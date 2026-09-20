@@ -35,7 +35,6 @@ pub(super) fn opening() -> Fact {
     Fact::InvocationOpened {
         configuration: None,
         input: InvocationInput::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             content: "你好".into(),
             request_fingerprint: None,
@@ -44,7 +43,7 @@ pub(super) fn opening() -> Fact {
 }
 pub(super) fn request(session: &str) -> Fact {
     Fact::ModelRequested {
-        purpose: None,
+        purpose: maka_runtime::context::ModelPurpose::Main,
         context: None,
         checkpoint_event_id: None,
         step_id: format!("step-{session}"),

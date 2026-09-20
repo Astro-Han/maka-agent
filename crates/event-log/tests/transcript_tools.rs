@@ -69,7 +69,7 @@ async fn accepted(log: &EventLog, step: &str, name: &str) -> u64 {
     };
     let facts = [
         Fact::ModelRequested {
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
             checkpoint_event_id: None,
             step_id: step.into(),
@@ -130,7 +130,6 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
     log.append(&event(Fact::InvocationOpened {
         configuration: None,
         input: InvocationInput::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             content: "read".into(),
             request_fingerprint: None,

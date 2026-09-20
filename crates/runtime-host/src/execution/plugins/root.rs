@@ -19,18 +19,81 @@
 
 use super::{BoundCommands, ChildSession, Error, Executions, Grant, SessionConfiguration, storage};
 use crate::session::PreparedSession;
-use maka_plugins::execution::{CreateRoot, RootApproval};
+use maka_plugins::{
+    authorization::Boundary,
+    execution::{CreateRoot, RootApproval, SessionBoundary, Target},
+};
 use maka_protocol::session::{
     SessionCreateInput, SessionCreateTarget, SessionModelTarget, WorkspaceProjection,
 };
-use maka_runtime::execution::{PermissionMode, WorkspaceTarget};
+use maka_runtime::execution::{PermissionMode, WorkspaceIdentity, WorkspaceTarget};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
+#[derive(Clone, serde::Serialize)]
+pub(super) struct RootGrant {
+    pub workspace: WorkspaceProjection,
+    pub workspace_identity: WorkspaceIdentity,
+    pub permission_mode: PermissionMode,
+    pub source: Option<SessionBoundary>,
+}
+impl From<RootApproval> for RootGrant {
+    fn from(approval: RootApproval) -> Self {
+        Self {
+            workspace: WorkspaceProjection {
+                target: approval.template.workspace,
+                host_cwd: approval.template.cwd,
+            },
+            workspace_identity: approval.template.workspace_identity,
+            permission_mode: approval.template.permission_mode,
+            source: approval.source,
+        }
+    }
+}
+
 impl BoundCommands {
     pub(super) async fn authorize_origin(&self, host: &Executions) -> Result<(), Error> {
+        if let Some(call) = &self.call {
+            match host.plugin_execution_boundary(call).await? {
+                Boundary::Session { boundary, .. } => {
+                    let grants = self.grants.lock().unwrap();
+                    let grant = grants.get(&boundary.session_id).ok_or(Error::Denied)?;
+                    if grant.boundary_revision != boundary.boundary_revision
+                        || grant.permission_mode != boundary.permission_mode
+                        || grant.cwd != boundary.cwd
+                    {
+                        return Err(Error::Denied);
+                    }
+                }
+                Boundary::Workspace {
+                    workspace,
+                    workspace_identity,
+                    permission_mode,
+                } => {
+                    let grant = self.root_grant.as_ref().ok_or(Error::Denied)?;
+                    if grant.workspace != workspace
+                        || grant.workspace_identity != workspace_identity
+                        || grant.permission_mode != permission_mode
+                    {
+                        return Err(Error::Denied);
+                    }
+                }
+                Boundary::Profile => return Err(Error::Denied),
+            }
+        }
+        if let Some(id) = self.consent {
+            crate::server::plugin_authorization::validate(
+                &host.log,
+                &host.configuration,
+                &self.namespace,
+                id,
+                maka_plugins::authorization::Capability::Executions,
+            )
+            .await
+            .map_err(super::authority::consent_error)?;
+        }
         let Some(source) = self
-            .root_approval
+            .root_grant
             .as_ref()
             .and_then(|root| root.source.as_ref())
         else {
@@ -64,7 +127,10 @@ impl BoundCommands {
         request
             .validate()
             .map_err(|error| Error::Invalid(error.to_string()))?;
-        let approval = self.root_approval.as_ref().ok_or(Error::Denied)?;
+        let approval = self.root_grant.as_ref().ok_or(Error::Denied)?;
+        if rank(request.settings.permission_mode) > rank(approval.permission_mode) {
+            return Err(Error::Denied);
+        }
         let host = self.executions()?;
         let lease = self.context.admit().map_err(|_| Error::Revoked)?;
         self.authorize_origin(&host).await?;
@@ -83,7 +149,7 @@ impl BoundCommands {
                     .map_err(|error| Error::Invalid(error.to_string()))?
             )
         );
-        let observed_project = match &approval.template.workspace {
+        let observed_project = match &approval.workspace.target {
             WorkspaceTarget::Project { project_id } => Some(
                 host.log
                     .get_project(project_id)
@@ -98,12 +164,12 @@ impl BoundCommands {
             let resolved = crate::server::resolve_project_workspace(project.clone())
                 .await
                 .map_err(|error| Error::Invalid(error.message))?;
-            if resolved.host_cwd != approval.template.cwd {
+            if resolved.host_cwd != approval.workspace.host_cwd {
                 return Err(Error::Denied);
             }
         }
-        let path = std::path::PathBuf::from(&approval.template.cwd);
-        let expected = approval.template.workspace_identity.clone();
+        let path = std::path::PathBuf::from(&approval.workspace.host_cwd);
+        let expected = approval.workspace_identity.clone();
         tokio::task::spawn_blocking(move || {
             let canonical = path
                 .canonicalize()
@@ -150,8 +216,7 @@ impl BoundCommands {
                     .await
                     .map_err(storage)?;
                 let expected =
-                    configuration(&worker, &id, &request.name, &approval, existing.is_none())
-                        .await?;
+                    configuration(&worker, &id, &request, &approval, existing.is_none()).await?;
                 let record = match existing {
                     Some(record) => record,
                     None => {
@@ -207,53 +272,79 @@ impl BoundCommands {
 async fn configuration(
     host: &Arc<Executions>,
     id: &str,
-    name: &str,
-    approval: &RootApproval,
-    resolve_model: bool,
+    request: &CreateRoot,
+    approval: &RootGrant,
+    resolve_target: bool,
 ) -> Result<SessionConfiguration, Error> {
-    let template = &approval.template;
-    let target = SessionModelTarget::Explicit {
-        connection_id: template.model.connection_id.clone(),
-        connection_slug: template.model.connection_slug.clone(),
-        model: template.model.model.clone(),
-    };
-    let model = if resolve_model {
-        crate::session::model::resolve(&host.configuration, &target, template.thinking_level)
-            .await
-            .map_err(|error| Error::Invalid(error.message))?
-    } else {
-        template.model.clone()
+    let settings = &request.settings;
+    let (target, bound, thinking_level) = match &settings.target {
+        Target::Model {
+            model,
+            thinking_level,
+        } => {
+            let target = SessionModelTarget::Explicit {
+                connection_id: model.connection_id.clone(),
+                connection_slug: model.connection_slug.clone(),
+                model: model.model.clone(),
+            };
+            let bound = if resolve_target {
+                crate::session::model::resolve(&host.configuration, &target, *thinking_level)
+                    .await
+                    .map_err(|error| Error::Invalid(error.message))?
+            } else {
+                model.clone()
+            };
+            (
+                SessionCreateTarget::Model {
+                    model_target: target,
+                },
+                bound.into(),
+                *thinking_level,
+            )
+        }
+        Target::Executor { executor_id } => {
+            if resolve_target {
+                host.executor_binding(id, executor_id)
+                    .map_err(|error| Error::Invalid(error.message))?;
+            }
+            (
+                SessionCreateTarget::Executor {
+                    executor_id: executor_id.clone(),
+                },
+                crate::session::SessionTarget::Executor {
+                    executor_id: executor_id.clone(),
+                },
+                None,
+            )
+        }
     };
     let prepared = PreparedSession::new(SessionCreateInput {
         session_id: id.into(),
-        workspace: template.workspace.clone(),
-        target: SessionCreateTarget::Model {
-            model_target: target,
-        },
+        workspace: approval.workspace.target.clone(),
+        target,
         mode: None,
-        name: Some(name.into()),
+        name: Some(request.name.clone()),
         labels: None,
-        thinking_level: template.thinking_level,
+        thinking_level,
         tool_profile: None,
         // The explicit Host grant supplies the default to bind below. The
         // interactive create codec restricts Explore to UI-specific modes.
         permission_mode: None,
-        collaboration_mode: Some(template.collaboration_mode),
-        orchestration_mode: Some(template.orchestration_mode.clone()),
+        collaboration_mode: Some(settings.collaboration_mode),
+        orchestration_mode: Some(settings.behavior.clone()),
     })
     .map_err(|error| Error::Invalid(error.to_string()))?;
     let mut config = prepared.bind(
-        WorkspaceProjection {
-            target: template.workspace.clone(),
-            host_cwd: template.cwd.clone(),
-        },
-        model,
-        template.permission_mode,
-        template.tool_mode,
+        approval.workspace.clone(),
+        bound,
+        settings.permission_mode,
+        settings.tool_mode,
     );
+    config.bound_tools = settings.bound_tools.clone();
+    config.instructions = settings.instructions.clone();
     if let Some(source) = &approval.source {
-        if rank(template.permission_mode) > rank(source.permission_mode)
-            || template.cwd != source.cwd
+        if rank(settings.permission_mode) > rank(source.permission_mode)
+            || approval.workspace.host_cwd != source.cwd
         {
             return Err(Error::Denied);
         }
@@ -263,9 +354,24 @@ async fn configuration(
             .await
             .map_err(storage)?
             .ok_or(Error::NotFound)?;
-        config.bound_tools = origin.configuration.bound_tools;
+        if let Some(ceiling) = origin.configuration.bound_tools {
+            config.bound_tools = Some(match config.bound_tools {
+                Some(selected) => selected.intersection(&ceiling).cloned().collect(),
+                None => ceiling,
+            });
+        }
         config.tool_profile = origin.configuration.tool_profile;
-        config.instructions = origin.configuration.instructions;
+        config.instructions = match (origin.configuration.instructions, config.instructions) {
+            (Some(base), Some(extra)) => Some(format!("{base}\n\n{extra}")),
+            (base, extra) => base.or(extra),
+        };
+        if config
+            .instructions
+            .as_ref()
+            .is_some_and(|text| text.len() > 16 * 1024)
+        {
+            return Err(Error::Invalid("combined instructions exceed 16 KiB".into()));
+        }
     }
     Ok(config)
 }

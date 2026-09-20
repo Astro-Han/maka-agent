@@ -101,7 +101,7 @@ pub(super) async fn selected(
              WHERE request.invocation_id = ?1 AND request.operation_id = ?2
              AND request.kind = 'model_requested'
              AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
-             AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main')",
+             AND json_extract(request.event_json, '$.fact.purpose') = 'main')",
         )
         .bind(invocation)
         .bind(step)

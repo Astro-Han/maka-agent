@@ -88,13 +88,13 @@ pub(super) fn start(
     bound: Bound,
     provider: Arc<dyn StreamProvider>,
     input: Value,
-    mut caller: Caller,
+    caller: Caller,
     tasks: &tokio_util::task::TaskTracker,
 ) -> Result<(Uuid, oneshot::Receiver<Result<(), Error>>), maka_protocol::OperationError> {
     let leases = bound.admit()?;
     let id = Uuid::new_v4();
-    let stop = reservation.document.cancellation.child_token();
-    caller.cancellation = stop.clone();
+    let stop = caller.cancellation.clone();
+    let resources = caller.resources.clone();
     let (reads, receiver) = mpsc::channel(1);
     let (done, completed) = watch::channel(None);
     let (ready, opened) = oneshot::channel();
@@ -107,11 +107,15 @@ pub(super) fn start(
     reservation.document.insert(id, handle)?;
     tasks.spawn(async move {
         let _leases = leases;
-        let result =
+        let mut result =
             std::panic::AssertUnwindSafe(run(&bound, provider, input, caller, receiver, ready))
                 .catch_unwind()
                 .await
                 .unwrap_or(Err(Error::CleanupUnconfirmed));
+        stop.cancel();
+        if resources.finish().await.is_err() {
+            result = Err(Error::CleanupUnconfirmed);
+        }
         if matches!(result, Err(Error::CleanupUnconfirmed)) {
             reservation.document.cleanup_failed();
             bound

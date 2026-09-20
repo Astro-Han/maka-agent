@@ -118,7 +118,6 @@ async fn frozen_base_preserves_original_checkpoint_tail_and_diagnostics_across_l
             input: InvocationInput::Message {
                 content: "other Session".into(),
                 request_fingerprint: None,
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
             },
         },
@@ -136,7 +135,6 @@ async fn frozen_base_preserves_original_checkpoint_tail_and_diagnostics_across_l
             input: InvocationInput::Message {
                 content: "later incomplete work".into(),
                 request_fingerprint: None,
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
             },
         },
@@ -232,7 +230,6 @@ async fn a_closed_frozen_boundary_does_not_prove_that_tool_effects_are_settled()
             input: InvocationInput::Message {
                 content: "unfinished tool".into(),
                 request_fingerprint: None,
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
             },
         },

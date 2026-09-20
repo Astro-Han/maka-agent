@@ -93,8 +93,7 @@ describe('Host Client Capability coordinator', () => {
       ): frame is {
         kind: 'client.capability.call';
         registrationId: string;
-        sessionId: string;
-        turnId: string;
+        source: { kind: 'agent'; sessionId: string; turnId: string };
         toolCallId: string;
         cwd: string;
       } => isRecord(frame) && frame.kind === 'client.capability.call',
@@ -102,8 +101,8 @@ describe('Host Client Capability coordinator', () => {
     assert.equal(call?.registrationId, 'registration-a');
     assert.deepEqual(
       call && {
-        sessionId: call.sessionId,
-        turnId: call.turnId,
+        sessionId: call.source.sessionId,
+        turnId: call.source.turnId,
         toolCallId: call.toolCallId,
         cwd: call.cwd,
       },

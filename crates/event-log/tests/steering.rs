@@ -44,7 +44,6 @@ async fn steering_is_exact_once_session_scoped_and_atomic_with_rebuildable_user_
             Fact::InvocationOpened {
                 configuration: None,
                 input: InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "same text".into(),
                     request_fingerprint: None,
@@ -66,7 +65,7 @@ async fn steering_is_exact_once_session_scoped_and_atomic_with_rebuildable_user_
             input_digest: "input".into(),
             route_identity: "route".into(),
             checkpoint_event_id: None,
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
             effective_source_digest: None,
         },

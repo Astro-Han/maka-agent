@@ -22,7 +22,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { configureModel } from './client-runtime-policy-fixture.mjs';
-import { workhubRemote, toggleWorkhub } from './client-workhub-plugin.mjs';
+import { toggleWorkhub, workhubRemote } from './client-workhub-plugin.mjs';
 
 export async function verifyWorkhubQueue(connection, codeMode) {
   const sessionId = 'maka_workhub_coordination';

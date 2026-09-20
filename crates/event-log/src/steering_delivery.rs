@@ -59,7 +59,6 @@ impl EventLog {
                             invocation.clone(),
                             Fact::MessageSteered {
                                 message: Box::new(admission.source.message),
-                                skill_invocation: admission.source.skill_invocation,
                             },
                         ))
                         .map_err(|error| StoreError::InvalidTransition(error.to_string()))?;

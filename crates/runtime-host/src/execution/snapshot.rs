@@ -25,7 +25,7 @@ use maka_runtime::input::InvocationInput;
 pub(crate) struct RecordedTurn {
     pub snapshot: TurnSnapshot,
     pub fingerprint: Option<String>,
-    pub skill_invocation: maka_runtime::skills::SkillInvocationResult,
+    pub preparation: Vec<maka_runtime::input::InputReceipt>,
 }
 
 pub(crate) fn project(boundary: TurnBoundary) -> RecordedTurn {
@@ -38,10 +38,8 @@ pub(crate) fn project(boundary: TurnBoundary) -> RecordedTurn {
         .then_some(RootExecutionKind::ContextCompact),
         ..LiveTurn::default()
     };
-    let skill_invocation = match boundary.root_input() {
-        InvocationInput::Message {
-            skill_invocation, ..
-        } => skill_invocation.as_deref().cloned().unwrap_or_default(),
+    let preparation = match boundary.root_input() {
+        InvocationInput::Message { content, .. } => content.preparation.clone(),
         _ => Default::default(),
     };
     let fingerprint = boundary
@@ -77,7 +75,7 @@ pub(crate) fn project(boundary: TurnBoundary) -> RecordedTurn {
         },
     };
     RecordedTurn {
-        skill_invocation,
+        preparation,
         snapshot: TurnSnapshot {
             session_id: invocation.session_id,
             turn_id: invocation.turn_id,

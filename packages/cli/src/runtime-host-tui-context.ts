@@ -39,7 +39,6 @@ import {
 import {
   readRuntimeHostAgentGraphEpochs,
   readRuntimeHostConnectionCatalog,
-  readRuntimeHostInvocableSkills,
   readRuntimeHostProjects,
   isRuntimeHostReconnectingConnection,
   type AgentGraphEpochDirectory,
@@ -47,6 +46,7 @@ import {
   type RuntimeHostProfile,
 } from '@maka/runtime-host/client';
 import { runtimeHostProfileUsesHostWorkspace } from '@maka/runtime-host/profile-kind';
+import { readRuntimeHostSkills } from './runtime-host-skills.js';
 import type { AgentGraphClientSnapshot, WorkspaceTarget } from '@maka/runtime-host/protocol';
 import {
   connectRuntimeHostCli,
@@ -376,14 +376,7 @@ async function listStablePresentedSkills(
     ? await readSessionWorkspace(connection, sessionId, fallbackWorkspace)
     : fallbackWorkspace;
   if (!workspace) throw new Error('The remote Session workspace is unavailable');
-  return [
-    ...(await readRuntimeHostInvocableSkills(connection, {
-      kind: 'new_session',
-      context: { workspace },
-      collaborationMode: 'agent',
-      permissionMode,
-    })),
-  ];
+  return readRuntimeHostSkills(connection, workspace, permissionMode);
 }
 
 export async function resolveRuntimeHostTuiWorkspace(

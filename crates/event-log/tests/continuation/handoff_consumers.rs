@@ -136,7 +136,6 @@ async fn handoff_output_keeps_one_public_identity_and_all_physical_evidence_afte
         },
         submitted_placement: Placement::NextTurn,
         disposition: MessageDisposition::TurnStarted,
-        skill_invocation: Default::default(),
         submitted_intent: None,
     });
     append(&log, &root).await;
@@ -156,7 +155,6 @@ async fn handoff_output_keeps_one_public_identity_and_all_physical_evidence_afte
                             submitted_content_digest: content.content_digest().unwrap(),
                             content,
                         }),
-                        skill_invocation: Default::default(),
                     },
                 ),
             )
@@ -176,7 +174,7 @@ async fn handoff_output_keeps_one_public_identity_and_all_physical_evidence_afte
             &RuntimeEvent::new(
                 current.invocation.clone(),
                 Fact::ModelRequested {
-                    purpose: Some(maka_runtime::context::ModelPurpose::Main),
+                    purpose: maka_runtime::context::ModelPurpose::Main,
                     context: None,
                     checkpoint_event_id: None,
                     step_id: step_id.clone(),
@@ -400,7 +398,6 @@ async fn workhub_handoff_keeps_user_authority_and_recovers_correction_after_coor
         content: pending.source.message.content.clone(),
         source_messages: vec![pending.source],
         request_fingerprint: None,
-        skill_invocation: None,
     };
     append(&log, &target).await;
     let request = CorrectionRequest {
@@ -419,13 +416,23 @@ async fn workhub_handoff_keeps_user_authority_and_recovers_correction_after_coor
     let mut wrong = request.clone();
     wrong.source_message_event_id = coordinator.id.clone();
     assert!(
-        log.request_workhub_correction(wrong, Some(1), None, None::<&()>)
-            .await
-            .is_err(),
+        log.request_workhub_correction(
+            wrong,
+            Some(1),
+            None,
+            &serde_json::json!({"configuration_digest": "test-target"})
+        )
+        .await
+        .is_err(),
         "a handoff opening is not a new user decision"
     );
     let intent = log
-        .request_workhub_correction(request.clone(), Some(1), None, None::<&()>)
+        .request_workhub_correction(
+            request.clone(),
+            Some(1),
+            None,
+            &serde_json::json!({"configuration_digest": "test-target"}),
+        )
         .await
         .unwrap();
     assert_eq!(intent.intent.owner.as_ref(), Some(&target.invocation));
@@ -571,7 +578,6 @@ async fn stop_recovers_a_frozen_owner_through_handoffs_but_never_manual_resume()
             content: pending.source.message.content.clone(),
             source_messages: vec![pending.source],
             request_fingerprint: None,
-            skill_invocation: None,
         };
         append(&log, &target).await;
         let request = StopRequest {

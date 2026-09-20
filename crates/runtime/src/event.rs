@@ -132,8 +132,7 @@ pub enum Fact {
         route_identity: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         checkpoint_event_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        purpose: Option<crate::context::ModelPurpose>,
+        purpose: crate::context::ModelPurpose,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context: Option<crate::context::ModelRequestContext>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -141,11 +140,6 @@ pub enum Fact {
     },
     MessageSteered {
         message: Box<crate::input::DeliveredMessage>,
-        #[serde(
-            default,
-            skip_serializing_if = "crate::skills::SkillInvocationResult::is_empty"
-        )]
-        skill_invocation: crate::skills::SkillInvocationResult,
     },
     WorkhubDelegated {
         delegation: Box<crate::workhub::Delegation>,

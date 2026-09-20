@@ -27,7 +27,6 @@ pub(super) fn opening() -> Fact {
     Fact::InvocationOpened {
         configuration: None,
         input: InvocationInput::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             content: "read".into(),
             request_fingerprint: None,
@@ -37,7 +36,7 @@ pub(super) fn opening() -> Fact {
 pub(super) fn step(facts: &mut Vec<Fact>, id: &str, text: bool, native: bool) {
     facts.push(Fact::ModelRequested {
         effective_source_digest: None,
-        purpose: None,
+        purpose: maka_runtime::context::ModelPurpose::Main,
         context: None,
         checkpoint_event_id: None,
         step_id: id.into(),

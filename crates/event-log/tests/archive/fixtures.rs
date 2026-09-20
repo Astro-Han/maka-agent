@@ -42,7 +42,6 @@ pub(super) async fn open(log: &EventLog, id: &str, compact: bool) {
                 }
             } else {
                 InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "question".into(),
                     request_fingerprint: None,
@@ -70,11 +69,11 @@ pub(super) fn request(id: &str, step: &str, source: Option<&ModelContextSource>)
         Fact::ModelRequested {
             step_id: step.into(),
             model_id: "test".into(),
-            purpose: Some(if source.is_some() {
+            purpose: if source.is_some() {
                 ModelPurpose::Summary
             } else {
                 ModelPurpose::Main
-            }),
+            },
             context: None,
             source_scope: source.map_or_else(
                 || LogScope::Session {

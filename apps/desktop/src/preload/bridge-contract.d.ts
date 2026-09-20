@@ -856,6 +856,7 @@ export interface MakaBridge {
   };
 
   clientPlugins: {
+    authorization(host: DesktopRuntimeHostRef, connectionEpoch: string, input: OperationInput<'plugin.authorization'>, registerCancellation: (cancel: () => void) => void): Promise<OperationOutput<'plugin.authorization'>>;
     file(host: DesktopRuntimeHostRef, connectionEpoch: string, identity: ClientIdentity, input: ClientFileRequest): Promise<string | null>;
     connection(host: DesktopRuntimeHostRef): Promise<{ epoch: string; hostEpoch: string; localFiles: boolean }>;
     session(host: DesktopRuntimeHostRef, connectionEpoch: string, sessionId: string): Promise<string>;
@@ -1119,7 +1120,7 @@ export interface MakaBridge {
         turnId: string;
         text: string;
         displayText?: string;
-        skillIds?: string[];
+        inputSelections?: import("@maka/runtime-host/protocol").InputSelections;
         attachmentItems?: RendererIngestInput[];
         retainedAttachments?: import('@maka/core/events').AttachmentRef[];
         turnOrchestration?: TurnOrchestration;
@@ -1142,7 +1143,7 @@ export interface MakaBridge {
           messageId?: never;
           attachments: import('@maka/core/events').AttachmentRef[];
           inlineReferences: import('@maka/core/events').InlineReference[];
-          skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
+          preparation: import('@maka/runtime-host/protocol').InputReceipt[];
         }
       | {
           ok: true;
@@ -1156,12 +1157,13 @@ export interface MakaBridge {
           messageId: string;
           attachments: import('@maka/core/events').AttachmentRef[];
           inlineReferences: import('@maka/core/events').InlineReference[];
-          skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
+          preparation: import('@maka/runtime-host/protocol').InputReceipt[];
         }
       | {
           ok: false;
-          reason: 'skill_invocation_failed';
-          skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
+          reason: 'input_preparation_failed';
+          message: string;
+          preparation: import('@maka/runtime-host/protocol').InputReceipt[];
         }
       | {
           ok: false;
@@ -1172,7 +1174,7 @@ export interface MakaBridge {
           ok: false;
           reason: 'outcome_unknown';
           messageId: string;
-          skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
+          preparation: import('@maka/runtime-host/protocol').InputReceipt[];
         }
     >;
     stop(
@@ -1195,7 +1197,7 @@ export interface MakaBridge {
         messageId: string;
         text: string;
         displayText?: string;
-        skillIds?: string[];
+        inputSelections?: import("@maka/runtime-host/protocol").InputSelections;
         turnOrchestration?: TurnOrchestration;
         attachmentItems?: RendererIngestInput[];
         retainedAttachments?: import('@maka/core/events').AttachmentRef[];
@@ -1214,12 +1216,13 @@ export interface MakaBridge {
           turnId?: string;
           attachments: import('@maka/core/events').AttachmentRef[];
           inlineReferences: import('@maka/core/events').InlineReference[];
-          skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
+          preparation: import('@maka/runtime-host/protocol').InputReceipt[];
         }
       | {
           ok: false;
-          reason: 'skill_invocation_failed';
-          skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
+          reason: 'input_preparation_failed';
+          message: string;
+          preparation: import('@maka/runtime-host/protocol').InputReceipt[];
         }
       | {
           ok: false;

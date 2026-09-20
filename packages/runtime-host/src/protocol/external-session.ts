@@ -33,7 +33,10 @@ import {
 } from './codec.js';
 import { invalidProtocolFrame } from './errors.js';
 import { defineHostPathOperation, defineOperation } from './operation-spec.js';
-import { decodeSessionCatalogItem, type SessionCatalogItem } from './session-catalog.js';
+import {
+  decodeSessionCatalogProjection,
+  type SessionCatalogProjection,
+} from './session-catalog.js';
 import { decodeWorkspaceTarget, type WorkspaceTarget } from './workspace.js';
 
 export const EXTERNAL_SESSION_PAGE_MAX_ITEMS = 16;
@@ -110,7 +113,9 @@ export interface ExternalSessionImportInput {
 }
 
 /** A completed import command may refuse the source before any Session is written. */
-export type ExternalSessionImportResult<Session extends SessionCatalogItem = SessionCatalogItem> =
+export type ExternalSessionImportResult<
+  Session extends SessionCatalogProjection = SessionCatalogProjection,
+> =
   | { readonly kind: 'imported'; readonly session: Session }
   | { readonly kind: 'source_limit_exceeded'; readonly limit: ExternalSessionLimit };
 
@@ -260,7 +265,10 @@ export function decodeExternalSessionImportResult(value: unknown): ExternalSessi
   if (result.kind !== 'imported')
     throw invalidProtocolFrame('Invalid external Session import result kind');
   requireExactRecord(result, 'external Session import result', ['kind', 'session']);
-  const decoded = { kind: 'imported' as const, session: decodeSessionCatalogItem(result.session) };
+  const decoded = {
+    kind: 'imported' as const,
+    session: decodeSessionCatalogProjection(result.session),
+  };
   requireEncodedByteLimit(
     decoded,
     'external Session import result',

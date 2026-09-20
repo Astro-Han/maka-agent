@@ -158,8 +158,9 @@ async fn original_client_capabilities_pin_admit_settle_release_and_reopen() {
                         let frame: serde_json::Value =
                             serde_json::from_slice(&std::fs::read(&json).unwrap()).unwrap();
                         let invocation = &dispatched.invocation;
-                        assert_eq!(frame["sessionId"], invocation.session_id);
-                        assert_eq!(frame["turnId"], invocation.turn_id);
+                        assert_eq!(frame["source"]["kind"], "agent");
+                        assert_eq!(frame["source"]["sessionId"], invocation.session_id);
+                        assert_eq!(frame["source"]["turnId"], invocation.turn_id);
                         let tuple = serde_json::to_vec(&[
                             "maka.tool-presentation.v1",
                             &invocation.invocation_id,

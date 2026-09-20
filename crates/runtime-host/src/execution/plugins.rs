@@ -20,9 +20,13 @@
 mod authority;
 mod children;
 mod client;
+mod effects;
 mod filesystem;
 mod llm;
 mod root;
+use root::RootGrant;
+mod scopes;
+pub(crate) use scopes::ResourceTarget;
 mod workspace;
 
 use super::Executions;
@@ -63,26 +67,31 @@ struct BoundCommands {
     grants: Arc<Mutex<BTreeMap<String, Grant>>>,
     root_id: String,
     submission_stop: tokio_util::sync::CancellationToken,
-    root_approval: Option<maka_plugins::execution::RootApproval>,
+    root_grant: Option<RootGrant>,
+    consent: Option<maka_plugins::authorization::Id>,
+    call: Option<maka_plugins::call::Scope>,
 }
 
 impl Executions {
     pub(crate) async fn admit_plugin_process(
         &self,
-        invocation: &maka_runtime::event::Invocation,
+        scope: &maka_plugins::call::Scope,
     ) -> Result<(String, tokio::sync::OwnedMutexGuard<()>), Error> {
         let gate = self.interactions.own_admission().await;
-        let cwd = self.plugin_process_workspace(invocation).await?;
+        let cwd = self
+            .plugin_resource_workspace(scope, maka_plugins::authorization::Capability::Processes)
+            .await?;
         Ok((cwd, gate))
     }
 
     pub(crate) async fn plugin_network_policy(
         &self,
-        invocation: &maka_runtime::event::Invocation,
+        scope: &maka_plugins::call::Scope,
     ) -> Result<maka_network::Policy, Error> {
         // Raw HTTP can have arbitrary external side effects, just like a process.
         // Both the admitted and current permission must still allow them.
-        self.plugin_process_workspace(invocation).await?;
+        self.plugin_resource_workspace(scope, maka_plugins::authorization::Capability::Network)
+            .await?;
         let network = self
             .configuration
             .network_configuration()
@@ -145,6 +154,7 @@ impl Executions {
                 super::failure(super::Code::OperationUnavailable, "Executor is not active")
             })?;
         maka_plugins::executor::Binding::new(session_id.into(), contribution)
+            .map(|binding| binding.with_calls(self.plugin_calls.clone()))
             .map_err(super::internal)
     }
 
@@ -192,7 +202,6 @@ impl Executions {
                         content: pending.source.message.content.clone(),
                         request_fingerprint: None,
                         source_messages: vec![pending.source],
-                        skill_invocation: None,
                     },
                 },
                 Fact::InvocationEnded {
@@ -279,6 +288,48 @@ impl BoundCommands {
 }
 
 impl Commands for BoundCommands {
+    fn session(
+        &self,
+        session_id: String,
+    ) -> BoxFuture<'_, Result<maka_plugins::session::View, Error>> {
+        Box::pin(async move {
+            let host = self.executions()?;
+            let _lease = self.context.admit().map_err(|_| Error::Revoked)?;
+            let _gate = host.lock_admission().await;
+            self.authorize(&host, &session_id).await?;
+            let record = host
+                .log
+                .get_session::<SessionConfiguration>(&session_id)
+                .await
+                .map_err(storage)?
+                .ok_or(Error::NotFound)?;
+            let configuration = record.configuration;
+            let target = match configuration.target {
+                crate::session::SessionTarget::Model { model } => {
+                    maka_plugins::execution::Target::Model {
+                        model,
+                        thinking_level: configuration.thinking_level,
+                    }
+                }
+                crate::session::SessionTarget::Executor { executor_id } => {
+                    maka_plugins::execution::Target::Executor { executor_id }
+                }
+            };
+            Ok(maka_plugins::session::View {
+                session_id: record.id,
+                revision: record.revision,
+                name: configuration.name,
+                boundary_revision: configuration.boundary_revision,
+                workspace: configuration.workspace,
+                target,
+                permission_mode: configuration.permission_mode,
+                collaboration_mode: configuration.collaboration_mode,
+                behavior: configuration.orchestration_mode,
+                tool_mode: configuration.tool_mode,
+                bound_tools: configuration.bound_tools,
+            })
+        })
+    }
     fn validate_authority(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             let host = self.executions()?;

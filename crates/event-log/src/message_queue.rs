@@ -49,7 +49,6 @@ pub enum QueueEdit {
     Update {
         message_id: String,
         content: Box<MessageInput>,
-        skill_invocation: maka_runtime::skills::SkillInvocationResult,
         required_tools: std::collections::BTreeSet<String>,
     },
     Reorder {

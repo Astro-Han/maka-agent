@@ -107,7 +107,6 @@ async fn relink_merges_aliases_and_sessions_in_one_transaction_without_rewriting
         Fact::InvocationOpened {
             configuration: None,
             input: InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "immutable opening".into(),
                 request_fingerprint: None,

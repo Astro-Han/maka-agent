@@ -86,15 +86,7 @@ const COMPUTER_USE: &str =
     include_str!("../../../../packages/runtime/resources/bundled-skills/computer-use/SKILL.md");
 
 pub(super) fn trusted_bundled_hash(id: &str, hash: &str) -> bool {
-    // Historical hashes mirror the package generator's explicitly trusted releases.
-    id == "computer-use"
-        && (hash == maka_runtime::artifact::content_digest(COMPUTER_USE.as_bytes())
-            || matches!(
-                hash,
-                "sha256:419088b2f8a0b12061b4811323abc381869ebe8fccbfc8f2bdfc96ff37a1e45b"
-                    | "sha256:8e4404349be4e5493fcf13981624ed55198c0670a794fbf88e2bad81ddb79f6c"
-                    | "sha256:64aa2ef2d608e15792cc04eff7204731671b6b18818964ba95c65f53c694db62"
-            ))
+    id == "computer-use" && hash == maka_runtime::artifact::content_digest(COMPUTER_USE.as_bytes())
 }
 
 pub fn source_catalog(

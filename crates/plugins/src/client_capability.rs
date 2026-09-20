@@ -20,8 +20,23 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// A tool selected from the invocation's frozen Client Capability catalog.
-#[derive(Serialize, Deserialize)]
+pub trait Clients: Send + Sync {
+    fn tools(
+        &self,
+        call: crate::call::Scope,
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<Vec<maka_runtime::tools::ToolDefinition>, maka_runtime::tools::ToolError>,
+    >;
+    fn call(
+        &self,
+        call: crate::call::Scope,
+        input: Call,
+    ) -> futures_util::future::BoxFuture<'_, Result<Value, maka_runtime::tools::ToolError>>;
+}
+
+/// A tool selected from the call scope's frozen Client Capability catalog.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Call {
     pub name: String,

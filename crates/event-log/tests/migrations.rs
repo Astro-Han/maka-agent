@@ -37,7 +37,6 @@ async fn seed_session_and_event(log: &EventLog) -> RuntimeEvent {
         Fact::InvocationOpened {
             configuration: None,
             input: InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "kept".into(),
                 request_fingerprint: None,
@@ -63,7 +62,7 @@ fn migration_checksums(connection: &Connection) -> Vec<(i64, Vec<u8>)> {
 }
 
 #[tokio::test]
-async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewriting_facts() {
+async fn initialization_and_reopen_preserve_facts_payloads_and_schema_identity() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("events.sqlite");
     let log = EventLog::open(&path).await.unwrap();
@@ -72,10 +71,8 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
         &EventWrite::plain(RuntimeEvent::new(
             event.invocation.clone(),
             Fact::ToolDispatched {
-                operation_id: "migration-tool".into(),
-                call: maka_runtime::tool_call::ToolCallIdentity::standalone(
-                    "migration-call".into(),
-                ),
+                operation_id: "read".into(),
+                call: maka_runtime::tool_call::ToolCallIdentity::standalone("call".into()),
                 name: "Read".into(),
                 input: json!({}),
             },
@@ -85,107 +82,53 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
     .await
     .unwrap();
     let (outcome, _) = EventWrite::tool_success(
-        "migration-result".into(),
+        "result".into(),
         event.recorded_at,
         event.invocation.clone(),
-        "migration-tool".into(),
-        maka_runtime::tool_output::ToolOutput::Text("payload survives parent migration".into())
-            .into(),
+        "read".into(),
+        maka_runtime::tool_output::ToolOutput::Text("persistent output".into()).into(),
     )
     .unwrap();
     log.append(&outcome).await.unwrap();
-    let before = log.prefix(10, 16_384).await.unwrap();
+    let before = serde_json::to_vec(&log.prefix(10, 16384).await.unwrap()).unwrap();
     let session = log.get_session::<Value>("session").await.unwrap();
-    assert!(log.prepare_transcript("session", 1, 32).await.unwrap());
     log.close().await.unwrap();
     let connection = Connection::open(&path).unwrap();
     let checksums = migration_checksums(&connection);
+    assert!(!checksums.is_empty());
+    assert!(checksums.iter().all(|(_, checksum)| checksum.len() == 48));
     let raw: Vec<u8> = connection
         .query_row(
-            "SELECT payload FROM tool_result_payloads WHERE event_id = 'migration-result'",
+            "SELECT payload FROM tool_result_payloads WHERE event_id = 'result'",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(
-        checksums
-            .iter()
-            .map(|(version, _)| *version)
-            .collect::<Vec<_>>(),
-        vec![
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-            25, 26, 27
-        ]
-    );
-    assert!(checksums.iter().all(|(_, checksum)| checksum.len() == 48));
-    let payload: Vec<u8> = connection
-        .query_row("SELECT payload FROM transcript_rows", [], |row| row.get(0))
-        .unwrap();
-    // An epoch-151 display cache must not hide the new interruption semantics.
-    // Only the disposable cache is invalidated; execution facts stay byte-exact.
-    connection
-        .execute_batch(
-            "UPDATE transcript_rows SET payload = x'00', total_bytes = 1;
-        DELETE FROM _sqlx_migrations WHERE version = 16; PRAGMA user_version = 15;",
-        )
-        .unwrap();
     drop(connection);
     let log = EventLog::open(&path).await.unwrap();
-    assert!(log.prepare_transcript("session", 1, 32).await.unwrap());
     assert_eq!(
-        serde_json::to_vec(&log.prefix(10, 16_384).await.unwrap()).unwrap(),
-        serde_json::to_vec(&before).unwrap()
+        serde_json::to_vec(&log.prefix(10, 16384).await.unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(
+        log.probe_session_create::<Value>("session", "request")
+            .await
+            .unwrap(),
+        session
+    );
+    assert_eq!(
+        log.append(&EventWrite::plain(event).unwrap())
+            .await
+            .unwrap(),
+        1
     );
     log.close().await.unwrap();
-    let connection = Connection::open(&path).unwrap();
-    assert_eq!(
-        connection
-            .query_row("SELECT payload FROM transcript_rows", [], |row| row
-                .get::<_, Vec<u8>>(0))
-            .unwrap(),
-        payload
-    );
-    assert_eq!(migration_checksums(&connection), checksums);
-    // Restore the legacy version without a ledger; retaining the read-state
-    // table also exercises idempotent backfill after interrupted adoption.
-    connection
-        .execute_batch(
-            "DROP TABLE session_managers; DROP TABLE model_request_compositions; DROP TABLE request_compositions; DROP TABLE graph_wakes; DROP TABLE graph_intents; DROP TABLE graph_updates; DROP TABLE graph_epochs; DROP TABLE plugin_execution_receipts; DROP TABLE plugin_data; DROP TABLE plugin_packages; DROP TABLE plugin_package_files;
-             DROP TABLE plugin_package_blobs; DROP TABLE plugin_composition;
-             DROP VIEW workhub_corrections; DROP VIEW workhub_assignments;
-             DROP VIEW workhub_stops; ALTER TABLE legacy_workhub_stops RENAME TO workhub_stops;
-             DROP VIEW runtime_events; DROP VIEW session_events;
-             ALTER TABLE event_log RENAME TO runtime_events;
-             DROP TABLE workhub_stops; DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE _sqlx_migrations; PRAGMA user_version = 1;",
-        )
-        .unwrap();
-    drop(connection);
-    for _ in 0..2 {
-        let log = EventLog::open(&path).await.unwrap();
-        assert_eq!(
-            serde_json::to_vec(&log.prefix(10, 16_384).await.unwrap()).unwrap(),
-            serde_json::to_vec(&before).unwrap()
-        );
-        assert_eq!(
-            log.probe_session_create::<Value>("session", "request")
-                .await
-                .unwrap(),
-            session
-        );
-        assert_eq!(
-            log.append(&EventWrite::plain((event).clone()).unwrap())
-                .await
-                .unwrap(),
-            1
-        );
-        log.close().await.unwrap();
-    }
     let connection = Connection::open(&path).unwrap();
     assert_eq!(migration_checksums(&connection), checksums);
     assert_eq!(
         connection
             .query_row(
-                "SELECT payload FROM tool_result_payloads WHERE event_id = 'migration-result'",
+                "SELECT payload FROM tool_result_payloads WHERE event_id = 'result'",
                 [],
                 |row| row.get::<_, Vec<u8>>(0),
             )
@@ -200,20 +143,22 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
             .unwrap(),
         0
     );
-    assert_eq!(
-        connection
-            .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
-                .get::<_, i64>(0))
-            .unwrap(),
-        27
-    );
 }
 
 #[tokio::test]
 async fn mismatched_and_unknown_migrations_fail_closed_without_touching_committed_events() {
     let temp = tempfile::tempdir().unwrap();
-    for unknown in [false, true] {
-        let path = temp.path().join(format!("events-{unknown}.sqlite"));
+    for (case, corruption) in [
+        "UPDATE _sqlx_migrations SET checksum = x'00' WHERE version = 1",
+        "UPDATE _sqlx_migrations SET version = 99 WHERE version = 1",
+        "DROP TABLE _sqlx_migrations",
+        "DELETE FROM _sqlx_migrations",
+        "PRAGMA user_version = 0",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path = temp.path().join(format!("events-{case}.sqlite"));
         let log = EventLog::open(&path).await.unwrap();
         let event = seed_session_and_event(&log).await;
         log.close().await.unwrap();
@@ -222,29 +167,29 @@ async fn mismatched_and_unknown_migrations_fail_closed_without_touching_committe
             "SELECT json_array(id, fingerprint, revision, created_at, updated_at, archived, configuration) FROM session_control",
             [], |row| row.get(0)
         ).unwrap();
-        let sql = if unknown {
-            "UPDATE _sqlx_migrations SET version = 99 WHERE version = 2"
-        } else {
-            "UPDATE _sqlx_migrations SET checksum = x'00' WHERE version = 1"
-        };
-        connection.execute_batch(sql).unwrap();
+        connection.execute_batch(corruption).unwrap();
+        connection
+            .execute_batch("PRAGMA journal_mode = DELETE")
+            .unwrap();
         drop(connection);
         let before = std::fs::read(&path).unwrap();
         let error = EventLog::open(&path).await.err().expect("must reject");
         assert!(
             std::fs::read(&path).unwrap() == before,
-            "rejected open mutated database (unknown={unknown})"
+            "rejected open mutated database ({corruption})"
         );
-        if unknown {
+        if case == 1 {
             assert!(matches!(
                 error,
                 StoreError::Migration(sqlx::migrate::MigrateError::VersionMissing(99))
             ));
-        } else {
+        } else if case == 0 {
             assert!(matches!(
                 error,
                 StoreError::Migration(sqlx::migrate::MigrateError::VersionMismatch(1))
             ));
+        } else {
+            assert!(matches!(error, StoreError::UnsupportedDatabase));
         }
         let connection = Connection::open(&path).unwrap();
         assert_eq!(
@@ -269,13 +214,15 @@ async fn mismatched_and_unknown_migrations_fail_closed_without_touching_committe
             "SELECT json_array(id, fingerprint, revision, created_at, updated_at, archived, configuration) FROM session_control",
             [], |row| row.get::<_, String>(0)
         ).unwrap(), session_before);
-        assert_eq!(
-            connection
-                .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            27
-        );
+        if case != 2 {
+            assert_eq!(
+                connection
+                    .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                i64::from(case != 3)
+            );
+        }
     }
 
     let path = temp.path().join("foreign.sqlite");
@@ -336,7 +283,7 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        27
+        1
     );
     assert_eq!(
         connection
@@ -346,6 +293,6 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        27
+        1
     );
 }

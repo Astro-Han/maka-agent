@@ -61,12 +61,10 @@ impl ModelRequestContext {
 }
 
 /// The caller must first associate the request with its canonical opening.
-/// Missing legacy purpose is inferred only where the old runtime had a known
-/// interpretation; explicit automatic summaries in Message invocations remain
-/// summaries. An unrecognized or contradictory opening never defaults to Main.
+/// The explicit purpose must agree with the opening's execution kind.
 pub fn resolve_model_purpose(
     opening: &crate::input::InvocationInput,
-    purpose: Option<ModelPurpose>,
+    purpose: ModelPurpose,
 ) -> Result<ModelPurpose, &'static str> {
     use crate::input::InvocationInput;
     match (opening, purpose) {
@@ -75,11 +73,11 @@ pub fn resolve_model_purpose(
             | InvocationInput::Continuation { .. }
             | InvocationInput::Handoff { .. },
             purpose,
-        ) => Ok(purpose.unwrap_or(ModelPurpose::Main)),
-        (InvocationInput::ContextCompact { .. }, None | Some(ModelPurpose::Summary)) => {
+        ) => Ok(purpose),
+        (InvocationInput::ContextCompact { .. }, ModelPurpose::Summary) => {
             Ok(ModelPurpose::Summary)
         }
-        (InvocationInput::ContextCompact { .. }, Some(ModelPurpose::Main)) => {
+        (InvocationInput::ContextCompact { .. }, ModelPurpose::Main) => {
             Err("model purpose contradicts compact opening")
         }
         (InvocationInput::Code { .. }, _) => {
@@ -100,7 +98,6 @@ pub enum CompactOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContextCheckpoint {
-    #[serde(default, skip_serializing_if = "CheckpointMode::is_standalone")]
     pub mode: CheckpointMode,
     pub covered_through: u64,
     pub source_digest: String,
@@ -218,9 +215,8 @@ mod tests {
     use crate::input::InvocationInput;
 
     #[test]
-    fn legacy_purpose_uses_opening_while_explicit_auto_summary_remains_summary() {
+    fn model_purpose_must_match_the_canonical_opening() {
         let message = InvocationInput::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             content: "task".into(),
             request_fingerprint: None,
@@ -229,22 +225,13 @@ mod tests {
             request_fingerprint: "request".into(),
         };
         let code = InvocationInput::Code { source: "1".into() };
-        assert_eq!(
-            resolve_model_purpose(&message, None),
-            Ok(ModelPurpose::Main)
-        );
-        assert_eq!(
-            resolve_model_purpose(&compact, None),
-            Ok(ModelPurpose::Summary)
-        );
         for purpose in [ModelPurpose::Main, ModelPurpose::Summary] {
-            assert_eq!(resolve_model_purpose(&message, Some(purpose)), Ok(purpose));
-            assert!(resolve_model_purpose(&code, Some(purpose)).is_err());
+            assert_eq!(resolve_model_purpose(&message, purpose), Ok(purpose));
+            assert!(resolve_model_purpose(&code, purpose).is_err());
         }
-        assert!(resolve_model_purpose(&code, None).is_err());
-        assert!(resolve_model_purpose(&compact, Some(ModelPurpose::Main)).is_err());
+        assert!(resolve_model_purpose(&compact, ModelPurpose::Main).is_err());
         assert_eq!(
-            resolve_model_purpose(&compact, Some(ModelPurpose::Summary)),
+            resolve_model_purpose(&compact, ModelPurpose::Summary),
             Ok(ModelPurpose::Summary)
         );
     }
@@ -278,8 +265,8 @@ mod tests {
     }
 
     #[test]
-    fn old_checkpoint_bytes_do_not_gain_a_default_mode_field() {
-        let value = serde_json::json!({"covered_through":1,"source_digest":"digest","summary_step_id":"step",
+    fn checkpoint_mode_is_explicit_and_rejects_contradictory_fields() {
+        let value = serde_json::json!({"mode":{"kind":"standalone"},"covered_through":1,"source_digest":"digest","summary_step_id":"step",
             "summary":{"format":"sections_v1","text":"summary"}});
         let mut checkpoint: ContextCheckpoint = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(checkpoint.mode, CheckpointMode::Standalone);

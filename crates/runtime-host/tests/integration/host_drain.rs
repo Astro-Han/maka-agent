@@ -66,8 +66,7 @@ impl MessageWriter for Writer {
     }
 }
 fn hello() -> Value {
-    json!({"kind":"hello", "clientInstanceId":"drain-test", "surface":"desktop",
-        "activitySnapshotVersion":2, "protocolMin":0, "protocolMax":0,
+    json!({"kind":"hello", "clientInstanceId":"drain-test",         "protocolMin":0, "protocolMax":0,
         "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH, "compositionId":"maka.interactive"})
 }
 fn request(operation: &str, input: Value) -> Value {

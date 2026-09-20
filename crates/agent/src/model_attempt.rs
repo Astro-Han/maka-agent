@@ -220,7 +220,7 @@ async fn execute_once(
                     maka_runtime::event::LogScope::Lineage { .. }
                 ))
             .then(|| source.effective_source_digest.clone()),
-            purpose: Some(purpose),
+            purpose,
             context: input.context.clone(),
             step_id: step_id.clone(),
             model_id: input.provider.model.clone(),

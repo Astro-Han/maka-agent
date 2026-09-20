@@ -37,7 +37,6 @@ async fn open(log: &EventLog) {
     log.append(&event(Fact::InvocationOpened {
         configuration: None,
         input: InvocationInput::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             content: "read".into(),
             request_fingerprint: None,

@@ -162,6 +162,7 @@ impl ToolCatalog {
             bound.handler = ToolHandler::Prepared(Arc::new(Guarded {
                 handler: bound.handler,
                 owner: contribution,
+                calls: captured.call_issuer(),
             }));
             entries.insert(
                 name,
@@ -184,6 +185,7 @@ impl ToolCatalog {
 struct Guarded {
     handler: ToolHandler,
     owner: maka_plugins::contributions::Contribution<PluginTool>,
+    calls: Option<maka_plugins::call::Issuer>,
 }
 
 impl ToolPreparer for Guarded {
@@ -200,14 +202,32 @@ impl ToolPreparer for Guarded {
         if !self.owner.is_effective() {
             return Box::pin(async { Err(ToolRejection::Unavailable) });
         }
+        let identity = maka_plugins::call::Identity::Agent {
+            invocation: context.invocation.clone(),
+            operation_id: Some(context.operation_id.clone()),
+        };
+        let calls = self.calls.clone();
         let preparation = self.handler.prepare(name, input, context, cancellation);
         let owner = self.owner.clone();
         Box::pin(async move {
-            Ok(preparation.await?.guarded(move || {
+            let scope_owner = owner.owner.clone();
+            let prepared = preparation.await?.guarded(move || {
                 owner
                     .admit()
                     .map_err(|error| ToolError::Failed(error.to_string()))
-            }))
+            });
+            Ok(match calls {
+                None => prepared,
+                Some(issuer) => prepared.map_future(move |operation, stop| {
+                    Box::pin(async move {
+                        let result = issuer.run(identity, stop, operation).await;
+                        if let Err(ToolError::OutcomeUnknown(reason)) = &result {
+                            scope_owner.cleanup_failed(reason.clone());
+                        }
+                        result
+                    })
+                }),
+            })
         })
     }
 }

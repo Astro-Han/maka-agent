@@ -67,17 +67,6 @@ async fn pending(log: &EventLog, owner: &Invocation, id: &str, disposition: Disp
                 Placement::CurrentTurn
             },
             disposition,
-            skill_invocation: if id == "skill-gate" {
-                maka_runtime::skills::SkillInvocationResult {
-                    loaded: vec![maka_runtime::skills::LoadedSkill {
-                        id: "shell-work".into(),
-                        name: "Shell work".into(),
-                    }],
-                    ..Default::default()
-                }
-            } else {
-                Default::default()
-            },
             submitted_intent: None,
         },
     })
@@ -130,7 +119,6 @@ async fn startup_consumes_reserved_and_queued_work_once_without_replaying_unknow
                     input: InvocationInput::Message {
                         content: "previous root".into(),
                         request_fingerprint: None,
-                        skill_invocation: Default::default(),
                         source_messages: vec![],
                     },
                 },

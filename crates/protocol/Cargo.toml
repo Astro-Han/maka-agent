@@ -25,7 +25,6 @@ publish.workspace = true
 
 [dependencies]
 maka-plugins.workspace = true
-maka-skills.workspace = true
 base64 = "0.22"
 regress = "0.11.1"
 url = "2"

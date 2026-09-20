@@ -117,12 +117,10 @@ impl Executions {
             }
             let content: MessageInput = input.content.clone().into();
             let digest = content.content_digest().map_err(internal)?;
-            let intent =
-                (input.skill_ids.is_some() || input.turn_orchestration.is_some()).then(|| {
-                    SubmittedTurnIntent {
-                        skill_ids: input.skill_ids.clone().unwrap_or_default(),
-                        turn_orchestration: input.turn_orchestration.clone(),
-                    }
+            let intent = (!input.input_selections.is_empty() || input.turn_orchestration.is_some())
+                .then(|| SubmittedTurnIntent {
+                    input_selections: input.input_selections.clone(),
+                    turn_orchestration: input.turn_orchestration.clone(),
                 });
             if input.origin_host_epoch == epoch
                 && let Some(receipt) = self
@@ -163,14 +161,14 @@ impl Executions {
                 return Ok(match source.disposition {
                     MessageDisposition::TurnStarted => SubmitResult::TurnStarted {
                         turn_id: proof.opening().event.invocation.turn_id.clone(),
-                        skill_invocation: source.skill_invocation.clone(),
+                        preparation: source.message.content.preparation.clone(),
                     },
                     MessageDisposition::Steering => SubmitResult::Steering {
-                        skill_invocation: source.skill_invocation.clone(),
+                        preparation: source.message.content.preparation.clone(),
                         queue_revision: None,
                     },
                     MessageDisposition::Followup => SubmitResult::Followup {
-                        skill_invocation: source.skill_invocation.clone(),
+                        preparation: source.message.content.preparation.clone(),
                         queue_revision: None,
                     },
                 });
@@ -212,7 +210,6 @@ impl Executions {
                 },
                 submitted_placement: input.placement,
                 disposition: MessageDisposition::TurnStarted,
-                skill_invocation: Default::default(),
                 submitted_intent: intent,
             };
             let active = self
@@ -321,10 +318,7 @@ impl Executions {
                             )
                             .await?;
                         environment
-                            .expand(
-                                input.content.clone().into(),
-                                input.skill_ids.clone().unwrap_or_default(),
-                            )
+                            .expand(input.content.clone().into(), input.input_selections.clone())
                             .await
                     }
                     .await,
@@ -337,26 +331,24 @@ impl Executions {
             else {
                 continue;
             };
-            let skill_invocation = match selection {
-                super::skills::SkillPreparation::Ready {
-                    skill_invocation, ..
-                } => skill_invocation,
-                super::skills::SkillPreparation::Blocked(skill_invocation) => {
-                    return Ok(SubmitResult::Blocked { skill_invocation });
-                }
-            };
+            if let super::input::Outcome::Blocked { message } = selection {
+                return Ok(SubmitResult::Blocked {
+                    message,
+                    preparation: content.preparation,
+                });
+            }
+            let preparation = content.preparation.clone();
             let mut source = source;
             source.message.content = content.clone();
-            source.skill_invocation = skill_invocation.clone();
             let mut run = self
                 .prepare_message(
                     TurnStartInput {
                         session_id: input.session_id,
                         turn_id: Uuid::new_v4().to_string(),
                         content: content.clone().into(),
-                        // Original skill intent stays in the source identity.
+                        // Original input intent stays in the source identity.
                         // Preparation below uses this Run's actual frozen tools.
-                        skill_ids: None,
+                        input_selections: Default::default(),
                         turn_orchestration: input.turn_orchestration,
                         max_steps: None,
                     },
@@ -366,13 +358,13 @@ impl Executions {
                     environment,
                 )
                 .await?;
-            run.message(content, None)?;
+            run.message(content)?;
             // Opening and original source identity commit together before any model
             // or tool effect. There is no separately accepted, unstarted idle row.
             let turn = self.launch(run).await?;
             return Ok(SubmitResult::TurnStarted {
                 turn_id: turn.turn_id,
-                skill_invocation,
+                preparation,
             });
         }
     }

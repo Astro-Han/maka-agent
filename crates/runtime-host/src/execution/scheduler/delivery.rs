@@ -101,6 +101,7 @@ impl Backend {
                         .create_root(CreateRoot {
                             operation_id: fire.id.clone(),
                             name: fire.title.clone(),
+                            settings: approval.template.settings(),
                         })
                         .await?;
                     (commands, session.session_id)

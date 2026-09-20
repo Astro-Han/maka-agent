@@ -29,8 +29,32 @@ import {
   readRuntimeHostProjects,
   readRuntimeHostSessionCatalogPage,
   readRuntimeHostSessions,
-  readRuntimeHostSkillCatalog,
 } from '../client/catalog-reader.js';
+
+function session(id: string) {
+  return {
+    id,
+    revision: 1,
+    workspace: { target: { kind: 'host_path', path: '/work' }, hostCwd: '/work' },
+    createdAt: 0,
+    activityAt: 1,
+    name: 'Chat',
+    isFlagged: false,
+    isArchived: false,
+    labels: [],
+    labelsTruncated: false,
+    hasUnread: false,
+    status: 'active',
+    backend: 'ai-sdk',
+    llmConnectionId: null,
+    llmConnectionSlug: 'default',
+    connectionLocked: false,
+    model: 'model',
+    permissionMode: 'ask',
+    collaborationMode: 'agent',
+    orchestrationMode: 'default',
+  };
+}
 
 test('reads one Session catalog page and carries its revision into the continuation cursor', async () => {
   const inputs: Record<string, unknown>[] = [];
@@ -41,14 +65,7 @@ test('reads one Session catalog page and carries its revision into the continuat
     return {
       kind: 'page',
       revision: 'sha256:sessions',
-      sessions: [
-        {
-          kind: 'unsupported_legacy_record',
-          id: continuation ? 'legacy-2' : 'legacy-1',
-          revision: 1,
-          reason: 'not_wire_representable',
-        },
-      ],
+      sessions: [session(continuation ? 'session-2' : 'session-1')],
       nextCursor: continuation ? null : 'page-2',
     };
   });
@@ -56,26 +73,12 @@ test('reads one Session catalog page and carries its revision into the continuat
   const first = await readRuntimeHostSessionCatalogPage(connection);
   assert.deepEqual(first, {
     revision: 'sha256:sessions',
-    sessions: [
-      {
-        kind: 'unsupported_legacy_record',
-        id: 'legacy-1',
-        revision: 1,
-        reason: 'not_wire_representable',
-      },
-    ],
+    sessions: [session('session-1')],
     nextCursor: { revision: 'sha256:sessions', cursor: 'page-2' },
   });
   assert.deepEqual(await readRuntimeHostSessionCatalogPage(connection, first.nextCursor!), {
     revision: 'sha256:sessions',
-    sessions: [
-      {
-        kind: 'unsupported_legacy_record',
-        id: 'legacy-2',
-        revision: 1,
-        reason: 'not_wire_representable',
-      },
-    ],
+    sessions: [session('session-2')],
     nextCursor: null,
   });
   assert.deepEqual(inputs, [
@@ -181,36 +184,6 @@ test('retries when the first Session catalog page reports a revision change', as
 
   assert.deepEqual(await readRuntimeHostSessions(connection), []);
   assert.equal(starts, 2);
-});
-
-test('rejects a repeated Skill catalog cursor instead of looping forever', async () => {
-  const connection = fakeConnection(async (operation, input) => {
-    assert.equal(operation, 'skill.catalog.query');
-    return {
-      kind: 'page',
-      view: 'governance',
-      revision: 'sha256:skills',
-      items: [],
-      nextCursor: 'repeated',
-      resolvedWorkspace: {
-        target: { kind: 'host_path', path: '/repo' },
-        hostCwd: '/repo',
-      },
-    };
-  });
-
-  await assert.rejects(
-    () =>
-      readRuntimeHostSkillCatalog(
-        connection,
-        { workspace: { kind: 'host_path', path: '/repo' } },
-        'governance',
-      ),
-    (error) =>
-      error instanceof RuntimeHostCatalogReadError &&
-      error.catalog === 'skill' &&
-      error.reason === 'repeated_cursor',
-  );
 });
 
 test('reassembles per-item relay profiles into the connection profile table', async () => {

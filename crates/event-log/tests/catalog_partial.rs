@@ -107,7 +107,6 @@ async fn interrupted_and_terminal_fallback_catalog_match_committed_presentation_
             Fact::InvocationOpened {
                 configuration: None,
                 input: InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "user".into(),
                     request_fingerprint: None,
@@ -120,7 +119,7 @@ async fn interrupted_and_terminal_fallback_catalog_match_committed_presentation_
             &log,
             &mut view,
             Fact::ModelRequested {
-                purpose: None,
+                purpose: maka_runtime::context::ModelPurpose::Main,
                 context: None,
                 checkpoint_event_id: None,
                 step_id: "step".into(),

@@ -150,7 +150,7 @@ impl Task {
             new_work_defaults,
             delegation_text,
         };
-        // Apply the same closed wire bounds as the legacy entry point.
+        // Tool and Remote inputs share the same closed domain bounds.
         maka_protocol::workhub::decode_act(&serde_json::to_value(input).map_err(super::failed)?)
             .map_err(super::failed)
     }

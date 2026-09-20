@@ -35,7 +35,7 @@ pub(crate) struct Resolution {
 }
 
 impl super::Control {
-    pub(crate) async fn query(&self) -> Result<SessionCatalogItem> {
+    pub(crate) async fn query(&self) -> Result<SessionCatalogProjection> {
         let record = self
             .commands
             .coordinator(self.caller.clone())
@@ -46,9 +46,7 @@ impl super::Control {
                     "WorkHub Session has not been resolved",
                 )
             })?;
-        Ok(SessionCatalogItem::Projection(Box::new(
-            crate::session::catalog_projection(record),
-        )))
+        Ok(crate::session::catalog_projection(record))
     }
 
     pub(crate) async fn resolve(

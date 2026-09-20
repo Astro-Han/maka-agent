@@ -61,7 +61,6 @@ fn input(base: &str, suffix: &str) -> RunInput {
         supports_vision: false,
         configuration: invocation::configuration(ToolMode::Direct),
         work: maka_agent::RunWork::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             message: format!("question {suffix}").into(),
             tools: Default::default(),
@@ -202,12 +201,12 @@ async fn continuation_claim_replays_only_its_lineage_and_retries_at_fresh_bounda
         let opening = |text: &str| Fact::InvocationOpened {
             configuration: Some(Box::new(source.configuration.clone())),
             input: InvocationInput::Message { content: text.into(), request_fingerprint: None,
-                source_messages: Vec::new(), skill_invocation: None },
+                source_messages: Vec::new(), },
         };
         let route = format!("sha256:{:x}", Sha256::digest(serde_json::to_vec(&source.provider).unwrap()));
         for fact in [
             opening("question source"),
-            Fact::ModelRequested { step_id: "old".into(), model_id: "test".into(), purpose: None, context: None,
+            Fact::ModelRequested { step_id: "old".into(), model_id: "test".into(), purpose: maka_runtime::context::ModelPurpose::Main, context: None,
                 source_scope: LogScope::Session { id: "session".into() }, source_high_water: 1,
                 source_digest: "fixture".into(), input_digest: "fixture".into(), route_identity: route,
                 checkpoint_event_id: None, effective_source_digest: None },

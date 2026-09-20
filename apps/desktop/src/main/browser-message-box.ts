@@ -107,6 +107,8 @@ export async function showBrowserMessageBoxWithRuntime(
 ): Promise<MessageBoxReturnValue> {
   activeBrowserMessageBoxPresentations += 1;
   try {
+    const cancelled = (): MessageBoxReturnValue => ({response: normalizeBrowserMessageBoxPresentation(options, {...appearance, dark: appearance.dark ?? runtime.shouldUseDarkColors}).cancelId, checkboxChecked: false});
+    if (options.signal?.aborted) return cancelled();
     const visibleParent = (): BrowserWindow | undefined =>
       parent && !parent.isDestroyed() && parent.isVisible() && !parent.isMinimized()
         ? parent
@@ -114,6 +116,9 @@ export async function showBrowserMessageBoxWithRuntime(
     try {
       return await presentBrowserMessageBox(runtime, options, visibleParent(), appearance);
     } catch (error) {
+      if (options.signal?.aborted) return cancelled();
+      // macOS parentless native dialogs ignore AbortSignal and block synchronously.
+      if (options.signal && !visibleParent()) throw error;
       runtime.onBrowserError(error);
       return await runtime.showNative(options, visibleParent());
     }
@@ -188,14 +193,19 @@ async function presentBrowserMessageBox(
         if (settled) return;
         settled = true;
         clearPresentationTimeout();
+        options.signal?.removeEventListener('abort', abort);
         resolve({ response, checkboxChecked: false });
       };
       const fail = (error: unknown): void => {
         if (settled) return;
         settled = true;
         clearPresentationTimeout();
+        options.signal?.removeEventListener('abort', abort);
         reject(error instanceof Error ? error : new Error(String(error)));
       };
+      const abort = () => finish(presentation.cancelId);
+      options.signal?.addEventListener('abort', abort, {once:true});
+      if (options.signal?.aborted) { abort(); return; }
       presentationTimeout = setTimeout(
         () => fail(new Error('Dialog renderer did not become interactive in time')),
         runtime.presentationTimeoutMs ?? DIALOG_PRESENTATION_TIMEOUT_MS,

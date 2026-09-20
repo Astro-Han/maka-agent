@@ -65,13 +65,7 @@ pub(crate) fn project(mut messages: Vec<Message>, provider: &ProviderKind) -> Ve
 }
 
 fn reasoning_field(options: Option<&Value>) -> Option<&'static str> {
-    let maka = &options?["maka"];
-    let current = &maka["openAiChatReasoningField"];
-    let field = if current.is_null() {
-        &maka["kimiReasoningField"]
-    } else {
-        current
-    };
+    let field = &options?["maka"]["openAiChatReasoningField"];
     match field.as_str()? {
         "reasoning" => Some("reasoning"),
         "reasoning_content" => Some("reasoning_content"),
@@ -120,10 +114,9 @@ mod tests {
     }
 
     #[test]
-    fn first_tagged_block_wins_and_legacy_field_is_supported() {
+    fn first_tagged_block_owns_the_reasoning_field() {
         let messages = vec![json!({"role":"assistant","content":[
-            {"type":"reasoning","text":"","providerOptions":{"maka":{
-                "openAiChatReasoningField":null,"kimiReasoningField":"reasoning"}}},
+            thinking("reasoning", ""),
             thinking("reasoning_content", "later"), thinking("reasoning", "last")
         ]})];
         let projected = serde_json::to_value(project(

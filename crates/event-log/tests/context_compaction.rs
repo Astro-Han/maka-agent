@@ -34,8 +34,6 @@ mod active;
 mod fixtures;
 #[path = "context_compaction/frozen.rs"]
 mod frozen;
-#[path = "context_compaction/legacy.rs"]
-mod legacy;
 use fixtures::{SUMMARY, closed, prepare_trace, prepared};
 
 #[tokio::test]
@@ -121,7 +119,6 @@ async fn repeated_checkpoints_cross_old_history_limits_with_bounded_tail_and_exa
         Fact::InvocationOpened {
             configuration: None,
             input: InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "x".repeat(9 * 1024 * 1024).into(),
                 request_fingerprint: None,

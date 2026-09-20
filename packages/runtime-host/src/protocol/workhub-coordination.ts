@@ -45,11 +45,11 @@ import {
 import {
   decodeSessionConfigurationUpdateInput,
   decodeSessionUpdateResult,
-  decodeSessionCatalogItem,
+  decodeSessionCatalogProjection,
   SESSION_CATALOG_OPERATION_SPECS,
   type SessionModelTarget,
   type SessionUpdateResult,
-  type SessionCatalogItem,
+  type SessionCatalogProjection,
 } from './session-catalog.js';
 
 export interface WorkHubCoordinationConfigureModelInput {
@@ -272,14 +272,14 @@ export const WORKHUB_COORDINATION_OPERATION_SPECS = {
   }),
   'workhub.coordination.query': defineOperation<
     Record<string, never>,
-    SessionCatalogItem,
+    SessionCatalogProjection,
     (typeof RESOLVE_ERRORS)[number]
   >({
     mode: 'query',
     availability: 'ready',
     errors: RESOLVE_ERRORS,
     decodeInput: decodeWorkHubCoordinationResolveInput,
-    decodeOutput: decodeSessionCatalogItem,
+    decodeOutput: decodeSessionCatalogProjection,
   }),
   'workhub.coordination.resolve': defineOperation<
     WorkHubCoordinationResolveInput,

@@ -42,7 +42,6 @@ async fn catalog_changes_page_committed_facts_without_replaying_duplicates_or_cr
             Fact::InvocationOpened {
                 configuration: None,
                 input: maka_runtime::input::InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "".into(),
                     request_fingerprint: None,

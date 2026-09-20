@@ -139,8 +139,7 @@ async fn slow_rpc_allows_same_connection_status_and_flushes_after_input_eof() {
     );
     requests
         .send(
-            json!({"kind":"hello","clientInstanceId":"half-close-test","surface":"desktop",
-        "activitySnapshotVersion":2,"protocolMin":0,"protocolMax":0,
+            json!({"kind":"hello","clientInstanceId":"half-close-test",        "protocolMin":0,"protocolMax":0,
         "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH,"compositionId":"maka.interactive"}),
         )
         .unwrap();

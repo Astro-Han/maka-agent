@@ -28,7 +28,29 @@ pub enum AdmissionEvidence {
     BrowserUrl { url: String },
 }
 
-/// Provider-to-host frames. Each variant carries only its admitted wire fields.
+/// Host-authenticated execution source; a user or background call has no Turn.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum CallSource {
+    Agent {
+        session_id: String,
+        turn_id: String,
+    },
+    Remote {
+        request_id: String,
+        session_id: Option<String>,
+    },
+    Background {
+        grant_id: String,
+        session_id: Option<String>,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all_fields = "camelCase")]
 pub enum ClientFrame {
@@ -104,8 +126,7 @@ pub enum HostFrame {
         server_id: String,
         tool_name: String,
         arguments: Map<String, Value>,
-        session_id: String,
-        turn_id: String,
+        source: CallSource,
         tool_call_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         cwd: Option<String>,

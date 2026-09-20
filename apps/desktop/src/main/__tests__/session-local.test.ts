@@ -45,7 +45,7 @@ import { createAttachmentApprovalRegistry } from '../attachment-approval.js';
 const accepted: TurnMessageSubmitResult = {
   disposition: 'turn_started',
   turnId: 'turn-1',
-  skillInvocation: { loaded: [], failed: [], receipts: [] },
+  preparation: [],
 };
 const intent = (messageId = 'message-1', sessionId = 'session-1'): LocalMessageIntent => ({
   command: { sessionId, messageId, placement: 'current_turn', content: { text: 'hello' } },
@@ -319,7 +319,7 @@ for (const refusal of ['operation-error', 'blocked-skill'] as const) {
         calls.push(input.messageId);
         if (input.messageId === 'message-1') {
           if (refusal === 'blocked-skill')
-            return { disposition: 'blocked', skillInvocation: accepted.skillInvocation };
+            return { disposition: 'blocked', message: 'Input unavailable', preparation: accepted.preparation };
           throw new RuntimeHostOperationError('turn.message.submit', 'session_busy', 'busy');
         }
         return accepted;

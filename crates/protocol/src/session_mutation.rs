@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{SessionCatalogItem, identity, validation};
+use super::{SessionCatalogProjection, identity, validation};
 use crate::{ProtocolError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -50,7 +50,7 @@ pub struct SessionMetadataUpdateInput {
 )]
 pub enum SessionUpdateResult {
     Committed {
-        session: SessionCatalogItem,
+        session: Box<SessionCatalogProjection>,
     },
     RevisionConflict {
         expected_revision: u64,
@@ -97,7 +97,7 @@ pub(super) fn assert_update_output(
     output: &SessionUpdateResult,
 ) -> Result<()> {
     match output {
-        SessionUpdateResult::Committed { session } => identity(session_id, session.id()),
+        SessionUpdateResult::Committed { session } => identity(session_id, &session.id),
         SessionUpdateResult::RevisionConflict {
             expected_revision, ..
         } if *expected_revision != revision => Err(ProtocolError::invalid(
@@ -109,7 +109,7 @@ pub(super) fn assert_update_output(
 
 pub fn assert_read_marker_output_for_input(
     input: &SessionReadMarkerSetInput,
-    output: &SessionCatalogItem,
+    output: &SessionCatalogProjection,
 ) -> Result<()> {
-    identity(&input.session_id, output.id())
+    identity(&input.session_id, &output.id)
 }

@@ -92,8 +92,47 @@ export interface LogEvent {
     fact: Json;
   };
 }
+export type ExecutionTarget =
+  | {
+      kind: 'model';
+      model: { connection_id: string; connection_slug: string; model: string };
+      thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
+    }
+  | { kind: 'executor'; executorId: string };
+export interface SessionConfiguration {
+  sessionId: string;
+  revision: number;
+  name: string;
+  boundaryRevision: number;
+  workspace: {
+    target: { kind: 'project'; projectId: string } | { kind: 'host_path'; path: string };
+    hostCwd: string;
+  };
+  target: ExecutionTarget;
+  permissionMode: 'explore' | 'ask' | 'bypass';
+  collaborationMode: 'agent' | 'plan';
+  behavior: string;
+  toolMode: 'direct' | 'code_mode';
+  boundTools: readonly string[] | null;
+}
 export interface Executions {
-  /** Host grants access to the Entry's Session and children it creates. */
+  /** Requires workspace execution consent; never derives authority from a path. */
+  createRoot(input: {
+    operationId: string;
+    name: string;
+    settings: {
+      target: ExecutionTarget;
+      permissionMode: 'explore' | 'ask' | 'bypass';
+      toolMode: 'direct' | 'code_mode';
+      collaborationMode: 'agent' | 'plan';
+      behavior: string;
+      boundTools?: readonly string[] | null;
+      instructions?: string | null;
+    };
+  }): Promise<{ sessionId: string }>;
+  /** Reads only an authorized Session, never the global catalog. */
+  session(sessionId: string): Promise<SessionConfiguration>;
+  /** Uses current source authorization and the captured Session ceiling. */
   submit(input: {
     operationId: string;
     sessionId: string;
@@ -113,13 +152,7 @@ export interface Executions {
     instructions?: string;
     /** Isolated Git workspaces are Host-owned and persist across child turns. */
     workspace?: 'inherit' | 'isolated_git';
-    target?:
-      | {
-          kind: 'model';
-          model: { connection_id: string; connection_slug: string; model: string };
-          thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
-        }
-      | { kind: 'executor'; executorId: string };
+    target?: ExecutionTarget;
   }): Promise<{ sessionId: string }>;
   /** Requires settled workspace writers; retries return the same immutable Artifact. */
   workspacePatch(operationId: string): Promise<WorkspacePatch | null>;

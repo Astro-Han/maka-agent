@@ -18,53 +18,15 @@
  */
 
 use super::Setup;
-use futures_util::future::BoxFuture;
 use maka_plugins::{
     composition::{Entry, Operation, Scope},
     kernel::Definition,
 };
-use maka_skills::plugin::{Builtin, ID, PreferenceSnapshot, PreferenceStore};
+use maka_skills::plugin::{Builtin, ID};
 use std::{path::PathBuf, sync::Arc};
-
-struct Preferences(Arc<maka_config::ConfigurationStore>);
-impl PreferenceStore for Preferences {
-    fn compare_exchange(
-        &self,
-        expected_revision: u64,
-        reference: String,
-        preference: maka_skills::Preference,
-    ) -> BoxFuture<'_, Result<bool, String>> {
-        Box::pin(async move {
-            self.0
-                .set_skill_preference(expected_revision, reference, preference)
-                .await
-                .map(|outcome| {
-                    matches!(
-                        outcome,
-                        maka_config::skills::PreferenceUpdate::Committed { .. }
-                    )
-                })
-                .map_err(|error| error.to_string())
-        })
-    }
-    fn read(&self) -> BoxFuture<'_, Result<PreferenceSnapshot, String>> {
-        Box::pin(async move {
-            let snapshot = self
-                .0
-                .skill_preferences()
-                .await
-                .map_err(|error| error.to_string())?;
-            Ok(PreferenceSnapshot {
-                revision: snapshot.revision,
-                entries: snapshot.entries,
-            })
-        })
-    }
-}
 
 pub(crate) fn install(
     setup: &mut Setup,
-    configuration: Arc<maka_config::ConfigurationStore>,
     state_root: PathBuf,
     home: Option<PathBuf>,
     executions: &Arc<crate::execution::Executions>,
@@ -75,13 +37,7 @@ pub(crate) fn install(
             "built-in Skills identity is reserved".into(),
         ));
     }
-    catalog.host_only::<maka_skills::plugin::Skills>()?;
-    catalog.reserve_for::<maka_skills::plugin::Skills>(ID, ID)?;
     catalog.host_only::<maka_plugins::input::InputPreparation>()?;
-    catalog.reserve_for::<maka_plugins::input::InputPreparation>(ID, ID)?;
-    for name in ["Skill", "SkillSearch"] {
-        catalog.reserve_for::<maka_tools::plugins::PluginTool>(name, ID)?;
-    }
     setup.builtins.insert(
         ID.into(),
         Arc::new(Definition {
@@ -92,18 +48,11 @@ pub(crate) fn install(
             plugin: Arc::new(Builtin {
                 state_root,
                 home,
-                preferences: Arc::new(Preferences(configuration)),
-                client: Some(maka_skills::plugin::remote::ClientSupport {
-                    bundle: maka_plugins::client::Bundle::builtin(
-                        ID,
-                        env!("CARGO_PKG_VERSION"),
-                        include_str!(concat!(env!("OUT_DIR"), "/skills-client.js")),
-                    )?,
-                    sessions: Arc::new(crate::execution::SessionViews(Arc::downgrade(executions))),
-                    workspaces: Arc::new(crate::execution::SessionViews(Arc::downgrade(
-                        executions,
-                    ))),
-                }),
+                client: Some(maka_plugins::client::Bundle::builtin(
+                    ID,
+                    env!("CARGO_PKG_VERSION"),
+                    include_str!(concat!(env!("OUT_DIR"), "/skills-client.js")),
+                )?),
             }),
         }),
     );

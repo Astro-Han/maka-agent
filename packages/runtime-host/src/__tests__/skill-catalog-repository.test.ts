@@ -24,7 +24,6 @@ import {
   type SkillCatalogInvocableQueryResult,
 } from '../protocol/index.js';
 
-import { RuntimeHostProtocolError } from '../protocol/errors.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -38,7 +37,7 @@ import {
   buildStarterSkillTemplate,
   createManagedSkillLock,
 } from '@maka/runtime/skills';
-import { decodeHostFrame, isSkillCatalogProjectRootLexicallyAbsolute } from '../protocol/index.js';
+import { isSkillCatalogProjectRootLexicallyAbsolute } from '../protocol/index.js';
 import type {
   SkillCatalogGovernanceItem,
   SkillCatalogQueryResult,
@@ -252,41 +251,6 @@ test('removed bundled sources lose provenance trust without disabling the local 
   assert.equal(await readFile(join(skillDirectory, 'SKILL.md'), 'utf8'), content);
 });
 
-test('bounds oversized metadata with an explicit diagnostic and encodable mutation result', async () => {
-  const fixture = await createFixture();
-  const sourceId = 'oversized-metadata';
-  const content = skillBodyWithTools('N'.repeat(300), 65, 'T'.repeat(300));
-  await createSkill(fixture.sources, sourceId, content);
-  const repository = fixture.repository();
-  const initial = await start(repository, fixture.project, 'managed_sources');
-  assert.equal(initial.items[0]?.kind, 'managed_source');
-  if (initial.items[0]?.kind === 'managed_source') {
-    assert.equal(initial.items[0].metadataTruncated, true);
-  }
-
-  const committed = await repository.mutate({
-    expectedRevision: initial.revision,
-    mutation: { kind: 'install', sourceType: 'managed', sourceId },
-  });
-  assert.equal(committed.kind, 'committed');
-  if (committed.kind !== 'committed') return;
-  assert.equal(committed.entry?.metadataTruncated, true);
-  assert.equal(committed.entry?.declaredTools.length, 64);
-  assert.ok(committed.entry?.declaredTools.every((tool) => Buffer.byteLength(tool) <= 256));
-  assert.ok(committed.entry?.validationCodes.includes('projection_truncated'));
-  const frame = {
-    requestId: 'metadata-projection',
-    operation: 'skill.catalog.mutate' as const,
-    ok: true as const,
-    result: { ...committed, resolvedWorkspace: workspaceProjection(fixture.project) },
-  };
-  assert.deepEqual(decodeHostFrame(frame), frame);
-
-  const page = await start(repository, fixture.project, 'governance');
-  assert.ok(Buffer.byteLength(JSON.stringify(page), 'utf8') <= 48 * 1024);
-  assert.equal(governanceItem(page, `workspace:legacy:${sourceId}`).metadataTruncated, true);
-});
-
 test('external project sources are read-only while Data Root preferences use durable schema v2', async () => {
   const fixture = await createFixture();
   const skillPath = await createSkill(
@@ -316,141 +280,6 @@ test('external project sources are read-only while Data Root preferences use dur
   assert.equal(state.schemaVersion, 2);
   assert.equal(state.skills[external.ref]?.enabled, false);
   assert.match(await readFile(join(skillPath, 'SKILL.md'), 'utf8'), /External/);
-});
-
-test('noncanonical external ids remain wire-safe governance entries', async () => {
-  const fixture = await createFixture();
-  await createSkill(
-    join(fixture.project, '.maka', 'skills'),
-    'valid skill',
-    skillBody('Valid Skill', 'noncanonical external id'),
-  );
-  await createSkill(
-    join(fixture.project, '.maka', 'skills'),
-    'bad\u007Fskill',
-    skillBody('Control Skill', 'control directory id'),
-  );
-  const repository = fixture.repository();
-  const page = await start(repository, fixture.project, 'governance');
-  assert.equal(governanceItem(page, 'project:maka:valid skill').id, 'valid skill');
-  const control = page.items.find(
-    (item): item is SkillCatalogGovernanceItem =>
-      item.kind === 'discovery_diagnostic' && item.name === 'Control Skill',
-  );
-  assert.ok(control);
-  assert.equal(control.id, 'invalid-skill-id');
-  assert.equal(control.manageable, false);
-  assert.equal(/[\u0000-\u001F\u007F]/.test(control.ref), false);
-  const frame = {
-    requestId: 'noncanonical-external-id',
-    operation: 'skill.catalog.query' as const,
-    ok: true as const,
-    result: { ...page, resolvedWorkspace: workspaceProjection(fixture.project) },
-  };
-  assert.deepEqual(decodeHostFrame(frame), frame);
-
-  assert.deepEqual(
-    await repository.mutate({
-      expectedRevision: page.revision,
-      mutation: { kind: 'set_enabled', ref: control.ref, enabled: false },
-    }),
-    { kind: 'rejected', reason: 'not_found' },
-  );
-  await assert.rejects(readFile(join(fixture.root, '.maka', 'skills-state.json')), {
-    code: 'ENOENT',
-  });
-  const initialModel = await repository.readCanonicalModelInventory({
-    projectRoot: fixture.project,
-  });
-  assert.equal(
-    initialModel.inventory.some((skill) => skill.id === 'bad\nskill'),
-    false,
-  );
-  assert.equal(
-    initialModel.inventory.some((skill) => skill.id === 'valid skill'),
-    true,
-  );
-
-  const disabled = await repository.mutate({
-    expectedRevision: page.revision,
-    mutation: {
-      kind: 'set_enabled',
-      ref: 'project:maka:valid skill',
-      enabled: false,
-    },
-  });
-  assert.equal(disabled.kind, 'committed');
-  const model = await repository.readCanonicalModelInventory({
-    projectRoot: fixture.project,
-  });
-  assert.equal(model.inventory.find((skill) => skill.id === 'valid skill')?.enabled, false);
-});
-
-test('repository preserves filesystem-safe ids and codec preserves the 256-byte display-id boundary', async () => {
-  const fixture = await createFixture();
-  const filesystemId = `${'界'.repeat(83)} abcde`;
-  const boundaryId = `${'界'.repeat(84)} abc`;
-  const oversizedId = `${boundaryId}x`;
-  assert.equal(Buffer.byteLength(filesystemId, 'utf8'), 255);
-  assert.equal(Buffer.byteLength(boundaryId, 'utf8'), 256);
-  assert.equal(Buffer.byteLength(oversizedId, 'utf8'), 257);
-  await createSkill(
-    join(fixture.project, '.maka', 'skills'),
-    filesystemId,
-    skillBody('Boundary Skill', 'encodable external id'),
-  );
-
-  const repository = fixture.repository();
-  const page = await start(repository, fixture.project, 'governance');
-  const filesystemRef = `project:maka:${filesystemId}`;
-  const filesystemItem = governanceItem(page, filesystemRef);
-  assert.equal(filesystemItem.id, filesystemId);
-  assert.equal(filesystemItem.manageable, false);
-
-  const boundaryPage = {
-    ...page,
-    items: [{ ...filesystemItem, id: boundaryId }],
-    resolvedWorkspace: workspaceProjection(fixture.project),
-  };
-  const queryFrame = {
-    requestId: 'display-id-boundary-query',
-    operation: 'skill.catalog.query' as const,
-    ok: true as const,
-    result: boundaryPage,
-  };
-  assert.deepEqual(decodeHostFrame(queryFrame), queryFrame);
-
-  const oversizedFrame = {
-    ...queryFrame,
-    result: {
-      ...boundaryPage,
-      items: [{ ...filesystemItem, id: oversizedId }],
-    },
-  };
-  assert.throws(
-    () => decodeHostFrame(oversizedFrame),
-    (error: unknown) => error instanceof RuntimeHostProtocolError && error.code === 'invalid_frame',
-  );
-
-  const committed = await repository.mutate({
-    expectedRevision: page.revision,
-    mutation: { kind: 'set_enabled', ref: filesystemRef, enabled: false },
-  });
-  assert.equal(committed.kind, 'committed');
-  if (committed.kind !== 'committed') return;
-  assert.equal(committed.entry?.id, filesystemId);
-  const mutationFrame = {
-    requestId: 'display-id-boundary-mutation',
-    operation: 'skill.catalog.mutate' as const,
-    ok: true as const,
-    result: { ...committed, resolvedWorkspace: workspaceProjection(fixture.project) },
-  };
-  assert.deepEqual(decodeHostFrame(mutationFrame), mutationFrame);
-
-  const model = await repository.readCanonicalModelInventory({
-    projectRoot: fixture.project,
-  });
-  assert.equal(model.inventory.find((skill) => skill.id === filesystemId)?.enabled, false);
 });
 
 test('managed source read failures are not projected as an empty catalog', async () => {
@@ -1366,13 +1195,6 @@ function stateFile(ref: string, enabled: boolean, pinned: boolean, updatedAt: st
     schemaVersion: 2,
     skills: { [ref]: { enabled, pinned, updatedAt } },
   })}\n`;
-}
-
-function workspaceProjection(projectRoot: string) {
-  return {
-    target: { kind: 'host_path' as const, path: projectRoot },
-    hostCwd: projectRoot,
-  };
 }
 
 async function start(

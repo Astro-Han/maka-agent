@@ -19,6 +19,62 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function (ctx) {
+  await ctx.input.prepare('example.review', (request) => {
+    const selections = request.selections['example.review'];
+    if (!selections) return { kind: 'unchanged' };
+    if (selections[0] === 'missing')
+      return {
+        kind: 'blocked',
+        message: 'Review document is unavailable',
+        receipt: { document: selections[0] },
+      };
+    return {
+      kind: 'ready',
+      content: {
+        ...request.content,
+        quotes: [{ text: 'Prepared by an external input provider', label: selections[0] }],
+      },
+      receipt: { document: selections[0] },
+    };
+  });
+  const marker = 'state.bin';
+  try {
+    const page = await ctx.data.read({ path: marker });
+    if (new TextDecoder().decode(page.bytes) !== '持久状态🦀')
+      throw new Error('private file did not survive activation');
+  } catch (error) {
+    if (error.code !== 'not_found') throw error;
+    await ctx.data.write({ path: marker, bytes: new TextEncoder().encode('持久状态🦀') });
+  }
+  await ctx.data.write({ path: 'temporary', bytes: [0, 255, 42], truncate: true });
+  const firstPage = await ctx.data.read({ path: 'temporary', limit: 2 });
+  if (firstPage.nextOffset === null) throw new Error('private-file cursor missing');
+  const lastPage = await ctx.data.read({ path: 'temporary', offset: firstPage.nextOffset });
+  if (
+    firstPage.bytes[1] !== 255 ||
+    firstPage.nextOffset !== 2 ||
+    lastPage.bytes[0] !== 42 ||
+    lastPage.nextOffset !== null
+  )
+    throw new Error('private-file byte pagination is lossy');
+  const listing = await ctx.data.list({ limit: 1 });
+  const remaining = await ctx.data.list({ after: listing.nextAfter });
+  if (listing.nextAfter !== marker || remaining.entries[0]?.name !== 'temporary')
+    throw new Error('private-file listing silently truncated');
+  await ctx.data.rename('temporary', 'renamed');
+  await ctx.data.remove('renamed');
+  for (const path of ['../outside', 'C:/outside', 'CON', 'alias.']) {
+    try {
+      await ctx.data.write({ path, bytes: [] });
+      throw new Error('invalid private path accepted');
+    } catch (error) {
+      if (error.code !== 'invalid') throw error;
+    }
+  }
+  await ctx.behaviors.register('example.behavior', ({ sessionId }) => {
+    if (sessionId !== 'js-session') throw new Error('wrong behavior Session');
+    return { instructions: 'External behavior instructions', toolMode: 'direct' };
+  });
   let credential = await ctx.credentials.read('test-token');
   if (credential === null) {
     const written = await ctx.credentials.write({
@@ -57,6 +113,8 @@ export default async function (ctx) {
       capabilities: { thinking: true, toolActivity: true },
     },
     async (request, context) => {
+      if (request.content.quotes?.[0]?.text !== 'Prepared by an external input provider')
+        throw new Error('executor lost provider-prepared structured content');
       const session = request.invocation.session_id;
       if (
         session !== 'executor-session' &&
@@ -126,7 +184,7 @@ export default async function (ctx) {
       await completed.close();
       const scoped = await context.services.get('example.echo');
       if (!scoped) throw new Error('service retired');
-      const caller = await scoped.call({ inspect: true });
+      const caller = await scoped.call({ inspect: true, resources: command });
       await scoped.close();
       if (
         JSON.stringify(caller) !==
@@ -163,7 +221,15 @@ export default async function (ctx) {
   ctx.prompt.section({
     name: 'example.prompt',
     complete: true,
-    text: 'JavaScript plugin acceptance',
+    async text() {
+      const preferences = await ctx.preferences.read();
+      if (
+        Object.keys(preferences).sort().join(',') !==
+        'personalization,revision,workspaceInstructions'
+      )
+        throw new Error('preferences exposed unrelated Host configuration');
+      return `JavaScript plugin acceptance: ${JSON.stringify(preferences)}`;
+    },
   });
   ctx.tools.register(
     {
@@ -183,14 +249,14 @@ export default async function (ctx) {
         await denied.close();
         throw new Error('Ask Session gained unrestricted terminal access');
       } catch (error) {
-        if (error.code !== 'invalid' || !error.message.includes('not authorized')) throw error;
+        if (error.code !== 'revoked') throw error;
       }
       try {
         const denied = await call.processes.spawn(command);
         await denied.close();
         throw new Error('Ask Session gained unrestricted process access');
       } catch (error) {
-        if (error.code !== 'invalid' || !error.message.includes('not authorized')) throw error;
+        if (error.code !== 'revoked') throw error;
       }
       if (previousCall) {
         try {

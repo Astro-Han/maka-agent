@@ -22,8 +22,6 @@
 mod content;
 #[path = "turn_resume.rs"]
 mod resume;
-#[path = "turn_skills.rs"]
-mod skills;
 #[path = "turn_types.rs"]
 mod types;
 use crate::{ProtocolError, Result, codec};
@@ -31,7 +29,6 @@ pub use content::*;
 pub use resume::*;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
-pub use skills::*;
 pub use types::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,8 +37,8 @@ pub struct TurnStartInput {
     pub session_id: String,
     pub turn_id: String,
     pub content: MessageContent,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub input_selections: maka_runtime::input::Selections,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_orchestration: Option<TurnOrchestration>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,10 +67,11 @@ pub struct TurnStopInput {
 pub enum TurnStartResult {
     Started {
         turn: TurnSnapshot,
-        skill_invocation: SkillInvocationResult,
+        preparation: Vec<maka_runtime::input::InputReceipt>,
     },
     Blocked {
-        skill_invocation: SkillInvocationResult,
+        message: String,
+        preparation: Vec<maka_runtime::input::InputReceipt>,
     },
 }
 
@@ -81,35 +79,17 @@ pub fn decode_turn_start_input(value: &Value) -> Result<TurnStartInput> {
     let mut input: TurnStartInput = decode(value)?;
     entity(&input.session_id)?;
     entity(&input.turn_id)?;
-    let ids = input.skill_ids.as_deref().unwrap_or_default();
-    validate_skill_ids(ids)?;
-    input.content.validate_admission(!ids.is_empty())?;
-    if ids.is_empty() {
-        input.skill_ids = None;
-    }
+    maka_runtime::input::validate_selections(&input.input_selections)
+        .map_err(ProtocolError::invalid)?;
+    input
+        .content
+        .validate_admission(!input.input_selections.is_empty())?;
     if let Some(max) = input.max_steps {
         ensure(max > 0, "Invalid maxSteps")?;
     }
     Ok(input)
 }
 
-pub(crate) fn validate_skill_ids(ids: &[String]) -> Result<()> {
-    ensure(
-        ids.len() <= 50
-            && ids.iter().all(|id| {
-                id.len() <= 512
-                    && id.split(':').all(|part| {
-                        part.as_bytes()
-                            .first()
-                            .is_some_and(u8::is_ascii_alphanumeric)
-                            && part
-                                .bytes()
-                                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-                    })
-            }),
-        "Invalid skillIds",
-    )
-}
 pub fn decode_turn_query_input(value: &Value) -> Result<TurnQueryInput> {
     let input: TurnQueryInput = decode(value)?;
     entity(&input.session_id)?;
@@ -136,26 +116,31 @@ pub fn decode_context_compaction_outcome(value: &Value) -> Result<ContextCompact
 pub fn decode_turn_start_result(value: &Value) -> Result<TurnStartResult> {
     let result: TurnStartResult = decode(value)?;
     match &result {
-        TurnStartResult::Started {
-            turn,
-            skill_invocation,
-        } => {
+        TurnStartResult::Started { turn, preparation } => {
             turn.validate(&value["turn"])?;
-            skill_invocation
-                .validate()
-                .map_err(ProtocolError::invalid)?;
+            validate_preparation(preparation)?;
         }
-        TurnStartResult::Blocked { skill_invocation } => {
-            skill_invocation
-                .validate()
-                .map_err(ProtocolError::invalid)?;
-            ensure(
-                skill_invocation.loaded.is_empty() && !skill_invocation.failed.is_empty(),
-                "Blocked Turn requires only failed Skill invocations",
-            )?;
+        TurnStartResult::Blocked {
+            message,
+            preparation,
+        } => {
+            validate_blocked_preparation(message, preparation)?;
         }
     }
     Ok(result)
+}
+pub(crate) fn validate_preparation(receipts: &[maka_runtime::input::InputReceipt]) -> Result<()> {
+    maka_runtime::input::validate_receipts(receipts).map_err(ProtocolError::invalid)
+}
+pub(crate) fn validate_blocked_preparation(
+    message: &str,
+    receipts: &[maka_runtime::input::InputReceipt],
+) -> Result<()> {
+    ensure(
+        !message.trim().is_empty() && message.len() <= 4096 && !receipts.is_empty(),
+        "Invalid input preparation rejection",
+    )?;
+    validate_preparation(receipts)
 }
 pub fn assert_start_output_for_input(
     input: &TurnStartInput,

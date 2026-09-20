@@ -60,9 +60,6 @@ pub(crate) fn install(
         ));
     }
     catalog.host_only::<Control>()?;
-    catalog.reserve_for::<Control>(ID, ID)?;
-    catalog.reserve_for::<maka_plugins::session::SessionBehavior>(ID, ID)?;
-    catalog.reserve_for::<maka_tools::plugins::PluginTool>(tools::NAME, ID)?;
     setup
         .managed_sessions
         .push(maka_event_log::sessions::ManagedSession {
@@ -194,7 +191,6 @@ impl Plugin for WorkHub {
             context
                 .services
                 .provide(
-                    &context.lifecycle,
                     BACKEND_SERVICE,
                     Arc::new(Backend {
                         bundle,

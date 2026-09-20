@@ -21,15 +21,11 @@ use crate::{ConfigError, ConfigurationStore, Result, TransactionMode};
 use maka_runtime::configuration::{
     policy::{
         ChatDefaults, EnabledPolicy, MAX_POLICY_SNAPSHOT_BYTES, Personalization, RuntimePolicy,
-        RuntimePolicyMutationResult, RuntimePolicySnapshot, decode_canonical_document,
+        RuntimePolicyMutationResult, RuntimePolicySnapshot, decode_canonical_snapshot,
     },
     validation::{MAX_SAFE_INTEGER, revision},
 };
 use sqlx::SqliteConnection;
-
-// Matches migration 0006. Recovery has headroom for schema growth; ordinary
-// writes still require a policy that fits the unchanged 48 KiB wire budget.
-const MAX_POLICY_DOCUMENT_BYTES: usize = 64 * 1024;
 
 impl ConfigurationStore {
     pub async fn set_subagents(
@@ -162,7 +158,7 @@ pub(crate) async fn read(connection: &mut SqliteConnection) -> Result<RuntimePol
             policy: RuntimePolicy::default(),
         });
     };
-    if size < 0 || size > MAX_POLICY_DOCUMENT_BYTES as i64 {
+    if size < 0 || size > MAX_POLICY_SNAPSHOT_BYTES as i64 {
         return Err(ConfigError::UnsupportedDatabase);
     }
     let document: String =
@@ -170,5 +166,5 @@ pub(crate) async fn read(connection: &mut SqliteConnection) -> Result<RuntimePol
             .fetch_one(connection)
             .await?;
     let value = serde_json::from_str(&document)?;
-    decode_canonical_document(value).map_err(|_| ConfigError::UnsupportedDatabase)
+    decode_canonical_snapshot(value).map_err(|_| ConfigError::UnsupportedDatabase)
 }

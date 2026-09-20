@@ -53,11 +53,7 @@ const environmentBindingFields = {
   deploymentId: z.string().uuid(),
   operator: z.unknown().transform((value, context) => {
     try {
-      const command = decodeRuntimeHostOperatorCommand(value);
-      if (command.kind === 'legacy_posix_executable') {
-        throw new Error('Runtime Host setup operator must declare its target platform');
-      }
-      return command;
+      return decodeRuntimeHostOperatorCommand(value);
     } catch (error) {
       context.addIssue({
         code: 'custom',

@@ -45,6 +45,7 @@ import { PEER_MESH_OPERATION_SPECS } from './peer-mesh.js';
 import { PLUGIN_PLATFORM_OPERATION_SPECS } from './plugin-platform.js';
 import { PLUGIN_CLIENT_OPERATION_SPECS } from './plugin-client.js';
 import { PLUGIN_REMOTE_OPERATION_SPECS } from './plugin-remote.js';
+import { PLUGIN_AUTHORIZATION_OPERATION_SPECS } from './plugin-authorization.js';
 import { PROJECT_CATALOG_OPERATION_SPECS } from './project-catalog.js';
 import {
   composeOperationSpecMaps,
@@ -65,7 +66,6 @@ import { SESSION_REVISION_OPERATION_SPECS } from './session-revision.js';
 import { SESSION_BUNDLE_OPERATION_SPECS } from './session-bundle.js';
 import { SESSION_RETIREMENT_OPERATION_SPECS } from './session-retirement.js';
 import { SESSION_EFFECT_OPERATION_SPECS } from './session-effects.js';
-import { SKILL_CATALOG_OPERATION_SPECS } from './skill-catalog.js';
 import { TURN_OPERATION_SPECS } from './turn.js';
 import { USAGE_PRICING_OPERATION_SPECS } from './usage-pricing.js';
 import { WEB_SEARCH_OPERATION_SPECS } from './web-search.js';
@@ -121,6 +121,7 @@ export type {
 } from './artifact.js';
 export {
   TURN_FAILURE_MESSAGE_MAX_BYTES,
+  decodeInputSelections,
   TURN_MESSAGE_CONTENT_MAX_BYTES,
   TURN_MESSAGE_TEXT_MAX_BYTES,
   TURN_RESUME_PARK_REASONS,
@@ -142,6 +143,8 @@ export type {
 } from './message.js';
 export type {
   LiveTurnSnapshot,
+  InputSelections,
+  InputReceipt,
   TurnProviderRetry,
   TurnQueryInput,
   TurnRegenerateInput,
@@ -175,6 +178,7 @@ export * from './plan.js';
 export * from './plugin-platform.js';
 export * from './plugin-client.js';
 export * from './plugin-remote.js';
+export * from './plugin-authorization.js';
 export * from './project-catalog.js';
 export * from './runtime-policy.js';
 export * from './runtime-resource.js';
@@ -225,7 +229,6 @@ export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
   SESSION_BUNDLE_OPERATION_SPECS,
   SESSION_RETIREMENT_OPERATION_SPECS,
   ARTIFACT_OPERATION_SPECS,
-  SKILL_CATALOG_OPERATION_SPECS,
   USAGE_PRICING_OPERATION_SPECS,
   MEMORY_OPERATION_SPECS,
   OAUTH_OPERATION_SPECS,
@@ -238,6 +241,7 @@ export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
   PLUGIN_PLATFORM_OPERATION_SPECS,
   PLUGIN_CLIENT_OPERATION_SPECS,
   PLUGIN_REMOTE_OPERATION_SPECS,
+  PLUGIN_AUTHORIZATION_OPERATION_SPECS,
 );
 
 export type OperationSpecMap = typeof HOST_OPERATION_SPECS;
@@ -248,6 +252,7 @@ export type OperationKey = keyof OperationSpecMap;
 export const REMOTE_OWNER_OPERATION_GRANTS = Object.freeze([
   'plugin.client.query',
   'plugin.remote',
+  'plugin.authorization',
   'access.credential.finalize',
   'agent.graph.epochs.query',
   'agent.graph.operator.query',
@@ -345,12 +350,6 @@ export const REMOTE_OWNER_OPERATION_GRANTS = Object.freeze([
   'session.turn_landmarks.query',
   'session.turns.query',
   'session.workspace.relocate',
-  'skill.catalog.invocable.query',
-  'skill.catalog.mutate',
-  'skill.catalog.preview-update',
-  'skill.catalog.resolve-path',
-  'skill.catalog.query',
-  'skill.source.import',
   'subscription.close',
   'subscription.open',
   'subscription.pty_interest.set',

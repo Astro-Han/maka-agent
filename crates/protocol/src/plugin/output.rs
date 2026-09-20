@@ -124,6 +124,10 @@ pub fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
         return Err(ProtocolError::invalid("plugin output exceeds 128 KiB"));
     }
     match operation {
+        Operation::PluginAuthorization => {
+            serde_json::from_value::<super::AuthorizationResult>(value.clone())
+                .map_err(|error| ProtocolError::invalid(error.to_string()))?;
+        }
         Operation::PluginRemote => {
             super::validate_remote_result(value)?;
         }

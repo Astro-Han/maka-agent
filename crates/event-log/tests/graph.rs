@@ -72,7 +72,6 @@ async fn committed_graph_decisions_and_host_receipts_recover_without_retargeting
                 content: "Coordinate".into(),
                 source_messages: vec![],
                 request_fingerprint: None,
-                skill_invocation: None,
             },
         },
         Fact::ToolDispatched {

@@ -67,31 +67,13 @@ pub(crate) async fn initialize_execution(
     )
     .fetch_one(&mut *tx)
     .await?;
-    let versioned: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('catalog_message_watermark')
-            WHERE name = 'projection_version')",
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    let version = if versioned {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT projection_version FROM catalog_message_watermark WHERE singleton = 1",
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-    } else {
-        // Only disposable projection metadata changes; canonical events stay intact.
-        sqlx::raw_sql("DROP TABLE IF EXISTS catalog_message_watermark;")
-            .execute(&mut *tx)
-            .await?;
-        None
-    };
-    let complete = complete && version == Some(8);
     if !complete {
-        // The schema belongs exclusively to this disposable projection.
-        sqlx::raw_sql("DROP TABLE IF EXISTS catalog_messages;")
-            .execute(&mut *tx)
-            .await?;
+        sqlx::raw_sql(
+            "DROP TABLE IF EXISTS catalog_messages;
+             DROP TABLE IF EXISTS catalog_message_watermark;",
+        )
+        .execute(&mut *tx)
+        .await?;
     }
     sqlx::raw_sql(
         "CREATE TABLE IF NOT EXISTS catalog_messages (
@@ -109,18 +91,12 @@ pub(crate) async fn initialize_execution(
             session_id, message_at DESC, sequence DESC, ordinal DESC
          ) WHERE preview IS NOT NULL;
          CREATE TABLE IF NOT EXISTS catalog_message_watermark(
-            singleton INTEGER PRIMARY KEY CHECK(singleton = 1), sequence INTEGER NOT NULL,
-            projection_version INTEGER NOT NULL
+            singleton INTEGER PRIMARY KEY CHECK(singleton = 1), sequence INTEGER NOT NULL
          );
-         INSERT OR IGNORE INTO catalog_message_watermark VALUES (1, 0, 8);",
+         INSERT OR IGNORE INTO catalog_message_watermark VALUES (1, 0);",
     )
     .execute(&mut *tx)
     .await?;
-    if !complete {
-        sqlx::raw_sql("UPDATE catalog_message_watermark SET sequence = 0, projection_version = 8;")
-            .execute(&mut *tx)
-            .await?;
-    }
     let mut through: i64 =
         sqlx::query_scalar("SELECT sequence FROM catalog_message_watermark WHERE singleton = 1")
             .fetch_one(&mut *tx)
@@ -183,7 +159,7 @@ pub(crate) async fn project_execution(
              WHERE request.kind = 'model_requested' AND request.invocation_id = ?1
              AND request.operation_id = ?2
              AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
-             AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main')",
+             AND json_extract(request.event_json, '$.fact.purpose') = 'main')",
         )
         .bind(&invocation)
         .bind(&step)

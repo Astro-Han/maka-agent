@@ -47,8 +47,8 @@ pub struct SubmitInput {
     pub message_id: String,
     pub content: MessageContent,
     pub placement: Placement,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub input_selections: maka_runtime::input::Selections,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_orchestration: Option<TurnOrchestration>,
 }
@@ -58,17 +58,15 @@ impl SubmitInput {
         epoch(&self.origin_host_epoch)?;
         turn::entity(&self.session_id)?;
         turn::entity(&self.message_id)?;
-        let ids = self.skill_ids.as_deref().unwrap_or_default();
-        turn::validate_skill_ids(ids)?;
-        self.content.validate_admission(!ids.is_empty())?;
+        maka_runtime::input::validate_selections(&self.input_selections)
+            .map_err(ProtocolError::invalid)?;
+        self.content
+            .validate_admission(!self.input_selections.is_empty())?;
         ensure(
-            (ids.is_empty() && self.turn_orchestration.is_none())
+            (self.input_selections.is_empty() && self.turn_orchestration.is_none())
                 || self.placement == Placement::CurrentTurn,
             "Exact-Turn intent requires current_turn placement",
         )?;
-        if ids.is_empty() {
-            self.skill_ids = None;
-        }
         Ok(())
     }
 }

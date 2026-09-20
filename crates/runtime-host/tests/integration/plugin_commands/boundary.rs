@@ -108,6 +108,18 @@ pub(super) async fn verify(
     let request = CreateRoot {
         operation_id: "frozen-root".into(),
         name: "Scheduled run".into(),
+        settings: maka_plugins::execution::RootSettings {
+            target: maka_plugins::execution::Target::Model {
+                model: model.clone(),
+                thinking_level: None,
+            },
+            permission_mode: maka_runtime::execution::PermissionMode::Explore,
+            tool_mode: maka_runtime::execution::ToolMode::CodeMode,
+            collaboration_mode: maka_runtime::execution::CollaborationMode::Agent,
+            behavior: maka_runtime::execution::BehaviorId::default(),
+            bound_tools: None,
+            instructions: None,
+        },
     };
     assert!(matches!(
         current.create_root(request.clone()).await,

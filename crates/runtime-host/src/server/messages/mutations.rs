@@ -134,7 +134,7 @@ pub(super) async fn execute(
                 if !entry.required_tools.iter().all(|name| tools.contains(name)) {
                     return Err(failure(
                         Code::OperationConflict,
-                        "Active Run lacks tools required by the queued Skills",
+                        "Active Run lacks tools required by the queued input",
                     ));
                 }
                 QueueEdit::Promote {
@@ -158,7 +158,6 @@ pub(super) async fn execute(
                 let mut source = entry.source.clone();
                 let required_tools;
                 source.message.content = super::update::content(source.message.content, &i.text)?;
-                source.skill_invocation = Default::default();
                 if let Some(references) = &mut source.message.content.inline_references {
                     references.retain(|reference| {
                         reference.kind != maka_runtime::input::InlineReferenceKind::Skill
@@ -206,18 +205,13 @@ pub(super) async fn execute(
                         )
                         .await?;
                     match candidate.selection {
-                        crate::execution::skills::SkillPreparation::Ready {
-                            skill_invocation,
+                        crate::execution::input::Outcome::Ready {
                             required_tools: requirements,
                         } => {
                             required_tools = requirements;
-                            source.skill_invocation = skill_invocation;
                         }
-                        crate::execution::skills::SkillPreparation::Blocked(_) => {
-                            return Err(failure(
-                                Code::OperationConflict,
-                                "Edited skill invocation could not be resolved",
-                            ));
+                        crate::execution::input::Outcome::Blocked { message } => {
+                            return Err(failure(Code::OperationConflict, &message));
                         }
                     };
                 }
@@ -225,7 +219,6 @@ pub(super) async fn execute(
                     required_tools,
                     message_id: i.entry_id.clone(),
                     content: Box::new(source.message.content),
-                    skill_invocation: source.skill_invocation,
                 }
             }
             Input::Reorder(i) => QueueEdit::Reorder {

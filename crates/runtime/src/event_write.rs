@@ -92,13 +92,12 @@ impl EventWrite {
                 crate::input::InvocationInput::Message {
                     content,
                     source_messages,
-                    skill_invocation,
                     ..
                 },
             ..
         } = &event.fact
         {
-            crate::message::validate_opening(content, source_messages, skill_invocation.as_deref())
+            crate::message::validate_sources(content, source_messages)
                 .map_err(|message| CommitError::Rejected(message.into()))?;
             if !source_messages.is_empty()
                 && serde_json::to_vec(&event)
@@ -111,15 +110,8 @@ impl EventWrite {
                 ));
             }
         }
-        if let Fact::MessageSteered {
-            message,
-            skill_invocation,
-        } = &event.fact
-        {
+        if let Fact::MessageSteered { message } = &event.fact {
             message
-                .validate()
-                .map_err(|message| CommitError::Rejected(message.into()))?;
-            skill_invocation
                 .validate()
                 .map_err(|message| CommitError::Rejected(message.into()))?;
         }

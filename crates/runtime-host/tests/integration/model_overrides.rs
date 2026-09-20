@@ -45,7 +45,7 @@ async fn original_client_declarations_freeze_each_invocation_and_reopen_without_
                 purpose, context, ..
             } = &stored.event.fact
             {
-                assert_eq!(*purpose, Some(ModelPurpose::Main));
+                assert_eq!(*purpose, ModelPurpose::Main);
                 let context = context.as_ref().unwrap();
                 requests.push((
                     stored.event.invocation.turn_id.as_str(),

@@ -321,7 +321,6 @@ impl Drop for CandidateFixture {
                 let _ = fs::remove_dir_all(deployment);
             }
         }
-        let _ = fs::remove_file(control.join("owner.lock"));
         let _ = fs::remove_dir(control);
         let _ = fs::remove_file(&self.lock);
     }

@@ -30,7 +30,7 @@ use sha2::{Digest, Sha256};
 impl Platform {
     pub async fn execute(&self, input: Input) -> Result<Value, OperationError> {
         match input {
-            Input::Remote(_) => Err(failure(
+            Input::Remote(_) | Input::Authorization(_) => Err(failure(
                 Code::OperationUnavailable,
                 "Remote requires an authenticated Client connection",
             )),
@@ -77,6 +77,7 @@ impl Platform {
                     Input::Reload { extension_id } => Mutation::Reload(extension_id),
                     Input::Reconcile => Mutation::Reconcile,
                     Input::Remote(_)
+                    | Input::Authorization(_)
                     | Input::Client(_)
                     | Input::Query(_)
                     | Input::Export { .. } => unreachable!(),

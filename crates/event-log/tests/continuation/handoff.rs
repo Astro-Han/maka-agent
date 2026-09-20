@@ -75,11 +75,11 @@ async fn handoff_rejects_unresolved_provider_effects_but_accepts_effect_free_sum
                 Fact::ModelRequested {
                     step_id: "step".into(),
                     model_id: "test".into(),
-                    purpose: Some(if provider_effect {
+                    purpose: if provider_effect {
                         ModelPurpose::Main
                     } else {
                         ModelPurpose::Summary
-                    }),
+                    },
                     context: None,
                     source_scope: context.source_evidence.scope,
                     source_high_water: context.source_evidence.high_water,

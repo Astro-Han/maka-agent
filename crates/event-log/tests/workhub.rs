@@ -43,7 +43,6 @@ fn message(text: &str) -> Fact {
             content: text.into(),
             request_fingerprint: None,
             source_messages: Vec::new(),
-            skill_invocation: None,
         },
     }
 }
@@ -282,7 +281,6 @@ async fn steering_keeps_delivery_ownership_across_waiting_shells_and_terminal_ha
                         content: pending[0].source.message.content.clone(),
                         source_messages: vec![pending[0].source.clone()],
                         request_fingerprint: None,
-                        skill_invocation: None,
                     },
                 },
             ))
@@ -525,7 +523,6 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
                 content: pending[0].source.message.content.clone(),
                 request_fingerprint: None,
                 source_messages: vec![pending[0].source.clone()],
-                skill_invocation: None,
             },
         },
     ))

@@ -49,7 +49,7 @@ function createBridgeRecorder(): {
         disposition: 'steering',
         attachments: [],
         inlineReferences: [],
-        skillInvocation: { loaded: [], failed: [], receipts: [] },
+        preparation: [],
       },
     ],
   ]);

@@ -26,7 +26,7 @@ import { watch } from 'node:fs';
 import { chmod, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createFileCredentialStore, type CredentialStore } from '@maka/storage/credential-store';
-import { withFileUpdateLock } from '@maka/storage/file-update-lock';
+import { withProcessLifetimeFileUpdateLock } from '@maka/storage/process-lifetime-file-update-lock';
 import {
   INTERACTIVE_RUNTIME_HOST_COMPOSITION_ID,
   isCanonicalRuntimeHostWebSocketPath,
@@ -36,7 +36,6 @@ import {
   requireHostRootId,
 } from '../protocol/index.js';
 import {
-  createRuntimeHostLegacyPosixOperatorCommand,
   decodeRuntimeHostOperatorCommand,
   decodeRuntimeHostPosixOperatorCommand,
   type RuntimeHostOperatorCommand,
@@ -345,7 +344,7 @@ export function createRuntimeHostProfileCredentialStore(
         profileCredentialSlot(profile),
         'runtime_host_access',
       );
-      return stored === null ? null : decodeProfileCredential(profile, stored);
+      return stored === null ? null : decodeProfileCredential(stored);
     },
     set: (profile, credential) => {
       try {
@@ -860,49 +859,13 @@ export function decodeRuntimeHostProfileDocument(value: unknown): RuntimeHostPro
     'schemaVersion',
     'profiles',
   ]);
-  if (
-    record.schemaVersion !== 1 &&
-    record.schemaVersion !== 2 &&
-    record.schemaVersion !== 3 &&
-    record.schemaVersion !== 4 &&
-    record.schemaVersion !== PROFILE_SCHEMA_VERSION
-  ) {
+  if (record.schemaVersion !== PROFILE_SCHEMA_VERSION) {
     throw new Error('Runtime Host profile document has an unsupported schema');
   }
   if (!Array.isArray(record.profiles) || record.profiles.length > PROFILE_COUNT_MAX) {
     throw new Error('Runtime Host profile document has an invalid profile list');
   }
-  const profiles = record.profiles.map((profile) =>
-    decodePersistedRuntimeHostProfile(
-      (record.schemaVersion as number) < PROFILE_SCHEMA_VERSION
-        ? migrateRuntimeHostProfileOperatorCommand(profile)
-        : profile,
-    ),
-  );
-  if (
-    record.schemaVersion === 1 &&
-    profiles.some(
-      (profile) =>
-        profile.kind === 'environment' ||
-        (profile.transport.kind === 'ssh' && profile.transport.activation !== undefined),
-    )
-  ) {
-    throw new Error('Runtime Host profile schema 1 cannot contain activation');
-  }
-  if (
-    (record.schemaVersion as number) < 3 &&
-    profiles.some((profile) => profile.kind === 'remote' && profile.access === 'session_guest')
-  ) {
-    throw new Error('Runtime Host profile schema 3 is required for restricted access');
-  }
-  if (
-    (record.schemaVersion as number) < 4 &&
-    profiles.some(
-      (profile) => profile.kind === 'remote' && profile.transport.kind === 'libp2p-direct',
-    )
-  ) {
-    throw new Error('Runtime Host profile schema 4 is required for Direct peer reachability');
-  }
+  const profiles = record.profiles.map(decodePersistedRuntimeHostProfile);
   const ids = new Set<string>();
   for (const profile of profiles) {
     if (ids.has(profile.id)) throw new Error(`Duplicate Runtime Host profile: ${profile.id}`);
@@ -912,52 +875,6 @@ export function decodeRuntimeHostProfileDocument(value: unknown): RuntimeHostPro
     schemaVersion: PROFILE_SCHEMA_VERSION,
     profiles: Object.freeze(profiles),
   });
-}
-
-export function migrateRuntimeHostProfileOperatorCommand(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const profile = value as Record<string, unknown>;
-  if (
-    profile.kind === 'environment' &&
-    typeof profile.operatorPath === 'string' &&
-    !Object.hasOwn(profile, 'operator')
-  ) {
-    const { operatorPath, ...rest } = profile;
-    return {
-      ...rest,
-      operator: createRuntimeHostLegacyPosixOperatorCommand(operatorPath),
-    };
-  }
-  if (profile.kind !== 'remote' || !profile.transport || typeof profile.transport !== 'object') {
-    return value;
-  }
-  const transport = profile.transport as Record<string, unknown>;
-  if (
-    transport.kind !== 'ssh' ||
-    !transport.activation ||
-    typeof transport.activation !== 'object'
-  ) {
-    return value;
-  }
-  const activation = transport.activation as Record<string, unknown>;
-  if (
-    activation.kind !== 'ssh_operator' ||
-    typeof activation.operatorPath !== 'string' ||
-    Object.hasOwn(activation, 'operator')
-  ) {
-    return value;
-  }
-  const { operatorPath, ...activationRest } = activation;
-  return {
-    ...profile,
-    transport: {
-      ...transport,
-      activation: {
-        ...activationRest,
-        operator: createRuntimeHostLegacyPosixOperatorCommand(operatorPath),
-      },
-    },
-  };
 }
 
 class FileRuntimeHostProfileCatalog implements RuntimeHostProfileCatalog {
@@ -1310,7 +1227,7 @@ class FileRuntimeHostProfileCatalog implements RuntimeHostProfileCatalog {
   #exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const pending = this.#operation.then(async () => {
       await prepareProfileDirectory(this.path);
-      return withFileUpdateLock(this.path, operation);
+      return withProcessLifetimeFileUpdateLock(this.path, operation);
     });
     this.#operation = pending.then(
       () => undefined,
@@ -1548,16 +1465,9 @@ function encodeProfileCredential(credential: RuntimeHostProfileCredential): stri
   })}`;
 }
 
-function decodeProfileCredential(
-  profile: RemoteRuntimeHostProfile,
-  value: string,
-): RuntimeHostProfileCredential {
+function decodeProfileCredential(value: string): RuntimeHostProfileCredential {
   if (!value.startsWith(PROFILE_CREDENTIAL_RECORD_PREFIX)) {
-    const credential = requireRuntimeHostAccessCredential(value);
-    return {
-      credential,
-      profileIncarnationId: legacyProfileIncarnationId(profile),
-    };
+    throw new Error('Runtime Host profile credential format is unsupported');
   }
   try {
     const parsed: unknown = JSON.parse(value.slice(PROFILE_CREDENTIAL_RECORD_PREFIX.length));
@@ -1576,16 +1486,6 @@ function decodeProfileCredential(
   } catch (error) {
     throw new Error('Runtime Host profile credential is invalid', { cause: error });
   }
-}
-
-function legacyProfileIncarnationId(profile: RemoteRuntimeHostProfile): string {
-  // Existing plaintext records predate incarnations. Their target-bound value
-  // remains stable until the next catalog write migrates the credential record.
-  return createHash('sha256')
-    .update('legacy-runtime-host-profile-incarnation')
-    .update('\0')
-    .update(profileCredentialSlot(profile))
-    .digest('hex');
 }
 
 function requireProfileIncarnationId(value: unknown): string {
@@ -1650,9 +1550,7 @@ function transportCredentialBinding(transport: RuntimeHostRemoteTransport): stri
 }
 
 function operatorTargetBinding(operator: RuntimeHostOperatorCommand): string {
-  return operator.kind === 'legacy_posix_executable'
-    ? operator.executablePath
-    : JSON.stringify(operator);
+  return JSON.stringify(operator);
 }
 
 function requireBoundedToken(value: unknown, label: string, maxBytes: number): string {
@@ -1784,20 +1682,7 @@ async function writeProfileDocument(
   path: string,
   document: RuntimeHostProfileDocument,
 ): Promise<void> {
-  const schemaVersion = document.profiles.some(
-    (profile) =>
-      profile.kind === 'environment' ||
-      (profile.kind === 'remote' &&
-        (profile.transport.kind === 'libp2p-direct' ||
-          (profile.transport.kind === 'ssh' && profile.transport.activation !== undefined))),
-  )
-    ? PROFILE_SCHEMA_VERSION
-    : document.profiles.some(
-          (profile) => profile.kind === 'remote' && profile.access === 'session_guest',
-        )
-      ? 3
-      : 1;
-  const encoded = `${JSON.stringify({ ...document, schemaVersion }, null, 2)}\n`;
+  const encoded = `${JSON.stringify(document, null, 2)}\n`;
   if (Buffer.byteLength(encoded, 'utf8') > PROFILE_DOCUMENT_MAX_BYTES) {
     throw new Error('Runtime Host profile document exceeds its size limit');
   }

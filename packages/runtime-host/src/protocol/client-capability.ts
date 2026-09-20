@@ -141,6 +141,11 @@ export interface ClientCapabilityUnregisterResult {
   readonly revision: number;
 }
 
+export type ClientCapabilityCallSource =
+  | { readonly kind: 'agent'; readonly sessionId: string; readonly turnId: string }
+  | { readonly kind: 'remote'; readonly sessionId: string | null; readonly requestId: string }
+  | { readonly kind: 'background'; readonly sessionId: string | null; readonly grantId: string };
+
 export interface ClientCapabilityCallFrame {
   readonly kind: 'client.capability.call';
   readonly invocationId: string;
@@ -149,8 +154,7 @@ export interface ClientCapabilityCallFrame {
   readonly serverId: string;
   readonly toolName: string;
   readonly arguments: Record<string, unknown>;
-  readonly sessionId: string;
-  readonly turnId: string;
+  readonly source: ClientCapabilityCallSource;
   readonly toolCallId: string;
   readonly cwd?: string;
 }
@@ -546,6 +550,37 @@ function decodeClientCapabilityAdmissionEvidence(
   }
 }
 
+function decodeCallSource(value: unknown): ClientCapabilityCallSource {
+  const source = requireRecord(value, 'Client Capability source');
+  switch (source.kind) {
+    case 'agent':
+      assertExactKeys(source, 'Agent call source', ['kind', 'sessionId', 'turnId']);
+      return {
+        kind: source.kind,
+        sessionId: requireEntityId(source.sessionId, 'sessionId'),
+        turnId: requireEntityId(source.turnId, 'turnId'),
+      };
+    case 'remote':
+      assertExactKeys(source, 'Remote call source', ['kind', 'sessionId', 'requestId']);
+      return {
+        kind: source.kind,
+        sessionId:
+          source.sessionId === null ? null : requireEntityId(source.sessionId, 'sessionId'),
+        requestId: requireEntityId(source.requestId, 'requestId'),
+      };
+    case 'background':
+      assertExactKeys(source, 'Background call source', ['kind', 'sessionId', 'grantId']);
+      return {
+        kind: source.kind,
+        sessionId:
+          source.sessionId === null ? null : requireEntityId(source.sessionId, 'sessionId'),
+        grantId: requireEntityId(source.grantId, 'grantId'),
+      };
+    default:
+      throw invalidProtocolFrame('Unknown Client Capability call source');
+  }
+}
+
 export function decodeClientCapabilityHostFrame(value: unknown): ClientCapabilityHostFrame {
   const frame = requireRecord(value, 'Client Capability Host frame');
   switch (frame.kind) {
@@ -561,8 +596,7 @@ export function decodeClientCapabilityHostFrame(value: unknown): ClientCapabilit
           'serverId',
           'toolName',
           'arguments',
-          'sessionId',
-          'turnId',
+          'source',
           'toolCallId',
         ],
         ['cwd'],
@@ -579,8 +613,7 @@ export function decodeClientCapabilityHostFrame(value: unknown): ClientCapabilit
         serverId: requireString(frame.serverId, 'serverId', 128),
         toolName: requireString(frame.toolName, 'toolName', 128),
         arguments: argumentsValue,
-        sessionId: requireEntityId(frame.sessionId, 'sessionId'),
-        turnId: requireEntityId(frame.turnId, 'turnId'),
+        source: decodeCallSource(frame.source),
         toolCallId: requireOpaqueIdentity(frame.toolCallId, 'toolCallId'),
         ...(frame.cwd === undefined ? {} : { cwd: requireString(frame.cwd, 'cwd', 4_096) }),
       };

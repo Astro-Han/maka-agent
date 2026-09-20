@@ -40,9 +40,9 @@ async fn settled(log: &EventLog, output: &ToolOutput) {
     for fact in [
         Fact::InvocationOpened {
             configuration: None,
-            input: InvocationInput::Message { skill_invocation: Default::default(), source_messages: Vec::new(), content: "prior".into(), request_fingerprint: None },
+            input: InvocationInput::Message { source_messages: Vec::new(), content: "prior".into(), request_fingerprint: None },
         },
-        Fact::ModelRequested { effective_source_digest: None, purpose: None, context: None, checkpoint_event_id: None, step_id: "step".into(), model_id: "test".into(),
+        Fact::ModelRequested { effective_source_digest: None, purpose: maka_runtime::context::ModelPurpose::Main, context: None, checkpoint_event_id: None, step_id: "step".into(), model_id: "test".into(),
             source_scope: maka_runtime::event::LogScope::Session { id: "session".into() },
             source_high_water: 1, source_digest: "fixture".into(), input_digest: "fixture".into(),
             route_identity: "fixture".into() },

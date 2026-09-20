@@ -93,7 +93,6 @@ pub(crate) async fn apply(
         QueueEdit::Update {
             message_id,
             content,
-            skill_invocation,
             required_tools,
         } => {
             let index = queued(&queue, &message_id)?;
@@ -101,7 +100,6 @@ pub(crate) async fn apply(
             entry.source.message.content = *content;
             // Edits change delivery, not the original submission identity used
             // to prove admission after an Epoch change.
-            entry.source.skill_invocation = skill_invocation;
             entry.required_tools = required_tools;
             entry.source.validate().map_err(invalid)?;
         }

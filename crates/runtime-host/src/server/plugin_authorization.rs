@@ -1,0 +1,441 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::{Host, authority::Authority};
+use crate::session::SessionConfiguration;
+use maka_config::{
+    ConfigurationStore,
+    plugin_authorization::{Approval, Boundary, Principal, Record},
+};
+use maka_event_log::EventLog;
+use maka_plugins::{
+    authorization::{Capability, Id, Request, Target},
+    execution::SessionBoundary,
+    storage::Namespace,
+};
+use maka_protocol::{
+    Operation, OperationError, OperationErrorCode as Code,
+    plugin::{AuthorizationCommand, AuthorizationInput, AuthorizationResult},
+};
+use maka_runtime::execution::{WorkspaceIdentity, WorkspaceTarget};
+use std::sync::Arc;
+
+pub(super) async fn execute(
+    host: &Arc<Host>,
+    authority: &Authority,
+    client: &str,
+    input: AuthorizationInput,
+) -> Result<AuthorizationResult, OperationError> {
+    input.validate().map_err(invalid)?;
+    let published = host.plugins.bind_client(&input.client)?;
+    let _lease = published.admit().map_err(invalid)?;
+    let namespace = Namespace::new(input.client.extension_id, input.scope).map_err(invalid)?;
+    let principal = match authority.credential() {
+        None => Principal::LocalUser {
+            client_instance_id: client.into(),
+        },
+        Some(credential) => Principal::Credential {
+            credential_id: credential.credential_id.clone(),
+            client_instance_id: client.into(),
+        },
+    };
+    let current = principal_authority(&host.configuration, &principal).await?;
+    if !current.has_grant(Operation::PluginAuthorization) {
+        return Err(denied());
+    }
+    match input.command {
+        AuthorizationCommand::Query { id } => {
+            let record = host
+                .configuration
+                .plugin_authorization(namespace, id)
+                .await
+                .map_err(persistence)?;
+            Ok(AuthorizationResult::Grant {
+                grant: record.map(|record| record.grant),
+            })
+        }
+        AuthorizationCommand::Revoke { id } => {
+            let _gate = host.executions.lock_admission().await;
+            host.configuration
+                .revoke_plugin_authorization(namespace, id)
+                .await
+                .map_err(persistence)?;
+            Ok(AuthorizationResult::Revoked)
+        }
+        AuthorizationCommand::Approve { request } => {
+            if let Some(result) =
+                previous(&host.configuration, &namespace, &principal, &request).await?
+            {
+                return Ok(result);
+            }
+            allow(&current, &request)?;
+            if host
+                .configuration
+                .runtime_policy()
+                .await
+                .map_err(persistence)?
+                .policy
+                .privacy
+                .incognito_active
+            {
+                return Err(invalid(
+                    "persistent plugin authorization is unavailable in incognito mode",
+                ));
+            }
+            // A concurrent approval may commit while the target is resolving.
+            // Recover its receipt before interpreting a now-stale capture.
+            let boundary = capture(&host.log, &request).await;
+            let _gate = host.executions.lock_admission().await;
+            let current = principal_authority(&host.configuration, &principal).await?;
+            if !current.has_grant(Operation::PluginAuthorization) {
+                return Err(denied());
+            }
+            let _lease = published.admit().map_err(invalid)?;
+            if let Some(result) =
+                previous(&host.configuration, &namespace, &principal, &request).await?
+            {
+                return Ok(result);
+            }
+            allow(&current, &request)?;
+            let boundary = boundary?;
+            validate_boundary(&host.log, &boundary).await?;
+            match host
+                .configuration
+                .approve_plugin_authorization(namespace, principal, request, boundary)
+                .await
+                .map_err(persistence)?
+            {
+                Approval::Granted(record) => Ok(AuthorizationResult::Grant {
+                    grant: Some(record.grant),
+                }),
+                Approval::Conflict => Err(conflict()),
+            }
+        }
+    }
+}
+
+async fn previous(
+    configuration: &ConfigurationStore,
+    namespace: &Namespace,
+    principal: &Principal,
+    request: &Request,
+) -> Result<Option<AuthorizationResult>, OperationError> {
+    configuration
+        .plugin_authorization_operation(namespace.clone(), request.operation_id)
+        .await
+        .map_err(persistence)?
+        .map(|record| {
+            if record.grant.request == *request && record.principal == *principal {
+                Ok(AuthorizationResult::Grant {
+                    grant: Some(record.grant),
+                })
+            } else {
+                Err(conflict())
+            }
+        })
+        .transpose()
+}
+
+fn conflict() -> OperationError {
+    OperationError {
+        code: Code::OperationConflict,
+        message: "authorization operation belongs to a different proposal or principal".into(),
+    }
+}
+
+/// Shared by live execution/resource handles; possessing an ID is insufficient.
+pub(crate) async fn validate(
+    log: &EventLog,
+    configuration: &ConfigurationStore,
+    namespace: &Namespace,
+    id: Id,
+    capability: Capability,
+) -> Result<Record, OperationError> {
+    let record = restore(log, configuration, namespace, id).await?;
+    if !record.grant.request.capabilities.contains(&capability) {
+        return Err(denied());
+    }
+    Ok(record)
+}
+
+pub(crate) async fn restore(
+    log: &EventLog,
+    configuration: &ConfigurationStore,
+    namespace: &Namespace,
+    id: Id,
+) -> Result<Record, OperationError> {
+    if configuration
+        .runtime_policy()
+        .await
+        .map_err(persistence)?
+        .policy
+        .privacy
+        .incognito_active
+    {
+        return Err(denied());
+    }
+    let record = configuration
+        .plugin_authorization(namespace.clone(), id)
+        .await
+        .map_err(persistence)?
+        .filter(|record| !record.grant.revoked)
+        .ok_or_else(denied)?;
+    let authority = principal_authority(configuration, &record.principal).await?;
+    allow(&authority, &record.grant.request)?;
+    validate_boundary(log, &record.boundary).await?;
+    Ok(record)
+}
+
+async fn principal_authority(
+    configuration: &ConfigurationStore,
+    principal: &Principal,
+) -> Result<Authority, OperationError> {
+    match principal {
+        Principal::LocalUser { .. } => Ok(Authority::LocalOwner),
+        Principal::Credential {
+            credential_id,
+            client_instance_id,
+        } => {
+            let credential = configuration
+                .active_access_credentials()
+                .await
+                .map_err(persistence)?
+                .into_iter()
+                .find(|credential| &credential.credential_id == credential_id)
+                .ok_or_else(denied)?;
+            let authority = Authority::Managed(Box::new(credential));
+            authority
+                .validate_client(configuration, client_instance_id)
+                .await
+                .map_err(|_| denied())?;
+            Ok(authority)
+        }
+    }
+}
+
+pub(crate) async fn client_identity(
+    configuration: &ConfigurationStore,
+    principal: &Principal,
+) -> Result<maka_runtime::capability::Identity, OperationError> {
+    let client = match principal {
+        Principal::LocalUser { client_instance_id }
+        | Principal::Credential {
+            client_instance_id, ..
+        } => client_instance_id,
+    };
+    principal_authority(configuration, principal)
+        .await?
+        .capability_identity(client.clone())
+        .ok_or_else(denied)
+}
+
+pub(crate) async fn validate_principal(
+    configuration: &ConfigurationStore,
+    principal: &Principal,
+    request: &Request,
+) -> Result<(), OperationError> {
+    allow(
+        &principal_authority(configuration, principal).await?,
+        request,
+    )
+}
+
+fn allow(authority: &Authority, request: &Request) -> Result<(), OperationError> {
+    if !authority.has_grant(Operation::PluginAuthorization) {
+        return Err(denied());
+    }
+    if matches!(
+        &request.target,
+        Target::Workspace {
+            workspace: WorkspaceTarget::HostPath { .. },
+            ..
+        }
+    ) && !authority.can_use_host_paths()
+    {
+        return Err(denied());
+    }
+    for capability in &request.capabilities {
+        let required: &[Operation] = match capability {
+            Capability::Executions => &[
+                Operation::SessionCreate,
+                Operation::TurnStart,
+                Operation::TurnStop,
+                Operation::SessionTranscriptPage,
+            ],
+            Capability::Processes => &[
+                Operation::RuntimeResourceStart,
+                Operation::RuntimeResourceControllerControl,
+                Operation::RuntimeResourceStop,
+            ],
+            Capability::ReadFiles
+            | Capability::WriteFiles
+            | Capability::Network
+            | Capability::Models
+            | Capability::ClientCapabilities => &[Operation::TurnStart],
+            Capability::Notifications => &[],
+        };
+        if required
+            .iter()
+            .any(|operation| !authority.has_grant(*operation))
+        {
+            return Err(denied());
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn capture(log: &EventLog, request: &Request) -> Result<Boundary, OperationError> {
+    Ok(match &request.target {
+        Target::Profile => Boundary::Profile,
+        Target::Session { session_id } => {
+            let session = log
+                .get_session::<SessionConfiguration>(session_id)
+                .await
+                .map_err(persistence)?
+                .filter(|record| !record.archived)
+                .ok_or_else(denied)?;
+            let session = session.configuration;
+            request
+                .validate_mode(session.permission_mode)
+                .map_err(invalid)?;
+            let workspace_identity = maka_fs_tools::workspace::ensure_identity(
+                std::path::Path::new(&session.workspace.host_cwd),
+            )
+            .await
+            .map_err(invalid)?;
+            Boundary::Session {
+                boundary: SessionBoundary {
+                    session_id: session_id.clone(),
+                    boundary_revision: session.boundary_revision,
+                    permission_mode: session.permission_mode,
+                    cwd: session.workspace.host_cwd,
+                },
+                workspace_identity,
+            }
+        }
+        Target::Workspace {
+            workspace,
+            permission_mode,
+        } => {
+            let workspace = match workspace {
+                WorkspaceTarget::Project { project_id } => {
+                    let project = log
+                        .get_project(project_id)
+                        .await
+                        .map_err(persistence)?
+                        .ok_or_else(denied)?;
+                    super::resolve_project_workspace(project).await?
+                }
+                WorkspaceTarget::HostPath { path } => {
+                    super::resolve_workspace_path(path.clone()).await?
+                }
+            };
+            let workspace_identity = maka_fs_tools::workspace::ensure_identity(
+                std::path::Path::new(&workspace.host_cwd),
+            )
+            .await
+            .map_err(invalid)?;
+            Boundary::Workspace {
+                workspace,
+                workspace_identity,
+                permission_mode: *permission_mode,
+            }
+        }
+    })
+}
+
+pub(crate) async fn validate_boundary(
+    log: &EventLog,
+    boundary: &Boundary,
+) -> Result<(), OperationError> {
+    let (cwd, expected) = match boundary {
+        Boundary::Profile => return Ok(()),
+        Boundary::Session {
+            boundary,
+            workspace_identity,
+        } => {
+            let current = log
+                .get_session::<SessionConfiguration>(&boundary.session_id)
+                .await
+                .map_err(persistence)?
+                .filter(|record| !record.archived)
+                .ok_or_else(denied)?;
+            let current = current.configuration;
+            if current.boundary_revision != boundary.boundary_revision
+                || current.permission_mode != boundary.permission_mode
+                || current.workspace.host_cwd != boundary.cwd
+            {
+                return Err(denied());
+            }
+            (boundary.cwd.clone(), workspace_identity)
+        }
+        Boundary::Workspace {
+            workspace,
+            workspace_identity,
+            ..
+        } => {
+            if let WorkspaceTarget::Project { project_id } = &workspace.target {
+                let project = log
+                    .get_project(project_id)
+                    .await
+                    .map_err(persistence)?
+                    .ok_or_else(denied)?;
+                if super::resolve_project_workspace(project).await?.host_cwd != workspace.host_cwd {
+                    return Err(denied());
+                }
+            }
+            (workspace.host_cwd.clone(), workspace_identity)
+        }
+    };
+    if &identity(cwd).await? != expected {
+        return Err(denied());
+    }
+    Ok(())
+}
+async fn identity(cwd: String) -> Result<WorkspaceIdentity, OperationError> {
+    tokio::task::spawn_blocking(move || {
+        maka_fs_tools::workspace::read_identity(std::path::Path::new(&cwd))
+    })
+    .await
+    .map_err(invalid)?
+    .map_err(|_| denied())
+}
+fn denied() -> OperationError {
+    OperationError {
+        code: Code::Unauthorized,
+        message: "plugin authorization is absent, revoked or outside the current boundary".into(),
+    }
+}
+fn invalid(error: impl std::fmt::Display) -> OperationError {
+    OperationError {
+        code: Code::InvalidRequest,
+        message: error.to_string(),
+    }
+}
+fn persistence(error: impl Into<maka_config::ConfigError>) -> OperationError {
+    let error = error.into();
+    OperationError {
+        code: if matches!(error, maka_config::ConfigError::CommitUnknown) {
+            Code::CommitOutcomeUnknown
+        } else {
+            Code::PersistenceFailed
+        },
+        message: error.to_string(),
+    }
+}

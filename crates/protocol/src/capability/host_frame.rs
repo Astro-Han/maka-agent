@@ -22,8 +22,30 @@ use crate::{
     ProtocolError, Result,
     codec::{exact, record, shaped, string},
 };
-use maka_runtime::capability::HostFrame;
+use maka_runtime::capability::{CallSource, HostFrame};
 use serde_json::{Map, Value};
+
+fn decode_source(value: &Value) -> Result<CallSource> {
+    let fields = record(value, "Client Capability source")?;
+    let source: CallSource = serde_json::from_value(value.clone())
+        .map_err(|error| ProtocolError::invalid(error.to_string()))?;
+    let required: &[&str] = match &source {
+        CallSource::Agent { .. } => &["kind", "sessionId", "turnId"],
+        CallSource::Remote { .. } => &["kind", "sessionId", "requestId"],
+        CallSource::Background { .. } => &["kind", "sessionId", "grantId"],
+    };
+    exact(fields, required)?;
+    for name in &required[1..] {
+        if *name == "sessionId"
+            && fields[*name].is_null()
+            && !matches!(source, CallSource::Agent { .. })
+        {
+            continue;
+        }
+        entity(&fields[*name], name)?;
+    }
+    Ok(source)
+}
 
 pub fn decode_host_frame(value: &Value) -> Result<HostFrame> {
     let fields = record(value, "Client Capability Host frame")?;
@@ -39,8 +61,7 @@ pub fn decode_host_frame(value: &Value) -> Result<HostFrame> {
                     "serverId",
                     "toolName",
                     "arguments",
-                    "sessionId",
-                    "turnId",
+                    "source",
                     "toolCallId",
                 ],
                 &["cwd"],
@@ -55,8 +76,7 @@ pub fn decode_host_frame(value: &Value) -> Result<HostFrame> {
                 server_id: string(&fields["serverId"], "serverId", 128)?,
                 tool_name: string(&fields["toolName"], "toolName", 128)?,
                 arguments,
-                session_id: entity(&fields["sessionId"], "sessionId")?,
-                turn_id: entity(&fields["turnId"], "turnId")?,
+                source: decode_source(&fields["source"])?,
                 tool_call_id,
                 cwd: fields
                     .get("cwd")

@@ -102,8 +102,24 @@ impl ToolJournal {
         name: String,
         input: Value,
         cancellation: CancellationToken,
-        mut effect: PreparedEffect,
+        effect: PreparedEffect,
     ) -> ToolFuture {
+        let output =
+            self.invoke_prepared_output(operation_id, call, name, input, cancellation, effect);
+        Box::pin(async move { output.await.map(ToolOutput::into_json) })
+    }
+
+    /// Native consumers keep the typed result; encoding is only for persistence
+    /// and wire adapters, not an unnecessary serialize/deserialize round trip.
+    pub fn invoke_prepared_output(
+        &self,
+        operation_id: String,
+        call: ToolCallIdentity,
+        name: String,
+        input: Value,
+        cancellation: CancellationToken,
+        mut effect: PreparedEffect,
+    ) -> ToolFuture<ToolOutput> {
         let sink = self.sink.clone();
         let invocation = self.invocation.clone();
         Box::pin(async move {
@@ -156,7 +172,7 @@ impl ToolJournal {
                 .await
                 .map_err(|error| ToolError::OutcomeUnknown(error.to_string()))?;
             drop(effect);
-            result.map(ToolOutput::into_json)
+            result
         })
     }
 }

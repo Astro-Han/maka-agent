@@ -78,12 +78,10 @@ impl Provider for Executor {
             let handle = outputs.register(context.output)?;
             let authority = callback
                 .calls
-                .enter(
-                    super::invocation::Identity {
-                        invocation: request.invocation.clone(),
-                        operation_id: None,
-                    },
-                    context.cancellation.clone(),
+                .forward(
+                    context
+                        .call
+                        .ok_or_else(|| Error::Provider("Host call scope is unavailable".into()))?,
                 )
                 .map_err(|error| Error::Provider(error.to_string()))?;
             let input = json!({
@@ -98,10 +96,6 @@ impl Provider for Executor {
                 context.cancellation,
             )
             .await;
-            authority
-                .finish()
-                .await
-                .map_err(|_| Error::CleanupUnconfirmed)?;
             let result = result.map_err(|error| match error {
                 maka_runtime::tools::ToolError::OutcomeUnknown(_) => Error::CleanupUnconfirmed,
                 other => Error::Provider(other.to_string()),

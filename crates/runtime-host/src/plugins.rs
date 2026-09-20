@@ -20,14 +20,19 @@
 pub(crate) mod assistant;
 mod authority;
 mod client;
+mod effects;
 mod entrypoint;
 pub(crate) mod graph;
+pub(crate) mod host;
+mod http;
 pub(crate) mod javascript;
 mod owner;
+mod process;
 pub(crate) mod remote;
 pub(crate) mod scheduler;
 pub(crate) mod skills;
 pub(crate) mod storage;
+mod terminal;
 pub mod wire;
 pub(crate) mod workhub;
 

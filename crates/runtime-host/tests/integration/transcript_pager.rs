@@ -47,7 +47,6 @@ async fn fixture() -> (tempfile::TempDir, EventLog, u64) {
                 Fact::InvocationOpened {
                     configuration: None,
                     input: InvocationInput::Message {
-                        skill_invocation: Default::default(),
                         source_messages: Vec::new(),
                         content: "你好😀".into(),
                         request_fingerprint: None,

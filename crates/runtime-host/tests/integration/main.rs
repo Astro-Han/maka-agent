@@ -62,6 +62,7 @@ mod model_overrides;
 mod oauth;
 mod oauth_execution;
 mod oauth_refresh;
+mod plugin_authorization;
 mod plugin_clients;
 mod plugin_commands;
 mod plugin_files;

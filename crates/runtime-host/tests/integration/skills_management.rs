@@ -28,27 +28,21 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 async fn catalog(peer: &mut Peer, context: &Value, view: &str) -> Value {
-    let value = peer
-        .rpc(
-            "skill.catalog.query",
-            json!({"kind":"start","context":context,"view":view}),
-        )
-        .await;
-    assert_eq!(value["ok"], true, "{value}");
-    value["result"].clone()
+    super::skills_plugin::client::workspace(
+        peer,
+        &context["workspace"]["path"],
+        json!({"kind":"catalog","view":view}),
+    )
+    .await
 }
 async fn mutate(peer: &mut Peer, context: &Value, mutation: Value) -> Value {
     let basis = catalog(peer, context, "governance").await;
-    let value = peer
-        .rpc(
-            "skill.catalog.mutate",
-            json!({
-                "context":context,"expectedRevision":basis["revision"],"mutation":mutation
-            }),
-        )
-        .await;
-    assert_eq!(value["ok"], true, "{value}");
-    value["result"].clone()
+    super::skills_plugin::client::workspace(
+        peer,
+        &context["workspace"]["path"],
+        json!({"kind":"mutate","expectedRevision":basis["revision"],"mutation":mutation}),
+    )
+    .await
 }
 fn document(body: &str) -> String {
     format!("---\nname: Review\ndescription: Review code\n---\n{body}\n")
@@ -102,44 +96,50 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
         let mut peer = Peer::new(host, "management").await;
         converged(&mut peer).await;
         if !reopened {
-            let imported = peer
-                .rpc("skill.source.import", json!({"sourcePath":import_file}))
-                .await;
-            assert_eq!(imported["result"]["kind"], "imported", "{imported}");
-            assert_eq!(imported["result"]["source"]["id"], "review");
+            let imported = super::skills_plugin::client::request(
+                &mut peer,
+                "import-source",
+                json!({"sourcePath":import_file}),
+            )
+            .await;
+            assert_eq!(imported["kind"], "imported", "{imported}");
+            assert_eq!(imported["source"]["id"], "review");
             assert_eq!(
                 std::fs::read(source.join("SKILL.md")).unwrap(),
                 original.as_bytes()
             );
-            let duplicate = peer
-                .rpc("skill.source.import", json!({"sourcePath":import_file}))
-                .await;
-            assert_eq!(
-                duplicate["result"]["reason"], "already_exists",
-                "{duplicate}"
-            );
+            let duplicate = super::skills_plugin::client::request(
+                &mut peer,
+                "import-source",
+                json!({"sourcePath":import_file}),
+            )
+            .await;
+            assert_eq!(duplicate["reason"], "already_exists", "{duplicate}");
             let invalid = fixture.workspace.join("invalid.md");
             std::fs::write(&invalid, "not a Skill").unwrap();
-            let rejected = peer
-                .rpc("skill.source.import", json!({"sourcePath":invalid}))
-                .await;
-            assert_eq!(rejected["result"]["reason"], "invalid_skill", "{rejected}");
+            let rejected = super::skills_plugin::client::request(
+                &mut peer,
+                "import-source",
+                json!({"sourcePath":invalid}),
+            )
+            .await;
+            assert_eq!(rejected["reason"], "invalid_skill", "{rejected}");
             assert!(!home.join(".maka/skill-sources/invalid").exists());
             for (base, id, reference) in [
                 (".maka", "user-review", "user:maka:user-review"),
                 (".agents", "agent-review", "user:agents:agent-review"),
             ] {
                 let directory = home.join(base).join("skills").join(id);
-                let resolved = peer
-                    .rpc(
-                        "skill.catalog.resolve-path",
-                        json!({
-                            "context":context, "ref":reference, "target":"file"
-                        }),
-                    )
-                    .await;
-                assert_eq!(resolved["result"]["kind"], "resolved", "{resolved}");
-                let path = std::path::Path::new(resolved["result"]["path"].as_str().unwrap());
+                let resolved = super::skills_plugin::client::workspace(
+                    &mut peer,
+                    &context["workspace"]["path"],
+                    json!({
+                        "kind":"resolve_path","ref":reference, "target":"file"
+                    }),
+                )
+                .await;
+                assert_eq!(resolved["kind"], "resolved", "{resolved}");
+                let path = std::path::Path::new(resolved["path"].as_str().unwrap());
                 assert_eq!(path, directory.join("SKILL.md").canonicalize().unwrap());
                 let removed = mutate(
                     &mut peer,
@@ -149,26 +149,28 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
                 .await;
                 assert_eq!(removed["kind"], "committed", "{removed}");
                 assert!(!directory.exists());
-                let missing = peer
-                    .rpc(
-                        "skill.catalog.resolve-path",
-                        json!({
-                            "context":context, "ref":reference, "target":"directory"
-                        }),
-                    )
-                    .await;
-                assert_eq!(missing["result"]["reason"], "missing", "{missing}");
+                let missing = super::skills_plugin::client::workspace(
+                    &mut peer,
+                    &context["workspace"]["path"],
+                    json!({
+                        "kind":"resolve_path","ref":reference, "target":"directory"
+                    }),
+                )
+                .await;
+                assert_eq!(missing["reason"], "missing", "{missing}");
             }
             let bundled = catalog(&mut peer, &context, "bundled").await;
-            let result = peer.rpc("skill.catalog.mutate", json!({
-                "context":context, "expectedRevision":bundled["revision"],
-                "mutation":{"kind":"install","sourceType":"bundled","sourceId":"computer-use"}
-            })).await;
-            assert_eq!(
-                result["result"]["entry"]["sourceType"], "bundled",
-                "{result}"
-            );
-            assert_eq!(result["result"]["entry"]["manageable"], true);
+            let result = super::skills_plugin::client::workspace(
+                &mut peer,
+                &context["workspace"]["path"],
+                json!({
+                    "kind":"mutate","expectedRevision":bundled["revision"],
+                    "mutation":{"kind":"install","sourceType":"bundled","sourceId":"computer-use"}
+                }),
+            )
+            .await;
+            assert_eq!(result["entry"]["sourceType"], "bundled", "{result}");
+            assert_eq!(result["entry"]["manageable"], true);
             let starter = mutate(&mut peer, &context, json!({"kind":"create_starter"})).await;
             assert_eq!(starter["kind"], "committed", "{starter}");
             let again = mutate(&mut peer, &context, json!({"kind":"create_starter"})).await;
@@ -202,16 +204,16 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
             .await;
             assert_eq!(auto["reason"], "local_modified", "{auto}");
             let basis = catalog(&mut peer, &context, "governance").await;
-            let preview = peer.rpc("skill.catalog.preview-update", json!({
-                "context":context,"expectedRevision":basis["revision"],"ref":"workspace:legacy:review"
+            let preview = super::skills_plugin::client::workspace(&mut peer, &context["workspace"]["path"], json!({
+                "kind":"preview","expectedRevision":basis["revision"],"ref":"workspace:legacy:review"
             })).await;
             assert_eq!(
-                preview["result"]["expectedCurrentSha256"],
+                preview["expectedCurrentSha256"],
                 content_digest(local.as_bytes()),
                 "{preview}"
             );
             assert_eq!(
-                preview["result"]["expectedSourceSha256"],
+                preview["expectedSourceSha256"],
                 content_digest(updated.as_bytes()),
                 "{preview}"
             );
@@ -221,7 +223,7 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
                 json!({
                     "kind":"update_managed","ref":"workspace:legacy:review","force":true,
                     "expectedCurrentSha256":content_digest(original.as_bytes()),
-                    "expectedSourceSha256":preview["result"]["expectedSourceSha256"]
+                    "expectedSourceSha256":preview["expectedSourceSha256"]
                 }),
             )
             .await;
@@ -231,8 +233,8 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
                 &context,
                 json!({
                     "kind":"update_managed","ref":"workspace:legacy:review","force":true,
-                    "expectedCurrentSha256":preview["result"]["expectedCurrentSha256"],
-                    "expectedSourceSha256":preview["result"]["expectedSourceSha256"]
+                    "expectedCurrentSha256":preview["expectedCurrentSha256"],
+                    "expectedSourceSha256":preview["expectedSourceSha256"]
                 }),
             )
             .await;

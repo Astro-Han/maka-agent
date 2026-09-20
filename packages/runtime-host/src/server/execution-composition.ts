@@ -40,10 +40,7 @@ import {
   WORKHUB_COORDINATION_SESSION_ID,
   WORKHUB_COORDINATION_REPLACEMENT_SCHEMA_VERSION,
 } from '@maka/core/session';
-import {
-  AgentGraphClientOperationError,
-  AgentGraphCoordinator,
-} from '@maka/runtime/stream-graph-coordinator';
+import { AgentGraphCoordinator } from '@maka/runtime/stream-graph-coordinator';
 import { AgentGraphSupervisorWakeCoordinator } from '@maka/runtime/agent-graph-supervisor-wake';
 import {
   BackendRegistry,
@@ -232,10 +229,7 @@ import {
   createSessionTranscriptReader,
   type SessionTranscriptReader,
 } from './session-transcript-reader.js';
-import {
-  HostSkillCatalogCoordinator,
-  SkillCatalogInvocableContextError,
-} from './skill-catalog-coordinator.js';
+import { HostSkillCatalogCoordinator } from './skill-catalog-coordinator.js';
 import { SkillCatalogRepository } from './skill-catalog-repository.js';
 import { HostSessionTodoCoordinator } from './session-todo-coordinator.js';
 import { HostTurnControlCoordinator } from './turn-control-coordinator.js';
@@ -775,63 +769,6 @@ export async function createExecutionRuntimeHostComposition(
           runWithStorageRootLease(context.owner.lease, 'interactive', 'write', operation),
         ...(options.skillHomeDirectory ? { homeDirectory: options.skillHomeDirectory } : {}),
       }),
-      workspaceResolver,
-      async (input, connection) => {
-        if (input.target.kind === 'session') {
-          const sessionId = input.target.sessionId;
-          let header;
-          try {
-            header = await stores.sessionStore.readHeaderSnapshot(sessionId);
-          } catch (error) {
-            if (isSessionNotFoundError(error)) {
-              throw new SkillCatalogInvocableContextError('not_found', 'Session does not exist');
-            }
-            throw error;
-          }
-          if (header.isArchived) {
-            throw new SkillCatalogInvocableContextError('session_archived', 'Session is archived');
-          }
-          let preview;
-          try {
-            preview = await requireClientCapabilities(
-              clientCapabilities,
-            ).runWithSessionBindingPreview(sessionId, connection.connectionId, () =>
-              requireToolNameResolver(resolveAvailableToolNames)(sessionId),
-            );
-          } catch (error) {
-            if (isSessionNotFoundError(error)) {
-              throw new SkillCatalogInvocableContextError('not_found', 'Session does not exist');
-            }
-            if (
-              error instanceof AgentGraphClientOperationError &&
-              error.code === 'session_archived'
-            ) {
-              throw new SkillCatalogInvocableContextError(
-                'session_archived',
-                'Session is archived',
-              );
-            }
-            throw error;
-          }
-          if (!preview.ok) throw new Error(preview.message);
-          return {
-            projectRoot: header.cwd,
-            host: buildHostCapabilitiesFromBinding(preview.value),
-          };
-        }
-        const previewSessionId = `skill-catalog-preview:${connection.connectionId}`;
-        return {
-          projectRoot: (await workspaceResolver.resolve(input.target.context.workspace)).cwd,
-          host: buildHostCapabilitiesFromBinding(
-            await requireNewSessionToolNameResolver(resolveNewSessionToolNames)(
-              previewSessionId,
-              input.target.collaborationMode,
-              input.target.permissionMode,
-              connection.connectionId,
-            ),
-          ),
-        };
-      },
     );
     const projects = new HostProjectCatalogCoordinator(
       openedProjectCatalog,
@@ -2615,7 +2552,6 @@ export async function createExecutionRuntimeHostComposition(
           connectionEffects.handlers,
           sessionTodo.handlers,
           artifacts.handlers,
-          skills.handlers,
           usagePricing.handlers,
           oauth.handlers,
           externalAgentSetup.handlers,

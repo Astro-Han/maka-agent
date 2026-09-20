@@ -75,6 +75,7 @@ export const PLUGIN_REMOTE_OPERATION_SPECS = {
     | 'invalid_request'
     | 'operation_unavailable'
     | 'operation_conflict'
+    | 'outcome_unknown'
     | 'internal_failure'
   >({
     mode: 'command',
@@ -85,6 +86,7 @@ export const PLUGIN_REMOTE_OPERATION_SPECS = {
       'invalid_request',
       'operation_unavailable',
       'operation_conflict',
+      'outcome_unknown',
       'internal_failure',
     ],
     decodeInput(value) {
@@ -161,7 +163,14 @@ export const PLUGIN_REMOTE_OPERATION_SPECS = {
 } as const;
 function binding(value: unknown): PluginRemoteBinding {
   const row = requireExactRecord(value, 'Remote binding', ['client', 'method', 'sessionId']);
-  const client = requireExactRecord(row.client, 'Remote Client', [
+  return {
+    client: decodePluginClientIdentity(row.client),
+    method: identity(row.method),
+    sessionId: row.sessionId === null ? null : requireId(row.sessionId, 'Remote Session'),
+  };
+}
+export function decodePluginClientIdentity(value: unknown): PluginRemoteClient {
+  const client = requireExactRecord(value, 'Remote Client', [
     'entryId',
     'extensionId',
     'activation',
@@ -169,15 +178,11 @@ function binding(value: unknown): PluginRemoteBinding {
     'clientDigest',
   ]);
   return {
-    client: {
-      entryId: identity(client.entryId),
-      extensionId: identity(client.extensionId),
-      activation: uuid(client.activation),
-      contentDigest: digest(client.contentDigest),
-      clientDigest: digest(client.clientDigest),
-    },
-    method: identity(row.method),
-    sessionId: row.sessionId === null ? null : requireId(row.sessionId, 'Remote Session'),
+    entryId: identity(client.entryId),
+    extensionId: identity(client.extensionId),
+    activation: uuid(client.activation),
+    contentDigest: digest(client.contentDigest),
+    clientDigest: digest(client.clientDigest),
   };
 }
 function target(value: unknown): PluginRemoteTarget {

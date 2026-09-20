@@ -537,13 +537,9 @@ export class RuntimeHostKernel {
       hello.generation !== undefined &&
       hello.generation !== this.#options.generation;
     if (generationMismatch && hello.takeover?.expectedHostEpoch === this.hostEpoch) {
-      const residencyCount =
-        hello.activitySnapshotVersion === 2
-          ? this.#residencies.drainCount
-          : this.#residencies.activeCount;
       if (
         authority.principalKind === 'local_owner' &&
-        residencyCount === 0 &&
+        this.#residencies.drainCount === 0 &&
         this.#hasNoObservedWork(transport)
       ) {
         this.#shutdownReason = 'retirement';
@@ -576,9 +572,8 @@ export class RuntimeHostKernel {
           this.#lifecycle.kind === 'ephemeral' && this.#isSettledForReplacementAdvice()
             ? 'wait_for_idle_exit'
             : 'blocked_by_residency',
-        ...(authority.principalKind === 'local_owner' &&
-        (generationMismatch || hello.activitySnapshotVersion === 2)
-          ? { activity: this.#activitySnapshot(hello.activitySnapshotVersion) }
+        ...(authority.principalKind === 'local_owner'
+          ? { activity: this.#activitySnapshot() }
           : {}),
       };
     }
@@ -589,9 +584,7 @@ export class RuntimeHostKernel {
     this.#cancelIdle();
     return {
       kind: 'accepted',
-      ...(hello.activitySnapshotVersion === 2 && this.#composition?.prepareHandoff
-        ? { cooperativeHandoff: true as const }
-        : {}),
+      ...(this.#composition?.prepareHandoff ? { cooperativeHandoff: true as const } : {}),
       rootId: this.#options.owner.capability.rootId,
       hostEpoch: this.hostEpoch,
       connectionId: randomUUID(),
@@ -732,13 +725,13 @@ export class RuntimeHostKernel {
           result: {
             ...this.#statusSnapshot(),
             upgradeBlockingActivity: this.#hasUpgradeBlockingActivity(0),
+            drainResidencies: this.#residencies.drainCount,
             compositionModules: this.#composition?.moduleIds ?? [],
             residencies: this.#residencies.snapshot(),
             protocolVersion: RUNTIME_HOST_PROTOCOL_VERSION,
             compatibilityEpoch: RUNTIME_HOST_COMPATIBILITY_EPOCH,
             pid: process.pid,
             processUptimeSeconds: Math.max(0, Math.floor(process.uptime())),
-            nodeVersion: process.versions.node,
             platform: process.platform,
             arch: osArch(),
             osRelease: osRelease(),
@@ -909,18 +902,14 @@ export class RuntimeHostKernel {
     };
   }
 
-  #activitySnapshot(version?: 2): HostActivitySnapshot {
+  #activitySnapshot(): HostActivitySnapshot {
     return {
       connections: this.#acceptedTransports.size,
       activeOperations: this.#activeOperations,
       processUptimeSeconds: Math.max(0, Math.floor(process.uptime())),
       residencies: this.#residencies.snapshot(),
-      ...(version === 2
-        ? {
-            drainResidencies: this.#residencies.drainCount,
-            ...(this.#composition?.prepareHandoff ? { cooperativeHandoff: true } : {}),
-          }
-        : {}),
+      drainResidencies: this.#residencies.drainCount,
+      ...(this.#composition?.prepareHandoff ? { cooperativeHandoff: true } : {}),
     };
   }
 

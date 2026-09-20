@@ -212,7 +212,7 @@ pub async fn unknown_dispatch(
     let facts = [
         Fact::ModelRequested {
             effective_source_digest: None,
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
             checkpoint_event_id: None,
             step_id: "step".into(),

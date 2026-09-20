@@ -18,10 +18,6 @@
  */
 
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import type { IPty } from 'node-pty';
 import { type RuntimeHostSshProcessFactory } from '@maka/runtime-host/client';
@@ -30,16 +26,15 @@ import {
   encodeRuntimeHostAccessManagementFrame,
   encodeRuntimeHostPeerManagementFrame,
   encodeRuntimeHostServiceManagementFrame,
-  encodeRuntimeHostSetupFrame,
   encodeRuntimeHostPeerMeshManagementFrame,
   runtimeHostAccessCredentialFingerprint,
   RUNTIME_HOST_OPERATOR_PEER_MANAGEMENT_CAPABILITY,
-  RUNTIME_HOST_SETUP_FRAME_PREFIX,
 } from '@maka/runtime-host/operator';
 import {
   createDesktopRuntimeHostSshTerminal,
   runtimeHostPeerTargetFromPlatform,
 } from '../runtime-host-ssh-terminal.js';
+import { NATIVE_ARTIFACT_PREFIX, NATIVE_SETUP_PREFIX } from '../native-runtime-host-setup.js';
 import { waitFor as pollFor } from '@maka/core/test-only/async-primitives';
 
 const OPERATOR = {
@@ -196,215 +191,87 @@ test('does not reopen a cancelled SSH prompt for late process output', async () 
   await harness.terminal.close();
 });
 
-test('keeps setup credentials out of the interactive terminal projection', async () => {
-  const harness = createHarness('pending');
-  const controller = new AbortController();
-  const progress: string[] = [];
-  const setup = harness.terminal.runSetup(
-    {
-      destination: 'operator@example.com',
-      setupPackage: { kind: 'npm', specifier: 'maka-agent@1.2.3+desktop.1' },
-      remotePlatform: 'posix',
-      principalId: 'desktop:stable-client',
-      signal: controller.signal,
-    },
-    (frame) => progress.push(frame.phase),
-  );
-  await waitFor(() => harness.pty.hasDataListener());
-  harness.pty.emitData('Password: ');
-  const progressFrame = encodeRuntimeHostSetupFrame({
-    schemaVersion: 1,
-    sequence: 0,
-    kind: 'progress',
-    phase: 'installing_service',
-  });
-  harness.pty.emitData(progressFrame.slice(0, 12));
-  harness.pty.emitData(progressFrame.slice(12));
-  const completeFrame = encodeRuntimeHostSetupFrame({
-    schemaVersion: 1,
-    sequence: 1,
-    kind: 'complete',
-    version: '0.1.0-beta.1',
-    serviceId: 'b'.repeat(64),
-    deploymentId: '00000000-0000-4000-8000-000000000001',
-    operator: OPERATOR,
-    rootPath: '/home/operator/.config/Maka/workspaces/default',
-    rootId: 'a'.repeat(64),
-    endpoint: 'ws://127.0.0.1:7443/runtime-host',
-    credentialId: 'credential-1',
-    credential: 'secret-access-token',
-  });
-  harness.pty.emitData(completeFrame);
-  controller.abort();
-  await Promise.resolve();
-  assert.deepEqual(harness.pty.killSignals, []);
-  harness.pty.exit(0);
-
-  const result = await setup;
-  assert.equal(result.credential, 'secret-access-token');
-  assert.deepEqual(progress, ['installing_service']);
-  assert.doesNotMatch(JSON.stringify(harness.events), /secret-access-token|MAKA_RUNTIME/u);
-  assert.match(JSON.stringify(harness.events), /Password/u);
-  const remoteCommand = harness.launchArgs.at(-1)?.at(-1) ?? '';
-  assert.match(remoteCommand, /mktemp -d/u);
-  assert.match(remoteCommand, /--prefix/u);
-  assert.match(remoteCommand, /trap.*HUP.*trap.*INT.*trap.*TERM/u);
-  assert.doesNotMatch(remoteCommand, /--update-existing/u);
-  await harness.terminal.close();
-});
-
-test('runs Windows setup through one encoded PowerShell command', async () => {
-  const harness = createHarness('pending');
-  const setup = harness.terminal.runSetup(
-    {
-      destination: 'operator@example.com',
-      setupPackage: { kind: 'npm', specifier: 'maka-agent@1.2.3' },
-      remotePlatform: 'win32',
-      principalId: 'desktop:stable-client',
-      lifecycle: 'on_demand',
-    },
-    () => undefined,
-  );
-  await waitFor(() => harness.pty.hasDataListener());
-  const remoteCommand = harness.launchArgs.at(-1)?.at(-1) ?? '';
-  assert.match(remoteCommand, /^powershell\.exe .* -EncodedCommand [A-Za-z0-9+/=]+$/u);
-  assert.doesNotMatch(remoteCommand, /\/bin\/sh|maka-agent/u);
-  const encoded = remoteCommand.split(' ').at(-1);
-  assert.ok(encoded);
-  const script = Buffer.from(encoded, 'base64').toString('utf16le');
-  assert.match(script, /npx\.cmd/u);
-  assert.match(script, /Remove-Item/u);
-
-  harness.pty.emitData(encodeRuntimeHostSetupFrame({
-    schemaVersion: 1,
-    sequence: 0,
-    kind: 'complete',
-    version: '1.2.3',
-    serviceId: 'b'.repeat(64),
-    deploymentId: '00000000-0000-4000-8000-000000000001',
-    operator: WINDOWS_OPERATOR,
-    rootPath: 'C:\\Users\\operator\\AppData\\Local\\Maka\\workspaces\\default',
-    rootId: 'a'.repeat(64),
-    endpoint: 'ws://127.0.0.1:7443/runtime-host',
-    credentialId: 'credential-1',
-    credential: 'secret-access-token',
-  }));
-  harness.pty.exit(0);
-  assert.deepEqual((await setup).operator, WINDOWS_OPERATOR);
-  await harness.terminal.close();
-});
-
-test('discards an oversized reserved setup line instead of projecting its tail', async () => {
-  const harness = createHarness('pending');
-  const setup = harness.terminal.runSetup(
-    {
-      destination: 'operator@example.com',
-      setupPackage: { kind: 'npm', specifier: 'maka-agent@1.2.3' },
-      remotePlatform: 'posix',
-      principalId: 'desktop:stable-client',
-    },
-    () => undefined,
-  );
-  await waitFor(() => harness.pty.hasDataListener());
-  harness.pty.emitData(`${RUNTIME_HOST_SETUP_FRAME_PREFIX}${'x'.repeat(21 * 1024)}`);
-  harness.pty.emitData('"credential":"must-not-reach-renderer"}\nvisible output\n');
-  harness.pty.exit(1);
-
-  await assert.rejects(setup, /oversized result/u);
-  assert.doesNotMatch(
-    JSON.stringify([harness.events, await harness.getSnapshot()]),
-    /must-not-reach-renderer/u,
-  );
-  assert.match(JSON.stringify(harness.events), /visible output/u);
-  await harness.terminal.close();
-});
-
-test('keeps a completed setup process owned until it exits', async () => {
-  const harness = createHarness('pending');
-  const setup = harness.terminal.runSetup(
-    {
-      destination: 'operator@example.com',
-      setupPackage: { kind: 'npm', specifier: 'maka-agent@1.2.3' },
-      remotePlatform: 'posix',
-      principalId: 'desktop:stable-client',
-    },
-    () => undefined,
-  );
-  await waitFor(() => harness.pty.hasDataListener());
-  harness.pty.emitData(encodeRuntimeHostSetupFrame({
-    schemaVersion: 1,
-    sequence: 0,
-    kind: 'complete',
-    version: '1.2.3',
-    serviceId: 'b'.repeat(64),
-    deploymentId: '00000000-0000-4000-8000-000000000001',
-    operator: OPERATOR,
-    rootPath: '/home/operator/.config/Maka/workspaces/default',
-    rootId: 'a'.repeat(64),
-    endpoint: 'ws://127.0.0.1:7443/runtime-host',
-    credentialId: 'credential-1',
-    credential: 'secret-access-token',
-  }));
-
-  await harness.terminal.close();
-
-  assert.deepEqual(harness.pty.killSignals, ['SIGTERM']);
-  assert.equal((await setup).credentialId, 'credential-1');
-});
-
-test('force-stops a cancelled setup when SSH ignores graceful termination', async () => {
-  const harness = createHarness('pending');
-  harness.pty.deferKill = true;
-  harness.pty.exitOnForceKill = true;
-  const controller = new AbortController();
-  const setup = harness.terminal.runSetup(
-    {
-      destination: 'operator@example.com',
-      setupPackage: { kind: 'npm', specifier: 'maka-agent@1.2.3' },
-      remotePlatform: 'posix',
-      principalId: 'desktop:stable-client',
-      signal: controller.signal,
-    },
-    () => undefined,
-  );
-  await waitFor(() => harness.pty.hasDataListener());
-  harness.pty.emitData('Password: ');
-
-  controller.abort();
-
-  await assert.rejects(setup, /aborted/u);
-  assert.deepEqual(harness.pty.killSignals, ['SIGTERM', 'SIGKILL']);
-  assert.deepEqual(harness.terminatedProcesses, [
-    { pid: 42, signal: 'SIGTERM' },
-    { pid: 42, signal: 'SIGKILL' },
-  ]);
-  assert.deepEqual(harness.eventKinds(), ['opened', 'data', 'dismissed']);
-  assert.deepEqual(await harness.getSnapshot(), { kind: 'idle', revision: 3 });
-  await harness.terminal.close();
-});
-
-test('does not signal a reused process identity when cancellation races SSH exit', async () => {
-  const harness = createHarness('pending');
-  const controller = new AbortController();
-  const setup = harness.terminal.runSetup(
-    {
-      destination: 'operator@example.com',
-      setupPackage: { kind: 'npm', specifier: 'maka-agent@1.2.3' },
-      remotePlatform: 'posix',
-      principalId: 'desktop:stable-client',
-      signal: controller.signal,
-    },
-    () => undefined,
-  );
-  await waitFor(() => harness.pty.hasDataListener());
-
-  controller.abort();
-  harness.pty.exit(0);
-
-  await assert.rejects(setup, /aborted/u);
-  await Promise.resolve();
-  assert.deepEqual(harness.pty.killSignals, []);
-  await harness.terminal.close();
+test('native SSH setup verifies the target package and keeps its receipt out of terminal output', async () => {
+  for (const windows of [false, true]) {
+    const directory = windows ? 'C:\\Maka\\package' : '/opt/maka/package';
+    const executable = windows ? `${directory}\\bin\\maka.exe` : `${directory}/bin/maka`;
+    const artifact = {
+      target: windows ? 'win32-x64' as const : 'linux-x64-gnu' as const,
+      version: '0.2.0', directory, executable,
+      ...(windows ? { serviceExecutable: `${directory}\\bin\\maka-service.exe` } : {}),
+      integrity: `sha512-${'A'.repeat(86)}==`,
+    };
+    const receipt = {
+      deployment: {
+        deploymentId: '00000000-0000-4000-8000-000000000001', configRevision: 1,
+        rootId: 'a'.repeat(64), rootPath: windows ? 'C:\\Maka\\state' : '/opt/maka/state',
+        executable, sha256: 'b'.repeat(64), mode: 'on_demand', websocket: '127.0.0.1:0',
+      },
+      host: { hostEpoch: 'host-epoch', pid: 123, port: 4567 },
+      pairing: { rootId: 'a'.repeat(64), credentialId: 'credential', credential: 'setup-private-token' },
+    };
+    const events: unknown[] = [];
+    const commands: string[] = [];
+    let committed = false;
+    let launch = 0;
+    const terminal = createDesktopRuntimeHostSshTerminal({
+      ipcMain: { handle: () => undefined, removeHandler: () => undefined },
+      send: (_channel, event) => events.push(event),
+      revealDelayMs: 0,
+      spawnPty: ((file: string, args: string[]) => {
+        const pty = new FakePty();
+        const step = launch++;
+        const encoded = args.at(-1) ?? '';
+        const script = windows && file === 'ssh'
+          ? Buffer.from(encoded.split(' ').at(-1)!, 'base64').toString('utf16le')
+          : encoded;
+        const payload = windows ? script.match(/FromBase64String\('([^']+)'\)/u)?.[1] : undefined;
+        const command = payload ? Buffer.from(payload, 'base64').toString('utf8') : script;
+        commands.push(command);
+        setImmediate(() => {
+          let frame: string;
+          if (step === 0) {
+            const name = command.match(/maka-native-[a-f0-9]{32}/u)?.[0];
+            assert.ok(name);
+            frame = `__MAKA_NATIVE_HOST_STAGE__${windows ? 'C:\\Temp\\' : '/tmp/'}${name}\n`;
+          } else if (step === 1) {
+            assert.equal(file, 'scp');
+            pty.exit(0);
+            return;
+          } else if (step === 2) {
+            assert.match(command, /fetch/u);
+            assert.ok(command.includes('c'.repeat(64)));
+            frame = `${NATIVE_ARTIFACT_PREFIX}${JSON.stringify(artifact)}\n`;
+          } else if (step === 3) {
+            frame = '__MAKA_NATIVE_HOST_CLEAN__ok\n';
+          } else {
+            assert.equal(step, 4);
+            assert.equal(committed, true);
+            assert.match(command, /desktop:client/u);
+            assert.doesNotMatch(command, /allow-interrupt|update-existing/u);
+            frame = `${NATIVE_SETUP_PREFIX}${JSON.stringify(receipt)}\n`;
+          }
+          // PTY chunks need not coincide with reserved frame boundaries.
+          pty.emitData(frame.slice(0, 11));
+          pty.emitData(frame.slice(11));
+          pty.exit(0);
+        });
+        return pty as unknown as IPty;
+      }) as typeof import('node-pty').spawn,
+    });
+    try {
+      const result = await terminal.runNativeSetup({
+        destination: 'operator@example.com', principalId: 'desktop:client',
+        package: { artifact, receiptSha256: 'c'.repeat(64) },
+      }, () => { committed = true; });
+      assert.deepEqual(result.receipt, receipt);
+      assert.equal(result.operator.executablePath, executable);
+      assert.equal(commands.length, 5);
+      assert.doesNotMatch(JSON.stringify(events), /setup-private-token|__MAKA_NATIVE_HOST_/u);
+    } finally {
+      await terminal.close();
+    }
+  }
 });
 
 test('reads a framed service result without projecting it into the SSH terminal', async () => {
@@ -1031,63 +898,6 @@ test('runs interactive operator activation as one strict framed SSH command', as
   assert.match(remoteCommand, new RegExp(rootId, 'u'));
   assert.doesNotMatch(remoteCommand, /credential|token/u);
   await harness.terminal.close();
-});
-
-test('uploads a development release archive before running the same remote setup', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'maka-runtime-host-development-package-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const archive = join(directory, 'maka-agent-development.tgz');
-  await writeFile(archive, 'development package');
-  const integrity = `sha512-${createHash('sha512').update('development package').digest('base64')}`;
-  const handlers = new Map<string, (...args: unknown[]) => unknown>();
-  const launches: Array<{ file: string; args: string[]; pty: FakePty }> = [];
-  const terminal = createDesktopRuntimeHostSshTerminal({
-    ipcMain: {
-      handle: (channel, handler) => handlers.set(channel, handler as (...args: unknown[]) => unknown),
-      removeHandler: (channel) => handlers.delete(channel),
-    },
-    send: () => undefined,
-    spawnPty: ((file: string, args: string[]) => {
-      const pty = new FakePty();
-      launches.push({ file, args, pty });
-      return pty as unknown as IPty;
-    }) as typeof import('node-pty').spawn,
-  });
-  t.after(() => terminal.close());
-
-  const setupInput = {
-    destination: 'operator@example.com',
-    setupPackage: {
-      kind: 'development_archive',
-      path: archive,
-      integrity,
-    } as const,
-    remotePlatform: 'posix' as const,
-    principalId: 'desktop:stable-client',
-  };
-  const setup = terminal.runSetup(setupInput, () => undefined);
-  await waitFor(() => launches.length === 1);
-  assert.equal(launches[0]?.file, 'scp');
-  assert.match(launches[0]?.args.at(-2) ?? '', /maka-agent-development\.tgz$/u);
-  assert.match(
-    launches[0]?.args.at(-1) ?? '',
-    /^operator@example\.com:\.\/\.maka-runtime-host-setup-.+\.tgz$/u,
-  );
-  launches[0]?.pty.exit(0);
-
-  await waitFor(() => launches.length === 2);
-  assert.equal(launches[1]?.file, 'ssh');
-  const remoteCommand = launches[1]?.args.at(-1) ?? '';
-  assert.match(remoteCommand, /--package.*maka-runtime-host-setup-.+\.tgz/u);
-  assert.match(remoteCommand, /MAKA_RUNTIME_HOST_SETUP_SOURCE_PACKAGE_INTEGRITY=/u);
-  assert.ok(remoteCommand.includes(integrity));
-  assert.match(remoteCommand, /--defer-pairing-commit/u);
-  assert.match(remoteCommand, /--update-existing/u);
-  assert.match(remoteCommand, /cd.*\$HOME/u);
-  assert.match(remoteCommand, /rm -f/u);
-  assert.match(remoteCommand, /exec \/bin\/sh -c/u);
-  launches[1]?.pty.exit(255);
-  await assert.rejects(setup, /exited with code 255/u);
 });
 
 function createHarness(

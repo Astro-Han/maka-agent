@@ -126,12 +126,12 @@ pub(super) async fn read_selected(
                 return None;
             }
             let kind: &str = row.try_get("opening_kind").ok()?;
-            let purpose: Option<&str> = row.try_get("purpose").ok()?;
+            let purpose: &str = row.try_get("purpose").ok()?;
             let purpose = match (kind, purpose) {
-                ("message" | "continuation", None | Some("main")) => ModelPurpose::Main,
-                ("handoff", Some("main")) => ModelPurpose::Main,
-                ("message" | "continuation" | "handoff" | "context_compact", Some("summary"))
-                | ("context_compact", None) => ModelPurpose::Summary,
+                ("message" | "continuation" | "handoff", "main") => ModelPurpose::Main,
+                ("message" | "continuation" | "handoff" | "context_compact", "summary") => {
+                    ModelPurpose::Summary
+                }
                 _ => return None,
             };
             if purpose == ModelPurpose::Summary {

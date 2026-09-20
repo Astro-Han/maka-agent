@@ -25,7 +25,7 @@ import test from 'node:test';
 import type { IpcMain } from 'electron';
 import type { BotRegistry } from '@maka/runtime/bots';
 import type { ComputerUseToolSet } from '@maka/runtime/computer-use-tools';
-import type { MakaTool } from '@maka/runtime/tool-runtime';
+import type { SessionTool } from '@maka/runtime/tool-runtime';
 import { connectRuntimeHost } from '@maka/runtime-host/client';
 import { acquireOperationalStateDatabase } from '@maka/storage/operational-state-store';
 import {
@@ -82,7 +82,7 @@ test('drives Desktop Session operations through a real Runtime Host connection',
               result: {
                 disposition: 'steering',
                 queueRevision: 1,
-                skillInvocation: { loaded: [], failed: [], receipts: [] },
+                preparation: [],
               },
             };
           },
@@ -118,7 +118,7 @@ test('drives Desktop Session operations through a real Runtime Host connection',
       {
         disposition: 'steering',
         queueRevision: 1,
-        skillInvocation: { loaded: [], failed: [], receipts: [] },
+        preparation: [],
       },
     );
 
@@ -390,7 +390,7 @@ test('drives the renderer Session execution facade through real UDS framing', as
               result: {
                 disposition: 'turn_started',
                 turnId: 'turn-host-1',
-                skillInvocation: { loaded: [], failed: [], receipts: [] },
+                preparation: [],
               },
             };
           },
@@ -444,7 +444,7 @@ test('drives the renderer Session execution facade through real UDS framing', as
         turnId: 'turn-host-1',
         attachments: [],
         inlineReferences: [],
-        skillInvocation: { loaded: [], failed: [], receipts: [] },
+        preparation: [],
       },
     );
 
@@ -643,7 +643,7 @@ function session(
   };
 }
 
-function nativeTool(): MakaTool {
+function nativeTool(): SessionTool {
   return {
     name: 'browser_snapshot',
     description: 'Capture the current page.',

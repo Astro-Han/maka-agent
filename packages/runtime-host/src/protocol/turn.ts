@@ -18,6 +18,8 @@
  */
 
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT } from '@maka/core/attachments';
+import type { InputReceipt } from '@maka-agent/plugin-sdk/host';
+import { z } from 'zod';
 import {
   decodeMessageContent as decodeCanonicalMessageContent,
   DIRECTORY_REFERENCE_MAX_COUNT,
@@ -32,10 +34,6 @@ import {
   isTurnOrchestrationSource,
   type TurnOrchestration,
 } from '@maka/core/orchestration';
-import {
-  decodeSkillInvocationResult,
-  type SkillInvocationResult,
-} from '@maka/core/skill-invocation';
 import { invalidProtocolFrame } from './errors.js';
 import {
   assertExactKeys,
@@ -55,7 +53,7 @@ export interface TurnStartInput {
   sessionId: string;
   turnId: string;
   content: MessageContent;
-  skillIds?: string[];
+  inputSelections?: InputSelections;
   turnOrchestration?: TurnOrchestration;
   maxSteps?: number;
 }
@@ -64,11 +62,12 @@ export type TurnStartResult =
   | {
       kind: 'started';
       turn: TurnSnapshot;
-      skillInvocation: SkillInvocationResult;
+      preparation: InputReceipt[];
     }
   | {
       kind: 'blocked';
-      skillInvocation: SkillInvocationResult;
+      message: string;
+      preparation: InputReceipt[];
     };
 
 export type { MessageContent };
@@ -78,8 +77,61 @@ export const TURN_MESSAGE_CONTENT_MAX_BYTES = 52 * 1024;
 export const TURN_MESSAGE_QUOTE_MAX_COUNT = 16;
 export const TURN_MESSAGE_QUOTE_TEXT_MAX_LENGTH = 32_000;
 export const TURN_MESSAGE_QUOTE_LABEL_MAX_LENGTH = 200;
-export const TURN_SKILL_ID_MAX_COUNT = 50;
-export const TURN_SKILL_ID_MAX_LENGTH = 512;
+export type InputSelections = Readonly<Record<string, readonly string[]>>;
+export type { InputReceipt };
+const RECEIPT_DATA = z.json();
+
+export function decodeInputReceipts(value: unknown): InputReceipt[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > 2048 ||
+    Buffer.byteLength(JSON.stringify(value)) > 1024 * 1024
+  ) {
+    throw invalidProtocolFrame('Invalid input preparation receipts');
+  }
+  return value.map((entry) => {
+    const item = requireExactRecord(entry, 'input receipt', ['source', 'receipt']);
+    const source = requireExactRecord(item.source, 'input source', [
+      'kind',
+      'name',
+      'packageId',
+      'entryId',
+      'activation',
+      'revision',
+    ]);
+    if (source.kind !== 'input') throw invalidProtocolFrame('Invalid input source kind');
+    const field = (key: string): string => {
+      const text = requireString(source[key], key, 512);
+      if (
+        !text.length ||
+        Buffer.byteLength(text) > 512 ||
+        /[\u0000-\u001f\u007f-\u009f]/u.test(text)
+      )
+        throw invalidProtocolFrame('Invalid input source');
+      return text;
+    };
+    const receipt = RECEIPT_DATA.safeParse(item.receipt);
+    if (!receipt.success) throw invalidProtocolFrame('Invalid input receipt data');
+    return {
+      source: {
+        kind: 'input',
+        name: field('name'),
+        packageId: field('packageId'),
+        entryId: field('entryId'),
+        activation: field('activation'),
+        revision: field('revision'),
+      },
+      receipt: receipt.data,
+    };
+  });
+}
+
+export function decodeInputRejection(message: unknown, receipts: InputReceipt[]): string {
+  const text = requireString(message, 'input rejection', 4096);
+  if (!text.trim() || Buffer.byteLength(text) > 4096 || !receipts.length)
+    throw invalidProtocolFrame('Invalid input rejection');
+  return text;
+}
 const ATTACHMENT_NAME_MAX_BYTES = 512;
 const ATTACHMENT_MIME_TYPE_MAX_BYTES = 256;
 const ATTACHMENT_PATH_MAX_BYTES = 4096;
@@ -356,14 +408,14 @@ export function decodeTurnStartInput(value: unknown): TurnStartInput {
     value,
     'turn.start input',
     ['sessionId', 'turnId', 'content'],
-    ['skillIds', 'turnOrchestration', 'maxSteps'],
+    ['inputSelections', 'turnOrchestration', 'maxSteps'],
   );
-  const skillIds = decodeSkillIds(record.skillIds);
+  const inputSelections = decodeInputSelections(record.inputSelections);
   return {
     sessionId: requireEntityId(record.sessionId, 'sessionId'),
     turnId: requireEntityId(record.turnId, 'turnId'),
-    content: decodeMessageAdmissionContent(record.content, skillIds.length > 0),
-    ...(skillIds.length > 0 ? { skillIds } : {}),
+    content: decodeMessageAdmissionContent(record.content, Object.keys(inputSelections).length > 0),
+    ...(Object.keys(inputSelections).length > 0 ? { inputSelections } : {}),
     ...(record.turnOrchestration !== undefined
       ? { turnOrchestration: decodeTurnOrchestration(record.turnOrchestration) }
       : {}),
@@ -379,22 +431,30 @@ function requirePositiveSafeInteger(value: unknown, label: string): number {
   return decoded;
 }
 
-export function decodeSkillIds(value: unknown): string[] {
-  if (value === undefined) return [];
-  if (
-    !Array.isArray(value) ||
-    value.length > TURN_SKILL_ID_MAX_COUNT ||
-    value.some(
-      (id) =>
-        typeof id !== 'string' ||
-        id.length === 0 ||
-        id.length > TURN_SKILL_ID_MAX_LENGTH ||
-        !/^[A-Za-z0-9][A-Za-z0-9._-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)*$/.test(id),
-    )
-  ) {
-    throw invalidProtocolFrame('Invalid Turn skillIds');
+export function decodeInputSelections(value: unknown): InputSelections {
+  if (value === undefined) return {};
+  const entries = Object.entries(requireRecord(value, 'inputSelections'));
+  const bounded = (text: unknown, limit: number): text is string =>
+    typeof text === 'string' &&
+    text.length > 0 &&
+    Buffer.byteLength(text, 'utf8') <= limit &&
+    !/[\u0000-\u001f\u007f-\u009f]/u.test(text);
+  let count = 0;
+  for (const [provider, selectors] of entries) {
+    if (
+      !bounded(provider, 128) ||
+      !Array.isArray(selectors) ||
+      selectors.length === 0 ||
+      selectors.some((selector) => !bounded(selector, 512))
+    ) {
+      throw invalidProtocolFrame('Invalid inputSelections');
+    }
+    count += selectors.length;
+    if (count > 50) throw invalidProtocolFrame('Too many input selections');
   }
-  return [...value];
+  return Object.fromEntries(
+    entries.map(([provider, selectors]) => [provider, [...(selectors as string[])]]),
+  );
 }
 
 export function decodeTurnOrchestration(value: unknown): TurnOrchestration {
@@ -644,22 +704,18 @@ export function decodeTurnResumeStartResult(value: unknown): TurnResumeStartResu
 
 export function decodeTurnStartResult(value: unknown): TurnStartResult {
   const record = requireRecord(value, 'Turn start result');
-  let skillInvocation: SkillInvocationResult;
-  try {
-    skillInvocation = decodeSkillInvocationResult(record.skillInvocation);
-  } catch {
-    throw invalidProtocolFrame('Invalid Turn start Skill invocation result');
-  }
+  const preparation = decodeInputReceipts(record.preparation);
   if (record.kind === 'started') {
-    assertExactKeys(record, 'started Turn result', ['kind', 'turn', 'skillInvocation']);
-    return { kind: 'started', turn: decodeTurnSnapshot(record.turn), skillInvocation };
+    assertExactKeys(record, 'started Turn result', ['kind', 'turn', 'preparation']);
+    return { kind: 'started', turn: decodeTurnSnapshot(record.turn), preparation };
   }
   if (record.kind === 'blocked') {
-    assertExactKeys(record, 'blocked Turn result', ['kind', 'skillInvocation']);
-    if (skillInvocation.loaded.length !== 0 || skillInvocation.failed.length === 0) {
-      throw invalidProtocolFrame('Blocked Turn requires only failed Skill invocations');
-    }
-    return { kind: 'blocked', skillInvocation };
+    assertExactKeys(record, 'blocked Turn result', ['kind', 'message', 'preparation']);
+    return {
+      kind: 'blocked',
+      message: decodeInputRejection(record.message, preparation),
+      preparation,
+    };
   }
   throw invalidProtocolFrame('Invalid Turn start result');
 }

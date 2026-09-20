@@ -1867,7 +1867,7 @@ test('an exact legacy ephemeral stop always requires consent and preserves the O
     registration: { ...observed.registration, lifecycleMode: 'ephemeral' as const },
     processIdentity: { startIdentity: 'darwin:1700000000:123456' },
     handshake: { ...observed.handshake, activity: {
-      connections: 0, activeOperations: 0, processUptimeSeconds: 60, residencies: [],
+      connections: 0, activeOperations: 0, processUptimeSeconds: 60, residencies: [], drainResidencies: 0,
     } },
   };
   const replacement = candidateHarness();
@@ -1924,7 +1924,7 @@ test('keeps a known repair actionable when its first authority inspection fails'
       return {
         identity: 'verified-repair', target: { name: 'Local', location: 'local' },
         reason: 'repair', mayExitNaturally: false,
-        activity: { connections: 0, activeOperations: 0, processUptimeSeconds: 1, residencies: [] },
+        activity: { connections: 0, activeOperations: 0, processUptimeSeconds: 1, residencies: [], drainResidencies: 0 },
         replacement: { kind: 'repair', canReplaceIdle: true, canInterrupt: false,
           execute: async () => { didRepair = true; return { kind: 'completed' }; } },
       };
@@ -2008,6 +2008,7 @@ function upgradeRequired(
               activeOperations,
               processUptimeSeconds: 60,
               residencies,
+              drainResidencies: residencies.reduce((count, item) => count + item.count, 0),
             },
           }
         : {}),

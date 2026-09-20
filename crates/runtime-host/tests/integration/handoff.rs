@@ -398,7 +398,6 @@ async fn stop_sealed_turn_uses_public_identity_without_provider_and_survives_res
                     content: "stop this task".into(),
                     request_fingerprint: None,
                     source_messages: Vec::new(),
-                    skill_invocation: None,
                 },
             },
             Fact::InvocationEnded {
@@ -427,7 +426,6 @@ async fn stop_sealed_turn_uses_public_identity_without_provider_and_survives_res
                             },
                             submitted_placement: maka_runtime::message::Placement::NextTurn,
                             disposition: maka_runtime::message::MessageDisposition::Followup,
-                            skill_invocation: Default::default(),
                             submitted_intent: None,
                         },
                     },

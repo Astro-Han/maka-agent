@@ -30,7 +30,6 @@ use std::{fs::File, path::Path, sync::Arc};
 const DATABASE: &str = "deployment.sqlite";
 const APPLICATION_ID: i64 = 0x4d414b44;
 static MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/deployment");
-// user_version describes the stable Active reader, not the SQLx migration count.
 
 pub(super) enum Installation {
     Missing,
@@ -54,6 +53,7 @@ pub(super) async fn read(directory: &Path) -> Result<Installation, HostError> {
         SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(path).read_only(true))
             .await?;
     let result = async {
+        validate_schema(&mut connection).await?;
         let application: i64 = sqlx::query_scalar("PRAGMA application_id").fetch_one(&mut connection).await?;
         let version: i64 = sqlx::query_scalar("PRAGMA user_version").fetch_one(&mut connection).await?;
         if version == 0 && application == APPLICATION_ID {
@@ -274,6 +274,18 @@ fn private_file(path: &Path) -> Result<File, HostError> {
 }
 
 async fn initialize(connection: &mut SqliteConnection) -> Result<(), StoreError> {
+    validate_schema(connection).await?;
+    sqlx::raw_sql(
+        "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA application_id=1296124740;",
+    )
+    .execute(&mut *connection)
+    .await?;
+    Ok(())
+}
+
+/// Reject unsupported stores before either a reader serves them or a writer
+/// changes journaling or creates SQLx metadata. Version zero is initial setup only.
+async fn validate_schema(connection: &mut SqliteConnection) -> Result<(), StoreError> {
     let application: i64 = sqlx::query_scalar("PRAGMA application_id")
         .fetch_one(&mut *connection)
         .await?;
@@ -292,11 +304,35 @@ async fn initialize(connection: &mut SqliteConnection) -> Result<(), StoreError>
             "unsupported deployment database".into(),
         ));
     }
-    sqlx::raw_sql(
-        "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA application_id=1296124740;",
+    let ledger: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='_sqlx_migrations')",
     )
-    .execute(&mut *connection)
+    .fetch_one(&mut *connection)
     .await?;
+    let applied: Vec<(i64, bool, Vec<u8>)> = if ledger {
+        sqlx::query_as("SELECT version, success, checksum FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(&mut *connection)
+            .await?
+    } else {
+        Vec::new()
+    };
+    let valid = if version == 0 {
+        tables == i64::from(ledger) && applied.is_empty()
+    } else {
+        applied.len() == MIGRATIONS.iter().len()
+            && applied.iter().zip(MIGRATIONS.iter()).all(
+                |((version, success, checksum), expected)| {
+                    *version == expected.version
+                        && *success
+                        && checksum.as_slice() == expected.checksum.as_ref()
+                },
+            )
+    };
+    if !valid {
+        return Err(StoreError::InvalidTransition(
+            "unsupported deployment schema".into(),
+        ));
+    }
     Ok(())
 }
 

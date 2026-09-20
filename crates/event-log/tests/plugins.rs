@@ -85,7 +85,6 @@ async fn execution_receipts_commit_with_work_and_survive_delivery_restarts_and_l
                 content: admission.source.message.content.clone(),
                 request_fingerprint: None,
                 source_messages: vec![admission.source],
-                skill_invocation: None,
             },
         },
         Fact::InvocationEnded {
@@ -385,7 +384,6 @@ async fn package_and_intent_commit_together_survive_reopen_and_preserve_live_byt
                                     content: "log traffic during package installation".into(),
                                     request_fingerprint: None,
                                     source_messages: vec![],
-                                    skill_invocation: None,
                                 },
                             },
                             Fact::InvocationEnded {

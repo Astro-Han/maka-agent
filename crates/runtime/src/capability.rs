@@ -34,7 +34,7 @@ pub use form::{
     FormValue,
 };
 mod frame;
-pub use frame::{AdmissionEvidence, ClientFrame, HostFrame};
+pub use frame::{AdmissionEvidence, CallSource, ClientFrame, HostFrame};
 pub use result::{CallResult, ContentBlock};
 
 use serde::{Deserialize, Serialize};

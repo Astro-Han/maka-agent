@@ -55,13 +55,12 @@ impl ToolPreparer for Tool {
         Box::pin(async move {
             Ok(PreparedEffect::new(move |cancellation| {
                 Box::pin(async move {
-                    let authority = callback.calls.enter(
-                        super::invocation::Identity {
-                            invocation: context.invocation.clone(),
-                            operation_id: Some(context.operation_id.clone()),
-                        },
-                        cancellation.clone(),
-                    )?;
+                    let authority =
+                        callback
+                            .calls
+                            .forward(maka_plugins::call::current().ok_or_else(|| {
+                                ToolError::Failed("Host tool call scope is unavailable".into())
+                            })?)?;
                     let result = invoke(
                         &callback.module,
                         callback.id,
@@ -73,7 +72,6 @@ impl ToolPreparer for Tool {
                         cancellation,
                     )
                     .await;
-                    authority.finish().await?;
                     result.map(Into::into)
                 })
             }))
@@ -82,6 +80,32 @@ impl ToolPreparer for Tool {
 }
 pub(super) struct Prompt {
     pub callback: Arc<Callback>,
+}
+pub(super) struct Behavior {
+    pub callback: Arc<Callback>,
+}
+impl maka_plugins::session::Behavior for Behavior {
+    fn prepare(
+        &self,
+        session_id: String,
+    ) -> futures_util::future::BoxFuture<'_, Result<maka_plugins::session::Preparation, String>>
+    {
+        Box::pin(async move {
+            let value = invoke(
+                &self.callback.module,
+                self.callback.id,
+                json!({"sessionId": session_id}),
+                Value::Null,
+                CancellationToken::new(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            let preparation: maka_plugins::session::Preparation =
+                serde_json::from_value(value).map_err(|error| error.to_string())?;
+            preparation.validate().map_err(|error| error.to_string())?;
+            Ok(preparation)
+        })
+    }
 }
 impl Provider for Prompt {
     fn evaluate(&self, request: Request) -> TextFuture {

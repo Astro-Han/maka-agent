@@ -36,7 +36,6 @@ wire_enum!(BlockedReason { NoRealConnection=>"NO_REAL_CONNECTION", Auth=>"auth",
 wire_enum!(Backend { AiSdk=>"ai-sdk", PluginExecutor=>"plugin-executor", Fake=>"fake" });
 wire_enum!(RevisionState { Preparing=>"preparing", Committed=>"committed" });
 wire_enum!(SessionLifecycleState { Active=>"active", Archived=>"archived" });
-wire_enum!(UnsupportedReason { NotWireRepresentable=>"not_wire_representable" });
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -125,30 +124,4 @@ pub struct SessionCatalogProjection {
     pub last_read_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live_run_state: Option<SessionCatalogLiveRunState>,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum UnsupportedLegacyRecord {
-    UnsupportedLegacyRecord {
-        id: String,
-        revision: u64,
-        reason: UnsupportedReason,
-    },
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum SessionCatalogItem {
-    Projection(Box<SessionCatalogProjection>),
-    UnsupportedLegacy(UnsupportedLegacyRecord),
-}
-impl SessionCatalogItem {
-    pub fn id(&self) -> &str {
-        match self {
-            Self::Projection(p) => &p.id,
-            Self::UnsupportedLegacy(UnsupportedLegacyRecord::UnsupportedLegacyRecord {
-                id,
-                ..
-            }) => id,
-        }
-    }
 }

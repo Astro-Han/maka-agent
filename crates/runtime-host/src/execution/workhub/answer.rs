@@ -140,7 +140,6 @@ pub(super) async fn execute(
             },
             work: RunWork::Message {
                 source_messages: Vec::new(),
-                skill_invocation: None,
                 message: content.into(),
                 tools: model.tools,
                 max_steps: plan.max_steps,

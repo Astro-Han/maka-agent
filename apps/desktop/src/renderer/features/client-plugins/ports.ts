@@ -18,7 +18,7 @@
  */
 
 import type { ClientDescriptor } from '@maka-agent/plugin-sdk/client';
-import type { ClientSnapshot, ClientRemoteFactory, ClientFilesFactory } from '@maka/ui/client-plugins';
+import type { ClientSnapshot, ClientRemoteFactory, ClientFilesFactory, ClientAuthorizationFactory } from '@maka/ui/client-plugins';
 
 export interface ClientHostRef { readonly profileId: string; readonly hostId: string }
 export interface ClientPluginServices {
@@ -27,6 +27,7 @@ export interface ClientPluginServices {
   connect(host: ClientHostRef): {
     readonly remote: ClientRemoteFactory;
     readonly localFiles?: ClientFilesFactory;
+    readonly authorization?: ClientAuthorizationFactory;
     session(sessionId: string): Promise<string>;
     snapshot(signal: AbortSignal): Promise<ClientSnapshot>;
     source(descriptor: ClientDescriptor, signal: AbortSignal): Promise<string>;

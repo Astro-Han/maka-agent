@@ -21,4 +21,16 @@ CREATE TABLE deployment (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     configuration TEXT NOT NULL CHECK (json_valid(configuration) AND length(CAST(configuration AS BLOB)) <= 65536)
 ) STRICT;
+
+-- Pending intent does not authorize startup; only the active deployment does.
+CREATE TABLE deployment_update (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    target TEXT NOT NULL CHECK (json_valid(target) AND length(CAST(target AS BLOB)) <= 65536)
+) STRICT;
+
+CREATE TABLE deployment_update_policy (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    configuration TEXT NOT NULL CHECK (json_valid(configuration) AND length(CAST(configuration AS BLOB)) <= 16384)
+) STRICT;
+
 PRAGMA user_version = 1;

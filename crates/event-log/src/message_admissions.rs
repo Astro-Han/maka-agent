@@ -224,15 +224,11 @@ pub(crate) async fn consume(
             continue;
         };
         let matches = match &event.fact {
-            Fact::MessageSteered {
-                message,
-                skill_invocation,
-            } => {
+            Fact::MessageSteered { message } => {
                 *pending.steering_target() == event.invocation
                     && pending.source.disposition == MessageDisposition::Steering
                     && pending.source.submitted_intent.is_none()
                     && pending.source.message == **message
-                    && pending.source.skill_invocation == *skill_invocation
             }
             Fact::InvocationOpened { .. } => {
                 crate::message_sources::roots(event).iter().any(|source| {

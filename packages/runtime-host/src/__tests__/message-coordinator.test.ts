@@ -1415,7 +1415,7 @@ function resubmitRecoveredExact(
       messageId: 'recovered-exact',
       content: { text: 'run this as a graph' },
       placement: 'current_turn',
-      skillIds: ['review'],
+      inputSelections: { 'maka.skills': ['review'] },
       turnOrchestration: { mode, source: 'slash_command' },
     },
     operationContext(),

@@ -20,6 +20,8 @@
 import type { AttachmentIngestBlockedCode } from '@maka/core/attachments';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type { SkillInvocationResult } from '@maka/runtime/skill-invocation';
+import { preparedSkillInvocation } from '@maka/core/skill-invocation';
+import type { InputReceipt } from '@maka/runtime-host/protocol';
 import { getShellCopy } from './locales/shell-copy.js';
 
 type FeedbackToastApi = {
@@ -33,7 +35,7 @@ type FeedbackToastApi = {
 };
 
 type SubmissionFeedback =
-  | { skillInvocation: SkillInvocationResult }
+  | { preparation: InputReceipt[]; message?: string }
   | { reason: 'attachment_blocked'; code: AttachmentIngestBlockedCode };
 
 export function showSubmissionFeedback(
@@ -46,7 +48,11 @@ export function showSubmissionFeedback(
     showAttachmentIngestBlockedFeedback(uiLocale, toastApi, outcome.code, sessionId);
     return;
   }
-  showSkillInvocationFeedback(uiLocale, toastApi, outcome.skillInvocation, sessionId);
+  if (outcome.message) {
+    toastApi.error(getShellCopy(uiLocale).chatActions.sendFailedTitle, outcome.message, undefined, { sessionId });
+    return;
+  }
+  showSkillInvocationFeedback(uiLocale, toastApi, preparedSkillInvocation(outcome.preparation), sessionId);
 }
 
 function showAttachmentIngestBlockedFeedback(
@@ -67,10 +73,10 @@ function showAttachmentIngestBlockedFeedback(
 /** Match main-process persistence for a chip-only optimistic user message. */
 export function skillInvocationDisplayText(
   text: string,
-  skillInvocation: SkillInvocationResult,
+  preparation: InputReceipt[],
 ): string {
   if (text.trim().length > 0) return text;
-  return skillInvocation.loaded.map((skill) => `/skill:${skill.id}`).join(' ');
+  return preparedSkillInvocation(preparation).loaded.map((skill) => `/skill:${skill.id}`).join(' ');
 }
 
 /** The Composer is the only Desktop surface that invokes Skills (#1433). */

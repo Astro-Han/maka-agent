@@ -25,6 +25,16 @@ fn update(patch: Value) -> Value {
     json!({"sessionId":"s1","expectedRevision":1,"patch":patch})
 }
 
+fn projection(id: &str) -> Value {
+    json!({
+        "id":id,"revision":2,"workspace":{"target":{"kind":"host_path","path":"/work"},"hostCwd":"/work"},
+        "createdAt":0,"activityAt":1,"name":"Chat","isFlagged":false,"isArchived":false,
+        "labels":[],"labelsTruncated":false,"hasUnread":false,"status":"active","backend":"ai-sdk",
+        "llmConnectionId":null,"llmConnectionSlug":"default","connectionLocked":false,"model":"model",
+        "permissionMode":"ask","collaborationMode":"agent","orchestrationMode":"default"
+    })
+}
+
 #[test]
 fn configuration_thinking_preserves_clears_and_sets_without_relaxing_other_contracts() {
     for (patch, thinking) in [
@@ -99,14 +109,9 @@ fn configuration_requires_exact_input_safe_revision_and_correlated_output() {
     assert!(decode_session_configuration_update_input(&invalid).is_err());
     let input = decode_session_configuration_update_input(&value).unwrap();
     for (output, accepted) in [
+        (json!({"kind":"committed","session":projection("s1")}), true),
         (
-            json!({"kind":"committed","session":{"kind":"unsupported_legacy_record",
-            "id":"s1","revision":2,"reason":"not_wire_representable"}}),
-            true,
-        ),
-        (
-            json!({"kind":"committed","session":{"kind":"unsupported_legacy_record",
-            "id":"s2","revision":2,"reason":"not_wire_representable"}}),
+            json!({"kind":"committed","session":projection("s2")}),
             false,
         ),
         (
@@ -197,7 +202,7 @@ fn metadata_preserves_absence_and_validates_boundaries_before_domain_normalizati
 fn marker_is_exact_id_only_and_update_outputs_are_correlated() {
     let input = decode_session_metadata_update_input(&update(json!({"labels":[]}))).unwrap();
     for id in ["s1", "s2"] {
-        let item = json!({"kind":"unsupported_legacy_record","id":id,"revision":1,"reason":"not_wire_representable"});
+        let item = projection(id);
         let output =
             decode_session_update_result(&json!({"kind":"committed","session":item})).unwrap();
         assert_eq!(
@@ -211,7 +216,7 @@ fn marker_is_exact_id_only_and_update_outputs_are_correlated() {
         assert_eq!(
             assert_read_marker_output_for_input(
                 &marker,
-                &decode_session_catalog_item(&item).unwrap()
+                &decode_session_catalog_projection(&item).unwrap()
             )
             .is_ok(),
             id == "s1"

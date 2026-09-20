@@ -110,19 +110,6 @@ test('reports missing and unsupported Session projections without caller-specifi
   );
 
   for (const [name, result, reason] of [
-    [
-      'legacy',
-      {
-        kind: 'session',
-        session: {
-          kind: 'unsupported_legacy_record',
-          id: 'session-1',
-          revision: 1,
-          reason: 'not_wire_representable',
-        },
-      },
-      'unsupported_session_projection',
-    ],
     ['invalid', { kind: 'page', sessions: [], nextCursor: null }, 'invalid_projection'],
   ] as const) {
     const connection = fakeConnection(async () => result);

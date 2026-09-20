@@ -19,7 +19,7 @@
 
 use super::{Broker, CallError, PendingCall};
 use crate::Registration;
-use maka_runtime::capability::{HostFrame, HostPathAccess};
+use maka_runtime::capability::{CallSource, HostFrame, HostPathAccess};
 use serde_json::{Map, Value};
 use std::{sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -38,8 +38,7 @@ pub struct ToolCall {
     pub server_id: String,
     pub tool_name: String,
     pub arguments: Map<String, Value>,
-    pub session_id: String,
-    pub turn_id: String,
+    pub source: CallSource,
     pub tool_call_id: String,
     pub cwd: String,
 }
@@ -111,8 +110,7 @@ impl Broker {
                 server_id: call.server_id,
                 tool_name: call.tool_name,
                 arguments: call.arguments,
-                session_id: call.session_id,
-                turn_id: call.turn_id,
+                source: call.source,
                 tool_call_id: call.tool_call_id,
                 cwd,
             }

@@ -48,15 +48,16 @@ impl Executions {
         if let Some(prepared) = prepared {
             source.message.content = prepared.content;
             match prepared.selection {
-                crate::execution::skills::SkillPreparation::Ready {
-                    skill_invocation,
+                crate::execution::input::Outcome::Ready {
                     required_tools: requirements,
                 } => {
                     required_tools = requirements;
-                    source.skill_invocation = skill_invocation;
                 }
-                crate::execution::skills::SkillPreparation::Blocked(skill_invocation) => {
-                    return Ok(SubmitResult::Blocked { skill_invocation });
+                crate::execution::input::Outcome::Blocked { message } => {
+                    return Ok(SubmitResult::Blocked {
+                        message,
+                        preparation: source.message.content.preparation,
+                    });
                 }
             };
         }
@@ -132,11 +133,11 @@ impl Executions {
 pub(super) fn result(receipt: MessageSubmitReceipt) -> Result<SubmitResult> {
     Ok(match receipt.disposition {
         MessageDisposition::Steering => SubmitResult::Steering {
-            skill_invocation: receipt.skill_invocation,
+            preparation: receipt.preparation,
             queue_revision: Some(receipt.queue_revision),
         },
         MessageDisposition::Followup => SubmitResult::Followup {
-            skill_invocation: receipt.skill_invocation,
+            preparation: receipt.preparation,
             queue_revision: Some(receipt.queue_revision),
         },
         MessageDisposition::TurnStarted => {

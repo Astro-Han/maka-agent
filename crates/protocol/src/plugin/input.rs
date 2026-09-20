@@ -55,6 +55,7 @@ pub struct Apply {
 }
 
 pub enum Input {
+    Authorization(Box<super::AuthorizationInput>),
     Remote(Box<super::RemoteRequest>),
     Client(super::ClientQuery),
     Query(Query),
@@ -78,6 +79,11 @@ pub enum Input {
 pub fn decode_input(operation: Operation, value: &Value) -> Result<Input> {
     let row = codec::record(value, "plugin input")?;
     Ok(match operation {
+        Operation::PluginAuthorization => {
+            let request: super::AuthorizationInput = decode(value.clone())?;
+            request.validate()?;
+            Input::Authorization(Box::new(request))
+        }
         Operation::PluginRemote => {
             let request: super::RemoteRequest = decode(value.clone())?;
             request.validate()?;

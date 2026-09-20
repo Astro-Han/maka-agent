@@ -24,20 +24,6 @@ mod validation;
 pub use receipt::{SkillFailedReceipt, SkillInvocationReceipt, SkillLoadedReceipt};
 pub use validation::SkillValidationCode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SkillPreference {
-    pub enabled: bool,
-    pub pinned: bool,
-}
-impl Default for SkillPreference {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            pinned: false,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkillInvocationResult {

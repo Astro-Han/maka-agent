@@ -38,7 +38,6 @@ fn opening(session: &str) -> RuntimeEvent {
         Fact::InvocationOpened {
             configuration: None,
             input: InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "visible".into(),
                 request_fingerprint: None,
@@ -183,93 +182,4 @@ async fn unknown_and_empty_tail_ids_leave_all_authorities_unchanged() {
             Err(StoreError::InvalidTransition(_))
         ));
     }
-}
-
-#[tokio::test]
-async fn migration_backfills_only_existing_sessions_and_never_replays_over_acknowledgement() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("events.sqlite");
-    let log = EventLog::open(&path).await.unwrap();
-    for id in ["session", "empty"] {
-        log.create_session(id, id, &json!({}), 1).await.unwrap();
-    }
-    let visible = opening("session");
-    log.append(&EventWrite::plain((visible).clone()).unwrap())
-        .await
-        .unwrap();
-    log.append(
-        &EventWrite::plain(
-            (RuntimeEvent::new(
-                invocation("session"),
-                Fact::InvocationEnded {
-                    outcome: InvocationOutcome::Completed,
-                },
-            ))
-            .clone(),
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-    // Standalone event streams have no control row; finalization still succeeds.
-    log.append(&EventWrite::plain((opening("standalone")).clone()).unwrap())
-        .await
-        .unwrap();
-    log.append(
-        &EventWrite::plain(
-            (RuntimeEvent::new(
-                invocation("standalone"),
-                Fact::InvocationEnded {
-                    outcome: InvocationOutcome::Completed,
-                },
-            ))
-            .clone(),
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-    let bytes = serde_json::to_vec(&log.prefix(32, 65536).await.unwrap()).unwrap();
-    let revision = catalog(&log).await;
-    log.close().await.unwrap();
-    let source = rusqlite::Connection::open(&path).unwrap();
-    source
-        .execute_batch(
-            "DROP TABLE session_read_state; DELETE FROM _sqlx_migrations WHERE version = 2;
-         PRAGMA user_version = 1;",
-        )
-        .unwrap();
-    let log = EventLog::open(&path).await.unwrap();
-    assert!(
-        log.get_session::<Value>("session")
-            .await
-            .unwrap()
-            .unwrap()
-            .read_state
-            .has_unread
-    );
-    assert!(
-        !log.get_session::<Value>("empty")
-            .await
-            .unwrap()
-            .unwrap()
-            .read_state
-            .has_unread
-    );
-    assert_eq!(catalog(&log).await, revision);
-    let ack = acknowledge(&log, &visible.id).await;
-    log.close().await.unwrap();
-    // Legacy ledger adoption must also preserve an already durable acknowledgement.
-    source
-        .execute_batch("DROP TABLE session_managers; DROP TABLE model_request_compositions; DROP TABLE request_compositions; DROP TABLE graph_wakes; DROP TABLE graph_intents; DROP TABLE graph_updates; DROP TABLE graph_epochs; DROP TABLE plugin_execution_receipts; DROP TABLE plugin_data; DROP TABLE plugin_packages; DROP TABLE plugin_package_files; DROP TABLE plugin_package_blobs; DROP TABLE plugin_composition; DROP VIEW workhub_corrections; DROP VIEW workhub_assignments; DROP VIEW workhub_stops; ALTER TABLE legacy_workhub_stops RENAME TO workhub_stops; DROP VIEW runtime_events; DROP VIEW session_events; ALTER TABLE event_log RENAME TO runtime_events; DROP TABLE workhub_stops; DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE _sqlx_migrations;")
-        .unwrap();
-    let log = EventLog::open(&path).await.unwrap();
-    assert_eq!(
-        log.get_session::<Value>("session").await.unwrap(),
-        Some(ack)
-    );
-    assert_eq!(
-        serde_json::to_vec(&log.prefix(32, 65536).await.unwrap()).unwrap(),
-        bytes
-    );
 }

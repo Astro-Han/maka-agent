@@ -30,10 +30,10 @@ pub mod model_fetch;
 pub mod network;
 pub mod oauth;
 pub mod onboarding;
+pub mod plugin_authorization;
 mod plugin_credentials;
 mod policy;
 pub mod projection;
-pub mod skills;
 mod vault;
 
 pub use maka_event_log::connection::BoxFuture;

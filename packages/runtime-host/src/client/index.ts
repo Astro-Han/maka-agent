@@ -66,7 +66,6 @@ export {
   decodeEnvironmentRuntimeHostProfile,
   decodePersistedRuntimeHostProfile,
   decodeRemoteRuntimeHostProfile,
-  migrateRuntimeHostProfileOperatorCommand,
   remoteRuntimeHostUnavailableError,
   runtimeHostProfileAccess,
   runtimeHostProfileTargetFingerprint,
@@ -141,18 +140,17 @@ export {
   RuntimeHostCatalogReadError,
   RuntimeHostSessionCatalogRevisionChangedError,
   readRuntimeHostConnectionCatalog,
-  readRuntimeHostInvocableSkills,
   readRuntimeHostProjectDetails,
   readRuntimeHostResources,
   readRuntimeHostProjects,
   readRuntimeHostSessionCatalogPage,
   readRuntimeHostSessions,
-  readRuntimeHostSkillCatalog,
   type RuntimeHostSessionCatalogPage,
   type RuntimeHostSessionCatalogPageCursor,
   type RuntimeHostConnectionCatalogEntry,
   type RuntimeHostConnectionCatalogSnapshot,
 } from './catalog-reader.js';
+export { createPluginRemote } from './plugin-remote.js';
 export {
   IDLE_GRACE_MS_ENV_VAR,
   connectOrSpawnRuntimeHost,

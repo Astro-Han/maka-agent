@@ -100,7 +100,7 @@ impl BoundCommands {
                         workspace::bind(&mut child, request.workspace, worktree)?;
                         if let Some(target) = request.target {
                             match target {
-                                maka_plugins::execution::ChildTarget::Model {
+                                maka_plugins::execution::Target::Model {
                                     model,
                                     thinking_level,
                                 } => {
@@ -118,7 +118,7 @@ impl BoundCommands {
                                     .into();
                                     child.thinking_level = thinking_level;
                                 }
-                                maka_plugins::execution::ChildTarget::Executor { executor_id } => {
+                                maka_plugins::execution::Target::Executor { executor_id } => {
                                     if child.tool_profile.is_some()
                                         || child.bound_tools.is_some()
                                         || request.bound_tools.is_some()

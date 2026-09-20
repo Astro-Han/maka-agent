@@ -156,7 +156,7 @@ async fn plugin_step_surface_survives_retry_changes_only_between_steps_and_reope
         let mut input = fixture::input(&base, "composition", false);
         let session = input.invocation.session_id.clone();
         input.work = RunWork::Message {
-            skill_invocation: None, source_messages: Vec::new(), message: "Use echo".into(),
+            source_messages: Vec::new(), message: "Use echo".into(),
             tools: ToolCatalog::default().with_plugins(catalog, Scope::Session(session.clone()), None).unwrap(),
             max_steps: 3,
         };

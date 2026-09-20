@@ -20,7 +20,9 @@
 use crate::attachment::AttachmentRef;
 use serde::{Deserialize, Serialize};
 mod references;
+mod selections;
 pub use references::{DirectoryReference, InlineReference, InlineReferenceKind, QuoteRef};
+pub use selections::{Selections, validate_selections};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -43,9 +45,6 @@ pub enum InvocationInput {
         request_fingerprint: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         source_messages: Vec<crate::message::RootSourceMessage>,
-        /// Legacy turn.start has no Message identity; its receipt belongs to this opening.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        skill_invocation: Option<Box<crate::skills::SkillInvocationResult>>,
     },
     Code {
         source: String,
@@ -157,6 +156,7 @@ pub struct DeliveredMessage {
 
 impl DeliveredMessage {
     pub fn validate(&self) -> Result<(), &'static str> {
+        validate_receipts(&self.content.preparation)?;
         crate::interaction::entity_id(&self.message_id)?;
         if !crate::archive::valid_projection_digest(&self.submitted_content_digest) {
             return Err("invalid submitted message digest");
@@ -192,6 +192,39 @@ impl From<String> for MessageInput {
 pub struct InputReceipt {
     pub source: crate::composition::SourceRevision,
     pub receipt: serde_json::Value,
+}
+
+pub fn validate_receipts(receipts: &[InputReceipt]) -> Result<(), &'static str> {
+    // A root can aggregate 64 source messages, each prepared by up to 32 providers.
+    if receipts.len() > 64 * 32 {
+        return Err("too many input preparation receipts");
+    }
+    for receipt in receipts {
+        let source = &receipt.source;
+        if source.kind != crate::composition::SourceKind::Input
+            || [
+                &source.name,
+                &source.package_id,
+                &source.entry_id,
+                &source.activation,
+                &source.revision,
+            ]
+            .into_iter()
+            .any(|value| {
+                value.is_empty() || value.len() > 512 || value.chars().any(char::is_control)
+            })
+        {
+            return Err("invalid input preparation source");
+        }
+    }
+    if serde_json::to_vec(receipts)
+        .map_err(|_| "invalid input preparation encoding")?
+        .len()
+        > 1024 * 1024
+    {
+        return Err("input preparation receipts exceed durable capacity");
+    }
+    Ok(())
 }
 
 impl From<&str> for MessageInput {

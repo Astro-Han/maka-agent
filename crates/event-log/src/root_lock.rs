@@ -28,7 +28,6 @@ use std::{
 };
 
 /// A stable, exclusively locked file. Never unlink it as part of cleanup.
-/// Uses native whole-file locks; State Root's TS-compatible leases are separate.
 pub struct FileLease {
     file: File,
     path: PathBuf,

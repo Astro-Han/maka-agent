@@ -233,67 +233,11 @@ async fn defaults_are_read_only_and_cas_is_durable_even_for_same_value() {
         RuntimePolicyMutationResult::Committed { revision: 3 }
     );
     store.close().await.unwrap();
-    // Reconstruct the previous Rust policy document and migration ledger. The
-    // upgrade must preserve user values/revisions without weakening wire decode.
-    db.execute_batch(
-        "UPDATE runtime_policy SET document = json_remove(document, '$.policy.externalAgents');
-        DELETE FROM _sqlx_migrations WHERE version = 6; PRAGMA user_version = 5;",
-    )
-    .unwrap();
-    let document: String = db
-        .query_row("SELECT document FROM runtime_policy", [], |row| row.get(0))
-        .unwrap();
-    let mut legacy: serde_json::Value = serde_json::from_str(&document).unwrap();
-    // A valid legacy document at the old byte limit must survive schema growth.
-    while legacy.to_string().len() + 515 < MAX_POLICY_SNAPSHOT_BYTES {
-        let domains = legacy["policy"]["networkProxy"]["bypassList"]
-            .as_array_mut()
-            .unwrap();
-        domains.push(serde_json::json!(format!(
-            "{:03}{}",
-            domains.len(),
-            "x".repeat(509)
-        )));
-    }
-    let remaining = MAX_POLICY_SNAPSHOT_BYTES - legacy.to_string().len();
-    if remaining > 3 {
-        legacy["policy"]["networkProxy"]["bypassList"]
-            .as_array_mut()
-            .unwrap()
-            .push(serde_json::json!("y".repeat(remaining - 3)));
-    }
-    let document = legacy.to_string();
-    assert!(document.len() <= MAX_POLICY_SNAPSHOT_BYTES);
-    assert!(document.len() > MAX_POLICY_SNAPSHOT_BYTES - 40);
-    db.execute("UPDATE runtime_policy SET document = ?", [&document])
-        .unwrap();
-    let reopened = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    let reopened = ConfigurationStore::for_root(owner).await.unwrap();
     let snapshot = reopened.runtime_policy().await.unwrap();
     assert_eq!(snapshot.revision, 3);
     assert_eq!(snapshot.policy.chat_defaults, clear);
-    assert_eq!(snapshot.policy.external_agents, ExternalAgents::default());
-    assert_eq!(
-        serde_json::to_value(&snapshot.policy.network_proxy).unwrap(),
-        legacy["policy"]["networkProxy"]
-    );
-    assert!(snapshot.validate().is_err()); // Still too large for the wire.
-    assert_eq!(
-        reopened.network_configuration().await.unwrap().proxy,
-        snapshot.policy.network_proxy
-    );
-    assert!(matches!(
-        reopened.set_chat_defaults(3, clear).await,
-        Err(ConfigError::Invalid(_))
-    ));
-    assert_eq!(reopened.runtime_policy().await.unwrap(), snapshot);
-    assert!(matches!(
-        reopened
-            .set_network_proxy(3, initial.policy.network_proxy.clone())
-            .await
-            .unwrap(),
-        RuntimePolicyMutationResult::Committed { revision: 4 }
-    ));
-    reopened.runtime_policy().await.unwrap().validate().unwrap();
+    snapshot.validate().unwrap();
     assert_eq!(count(&db), 1);
     reopened.close().await.unwrap();
 }

@@ -45,6 +45,29 @@ impl Bound {
     }
 }
 impl Platform {
+    pub(crate) fn bind_client(
+        &self,
+        expected: &maka_plugins::remote::ClientIdentity,
+    ) -> Result<Contribution<Client>, OperationError> {
+        let client = self
+            .catalog
+            .snapshot::<Client>(&Scope::DesktopUi)
+            .entries
+            .get(&expected.entry_id)
+            .cloned()
+            .ok_or_else(|| conflict("Client entry is not effective"))?;
+        let identity = client.owner.identity().map_err(conflict)?;
+        let bundle = &client.value.bundle;
+        if identity.activation != expected.activation
+            || identity.package_id != expected.extension_id
+            || bundle.content_digest != expected.content_digest
+            || bundle.client_digest != expected.client_digest
+        {
+            return Err(conflict("Client activation or package bytes changed"));
+        }
+        let _lease = client.admit().map_err(conflict)?;
+        Ok(client)
+    }
     /// Captures both UI and backend registrations. An already bound target may
     /// not resolve to a replacement handler, even within the same activation.
     pub(crate) fn bind_remote(
@@ -52,22 +75,9 @@ impl Platform {
         request: &RemoteBinding,
         expected: Option<&Target>,
     ) -> Result<Bound, OperationError> {
-        let client = self
-            .catalog
-            .snapshot::<Client>(&Scope::DesktopUi)
-            .entries
-            .get(&request.client.entry_id)
-            .cloned()
-            .ok_or_else(|| conflict("Client entry is not effective"))?;
+        let client = self.bind_client(&request.client)?;
         let identity = client.owner.identity().map_err(conflict)?;
         let bundle = &client.value.bundle;
-        if identity.activation != request.client.activation
-            || identity.package_id != request.client.extension_id
-            || bundle.content_digest != request.client.content_digest
-            || bundle.client_digest != request.client.client_digest
-        {
-            return Err(conflict("Client activation or package bytes changed"));
-        }
         let scope = request
             .session_id
             .as_ref()

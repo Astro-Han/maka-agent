@@ -49,7 +49,7 @@ impl Executions {
                 }
                 return Ok(TurnStartResult::Started {
                     turn: record.snapshot,
-                    skill_invocation: record.skill_invocation,
+                    preparation: record.preparation,
                 });
             }
             if self
@@ -86,10 +86,7 @@ impl Executions {
                             )
                             .await?;
                         environment
-                            .expand(
-                                input.content.clone().into(),
-                                input.skill_ids.clone().unwrap_or_default(),
-                            )
+                            .expand(input.content.clone().into(), input.input_selections.clone())
                             .await
                     }
                     .await,
@@ -102,15 +99,14 @@ impl Executions {
             else {
                 continue;
             };
-            let selection_result = match selection {
-                super::skills::SkillPreparation::Ready {
-                    skill_invocation, ..
-                } => skill_invocation,
-                super::skills::SkillPreparation::Blocked(skill_invocation) => {
-                    return Ok(TurnStartResult::Blocked { skill_invocation });
-                }
-            };
-            input.skill_ids = None;
+            if let super::input::Outcome::Blocked { message } = selection {
+                return Ok(TurnStartResult::Blocked {
+                    message,
+                    preparation: content.preparation,
+                });
+            }
+            let preparation = content.preparation.clone();
+            input.input_selections.clear();
             input.content = content.clone().into();
             let mut run = self
                 .prepare_message(
@@ -121,15 +117,9 @@ impl Executions {
                     environment,
                 )
                 .await?;
-            run.message(
-                content,
-                (!selection_result.is_empty()).then(|| Box::new(selection_result.clone())),
-            )?;
+            run.message(content)?;
             let turn = self.launch(run).await?;
-            return Ok(TurnStartResult::Started {
-                turn,
-                skill_invocation: selection_result,
-            });
+            return Ok(TurnStartResult::Started { turn, preparation });
         }
     }
 }

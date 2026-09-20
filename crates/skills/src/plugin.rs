@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Statically linked Skills domain; Host supplies only its preferences repository and paths.
+//! Skills owns discovery, publication and preferences; Host supplies capabilities.
 use futures_util::future::BoxFuture;
 use maka_plugins::{
     composition::Scope,
@@ -39,6 +39,7 @@ mod input;
 mod mutation;
 mod page;
 mod path;
+mod preferences;
 mod preview;
 pub mod remote;
 mod snapshot;
@@ -72,23 +73,10 @@ pub struct PreferenceSnapshot {
     pub entries: BTreeMap<String, crate::Preference>,
 }
 
-/// Domain repository, not a general configuration or Host handle.
-pub trait PreferenceStore: Send + Sync {
-    fn read(&self) -> BoxFuture<'_, Result<PreferenceSnapshot, String>>;
-    /// False means the expected control revision no longer matches.
-    fn compare_exchange(
-        &self,
-        expected_revision: u64,
-        reference: String,
-        preference: crate::Preference,
-    ) -> BoxFuture<'_, Result<bool, String>>;
-}
-
 pub struct Builtin {
     pub state_root: PathBuf,
     pub home: Option<PathBuf>,
-    pub preferences: Arc<dyn PreferenceStore>,
-    pub client: Option<remote::ClientSupport>,
+    pub client: Option<Arc<maka_plugins::client::Bundle>>,
 }
 
 #[derive(Clone)]
@@ -105,7 +93,7 @@ pub struct Skills {
 #[derive(Clone)]
 struct Basis {
     owner: Context,
-    preferences: Arc<dyn PreferenceStore>,
+    preferences: Arc<preferences::Preferences>,
 }
 
 impl Plugin for Builtin {
@@ -157,10 +145,15 @@ impl Plugin for Builtin {
                 Ok(staged)
             });
         }
-        let client = self.client.clone();
+        let client = self.client.as_ref().map(|bundle| remote::ClientSupport {
+            bundle: bundle.clone(),
+        });
         let services = context.services.clone();
         let Some(data) = context.data else {
             return Box::pin(async { Err("Skills requires plugin private files".into()) });
+        };
+        let Some(host) = context.host else {
+            return Box::pin(async { Err("Skills requires plugin storage".into()) });
         };
         let skills = Skills {
             data,
@@ -171,7 +164,7 @@ impl Plugin for Builtin {
             home: self.home.clone(),
             basis: Basis {
                 owner: context.lifecycle,
-                preferences: self.preferences.clone(),
+                preferences: Arc::new(preferences::Preferences(host.storage)),
             },
         };
         Box::pin(async move {
@@ -181,7 +174,6 @@ impl Plugin for Builtin {
                 .data
                 .run(move |data| {
                     let publisher = crate::publication::Publisher::open(&root, data)?;
-                    publisher.recover_legacy(&root)?;
                     publisher.recover()?;
                     if let Some(home) = home {
                         crate::publication::UserStore::recover_existing(&home)?;
@@ -196,11 +188,7 @@ impl Plugin for Builtin {
             if let Some(client) = client {
                 remote::publish(&skills, &mut staged, client.clone())?;
                 services
-                    .provide(
-                        &skills.basis.owner,
-                        remote::CLIENT_SERVICE,
-                        Arc::new(client),
-                    )
+                    .provide(remote::CLIENT_SERVICE, Arc::new(client))
                     .map_err(|error| error.to_string())?;
             }
             staged
@@ -208,9 +196,6 @@ impl Plugin for Builtin {
                     ID,
                     maka_plugins::input::InputPreparation(Arc::new(skills.clone())),
                 )
-                .map_err(|error| error.to_string())?;
-            staged
-                .insert(ID, skills)
                 .map_err(|error| error.to_string())?;
             Ok(staged)
         })

@@ -27,6 +27,7 @@ use maka_runtime::access::ManagedPrincipalKind;
 use serde_json::Value;
 
 /// Transport-derived authority; a remote bearer can never become a local owner.
+#[derive(Clone)]
 pub(super) enum Authority {
     LocalOwner,
     Managed(Box<AccessCredential>),
@@ -108,7 +109,7 @@ impl Authority {
         }
     }
 
-    fn has_grant(&self, operation: Operation) -> bool {
+    pub(super) fn has_grant(&self, operation: Operation) -> bool {
         match self {
             Self::LocalOwner => true,
             Self::Managed(credential) => {
@@ -192,28 +193,12 @@ fn path_free(request: &Request) -> bool {
         // checks those against the current transport authority before binding
         // or calling. Ordinary UI reads do not imply filesystem privileges.
         Operation::PluginClientQuery | Operation::PluginRemote => true,
+        Operation::PluginAuthorization => serde_json::from_value::<
+            maka_protocol::plugin::AuthorizationInput,
+        >(request.input.clone())
+        .is_ok_and(|input| !input.uses_host_paths()),
         Operation::ScheduledTaskMutate => {
             serde_json::from_value::<maka_scheduler::command::Mutation>(request.input.clone())
-                .is_ok_and(|input| !input.uses_host_paths())
-        }
-        Operation::SkillCatalogQuery => maka_protocol::skills::decode_catalog_input(&request.input)
-            .is_ok_and(|input| !input.uses_host_paths()),
-        Operation::SkillCatalogResolvePath => {
-            maka_protocol::skills::decode_path_input(&request.input).is_ok_and(|input| {
-                !matches!(
-                    input.context.workspace,
-                    maka_runtime::execution::WorkspaceTarget::HostPath { .. }
-                )
-            })
-        }
-        Operation::SkillCatalogPreviewUpdate => {
-            maka_protocol::skills::decode_preview_input(&request.input)
-                .is_ok_and(|input| !input.uses_host_paths())
-        }
-        Operation::SkillCatalogMutate => maka_protocol::skills::decode_mutate_input(&request.input)
-            .is_ok_and(|input| !input.uses_host_paths()),
-        Operation::SkillCatalogInvocableQuery => {
-            maka_protocol::skills::decode_invocable_input(&request.input)
                 .is_ok_and(|input| !input.uses_host_paths())
         }
         Operation::ProjectCatalogQuery => maka_protocol::project::decode_query(&request.input)
@@ -352,27 +337,6 @@ mod tests {
             owner_identity.provider_id(),
             provider_identity.provider_id()
         );
-        for (target, allowed) in [
-            (json!({"kind":"session","sessionId":"existing"}), true),
-            (
-                json!({"kind":"new_session","context":{"workspace":{"kind":"project","projectId":"project"}},"collaborationMode":"agent","permissionMode":"ask"}),
-                true,
-            ),
-            (
-                json!({"kind":"new_session","context":{"workspace":{"kind":"host_path","path":"/private"}},"collaborationMode":"agent","permissionMode":"ask"}),
-                false,
-            ),
-            (json!({"kind":"new_session","context":{}}), false),
-        ] {
-            assert_eq!(
-                owner.authorizes(&Request {
-                    request_id: "skills".into(),
-                    operation: Operation::SkillCatalogInvocableQuery,
-                    input: json!({"kind":"start","target":target}),
-                }),
-                allowed
-            );
-        }
         for operation in [
             Operation::RuntimeResourceStart,
             Operation::RuntimeResourceStop,

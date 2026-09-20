@@ -147,7 +147,7 @@ async fn search_activates_next_step_and_only_committed_compaction_unloads_direct
                 let mut input = fixture::input(&base, "discovery", false);
                 input.configuration.tool_mode = mode;
                 input.context = Some(ModelRequestContext { provider_id:"openai".into(), context_window:Some(220), declared_window:Some(220) });
-                input.work = RunWork::Message { skill_invocation: Default::default(), source_messages:Vec::new(), message:"Use echo".into(), tools:catalog, max_steps:3 };
+                input.work = RunWork::Message { source_messages:Vec::new(), message:"Use echo".into(), tools:catalog, max_steps:3 };
                 let engine = fixture::engine(log.clone());
                 engine.run(input, CancellationToken::new()).await.unwrap();
                 engine.drain().await;

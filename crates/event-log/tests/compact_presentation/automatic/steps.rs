@@ -47,7 +47,7 @@ pub(super) async fn step(
             input_digest: "input".into(),
             route_identity: "route".into(),
             checkpoint_event_id: None,
-            purpose: Some(purpose),
+            purpose,
             context: None,
         },
     )

@@ -45,6 +45,21 @@ impl Host {
         }
         if maka_protocol::plugin::supports(operation) {
             let input = maka_protocol::plugin::decode_input(operation, &input)?;
+            if let maka_protocol::plugin::Input::Authorization(input) = input {
+                return Ok(
+                    match super::plugin_authorization::execute(
+                        self,
+                        authority,
+                        client_instance_id,
+                        *input,
+                    )
+                    .await
+                    {
+                        Ok(result) => Outcome::success(serde_json::to_value(result)?),
+                        Err(error) => Outcome::failure(error),
+                    },
+                );
+            }
             if let maka_protocol::plugin::Input::Remote(request) = input {
                 return Ok(
                     match super::plugin_remote::execute(
@@ -84,19 +99,6 @@ impl Host {
         }
         if maka_protocol::workhub::supports(operation) {
             return super::workhub::execute(self, operation, &input, connection_id).await;
-        }
-        if matches!(
-            operation,
-            Operation::SkillCatalogQuery
-                | Operation::SkillCatalogPreviewUpdate
-                | Operation::SkillCatalogResolvePath
-                | Operation::SkillSourceImport
-                | Operation::SkillCatalogMutate
-        ) {
-            return super::skills::sources::execute(self, operation, &input).await;
-        }
-        if operation == Operation::SkillCatalogInvocableQuery {
-            return super::skills::execute(self, connection_id, &input).await;
         }
         if maka_protocol::oauth::supports(operation) {
             return super::oauth::execute(self, connection_id, operation, &input).await;

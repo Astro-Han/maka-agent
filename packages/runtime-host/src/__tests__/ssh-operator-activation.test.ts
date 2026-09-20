@@ -152,12 +152,11 @@ test('POSIX operator commands apply environment before exec', async (t) => {
       nodePath: '/usr/bin/node',
     }),
   );
-  assert.equal(
-    runtimeHostSshOperatorRemoteCommand(
-      { kind: 'legacy_posix_executable', executablePath: '/opt/maka/operator' },
-      ['activate'],
-    ),
-    "exec '/opt/maka/operator' 'activate'",
+  assert.throws(() =>
+    decodeRuntimeHostOperatorCommand({
+      kind: 'legacy_posix_executable',
+      executablePath: '/opt/maka/operator',
+    }),
   );
 });
 

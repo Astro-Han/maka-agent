@@ -30,7 +30,7 @@ export default async function (ctx) {
           await call.http.request({ url: base });
           throw new Error('Ask invocation gained raw HTTP');
         } catch (error) {
-          if (!error.message.includes('not authorized')) throw error;
+          if (error.code !== 'revoked') throw error;
         }
         return { status: 'completed', text: 'Denied correctly' };
       }

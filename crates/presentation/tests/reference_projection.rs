@@ -58,7 +58,6 @@ fn reference_text_is_bounded_before_presentation_and_poison_does_not_publish_it(
                 Fact::InvocationOpened {
                     configuration: None,
                     input: InvocationInput::Message {
-                        skill_invocation: Default::default(),
                         source_messages: Vec::new(),
                         content: input,
                         request_fingerprint: None,

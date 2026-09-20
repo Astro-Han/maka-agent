@@ -24,7 +24,7 @@ pub mod network_update;
 mod settings;
 mod subagents;
 use crate::execution::ThinkingLevel;
-pub use codec::{decode_canonical_document, decode_canonical_snapshot, normalize_mutation};
+pub use codec::{decode_canonical_snapshot, normalize_mutation};
 use serde::{Deserialize, Serialize};
 pub use settings::*;
 pub use subagents::{SubagentPreset, SubagentProfile, SubagentSettings};

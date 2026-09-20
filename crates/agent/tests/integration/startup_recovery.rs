@@ -307,7 +307,6 @@ async fn unknown_dispatch_stays_unknown_and_blocks_next_admission_after_reopen()
                 supports_vision: false,
                 configuration: invocation::configuration(ToolMode::Direct),
                 work: maka_agent::RunWork::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     message: "continue".into(),
                     tools: Default::default(),

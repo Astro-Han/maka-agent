@@ -79,10 +79,9 @@ async fn continuation_requests_and_checkpoints_prove_selected_source_across_repa
             .unwrap();
         let request = lineage_request("main", ModelPurpose::Main, &main_source);
         let commits = log.subscribe_commits();
-        for mutation in 0..6 {
+        for mutation in 1..6 {
             let mut forged = request.event().clone();
             let Fact::ModelRequested {
-                purpose,
                 source_scope,
                 source_digest,
                 source_high_water,
@@ -94,7 +93,6 @@ async fn continuation_requests_and_checkpoints_prove_selected_source_across_repa
                 panic!()
             };
             match mutation {
-                0 => *purpose = None,
                 1 => {
                     *source_scope = LogScope::Session {
                         id: "session".into(),

@@ -54,7 +54,6 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
             Fact::InvocationOpened {
                 configuration: None,
                 input: InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "old visible message".into(),
                     request_fingerprint: None,
@@ -111,7 +110,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
             &mut view,
             &compact,
             Fact::ModelRequested {
-                purpose: Some(ModelPurpose::Summary),
+                purpose: ModelPurpose::Summary,
                 context: None,
                 step_id: "summary".into(),
                 model_id: "model".into(),
@@ -276,19 +275,8 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
             .unwrap();
         assert_eq!(acknowledged.read_state, previous.read_state);
         let canonical = log.prefix(100, 1024 * 1024).await.unwrap().digest;
-        // Force a pre-filter projection version and a leaked cached summary.
-        // Reopening must rebuild only derived rows, preserving canonical bytes.
-        db.execute(
-            "INSERT INTO catalog_messages VALUES (?, 999, 'session', 9999999999999,
-            'leaked summary', 'summary-row')",
-            [terminal.sequence as i64],
-        )
-        .unwrap();
-        db.execute(
-            "UPDATE catalog_message_watermark SET projection_version = 4",
-            [],
-        )
-        .unwrap();
+        // Reopening rebuilds the discarded projection, preserving canonical bytes.
+        db.execute("DROP TABLE catalog_messages", []).unwrap();
         db.execute("DELETE FROM transcript_rows", []).unwrap();
         db.execute("DELETE FROM transcript_progress", []).unwrap();
         log.close().await.unwrap();

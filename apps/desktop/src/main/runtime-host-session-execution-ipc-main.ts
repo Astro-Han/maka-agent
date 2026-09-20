@@ -129,7 +129,6 @@ type RuntimeHostSessionExecutionClient = Pick<
 >;
 
 /** No Skill was named, so the Host resolved none. */
-const EMPTY_SKILL_INVOCATION = { loaded: [], failed: [], receipts: [] } as const;
 const DESKTOP_MESSAGE_QUERY_MAX_ENTRIES = 4_096;
 
 async function submitMessageWithReconnect(
@@ -429,7 +428,7 @@ export function registerRuntimeHostSessionExecutionIpc(
         command.displayText ??
         (command.text.trim().length > 0
           ? command.text
-          : (command.skillIds ?? []).map((id) => `/skill:${id}`).join(" "));
+          : Object.values(command.inputSelections ?? {}).flat().join(" "));
       const inlineReferences = mergeWorkspaceFileInlineReferences({
         displayText,
         workspaceFileReferences: command.workspaceFileReferences,
@@ -455,7 +454,7 @@ export function registerRuntimeHostSessionExecutionIpc(
           ...(command.quotes ? { quotes: command.quotes } : {}),
           inlineReferences,
         },
-        ...((command.skillIds?.length ?? 0) > 0 ? { skillIds: command.skillIds } : {}),
+        ...(command.inputSelections ? { inputSelections: command.inputSelections } : {}),
         ...(command.turnOrchestration
           ? { turnOrchestration: command.turnOrchestration }
           : {}),
@@ -465,14 +464,15 @@ export function registerRuntimeHostSessionExecutionIpc(
           ok: false as const,
           reason: 'outcome_unknown' as const,
           messageId,
-          skillInvocation: EMPTY_SKILL_INVOCATION,
+          preparation: [],
         };
       }
       if (submitted.disposition === "blocked") {
         return {
           ok: false as const,
-          reason: "skill_invocation_failed" as const,
-          skillInvocation: submitted.skillInvocation,
+          reason: "input_preparation_failed" as const,
+          message: submitted.message,
+          preparation: submitted.preparation,
         };
       }
       if (submitted.disposition === "turn_started") {
@@ -484,7 +484,7 @@ export function registerRuntimeHostSessionExecutionIpc(
           turnId: submitted.turnId,
           attachments,
           inlineReferences,
-          skillInvocation: submitted.skillInvocation,
+          preparation: submitted.preparation,
         };
       }
       // The sending surface believed this Session idle; nudge it to refresh so
@@ -497,7 +497,7 @@ export function registerRuntimeHostSessionExecutionIpc(
         ...(sideConversation ? { messageId } : {}),
         attachments,
         inlineReferences,
-        skillInvocation: submitted.skillInvocation,
+        preparation: submitted.preparation,
       };
     },
   );
@@ -532,7 +532,7 @@ export function registerRuntimeHostSessionExecutionIpc(
         command.displayText ??
         (command.text.trim().length > 0
           ? command.text
-          : (command.skillIds ?? []).map((id) => `/skill:${id}`).join(" "));
+          : Object.values(command.inputSelections ?? {}).flat().join(" "));
       const inlineReferences = mergeWorkspaceFileInlineReferences({
         displayText,
         workspaceFileReferences: command.workspaceFileReferences,
@@ -555,7 +555,7 @@ export function registerRuntimeHostSessionExecutionIpc(
           ...(command.quotes ? { quotes: command.quotes } : {}),
           inlineReferences,
         },
-        ...((command.skillIds?.length ?? 0) > 0 ? { skillIds: command.skillIds } : {}),
+        ...(command.inputSelections ? { inputSelections: command.inputSelections } : {}),
         ...(command.turnOrchestration
           ? { turnOrchestration: command.turnOrchestration }
           : {}),
@@ -564,8 +564,9 @@ export function registerRuntimeHostSessionExecutionIpc(
       if (result.disposition === 'blocked') {
         return {
           ok: false as const,
-          reason: 'skill_invocation_failed' as const,
-          skillInvocation: result.skillInvocation,
+          reason: 'input_preparation_failed' as const,
+          message: result.message,
+          preparation: result.preparation,
         };
       }
       if (result.disposition === "turn_started") {
@@ -578,7 +579,7 @@ export function registerRuntimeHostSessionExecutionIpc(
           turnId: result.turnId,
           attachments,
           inlineReferences,
-          skillInvocation: result.skillInvocation,
+          preparation: result.preparation,
         };
       }
       // The submitting surface believed this Session idle when it steered;
@@ -589,7 +590,7 @@ export function registerRuntimeHostSessionExecutionIpc(
         disposition: result.disposition,
         attachments,
         inlineReferences,
-        skillInvocation: result.skillInvocation,
+        preparation: result.preparation,
       };
     },
   );

@@ -53,7 +53,6 @@ async fn target_metadata_change_invalidates_uncommitted_delegation_but_not_its_d
                 content: "user request".into(),
                 request_fingerprint: None,
                 source_messages: Vec::new(),
-                skill_invocation: None,
             },
         },
     ))

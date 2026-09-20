@@ -25,21 +25,17 @@ use futures_util::future::BoxFuture;
 use maka_plugins::{
     client::Bundle,
     contributions::Staged,
-    remote::{
-        Caller, Endpoint, Error, Handler, Method, Sessions, WorkspaceViewInput, Workspaces, key,
-    },
+    remote::{Caller, Endpoint, Error, Handler, Method, WorkspaceViewInput, key},
 };
 use maka_runtime::execution::{CollaborationMode, PermissionMode, WorkspaceTarget};
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
 
-/// Optional embedding capabilities, not a general Host handle.
+/// Plugin-local wiring assembled from public Host capabilities.
 #[derive(Clone)]
-pub struct ClientSupport {
+pub(super) struct ClientSupport {
     pub bundle: Arc<Bundle>,
-    pub sessions: Arc<dyn Sessions>,
-    pub workspaces: Arc<dyn Workspaces>,
 }
 pub const CLIENT_SERVICE: &str = "maka.skills.client";
 
@@ -90,7 +86,6 @@ pub(super) fn publish(
             support.bundle.content_digest.clone(),
             Handler::Method(Arc::new(Service {
                 skills: skills.clone(),
-                support: support.clone(),
                 source,
             })),
         );
@@ -116,13 +111,11 @@ pub(super) fn publish(
 }
 struct Service {
     skills: Skills,
-    support: ClientSupport,
     source: Source,
 }
 impl Method for Service {
     fn call(&self, input: Value, caller: Caller) -> BoxFuture<'static, Result<Value, Error>> {
         let skills = self.skills.clone();
-        let support = self.support.clone();
         let source = self.source;
         Box::pin(async move {
             let (request, view, target) = match source {
@@ -132,7 +125,7 @@ impl Method for Service {
                         .session_id
                         .clone()
                         .ok_or_else(|| Error::Invalid("Skills requires a Session".into()))?;
-                    let view = support.sessions.read(caller.clone()).await?;
+                    let view = caller.views.session().await?;
                     (request, view, InvocableTarget::Session { session_id })
                 }
                 Source::Project | Source::Path => {
@@ -173,7 +166,7 @@ impl Method for Service {
                     };
                     let permission_mode = input.permission_mode;
                     let collaboration_mode = input.collaboration_mode;
-                    let view = support.workspaces.read(input, caller.clone()).await?;
+                    let view = caller.views.workspace(input).await?;
                     let target = InvocableTarget::NewSession {
                         context: WorkspaceContext {
                             workspace: view.workspace.target.clone(),
@@ -208,11 +201,16 @@ fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, Error> {
     serde_json::from_value(value).map_err(|error| Error::Invalid(error.to_string()))
 }
 fn encode(value: impl serde::Serialize) -> Result<Value, Error> {
-    serde_json::to_value(value).map_err(failure)
+    serde_json::to_value(value).map_err(|error| Error::Provider(error.to_string()))
 }
 fn message(error: impl ToString) -> String {
     error.to_string()
 }
-fn failure(error: impl ToString) -> Error {
-    Error::Provider(error.to_string())
+fn failure(error: super::Error) -> Error {
+    match error {
+        super::Error::Invalid(message) => Error::Invalid(message),
+        super::Error::Retired => Error::Retired,
+        super::Error::OutcomeUnknown(message) => Error::OutcomeUnknown(message),
+        other => Error::Provider(other.to_string()),
+    }
 }

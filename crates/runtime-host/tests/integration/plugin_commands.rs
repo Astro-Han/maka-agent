@@ -178,7 +178,7 @@ async fn scenario() {
             instructions: Some(
                 "Child-specific durable instructions.\nPreserve this second line.".into(),
             ),
-            target: Some(maka_plugins::execution::ChildTarget::Model {
+            target: Some(maka_plugins::execution::Target::Model {
                 model: model.clone(),
                 thinking_level: None,
             }),

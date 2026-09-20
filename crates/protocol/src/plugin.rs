@@ -17,7 +17,9 @@
  * under the License.
  */
 
+mod authorization;
 mod client;
+pub use authorization::*;
 mod input;
 mod output;
 mod projection;
@@ -41,13 +43,16 @@ pub const ERRORS: &[OperationErrorCode] = &[
     OperationErrorCode::SourceUnreadable,
     OperationErrorCode::PersistenceFailed,
     OperationErrorCode::CommitOutcomeUnknown,
+    OperationErrorCode::OutcomeUnknown,
     OperationErrorCode::InternalFailure,
+    OperationErrorCode::Unauthorized,
 ];
 
 pub fn supports(operation: Operation) -> bool {
     matches!(
         operation,
         Operation::PluginClientQuery
+            | Operation::PluginAuthorization
             | Operation::PluginRemote
             | Operation::PluginPlatformQuery
             | Operation::PluginPlatformReconcile

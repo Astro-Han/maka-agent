@@ -67,7 +67,6 @@ async fn fenced_bootstrap_and_bounded_catchup_survive_coalescing_and_reopen() {
         Fact::InvocationOpened {
             configuration: None,
             input: maka_runtime::input::InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "one".into(),
                 request_fingerprint: None,
@@ -209,7 +208,6 @@ async fn active_stream_seeds_are_fenced_bounded_and_survive_reopen() {
             (event(Fact::InvocationOpened {
                 configuration: None,
                 input: maka_runtime::input::InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "".into(),
                     request_fingerprint: None,
@@ -251,7 +249,7 @@ async fn active_stream_seeds_are_fenced_bounded_and_survive_reopen() {
         log.append(
             &EventWrite::plain(
                 (event(Fact::ModelRequested {
-                    purpose: None,
+                    purpose: maka_runtime::context::ModelPurpose::Main,
                     context: None,
                     checkpoint_event_id: None,
                     step_id: step.into(),

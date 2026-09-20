@@ -29,7 +29,6 @@ import type { CreateSessionInput, TurnOrchestration } from '@maka/core/runtime-i
 import type { UserQuestionResponse } from '@maka/core/user-question';
 import type { InteractionFormResponse } from '@maka/core/interaction';
 import type { ContextDiagnostics } from '@maka/runtime/context-diagnostics';
-import type { SkillInvocationResult } from '@maka/core/skill-invocation';
 import type {
   GoalControlAction,
   GoalProjection,
@@ -91,7 +90,7 @@ export interface MakaPreparedSessionTurn {
   runId?: string;
   events: AsyncIterable<SessionEvent>;
   summary?: SessionSummary;
-  skillInvocation?: SkillInvocationResult;
+  preparation?: import('@maka/runtime-host/protocol').InputReceipt[];
 }
 
 export interface MakaAttachedSessionTurn extends MakaPreparedSessionTurn {
@@ -117,23 +116,6 @@ export interface MakaSubmitMessageOptions {
 export interface MakaRetractedMessages {
   text: string;
   messageIds: readonly string[];
-}
-
-/**
- * Why Runtime Host refused to open a Turn for an explicit Skill invocation.
- * `turn.start`'s only remaining caller is headless `maka run`, which reports
- * this as an ordinary failure, so the reasons belong in the message rather
- * than in a payload nothing reads.
- */
-export function skillInvocationBlockedMessage(skillInvocation: SkillInvocationResult): string {
-  const reasons = skillInvocation.failed.map((failure) =>
-    failure.reason === 'too_many_requests'
-      ? `more than ${failure.requestLimit} Skill requests`
-      : `/skill:${failure.request} (${failure.reason.replaceAll('_', ' ')})`,
-  );
-  return reasons.length > 0
-    ? `Could not resolve the Skill this Turn asked for: ${reasons.join(', ')}`
-    : 'Explicit Skill invocation could not be resolved';
 }
 
 export interface MakaUserCommand {

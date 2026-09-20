@@ -173,7 +173,7 @@ describe('permission response IPC boundary', () => {
         turnId: 'turn-1',
         text: 'review @packages/ui/src/chat turn.tsx',
         displayText: 'review @packages/ui/src/chat turn.tsx',
-        skillIds: ['weekly-report', 'project:maka:writer'],
+        inputSelections: { "maka.skills": ['weekly-report', 'project:maka:writer'] },
         attachmentItems: [{ approvalId: 'a', name: 'n' }],
         retainedAttachments: [
           {
@@ -207,7 +207,7 @@ describe('permission response IPC boundary', () => {
         turnId: 'turn-1',
         text: 'review @packages/ui/src/chat turn.tsx',
         displayText: 'review @packages/ui/src/chat turn.tsx',
-        skillIds: ['weekly-report', 'project:maka:writer'],
+        inputSelections: { "maka.skills": ['weekly-report', 'project:maka:writer'] },
         attachmentItems: [{ approvalId: 'a', name: 'n' }],
         retainedAttachments: [
           {
@@ -233,10 +233,10 @@ describe('permission response IPC boundary', () => {
       },
     );
     assert.equal(normalizeSessionSendCommand({ type: 'stop' }), undefined);
-    assert.deepEqual(normalizeSessionSendCommand({ type: 'send', text: '', skillIds: ['writer'] }), {
+    assert.deepEqual(normalizeSessionSendCommand({ type: 'send', text: '', inputSelections: { "maka.skills": ['writer'] } }), {
       type: 'send',
       text: '',
-      skillIds: ['writer'],
+      inputSelections: { "maka.skills": ['writer'] },
     });
   });
 
@@ -256,7 +256,7 @@ describe('permission response IPC boundary', () => {
       // base64 bytes before IPC, and main resolves only the encoded shapes.
       { type: 'send', text: 'hello', attachmentItems: [{ file: {} }] },
       { type: 'send', text: 'hello', turnId: 1 },
-      { type: 'send', text: 'hello', skillIds: ['/bad'] },
+      { type: 'send', text: 'hello', inputSelections: { "maka.skills": ['bad\nselector'] } },
       { type: 'send', text: 'hello', turnOrchestration: { mode: 'swarm', source: 'prompt' } },
       { type: 'send', text: 'hello', quotes: {} },
       { type: 'send', text: 'hello', quotes: Array(17).fill({ text: 'x' }) },

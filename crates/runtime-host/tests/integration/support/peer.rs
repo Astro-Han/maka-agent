@@ -66,8 +66,7 @@ impl Peer {
         };
         peer.send
             .send(
-                json!({"kind":"hello","clientInstanceId":id,"surface":"desktop",
-            "activitySnapshotVersion":2,"protocolMin":0,"protocolMax":0,
+                json!({"kind":"hello","clientInstanceId":id,            "protocolMin":0,"protocolMax":0,
             "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH,"compositionId":"maka.interactive"}),
             )
             .unwrap();

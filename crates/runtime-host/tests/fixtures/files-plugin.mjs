@@ -99,7 +99,7 @@ export default async function (ctx) {
         const glob = await call.files.glob({ pattern: '*.txt' });
         if (!glob.files.includes('result.txt')) throw new Error('glob omitted file');
         const image = await call.files.read({ path: 'image.png' });
-        if (!('kind' in image) || image.kind !== 'image' || image.ref.kind !== 'session_file') {
+        if (!('ref' in image) || image.kind !== 'image' || image.ref.kind !== 'session_file') {
           throw new Error('image was not persisted before SDK delivery');
         }
         // Even a caught/abandoned operation remains owned until durable settlement.

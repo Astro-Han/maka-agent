@@ -26,7 +26,10 @@ import {
 } from './codec.js';
 import { invalidProtocolFrame } from './errors.js';
 import { defineOperation } from './operation-spec.js';
-import { decodeSessionCatalogItem, type SessionCatalogItem } from './session-catalog.js';
+import {
+  decodeSessionCatalogProjection,
+  type SessionCatalogProjection,
+} from './session-catalog.js';
 
 const SESSION_COPY_ERRORS = [
   'host_not_ready',
@@ -57,7 +60,7 @@ export interface SessionConversationCopyInput {
 export type SessionConversationCopyResult =
   | {
       readonly kind: 'committed';
-      readonly session: SessionCatalogItem;
+      readonly session: SessionCatalogProjection;
     }
   | {
       readonly kind: 'source_revision_conflict';
@@ -189,7 +192,7 @@ export function decodeSessionConversationCopyResult(value: unknown): SessionConv
     ]);
     return {
       kind: 'committed',
-      session: decodeSessionCatalogItem(exact.session),
+      session: decodeSessionCatalogProjection(exact.session),
     };
   }
   if (result.kind === 'source_revision_conflict') {

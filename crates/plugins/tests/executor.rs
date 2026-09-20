@@ -43,6 +43,10 @@ impl Provider for Adapter {
         let started = self.started.clone();
         let cooperative = self.cooperative;
         Box::pin(async move {
+            let scope = context.call.as_ref().expect("embedding-issued call scope");
+            assert_eq!(scope.identity.agent().unwrap().session_id, "session");
+            let mut resource = scope.resources.reserve().unwrap();
+            resource.start();
             context
                 .output
                 .emit(Output::OutputDelta {
@@ -54,6 +58,8 @@ impl Provider for Adapter {
                 std::future::pending::<()>().await;
             }
             context.cancellation.cancelled().await;
+            assert!(scope.cancellation.is_cancelled());
+            resource.complete(Ok(()));
             assert!(matches!(
                 context
                     .output
@@ -110,7 +116,9 @@ async fn retirement_cancels_exact_executor_and_keeps_settlement_lease_or_fences_
             .entries
             .remove("example")
             .unwrap();
-        let binding = Binding::new("session".into(), contribution).unwrap();
+        let binding = Binding::new("session".into(), contribution)
+            .unwrap()
+            .with_calls(maka_plugins::call::Issuer::default());
         let request = Request {
             invocation: Invocation {
                 session_id: "session".into(),

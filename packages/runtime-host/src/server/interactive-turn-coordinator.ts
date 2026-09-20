@@ -35,12 +35,6 @@ import type {
   TurnStartOutcome,
 } from './root-turn-coordinator.js';
 
-const EMPTY_SKILL_INVOCATION: SkillInvocationResult = {
-  loaded: [],
-  failed: [],
-  receipts: [],
-};
-
 type InteractiveTurnExecutionPort = Pick<
   RootTurnCoordinator,
   'prepareHostedSkillInvocationContent' | 'startInteractiveRootMessage'
@@ -76,7 +70,10 @@ export class HostInteractiveTurnCoordinator {
 
   async #start(input: TurnStartInput, context: ConnectionContext): Promise<TurnStartOutcome> {
     const content = normalizeMessageContent(input.content);
-    const skillIds = input.skillIds ?? [];
+    if (Object.keys(input.inputSelections ?? {}).some((name) => name !== 'maka.skills')) {
+      return operationConflict('Input preparation provider is not installed');
+    }
+    const skillIds = input.inputSelections?.['maka.skills'] ?? [];
     if (skillIds.length > 0 || parseSkillInvocationTokens(content.text).length > 0) {
       return this.#startSkillInvocation(
         input,
@@ -110,7 +107,7 @@ export class HostInteractiveTurnCoordinator {
           result: {
             kind: 'started',
             turn: outcome.result,
-            skillInvocation: EMPTY_SKILL_INVOCATION,
+            preparation: [],
           },
         }
       : outcome;
@@ -166,10 +163,7 @@ export class HostInteractiveTurnCoordinator {
     const outcome = await this.#executions.startInteractiveRootMessage(request, context);
     const rejection = await this.#turns.readRootTurnStartRejection(input.sessionId, input.turnId);
     if (rejection && isDeepStrictEqual(rejection.execution, execution)) {
-      return {
-        ok: true,
-        result: { kind: 'blocked', skillInvocation: rejection.skillInvocation },
-      };
+      return operationConflict('Input preparation was rejected');
     }
     if (!outcome.ok) return outcome;
     const admission = await this.#turns.readRootTurnAdmission(input.sessionId, input.turnId);
@@ -183,7 +177,7 @@ export class HostInteractiveTurnCoordinator {
       result: {
         kind: 'started',
         turn: outcome.result,
-        skillInvocation: admission.skillInvocation ?? EMPTY_SKILL_INVOCATION,
+        preparation: [],
       },
     };
   }

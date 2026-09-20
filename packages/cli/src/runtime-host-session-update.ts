@@ -18,19 +18,11 @@
  */
 
 import type { DirectRequestOperationKey, RuntimeHostConnection } from '@maka/runtime-host/client';
-import type {
-  SessionCatalogItem,
-  SessionCatalogProjection,
-  SessionUpdateResult,
-} from '@maka/runtime-host/protocol';
+import type { SessionCatalogProjection, SessionUpdateResult } from '@maka/runtime-host/protocol';
 
 const MAX_UPDATE_ATTEMPTS = 3;
 
-type RuntimeHostSessionUpdateErrorReason =
-  | 'invalid_projection'
-  | 'not_found'
-  | 'unsupported_session_projection'
-  | 'revision_conflict';
+type RuntimeHostSessionUpdateErrorReason = 'invalid_projection' | 'not_found' | 'revision_conflict';
 
 export class RuntimeHostSessionUpdateError extends Error {
   readonly name = 'RuntimeHostSessionUpdateError';
@@ -59,9 +51,7 @@ export async function getRuntimeHostSession(
       sessionId,
     );
   }
-  return result.session === null
-    ? null
-    : requireRuntimeHostSessionProjection(result.session, 'session.catalog.query');
+  return result.session;
 }
 
 export async function updateRuntimeHostSession(
@@ -82,7 +72,7 @@ export async function updateRuntimeHostSession(
     options.assertRequestAllowed?.();
     const result = await update(current);
     if (result.kind === 'committed') {
-      return requireRuntimeHostSessionProjection(result.session, options.operation);
+      return result.session;
     }
   }
   throw new RuntimeHostSessionUpdateError(
@@ -91,12 +81,4 @@ export async function updateRuntimeHostSession(
     sessionId,
     MAX_UPDATE_ATTEMPTS,
   );
-}
-
-export function requireRuntimeHostSessionProjection(
-  session: SessionCatalogItem,
-  operation: DirectRequestOperationKey = 'session.catalog.query',
-): SessionCatalogProjection {
-  if (!('kind' in session)) return session;
-  throw new RuntimeHostSessionUpdateError(operation, 'unsupported_session_projection', session.id);
 }

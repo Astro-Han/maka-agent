@@ -145,7 +145,7 @@ export async function verifyTurns(connection, sessionId, fixture, connectSibling
   const first = await firstReferencedTurn(connection, sessionId, fixture);
   const started = await request('turn.start', first);
   assert.equal(started.kind, 'started');
-  assert.deepEqual(started.skillInvocation, { loaded: [], failed: [], receipts: [] });
+  assert.deepEqual(started.preparation, []);
   assert.equal(started.turn.sessionId, sessionId);
   assert.notEqual(started.turn.runId, started.turn.turnId);
   const terminal = await waitTerminal(request, sessionId, first.turnId);

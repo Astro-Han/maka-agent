@@ -21,7 +21,7 @@ use crate::session::SessionConfiguration;
 use maka_plugins::{
     composition::Scope,
     contributions::Catalog,
-    execution::{ChildTarget, CreateChild},
+    execution::{CreateChild, Target as ExecutionTarget},
 };
 use maka_runtime::{
     configuration::policy::{SubagentPreset, SubagentProfile},
@@ -195,7 +195,7 @@ impl Definitions {
                 (
                     preset.profile.into(),
                     preset.name.clone(),
-                    Some(ChildTarget::Model {
+                    Some(ExecutionTarget::Model {
                         model: Self::preset_model(preset, &preferences.models)?,
                         thinking_level: preset.thinking_level,
                     }),
@@ -216,7 +216,7 @@ impl Definitions {
             if !matches!(profile, Profile::General) {
                 return Err("External executors cannot enforce native agent tool profiles".into());
             }
-            Some(ChildTarget::Executor {
+            Some(ExecutionTarget::Executor {
                 executor_id: executor.clone().try_into().map_err(super::error)?,
             })
         } else {

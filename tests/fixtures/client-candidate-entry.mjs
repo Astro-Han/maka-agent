@@ -57,7 +57,8 @@ try {
   assert.equal(diagnostics.platform, process.platform);
   assert.equal(diagnostics.arch, process.arch);
   assert.equal(diagnostics.osRelease, osRelease());
-  assert.equal(diagnostics.nodeVersion, 'not applicable (Rust)');
+  assert.equal(Object.hasOwn(diagnostics, 'nodeVersion'), false);
+  assert.equal(typeof diagnostics.drainResidencies, 'number');
   assert.equal(diagnostics.activeOperations, 0, 'queries are not active commands');
   assert.equal(diagnostics.activeResidencies, 0);
   assert.equal(diagnostics.upgradeBlockingActivity, false);

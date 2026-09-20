@@ -47,7 +47,6 @@ async fn oversized_turn_reports_incomplete_boundary_without_losing_rows() {
                 Fact::InvocationOpened {
                     configuration: None,
                     input: InvocationInput::Message {
-                        skill_invocation: Default::default(),
                         source_messages: Vec::new(),
                         content: "text".into(),
                         request_fingerprint: None,

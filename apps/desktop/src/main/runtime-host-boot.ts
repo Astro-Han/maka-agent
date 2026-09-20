@@ -231,7 +231,6 @@ import {
 } from "./runtime-host-ssh-terminal.js";
 import {
   runDesktopRuntimeHostWslManagement,
-  runDesktopRuntimeHostWslSetup,
   resolveDesktopRuntimeHostWslTarget,
   runNativeRuntimeHostWslSetup,
   prepareNativeRuntimeHostWslPackage,
@@ -261,6 +260,7 @@ import { RuntimeHostOAuthPresentation } from "./runtime-host-oauth-presentation.
 import { registerRuntimeHostPermissionsIpc } from "./runtime-host-permissions-ipc-main.js";
 import { registerRuntimeHostRendererIpc } from "./runtime-host-renderer-ipc-main.js";
 import { registerClientPluginRemoteIpc } from './client-plugin-remote-ipc.js';
+import { pluginAuthorizationDialog } from './plugin-authorization-dialog.js';
 import { registerRuntimeHostSearchIpc } from "./runtime-host-search-ipc-main.js";
 import { createRuntimeHostProjectCatalog } from "./runtime-host-project-catalog.js";
 import { createRuntimeHostDefaultRecovery } from "./runtime-host-default-recovery.js";
@@ -793,18 +793,14 @@ const runtimeHostOnboarding = createDesktopRuntimeHostOnboarding({
   ipcMain,
   clientInstanceId: runtimeHostClientInstanceId,
   profiles: runtimeHostProfileService,
-  ...(!isE2e ? { nativeSetup: {
+  nativeSetup: {
     resolvePackage: resolveNativePackage,
     ssh: runtimeHostSshTerminal.runNativeSetup,
     wsl: runNativeRuntimeHostWslSetup,
-  } } : {}),
-  runSetup: runtimeHostSshTerminal.runSetup,
-  runWslSetup: runDesktopRuntimeHostWslSetup,
+  },
   resolveWslTargetIdentity: resolveDesktopRuntimeHostWslTarget,
   listWslDistributions: listRuntimeHostWslDistributions,
-  setupPackageMode: runtimeHostSetupPackage.mode,
   resolveSshTargetIdentity: runtimeHostSshTerminal.resolveTargetIdentity,
-  resolveSetupPackage: runtimeHostSetupPackage.resolve,
   send: (snapshot) =>
     mainWindowController.send("runtime-host-onboarding:changed", snapshot),
 });
@@ -1309,7 +1305,7 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
               const target = runtimePolicyTargetsByEpoch.get(scope.targetEpoch);
               if (!target?.isActive()) throw new Error('Preview target is no longer active');
               return managedArtifactPreview.prepare(scope.targetEpoch, target.client, sessionId, artifactId, signal);
-            }),
+            }).map(tool => ({ context: 'session' as const, tool })),
           },
           {
             offerId: "desktop_settings",
@@ -1818,6 +1814,15 @@ function registerHostClientIpc(
     ipcMain: scopedIpc, client,
     ownsRenderer: (contents) => mainWindowController.ownsRenderer(contents),
     report: (error) => console.error('[plugins] Remote cleanup failed:', error),
+    authorization: {
+      validate: async (identity) => { await client.request('plugin.client.query', {kind:'bundle',entryId:identity.entryId,activation:identity.activation,clientDigest:identity.clientDigest,offset:0}); },
+      confirm: async (input, signal) => {
+        const locale = desktopLocale.current();
+        const result = await showDesktopMessageBox(pluginAuthorizationDialog(input, locale, signal), {locale});
+        return result.response === 1;
+      },
+      request: (input) => client.request('plugin.authorization', input),
+    },
     files: usesHostWorkspace ? undefined : {
       validate: async (input) => { await client.request('plugin.client.query', input); },
       pick: async () => {

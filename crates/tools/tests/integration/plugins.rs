@@ -25,7 +25,10 @@ use maka_plugins::{
     contributions::{Catalog, Staged},
     fiber::Fiber,
 };
-use maka_runtime::{tool_call::ToolRejection, tools::ToolCallContext};
+use maka_runtime::{
+    tool_call::ToolRejection,
+    tools::{ToolCallContext, ToolExecutor, ToolFuture},
+};
 use maka_tools::{plugins::PluginTool, *};
 use serde_json::json;
 use std::{
@@ -35,7 +38,37 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
-fn registration(schema: serde_json::Value, effect: Arc<preflight::Effect>) -> PluginTool {
+struct ScopedEffect {
+    effect: Arc<preflight::Effect>,
+    issuer: maka_plugins::call::Issuer,
+}
+impl ToolExecutor for ScopedEffect {
+    fn names(&self) -> Vec<String> {
+        self.effect.names()
+    }
+    fn invoke(
+        &self,
+        name: String,
+        input: serde_json::Value,
+        cancellation: CancellationToken,
+    ) -> ToolFuture {
+        let effect = self.effect.clone();
+        let issuer = self.issuer.clone();
+        Box::pin(async move {
+            let scope =
+                maka_plugins::call::current().expect("scope exists only after tool admission");
+            assert!(issuer.owns(&scope));
+            assert!(scope.identity.operation_id().is_some());
+            effect.invoke(name, input, cancellation).await
+        })
+    }
+}
+
+fn registration(
+    schema: serde_json::Value,
+    effect: Arc<preflight::Effect>,
+    issuer: maka_plugins::call::Issuer,
+) -> PluginTool {
     PluginTool::new(ToolRegistration {
         definition: ToolDefinition {
             name: "echo".into(),
@@ -44,7 +77,7 @@ fn registration(schema: serde_json::Value, effect: Arc<preflight::Effect>) -> Pl
         },
         nesting: ToolNesting::Nestable,
         semantics: ToolSemantics::Parallel,
-        handler: ToolHandler::Immediate(effect),
+        handler: ToolHandler::Immediate(Arc::new(ScopedEffect { effect, issuer })),
     })
     .unwrap()
 }
@@ -59,7 +92,8 @@ async fn request_capture_refreshes_plugins_without_retargeting_old_handlers_or_w
     );
     let invocation = preflight::invocation("plugins");
     let scope = Scope::Session(invocation.session_id.clone());
-    let catalog = Catalog::default();
+    let issuer = maka_plugins::call::Issuer::default();
+    let catalog = Catalog::with_calls(issuer.clone());
     let core = ToolCatalog::default()
         .with_plugins(catalog.clone(), scope.clone(), None)
         .unwrap();
@@ -85,7 +119,11 @@ async fn request_capture_refreshes_plugins_without_retargeting_old_handlers_or_w
     staged
         .insert(
             "echo",
-            registration(json!({"type":"string"}), first_effect.clone()),
+            registration(
+                json!({"type":"string"}),
+                first_effect.clone(),
+                issuer.clone(),
+            ),
         )
         .unwrap();
     catalog.publish(&first, staged).unwrap();
@@ -114,7 +152,11 @@ async fn request_capture_refreshes_plugins_without_retargeting_old_handlers_or_w
     staged
         .insert(
             "echo",
-            registration(json!({"type":"integer"}), second_effect.clone()),
+            registration(
+                json!({"type":"integer"}),
+                second_effect.clone(),
+                issuer.clone(),
+            ),
         )
         .unwrap();
     catalog.publish(&second, staged).unwrap();

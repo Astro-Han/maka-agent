@@ -80,7 +80,6 @@ pub fn input(base: &str, id: &str, compact: bool) -> RunInput {
             RunWork::ContextCompact
         } else {
             RunWork::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 message: format!("question-{id}").into(),
                 tools: Default::default(),

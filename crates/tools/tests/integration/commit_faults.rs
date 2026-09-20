@@ -129,7 +129,6 @@ async fn seed(log: &EventLog, invocation: &Invocation, call: &ModelToolCall) {
     append(Fact::InvocationOpened {
         configuration: None,
         input: InvocationInput::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             content: "execute the fixture".into(),
             request_fingerprint: None,
@@ -156,7 +155,7 @@ async fn seed(log: &EventLog, invocation: &Invocation, call: &ModelToolCall) {
         input_digest: "fixture".into(),
         route_identity: "fixture".into(),
         checkpoint_event_id: None,
-        purpose: None,
+        purpose: maka_runtime::context::ModelPurpose::Main,
         context: None,
     })
     .await;

@@ -55,7 +55,6 @@ pub fn opening() -> Fact {
         input: InvocationInput::Message {
             content: "opening".into(),
             request_fingerprint: None,
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
         },
     }
@@ -82,7 +81,6 @@ pub fn admission(
                 Placement::CurrentTurn
             },
             disposition,
-            skill_invocation: Default::default(),
             submitted_intent: None,
         },
     }

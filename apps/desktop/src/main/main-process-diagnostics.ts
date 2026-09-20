@@ -493,7 +493,7 @@ export function formatDesktopDiagnosticReport(
       `Protocol: v${host.protocolVersion} · compatibility ${host.compatibilityEpoch}`,
       `State: ${host.state}`,
       `Process: ${host.pid} · uptime ${host.processUptimeSeconds}s`,
-      `Runtime: Node ${host.nodeVersion} · ${host.platform} ${host.osRelease} (${host.arch})`,
+      `Platform: ${host.platform} ${host.osRelease} (${host.arch})`,
       `Activity: ${host.connections} connections · ${host.activeOperations} operations · ${host.activeResidencies} residencies`,
       `Recent Runtime Host logs (${host.logs.length})`,
       ...(host.logs.length > 0 ? host.logs : ['<none captured>']),

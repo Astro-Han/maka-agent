@@ -18,7 +18,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -26,7 +26,6 @@ import { deferred } from "@maka/core/test-only/async-primitives";
 import {
   createClientRuntimeHostCredentialStore,
   createClientRuntimeHostProfileCatalog,
-  createRuntimeHostProfileCredentialStore,
   encodeRuntimeHostOwnerConnectionCode,
   LOCAL_RUNTIME_HOST_PROFILE,
   RuntimeHostPermanentReconnectError,
@@ -110,49 +109,7 @@ afterEach(async () => {
   );
 });
 
-for (const hasDeployment of [false, true]) {
-  test(`recovers an abandoned deployment lock before loading Host choices (saved=${hasDeployment})`, async () => {
-    const root = await clientRoot();
-    const catalog = createClientRuntimeHostProfileCatalog(root);
-    const managedServices = createDesktopRuntimeHostManagedServiceStore(root);
-    if (hasDeployment) {
-      await catalog.create(MANAGED_PROFILE, "token");
-      await managedServices.save(MANAGED_PROFILE, MANAGED_SERVICE);
-    }
-    const before = await managedServices.read();
-    await mkdir(join(root, "runtime-host-deployments.json.lock"));
-
-    const startup = await resolveDesktopRuntimeHostStartup(root, { catalog });
-    const service = createDesktopRuntimeHostProfileService({
-      clientDataRoot: root,
-      startup,
-      catalog,
-      managedServices,
-      states: () => [ready({ profile: LOCAL_RUNTIME_HOST_PROFILE })],
-      enable: async () => undefined,
-      disable: async () => undefined,
-      setDefault: () => undefined,
-      finalizePairing: async () => undefined,
-    });
-    const snapshot = await service.getSnapshot();
-    assert.equal(snapshot.defaultProfileId, LOCAL_RUNTIME_HOST_PROFILE.id);
-    assert.equal(snapshot.entries[0]?.readiness, "ready");
-    assert.equal(snapshot.entries.length, hasDeployment ? 2 : 1);
-    assert.deepEqual(await managedServices.read(), before);
-    if (hasDeployment) assert.equal(snapshot.entries[1]?.managedService, true);
-  });
-}
-
-test("does not discard unexpected contents in an abandoned deployment lock", async () => {
-  const root = await clientRoot();
-  const lock = join(root, "runtime-host-deployments.json.lock");
-  await mkdir(lock);
-  await writeFile(join(lock, "unexpected"), "retain me");
-  await assert.rejects(resolveDesktopRuntimeHostStartup(root), { code: "ENOTEMPTY" });
-  assert.equal(await readFile(join(lock, "unexpected"), "utf8"), "retain me");
-});
-
-test("migrates the former selected Host into enabled and default preferences", async () => {
+test("preserves unsupported preferences and reports their read failure", async () => {
   const root = await clientRoot();
   await createClientRuntimeHostProfileCatalog(root).create(PROFILE, "token");
   await writeFile(
@@ -162,56 +119,9 @@ test("migrates the former selected Host into enabled and default preferences", a
 
   const startup = await resolveDesktopRuntimeHostStartup(root);
 
-  assert.equal(startup.preferences.defaultProfileId, PROFILE.id);
-  assert.deepEqual(startup.preferences.enabledRemoteProfileIds, [PROFILE.id]);
-  assert.equal(startup.remotes[0]?.profile.id, PROFILE.id);
-  assert.equal(
-    JSON.parse(await readFile(join(root, "runtime-host-profile-selection.json"), "utf8"))
-      .schemaVersion,
-    2,
-  );
-});
-
-test('removes obsolete experimental Guest profiles and pairing intents at startup', async () => {
-  const root = await clientRoot();
-  const credentials = createClientRuntimeHostCredentialStore(root);
-  const catalog = createClientRuntimeHostProfileCatalog(root, credentials);
-  const guest = { ...PROFILE, id: 'shared-obsolete', access: 'session_guest' as const };
-  await createRuntimeHostProfileCredentialStore(credentials).set(guest, {
-    credential: 'guest-token',
-    profileIncarnationId: 'guest-incarnation',
-  });
-  await writeFile(
-    join(root, 'runtime-host-profiles.json'),
-    `${JSON.stringify({ schemaVersion: 3, profiles: [guest] })}\n`,
-  );
-  await writeFile(
-    join(root, 'runtime-host-profile-selection.json'),
-    `${JSON.stringify({
-      schemaVersion: 2,
-      defaultProfileId: guest.id,
-      enabledRemoteProfileIds: [guest.id],
-    })}\n`,
-  );
-  await writeDesktopRuntimeHostPairingIntents(credentials, [
-    createDesktopRuntimeHostPairingIntent({
-      target: { profile: guest, credential: 'guest-token' },
-      wasEnabled: true,
-    }),
-  ]);
-
-  const startup = await resolveDesktopRuntimeHostStartup(root, {
-    catalog,
-    credentialStore: credentials,
-  });
-
-  assert.deepEqual((await catalog.read()).profiles, []);
-  assert.deepEqual(startup.pairingIntents, []);
-  assert.deepEqual(startup.preferences, {
-    schemaVersion: 2,
-    defaultProfileId: 'local',
-    enabledRemoteProfileIds: [],
-  });
+  assert.ok(startup.preferencesReadFailure);
+  assert.equal(startup.preferences.defaultProfileId, 'local');
+  assert.equal(JSON.parse(await readFile(join(root, 'runtime-host-profile-selection.json'), 'utf8')).schemaVersion, 1);
 });
 
 test("starts Local and preserves remote preferences when the profile catalog is unreadable", async () => {
@@ -343,7 +253,8 @@ test("reuses the existing WSL profile when the same managed Host is added again"
     provider: { kind: "wsl" as const, distribution: "Ubuntu-24.04" },
     rootId: ROOT_ID,
     operator: {
-      kind: "legacy_posix_executable" as const,
+      kind: "native" as const,
+      platform: "posix" as const,
       executablePath: "/home/operator/.local/share/Maka/runtime-host-services/operator",
     },
   };
@@ -1124,6 +1035,7 @@ test("does not rotate a managed credential after its profile target changes", as
     deployment: {
       id: "e".repeat(64),
       rootPath: "/srv/other-maka",
+      deploymentId: "22222222-2222-4222-8222-222222222222",
     },
   };
   await catalog.remove(MANAGED_PROFILE.id);
@@ -1357,8 +1269,6 @@ test('discarding a committed rotation unlocks the restored local profile', async
   );
 
   restoringOldCredential = true;
-  const abandonedLock = join(root, 'runtime-host-profiles.json.lock');
-  await mkdir(abandonedLock);
   const discarded = await service.discardPairing(MANAGED_PROFILE.id);
   assert.equal(discarded.pairingRecoveryPending, undefined);
   assert.equal((await catalog.resolve(MANAGED_PROFILE.id)).credential, 'old-token');
@@ -1575,7 +1485,7 @@ test("keeps existing Hosts available while corrupt pairing recovery awaits resol
   assert.equal((await service.setEnabled(PROFILE.id, false)).entries[1]?.enabled, false);
 });
 
-test("migrates an interrupted SSH pairing from the released operator path", async () => {
+test("rejects an interrupted pairing with an obsolete operator path", async () => {
   const root = await clientRoot();
   const credentialStore = createClientRuntimeHostCredentialStore(root);
   await credentialStore.setSecret(
@@ -1607,18 +1517,8 @@ test("migrates an interrupted SSH pairing from the released operator path", asyn
 
   const startup = await resolveDesktopRuntimeHostStartup(root, { credentialStore });
 
-  assert.equal(startup.pairingReadFailure, undefined);
-  assert.deepEqual(startup.pairingIntents[0]?.target.profile.transport, {
-    kind: "ssh",
-    destination: "operator@example.com",
-    activation: {
-      kind: "ssh_operator",
-      operator: {
-        kind: "legacy_posix_executable",
-        executablePath: "/home/operator/.local/share/maka/operator",
-      },
-    },
-  });
+  assert.ok(startup.pairingReadFailure);
+  assert.deepEqual(startup.pairingIntents, []);
 });
 
 test("retries pairing recovery before discarding it", async () => {

@@ -19,22 +19,17 @@
 
 mod bridge;
 mod callbacks;
-mod effects;
 mod executor;
-mod http;
 mod input;
 mod invocation;
-mod process;
 mod registration;
 mod remote;
-mod terminal;
 
 use super::PackageLoader;
 use crate::execution::Executions;
 use futures_util::future::BoxFuture;
 use maka_js_runtime::plugin::{Lifecycle, Limits, Module, Pool};
 use maka_plugins::{
-    composition::Scope,
     contributions::Staged,
     fiber::Effect,
     kernel::{Definition, Plugin, PluginContext},
@@ -47,14 +42,12 @@ use std::time::Duration;
 pub(crate) struct Loader {
     pool: Arc<Pool>,
     executions: Weak<Executions>,
-    root: String,
 }
 impl Loader {
-    pub fn new(executions: &Arc<Executions>, root: String) -> Result<Self, maka_plugins::Error> {
+    pub fn new(executions: &Arc<Executions>) -> Result<Self, maka_plugins::Error> {
         Ok(Self {
             pool: Arc::new(Pool::new(Limits::default(), 4).map_err(invalid)?),
             executions: Arc::downgrade(executions),
-            root,
         })
     }
 }
@@ -72,7 +65,6 @@ impl PackageLoader for Loader {
                 Ok::<Arc<dyn Plugin>, maka_plugins::Error>(Arc::new(JavaScript {
                     pool: self.pool.clone(),
                     executions: self.executions.clone(),
-                    root: self.root.clone(),
                     source: source.into(),
                     name: entry.entry.clone(),
                     mode: entry.vm,
@@ -106,7 +98,6 @@ struct JavaScript {
     remote: Arc<remote::Source>,
     pool: Arc<Pool>,
     executions: Weak<Executions>,
-    root: String,
     source: String,
     name: String,
     generation: String,
@@ -121,8 +112,7 @@ impl Plugin for JavaScript {
         let pool = self.pool.clone();
         let executions = self.executions.clone();
         let remote = self.remote.clone();
-        let (root, source, name, generation, mode) = (
-            self.root.clone(),
+        let (source, name, generation, mode) = (
             self.source.clone(),
             self.name.clone(),
             self.generation.clone(),
@@ -131,22 +121,10 @@ impl Plugin for JavaScript {
         Box::pin(async move {
             let executions = executions.upgrade().ok_or("Host closed")?;
             let identity = context.lifecycle.identity().map_err(message)?;
-            let sessions = match &identity.scope {
-                Scope::Session(id) => vec![id.clone()],
-                _ => vec![],
-            };
-            let commands = executions
-                .authorize_plugin(
-                    context.lifecycle.clone(),
-                    &sessions,
-                    &root,
-                    tokio_util::sync::CancellationToken::new(),
-                )
-                .await
-                .map_err(message)?;
-            let storage = executions
-                .plugin_store(context.lifecycle.clone())
-                .map_err(message)?;
+            let host = context
+                .host
+                .clone()
+                .ok_or("Host capabilities are unavailable")?;
             let vm = match mode {
                 VmMode::Shared => pool.shared(),
                 VmMode::Dedicated => pool.dedicated(&generation),
@@ -154,10 +132,8 @@ impl Plugin for JavaScript {
             .map_err(message)?;
             let bridge = Arc::new(bridge::HostBridge::new(
                 context.clone(),
-                storage,
-                commands,
-                executions.plugin_catalog.clone(),
-                Arc::downgrade(&executions),
+                host,
+                executions.plugin_calls.clone(),
                 remote.clone(),
             ));
             let module = vm

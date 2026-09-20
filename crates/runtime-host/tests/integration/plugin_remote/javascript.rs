@@ -32,6 +32,8 @@ async fn javascript_remote_replaces_exact_registration_and_closes_late_vm_stream
 }
 async fn scenario() {
     let fixture = ClientFixture::new("maka-js-remote-");
+    let canonical_workspace = fixture.workspace.canonicalize().unwrap();
+    let expected_cwd = maka_fs_tools::workspace::project::host_path(&canonical_workspace).unwrap();
     let path = fixture.workspace.join("plugin");
     std::fs::create_dir(&path).unwrap();
     std::fs::write(
@@ -86,6 +88,79 @@ async fn scenario() {
     let client = json!({"entryId":entry["entryId"],"extensionId":entry["extensionId"],"activation":entry["activation"],
         "contentDigest":entry["contentDigest"],"clientDigest":entry["clientDigest"]});
     let document = rpc(&mut peer, json!({"kind":"open_document"})).await["document"].clone();
+    let (uncertain, uncertain_target) = bind(&mut peer, &client, "uncertain").await;
+    let failure = peer
+        .rpc(
+            "plugin.remote",
+            json!({"kind":"call", "binding":uncertain,
+        "target":uncertain_target, "document":document, "input":null}),
+        )
+        .await;
+    assert_eq!(failure["error"]["code"], "outcome_unknown", "{failure}");
+    let (uncertain, uncertain_target) = bind(&mut peer, &client, "uncertain-stream").await;
+    let uncertain_stream = rpc(
+        &mut peer,
+        json!({"kind":"open", "binding":uncertain,
+        "target":uncertain_target, "document":document, "input":null}),
+    )
+    .await["stream"]
+        .clone();
+    let failure = peer
+        .rpc(
+            "plugin.remote",
+            json!({"kind":"next", "document":document,
+        "stream":uncertain_stream}),
+        )
+        .await;
+    assert_eq!(failure["error"]["code"], "outcome_unknown", "{failure}");
+    rpc(
+        &mut peer,
+        json!({"kind":"close", "document":document, "stream":uncertain_stream}),
+    )
+    .await;
+    // Business uncertainty does not fence a fully settled provider or revoke
+    // the caller's document: normal calls below must still succeed.
+    for method in ["workspace", "workspace", "denied-workspace"] {
+        let (binding, target) = bind(&mut peer, &client, method).await;
+        let result = peer
+            .rpc(
+                "plugin.remote",
+                json!({"kind":"call", "binding":binding,
+            "target":target, "document":document, "input":fixture.workspace}),
+            )
+            .await;
+        if method == "denied-workspace" {
+            assert_eq!(result["ok"], false, "{result}");
+            assert!(
+                result["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("does not allow Host paths"),
+                "{result}"
+            );
+        } else {
+            assert_eq!(success(result)["value"]["cwd"], expected_cwd);
+        }
+    }
+    let (view_binding, view_target) = bind(&mut peer, &client, "workspace-stream").await;
+    let view_stream = rpc(
+        &mut peer,
+        json!({"kind":"open", "binding":view_binding,
+        "target":view_target,"document":document,"input":fixture.workspace}),
+    )
+    .await["stream"]
+        .clone();
+    let view = rpc(
+        &mut peer,
+        json!({"kind":"next","document":document,"stream":view_stream}),
+    )
+    .await;
+    assert_eq!(view["item"]["cwd"], expected_cwd, "{view}");
+    rpc(
+        &mut peer,
+        json!({"kind":"close","document":document,"stream":view_stream}),
+    )
+    .await;
     let (binding, target) = bind(&mut peer, &client, "echo").await;
     let call = json!({"kind":"call","binding":binding,"target":target,"document":document,"input":"hello"});
     assert_eq!(rpc(&mut peer, call.clone()).await["value"]["generation"], 0);

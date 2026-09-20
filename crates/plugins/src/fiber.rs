@@ -25,7 +25,7 @@ mod task;
 pub use context::{CallGuard, Context};
 pub use effect::Effect;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tokio::{
@@ -48,7 +48,7 @@ pub enum Phase {
     Disposed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Identity {
     pub package_id: String,

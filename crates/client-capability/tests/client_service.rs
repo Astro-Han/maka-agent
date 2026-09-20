@@ -193,8 +193,17 @@ async fn service_roundtrip() {
                         server_id: format!("test-server-{access}"),
                         tool_name: "write".into(),
                         arguments: serde_json::from_value(json!({"text": access})).unwrap(),
-                        session_id: "interop-session".into(),
-                        turn_id: "interop-turn".into(),
+                        source: if index == 0 {
+                            maka_runtime::capability::CallSource::Agent {
+                                session_id: "interop-session".into(),
+                                turn_id: "interop-turn".into(),
+                            }
+                        } else {
+                            maka_runtime::capability::CallSource::Background {
+                                session_id: None,
+                                grant_id: "authorized-grant".into(),
+                            }
+                        },
                         tool_call_id: format!("interop-call-{access}"),
                         cwd: workspace.path().to_str().unwrap().into(),
                     },

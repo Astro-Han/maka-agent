@@ -156,10 +156,7 @@ enum Target<'a> {
 }
 
 fn target(path: &str) -> Result<Target<'_>, ToolError> {
-    if path.starts_with("archive:")
-        || path.starts_with("maka://runtime/tool-results/")
-        || path.starts_with("maka://archive-ledger/")
-    {
+    if path.starts_with("archive:") || path.starts_with("maka://runtime/tool-results/") {
         return ToolResultAddress::parse(path)
             .map(Target::ToolResult)
             .map_err(failed);

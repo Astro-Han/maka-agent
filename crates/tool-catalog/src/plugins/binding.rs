@@ -113,6 +113,7 @@ impl ToolCatalog {
             registration.handler = ToolHandler::Prepared(Arc::new(Guarded {
                 handler: ToolHandler::Prepared(binding.handler),
                 owner: contribution,
+                calls: captured.call_issuer(),
             }));
             entries.insert(
                 name,

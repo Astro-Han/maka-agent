@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod directory;
+pub mod files;
 pub use directory::{Directories, Directory};
 
 #[derive(Clone, Debug, PartialEq, Eq)]

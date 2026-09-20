@@ -26,7 +26,6 @@ mod graph;
 pub(crate) use graph::GraphSessions;
 mod handoff;
 pub(crate) use handoff::CooperativeRun;
-mod client_view;
 mod creation;
 pub(crate) use creation::Creation;
 pub(crate) mod input;
@@ -34,7 +33,7 @@ mod interrupt;
 mod launch;
 pub(crate) mod message;
 mod plugins;
-pub(crate) use client_view::SessionViews;
+pub(crate) use plugins::ResourceTarget;
 mod prepare;
 mod provider;
 mod read;
@@ -43,7 +42,6 @@ mod resume;
 mod scheduler;
 pub(crate) use scheduler::SchedulerServices;
 mod shell;
-pub(crate) mod skills;
 pub(crate) mod snapshot;
 mod successor;
 mod tools;
@@ -69,6 +67,7 @@ type Result<T> = std::result::Result<T, OperationError>;
 
 pub(crate) struct Executions {
     pub(crate) plugin_catalog: maka_plugins::contributions::Catalog,
+    pub(crate) plugin_calls: maka_plugins::call::Issuer,
     pub(crate) shells: Arc<crate::shell::ShellResources>,
     pub(crate) controllers: crate::controllers::Controllers,
     engine: Engine,
@@ -114,11 +113,13 @@ impl Executions {
         runtime: maka_js_runtime::trusted::TrustedRuntime,
     ) -> std::result::Result<Self, crate::server::HostError> {
         let workers = TaskTracker::new();
-        let plugin_catalog = maka_plugins::contributions::Catalog::default();
+        let plugin_calls = maka_plugins::call::Issuer::default();
+        let plugin_catalog = maka_plugins::contributions::Catalog::with_calls(plugin_calls.clone());
         tools::reserve_core_names(&plugin_catalog)?;
         let models = ModelExecutor::with_runtime(runtime.clone(), 64, Duration::from_secs(120))?;
         Ok(Self {
             plugin_catalog,
+            plugin_calls,
             oauth: crate::oauth::Authority::new(workers.clone(), shutdown.clone()),
             controllers: Default::default(),
             shells: Arc::new(crate::shell::ShellResources::with_runtime(

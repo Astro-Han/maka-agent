@@ -60,7 +60,6 @@ async fn refusals_have_no_dispatch_or_uncertainty_and_cannot_alias_effects() {
             (event(Fact::InvocationOpened {
                 configuration: None,
                 input: InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "hello".into(),
                     request_fingerprint: None,

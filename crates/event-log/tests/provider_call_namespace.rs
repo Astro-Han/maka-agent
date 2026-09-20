@@ -56,7 +56,7 @@ async fn accepted(log: &EventLog, step: &str) {
     log.append_batch(
         &([
             event(Fact::ModelRequested {
-                purpose: None,
+                purpose: maka_runtime::context::ModelPurpose::Main,
                 context: None,
                 checkpoint_event_id: None,
                 step_id: step.into(),
@@ -118,7 +118,6 @@ async fn provider_ids_can_repeat_across_steps_including_recovery_refusals() {
             (event(Fact::InvocationOpened {
                 configuration: None,
                 input: InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "continue".into(),
                     request_fingerprint: None,

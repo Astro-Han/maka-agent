@@ -75,7 +75,7 @@ export async function verifyMessageRecovery(connection, reopened) {
     {
       disposition: 'turn_started',
       turnId: 'reserved-reserved',
-      skillInvocation: { loaded: [], failed: [], receipts: [] },
+      preparation: [],
     },
   );
   console.log(reopened ? 'message-recovery-reopened' : 'message-recovery-passed');

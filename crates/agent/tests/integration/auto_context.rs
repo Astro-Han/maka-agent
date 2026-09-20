@@ -208,7 +208,7 @@ async fn midturn_waits_for_all_code_mode_results_and_replays_exact_image_anchor_
             .filter(|event| matches!(
                 event.event.fact,
                 Fact::ModelRequested {
-                    purpose: Some(ModelPurpose::Summary),
+                    purpose: ModelPurpose::Summary,
                     ..
                 }
             ))

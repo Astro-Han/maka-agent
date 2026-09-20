@@ -134,7 +134,6 @@ async fn lifecycle_obeys_canonical_invocation_seal_and_validates_bounds() {
                 Fact::InvocationOpened {
                     configuration: None,
                     input: maka_runtime::input::InvocationInput::Message {
-                        skill_invocation: Default::default(),
                         source_messages: Vec::new(),
                         content: "".into(),
                         request_fingerprint: None,
@@ -187,7 +186,6 @@ async fn lifecycle_obeys_canonical_invocation_seal_and_validates_bounds() {
         Fact::InvocationOpened {
             configuration: None,
             input: maka_runtime::input::InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "".into(),
                 request_fingerprint: None,

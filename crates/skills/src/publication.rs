@@ -66,23 +66,6 @@ pub struct Publisher {
     _lock: std::sync::Arc<io::PublicationLock>,
 }
 impl Publisher {
-    /// Recovery of the previous domain layout belongs here, not in Root or
-    /// the plugin kernel. Leave the old directory intact after draining it.
-    pub fn recover_legacy(&self, root: &Path) -> Result<(), Error> {
-        let root = Dir::open_ambient_dir(root, ambient_authority())?;
-        let transactions = match root.open_dir_nofollow("skill-transactions") {
-            Ok(directory) => directory,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error.into()),
-        };
-        Self {
-            skills: self.skills.try_clone()?,
-            transactions,
-            _lock: self._lock.clone(),
-        }
-        .recover()
-    }
-
     pub fn open(root: &Path, data: &Dir) -> Result<Self, Error> {
         if !root.is_absolute() {
             return Err(Error::Invalid("Publication root must be absolute".into()));

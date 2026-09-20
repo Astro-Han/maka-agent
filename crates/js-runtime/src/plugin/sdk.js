@@ -30,6 +30,18 @@
   const invocations = new Map();
   const streams = new Map();
   let streamSequence = 0;
+  const remoteResult = async (operation) => {
+    try {
+      return { kind: 'value', value: await operation() };
+    } catch (error) {
+      const code = ['invalid', 'revoked', 'cancelled', 'outcome_unknown', 'unavailable'].includes(
+        error?.code,
+      )
+        ? error.code
+        : 'unavailable';
+      return { kind: 'error', code, message: String(error) };
+    }
+  };
   const closeStream = async (handle) => {
     const stream = streams.get(handle);
     if (!stream) return;
@@ -97,7 +109,12 @@
       Object.fromEntries(
         ['read', 'write', 'edit', 'glob', 'grep', 'patch'].map((kind) => [
           kind,
-          (input) => host('files.invoke', { authority, operation: { kind, input } }),
+          async (input) => {
+            const result = await host('files.invoke', { authority, operation: { kind, input } });
+            return result.kind === 'image' && result.bytes
+              ? { ...result, bytes: Uint8Array.from(result.bytes) }
+              : result;
+          },
         ]),
       ),
     );
@@ -153,6 +170,25 @@
     if (reply.ok) return reply.value;
     throw Object.assign(new Error(reply.error.message), { code: reply.error.code });
   };
+  const executions = (handle) => {
+    const call = (method, input) => host(`execution.${method}`, { handle, input });
+    let closing;
+    return Object.freeze({
+      submit: (input) => call('submit', input),
+      session: (sessionId) => call('session', { sessionId }),
+      createChild: (input) => call('createChild', input),
+      createRoot: (input) => call('createRoot', input),
+      workspacePatch: (operationId) => call('workspacePatch', { operationId }),
+      query: (operationId) => call('query', { operationId }),
+      cancel: (operationId) => call('cancel', { operationId }),
+      events: (input) => call('events', input),
+      event: (input) => call('event', input),
+      close() {
+        closing ??= host('execution.close', { handle });
+        return closing;
+      },
+    });
+  };
   const callback = (fn) => {
     if (typeof fn !== 'function' || callbacks.size >= 256 || next >= 0xffff_ffff) {
       throw new TypeError('Invalid callback or plugin callback limit exceeded');
@@ -198,6 +234,29 @@
     });
   };
   const text = (value) => (typeof value === 'function' ? value : () => value);
+  const resources = (authority) => ({
+    executions: Object.freeze({
+      open: async () => executions(await host('execution.acquire', { authority })),
+    }),
+    services: Object.freeze({ get: (name) => getService(name, authority) }),
+    processes: processes(authority),
+    terminals: terminals(authority),
+    http: http(authority),
+    files: files(authority),
+    llm: Object.freeze({ generate: (input) => host('llm.generate', { authority, input }) }),
+    clients: Object.freeze({
+      tools: () => host('clients.tools', { authority }),
+      call: (input) => host('clients.call', { authority, call: input }),
+    }),
+  });
+  const authorized = async (opened, signal, callback) => {
+    const { handle, source } = await opened;
+    try {
+      return await callback(Object.freeze({ ...resources(handle), source, signal }));
+    } finally {
+      await host('authorization.close', { handle });
+    }
+  };
   return Object.freeze({
     async activate(identity, config) {
       if (phase !== 'new') throw new Error('Plugin already initialized');
@@ -205,6 +264,8 @@
       const context = Object.freeze({
         identity: Object.freeze(identity),
         signal,
+        withAuthorization: (id, callback) =>
+          authorized(host('authorization.open', { id }), signal, callback),
         input: Object.freeze({
           prepare: (name, prepare) =>
             register('input_preparation', { name }, (request, call) =>
@@ -217,60 +278,71 @@
         executors: Object.freeze({
           register: (definition, execute) => register('executor', definition, execute),
         }),
+        behaviors: Object.freeze({
+          register: (name, prepare) => register('behavior', { name }, prepare),
+        }),
         remote: Object.freeze({
-          method: (name, invoke) => register('remote_method', { name }, invoke),
-          stream: (name, open) =>
-            register('remote_stream', { name }, async (input, call) => {
-              if (streams.size >= 32) throw new Error('Client stream capacity exceeded');
-              const handle = 'stream-' + ++streamSequence;
-              let stopped = false;
-              let stop;
-              const cancelled = new Promise((resolve) => {
-                stop = resolve;
-              });
-              const stream = {
-                value: undefined,
-                pending: undefined,
-                closing: undefined,
-                cancelledValue: false,
-                cancel() {
-                  stopped = true;
-                  stop();
-                  if (stream.value && !stream.cancelledValue) {
-                    stream.cancelledValue = true;
-                    stream.value.cancel();
+          method: (name, invoke, options) =>
+            register('remote_method', { ...options, name }, (input, call) =>
+              remoteResult(() => invoke(input, call)),
+            ),
+          stream: (name, open, options) =>
+            register('remote_stream', { ...options, name }, (input, call) =>
+              remoteResult(async () => {
+                if (streams.size >= 32) throw new Error('Client stream capacity exceeded');
+                const handle = 'stream-' + ++streamSequence;
+                let stopped = false;
+                let stop;
+                const cancelled = new Promise((resolve) => {
+                  stop = resolve;
+                });
+                const stream = {
+                  value: undefined,
+                  pending: undefined,
+                  closing: undefined,
+                  cancelledValue: false,
+                  cancel() {
+                    stopped = true;
+                    stop();
+                    if (stream.value && !stream.cancelledValue) {
+                      stream.cancelledValue = true;
+                      stream.value.cancel();
+                    }
+                  },
+                };
+                const streamSignal = Object.freeze({
+                  get aborted() {
+                    return stopped || call.signal.aborted;
+                  },
+                  wait: () => Promise.race([cancelled, call.signal.wait()]),
+                  throwIfAborted() {
+                    if (this.aborted) throw new Error('Client stream cancelled');
+                  },
+                });
+                streams.set(handle, stream);
+                invocations.set(handle, stream.cancel);
+                try {
+                  stream.value = await open(
+                    input,
+                    Object.freeze({ ...call, signal: streamSignal }),
+                  );
+                  if (
+                    !stream.value ||
+                    typeof stream.value.next !== 'function' ||
+                    typeof stream.value.cancel !== 'function' ||
+                    typeof stream.value.close !== 'function'
+                  ) {
+                    throw new Error('Invalid Client stream');
                   }
-                },
-              };
-              const streamSignal = Object.freeze({
-                get aborted() {
-                  return stopped || call.signal.aborted;
-                },
-                wait: () => Promise.race([cancelled, call.signal.wait()]),
-                throwIfAborted() {
-                  if (this.aborted) throw new Error('Client stream cancelled');
-                },
-              });
-              streams.set(handle, stream);
-              invocations.set(handle, stream.cancel);
-              try {
-                stream.value = await open(input, Object.freeze({ ...call, signal: streamSignal }));
-                if (
-                  !stream.value ||
-                  typeof stream.value.next !== 'function' ||
-                  typeof stream.value.cancel !== 'function' ||
-                  typeof stream.value.close !== 'function'
-                ) {
-                  throw new Error('Invalid Client stream');
+                  if (stopped) stream.cancel();
+                  return handle;
+                } catch (error) {
+                  streams.delete(handle);
+                  invocations.delete(handle);
+                  throw error;
                 }
-                if (stopped) stream.cancel();
-                return handle;
-              } catch (error) {
-                streams.delete(handle);
-                invocations.delete(handle);
-                throw error;
-              }
-            }),
+              }),
+            ),
         }),
         prompt: Object.freeze({
           section: (definition) => {
@@ -307,18 +379,28 @@
           read: (key) => host('storage.read', { key }),
           batch: (mutations) => host('storage.batch', { mutations }),
         }),
+        preferences: Object.freeze({
+          read: () => host('preferences.read'),
+        }),
+        data: Object.freeze({
+          async read(input) {
+            const page = await host('data.read', input);
+            return { ...page, bytes: Uint8Array.from(page.bytes) };
+          },
+          write: (input) => host('data.write', { ...input, bytes: Array.from(input.bytes) }),
+          list: (input = {}) => host('data.list', input),
+          createDirectory: (path) => host('data.createDirectory', { path }),
+          remove: (path) => host('data.remove', { path }),
+          rename: (from, to) => host('data.rename', { from, to }),
+        }),
         credentials: Object.freeze({
           read: (key) => host('credentials.read', { key }),
           write: (input) => host('credentials.write', input),
         }),
         executions: Object.freeze({
-          submit: (input) => host('execution.submit', input),
-          createChild: (input) => host('execution.createChild', input),
-          workspacePatch: (operationId) => host('execution.workspacePatch', { operationId }),
-          query: (operationId) => host('execution.query', { operationId }),
-          cancel: (operationId) => host('execution.cancel', { operationId }),
-          events: (input) => host('execution.events', input),
-          event: (input) => host('execution.event', input),
+          async restore(id) {
+            return executions(await host('execution.restore', { id }));
+          },
         }),
         sleep: (milliseconds) => host('clock.sleep', { milliseconds }),
         effect(dispose) {
@@ -365,19 +447,21 @@
       });
       try {
         const context = { ...call, signal: callSignal };
+        if (call?.remoteAuthority) {
+          context.views = Object.freeze({
+            authorize: (request, callback) =>
+              authorized(
+                host('remote.authorize', { authority: call.remoteAuthority, request }),
+                callSignal,
+                callback,
+              ),
+            session: () => host('remote.session', { authority: call.remoteAuthority }),
+            workspace: (input) =>
+              host('remote.workspace', { authority: call.remoteAuthority, input }),
+          });
+        }
         if (call?.authority) {
-          context.services = Object.freeze({ get: (name) => getService(name, call.authority) });
-          context.processes = processes(call.authority);
-          context.terminals = terminals(call.authority);
-          context.http = http(call.authority);
-          context.files = files(call.authority);
-          context.llm = Object.freeze({
-            generate: (input) => host('llm.generate', { authority: call.authority, input }),
-          });
-          context.clients = Object.freeze({
-            tools: () => host('clients.tools', { authority: call.authority }),
-            call: (input) => host('clients.call', { authority: call.authority, call: input }),
-          });
+          Object.assign(context, resources(call.authority));
         }
         if (call?.executor) {
           context.emit = (output) => host('executor.emit', { handle: call.executor, output });
@@ -394,10 +478,12 @@
       const stream = streams.get(handle);
       if (!stream?.value || stream.closing || stream.pending)
         throw new Error('Client stream is closed or busy');
-      const pending = tracked(() => stream.value.next());
+      const pending = remoteResult(() => tracked(() => stream.value.next()));
       stream.pending = pending;
       try {
-        const result = await pending;
+        const outcome = await pending;
+        if (outcome.kind === 'error') return outcome;
+        const result = outcome.value;
         if (
           !result ||
           (result.done !== undefined && typeof result.done !== 'boolean') ||
@@ -405,7 +491,10 @@
         ) {
           throw new Error('Client stream returned an invalid iterator result');
         }
-        return result.done ? { kind: 'end' } : { kind: 'item', value: result.value };
+        return {
+          kind: 'value',
+          value: result.done ? { kind: 'end' } : { kind: 'item', value: result.value },
+        };
       } finally {
         stream.pending = undefined;
       }

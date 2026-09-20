@@ -37,13 +37,18 @@ export interface ImageReference {
   mimeType: string;
   ref: AttachmentLocation;
 }
+export interface ImageBytes {
+  kind: 'image';
+  mimeType: string;
+  bytes: Uint8Array;
+}
 export type Patch =
   | { type: 'create_file' | 'update_file'; path: string; diff: string }
   | { type: 'delete_file'; path: string };
 
 export interface Files {
-  /** Bounded text page or durable image reference; pass next back unchanged. */
-  read(input: ReadInput): Promise<TextPage | ImageReference>;
+  /** Bounded text page or image; Agent images use durable refs, other sources receive bytes. */
+  read(input: ReadInput): Promise<TextPage | ImageReference | ImageBytes>;
   /** UTF-8, at most 1 MiB. Existing parent directory required. */
   write(input: {
     path: string;

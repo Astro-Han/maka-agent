@@ -95,9 +95,7 @@ impl Host {
                         Replacement::BlockedByResidency
                     },
                     generation: self.options.generation.clone(),
-                    activity: (local_owner
-                        && (generation_mismatch || hello.activity_snapshot_version == Some(2)))
-                    .then(|| self.activity_snapshot(hello.activity_snapshot_version)),
+                    activity: local_owner.then(|| self.activity_snapshot()),
                 },
                 None,
                 None,
@@ -127,17 +125,15 @@ impl Host {
         ))
     }
 
-    fn activity_snapshot(&self, version: Option<u8>) -> Value {
+    fn activity_snapshot(&self) -> Value {
         let activity = self.activity();
-        let mut result = json!({
+        json!({
             "connections": self.accepted_connections.lock().unwrap().len(),
             "activeOperations": self.commands.len(),
             "processUptimeSeconds": self.started.elapsed().as_secs(),
             "residencies": activity.residencies(),
-        });
-        if version == Some(2) {
-            result["drainResidencies"] = activity.resident_count().into();
-        }
-        result
+            "drainResidencies": activity.resident_count(),
+            "cooperativeHandoff": true,
+        })
     }
 }

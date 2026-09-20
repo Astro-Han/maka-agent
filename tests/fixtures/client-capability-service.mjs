@@ -83,8 +83,12 @@ export async function verifyCapabilityService(workspace) {
       assert.equal(frame.registrationId, registrationIds.get(generation));
       assert.equal(frame.serverId, `test-server-${access}`);
       assert.equal(frame.toolName, 'write');
-      assert.equal(frame.sessionId, 'interop-session');
-      assert.equal(frame.turnId, 'interop-turn');
+      assert.deepEqual(
+        frame.source,
+        access === 'none'
+          ? { kind: 'agent', sessionId: 'interop-session', turnId: 'interop-turn' }
+          : { kind: 'background', sessionId: null, grantId: 'authorized-grant' },
+      );
       assert.equal(frame.toolCallId, `interop-call-${access}`);
       assert.deepEqual(frame.arguments, { text: access });
       if (access === 'none') assert.equal(Object.hasOwn(frame, 'cwd'), false);

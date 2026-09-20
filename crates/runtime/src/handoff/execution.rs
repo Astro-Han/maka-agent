@@ -34,8 +34,6 @@ pub struct HandoffExecution {
     pub main_output_limit: Option<u64>,
     pub supports_vision: bool,
     pub tools: HandoffTools,
-    // Keep the historical field name; old boolean facts remain readable.
-    #[serde(rename = "compaction_attempted")]
     pub compaction: CompactionBudget,
     /// Manual continuation's stable-cut policy, absent for ordinary conversation.
     /// Physical handoff must not introduce or discard this projection policy.
@@ -44,38 +42,11 @@ pub struct HandoffExecution {
 
 /// A provider-accepted step renews reshaping, but not a failed summarizer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", from = "StoredCompactionBudget")]
+#[serde(rename_all = "snake_case")]
 pub enum CompactionBudget {
     Available,
     Reshaped,
     Failed,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum StoredCompactionBudget {
-    Legacy(bool),
-    Current(CompactionState),
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum CompactionState {
-    Available,
-    Reshaped,
-    Failed,
-}
-
-impl From<StoredCompactionBudget> for CompactionBudget {
-    fn from(value: StoredCompactionBudget) -> Self {
-        match value {
-            StoredCompactionBudget::Legacy(false)
-            | StoredCompactionBudget::Current(CompactionState::Available) => Self::Available,
-            StoredCompactionBudget::Current(CompactionState::Reshaped) => Self::Reshaped,
-            // Legacy facts did not distinguish failure from successful reshaping.
-            StoredCompactionBudget::Legacy(true)
-            | StoredCompactionBudget::Current(CompactionState::Failed) => Self::Failed,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,34 +78,5 @@ impl HandoffExecution {
             context.validate()?;
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::CompactionBudget;
-
-    #[test]
-    fn compaction_budget_round_trips_and_reads_legacy_handoffs() {
-        for state in [
-            CompactionBudget::Available,
-            CompactionBudget::Reshaped,
-            CompactionBudget::Failed,
-        ] {
-            let value = serde_json::to_value(state).unwrap();
-            assert_eq!(
-                serde_json::from_value::<CompactionBudget>(value).unwrap(),
-                state
-            );
-        }
-        assert_eq!(
-            serde_json::from_str::<CompactionBudget>("false").unwrap(),
-            CompactionBudget::Available
-        );
-        assert_eq!(
-            serde_json::from_str::<CompactionBudget>("true").unwrap(),
-            CompactionBudget::Failed
-        );
-        assert!(serde_json::from_str::<CompactionBudget>("1").is_err());
     }
 }

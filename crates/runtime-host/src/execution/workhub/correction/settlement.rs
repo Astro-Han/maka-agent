@@ -177,9 +177,8 @@ async fn prepare(
         )
     };
     let request = &record.intent.request;
-    let preparation: Preparation =
-        serde_json::from_value(record.intent.preparation.clone().ok_or_else(unavailable)?)
-            .map_err(super::super::super::internal)?;
+    let preparation: Preparation = serde_json::from_value(record.intent.preparation.clone())
+        .map_err(super::super::super::internal)?;
     match (preparation, &request.target) {
         (
             Preparation::Existing {

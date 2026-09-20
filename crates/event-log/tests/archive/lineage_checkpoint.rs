@@ -53,7 +53,7 @@ async fn narrower_checkpoint_does_not_corrupt_later_whole_session_archives() {
         .unwrap();
     let mut main = request("child", "main", Some(&active)).event().clone();
     if let Fact::ModelRequested { purpose, .. } = &mut main.fact {
-        *purpose = Some(ModelPurpose::Main);
+        *purpose = ModelPurpose::Main;
     }
     continuation::append(&log, &main).await;
     log.append(&event("child", Fact::ModelCompleted {

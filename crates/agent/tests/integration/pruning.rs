@@ -168,7 +168,6 @@ async fn settled_results_are_pruned_before_context_limits_and_survive_failed_sum
             declared_window: spent.then_some(220),
         });
         input.work = RunWork::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             message: "read".into(),
             tools: catalog(count.clone(), repeats),
@@ -239,7 +238,7 @@ async fn settled_results_are_pruned_before_context_limits_and_survive_failed_sum
                     .filter(|stored| matches!(
                         stored.event.fact,
                         Fact::ModelRequested {
-                            purpose: Some(maka_runtime::context::ModelPurpose::Summary),
+                            purpose: maka_runtime::context::ModelPurpose::Summary,
                             ..
                         }
                     ))
@@ -256,7 +255,7 @@ async fn settled_results_are_pruned_before_context_limits_and_survive_failed_sum
             {
                 assert_eq!(
                     effective_source_digest.is_some(),
-                    purpose == Some(maka_runtime::context::ModelPurpose::Summary)
+                    purpose == maka_runtime::context::ModelPurpose::Summary
                 );
             }
         }

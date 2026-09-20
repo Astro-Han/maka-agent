@@ -43,14 +43,10 @@ async fn submit_receipt_is_atomic_and_survives_edit_delivery_cancellation_and_ep
     append(&log, &owner, opening()).await;
     let mut pending = admission(&owner, "queued", Disposition::Followup);
     pending.required_tools.insert("Bash".into());
-    pending
-        .source
-        .skill_invocation
-        .loaded
-        .push(maka_runtime::skills::LoadedSkill {
-            id: "shell-work".into(),
-            name: "Shell work".into(),
-        });
+    pending.source.message.content.preparation.push(serde_json::from_value(json!({
+        "source":{"kind":"input","name":"review","packageId":"reviewer","entryId":"entry","activation":"1","revision":"1"},
+        "receipt":{"document":"report.md"}
+    })).unwrap());
     let before = log.message_queue("session").await.unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
@@ -83,7 +79,6 @@ async fn submit_receipt_is_atomic_and_survives_edit_delivery_cancellation_and_ep
             QueueEdit::Update {
                 message_id: "queued".into(),
                 content: Box::new("edited".into()),
-                skill_invocation: Default::default(),
                 required_tools: Default::default(),
             },
             command("edit", Kind::Update),
@@ -145,7 +140,6 @@ async fn submit_receipt_is_atomic_and_survives_edit_delivery_cancellation_and_ep
             input: InvocationInput::Message {
                 content: edited.source.message.content.clone(),
                 request_fingerprint: None,
-                skill_invocation: Default::default(),
                 source_messages: vec![edited.source],
             },
         },

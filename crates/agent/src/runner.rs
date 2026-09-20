@@ -74,13 +74,11 @@ pub async fn run(
         RunWork::Message {
             message,
             source_messages,
-            skill_invocation,
             ..
         } => InvocationInput::Message {
             content: message.clone(),
             request_fingerprint: input.request_fingerprint.clone(),
             source_messages: source_messages.clone(),
-            skill_invocation: skill_invocation.clone(),
         },
         RunWork::ContextCompact => InvocationInput::ContextCompact {
             request_fingerprint: input

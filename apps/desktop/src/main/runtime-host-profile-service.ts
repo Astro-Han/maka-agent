@@ -18,7 +18,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, open, readFile, rename, rm, rmdir } from "node:fs/promises";
+import { open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { NativeHostBudget } from './native-runtime-host-operation.js';
 import {
@@ -44,7 +44,7 @@ import {
 import { runtimeHostAccessCredentialFingerprint } from "@maka/runtime-host/operator";
 import type { HostPeerEndpoint } from '@maka/runtime-host/protocol';
 import type { CredentialStore } from "@maka/storage/credential-store";
-import { withFileUpdateLock } from "@maka/storage/file-update-lock";
+import { withProcessLifetimeFileUpdateLock } from "@maka/storage/process-lifetime-file-update-lock";
 import type {
   DesktopRuntimeHostProfileAddInput,
   DesktopRuntimeHostProfileAddResult,
@@ -170,12 +170,6 @@ export async function resolveDesktopRuntimeHostStartup(
     readPreferences?: () => Promise<DesktopRuntimeHostPreferences>;
   } = {},
 ): Promise<DesktopRuntimeHostStartup> {
-  // The Desktop single-instance lock is held before startup opens any stores.
-  // Reclaim only legacy directory markers here, before concurrent readers can
-  // start; current deployment writers use a process-lifetime OS lease.
-  await recoverAbandonedDesktopFileUpdateLock(
-    join(clientDataRoot, "runtime-host-deployments.json"),
-  );
   const preferencesPath = join(clientDataRoot, PREFERENCES_FILE);
   let preferences: DesktopRuntimeHostPreferences;
   let preferencesReadFailure: Error | undefined;
@@ -226,25 +220,6 @@ export async function resolveDesktopRuntimeHostStartup(
       remotes: [],
       unavailable,
     };
-  }
-  const obsoleteProfileIds = new Set(
-    document.profiles.flatMap((profile) =>
-      profile.kind === 'remote' && profile.access === 'session_guest' ? [profile.id] : [],
-    ),
-  );
-  if (obsoleteProfileIds.size > 0) {
-    await recoverAbandonedDesktopFileUpdateLock(join(clientDataRoot, PROFILE_FILE));
-  }
-  for (const profileId of obsoleteProfileIds) await catalog.remove(profileId);
-  if (obsoleteProfileIds.size > 0) document = await catalog.read();
-  if (!pairingReadFailure) {
-    const retained = pairingIntents.filter(
-      (intent) => intent.target.profile.access !== 'session_guest',
-    );
-    if (retained.length !== pairingIntents.length) {
-      await writeDesktopRuntimeHostPairingIntents(credentialStore, retained);
-      pairingIntents = retained;
-    }
   }
   const profileIds = new Set(document.profiles.map((profile) => profile.id));
   const defaultProfile = document.profiles.find(
@@ -354,7 +329,6 @@ export function createDesktopRuntimeHostProfileService(input: {
 
   const mutateProfiles = <T>(operation: () => Promise<T>): Promise<T> =>
     mutate(async () => {
-      await recoverAbandonedDesktopFileUpdateLock(profilePath);
       assertPreferencesWritable();
       if (pairingReadFailure) {
         throw new Error(
@@ -429,7 +403,7 @@ export function createDesktopRuntimeHostProfileService(input: {
   };
 
   const persist = async (next: DesktopRuntimeHostPreferences): Promise<void> => {
-    await withFileUpdateLock(profilePath, () =>
+    await withProcessLifetimeFileUpdateLock(profilePath, () =>
       writeRuntimeHostPreferences(preferencesPath, next),
     );
     preferences = next;
@@ -1128,14 +1102,6 @@ export function createDesktopRuntimeHostProfileService(input: {
     },
     markManagedServiceUninstalling(expected) {
       return mutateProfiles(async () => {
-        if (
-          !expected.deployment.deploymentId &&
-          expected.state !== 'uninstalling'
-        ) {
-          throw new Error(
-            'Re-onboard this Runtime Host before uninstalling it; its legacy binding has no deployment generation',
-          );
-        }
         requirePairingComplete(expected.profile.id);
         const document = await catalog.read();
         const current = document.profiles.find(
@@ -1488,27 +1454,6 @@ function assertRootIsNotEnabled(
   }
 }
 
-async function recoverAbandonedDesktopFileUpdateLock(targetPath: string): Promise<void> {
-  const lockPath = `${targetPath}.lock`;
-  const lock = await lstat(lockPath).catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  });
-  if (
-    !lock ||
-    !lock.isDirectory() ||
-    lock.isSymbolicLink()
-  ) {
-    return;
-  }
-  // Electron's single-instance authority excludes another Desktop writer for
-  // this client data root. Legacy directory locks contain no owner identity,
-  // so only reclaim an old, empty marker; unexpected contents still fail loud.
-  await rmdir(lockPath).catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  });
-}
-
 async function persistIfCurrentTarget(
   catalog: RuntimeHostProfileCatalog,
   profilePath: string,
@@ -1516,7 +1461,7 @@ async function persistIfCurrentTarget(
   target: ResolvedRuntimeHostProfile,
   preferences: DesktopRuntimeHostPreferences,
 ): Promise<void> {
-  await withFileUpdateLock(profilePath, async () => {
+  await withProcessLifetimeFileUpdateLock(profilePath, async () => {
     const current = await catalog.resolve(target.profile.id);
     if (!sameResolvedRuntimeHostProfileTarget(current, target)) {
       throw new Error("Runtime Host profile changed while it was being enabled");
@@ -1637,35 +1582,12 @@ async function readRuntimeHostPreferences(path: string): Promise<DesktopRuntimeH
     value = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return defaultPreferences();
-    if (!(error instanceof SyntaxError)) throw error;
-    console.error("[runtime-host] preferences are invalid; using Local defaults");
-    return defaultPreferences();
-  }
-  if (isLegacySelection(value)) {
-    const migrated = {
-      schemaVersion: PREFERENCES_SCHEMA_VERSION,
-      defaultProfileId: value.profileId,
-      enabledRemoteProfileIds:
-        value.profileId === LOCAL_RUNTIME_HOST_PROFILE.id ? [] : [value.profileId],
-    } as const;
-    await writeRuntimeHostPreferences(path, migrated);
-    return migrated;
+    throw error;
   }
   if (!isRuntimeHostPreferences(value)) {
-    console.error("[runtime-host] preferences are invalid; using Local defaults");
-    return defaultPreferences();
+    throw new Error("Runtime Host preferences format is invalid or unsupported");
   }
   return value;
-}
-
-function isLegacySelection(value: unknown): value is { schemaVersion: 1; profileId: string } {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    (value as { schemaVersion?: unknown }).schemaVersion === 1 &&
-    typeof (value as { profileId?: unknown }).profileId === "string",
-  );
 }
 
 function isRuntimeHostPreferences(value: unknown): value is DesktopRuntimeHostPreferences {

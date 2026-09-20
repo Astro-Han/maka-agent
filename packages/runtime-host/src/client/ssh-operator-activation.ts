@@ -133,7 +133,7 @@ export function runtimeHostSshOperatorRemoteCommand(
       throw new Error('Runtime Host operator environment variable name is invalid');
     }
   }
-  if (operator.kind === 'legacy_posix_executable' || operator.platform === 'posix') {
+  if (operator.platform === 'posix') {
     const command = [invocation.executable, ...invocation.args].map(quotePosix).join(' ');
     const variables = entries.map(([name, value]) => `${name}=${quotePosix(value)}`).join(' ');
     const execute = `${variables ? `${variables} ` : ''}exec ${command}`;

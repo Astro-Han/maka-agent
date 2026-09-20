@@ -111,11 +111,11 @@ impl Host {
             ],
             residencies: activity.residencies(),
             upgrade_blocking_activity: activity.blocks_retirement(0),
+            drain_residencies: activity.resident_count(),
             protocol_version: 0,
             compatibility_epoch: maka_protocol::COMPATIBILITY_EPOCH,
             pid: std::process::id(),
             process_uptime_seconds: self.started.elapsed().as_secs(),
-            node_version: "not applicable (Rust)",
             #[cfg(target_os = "linux")]
             platform: Platform::Linux,
             #[cfg(target_os = "macos")]

@@ -650,7 +650,7 @@ export function registerDesktopSessionLocalIpc(deps: {
                 quotes: command.quotes,
                 inlineReferences,
               },
-              ...(command.skillIds?.length ? { skillIds: command.skillIds } : {}),
+              ...(command.inputSelections ? { inputSelections: command.inputSelections } : {}),
               ...(command.turnOrchestration ? { turnOrchestration: command.turnOrchestration } : {}),
             },
           }),
@@ -668,7 +668,7 @@ export function registerDesktopSessionLocalIpc(deps: {
         disposition: 'locally_saved',
         attachments: retained,
         inlineReferences,
-        skillInvocation: { loaded: [], failed: [], receipts: [] },
+        preparation: [],
       };
     },
   );

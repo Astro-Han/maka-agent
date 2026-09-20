@@ -22,7 +22,6 @@ import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   decodePersistedRuntimeHostProfile,
-  migrateRuntimeHostProfileOperatorCommand,
   sameEnvironmentRuntimeHostDeployment,
   sameResolvedRuntimeHostProfileTarget,
   type EnvironmentRuntimeHostProfile,
@@ -32,7 +31,6 @@ import {
 } from "@maka/runtime-host/client";
 import { requireHostRootId } from "@maka/runtime-host/protocol";
 import {
-  createRuntimeHostLegacyPosixOperatorCommand,
   decodeRuntimeHostOperatorCommand,
   type RuntimeHostOperatorCommand,
 } from "@maka/runtime-host/operator";
@@ -47,7 +45,7 @@ const PATH_MAX_BYTES = 4 * 1024;
 export interface DesktopRuntimeHostDeploymentBinding {
   readonly id: string;
   readonly rootPath: string;
-  readonly deploymentId?: string;
+  readonly deploymentId: string;
 }
 
 type ManagedSshRuntimeHostProfile = RemoteRuntimeHostProfile & {
@@ -153,7 +151,6 @@ export function createDesktopRuntimeHostManagedServiceStore(
 ): DesktopRuntimeHostManagedServiceStore {
   return new FileDesktopRuntimeHostManagedServiceStore(
     join(clientDataRoot, "runtime-host-deployments.json"),
-    join(clientDataRoot, "runtime-host-managed-services.json"),
   );
 }
 
@@ -187,11 +184,9 @@ export function sameDesktopRuntimeHostManagedServiceBinding(
 
 class FileDesktopRuntimeHostManagedServiceStore implements DesktopRuntimeHostManagedServiceStore {
   readonly #path: string;
-  readonly #legacyPath: string;
 
-  constructor(path: string, legacyPath: string) {
+  constructor(path: string) {
     this.#path = path;
-    this.#legacyPath = legacyPath;
   }
 
   async read(): Promise<DesktopRuntimeHostManagedServiceDocument> {
@@ -203,28 +198,13 @@ class FileDesktopRuntimeHostManagedServiceStore implements DesktopRuntimeHostMan
     try {
       contents = await readFile(this.#path, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      try {
-        contents = await readFile(this.#legacyPath, "utf8");
-      } catch (legacyError) {
-        if ((legacyError as NodeJS.ErrnoException).code === "ENOENT") return emptyDocument();
-        throw legacyError;
-      }
-      const migrated = decodeLegacyDocument(JSON.parse(contents));
-      await writeDocument(this.#path, migrated);
-      await removeLegacyDocument(this.#legacyPath);
-      return migrated;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyDocument();
+      throw error;
     }
     if (Buffer.byteLength(contents, "utf8") > DOCUMENT_MAX_BYTES) {
       throw new Error("Runtime Host managed service document is too large");
     }
-    const value: unknown = JSON.parse(contents);
-    const migrated = decodeDocument(value);
-    if ((value as { readonly schemaVersion?: unknown }).schemaVersion === 1) {
-      await writeDocument(this.#path, migrated);
-    }
-    await removeLegacyDocument(this.#legacyPath);
-    return migrated;
+    return decodeDocument(JSON.parse(contents));
   }
 
   save(
@@ -390,9 +370,8 @@ function decodeDocument(
   if (!Array.isArray(record.bindings)) {
     throw new Error("Runtime Host managed service document is invalid");
   }
-  if (record.schemaVersion === 1) return migrateVersionOneDocument(record.bindings);
   if (record.schemaVersion !== SCHEMA_VERSION) {
-    throw new Error("Runtime Host managed service document is invalid");
+    throw new Error("Runtime Host managed service document schema is unsupported");
   }
   if (record.bindings.length > BINDING_COUNT_MAX) {
     throw new Error(
@@ -470,98 +449,16 @@ function decodeDocument(
   });
 }
 
-function migrateVersionOneDocument(bindings: unknown[]): DesktopRuntimeHostManagedServiceDocument {
-  return decodeDocument({
-    schemaVersion: SCHEMA_VERSION,
-    bindings: bindings.map((candidate) => {
-      const profile = migrateRuntimeHostProfileOperatorCommand(
-        (candidate as { readonly profile?: unknown } | null)?.profile,
-      );
-      const decodedProfile = decodePersistedRuntimeHostProfile(profile);
-      const binding = requireExactRecord(
-        candidate,
-        "Runtime Host managed service binding",
-        decodedProfile.kind === "environment"
-          ? ["deployment", "profile", "state"]
-          : ["control", "deployment", "profile", "state"],
-      );
-      if (decodedProfile.kind === "environment") return { ...binding, profile };
-      const control = requireExactRecord(binding.control, "Managed Runtime Host control route", [
-        "kind",
-        "operatorPath",
-      ]);
-      if (control.kind !== "ssh_operator") {
-        throw new Error("Managed Runtime Host control route is invalid");
-      }
-      return {
-        ...binding,
-        profile,
-        control: {
-          kind: "ssh_operator",
-          operator: createRuntimeHostLegacyPosixOperatorCommand(
-            requirePosixOperatorPath(control.operatorPath),
-          ),
-        },
-      };
-    }),
-  });
-}
-
-function decodeLegacyDocument(value: unknown): DesktopRuntimeHostManagedServiceDocument {
-  const record = requireExactRecord(value, "Legacy Runtime Host managed service document", [
-    "schemaVersion",
-    "bindings",
-  ]);
-  if (record.schemaVersion !== 1 || !Array.isArray(record.bindings)) {
-    throw new Error("Legacy Runtime Host managed service document is invalid");
-  }
-  return decodeDocument({
-    schemaVersion: SCHEMA_VERSION,
-    bindings: record.bindings.map((candidate) => {
-      const binding = requireExactRecord(candidate, "Legacy Runtime Host service binding", [
-        "profile",
-        "service",
-        "state",
-      ]);
-      const service = requireExactRecord(binding.service, "Managed Runtime Host service", [
-        "id",
-        "operatorPath",
-        "rootPath",
-      ]);
-      const operatorPath = requirePosixOperatorPath(service.operatorPath);
-      return {
-        profile: migrateRuntimeHostProfileOperatorCommand(binding.profile),
-        deployment: {
-          id: requireHostRootId(service.id),
-          rootPath: requirePath(service.rootPath, "Managed Runtime Host State Root"),
-        },
-        control: {
-          kind: "ssh_operator",
-          operator: createRuntimeHostLegacyPosixOperatorCommand(operatorPath),
-        },
-        state: binding.state,
-      };
-    }),
-  });
-}
-
 function decodeDeployment(value: unknown): DesktopRuntimeHostDeploymentBinding {
-  const hasDeploymentId =
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.hasOwn(value, "deploymentId");
   const record = requireExactRecord(
     value,
     "Managed Runtime Host deployment",
-    hasDeploymentId ? ["deploymentId", "id", "rootPath"] : ["id", "rootPath"],
+    ["deploymentId", "id", "rootPath"],
   );
   return Object.freeze({
     id: requireHostRootId(record.id),
     rootPath: requirePath(record.rootPath, "Managed Runtime Host State Root"),
-    ...(record.deploymentId === undefined
-      ? {}
-      : { deploymentId: requireDeploymentId(record.deploymentId) }),
+    deploymentId: requireDeploymentId(record.deploymentId),
   });
 }
 
@@ -622,14 +519,6 @@ function requirePath(value: unknown, label: string): string {
     throw new Error(`${label} is invalid`);
   }
   return value;
-}
-
-function requirePosixOperatorPath(value: unknown): string {
-  const path = requirePath(value, "Managed Runtime Host operator path");
-  if (!path.startsWith("/")) {
-    throw new Error("Managed Runtime Host operator path must be absolute");
-  }
-  return path;
 }
 
 function requireExactRecord(
@@ -713,14 +602,4 @@ async function writeDocument(
   } finally {
     await rm(temporaryPath, { force: true });
   }
-}
-
-async function removeLegacyDocument(path: string): Promise<void> {
-  try {
-    await rm(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw error;
-  }
-  await syncDirectory(dirname(path));
 }

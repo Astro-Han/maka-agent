@@ -252,8 +252,11 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
     });
     let HostFrame::Call {
         invocation_id: id,
-        session_id,
-        turn_id,
+        source:
+            maka_runtime::capability::CallSource::Agent {
+                session_id,
+                turn_id,
+            },
         tool_call_id,
         cwd,
         ..

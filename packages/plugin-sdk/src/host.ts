@@ -67,6 +67,34 @@ export interface RemoteCaller {
   readonly documentId: string;
   readonly sessionId: string | null;
   readonly signal: Cancellation;
+  readonly views: {
+    authorize<T>(
+      request: import('./authorization.js').AuthorizationRequest,
+      use: (call: ResourceContext) => Awaitable<T>,
+    ): Promise<T>;
+    session(): Promise<SessionView>;
+    workspace(input: WorkspaceViewInput): Promise<SessionView>;
+  };
+}
+export interface WorkspaceViewInput {
+  workspace: { kind: 'project'; projectId: string } | { kind: 'host_path'; path: string };
+  permissionMode: 'explore' | 'ask' | 'bypass';
+  collaborationMode: 'agent' | 'plan';
+}
+export interface SessionView {
+  workspace: { target: WorkspaceViewInput['workspace']; hostCwd: string };
+  tools: readonly string[];
+}
+export interface RemoteOptions {
+  /** Host rejects the endpoint for callers without path access. */
+  access?: 'granted' | 'host_paths';
+}
+/** Throw an Error carrying this code to preserve its meaning across Remote.
+ * Unclassified exceptions become unavailable. An unknown outcome requires
+ * domain recovery; it does not imply that the plugin failed to clean up.
+ */
+export interface RemoteFailure extends Error {
+  readonly code: 'invalid' | 'revoked' | 'cancelled' | 'outcome_unknown' | 'unavailable';
 }
 export interface RemoteStream<T extends Json> {
   next(): Awaitable<IteratorResult<T, void>>;
@@ -80,22 +108,34 @@ export interface Services {
 export interface Service<Input, Output> extends Registration {
   call(input: Input): Promise<Output>;
 }
-export interface CallContext {
-  readonly invocation: Invocation;
-  readonly operationId?: string | null;
+export type CallSource =
+  | { readonly kind: 'agent'; readonly invocation: Invocation; readonly operationId: string | null }
+  | { readonly kind: 'remote'; readonly requestId: string }
+  | { readonly kind: 'background'; readonly grant: string };
+export interface ResourceContext {
+  /** Borrow this call's execution authority; close the view after use. */
+  readonly executions: { open(): Promise<Executions & Registration> };
   readonly signal: Cancellation;
   readonly processes: Processes;
   readonly terminals: Terminals;
   readonly http: Http;
-  /** Uses admitted ∩ current permissions and the invocation's tool ceiling. */
+  /** Uses the source's admitted and current permissions. */
   readonly files: Files;
   readonly llm: import('./llm.js').Llm;
   readonly clients: import('./clients.js').ClientCapabilities;
   readonly services: Services;
 }
+export interface CallContext extends ResourceContext {
+  readonly invocation: Invocation;
+  readonly operationId?: string | null;
+}
 export type ServiceContext = { readonly configuration: readonly Json[] } & (
-  | CallContext
-  | { readonly signal: Cancellation; readonly invocation?: undefined }
+  | (ResourceContext & {
+      readonly source: CallSource;
+      readonly invocation?: Invocation | null;
+      readonly operationId?: string | null;
+    })
+  | { readonly signal: Cancellation; readonly invocation?: undefined; readonly source?: undefined }
 );
 export interface ToolDefinition {
   name: string;
@@ -156,7 +196,35 @@ export interface StorageMutation {
   expectedRevision: number | null;
   data: StorageData;
 }
+export interface BehaviorPreparation {
+  instructions?: string;
+  toolMode?: 'direct' | 'code_mode';
+  nativeTools?: 'workspace' | 'attachments';
+  requiredClients?: {
+    required: readonly string[];
+    optional?: readonly string[];
+    private?: readonly string[];
+  } | null;
+  toolCeiling?: readonly string[] | null;
+}
 export interface HostContext {
+  /** Opens current background authority and confirms cleanup after the callback. */
+  withAuthorization<T>(
+    id: string,
+    use: (call: ResourceContext & { readonly source: CallSource }) => Awaitable<T>,
+  ): Promise<T>;
+  readonly behaviors: {
+    /** Preparation narrows capabilities; it never grants execution authority.
+     * Close/re-register when the source changes to invalidate stale admissions.
+     */
+    register(
+      name: string,
+      prepare: (
+        request: { readonly sessionId: string },
+        call: { readonly signal: Cancellation },
+      ) => Awaitable<BehaviorPreparation>,
+    ): Promise<Registration>;
+  };
   readonly input: {
     /** Pure preparation. Close/re-register when its source changes to revoke stale admissions. */
     prepare(
@@ -168,10 +236,12 @@ export interface HostContext {
     method<I extends Json, O extends Json>(
       name: string,
       invoke: (input: I, caller: RemoteCaller) => Awaitable<O>,
+      options?: RemoteOptions,
     ): Promise<Registration>;
     stream<I extends Json, O extends Json>(
       name: string,
       open: (input: I, caller: RemoteCaller) => Awaitable<RemoteStream<O>>,
+      options?: RemoteOptions,
     ): Promise<Registration>;
   };
   readonly identity: Identity;
@@ -203,7 +273,20 @@ export interface HostContext {
     read(key: string): Promise<StorageRecord | null>;
     batch(mutations: readonly StorageMutation[]): Promise<StorageRecord[]>;
   };
-  readonly executions: Executions;
+  /** Non-secret user preferences; no configuration or execution authority. */
+  readonly preferences: {
+    read(): Promise<{
+      revision: number;
+      personalization: { displayName: string; assistantTone: string };
+      workspaceInstructions: boolean;
+    }>;
+  };
+  readonly executions: {
+    /** Restore explicit Host consent; the ID alone is not permission. Closing
+     * releases this view, never cancels work already accepted by the Host. */
+    restore(id: string): Promise<Executions & Registration>;
+  };
+  readonly data: PrivateFiles;
   readonly credentials: Credentials;
   sleep(milliseconds: number): Promise<void>;
   /** Cleanup runs in reverse registration order. */
@@ -211,12 +294,54 @@ export interface HostContext {
   /** Stage during activation; starts only after publication becomes effective. */
   run(task: () => Awaitable<void>): void;
 }
+/** Package/scope-private files, not the user's workspace. Operations are
+ * independent; the plugin owns its file format and multi-operation recovery.
+ * Paths use portable relative components, never links or parent traversal.
+ * Files are flushed, but namespace mutations do not promise power-loss durability.
+ */
+export interface PrivateFiles {
+  /** Reads at most 1 MiB (default 64 KiB). A non-null cursor means more bytes exist. */
+  read(input: { path: string; offset?: number; limit?: number }): Promise<{
+    bytes: Uint8Array;
+    nextOffset: number | null;
+  }>;
+  /** Flush a bounded write, not an atomic replacement. outcome_unknown requires recovery. */
+  write(input: {
+    path: string;
+    offset?: number;
+    bytes: Uint8Array | readonly number[];
+    truncate?: boolean;
+  }): Promise<void>;
+  /** Lexical pagination, not a snapshot across concurrent directory mutations. */
+  list(input?: { path?: string; after?: string | null; limit?: number }): Promise<{
+    entries: { name: string; kind: 'file' | 'directory' | 'other' }[];
+    nextAfter: string | null;
+  }>;
+  createDirectory(path: string): Promise<void>;
+  /** Removes only a file/link or an empty directory. */
+  remove(path: string): Promise<void>;
+  /** May replace an existing destination file. */
+  rename(from: string, to: string): Promise<void>;
+}
 /** No invocation exists yet; preparation does not grant tool, file or process authority. */
+export interface InputReceipt {
+  readonly source: {
+    readonly kind: 'input';
+    readonly name: string;
+    readonly packageId: string;
+    readonly entryId: string;
+    readonly activation: string;
+    readonly revision: string;
+  };
+  readonly receipt: Json;
+}
 export interface InputPreparationRequest {
   readonly sessionId: string;
   readonly cwd: string;
   readonly content: MessageContent;
-  readonly selections: readonly string[];
+  /** Evidence from preceding providers; a provider cannot replace it. */
+  readonly preparation: readonly InputReceipt[];
+  readonly selections: Readonly<Record<string, readonly string[]>>;
   readonly tools: readonly string[];
   readonly signal: Cancellation;
 }
@@ -224,7 +349,7 @@ export type InputPreparationOutcome =
   | { readonly kind: 'unchanged' }
   | {
       readonly kind: 'ready';
-      readonly text: string;
+      readonly content: MessageContent;
       readonly receipt: Json;
       readonly requiredTools?: readonly string[];
     }

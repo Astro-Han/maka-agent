@@ -132,14 +132,14 @@ pub fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
             }
         }
         Operation::WorkhubCoordinationQuery => {
-            if decode_session_catalog_item(value)?.id() != COORDINATION_SESSION_ID {
+            if decode_session_catalog_projection(value)?.id != COORDINATION_SESSION_ID {
                 return Err(ProtocolError::invalid("Invalid WorkHub Session identity"));
             }
         }
         Operation::WorkhubCoordinationConfigureModel => {
             let result = decode_session_update_result(value)?;
             if let SessionUpdateResult::Committed { session, .. } = result
-                && session.id() != COORDINATION_SESSION_ID
+                && session.id != COORDINATION_SESSION_ID
             {
                 return Err(ProtocolError::invalid("Invalid WorkHub Session identity"));
             }

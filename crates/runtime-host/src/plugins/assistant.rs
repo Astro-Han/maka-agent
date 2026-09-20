@@ -25,28 +25,17 @@ use maka_plugins::{
     contributions::{Catalog, Staged},
     fiber::Context,
     kernel::{Definition, Plugin, PluginContext},
+    preferences::Preferences,
     prompt::{Provider, Request, Section, SectionMode, Text, TextFuture},
     session::{Behavior, Preparation, SessionBehavior},
 };
-use maka_runtime::configuration::policy::RuntimePolicySnapshot;
 use serde_json::Value;
 use std::{path::PathBuf, sync::Arc};
 
 const ID: &str = "maka.assistant";
 
-trait Preferences: Send + Sync {
-    fn read(&self) -> BoxFuture<'_, Result<RuntimePolicySnapshot, String>>;
-}
-struct Settings(Arc<maka_config::ConfigurationStore>);
-impl Preferences for Settings {
-    fn read(&self) -> BoxFuture<'_, Result<RuntimePolicySnapshot, String>> {
-        Box::pin(async { self.0.runtime_policy().await.map_err(|e| e.to_string()) })
-    }
-}
-
 pub(crate) fn install(
     setup: &mut Setup,
-    configuration: Arc<maka_config::ConfigurationStore>,
     global: Option<PathBuf>,
     catalog: &Catalog,
 ) -> Result<(), maka_plugins::Error> {
@@ -55,9 +44,7 @@ pub(crate) fn install(
             "built-in assistant identity is reserved".into(),
         ));
     }
-    catalog.reserve_for::<Section>(ID, ID)?;
     catalog.host_only::<SessionBehavior>()?;
-    catalog.reserve_for::<SessionBehavior>("default", ID)?;
     setup.builtins.insert(
         ID.into(),
         Arc::new(Definition {
@@ -65,10 +52,7 @@ pub(crate) fn install(
             revision: env!("CARGO_PKG_VERSION").into(),
             dependencies: vec![],
             inject: vec![],
-            plugin: Arc::new(Builtin {
-                preferences: Arc::new(Settings(configuration)),
-                global,
-            }),
+            plugin: Arc::new(Builtin { global }),
         }),
     );
     let mut entry = Entry::new(ID)?;
@@ -85,7 +69,6 @@ pub(crate) fn install(
     Ok(())
 }
 struct Builtin {
-    preferences: Arc<dyn Preferences>,
     global: Option<PathBuf>,
 }
 impl Plugin for Builtin {
@@ -106,8 +89,11 @@ impl Plugin for Builtin {
         context: PluginContext,
         _: Value,
     ) -> BoxFuture<'static, Result<Staged, String>> {
+        let Some(host) = context.host else {
+            return Box::pin(async { Err("Assistant requires Host preferences".into()) });
+        };
         let assistant = Arc::new(Assistant {
-            preferences: self.preferences.clone(),
+            preferences: host.preferences,
             global: self.global.clone(),
             owner: context.lifecycle,
         });
@@ -148,10 +134,7 @@ impl Provider for Assistant {
         let owner = self.owner.clone();
         Box::pin(async move {
             let guard = owner.admit()?;
-            let snapshot = preferences
-                .read()
-                .await
-                .map_err(maka_plugins::Error::Invalid)?;
+            let snapshot = preferences.read().await?;
             let prompt = prompt::resolve(snapshot, request.target.cwd().into(), global, guard)
                 .await
                 .map_err(|e| maka_plugins::Error::Invalid(e.to_string()))?;

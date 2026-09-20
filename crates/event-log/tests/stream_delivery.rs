@@ -46,7 +46,7 @@ fn observed(step: &str, observation: ModelEvent) -> Fact {
 
 fn request(step: &str) -> Fact {
     Fact::ModelRequested {
-        purpose: None,
+        purpose: maka_runtime::context::ModelPurpose::Main,
         context: None,
         checkpoint_event_id: None,
         step_id: step.into(),
@@ -85,7 +85,6 @@ async fn giant_bodies_and_metadata_do_not_block_stream_delivery() {
     let opened = append(Fact::InvocationOpened {
         configuration: None,
         input: maka_runtime::input::InvocationInput::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             content: "".into(),
             request_fingerprint: None,
@@ -112,7 +111,6 @@ async fn giant_bodies_and_metadata_do_not_block_stream_delivery() {
     })
     .await;
     let steered = append(Fact::MessageSteered {
-        skill_invocation: Default::default(),
         message: Box::new(maka_runtime::input::DeliveredMessage {
             message_id: "steering".into(),
             content: "s".repeat(64 * 1024).into(),
@@ -251,7 +249,6 @@ async fn pages_obey_global_fences_and_never_skip_oversized_deltas() {
                     Fact::InvocationOpened {
                         configuration: None,
                         input: maka_runtime::input::InvocationInput::Message {
-                            skill_invocation: Default::default(),
                             source_messages: Vec::new(),
                             content: "".into(),
                             request_fingerprint: None,
@@ -279,7 +276,6 @@ async fn pages_obey_global_fences_and_never_skip_oversized_deltas() {
                     Fact::InvocationOpened {
                         configuration: None,
                         input: maka_runtime::input::InvocationInput::Message {
-                            skill_invocation: Default::default(),
                             source_messages: Vec::new(),
                             content: "".into(),
                             request_fingerprint: None,

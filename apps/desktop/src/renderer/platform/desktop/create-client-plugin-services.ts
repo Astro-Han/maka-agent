@@ -55,6 +55,37 @@ export function createDesktopClientPluginServices(
           if (!connectionEpoch) throw new Error('Client catalog has no connection identity');
           return clientPluginRemote(bridge.clientPlugins.remote, host, connectionEpoch)(identity, signal);
         },
+        authorization(identity, signal) {
+          if (!connectionEpoch) throw new Error('Client catalog has no connection identity');
+          const epoch = connectionEpoch;
+          const invoke = async (scope: import('@maka-agent/plugin-sdk/client').AuthorizationScope, command: Parameters<typeof bridge.clientPlugins.authorization>[2]['command']) => {
+            signal.throwIfAborted();
+            let cancel: (() => void) | undefined;
+            try {
+              return await bounded(bridge.clientPlugins.authorization(host, epoch, {client: identity, scope, command}, (stop) => {
+                cancel = stop;
+                signal.addEventListener('abort', stop, {once:true});
+                if (signal.aborted) stop();
+              }), signal);
+            } finally { if (cancel) signal.removeEventListener('abort', cancel); }
+          };
+          return {
+            async approve(scope, request) {
+              const result = await invoke(scope, {kind:'approve',request});
+              if (result.kind !== 'grant') throw new Error('Invalid authorization result');
+              return result.grant;
+            },
+            async query(scope, id) {
+              const result = await invoke(scope, {kind:'query',id});
+              if (result.kind !== 'grant') throw new Error('Invalid authorization result');
+              return result.grant;
+            },
+            async revoke(scope, id) {
+              const result = await invoke(scope, {kind:'revoke',id});
+              if (result.kind !== 'revoked') throw new Error('Invalid authorization result');
+            },
+          };
+        },
         localFiles(identity, signal) {
           if (!connectionEpoch) throw new Error('Client catalog has no connection identity');
           if (!localFiles) return undefined;

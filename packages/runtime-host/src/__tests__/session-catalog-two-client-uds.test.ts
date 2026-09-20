@@ -53,7 +53,6 @@ import {
   RUNTIME_HOST_PROTOCOL_VERSION,
   SESSION_CATALOG_LIVE_RUN_STATE_SCHEMA_VERSION,
   type ClientFrame,
-  type SessionCatalogItem,
   type SessionCatalogProjection,
   type SessionCreateInput,
   type SubscriptionFrame,
@@ -82,7 +81,6 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
   const {
     connectionId,
     largeLabelSessionId,
-    oversizedSessionId,
     unreadSessionId,
     retirementSessionId,
     retirementRevision,
@@ -128,76 +126,6 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
       assert.equal(largeLabels.labels.length, 32);
       assert.equal(largeLabels.labelsTruncated, true);
       assert.deepEqual(largeLabels.labels.slice(0, 2), ['visible', 'label-0']);
-      assert.deepEqual(
-        await desktop.request('session.catalog.query', {
-          kind: 'get',
-          sessionId: oversizedSessionId,
-        }),
-        {
-          kind: 'session',
-          session: {
-            kind: 'unsupported_legacy_record',
-            id: oversizedSessionId,
-            revision: 1,
-            reason: 'not_wire_representable',
-          },
-        },
-      );
-      assert.deepEqual(
-        await desktop.request('session.metadata.update', {
-          sessionId: oversizedSessionId,
-          expectedRevision: 1,
-          patch: { isFlagged: true },
-        }),
-        {
-          kind: 'committed',
-          session: {
-            kind: 'unsupported_legacy_record',
-            id: oversizedSessionId,
-            revision: 2,
-            reason: 'not_wire_representable',
-          },
-        },
-      );
-      assert.deepEqual(
-        await desktop.request('session.lifecycle.set', {
-          sessionId: oversizedSessionId,
-          state: 'archived',
-        }),
-        {
-          kind: 'unsupported_legacy_record',
-          id: oversizedSessionId,
-          revision: 3,
-          reason: 'not_wire_representable',
-        },
-      );
-      assert.deepEqual(
-        await tui.request('session.lifecycle.set', {
-          sessionId: oversizedSessionId,
-          state: 'active',
-        }),
-        {
-          kind: 'unsupported_legacy_record',
-          id: oversizedSessionId,
-          revision: 4,
-          reason: 'not_wire_representable',
-        },
-      );
-      assert.deepEqual(
-        await desktop.request('session.catalog.query', {
-          kind: 'get',
-          sessionId: oversizedSessionId,
-        }),
-        {
-          kind: 'session',
-          session: {
-            kind: 'unsupported_legacy_record',
-            id: oversizedSessionId,
-            revision: 4,
-            reason: 'not_wire_representable',
-          },
-        },
-      );
       await assert.rejects(
         desktop.request('session.create', {
           sessionId: 'relative-session',
@@ -826,7 +754,6 @@ async function seedAuthority(
 ): Promise<{
   readonly connectionId: string;
   readonly largeLabelSessionId: string;
-  readonly oversizedSessionId: string;
   readonly unreadSessionId: string;
   readonly retirementSessionId: string;
   readonly retirementRevision: number;
@@ -896,14 +823,6 @@ async function seedAuthority(
         'visible',
         ...Array.from({ length: 700 }, (_, index) => `label-${index}`),
       ],
-      llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-      llmConnectionSlug: 'fake',
-      model: 'fake-model',
-      permissionMode: 'ask',
-    });
-    const oversized = await execution.sessionStore.create({
-      cwd: root,
-      projectId: 'p'.repeat(257),
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
@@ -1013,7 +932,6 @@ async function seedAuthority(
     return {
       connectionId: connection.connectionId,
       largeLabelSessionId: largeLabels.id,
-      oversizedSessionId: oversized.id,
       unreadSessionId: unread.id,
       retirementSessionId: retirement.id,
       retirementRevision: retirementSnapshot.revision,
@@ -1106,7 +1024,7 @@ async function waitForSession(
   throw new Error('Session creation did not become durable before the deadline');
 }
 
-function requireSessionProjection(item: SessionCatalogItem): SessionCatalogProjection {
+function requireSessionProjection(item: SessionCatalogProjection): SessionCatalogProjection {
   if ('kind' in item) {
     assert.fail(`Expected a representable Session, received ${item.kind}`);
   }

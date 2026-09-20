@@ -325,11 +325,12 @@ test('returns blocked Skill feedback without waiting for a Turn that was not cre
       }),
       startTurn: async () => ({
         kind: 'blocked',
-        skillInvocation: {
+        message: 'writer: not_found',
+        preparation: fixturePreparation({
           loaded: [],
           failed: [{ request: 'writer', reason: 'not_found' }],
           receipts: [],
-        },
+        }),
       }),
     }),
     resolveCreateTarget: hostPathCreateTarget,
@@ -449,7 +450,7 @@ function startedTurn(turn: TurnSnapshot) {
   return {
     kind: 'started' as const,
     turn,
-    skillInvocation: { loaded: [], failed: [], receipts: [] },
+    preparation: [],
   };
 }
 
@@ -537,4 +538,8 @@ class AsyncFrameQueue implements AsyncIterable<SubscriptionFrame> {
       },
     };
   }
+}
+
+function fixturePreparation(receipt: unknown): import('@maka/runtime-host/protocol').InputReceipt[] {
+  return [{ source: { kind: 'input', name: 'maka.skills', packageId: 'maka.skills', entryId: 'skills', activation: "fixture", revision: "1" }, receipt: JSON.parse(JSON.stringify(receipt)) }];
 }

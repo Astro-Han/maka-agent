@@ -18,7 +18,7 @@
  */
 
 use maka_plugins::{
-    execution::{CreateChild, Submit},
+    execution::{CreateChild, CreateRoot, Submit},
     storage::Mutation,
 };
 use serde::{Deserialize, Serialize};
@@ -27,14 +27,26 @@ use serde_json::Value;
 #[derive(Deserialize)]
 #[serde(tag = "method", content = "input", deny_unknown_fields)]
 pub(super) enum Request {
+    #[serde(rename = "preferences.read")]
+    Preferences,
+    #[serde(rename = "remote.session")]
+    SessionView(Authority),
+    #[serde(rename = "remote.workspace")]
+    WorkspaceView(WorkspaceView),
+    #[serde(rename = "remote.authorize")]
+    AuthorizeRemote(RemoteAuthorization),
+    #[serde(rename = "authorization.open")]
+    OpenAuthorization(Authorization),
+    #[serde(rename = "authorization.close")]
+    CloseAuthorization(Handle),
     #[serde(rename = "credentials.read")]
     CredentialRead(Key),
     #[serde(rename = "credentials.write")]
     CredentialWrite(maka_plugins::credentials::Write),
     #[serde(rename = "terminal.spawn")]
-    TerminalSpawn(super::super::terminal::Spawn),
+    TerminalSpawn(TerminalSpawn),
     #[serde(rename = "terminal.control")]
-    TerminalControl(super::super::terminal::Control),
+    TerminalControl(TerminalControl),
     #[serde(rename = "terminal.next")]
     TerminalNext(ProcessHandle),
     #[serde(rename = "terminal.wait")]
@@ -42,21 +54,21 @@ pub(super) enum Request {
     #[serde(rename = "terminal.close")]
     TerminalClose(Handle),
     #[serde(rename = "files.invoke")]
-    Files(super::super::effects::Request),
+    Files(FileRequest),
     #[serde(rename = "llm.generate")]
-    Generate(super::super::effects::ModelRequest),
+    Generate(ModelRequest),
     #[serde(rename = "clients.tools")]
     ClientCatalog(Authority),
     #[serde(rename = "clients.call")]
-    ClientCall(super::super::effects::ClientRequest),
+    ClientCall(ClientRequest),
     #[serde(rename = "http.request")]
-    HttpSend(super::super::http::Request),
+    HttpSend(HttpRequest),
     #[serde(rename = "http.next")]
     HttpNext(ProcessHandle),
     #[serde(rename = "http.close")]
     HttpClose(Handle),
     #[serde(rename = "process.spawn")]
-    ProcessSpawn(super::super::process::Spawn),
+    ProcessSpawn(ProcessSpawn),
     #[serde(rename = "process.write")]
     ProcessWrite(ProcessWrite),
     #[serde(rename = "process.endInput")]
@@ -79,20 +91,42 @@ pub(super) enum Request {
     Read(Key),
     #[serde(rename = "storage.batch")]
     Batch(Batch),
+    #[serde(rename = "data.read")]
+    DataRead(maka_plugins::storage::files::ReadFile),
+    #[serde(rename = "data.write")]
+    DataWrite(maka_plugins::storage::files::WriteFile),
+    #[serde(rename = "data.list")]
+    DataList(maka_plugins::storage::files::ListFiles),
+    #[serde(rename = "data.createDirectory")]
+    DataCreateDirectory(Path),
+    #[serde(rename = "data.remove")]
+    DataRemove(Path),
+    #[serde(rename = "data.rename")]
+    DataRename(Rename),
     #[serde(rename = "execution.submit")]
-    Submit(Submit),
+    Submit(Execution<Submit>),
+    #[serde(rename = "execution.session")]
+    ExecutionSession(Execution<SessionQuery>),
     #[serde(rename = "execution.createChild")]
-    CreateChild(CreateChild),
+    CreateChild(Execution<CreateChild>),
+    #[serde(rename = "execution.createRoot")]
+    CreateRoot(Execution<CreateRoot>),
     #[serde(rename = "execution.workspacePatch")]
-    WorkspacePatch(Operation),
+    WorkspacePatch(Execution<Operation>),
     #[serde(rename = "execution.query")]
-    Query(Operation),
+    Query(Execution<Operation>),
     #[serde(rename = "execution.cancel")]
-    Cancel(Operation),
+    Cancel(Execution<Operation>),
     #[serde(rename = "execution.events")]
-    Events(Events),
+    Events(Execution<Events>),
     #[serde(rename = "execution.event")]
-    Event(Event),
+    Event(Execution<Event>),
+    #[serde(rename = "execution.restore")]
+    RestoreExecution(Authorization),
+    #[serde(rename = "execution.acquire")]
+    AcquireExecution(Authority),
+    #[serde(rename = "execution.close")]
+    CloseExecution(Handle),
     #[serde(rename = "service.provide")]
     Provide(Provide),
     #[serde(rename = "service.get")]
@@ -112,8 +146,80 @@ pub(super) struct ProcessHandle {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct Execution<T> {
+    pub handle: String,
+    pub input: T,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct SessionQuery {
+    pub session_id: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Authorization {
+    pub id: maka_plugins::authorization::Id,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RemoteAuthorization {
+    pub authority: String,
+    pub request: maka_plugins::authorization::Request,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProcessSpawn {
+    pub authority: String,
+    pub command: maka_plugins::process::Command,
+}
+#[derive(Deserialize)]
+pub(super) struct TerminalSpawn {
+    pub authority: String,
+    #[serde(flatten)]
+    pub input: maka_plugins::terminal::Spawn,
+}
+#[derive(Deserialize)]
+pub(super) struct TerminalControl {
+    pub authority: String,
+    pub handle: String,
+    #[serde(flatten)]
+    pub input: maka_plugins::terminal::Control,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Authority {
     pub authority: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FileRequest {
+    pub authority: String,
+    pub operation: maka_plugins::filesystem::Operation,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HttpRequest {
+    pub authority: String,
+    #[serde(flatten)]
+    pub request: maka_plugins::http::Request,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ModelRequest {
+    pub authority: String,
+    pub input: maka_plugins::llm::Generate,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ClientRequest {
+    pub authority: String,
+    pub call: maka_plugins::client_capability::Call,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WorkspaceView {
+    pub authority: String,
+    pub input: maka_plugins::remote::WorkspaceViewInput,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -138,6 +244,17 @@ pub(super) struct Withdraw {
 #[serde(deny_unknown_fields)]
 pub(super) struct Key {
     pub key: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Path {
+    pub path: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Rename {
+    pub from: String,
+    pub to: String,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -237,6 +354,20 @@ impl From<maka_plugins::Error> for Error {
         }
     }
 }
+impl From<maka_plugins::remote::Error> for Error {
+    fn from(error: maka_plugins::remote::Error) -> Self {
+        use maka_plugins::remote::Error as Remote;
+        Self {
+            code: match error {
+                Remote::Retired | Remote::Cancelled => Code::Revoked,
+                Remote::Invalid(_) => Code::Invalid,
+                Remote::Provider(_) => Code::Unavailable,
+                Remote::OutcomeUnknown(_) | Remote::CleanupUnconfirmed => Code::OutcomeUnknown,
+            },
+            message: error.to_string(),
+        }
+    }
+}
 impl From<maka_plugins::storage::StoreError> for Error {
     fn from(error: maka_plugins::storage::StoreError) -> Self {
         use maka_plugins::storage::StoreError;
@@ -248,6 +379,50 @@ impl From<maka_plugins::storage::StoreError> for Error {
         };
         Self {
             code,
+            message: error.to_string(),
+        }
+    }
+}
+impl From<maka_plugins::http::Error> for Error {
+    fn from(error: maka_plugins::http::Error) -> Self {
+        use maka_plugins::http::Error as Http;
+        Self {
+            code: match &error {
+                Http::Denied => Code::Revoked,
+                Http::Invalid(_) => Code::Invalid,
+                Http::Failed(_) => Code::Unavailable,
+                Http::CleanupUnconfirmed => Code::OutcomeUnknown,
+            },
+            message: error.to_string(),
+        }
+    }
+}
+impl From<maka_plugins::process::Error> for Error {
+    fn from(error: maka_plugins::process::Error) -> Self {
+        use maka_plugins::process::Error as Process;
+        Self {
+            code: match &error {
+                Process::Denied => Code::Revoked,
+                Process::Invalid(_) => Code::Invalid,
+                Process::Failed(_) => Code::Unavailable,
+                Process::CleanupUnconfirmed(_) => Code::OutcomeUnknown,
+            },
+            message: error.to_string(),
+        }
+    }
+}
+impl From<maka_plugins::storage::files::Error> for Error {
+    fn from(error: maka_plugins::storage::files::Error) -> Self {
+        use maka_plugins::storage::files::Error as File;
+        Self {
+            code: match &error {
+                File::Invalid(_) => Code::Invalid,
+                File::NotFound => Code::NotFound,
+                File::AlreadyExists => Code::Conflict,
+                File::Retired => Code::Revoked,
+                File::Io(_) => Code::Unavailable,
+                File::OutcomeUnknown(_) => Code::OutcomeUnknown,
+            },
             message: error.to_string(),
         }
     }

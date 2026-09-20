@@ -38,8 +38,8 @@ async fn legacy(log: &EventLog, id: &str, repeats: usize) {
     let operation = format!("{step}:call-{id}");
     for fact in [
         Fact::InvocationOpened { configuration: None,
-            input: InvocationInput::Message { skill_invocation: Default::default(), source_messages: Vec::new(), content: format!("question-{id}").into(), request_fingerprint: None } },
-        Fact::ModelRequested { purpose: None, context: None, checkpoint_event_id: None, effective_source_digest: None,
+            input: InvocationInput::Message { source_messages: Vec::new(), content: format!("question-{id}").into(), request_fingerprint: None } },
+        Fact::ModelRequested { purpose: maka_runtime::context::ModelPurpose::Main, context: None, checkpoint_event_id: None, effective_source_digest: None,
             step_id: step.clone(), model_id: "test".into(), source_scope: LogScope::Session { id: "session".into() },
             source_high_water: 1, source_digest: "legacy".into(), input_digest: "legacy".into(), route_identity: "legacy".into() },
         Fact::ModelCompleted { step_id: step.clone(), output: serde_json::from_value(json!({
@@ -146,7 +146,7 @@ async fn history_pruning_binds_post_coverage_first_pages_into_summary_after_reop
         .iter()
         .find_map(|stored| match &stored.event.fact {
             Fact::ModelRequested {
-                purpose: Some(ModelPurpose::Summary),
+                purpose: ModelPurpose::Summary,
                 source_high_water,
                 effective_source_digest: Some(digest),
                 ..

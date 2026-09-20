@@ -52,7 +52,6 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
                 content: "Make a new task".into(),
                 request_fingerprint: None,
                 source_messages: Vec::new(),
-                skill_invocation: None,
             },
         },
     ))

@@ -1968,7 +1968,12 @@ describe('non-serving Runtime Host kernel', () => {
           compositionId: KERNEL_COMPOSITION.descriptor.id,
         }),
       );
-      assert.deepEqual(decodeHostFrame(await staleWhileResident.read(1_000)), {
+      const staleResponse = decodeHostFrame(await staleWhileResident.read(1_000));
+      assert.ok('kind' in staleResponse && staleResponse.kind === 'incompatible');
+      const { activity, ...identity } = staleResponse;
+      assert.equal(activity?.connections, 1);
+      assert.equal(activity?.drainResidencies, 0);
+      assert.deepEqual(identity, {
         kind: 'incompatible',
         hostEpoch: candidate.host.hostEpoch,
         protocolMin: CURRENT_PROTOCOL.min,
@@ -1990,6 +1995,8 @@ describe('non-serving Runtime Host kernel', () => {
           clientInstanceId: 'blocked-legacy-resident',
           protocolMin: LEGACY_PROTOCOL.min,
           protocolMax: LEGACY_PROTOCOL.max,
+          compatibilityEpoch: RUNTIME_HOST_COMPATIBILITY_EPOCH,
+          compositionId: KERNEL_COMPOSITION.descriptor.id,
         }),
       );
       const blockedResponse = decodeHostFrame(await blockedWhileResident.read(1_000));
@@ -2012,6 +2019,8 @@ describe('non-serving Runtime Host kernel', () => {
           clientInstanceId: 'stale-schema-idle',
           protocolMin: CURRENT_PROTOCOL.min,
           protocolMax: CURRENT_PROTOCOL.max,
+          compatibilityEpoch: 20,
+          compositionId: KERNEL_COMPOSITION.descriptor.id,
         }),
       );
       const staleIdleResponse = decodeHostFrame(await staleAtIdle.read(1_000));
@@ -2986,7 +2995,7 @@ describe('non-serving Runtime Host kernel', () => {
     });
   });
 
-  test('accepts Client hellos with and without the legacy surface identity', async () => {
+  test('accepts current Client hellos and rejects obsolete surface fields', async () => {
     await withHostPaths(async (paths) => {
       const candidate = await startTestRuntimeHostCandidate(paths, {
         rootPath: paths.root,
@@ -3018,8 +3027,16 @@ describe('non-serving Runtime Host kernel', () => {
           const transport = new FramedTransport(await openSocket(candidate.host.endpoint));
           try {
             await writeRawLocalIpc(transport, encodeLegacyProtocolFrame(hello));
-            const response = decodeHostFrame(await transport.read(2_000));
-            assert.ok('kind' in response && response.kind === 'accepted');
+            if ('surface' in hello) {
+              await assert.rejects(
+                transport.read(2_000),
+                (error: unknown) =>
+                  error instanceof RuntimeHostTransportError && error.code === 'read_eof',
+              );
+            } else {
+              const response = decodeHostFrame(await transport.read(2_000));
+              assert.ok('kind' in response && response.kind === 'accepted');
+            }
           } finally {
             transport.abort();
           }

@@ -94,7 +94,7 @@ pub enum SessionCatalogQueryInput {
 pub enum SessionCatalogQueryResult {
     Page {
         revision: String,
-        sessions: Vec<SessionCatalogItem>,
+        sessions: Vec<SessionCatalogProjection>,
         next_cursor: Option<String>,
     },
     RevisionChanged {
@@ -102,7 +102,7 @@ pub enum SessionCatalogQueryResult {
         actual_revision: String,
     },
     Session {
-        session: Option<SessionCatalogItem>,
+        session: Option<Box<SessionCatalogProjection>>,
     },
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -155,7 +155,6 @@ macro_rules! decoder {
 }
 decoder!(decode_session_create_input, SessionCreateInput);
 decoder!(decode_session_catalog_query_input, SessionCatalogQueryInput);
-decoder!(decode_session_catalog_item, SessionCatalogItem);
 decoder!(decode_session_catalog_projection, SessionCatalogProjection);
 decoder!(
     decode_session_catalog_query_result,
@@ -175,18 +174,16 @@ decoder!(
 
 pub fn assert_create_output_for_input(
     input: &SessionCreateInput,
-    output: &SessionCatalogItem,
+    output: &SessionCatalogProjection,
 ) -> Result<()> {
-    identity(&input.session_id, output.id())
+    identity(&input.session_id, &output.id)
 }
 pub fn assert_lifecycle_output_for_input(
     input: &SessionLifecycleSetInput,
-    output: &SessionCatalogItem,
+    output: &SessionCatalogProjection,
 ) -> Result<()> {
-    identity(&input.session_id, output.id())?;
-    if let SessionCatalogItem::Projection(p) = output
-        && p.is_archived != (input.state == SessionLifecycleState::Archived)
-    {
+    identity(&input.session_id, &output.id)?;
+    if output.is_archived != (input.state == SessionLifecycleState::Archived) {
         return Err(ProtocolError::invalid(
             "Session lifecycle state does not match request",
         ));

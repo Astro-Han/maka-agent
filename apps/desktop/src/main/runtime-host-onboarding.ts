@@ -19,28 +19,12 @@
 
 import { randomUUID } from 'node:crypto';
 import type { IpcMain } from 'electron';
-import {
-  parseRuntimeHostSetupEndpoint,
-  type RuntimeHostNodeOperatorCommand,
-  type RuntimeHostNativeOperatorCommand,
-  type RuntimeHostOperatorCommand,
-  type RuntimeHostSetupPhase,
-} from '@maka/runtime-host/operator';
 import type {
   DesktopRuntimeHostOnboardingInput,
   DesktopRuntimeHostOnboardingSnapshot,
 } from '../preload/bridge-contract.js';
 import type { DesktopRuntimeHostProfileService } from './runtime-host-profile-service.js';
-import {
-  runtimeHostPeerTargetFromPlatform,
-  type RuntimeHostTargetIdentity,
-  type DesktopRuntimeHostSshSetupInput,
-} from './runtime-host-ssh-terminal.js';
-import type { DesktopRuntimeHostWslSetupInput } from './runtime-host-wsl-controller.js';
-import type {
-  DesktopRuntimeHostDevelopmentPeerTarget,
-  DesktopRuntimeHostSetupPackage,
-} from './runtime-host-setup-package.js';
+import type { RuntimeHostTargetIdentity } from './runtime-host-target.js';
 import { requireProjectDirectoryRoots } from '../shared/runtime-host-project-directory-policy.js';
 import type { NativeRuntimeHostPackage } from './native-runtime-host-setup.js';
 import type { NativeSetupInput, NativeSetupResult } from './native-runtime-host-installer.js';
@@ -53,8 +37,7 @@ type OnboardingState = DesktopRuntimeHostOnboardingSnapshot extends infer Snapsh
   : never;
 
 export function createDesktopRuntimeHostOnboarding(input: {
-  /** Production uses native packages; the legacy route remains for TS fixtures. */
-  readonly nativeSetup?: {
+  readonly nativeSetup: {
     resolvePackage(identity: RuntimeHostTargetIdentity, signal?: AbortSignal, budget?: NativeHostBudget, onProgress?: (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => void): Promise<NativeRuntimeHostPackage>;
     ssh(input: NativeSetupInput & { readonly destination: string; readonly sshPort?: number }, onCommit: () => void): Promise<NativeSetupResult>;
     wsl(input: NativeSetupInput & { readonly distribution: string }, onCommit: () => void): Promise<NativeSetupResult>;
@@ -65,46 +48,17 @@ export function createDesktopRuntimeHostOnboarding(input: {
     DesktopRuntimeHostProfileService,
     'addEnvironmentAndEnable' | 'addAndEnableVerified'
   >;
-  readonly runSetup: (
-    input: DesktopRuntimeHostSshSetupInput,
-    onProgress: (frame: { readonly phase: RuntimeHostSetupPhase }) => void,
-    onComplete: () => void,
-  ) => Promise<{
-    readonly rootId: string;
-    readonly rootPath: string;
-    readonly serviceId: string;
-    readonly deploymentId: string;
-    readonly operator: RuntimeHostOperatorCommand;
-    readonly endpoint: string;
-    readonly credential: string;
-  }>;
-  readonly runWslSetup: (
-    input: DesktopRuntimeHostWslSetupInput,
-    onProgress: (frame: { readonly phase: RuntimeHostSetupPhase }) => void,
-    onComplete: () => void,
-  ) => Promise<{
-    readonly rootId: string;
-    readonly rootPath: string;
-    readonly serviceId: string;
-    readonly deploymentId: string;
-    readonly operator: RuntimeHostNodeOperatorCommand<'posix'> | RuntimeHostNativeOperatorCommand<'posix'>;
-  }>;
   readonly listWslDistributions: () => Promise<readonly string[]>;
   readonly resolveWslTargetIdentity: (input: {
     readonly distribution: string;
     readonly signal?: AbortSignal;
   }) => Promise<Extract<RuntimeHostTargetIdentity, { platform: 'linux' }>>;
   readonly send: (snapshot: DesktopRuntimeHostOnboardingSnapshot) => void;
-  readonly setupPackageMode: 'published' | 'development';
   readonly resolveSshTargetIdentity: (input: {
     readonly destination: string;
     readonly sshPort?: number;
     readonly signal?: AbortSignal;
   }) => Promise<RuntimeHostTargetIdentity>;
-  readonly resolveSetupPackage: (
-    peerTarget: DesktopRuntimeHostDevelopmentPeerTarget,
-    signal?: AbortSignal,
-  ) => DesktopRuntimeHostSetupPackage | Promise<DesktopRuntimeHostSetupPackage>;
 }): { close(): Promise<void> } {
   let revision = 0;
   let snapshot: DesktopRuntimeHostOnboardingSnapshot = { kind: 'idle', revision };
@@ -150,107 +104,8 @@ export function createDesktopRuntimeHostOnboarding(input: {
     signal: AbortSignal,
   ): Promise<DesktopRuntimeHostOnboardingSnapshot> => {
     try {
-      if (input.nativeSetup) {
-        const budget = new NativeHostBudget(180_000, signal);
-        return await budget.wait(runNative(request, signal, input.nativeSetup, budget), 'Host setup');
-      }
-      if (request.kind === 'wsl') {
-        publish({ kind: 'running', phase: 'connecting_wsl' });
-        const target = await input.resolveWslTargetIdentity({ distribution: request.distribution, signal });
-        publish({ kind: 'running', phase: 'preparing_cli' });
-        const peerTarget = input.setupPackageMode === 'development'
-          ? runtimeHostPeerTargetFromPlatform(target.platform, target.architecture) : 'none';
-        const setupPackage = await input.resolveSetupPackage(peerTarget, signal);
-        return await runWsl(request, setupPackage, signal);
-      }
-      const targetIdentity = await resolveSshTargetIdentity(request, signal);
-      const peerTarget = input.setupPackageMode === 'development'
-        ? runtimeHostPeerTargetFromPlatform(targetIdentity.platform, targetIdentity.architecture)
-        : 'none';
-      const setupPackage = await input.resolveSetupPackage(
-        peerTarget,
-        signal,
-      );
-      const lifecycle = setupPackage.kind === 'npm' ? 'on_demand' : 'supervised';
-      signal.throwIfAborted();
-      publish({ kind: 'running', phase: 'connecting_ssh' });
-      let commitStarted = false;
-      const beginCommit = () => {
-        if (commitStarted) return;
-        commitStarted = true;
-        if (active) active.cancellable = false;
-        publish({
-          kind: 'running',
-          phase: 'connecting_host',
-        });
-      };
-      const complete = await input.runSetup(
-        {
-          destination: request.destination,
-          ...(request.sshPort === undefined ? {} : { sshPort: request.sshPort }),
-          setupPackage,
-          remotePlatform: targetIdentity.platform === 'win32' ? 'win32' : 'posix',
-          lifecycle,
-          principalId: `desktop:${input.clientInstanceId}`,
-          ...(request.projectDirectoryRoots
-            ? { projectDirectoryRoots: request.projectDirectoryRoots }
-            : {}),
-          signal,
-        },
-        (progress) => {
-          if (commitStarted) return;
-          publish({
-            kind: 'running',
-            phase: progress.phase,
-          });
-        },
-        beginCommit,
-      );
-      beginCommit();
-      const endpoint = parseRuntimeHostSetupEndpoint(complete.endpoint);
-      if (!endpoint) throw new Error('Remote Maka setup returned an invalid endpoint');
-      const profileId = `remote-${randomUUID()}`;
-      const profileName = request.name?.trim() || request.destination;
-      const connected = await input.profiles.addAndEnableVerified({
-        profile: {
-          id: profileId,
-          name: profileName,
-          kind: 'remote',
-          rootId: complete.rootId,
-          transport: {
-            kind: 'ssh',
-            destination: request.destination,
-            ...(request.sshPort === undefined ? {} : { sshPort: request.sshPort }),
-            ...(lifecycle === 'on_demand'
-              ? {
-                  activation: {
-                    kind: 'ssh_operator' as const,
-                    operator: complete.operator,
-                  },
-                }
-              : {
-                  remotePort: endpoint.port,
-                  websocketPath: endpoint.websocketPath,
-                }),
-          },
-        },
-        credential: complete.credential,
-        managedService: {
-          deployment: {
-            id: complete.serviceId,
-            rootPath: complete.rootPath,
-            deploymentId: complete.deploymentId,
-          },
-          control: {
-            kind: 'ssh_operator',
-            operator: complete.operator,
-          },
-        },
-      });
-      return publish({
-        kind: 'complete',
-        profileId: connected.profileId,
-      });
+      const budget = new NativeHostBudget(180_000, signal);
+      return await budget.wait(runNative(request, signal, input.nativeSetup, budget), 'Host setup');
     } catch (error) {
       if (signal.aborted) return publish({ kind: 'idle' });
       return publish({
@@ -263,7 +118,7 @@ export function createDesktopRuntimeHostOnboarding(input: {
   const runNative = async (
     request: DesktopRuntimeHostOnboardingInput,
     signal: AbortSignal,
-    native: NonNullable<typeof input.nativeSetup>,
+    native: typeof input.nativeSetup,
     budget: NativeHostBudget,
   ): Promise<DesktopRuntimeHostOnboardingSnapshot> => {
     publish({ kind: 'running', phase: request.kind === 'wsl' ? 'connecting_wsl' : 'connecting_ssh' });
@@ -314,71 +169,6 @@ export function createDesktopRuntimeHostOnboarding(input: {
     });
     budget.remaining('profile confirmation');
     return publish({ kind: 'complete', profileId: result.profileId });
-  };
-
-  const resolveSshTargetIdentity = async (
-    request: Extract<DesktopRuntimeHostOnboardingInput, { readonly kind: 'ssh' }>,
-    signal: AbortSignal,
-  ): Promise<RuntimeHostTargetIdentity> => {
-    publish({ kind: 'running', phase: 'connecting_ssh' });
-    const identity = await input.resolveSshTargetIdentity({
-      destination: request.destination,
-      ...(request.sshPort === undefined ? {} : { sshPort: request.sshPort }),
-      signal,
-    });
-    publish({ kind: 'running', phase: 'preparing_cli' });
-    return identity;
-  };
-
-  const runWsl = async (
-    request: Extract<DesktopRuntimeHostOnboardingInput, { readonly kind: 'wsl' }>,
-    setupPackage: DesktopRuntimeHostSetupPackage,
-    signal: AbortSignal,
-  ): Promise<DesktopRuntimeHostOnboardingSnapshot> => {
-    publish({ kind: 'running', phase: 'connecting_wsl' });
-    let commitStarted = false;
-    const beginCommit = () => {
-      if (commitStarted) return;
-      commitStarted = true;
-      if (active) active.cancellable = false;
-      publish({ kind: 'running', phase: 'connecting_host' });
-    };
-    const complete = await input.runWslSetup(
-      {
-        distribution: request.distribution,
-        setupPackage,
-        principalId: `desktop:${input.clientInstanceId}`,
-        ...(request.projectDirectoryRoots
-          ? { projectDirectoryRoots: request.projectDirectoryRoots }
-          : {}),
-        signal,
-      },
-      (progress) => {
-        if (!commitStarted) publish({ kind: 'running', phase: progress.phase });
-      },
-      beginCommit,
-    );
-    beginCommit();
-    const profileId = `environment-${randomUUID()}`;
-    const profile = {
-      id: profileId,
-      name: request.name?.trim() || request.distribution,
-      kind: 'environment' as const,
-      provider: { kind: 'wsl' as const, distribution: request.distribution },
-      rootId: complete.rootId,
-      operator: complete.operator,
-    };
-    const connected = await input.profiles.addEnvironmentAndEnable({
-      profile,
-      managedService: {
-        deployment: {
-          id: complete.serviceId,
-          rootPath: complete.rootPath,
-          deploymentId: complete.deploymentId,
-        },
-      },
-    });
-    return publish({ kind: 'complete', profileId: connected.profileId });
   };
 
   const channels = [

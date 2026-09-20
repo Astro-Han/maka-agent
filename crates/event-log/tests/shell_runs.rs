@@ -265,28 +265,13 @@ async fn durable_lifecycle_keeps_terminal_output_mutable_and_never_reattaches_on
 }
 
 #[tokio::test]
-async fn migration_and_recovery_commit_are_atomic_under_real_sqlite_faults() {
+async fn recovery_commit_is_atomic_under_real_sqlite_faults() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("runtime.sqlite");
     let log = EventLog::open(&path).await.unwrap();
     log.create_session("session", "create", &json!({}), 1)
         .await
         .unwrap();
-    log.close().await.unwrap();
-    let mut observer = SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&path))
-        .await
-        .unwrap();
-    // A prior Rust schema, not an old Maka/user database.
-    sqlx::raw_sql(
-        "DROP TABLE session_managers; DROP TABLE model_request_compositions; DROP TABLE request_compositions; DROP TABLE graph_wakes; DROP TABLE graph_intents; DROP TABLE graph_updates; DROP TABLE graph_epochs; DROP TABLE plugin_execution_receipts; DROP TABLE plugin_data; DROP TABLE plugin_packages; DROP TABLE plugin_package_files; DROP TABLE plugin_package_blobs; DROP TABLE plugin_composition; DROP VIEW workhub_corrections; DROP VIEW workhub_assignments; DROP VIEW workhub_stops; ALTER TABLE legacy_workhub_stops RENAME TO workhub_stops; DROP VIEW runtime_events; DROP VIEW session_events; ALTER TABLE event_log RENAME TO runtime_events; DROP TABLE workhub_stops; DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE shell_runs; DELETE FROM _sqlx_migrations WHERE version >= 6;
-        PRAGMA user_version = 5;",
-    )
-    .execute(&mut observer)
-    .await
-    .unwrap();
-    observer.close().await.unwrap();
-
-    let log = EventLog::open(&path).await.unwrap();
     for id in ["a", "b"] {
         log.create_shell_run(starting(id)).await.unwrap();
     }

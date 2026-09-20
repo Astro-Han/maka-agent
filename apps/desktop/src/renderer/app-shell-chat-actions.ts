@@ -24,7 +24,7 @@ import type * as DesktopBridge from '../preload/bridge-contract.js';
 import type { QuoteRef } from '@maka/core/events';
 import type { OrchestrationMode } from '@maka/core/orchestration';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
-import type { SkillInvocationResult } from '@maka/runtime/skill-invocation';
+import type { InputReceipt } from '@maka/runtime-host/protocol';
 import type { ThinkingLevel } from '@maka/core/model-thinking';
 import type { TurnOrchestration } from '@maka/core/runtime-inputs';
 import type { UiLocale } from '@maka/core/ui-locale';
@@ -234,7 +234,7 @@ export function createAppShellChatActions(deps: {
 
   /** Only an unreconciled submission keeps its row because Host admission may have succeeded. */
   type SubmittedMessage =
-    | { kind: 'projected'; skillInvocation: SkillInvocationResult; turnId?: string }
+    | { kind: 'projected'; preparation: InputReceipt[]; turnId?: string }
     | { kind: 'unreconciled' }
     | { kind: 'refused' };
 
@@ -277,7 +277,7 @@ export function createAppShellChatActions(deps: {
       return { kind: 'refused' };
     }
     if (result.disposition === 'locally_saved') {
-      return { kind: 'projected', skillInvocation: result.skillInvocation };
+      return { kind: 'projected', preparation: result.preparation };
     }
     if (surfaceVisible) skillFeedback.showSubmissionFeedback(uiLocale, toastApi, result, sessionId);
     // The row is updated whether or not the surface is on screen: attachments,
@@ -285,7 +285,7 @@ export function createAppShellChatActions(deps: {
     // they come back to it.
     publishTransientUserMessage(sessionId, {
       id: messageId,
-      text: input.displayText ?? skillFeedback.skillInvocationDisplayText(input.command.text, result.skillInvocation),
+      text: input.displayText ?? skillFeedback.skillInvocationDisplayText(input.command.text, result.preparation),
       attachments: [...result.attachments],
       transientPlacement: placement,
       pendingSteering: result.disposition === 'turn_started' ? false : input.pendingSteering,
@@ -296,7 +296,7 @@ export function createAppShellChatActions(deps: {
     }, true);
     return {
       kind: 'projected',
-      skillInvocation: result.skillInvocation,
+      preparation: result.preparation,
       ...(result.turnId ? { turnId: result.turnId } : {}),
     };
   }

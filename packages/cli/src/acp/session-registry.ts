@@ -61,7 +61,6 @@ import { RuntimeHostSessionChannel } from '../runtime-host-session-channel.js';
 import {
   RuntimeHostSessionUpdateError,
   getRuntimeHostSession,
-  requireRuntimeHostSessionProjection,
   updateRuntimeHostSession,
 } from '../runtime-host-session-update.js';
 import {
@@ -835,7 +834,7 @@ export class AcpSessionRegistry {
     // turn that success into an unreachable durable Session.
     let configOptions: SessionConfigOption[] | undefined;
     try {
-      const created = requireRuntimeHostSessionProjection(result, 'session.create');
+      const created = result;
       configOptions = await this.#projectConfigOptions(connection, created);
     } catch {
       // The client can still prompt, configure, list, or close the returned ID.
@@ -961,7 +960,7 @@ export class AcpSessionRegistry {
     }
 
     const sessions = page.sessions.flatMap((session) => {
-      if ('kind' in session || (cwd !== null && session.workspace.hostCwd !== cwd)) return [];
+      if (cwd !== null && session.workspace.hostCwd !== cwd) return [];
       const updatedAt = isoTimestamp(session.activityAt);
       return [
         {
@@ -1163,11 +1162,6 @@ function requestErrorFromSessionUpdate(
       return RequestError.internalError(
         { ...common, code: 'catalog_read_failure', reason: 'invalid_projection' },
         'Runtime Host returned an invalid Session lookup',
-      );
-    case 'unsupported_session_projection':
-      return RequestError.internalError(
-        { ...common, code: 'unsupported_session_projection' },
-        'Runtime Host Session cannot be represented in ACP',
       );
     case 'revision_conflict':
       return RequestError.internalError(

@@ -140,10 +140,9 @@ impl EventLog {
                             Placement::NextTurn
                         },
                         disposition: MessageDisposition::TurnStarted,
-                        skill_invocation: Default::default(),
                         submitted_intent: request.orchestration_mode.map(|mode| {
                             maka_runtime::message::SubmittedTurnIntent {
-                                skill_ids: Vec::new(),
+                                input_selections: Default::default(),
                                 turn_orchestration: Some(
                                     maka_runtime::message::TurnOrchestration {
                                         mode,

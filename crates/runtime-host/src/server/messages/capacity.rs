@@ -44,7 +44,6 @@ pub(super) fn check(
         QueueEdit::Update {
             message_id,
             content,
-            skill_invocation,
             required_tools,
         } => {
             let entry = prospective
@@ -53,7 +52,6 @@ pub(super) fn check(
                 .find(|e| &e.source.message.message_id == message_id)
                 .expect("validated entry");
             entry.source.message.content = (**content).clone();
-            entry.source.skill_invocation = skill_invocation.clone();
             entry.required_tools = required_tools.clone();
         }
         QueueEdit::RetractAll { .. } => prospective
@@ -236,7 +234,6 @@ mod tests {
                     input: InvocationInput::Message {
                         content: "root".into(),
                         request_fingerprint: None,
-                        skill_invocation: Default::default(),
                         source_messages: Vec::new(),
                     },
                 },
@@ -258,7 +255,6 @@ mod tests {
                 },
                 submitted_placement: Placement::NextTurn,
                 disposition: Disposition::Followup,
-                skill_invocation: Default::default(),
                 submitted_intent: None,
             },
         })
@@ -293,7 +289,6 @@ mod tests {
             let edit = QueueEdit::Update {
                 message_id: "queued".into(),
                 content: Box::new("x".repeat(bytes).into()),
-                skill_invocation: Default::default(),
                 required_tools: Default::default(),
             };
             let result = check("epoch", observation, &edit);

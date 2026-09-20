@@ -171,8 +171,6 @@ pub(super) async fn pending(
     directory: &Path,
     current: &Deployment,
 ) -> Result<Option<Deployment>, HostError> {
-    // Earlier installed operators have only the Active table. Observation must
-    // not run migrations or create a pending table on their behalf.
     let mut connection = SqliteConnection::connect_with(
         &SqliteConnectOptions::new()
             .filename(directory.join("deployment.sqlite"))
@@ -180,10 +178,6 @@ pub(super) async fn pending(
     )
     .await?;
     let result = async {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='deployment_update')",
-        ).fetch_one(&mut connection).await?;
-        if !exists { return Ok(None) }
         let value: Option<String> = sqlx::query_scalar(
             "SELECT CASE WHEN length(CAST(target AS BLOB)) <= 65536 THEN target ELSE '' END FROM deployment_update WHERE singleton = 1",
         ).fetch_optional(&mut connection).await?;

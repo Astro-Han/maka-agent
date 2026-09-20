@@ -61,11 +61,7 @@ import {
   RuntimeHostOperationError,
   type RuntimeHostConnection,
 } from '../client/index.js';
-import {
-  RUNTIME_HOST_PROTOCOL_VERSION,
-  type SessionCatalogItem,
-  type SessionCatalogProjection,
-} from '../protocol/index.js';
+import { RUNTIME_HOST_PROTOCOL_VERSION, type SessionCatalogProjection } from '../protocol/index.js';
 
 const CURRENT_PROTOCOL = {
   min: RUNTIME_HOST_PROTOCOL_VERSION,
@@ -2018,7 +2014,7 @@ async function querySession(
   return requireSessionProjection(result.session);
 }
 
-function requireSessionProjection(item: SessionCatalogItem): SessionCatalogProjection {
+function requireSessionProjection(item: SessionCatalogProjection): SessionCatalogProjection {
   if ('kind' in item) assert.fail(`Expected a representable Session, received ${item.kind}`);
   return item;
 }

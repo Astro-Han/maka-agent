@@ -42,21 +42,13 @@ export interface RuntimeHostNativeOperatorCommand<
   readonly executablePath: string;
 }
 
-/** Compatibility route for managed deployments created before the Node operator shipped. */
-export interface RuntimeHostLegacyPosixOperatorCommand {
-  readonly kind: 'legacy_posix_executable';
-  readonly executablePath: string;
-}
-
 export type RuntimeHostOperatorCommand =
   | RuntimeHostNodeOperatorCommand
-  | RuntimeHostNativeOperatorCommand
-  | RuntimeHostLegacyPosixOperatorCommand;
+  | RuntimeHostNativeOperatorCommand;
 
 export type RuntimeHostPosixOperatorCommand =
   | RuntimeHostNodeOperatorCommand<'posix'>
-  | RuntimeHostNativeOperatorCommand<'posix'>
-  | RuntimeHostLegacyPosixOperatorCommand;
+  | RuntimeHostNativeOperatorCommand<'posix'>;
 
 export function createRuntimeHostOperatorCommand<
   Platform extends RuntimeHostOperatorPlatform,
@@ -70,15 +62,6 @@ export function createRuntimeHostOperatorCommand<
     platform: input.platform,
     nodePath: requireAbsolutePath(input.nodePath, input.platform, 'operator Node path'),
     modulePath: requireAbsolutePath(input.modulePath, input.platform, 'operator module path'),
-  });
-}
-
-export function createRuntimeHostLegacyPosixOperatorCommand(
-  executablePath: string,
-): RuntimeHostLegacyPosixOperatorCommand {
-  return Object.freeze({
-    kind: 'legacy_posix_executable',
-    executablePath: requireAbsolutePath(executablePath, 'posix', 'legacy operator executable'),
   });
 }
 
@@ -126,16 +109,6 @@ export function decodeRuntimeHostOperatorCommand(value: unknown): RuntimeHostOpe
     throw new Error('Runtime Host operator command is invalid');
   }
   const record = value as Record<string, unknown>;
-  if (record.kind === 'legacy_posix_executable') {
-    const keys = Object.keys(record).sort();
-    const expected = ['executablePath', 'kind'];
-    if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
-      throw new Error('Runtime Host operator command has unexpected fields');
-    }
-    return createRuntimeHostLegacyPosixOperatorCommand(
-      requireString(record.executablePath, 'Legacy Runtime Host operator executable'),
-    );
-  }
   const keys = Object.keys(record).sort();
   if (record.kind === 'native') {
     const expected = ['executablePath', 'kind', 'platform'];
@@ -169,7 +142,6 @@ export function decodeRuntimeHostPosixOperatorCommand(
   value: unknown,
 ): RuntimeHostPosixOperatorCommand {
   const command = decodeRuntimeHostOperatorCommand(value);
-  if (command.kind === 'legacy_posix_executable') return command;
   if (command.platform !== 'posix') {
     throw new Error('Runtime Host operator must target POSIX');
   }
@@ -191,9 +163,6 @@ export function runtimeHostOperatorInvocation(
   args: readonly string[],
 ): { readonly executable: string; readonly args: readonly string[] } {
   const normalized = decodeRuntimeHostOperatorCommand(command);
-  if (normalized.kind === 'legacy_posix_executable') {
-    return { executable: normalized.executablePath, args };
-  }
   if (normalized.kind === 'native') {
     return { executable: normalized.executablePath, args: ['host', ...args] };
   }

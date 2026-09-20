@@ -26,7 +26,6 @@ use uuid::Uuid;
 
 mod attachments;
 mod environment;
-pub(crate) use environment::executor_skills;
 pub(crate) use environment::{Admission, Backend, Environment};
 
 pub(super) enum PreparedRun {
@@ -40,31 +39,15 @@ impl PreparedRun {
             Self::Executor(input) => &mut input.request.invocation,
         }
     }
-    pub fn message(
-        &mut self,
-        content: maka_runtime::input::MessageInput,
-        skills: Option<Box<maka_runtime::skills::SkillInvocationResult>>,
-    ) -> Result<()> {
+    pub fn message(&mut self, content: maka_runtime::input::MessageInput) -> Result<()> {
         match self {
             Self::Model(input) => {
-                let RunWork::Message {
-                    message,
-                    skill_invocation,
-                    ..
-                } = &mut input.work
-                else {
+                let RunWork::Message { message, .. } = &mut input.work else {
                     return Err(internal("Expected a Message Run"));
                 };
                 *message = content;
-                *skill_invocation = skills;
             }
             Self::Executor(input) => {
-                if skills.is_some() {
-                    return Err(failure(
-                        Code::OperationUnavailable,
-                        "Executor cannot accept native Skills",
-                    ));
-                }
                 input.request.content = content;
             }
         }
@@ -137,8 +120,8 @@ impl Executions {
         environment: Environment,
     ) -> Result<PreparedRun> {
         let content = &input.content;
-        if input.skill_ids.is_some() {
-            return Err(internal("Skill selection must be handled by admission"));
+        if !input.input_selections.is_empty() {
+            return Err(internal("Input selection must be handled by admission"));
         }
         if let MessageOrigin::Client { root_id, .. } = origin {
             self.validate_message_content(&input.session_id, content, root_id)
@@ -198,7 +181,6 @@ impl Executions {
             invocation: invocation.clone(),
             work: RunWork::Message {
                 source_messages,
-                skill_invocation: Default::default(),
                 message: prepared_content,
                 tools,
                 max_steps,

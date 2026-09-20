@@ -67,7 +67,7 @@ afterEach(async () => {
   );
 });
 
-test("migrates released WSL deployment bindings to the legacy operator route", async () => {
+test("rejects obsolete deployment bindings without rewriting them", async () => {
   const root = await mkdtemp(join(tmpdir(), "maka-managed-wsl-migration-"));
   roots.push(root);
   const path = join(root, "runtime-host-deployments.json");
@@ -94,28 +94,9 @@ test("migrates released WSL deployment bindings to the legacy operator route", a
     })}\n`,
   );
 
-  const document = await createDesktopRuntimeHostManagedServiceStore(root).read();
-  const binding = document.bindings[0];
-  assert.equal(binding?.profile.kind, "environment");
-  assert.deepEqual(binding?.profile.kind === "environment" ? binding.profile.operator : null, {
-    kind: "legacy_posix_executable",
-    executablePath: "/home/operator/.local/share/maka/operator",
-  });
-  const stored = await readFile(path, "utf8");
-  assert.match(stored, /"schemaVersion": 2/u);
-  assert.doesNotMatch(stored, /operatorPath/u);
-
-  const currentProfile = {
-    id: "ubuntu",
-    name: "Ubuntu",
-    kind: "environment" as const,
-    provider: { kind: "wsl" as const, distribution: "Ubuntu-24.04" },
-    rootId: "a".repeat(64),
-    operator,
-  };
-  const resolved = findDesktopRuntimeHostManagedServiceBinding(document, currentProfile);
-  assert.equal(resolved?.profile.kind, "environment");
-  assert.equal(resolved?.profile.kind === "environment" ? resolved.profile.operator : null, operator);
+  const before = await readFile(path, 'utf8');
+  await assert.rejects(createDesktopRuntimeHostManagedServiceStore(root).read(), /schema/u);
+  assert.equal(await readFile(path, 'utf8'), before);
 });
 
 test("keeps Desktop service bindings outside the shared profile catalog", async () => {

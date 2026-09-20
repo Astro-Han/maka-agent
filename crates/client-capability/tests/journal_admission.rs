@@ -70,7 +70,6 @@ async fn run(boundary: Boundary) {
             Fact::InvocationOpened {
                 configuration: None,
                 input: InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "invoke".into(),
                     request_fingerprint: None,
@@ -118,8 +117,10 @@ async fn run(boundary: Boundary) {
                 server_id: "server".into(),
                 tool_name: "effect".into(),
                 arguments: serde_json::Map::new(),
-                session_id: invocation.session_id.clone(),
-                turn_id: invocation.turn_id.clone(),
+                source: maka_runtime::capability::CallSource::Agent {
+                    session_id: invocation.session_id.clone(),
+                    turn_id: invocation.turn_id.clone(),
+                },
                 tool_call_id: "call".into(),
                 cwd: "/host/private/workspace".into(),
             },

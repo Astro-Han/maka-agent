@@ -252,13 +252,6 @@ export interface SessionCatalogProjection {
   readonly orchestrationMode: OrchestrationMode;
 }
 
-export interface UnsupportedLegacySessionCatalogRecord {
-  readonly kind: 'unsupported_legacy_record';
-  readonly id: string;
-  readonly revision: number;
-  readonly reason: 'not_wire_representable';
-}
-
 export interface SharedSessionCatalogProjection {
   readonly kind: 'shared_session';
   readonly id: string;
@@ -274,8 +267,6 @@ export interface SharedSessionCatalogProjection {
   readonly statusUpdatedAt?: number;
 }
 
-export type SessionCatalogItem = SessionCatalogProjection | UnsupportedLegacySessionCatalogRecord;
-
 export type SharedSessionCatalogQueryInput = Record<string, never>;
 
 export interface SharedSessionCatalogQueryResult {
@@ -286,7 +277,7 @@ export type SessionCatalogQueryResult =
   | {
       readonly kind: 'page';
       readonly revision: SessionCatalogRevision;
-      readonly sessions: readonly SessionCatalogItem[];
+      readonly sessions: readonly SessionCatalogProjection[];
       readonly nextCursor: string | null;
     }
   | {
@@ -296,11 +287,11 @@ export type SessionCatalogQueryResult =
     }
   | {
       readonly kind: 'session';
-      readonly session: SessionCatalogItem | null;
+      readonly session: SessionCatalogProjection | null;
     };
 
 export type SessionUpdateResult =
-  | { readonly kind: 'committed'; readonly session: SessionCatalogItem }
+  | { readonly kind: 'committed'; readonly session: SessionCatalogProjection }
   | {
       readonly kind: 'revision_conflict';
       readonly expectedRevision: number;
@@ -332,7 +323,7 @@ export const SESSION_CATALOG_OPERATION_SPECS = {
   }),
   'session.create': defineHostPathOperation<
     SessionCreateInput,
-    SessionCatalogItem,
+    SessionCatalogProjection,
     (typeof CREATE_ERRORS)[number]
   >(
     {
@@ -340,7 +331,7 @@ export const SESSION_CATALOG_OPERATION_SPECS = {
       availability: 'ready',
       errors: CREATE_ERRORS,
       decodeInput: decodeSessionCreateInput,
-      decodeOutput: decodeSessionCatalogItem,
+      decodeOutput: decodeSessionCatalogProjection,
       assertOutputForInput: (input, output) => assertSessionIdentity(input.sessionId, output),
     },
     (input) => input.workspace.kind === 'host_path',
@@ -386,14 +377,14 @@ export const SESSION_CATALOG_OPERATION_SPECS = {
   ),
   'session.read_marker.set': defineOperation<
     SessionReadMarkerSetInput,
-    SessionCatalogItem,
+    SessionCatalogProjection,
     (typeof READ_MARKER_ERRORS)[number]
   >({
     mode: 'command',
     availability: 'ready',
     errors: READ_MARKER_ERRORS,
     decodeInput: decodeSessionReadMarkerSetInput,
-    decodeOutput: decodeSessionCatalogItem,
+    decodeOutput: decodeSessionCatalogProjection,
     assertOutputForInput: (input, output) => assertSessionIdentity(input.sessionId, output),
   }),
   'session.execution_boundary.query': defineOperation<
@@ -688,7 +679,7 @@ export function decodeSessionCatalogQueryResult(value: unknown): SessionCatalogQ
     const exact = requireExactRecord(result, 'Session catalog item result', ['kind', 'session']);
     return {
       kind: 'session',
-      session: exact.session === null ? null : decodeSessionCatalogItem(exact.session),
+      session: exact.session === null ? null : decodeSessionCatalogProjection(exact.session),
     };
   }
   if (result.kind !== 'page') throw invalidProtocolFrame('Invalid Session catalog result kind');
@@ -704,7 +695,7 @@ export function decodeSessionCatalogQueryResult(value: unknown): SessionCatalogQ
   const decoded: SessionCatalogQueryResult = {
     kind: 'page',
     revision: catalogRevision(page.revision),
-    sessions: page.sessions.map(decodeSessionCatalogItem),
+    sessions: page.sessions.map(decodeSessionCatalogProjection),
     nextCursor:
       page.nextCursor === null
         ? null
@@ -725,7 +716,7 @@ export function decodeSessionUpdateResult(value: unknown): SessionUpdateResult {
       'kind',
       'session',
     ]);
-    return { kind: 'committed', session: decodeSessionCatalogItem(exact.session) };
+    return { kind: 'committed', session: decodeSessionCatalogProjection(exact.session) };
   }
   if (result.kind === 'revision_conflict') {
     const exact = requireExactRecord(result, 'Session revision conflict result', [
@@ -802,28 +793,6 @@ export function decodeSessionCatalogProjection(value: unknown): SessionCatalogPr
     SESSION_CATALOG_RESULT_MAX_BYTES,
   );
   return projection;
-}
-
-export function decodeSessionCatalogItem(value: unknown): SessionCatalogItem {
-  const record = requireRecord(value, 'Session catalog item');
-  if (record.kind !== 'unsupported_legacy_record') {
-    return decodeSessionCatalogProjection(record);
-  }
-  const exact = requireExactRecord(record, 'unsupported legacy Session catalog record', [
-    'kind',
-    'id',
-    'revision',
-    'reason',
-  ]);
-  if (exact.reason !== 'not_wire_representable') {
-    throw invalidProtocolFrame('Invalid unsupported legacy Session catalog reason');
-  }
-  return {
-    kind: 'unsupported_legacy_record',
-    id: requireEntityId(exact.id, 'Session id'),
-    revision: positiveRevision(exact.revision, 'Session revision'),
-    reason: exact.reason,
-  };
 }
 
 function modelTarget(value: unknown): SessionModelTarget {

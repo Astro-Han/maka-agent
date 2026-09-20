@@ -23,7 +23,7 @@ import { describe, test } from 'node:test';
 import {
   decodeClientFrame,
   decodeHostFrame,
-  decodeSessionCatalogItem,
+  decodeSessionCatalogProjection,
   decodeSessionCatalogQueryResult,
   HOST_OPERATION_SPECS,
   SESSION_CATALOG_PAGE_MAX_ITEMS,
@@ -35,7 +35,7 @@ describe('Session catalog protocol', () => {
   test('publishes canonical catalog activity without the redundant last-used timestamp', () => {
     const catalog = projection();
 
-    assert.deepEqual(decodeSessionCatalogItem(catalog), catalog);
+    assert.deepEqual(decodeSessionCatalogProjection(catalog), catalog);
   });
 
   test('decodes versioned live run state without collapsing absent and known-empty', () => {
@@ -49,9 +49,9 @@ describe('Session catalog protocol', () => {
       liveRunState: { schemaVersion: 1, runningTurnIds: ['turn-1', 'turn-2'] },
     };
 
-    assert.deepEqual(decodeSessionCatalogItem(unknown), unknown);
-    assert.deepEqual(decodeSessionCatalogItem(knownEmpty), knownEmpty);
-    assert.deepEqual(decodeSessionCatalogItem(running), running);
+    assert.deepEqual(decodeSessionCatalogProjection(unknown), unknown);
+    assert.deepEqual(decodeSessionCatalogProjection(knownEmpty), knownEmpty);
+    assert.deepEqual(decodeSessionCatalogProjection(running), running);
   });
 
   test('rejects malformed or open live run state', () => {
@@ -59,7 +59,7 @@ describe('Session catalog protocol', () => {
 
     assert.throws(
       () =>
-        decodeSessionCatalogItem({
+        decodeSessionCatalogProjection({
           ...projection(),
           liveRunState: { ...liveRunState, extra: true },
         }),
@@ -67,7 +67,7 @@ describe('Session catalog protocol', () => {
     );
     assert.throws(
       () =>
-        decodeSessionCatalogItem({
+        decodeSessionCatalogProjection({
           ...projection(),
           liveRunState: { ...liveRunState, schemaVersion: 2 },
         }),
@@ -75,7 +75,7 @@ describe('Session catalog protocol', () => {
     );
     assert.throws(
       () =>
-        decodeSessionCatalogItem({
+        decodeSessionCatalogProjection({
           ...projection(),
           liveRunState: { ...liveRunState, runningTurnIds: ['turn-1', 'turn-1'] },
         }),
@@ -83,7 +83,7 @@ describe('Session catalog protocol', () => {
     );
     assert.throws(
       () =>
-        decodeSessionCatalogItem({
+        decodeSessionCatalogProjection({
           ...projection(),
           liveRunState: { ...liveRunState, runningTurnIds: 'turn-1' },
         }),
@@ -101,10 +101,10 @@ describe('Session catalog protocol', () => {
       liveRunState: { schemaVersion: 1, runningTurnIds: atLimit },
     };
 
-    assert.deepEqual(decodeSessionCatalogItem(projectionAtLimit), projectionAtLimit);
+    assert.deepEqual(decodeSessionCatalogProjection(projectionAtLimit), projectionAtLimit);
     assert.throws(
       () =>
-        decodeSessionCatalogItem({
+        decodeSessionCatalogProjection({
           ...projection(),
           liveRunState: {
             schemaVersion: 1,
@@ -120,7 +120,7 @@ describe('Session catalog protocol', () => {
 
     assert.throws(
       () =>
-        decodeSessionCatalogItem({
+        decodeSessionCatalogProjection({
           ...projection(),
           liveRunState: { schemaVersion: 1, runningTurnIds },
         }),
@@ -591,7 +591,7 @@ describe('Session catalog protocol', () => {
   test('rejects a Host path projection whose target and cwd disagree', () => {
     assert.throws(
       () =>
-        decodeSessionCatalogItem({
+        decodeSessionCatalogProjection({
           ...projection(),
           workspace: {
             target: { kind: 'host_path', path: '/workspace' },
@@ -602,28 +602,20 @@ describe('Session catalog protocol', () => {
     );
   });
 
-  test('normalizes legacy Session statuses in catalog projections', () => {
-    for (const status of ['review', 'done']) {
-      const decoded = decodeSessionCatalogItem({ ...projection(), status });
-      if ('kind' in decoded) assert.fail('Expected a Session catalog projection');
-      assert.equal(decoded.status, 'active');
-    }
-  });
-
   test('rejects unknown Session statuses in catalog projections', () => {
     assert.throws(
-      () => decodeSessionCatalogItem({ ...projection(), status: 'unknown' }),
+      () => decodeSessionCatalogProjection({ ...projection(), status: 'unknown' }),
       isInvalidSessionStatus,
     );
   });
 
   test('requires a nullable Connection identity in Session catalog projections', () => {
     assert.deepEqual(
-      decodeSessionCatalogItem(projection({ llmConnectionId: null })),
+      decodeSessionCatalogProjection(projection({ llmConnectionId: null })),
       projection({ llmConnectionId: null }),
     );
     const { llmConnectionId: _omitted, ...withoutConnectionId } = projection();
-    assert.throws(() => decodeSessionCatalogItem(withoutConnectionId), isProtocolError);
+    assert.throws(() => decodeSessionCatalogProjection(withoutConnectionId), isProtocolError);
   });
 
   test('bounds pages and preserves revision-pinned continuation results', () => {

@@ -106,7 +106,6 @@ import {
   SESSION_TRANSCRIPT_BOOTSTRAP_MAX_BYTES,
   type SessionCatalogChangedFrame,
   type ScheduledTaskChangedFrame,
-  type SessionCatalogItem,
   type SessionCatalogProjection,
   type SharedSessionCatalogProjection,
   type CollaborationAccessQueryResult,
@@ -653,7 +652,7 @@ export class DesktopRuntimeHostClient {
   async listSessions(): Promise<SessionCatalogProjection[]> {
     this.#assertOpen();
     try {
-      return (await readRuntimeHostSessions(this.connection)).map(requireSessionProjection);
+      return await readRuntimeHostSessions(this.connection);
     } catch (error) {
       if (error instanceof DesktopRuntimeHostClientError) throw error;
       if (!(error instanceof RuntimeHostCatalogReadError)) throw error;
@@ -914,17 +913,13 @@ export class DesktopRuntimeHostClient {
         "Runtime Host returned an invalid Session catalog lookup",
       );
     }
-    return result.session === null
-      ? null
-      : requireSessionProjection(result.session);
+    return result.session;
   }
 
   async createSession(
     input: SessionCreateInput,
   ): Promise<SessionCatalogProjection> {
-    return requireSessionProjection(
-      await this.request("session.create", input),
-    );
+    return this.request("session.create", input);
   }
 
   listExternalSessionSources(): Promise<ExternalSessionSourceQueryResult> {
@@ -942,9 +937,7 @@ export class DesktopRuntimeHostClient {
     readonly sourceSessionId: string;
   }): Promise<ExternalSessionImportResult<SessionCatalogProjection>> {
     const result = await this.request("external-session.import", input);
-    return result.kind === 'imported'
-      ? { kind: 'imported', session: requireSessionProjection(result.session) }
-      : result;
+    return result;
   }
 
   exportSessionBundle(input: {
@@ -996,12 +989,7 @@ export class DesktopRuntimeHostClient {
     sessionId: string,
     readThroughMessageId: string,
   ): Promise<SessionCatalogProjection> {
-    return requireSessionProjection(
-      await this.request("session.read_marker.set", {
-        sessionId,
-        readThroughMessageId,
-      }),
-    );
+    return this.request("session.read_marker.set", { sessionId, readThroughMessageId });
   }
 
   readExecutionBoundary(sessionId: string): Promise<ExecutionBoundarySummary> {
@@ -1012,9 +1000,7 @@ export class DesktopRuntimeHostClient {
     sessionId: string,
     state: SessionLifecycleState,
   ): Promise<SessionCatalogProjection> {
-    return requireSessionProjection(
-      await this.request("session.lifecycle.set", { sessionId, state }),
-    );
+    return this.request("session.lifecycle.set", { sessionId, state });
   }
 
   /**
@@ -1095,7 +1081,7 @@ export class DesktopRuntimeHostClient {
           ? await this.request("session.branch.create", request)
           : await this.request("session.revision.create", request);
       if (result.kind === "committed")
-        return requireSessionProjection(result.session);
+        return result.session;
     }
     throw revisionConflict(`${kind} copy`, input.sourceSessionId);
   }
@@ -1708,7 +1694,7 @@ export class DesktopRuntimeHostClient {
       const current = await this.#requireSession(sessionId);
       const result = await update(current);
       if (result.kind === "committed")
-        return requireSessionProjection(result.session);
+        return result.session;
     }
     throw revisionConflict("update", sessionId);
   }
@@ -1798,16 +1784,6 @@ class DesktopSessionHandle implements DesktopRuntimeHostSession {
     this.#closeTask ??= this.subscription.close().finally(this.onClose);
     return this.#closeTask;
   }
-}
-
-function requireSessionProjection(
-  item: SessionCatalogItem,
-): SessionCatalogProjection {
-  if (!("kind" in item)) return item;
-  throw new DesktopRuntimeHostClientError(
-    "unsupported_session",
-    `Runtime Host Session is not representable by this Desktop Client: ${item.id}`,
-  );
 }
 
 function clientClosed(): DesktopRuntimeHostClientError {

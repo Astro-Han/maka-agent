@@ -35,6 +35,8 @@ pub(crate) struct Environment {
     pub composition: maka_runtime::execution::ToolComposition,
     bindings: Option<PreparedBindings>,
     directory: maka_fs_tools::workspace::directory::PublishedDirectory,
+    input_catalog: maka_plugins::contributions::Catalog,
+    prepared_input: Option<maka_plugins::input::Prepared>,
 }
 pub(crate) enum Backend {
     Model(Box<ModelEnvironment>),
@@ -43,8 +45,6 @@ pub(crate) enum Backend {
 pub(crate) struct ModelEnvironment {
     behavior: Option<BehaviorBasis>,
     pub tools: maka_tools::ToolCatalog,
-    input_catalog: maka_plugins::contributions::Catalog,
-    prepared_input: Option<maka_plugins::input::Prepared>,
 }
 
 pub(crate) struct Admission {
@@ -172,6 +172,8 @@ impl Executions {
                 prompt_capture: Some(captured),
                 prompt,
                 directory,
+                input_catalog: self.plugin_catalog.clone(),
+                prepared_input: None,
             });
         }
         let (behavior, basis) = {
@@ -283,8 +285,6 @@ impl Executions {
             backend: Backend::Model(Box::new(ModelEnvironment {
                 behavior: basis,
                 tools,
-                input_catalog: self.plugin_catalog.clone(),
-                prepared_input: None,
             })),
             digest: record.configuration_digest,
             session,
@@ -292,6 +292,8 @@ impl Executions {
             policy_revision: None,
             prompt_capture: None,
             directory,
+            input_catalog: self.plugin_catalog.clone(),
+            prepared_input: None,
         })
     }
 }
@@ -300,36 +302,24 @@ impl Environment {
     pub(in crate::execution) async fn expand(
         mut self,
         content: maka_runtime::input::MessageInput,
-        ids: Vec<String>,
+        selections: maka_runtime::input::Selections,
     ) -> Result<(
         Self,
         maka_runtime::input::MessageInput,
-        super::super::skills::SkillPreparation,
+        super::super::input::Outcome,
     )> {
-        let Backend::Model(model) = &mut self.backend else {
-            executor_skills(&content, &ids)?;
-            return Ok((
-                self,
-                content,
-                super::super::skills::SkillPreparation::Ready {
-                    skill_invocation: Default::default(),
-                    required_tools: Default::default(),
-                },
-            ));
+        let tools = match &self.backend {
+            Backend::Model(model) => model
+                .tools
+                .resolve_plugins()
+                .map_err(internal)?
+                .names()
+                .into_iter()
+                .collect(),
+            Backend::Executor(_) => Default::default(),
         };
-        let tools = model
-            .tools
-            .resolve_plugins()
-            .map_err(internal)?
-            .names()
-            .into_iter()
-            .collect();
-        let mut selections = std::collections::BTreeMap::new();
-        if !ids.is_empty() {
-            selections.insert(maka_skills::plugin::ID.into(), ids);
-        }
         let (prepared, selection) = super::super::input::prepare(
-            &model.input_catalog,
+            &self.input_catalog,
             maka_plugins::input::Request {
                 session_id: self.session_id.clone(),
                 cwd: self.session.workspace.host_cwd.clone(),
@@ -341,7 +331,7 @@ impl Environment {
         )
         .await?;
         let content = prepared.content.clone();
-        model.prepared_input = Some(prepared);
+        self.prepared_input = Some(prepared);
         Ok((self, content, selection))
     }
     /// Caller has repeated canonical replay/active/queue checks under admission.
@@ -409,16 +399,16 @@ impl Environment {
             admission._prompt = maka_plugins::prompt::admit(captured, &prompt.sources)
                 .map_err(|e| failure(Code::OperationUnavailable, &e.to_string()))?;
         }
-        if let Backend::Model(model) = &self.backend {
-            if let Some(basis) = &model.behavior {
-                admission._behavior = Some(basis.source.admit().map_err(internal)?);
-            }
-            if let Some(prepared) = &model.prepared_input {
-                let Some(guard) = prepared.admit().map_err(internal)? else {
-                    return Ok(None);
-                };
-                admission._input = Some(guard);
-            }
+        if let Backend::Model(model) = &self.backend
+            && let Some(basis) = &model.behavior
+        {
+            admission._behavior = Some(basis.source.admit().map_err(internal)?);
+        }
+        if let Some(prepared) = &self.prepared_input {
+            let Some(guard) = prepared.admit().map_err(internal)? else {
+                return Ok(None);
+            };
+            admission._input = Some(guard);
         }
         if !executions
             .capabilities
@@ -429,25 +419,6 @@ impl Environment {
         }
         Ok(Some((self, admission)))
     }
-}
-
-pub(crate) fn executor_skills(
-    content: &maka_runtime::input::MessageInput,
-    ids: &[String],
-) -> Result<()> {
-    if !ids.is_empty()
-        || content
-            .inline_references
-            .iter()
-            .flatten()
-            .any(|reference| reference.kind == maka_runtime::input::InlineReferenceKind::Skill)
-    {
-        return Err(failure(
-            Code::OperationUnavailable,
-            "Executor adapters do not accept Maka Skill invocations",
-        ));
-    }
-    Ok(())
 }
 
 fn binding_error(error: maka_client_capability::BindingError) -> maka_protocol::OperationError {

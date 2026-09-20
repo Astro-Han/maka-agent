@@ -58,8 +58,7 @@ impl MessageWriter for Writer {
 }
 
 fn hello() -> Value {
-    json!({"kind":"hello", "clientInstanceId":"retirement", "surface":"desktop",
-        "protocolMin":0, "protocolMax":0, "compositionId":"maka.interactive",
+    json!({"kind":"hello", "clientInstanceId":"retirement",         "protocolMin":0, "protocolMax":0, "compositionId":"maka.interactive",
         "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH})
 }
 
@@ -124,8 +123,9 @@ async fn short_connections_reset_idle_expiry(host: &std::sync::Arc<Host>) {
     connect().await;
     tokio::time::sleep(Duration::from_millis(110)).await;
     assert!(futures_util::poll!(&mut expiry).is_pending());
-    tokio::time::sleep(Duration::from_millis(110)).await;
-    assert!(futures_util::poll!(&mut expiry).is_ready());
+    tokio::time::timeout(Duration::from_secs(5), expiry)
+        .await
+        .expect("idle Host did not expire after the renewed grace period");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

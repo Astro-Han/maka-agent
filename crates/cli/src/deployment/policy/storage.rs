@@ -31,12 +31,7 @@ pub(in crate::deployment) async fn read(directory: &Path) -> Result<Record, Host
             .read_only(true),
     )
     .await?;
-    let result = async {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='deployment_update_policy')"
-        ).fetch_one(&mut connection).await?;
-        if exists { Ok::<_, HostError>(load(&mut connection).await?) } else { Ok(Record::default()) }
-    }.await;
+    let result = load(&mut connection).await;
     let closed = connection.close().await;
     let record = result?;
     closed?;

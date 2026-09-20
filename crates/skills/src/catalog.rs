@@ -19,7 +19,20 @@
 
 use crate::{DiscoveredSkill, DiscoverySnapshot, Issue, IssueCode, Severity, fields};
 use maka_runtime::skills::SkillFailureReason;
-pub use maka_runtime::skills::SkillPreference as Preference;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Preference {
+    pub enabled: bool,
+    pub pinned: bool,
+}
+impl Default for Preference {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            pinned: false,
+        }
+    }
+}
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::PathBuf,

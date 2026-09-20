@@ -78,8 +78,10 @@ fn closed_frame_kinds_and_exact_admission_evidence() {
         server_id: "server".into(),
         tool_name: "tool".into(),
         arguments: Default::default(),
-        session_id: "s".into(),
-        turn_id: "t".into(),
+        source: maka_runtime::capability::CallSource::Agent {
+            session_id: "s".into(),
+            turn_id: "t".into(),
+        },
         tool_call_id: "tc".into(),
         cwd: None,
     };
@@ -87,7 +89,7 @@ fn closed_frame_kinds_and_exact_admission_evidence() {
         serde_json::to_value(call).unwrap(),
         json!({
             "kind":"client.capability.call", "invocationId":"i", "registrationId":"r", "offerId":"o",
-            "serverId":"server", "toolName":"tool", "arguments":{}, "sessionId":"s", "turnId":"t", "toolCallId":"tc"
+            "serverId":"server", "toolName":"tool", "arguments":{}, "source":{"kind":"agent","sessionId":"s", "turnId":"t"}, "toolCallId":"tc"
         })
     );
 }
@@ -217,9 +219,29 @@ fn interaction_request_uses_validated_form_projection() {
 fn host_call_and_service_inputs_enforce_wire_boundaries() {
     let call = json!({"kind":"client.capability.call", "invocationId":"i", "registrationId":"r",
         "offerId":"o", "serverId":"server.with.dots", "toolName":"tool with spaces", "arguments":{},
-        "sessionId":"s", "turnId":"t", "toolCallId":"tc", "cwd":"relative/path"});
+        "source":{"kind":"agent","sessionId":"s", "turnId":"t"}, "toolCallId":"tc", "cwd":"relative/path"});
     let service = json!({"kind":"client.capability.service_call", "invocationId":"i", "registrationId":"r",
         "serviceId":"s", "version":"v.1", "method":"get", "input":{}});
+    for (source, valid) in [
+        (
+            json!({"kind":"remote","requestId":"request","sessionId":null}),
+            true,
+        ),
+        (
+            json!({"kind":"background","grantId":"grant","sessionId":"s"}),
+            true,
+        ),
+        (
+            json!({"kind":"remote","requestId":"request","sessionId":null,"turnId":"fake"}),
+            false,
+        ),
+        (json!({"kind":"agent","sessionId":null,"turnId":"t"}), false),
+        (json!({"kind":"background","grantId":"grant"}), false),
+    ] {
+        let mut candidate = call.clone();
+        candidate["source"] = source;
+        assert_eq!(decode_host_frame(&candidate).is_ok(), valid, "{candidate}");
+    }
     for (frame, input_key) in [(&call, "arguments"), (&service, "input")] {
         assert_eq!(
             serde_json::to_value(decode_host_frame(frame).unwrap()).unwrap(),

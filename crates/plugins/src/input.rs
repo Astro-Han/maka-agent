@@ -30,11 +30,7 @@ use maka_runtime::{
     input::{InputReceipt, MessageInput},
 };
 use serde_json::Value;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 mod revision;
@@ -45,7 +41,7 @@ pub struct Request {
     pub session_id: String,
     pub cwd: String,
     pub content: MessageInput,
-    pub selections: BTreeMap<String, Vec<String>>,
+    pub selections: maka_runtime::input::Selections,
     pub tools: BTreeSet<String>,
     pub cancellation: CancellationToken,
 }
@@ -114,6 +110,8 @@ pub async fn prepare(
     scope: &Scope,
     mut request: Request,
 ) -> Result<Prepared, Error> {
+    maka_runtime::input::validate_selections(&request.selections)
+        .map_err(|error| Error::Invalid(error.into()))?;
     let providers = catalog.snapshot::<InputPreparation>(scope).entries;
     if providers.len() > 32 {
         return Err(Error::Invalid(
@@ -165,7 +163,7 @@ pub async fn prepare(
                 (receipt, basis)
             }
             Outcome::Blocked { message, receipt } => {
-                if message.len() > 4096 {
+                if message.trim().is_empty() || message.len() > 4096 {
                     return Err(Error::Invalid("input rejection exceeds its budget".into()));
                 }
                 result.blocked = Some(message);

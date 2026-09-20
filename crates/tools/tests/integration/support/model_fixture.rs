@@ -43,7 +43,6 @@ pub async fn record_model_call(
         Fact::InvocationOpened {
             configuration: Some(Box::new(configuration.clone())),
             input: InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "test".into(),
                 request_fingerprint: None,
@@ -59,7 +58,7 @@ pub async fn record_model_call(
             input_digest: "".into(),
             route_identity: "".into(),
             checkpoint_event_id: None,
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
         },
         Fact::ModelCompleted {

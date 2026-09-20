@@ -28,7 +28,7 @@ pub(crate) fn mutation_projection(
     use maka_event_log::sessions::SessionMutation;
     match mutation {
         SessionMutation::Committed(record) => SessionUpdateResult::Committed {
-            session: SessionCatalogItem::Projection(Box::new(catalog_projection(record))),
+            session: Box::new(catalog_projection(record)),
         },
         SessionMutation::RevisionConflict { expected, actual } => {
             SessionUpdateResult::RevisionConflict {

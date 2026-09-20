@@ -45,7 +45,6 @@ async fn batch_rolls_back_every_fact_and_catalog_change_then_replays_exactly_aft
     let opening = event(Fact::InvocationOpened {
         configuration: None,
         input: maka_runtime::input::InvocationInput::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             content: "".into(),
             request_fingerprint: None,

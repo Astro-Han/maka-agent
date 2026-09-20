@@ -60,8 +60,6 @@ import {
   TURN_MESSAGE_QUOTE_TEXT_MAX_LENGTH,
   TURN_FAILURE_MESSAGE_MAX_BYTES,
   decodeMessageContent,
-  TURN_SKILL_ID_MAX_COUNT,
-  TURN_SKILL_ID_MAX_LENGTH,
 } from '../protocol/turn.js';
 
 describe('Runtime Host bootstrap protocol', () => {
@@ -111,9 +109,14 @@ describe('Runtime Host bootstrap protocol', () => {
     } as const;
 
     assert.deepEqual(decodeClientFrame(hello), hello);
+    for (const field of ['compatibilityEpoch', 'compositionId']) {
+      const missing: Record<string, unknown> = { ...hello };
+      delete missing[field];
+      assert.throws(() => decodeClientFrame(missing), isInvalidFrame);
+    }
   });
 
-  test('ignores a legacy surface identity while decoding a Client hello', () => {
+  test('rejects unknown Client hello fields', () => {
     const hello = {
       kind: 'hello',
       clientInstanceId: 'legacy-surface-client',
@@ -124,24 +127,7 @@ describe('Runtime Host bootstrap protocol', () => {
       compositionId: 'maka.interactive',
     } as const;
 
-    const { surface: _legacySurface, ...expected } = hello;
-    assert.deepEqual(decodeClientFrame(hello), expected);
-  });
-
-  test('publishes a new compatibility epoch for Session catalog live-run state', () => {
-    // Epoch 22 predates the live-run projection and rejects its added catalog
-    // field, so mixed-version peers must fail during the handshake instead.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 22);
-  });
-
-  test('publishes a new compatibility epoch for mandatory submit Skill outcomes', () => {
-    // Submit Skill outcomes and explicit OAuth Connection targets independently
-    // claimed epoch 78, so their merge requires a distinct compatibility boundary.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 78);
-  });
-
-  test('publishes a new compatibility epoch for Read image Session context refs', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 95);
+    assert.throws(() => decodeClientFrame(hello), isInvalidFrame);
   });
 
   test('rejects the legacy connection update result in the current compatibility epoch', () => {
@@ -158,134 +144,6 @@ describe('Runtime Host bootstrap protocol', () => {
         }),
       isInvalidFrame,
     );
-  });
-
-  test('publishes a new compatibility epoch for external Session import state', () => {
-    // Epoch 25 added authoritative live run state. Requiring importState on
-    // external catalog items is another closed wire-schema change, so Clients
-    // and Hosts from epoch 25 must fail the handshake instead of decoding each
-    // other's catalog responses asymmetrically.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 25);
-  });
-
-  test('publishes a new compatibility epoch for sandbox failure results', () => {
-    // Epoch 32 rejects the bounded sandbox failure reason on live tool results,
-    // so mixed-version peers must fail the handshake. Asserted as a floor, like
-    // the epochs above: pinning an exact value breaks on every later bump.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 32);
-  });
-
-  test('publishes a new compatibility epoch for backend-free ScheduledTask templates', () => {
-    // Epoch 33 Clients require the `backend` field these templates no longer
-    // emit. Also a floor, for the same reason as above.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 33);
-  });
-
-  test('publishes a new compatibility epoch for Session trace pagination', () => {
-    // Epoch 34 peers cannot exchange the paged trace and usage frames. Also a
-    // floor, for the same reason as above.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 34);
-  });
-
-  test('publishes a new compatibility epoch for TraceTotals removal', () => {
-    // Epoch 35 peers still transport aggregate TraceTotals. Also a floor, for
-    // the same reason as above.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 35);
-  });
-
-  test('publishes a new compatibility epoch for the catalog search term', () => {
-    // Epoch 36 cannot carry the search term. Also a floor, for the same reason
-    // as above.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 36);
-  });
-
-  test('publishes a new compatibility epoch for the retired execute permission mode', () => {
-    // Epoch 37 still speaks `execute`. Frame decoders now reject it, so such a
-    // peer would fail mid-Session rather than at connect.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 37);
-  });
-
-  test('publishes a new compatibility epoch for Client Capability progress', () => {
-    // Epoch 38 peers reject the additional tool descriptor field and progress
-    // frame, so the capability must be negotiated at a newer epoch.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 38);
-  });
-
-  test('publishes a new compatibility epoch for nested Client Capability interactions', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 81);
-  });
-
-  test('publishes a new compatibility epoch for onboarding endpoint overrides', () => {
-    // Epoch 44 peers reject the required `baseUrl` and `connectionId` on
-    // onboarding inputs, and the `base_url_not_configured` /
-    // `connection_not_found` rejections on their results. Both landed in one
-    // epoch because neither shape was ever published separately.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 44);
-  });
-
-  test('publishes a new compatibility epoch for explicit onboarding targets', () => {
-    // Epoch 51 peers require nullable connectionId targeting and decode a
-    // successful save without its committed Connection identity.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 52);
-  });
-
-  test('publishes a new compatibility epoch for explicit OAuth Connection targets', () => {
-    // Epoch 53 peers still send connectionId directly and receive provider plus
-    // connectionId fields instead of one canonical Connection identity.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 53);
-  });
-
-  test('publishes a new compatibility epoch for queued message editing', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 45);
-  });
-
-  test('publishes a new compatibility epoch for the project registration preference', () => {
-    // Epoch 46 Hosts reject the optional preference field on the closed register
-    // input, so mixed-version peers must fail during the handshake instead.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 46);
-  });
-
-  test('publishes a new compatibility epoch for Side Conversation copy intent', () => {
-    // Epoch 47 belongs to project registration preferences on current main.
-    // Side Conversation adds another closed branch-copy input and therefore
-    // needs its own later handshake boundary.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 47);
-  });
-
-  test('publishes a new compatibility epoch for GitHub Copilot logins', () => {
-    // Main is at 101 and open PRs already claim 102. The new OAuth provider,
-    // enrollment query, and onboarding credential shape change the closed wire
-    // vocabulary, so this branch re-derives the first unclaimed epoch.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 102);
-  });
-
-  test('publishes a new compatibility epoch for named OAuth identity and slug failures', () => {
-    // Epoch 109 is the current main boundary. Named create inputs and the
-    // slug_taken output extend closed wire shapes, so older peers must be
-    // rejected during handshake rather than failing midway through setup.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 109);
-  });
-
-  test('publishes a new compatibility epoch for context-budget failure detail', () => {
-    // Epoch 50 is already used by WorkHub coordination summaries on main.
-    // The context-budget detail therefore needs its own strictly newer
-    // handshake boundary so peers cannot accept the wrong closed shape.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 50);
-  });
-
-  test('publishes a new compatibility epoch for compound proxy updates', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 83);
-  });
-
-  test('publishes a new compatibility epoch for bound configuration credentials', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 84);
-  });
-
-  test('publishes a new compatibility epoch for explicit proxy credential updates', () => {
-    // Epoch 87 predates the Host-owned proxy credential mutation and its
-    // target-bound transfer result. Older peers cannot safely exchange these
-    // shapes, so the merged PR must advance the handshake boundary.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 87);
   });
 
   test('publishes a new compatibility epoch for the removed execution.inspect.resolve operation', () => {
@@ -400,62 +258,6 @@ describe('Runtime Host bootstrap protocol', () => {
       { revoked: true },
     );
     assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 54);
-  });
-
-  test('publishes a new compatibility epoch for Client-bound pairing claims', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 53);
-  });
-
-  test('publishes a new compatibility epoch for provider capacity retry progress', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 41);
-  });
-
-  test('publishes a new compatibility epoch for shell-run poll correlation', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 42);
-  });
-
-  test('publishes a new compatibility epoch for the retired Session timestamp', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 43);
-  });
-
-  test('publishes a new compatibility epoch for durable Message lifecycle queries', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 50);
-  });
-
-  test('publishes a new compatibility epoch for Message execution ownership', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 61);
-  });
-
-  test('publishes a new compatibility epoch for exact Session Connection identity', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 56);
-  });
-
-  test('publishes a new compatibility epoch for Host-bound directory references', () => {
-    // Epoch 80 belongs to catalog model-facts provenance on main. Directory
-    // references widen closed message inputs and need a later boundary.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 80);
-  });
-
-  test('publishes a new compatibility epoch for catalog model-facts provenance', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 79);
-  });
-
-  test('publishes a new compatibility epoch for the optional conversation-copy sourceTurnId', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 99);
-  });
-
-  test('publishes a new compatibility epoch for external Session import failure reasons', () => {
-    // model_unavailable / source_unreadable let the shell classify import
-    // failures by stable code; older peers cannot decode the new codes.
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 117);
-  });
-
-  test('publishes a new compatibility epoch for event-addressed transcript cursors', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 118);
-  });
-
-  test('publishes a new compatibility epoch for context-compaction transcript state', () => {
-    assert.ok(RUNTIME_HOST_COMPATIBILITY_EPOCH > 124);
   });
 
   test('selects the highest mutually supported protocol and rejects a gap', () => {
@@ -575,16 +377,6 @@ describe('Runtime Host bootstrap protocol', () => {
         SUBSCRIPTION_OPEN_RESULT_MAX_BYTES,
     );
     assert.throws(() => decodeHostFrame(oversized), isInvalidFrame);
-  });
-
-  test('normalizes legacy Session statuses in continuity snapshots', () => {
-    for (const status of ['review', 'done']) {
-      const decoded = decodeSessionContinuitySnapshot({
-        ...continuitySnapshot('epoch-1'),
-        session: { ...continuitySnapshot('epoch-1').session, status },
-      });
-      assert.equal(decoded.session.status, 'active');
-    }
   });
 
   test('rejects unknown Session statuses in continuity snapshots', () => {
@@ -1721,8 +1513,8 @@ describe('Runtime Host bootstrap protocol', () => {
     assert.throws(() => decodeHostFrame({ ...response, operation: 'turn.query' }), isInvalidFrame);
   });
 
-  test('accepts bounded explicit Skill identities on turn.start', () => {
-    const start = (skillIds: unknown, text = '') =>
+  test('accepts bounded provider-owned input selections on turn.start', () => {
+    const start = (inputSelections: unknown, text = '') =>
       decodeClientFrame({
         requestId: 'skill-start',
         operation: 'turn.start',
@@ -1730,30 +1522,32 @@ describe('Runtime Host bootstrap protocol', () => {
           sessionId: 'session-1',
           turnId: 'turn-skill-1',
           content: { text },
-          skillIds,
+          inputSelections,
         },
       });
-    assert.deepEqual(start(['writer', 'project:maka:reviewer']), {
+    assert.deepEqual(start({ writer: ['project/report.md', 'draft review'] }), {
       requestId: 'skill-start',
       operation: 'turn.start',
       input: {
         sessionId: 'session-1',
         turnId: 'turn-skill-1',
         content: { text: '' },
-        skillIds: ['writer', 'project:maka:reviewer'],
+        inputSelections: { writer: ['project/report.md', 'draft review'] },
       },
     });
     assert.doesNotThrow(() =>
-      start(Array.from({ length: TURN_SKILL_ID_MAX_COUNT }, (_, index) => `skill-${index}`)),
+      start({ writer: Array.from({ length: 50 }, (_, index) => `draft-${index}`) }),
     );
-    for (const skillIds of [
-      Array.from({ length: TURN_SKILL_ID_MAX_COUNT + 1 }, (_, index) => `skill-${index}`),
-      ['bad/id'],
-      ['bad id'],
-      ['x'.repeat(TURN_SKILL_ID_MAX_LENGTH + 1)],
-      [1],
+    for (const inputSelections of [
+      { writer: Array.from({ length: 51 }, (_, index) => `draft-${index}`) },
+      { writer: [] },
+      { writer: ['bad\nselector'] },
+      { writer: ['é'.repeat(257)] },
+      { writer: [1] },
+      { '': ['draft'] },
+      ['draft'],
     ]) {
-      assert.throws(() => start(skillIds), isInvalidFrame);
+      assert.throws(() => start(inputSelections), isInvalidFrame);
     }
     assert.deepEqual(start(undefined, 'plain'), {
       requestId: 'skill-start',
@@ -1764,7 +1558,7 @@ describe('Runtime Host bootstrap protocol', () => {
         content: { text: 'plain' },
       },
     });
-    assert.deepEqual(start([], 'plain'), {
+    assert.deepEqual(start({}, 'plain'), {
       requestId: 'skill-start',
       operation: 'turn.start',
       input: {
@@ -1777,15 +1571,15 @@ describe('Runtime Host bootstrap protocol', () => {
 
   test('bounds turn.start feedback as one transport-safe result', () => {
     const receipt = {
-      invocation: 'explicit' as const,
-      request: 'writer',
-      success: true as const,
-      ref: 'workspace:legacy:writer',
-      id: 'writer',
-      name: 'Writer',
-      scope: 'workspace' as const,
-      source: 'legacy' as const,
-      truncated: false,
+      source: {
+        kind: 'input' as const,
+        name: 'review',
+        packageId: 'reviewer',
+        entryId: 'entry',
+        activation: '1',
+        revision: '1',
+      },
+      receipt: { document: 'report.md' },
     };
     const response = {
       requestId: 'skill-start-response',
@@ -1799,34 +1593,17 @@ describe('Runtime Host bootstrap protocol', () => {
           runId: 'run-skill-1',
           status: 'running' as const,
         },
-        skillInvocation: {
-          loaded: [{ id: receipt.id, name: receipt.name }],
-          failed: [],
-          receipts: [receipt],
-        },
+        preparation: [receipt],
       },
     };
     assert.deepEqual(decodeHostFrame(response), response);
     assert.ok(encodeProtocolMessage(response).byteLength < RUNTIME_HOST_MAX_MESSAGE_BYTES);
 
-    const request = 'r'.repeat(TURN_SKILL_ID_MAX_LENGTH);
-    const id = 'i'.repeat(81);
-    const name = '"'.repeat(256);
     const oversized = {
       ...response,
       result: {
         ...response.result,
-        skillInvocation: {
-          loaded: Array.from({ length: TURN_SKILL_ID_MAX_COUNT }, () => ({ id, name })),
-          failed: [],
-          receipts: Array.from({ length: TURN_SKILL_ID_MAX_COUNT }, () => ({
-            ...receipt,
-            request,
-            ref: `workspace:legacy:${id}`,
-            id,
-            name,
-          })),
-        },
+        preparation: [{ ...receipt, receipt: 'x'.repeat(1024 * 1024) }],
       },
     };
     assert.throws(() => decodeHostFrame(oversized), isInvalidFrame);
@@ -2073,20 +1850,29 @@ describe('Runtime Host bootstrap protocol', () => {
   });
 
   test('decodes exact submit dispositions and bounded retract and interrupt results', () => {
-    const skillInvocation = { loaded: [], failed: [], receipts: [] };
+    const preparation: unknown[] = [];
     for (const result of [
-      { disposition: 'steering', queueRevision: 2, skillInvocation },
-      { disposition: 'followup', queueRevision: 3, skillInvocation },
-      { disposition: 'steering', skillInvocation },
-      { disposition: 'followup', skillInvocation },
-      { disposition: 'turn_started', turnId: 'turn-2', skillInvocation },
+      { disposition: 'steering', queueRevision: 2, preparation },
+      { disposition: 'followup', queueRevision: 3, preparation },
+      { disposition: 'steering', preparation },
+      { disposition: 'followup', preparation },
+      { disposition: 'turn_started', turnId: 'turn-2', preparation },
       {
         disposition: 'blocked',
-        skillInvocation: {
-          loaded: [],
-          failed: [{ request: 'missing', reason: 'not_found' }],
-          receipts: [],
-        },
+        message: 'Document unavailable',
+        preparation: [
+          {
+            source: {
+              kind: 'input',
+              name: 'review',
+              packageId: 'reviewer',
+              entryId: 'entry',
+              activation: '1',
+              revision: '1',
+            },
+            receipt: { missing: 'report.md' },
+          },
+        ],
       },
     ]) {
       assert.doesNotThrow(() =>
@@ -2125,23 +1911,19 @@ describe('Runtime Host bootstrap protocol', () => {
             disposition: 'turn_started',
             turnId: 'turn-2',
             queueRevision: 4,
-            skillInvocation,
+            preparation,
           },
         }),
       isInvalidFrame,
     );
-    for (const skillInvocation of [
-      { loaded: 'invalid', failed: [], receipts: [] },
-      { loaded: [{ id: 'writer', name: 'Writer' }], failed: [], receipts: [] },
-      { loaded: [], failed: [], receipts: [] },
-    ]) {
+    for (const preparation of [{}, [{ source: 'invalid', receipt: {} }], []]) {
       assert.throws(
         () =>
           decodeHostFrame({
             requestId: 'submit-response',
             operation: 'turn.message.submit',
             ok: true,
-            result: { disposition: 'blocked', skillInvocation },
+            result: { disposition: 'blocked', message: 'Document unavailable', preparation },
           }),
         isInvalidFrame,
       );
@@ -2276,7 +2058,13 @@ describe('Runtime Host bootstrap protocol', () => {
       right: typeof HOST_BOOTSTRAP_OPERATION_SPECS,
     ) => unknown;
     assert.throws(
-      () => composeUnchecked(HOST_BOOTSTRAP_OPERATION_SPECS, HOST_BOOTSTRAP_OPERATION_SPECS),
+      () =>
+        composeUnchecked(
+          {
+            'host.status': HOST_BOOTSTRAP_OPERATION_SPECS['host.status'],
+          } as typeof HOST_BOOTSTRAP_OPERATION_SPECS,
+          HOST_BOOTSTRAP_OPERATION_SPECS,
+        ),
       /Duplicate Runtime Host operation key: host\.status/,
     );
   });
@@ -2352,11 +2140,11 @@ describe('Runtime Host bootstrap protocol', () => {
         activeOperations: 0,
         activeResidencies: 0,
         upgradeBlockingActivity: true,
+        drainResidencies: 1,
         protocolVersion: 0,
         compatibilityEpoch: 9,
         pid: 42,
         processUptimeSeconds: 1,
-        nodeVersion: '22.0.0',
         platform: 'linux',
         arch: 'x64',
         osRelease: '6.6.0',
@@ -2377,11 +2165,11 @@ describe('Runtime Host bootstrap protocol', () => {
       activeOperations: 0,
       activeResidencies: 0,
       upgradeBlockingActivity: false,
+      drainResidencies: 0,
       protocolVersion: 0,
       compatibilityEpoch: 9,
       pid: 42,
       processUptimeSeconds: 1,
-      nodeVersion: '22.0.0',
       platform: 'linux',
       arch: 'x64',
       osRelease: '6.6.0',

@@ -162,8 +162,10 @@ impl ToolPreparer for ClientTools {
                         server_id: descriptor.server_id.clone(),
                         tool_name: descriptor.name.clone(),
                         arguments,
-                        session_id: context.invocation.session_id.clone(),
-                        turn_id: context.invocation.turn_id.clone(),
+                        source: maka_runtime::capability::CallSource::Agent {
+                            session_id: context.invocation.session_id.clone(),
+                            turn_id: context.invocation.turn_id.clone(),
+                        },
                         tool_call_id,
                         cwd: self.cwd.clone(),
                     },

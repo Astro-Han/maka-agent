@@ -94,7 +94,7 @@ pub(crate) async fn affected_after(
 pub(crate) async fn validate_summary(
     connection: &mut SqliteConnection,
     source: &SourceEvidence,
-    expected: Option<&str>,
+    expected: &str,
     requested: u64,
 ) -> Result<(), StoreError> {
     let selection = Selection::resolve(connection, &source.scope).await?;
@@ -106,31 +106,11 @@ pub(crate) async fn validate_summary(
             "summary effective source changed after its request".into(),
         ));
     }
-    match expected {
-        Some(expected)
-            if digest_selected(connection, &selection, source, requested).await? == expected =>
-        {
-            Ok(())
-        }
-        Some(_) => Err(StoreError::InvalidTransition(
+    if digest_selected(connection, &selection, source, requested).await? == expected {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidTransition(
             "summary effective source digest mismatch".into(),
-        )),
-        None => {
-            let archive_filter = Selection::predicate("a", "?3");
-            let target_filter = Selection::predicate("t", "?3");
-            let pruned: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "SELECT EXISTS(SELECT 1 FROM runtime_events a JOIN runtime_events t
-                 ON t.event_id=json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id')
-                 WHERE a.kind='tool_result_archived' AND json_extract(a.event_json,'$.invocation.session_id')=?
-                   AND t.sequence <= ?2 AND {archive_filter} AND {target_filter})"
-            ))).bind(&selection.session).bind(source.high_water as i64).bind(&selection.lineage).fetch_one(connection).await?;
-            if pruned {
-                Err(StoreError::InvalidTransition(
-                    "legacy summary cannot cover archived projections".into(),
-                ))
-            } else {
-                Ok(())
-            }
-        }
+        ))
     }
 }

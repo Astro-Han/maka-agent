@@ -91,10 +91,7 @@ pub fn count(value: &Value, label: &str) -> Result<u64> {
         .ok_or_else(|| ProtocolError::invalid(format!("Invalid {label}")))
 }
 
-pub fn composition(value: Option<&Value>) -> Result<String> {
-    let Some(value) = value else {
-        return Ok(crate::COMPOSITION_ID.into());
-    };
+pub fn composition(value: &Value) -> Result<String> {
     let id = string(value, "compositionId", 128)?;
     let mut segments = id.split(['.', '-']);
     let first = segments.next().unwrap_or_default();
@@ -114,11 +111,8 @@ pub fn composition(value: Option<&Value>) -> Result<String> {
     Ok(id)
 }
 
-pub fn epoch(value: Option<&Value>) -> Result<u64> {
-    let epoch = value
-        .map(|v| count(v, "compatibilityEpoch"))
-        .transpose()?
-        .unwrap_or(0);
+pub fn epoch(value: &Value) -> Result<u64> {
+    let epoch = count(value, "compatibilityEpoch")?;
     if epoch > 1_000_000 {
         return Err(ProtocolError::invalid("Invalid compatibilityEpoch"));
     }
@@ -130,19 +124,14 @@ pub(crate) fn decode_activity(value: &Value) -> Result<Value> {
         "connections",
         "activeOperations",
         "processUptimeSeconds",
+        "drainResidencies",
         "residencies",
     ];
     let frame = record(value, "Runtime Host activity")?;
-    shaped(frame, &fields, &["drainResidencies", "cooperativeHandoff"])?;
+    shaped(frame, &fields, &["cooperativeHandoff"])?;
     let mut result = Map::new();
-    for field in &fields[..3] {
+    for field in &fields[..4] {
         result.insert((*field).into(), json!(count(&frame[*field], field)?));
-    }
-    if let Some(v) = frame.get("drainResidencies") {
-        result.insert(
-            "drainResidencies".into(),
-            json!(count(v, "drainResidencies")?),
-        );
     }
     if let Some(v) = frame.get("cooperativeHandoff") {
         if !v.is_boolean() {

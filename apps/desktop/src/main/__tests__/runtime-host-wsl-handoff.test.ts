@@ -92,29 +92,16 @@ test('WSL handoff carries exact source identity and separately forwards interrup
 });
 
 
-test('legacy operator without a configuration fingerprint remains fenced by source version and Host identity', async () => {
-  const { configurationFingerprint: _fingerprint, ...legacyService } = service;
+test('WSL handoff rejects a source without its configuration fingerprint', async () => {
+  const { configurationFingerprint: _fingerprint, ...unverifiedService } = service;
   const blocker = await resolveDesktopWslHostHandoff(profile, incompatible(), new AbortController().signal, {
     resolveBinding: async () => binding,
-    resolvePackage: async () => ({
-      kind: 'development_archive', path: '/selected.tgz', integrity: 'sha512-selected',
-      displayVersion: '0.3.0-dev-abcdef012345',
-    }),
-    status: async () => ({ schemaVersion: 1, kind: 'result', action: 'status', service: legacyService }),
-    update: async (input) => {
-      assert.equal(input.expectedConfigFingerprint, undefined);
-      assert.equal(input.expectedSourceVersion, legacyService.installedVersion);
-      assert.deepEqual(input.expectedHost, { hostEpoch: 'old-host', pid: 42 });
-      assert.equal(input.expectedTarget.deploymentId, binding.deployment.deploymentId);
-      return { schemaVersion: 1, kind: 'error', action: 'update', error: { code: 'target_mismatch', message: 'Source changed under deployment lock' } };
-    },
+    resolvePackage: async () => assert.fail('unverified source must not stage a package'),
+    status: async () => ({ schemaVersion: 1, kind: 'result', action: 'status', service: unverifiedService }),
+    update: async () => assert.fail('unverified source must not be updated'),
   });
-  assert.ok(blocker.replacement);
-  assert.deepEqual(blocker.packageChange, {
-    current: legacyService.installedVersion,
-    target: '0.3.0-dev-abcdef012345',
-  });
-  assert.deepEqual(await blocker.replacement.execute('refuse_active_work', () => {}, 'explicit'), { kind: 'changed' });
+  assert.equal(blocker.replacement, undefined);
+  assert.match(blocker.operatorStep!, /could not verify/u);
 });
 
 test('development handoff never presents package integrity as a version', async () => {

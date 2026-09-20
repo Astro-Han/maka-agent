@@ -156,7 +156,6 @@ fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
         "committed",
         "conflict",
         "lost_intent",
-        "legacy",
     ] {
         let root = tempfile::tempdir().unwrap();
         let private = tempfile::tempdir().unwrap();
@@ -170,18 +169,11 @@ fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
         }))
         .unwrap();
         let hash = content_digest(&intent);
-        let transactions = if cut == "legacy" {
-            root.path().join("skill-transactions")
-        } else {
-            private.path().join("transactions")
-        };
+        let transactions = private.path().join("transactions");
         let transaction = transactions.join(format!("tx-{}-{}", uuid::Uuid::new_v4(), &hash[7..]));
         write_tree(&transaction.join("next"), "new");
         std::fs::write(transaction.join("intent.json"), &intent).unwrap();
-        if matches!(
-            cut,
-            "old_moved" | "published" | "committed" | "lost_intent" | "legacy"
-        ) {
+        if matches!(cut, "old_moved" | "published" | "committed" | "lost_intent") {
             std::fs::rename(&target, transaction.join("old")).unwrap();
         }
         if matches!(cut, "published" | "committed") {
@@ -202,11 +194,7 @@ fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
         } else if cut == "conflict" {
             std::fs::write(target.join("SKILL.md"), "edit before takeover").unwrap();
         }
-        if cut == "legacy" {
-            publisher.recover_legacy(root.path()).unwrap();
-        } else {
-            publisher.recover().unwrap();
-        }
+        publisher.recover().unwrap();
         let expected = match cut {
             "committed" => "edit after commit",
             "conflict" => "edit before takeover",

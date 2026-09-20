@@ -69,7 +69,7 @@ async fn question_commit_failures_never_publish_an_unjournaled_question_or_deliv
         writer
             .write(
                 &json!({"kind":"hello","clientInstanceId":"question-boundary",
-            "surface":"desktop","activitySnapshotVersion":2,"protocolMin":0,"protocolMax":0,
+            "protocolMin":0,"protocolMax":0,
             "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH,"compositionId":"maka.interactive"}),
             )
             .await

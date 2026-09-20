@@ -26,6 +26,7 @@ mod catalog_changes;
 pub mod connection;
 pub mod context;
 mod continuation;
+pub mod effects;
 mod executor;
 mod handoff;
 pub use handoff::PendingHandoff;

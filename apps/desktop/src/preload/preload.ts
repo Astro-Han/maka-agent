@@ -1409,6 +1409,17 @@ const makaBridge = {
   workHubControl: workHubControlBridge,
   workHubPresentation: workHubPresentationBridge,
   clientPlugins: {
+    async authorization(host, connectionEpoch, input, registerCancellation) {
+      const requestId = crypto.randomUUID();
+      let cancelled = false;
+      let cancelPending: (() => void) | undefined;
+      registerCancellation(() => { cancelled = true; cancelPending?.(); });
+      const scope = await runtimeHostScope(host);
+      if (cancelled) throw new Error('Client plugin retired before authorization');
+      const pending = ipcRenderer.invoke('plugins:authorization', scope, browserDocumentId, connectionEpoch, input, requestId);
+      cancelPending = () => { void ipcRenderer.invoke('plugins:authorization-cancel', scope, browserDocumentId, connectionEpoch, requestId).catch(() => {}); };
+      try { return await pending; } finally { cancelPending = undefined; }
+    },
     subscribeContext(host, handler) {
       const disposers = [
         subscribeSelectedRuntimeHostEvent('connections:event', host, handler),

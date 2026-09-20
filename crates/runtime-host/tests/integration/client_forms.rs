@@ -265,7 +265,8 @@ async fn verify_forms(disconnected: bool) {
         }
         assert!(
             output.status.success(),
-            "stdout: {}\nstderr: {}",
+            "status: {}\nstdout: {}\nstderr: {}",
+            output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );

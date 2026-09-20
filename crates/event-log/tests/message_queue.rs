@@ -134,21 +134,19 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
         assert!(!log.message_cancelled("session", id).await.unwrap());
     }
     db.execute_batch("DROP TRIGGER reject_cancel").unwrap();
-    let skills = maka_runtime::skills::SkillInvocationResult {
-        loaded: vec![maka_runtime::skills::LoadedSkill {
-            id: "review".into(),
-            name: "Review".into(),
-        }],
-        ..Default::default()
-    };
+    let receipt: maka_runtime::input::InputReceipt = serde_json::from_value(json!({
+        "source":{"kind":"input","name":"review","packageId":"reviewer","entryId":"entry","activation":"1","revision":"1"},
+        "receipt":{"document":"report.md"}
+    })).unwrap();
+    let mut content: maka_runtime::input::MessageInput = "edited 😀".into();
+    content.preparation.push(receipt.clone());
     let updated = log
         .edit_message_queue(
             "session",
             4,
             QueueEdit::Update {
                 message_id: "two".into(),
-                content: Box::new("edited 😀".into()),
-                skill_invocation: skills.clone(),
+                content: Box::new(content),
                 required_tools: ["Read".into()].into(),
             },
             command("update", Kind::Update),
@@ -192,11 +190,12 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
     assert_eq!(entry.steering_target(), &second);
     assert_eq!(entry.required_tools, ["Read".into()].into());
     assert_eq!(entry.source.submitted_placement, Placement::NextTurn);
+    let mut omitted = entry.source.message.clone();
+    omitted.content.preparation.clear();
     let omitted_receipt = EventWrite::plain(RuntimeEvent::new(
         second.clone(),
         Fact::MessageSteered {
-            message: Box::new(entry.source.message.clone()),
-            skill_invocation: Default::default(),
+            message: Box::new(omitted),
         },
     ))
     .unwrap();
@@ -223,7 +222,7 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
         .unwrap();
     assert_eq!(proof.event.invocation, second);
     assert!(
-        matches!(&proof.event.fact, Fact::MessageSteered { skill_invocation, .. } if skill_invocation == &skills)
+        matches!(&proof.event.fact, Fact::MessageSteered { message } if message.content.preparation == [receipt])
     );
     let queue = log.message_queue("session").await.unwrap();
     let cancelled = log
@@ -252,7 +251,6 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
                 &EventWrite::plain(RuntimeEvent::new(
                     second.clone(),
                     Fact::MessageSteered {
-                        skill_invocation: Default::default(),
                         message: Box::new(
                             admission(&second, id, Disposition::Steering).source.message
                         ),

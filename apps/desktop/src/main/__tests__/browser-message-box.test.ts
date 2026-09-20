@@ -141,6 +141,20 @@ test('drives the BrowserWindow lifecycle through a safe response URL', async () 
 });
 
 test('maps close to cancel and falls back after each BrowserWindow presentation failure', async () => {
+  const cancelled = fakeBrowserWindow({pendingLoad:true});
+  const cancellation = new AbortController();
+  const cancelledResult = showBrowserMessageBoxWithRuntime(
+    {message:'Allow background work?',buttons:['Cancel','Allow'],cancelId:0,signal:cancellation.signal},
+    undefined, ACTIVE_APPEARANCE, runtimeForWindow(cancelled),
+  );
+  cancellation.abort();
+  assert.deepEqual(await cancelledResult,{response:0,checkboxChecked:false});
+  assert.equal(cancelled.destroyed(),true);
+  const failed = fakeBrowserWindow({loadError:new Error('renderer failed')});
+  await assert.rejects(showBrowserMessageBoxWithRuntime(
+    {message:'Allow background work?',signal:new AbortController().signal},
+    undefined, ACTIVE_APPEARANCE, runtimeForWindow(failed),
+  ), /renderer failed/); // Never enter a synchronous, uninterruptible native fallback.
   const closed = fakeBrowserWindow();
   const closeResult = showBrowserMessageBoxWithRuntime(
     { message: 'Recover Maka', buttons: ['Recover', 'Cancel'], cancelId: 1 },

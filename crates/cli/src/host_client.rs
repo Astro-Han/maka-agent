@@ -90,7 +90,6 @@ impl HostClient {
             writer
                 .write(&ClientHello {
                     client_instance_id: format!("maka-operator-{}", uuid::Uuid::new_v4()),
-                    activity_snapshot_version: Some(2),
                     protocol_min: 0,
                     protocol_max: 0,
                     compatibility_epoch: COMPATIBILITY_EPOCH,

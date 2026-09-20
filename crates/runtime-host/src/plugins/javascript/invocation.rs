@@ -17,53 +17,40 @@
  * under the License.
  */
 
-mod resources;
-use maka_runtime::{event::Invocation, tools::ToolError};
-pub(super) use resources::{Resources, Ticket};
-use serde::Serialize;
+pub(super) use maka_plugins::call::Scope as Authority;
+use maka_runtime::tools::ToolError;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
 };
 use tokio_util::sync::CancellationToken;
 
-/// Issued by Host dispatch, never reconstructed from plugin-supplied identities.
-/// Each module gets its own handle; forwarding retains the original revocation.
-#[derive(Clone)]
-pub(super) struct Authority {
-    pub identity: Identity,
-    pub cancellation: CancellationToken,
-    pub resources: Arc<Resources>,
+pub(super) struct Calls {
+    issuer: maka_plugins::call::Issuer,
+    invocations: Mutex<BTreeMap<String, Authority>>,
+    remotes: Mutex<BTreeMap<String, maka_plugins::remote::Caller>>,
 }
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct Identity {
-    pub invocation: Invocation,
-    pub operation_id: Option<String>,
-}
-#[derive(Default)]
-pub(super) struct Calls(Mutex<BTreeMap<String, Authority>>);
 impl Calls {
-    pub fn enter(
-        self: &Arc<Self>,
-        identity: Identity,
-        cancellation: CancellationToken,
-    ) -> Result<Guard, ToolError> {
-        if cancellation.is_cancelled() {
-            return Err(ToolError::Failed("plugin invocation is closed".into()));
+    pub fn new(issuer: maka_plugins::call::Issuer) -> Self {
+        Self {
+            issuer,
+            invocations: Default::default(),
+            remotes: Default::default(),
         }
-        let mut calls = self.0.lock().unwrap();
+    }
+    pub fn forward(self: &Arc<Self>, authority: Authority) -> Result<Guard, ToolError> {
+        if !self.issuer.owns(&authority) || authority.cancellation.is_cancelled() {
+            return Err(ToolError::Failed(
+                "foreign or closed plugin invocation".into(),
+            ));
+        }
+        let mut calls = self.invocations.lock().unwrap();
         if calls.len() >= 128 {
             return Err(ToolError::Failed(
                 "plugin invocation capacity exceeded".into(),
             ));
         }
         let id = uuid::Uuid::new_v4().to_string();
-        let authority = Authority {
-            identity,
-            cancellation: cancellation.child_token(),
-            resources: Arc::default(),
-        };
         calls.insert(id.clone(), authority.clone());
         Ok(Guard {
             calls: self.clone(),
@@ -72,7 +59,7 @@ impl Calls {
         })
     }
     pub fn get(&self, id: &str) -> Result<Authority, maka_plugins::Error> {
-        self.0
+        self.invocations
             .lock()
             .unwrap()
             .get(id)
@@ -80,21 +67,60 @@ impl Calls {
             .cloned()
             .ok_or(maka_plugins::Error::Retired)
     }
+
+    pub fn enter_remote(
+        self: &Arc<Self>,
+        mut caller: maka_plugins::remote::Caller,
+    ) -> Result<RemoteGuard, maka_plugins::remote::Error> {
+        if caller.cancellation.is_cancelled() {
+            return Err(maka_plugins::remote::Error::Cancelled);
+        }
+        let mut calls = self.remotes.lock().unwrap();
+        if calls.len() >= 128 {
+            return Err(maka_plugins::remote::Error::Invalid(
+                "Remote call capacity exceeded".into(),
+            ));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        caller.cancellation = caller.cancellation.child_token();
+        let cancellation = caller.cancellation.clone();
+        calls.insert(id.clone(), caller);
+        Ok(RemoteGuard {
+            calls: self.clone(),
+            id,
+            cancellation,
+        })
+    }
+
+    pub fn remote(&self, id: &str) -> Result<maka_plugins::remote::Caller, maka_plugins::Error> {
+        self.remotes
+            .lock()
+            .unwrap()
+            .get(id)
+            .filter(|caller| !caller.cancellation.is_cancelled())
+            .cloned()
+            .ok_or(maka_plugins::Error::Retired)
+    }
+}
+pub(super) struct RemoteGuard {
+    calls: Arc<Calls>,
+    pub id: String,
+    pub cancellation: CancellationToken,
+}
+impl Drop for RemoteGuard {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+        self.calls.remotes.lock().unwrap().remove(&self.id);
+    }
 }
 pub(super) struct Guard {
     calls: Arc<Calls>,
     pub id: String,
     pub authority: Authority,
 }
-impl Guard {
-    pub async fn finish(&self) -> Result<(), ToolError> {
-        self.authority.cancellation.cancel();
-        self.authority.resources.finish().await
-    }
-}
 impl Drop for Guard {
     fn drop(&mut self) {
         self.authority.cancellation.cancel();
-        self.calls.0.lock().unwrap().remove(&self.id);
+        self.calls.invocations.lock().unwrap().remove(&self.id);
     }
 }

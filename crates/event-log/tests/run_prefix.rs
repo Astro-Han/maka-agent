@@ -37,7 +37,6 @@ fn opening(session: &str, run: &str, invocation: &str, text: &str) -> RuntimeEve
             input: InvocationInput::Message {
                 content: text.into(),
                 request_fingerprint: None,
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
             },
         },

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use crate::execution::{Executions, Result, failure, internal, skills::SkillPreparation};
+use crate::execution::{Executions, Result, failure, input::Outcome, internal};
 use crate::session::SessionConfiguration;
 use maka_client_capability::BindingMode;
 use maka_event_log::sessions::SessionRecord;
@@ -31,7 +31,7 @@ pub(crate) struct PreparedMessageInput {
     prepared: Option<maka_plugins::input::Prepared>,
     environment: Option<crate::execution::prepare::Environment>,
     pub content: MessageInput,
-    pub selection: SkillPreparation,
+    pub selection: Outcome,
 }
 
 #[derive(Default)]
@@ -48,25 +48,12 @@ impl Executions {
         connection: uuid::Uuid,
         active_tools: Option<Arc<HashSet<String>>>,
     ) -> Result<PreparedMessageInput> {
-        if session.configuration.target.model().is_none() {
-            crate::execution::prepare::executor_skills(&content, &[])?;
-            return Ok(PreparedMessageInput {
-                digest: session.configuration_digest,
-                prepared: None,
-                environment: None,
-                content,
-                selection: SkillPreparation::Ready {
-                    skill_invocation: Default::default(),
-                    required_tools: Default::default(),
-                },
-            });
-        }
         let Some(tools) = active_tools else {
             let digest = session.configuration_digest.clone();
             let (environment, content, selection) = self
                 .prepare_environment_for(session, Some(connection), BindingMode::Strict, None)
                 .await?
-                .expand(content, Vec::new())
+                .expand(content, Default::default())
                 .await?;
             return Ok(PreparedMessageInput {
                 digest,

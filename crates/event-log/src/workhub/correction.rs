@@ -77,11 +77,11 @@ impl EventLog {
         request: CorrectionRequest,
         target_revision: Option<u64>,
         target_owner: Option<maka_runtime::event::Invocation>,
-        preparation: Option<&impl Serialize>,
+        preparation: &impl Serialize,
     ) -> Result<CorrectionRecord, StoreError> {
         self.validate_root()?;
         request.validate().map_err(invalid)?;
-        let preparation = preparation.map(serde_json::to_value).transpose()?;
+        let preparation = serde_json::to_value(preparation)?;
         let commits = self.commits.clone();
         self.connection
             .run(move |connection| {
@@ -93,10 +93,14 @@ impl EventLog {
                         }
                         return Ok(previous);
                     }
-                    let mut intent =
-                        admit::apply(&mut tx, request, target_revision, target_owner.as_ref())
-                            .await?;
-                    intent.preparation = preparation;
+                    let intent = admit::apply(
+                        &mut tx,
+                        request,
+                        target_revision,
+                        target_owner.as_ref(),
+                        preparation,
+                    )
+                    .await?;
                     let sequence = control::append(
                         &mut tx,
                         &SessionEvent::workhub(

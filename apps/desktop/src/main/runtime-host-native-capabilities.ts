@@ -19,7 +19,7 @@
 
 import { Buffer } from "node:buffer";
 import type { ComputerUseToolSet } from '@maka/runtime/computer-use-tools';
-import type { MakaTool } from '@maka/runtime/tool-runtime';
+import type { MakaTool, SessionTool, SessionToolContext } from '@maka/runtime/tool-runtime';
 import {
   createOAuthPresentationClientProvider,
   type ClientCapabilityProvider,
@@ -60,11 +60,17 @@ export interface DesktopIdentifiedCapabilityTool {
   readonly toolName: string;
 }
 
+/** Declares that this implementation needs a Session, not an Agent Turn. */
+export interface DesktopSessionCapabilityTool {
+  readonly context: 'session';
+  readonly tool: SessionTool;
+}
+
 export interface DesktopCapabilityGroup {
   readonly offerId: string;
   readonly label: string;
   readonly description: string;
-  readonly tools: readonly (MakaTool | DesktopIdentifiedCapabilityTool)[];
+  readonly tools: readonly (MakaTool | DesktopIdentifiedCapabilityTool | DesktopSessionCapabilityTool)[];
   /**
    * Marks a dynamically sourced group: tools the decoder rejects are omitted
    * with a diagnostic, the group may be chunked past the single-offer tool
@@ -74,10 +80,9 @@ export interface DesktopCapabilityGroup {
   readonly dynamic?: boolean;
 }
 
-interface PreparedDesktopCapabilityTool {
-  readonly tool: MakaTool;
+type PreparedDesktopCapabilityTool = NativeToolBinding & {
   readonly descriptor: ClientCapabilityToolDescriptor;
-}
+};
 
 interface PreparedDesktopCapabilityGroup {
   readonly offerId: string;
@@ -87,7 +92,9 @@ interface PreparedDesktopCapabilityGroup {
   readonly dynamic?: boolean;
 }
 
-type NativeToolBinding = Pick<PreparedDesktopCapabilityTool, "tool">;
+type NativeToolBinding =
+  | { readonly kind: 'session'; readonly tool: SessionTool }
+  | { readonly kind: 'agent'; readonly tool: MakaTool };
 
 type DesktopToolModelOutput = Awaited<
   ReturnType<NonNullable<MakaTool["toModelOutput"]>>
@@ -98,7 +105,7 @@ type DesktopToolContentPart = Extract<
 >["value"][number];
 
 export interface DesktopNativeCapabilityProviderInput {
-  readonly browserTools: readonly MakaTool[];
+  readonly browserTools: readonly SessionTool[];
   readonly resolveBrowserUrl: (input: {
     readonly sessionId: string;
     readonly toolName: string;
@@ -211,6 +218,7 @@ export function createDesktopNativeCapabilityProvider(
     offers: () => offers,
     services: () => [...serviceOffers],
     call: (frame, options) => {
+      if (frame.source.sessionId === null) throw new Error('This native tool requires a Session');
       if (closed)
         throw new Error("Desktop native capability provider is closed");
       if (providerOptions.isTargetValid?.() === false) {
@@ -234,7 +242,7 @@ export function createDesktopNativeCapabilityProvider(
         () => undefined,
       );
       activeInvocations.set(invocation, {
-        sessionId: frame.sessionId,
+        sessionId: frame.source.sessionId,
         settled,
       });
       void settled.finally(() => activeInvocations.delete(invocation));
@@ -356,7 +364,7 @@ function capabilityGroups(
             label: "Browser",
             description:
               "Operate the embedded browser owned by this Desktop client.",
-            tools: input.browserTools,
+            tools: input.browserTools.map(tool => ({ context: 'session' as const, tool })),
           },
         ]
       : []),
@@ -384,6 +392,11 @@ async function invokeNativeTool(
   invocation: AbortController,
   usedSessionIds: Set<string>,
 ): Promise<ClientCapabilityCallResult> {
+  const source = frame.source;
+  if (source.sessionId === null) throw new Error('This native tool requires a Session');
+  if (binding.kind === 'agent' && source.kind !== 'agent') {
+    throw new Error('This tool requires an Agent invocation');
+  }
   const hostPathAccess = providerOptions.hostPathAccess ?? "cwd";
   if (hostPathAccess === "none" && frame.cwd !== undefined) {
     throw new Error("Desktop native capability does not accept a Host path");
@@ -400,8 +413,8 @@ async function invokeNativeTool(
   signal.throwIfAborted();
   const sessionId =
     frame.offerId === BROWSER_OFFER_ID || frame.offerId === COMPUTER_USE_OFFER_ID
-      ? providerOptions.nativeSessionId?.(frame.sessionId) ?? frame.sessionId
-      : frame.sessionId;
+      ? providerOptions.nativeSessionId?.(source.sessionId) ?? source.sessionId
+      : source.sessionId;
   const admissionEvidence =
     frame.offerId === BROWSER_OFFER_ID
       ? {
@@ -429,22 +442,25 @@ async function invokeNativeTool(
     }
   }
   signal.throwIfAborted();
-  usedSessionIds.add(frame.sessionId);
-  providerOptions.onSessionUsed?.(frame.sessionId);
-  if (frame.offerId === COMPUTER_USE_OFFER_ID || frame.offerId === "desktop_workhub") {
-    providerOptions.onDesktopInteractionTurnUsed?.(frame.sessionId, frame.turnId);
+  usedSessionIds.add(source.sessionId);
+  providerOptions.onSessionUsed?.(source.sessionId);
+  if (source.kind === 'agent' && (frame.offerId === COMPUTER_USE_OFFER_ID || frame.offerId === "desktop_workhub")) {
+    providerOptions.onDesktopInteractionTurnUsed?.(source.sessionId, source.turnId);
   }
-  const execute = () =>
-    binding.tool.impl(args, {
+  const context: SessionToolContext = {
       sessionId,
-      turnId: frame.turnId,
       cwd,
       toolCallId: frame.toolCallId,
       abortSignal: signal,
       emitOutput() {},
       requestUserForm: options.requestInteraction,
       ...(options.progress ? { emitProgress: options.progress } : {}),
-    });
+  };
+  const execute = () => {
+    if (binding.kind === 'session') return binding.tool.impl(args, context);
+    if (source.kind !== 'agent') throw new Error('This tool requires an Agent invocation');
+    return binding.tool.impl(args, { ...context, turnId: source.turnId });
+  };
   const output = await (admissionEvidence.kind === "browser_url"
     ? withBrowserOriginAdmission(
         { sessionId, url: admissionEvidence.url },
@@ -501,7 +517,10 @@ function prepareCapabilityGroups(
 ): PreparedDesktopCapabilityGroup[] {
   return groups.flatMap((group) => {
     const tools = group.tools.flatMap((entry): PreparedDesktopCapabilityTool[] => {
-      const tool = isIdentifiedEntry(entry) ? entry.tool : entry;
+      const tool = 'tool' in entry ? entry.tool : entry;
+      const binding: NativeToolBinding = 'context' in entry
+        ? { kind: 'session', tool: entry.tool }
+        : { kind: 'agent', tool };
       const identity = isIdentifiedEntry(entry)
         ? { serverId: entry.serverId, toolName: entry.toolName }
         : undefined;
@@ -521,7 +540,7 @@ function prepareCapabilityGroups(
         );
         return [];
       }
-      return [{ tool, descriptor }];
+      return [{ ...binding, descriptor }];
     });
     if (group.dynamic && tools.length === 0) return [];
     return chunkPreparedGroup({ ...group, tools });
@@ -628,9 +647,9 @@ function manifestFitsBudget(
 }
 
 function isIdentifiedEntry(
-  entry: MakaTool | DesktopIdentifiedCapabilityTool,
+  entry: MakaTool | DesktopIdentifiedCapabilityTool | DesktopSessionCapabilityTool,
 ): entry is DesktopIdentifiedCapabilityTool {
-  return 'tool' in entry;
+  return 'serverId' in entry && 'toolName' in entry;
 }
 
 function capabilityToolDescriptor(
@@ -701,7 +720,8 @@ function indexBindings(
 ): Map<string, NativeToolBinding> {
   const bindings = new Map<string, NativeToolBinding>();
   for (const group of groups) {
-    for (const { tool, descriptor } of group.tools) {
+    for (const binding of group.tools) {
+      const { tool, descriptor } = binding;
       const key = bindingKey({
         offerId: group.offerId,
         serverId: descriptor.serverId,
@@ -712,7 +732,7 @@ function indexBindings(
           `Duplicate Desktop native capability tool: ${group.offerId}/${tool.name}`,
         );
       }
-      bindings.set(key, { tool });
+      bindings.set(key, binding);
     }
   }
   return bindings;

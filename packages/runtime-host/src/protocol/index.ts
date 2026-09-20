@@ -17,7 +17,14 @@
  * under the License.
  */
 
-import { requireCount, requireId, requireRecord, requireString } from './codec.js';
+import {
+  requireCount,
+  requireId,
+  requireRecord,
+  requireString,
+  requireShapedRecord,
+  requireExactRecord,
+} from './codec.js';
 import { invalidProtocolFrame, RuntimeHostProtocolError } from './errors.js';
 import {
   decodeHostActivitySnapshot,
@@ -102,329 +109,7 @@ export const RUNTIME_HOST_REGISTRATION_SCHEMA_VERSION = 1 as const;
 export const RUNTIME_HOST_PROTOCOL_VERSION = 0 as const;
 // Increment when the same protocol version no longer guarantees safe Client-Host
 // interoperability. Mismatches are rejected before domain commands are admitted.
-export const RUNTIME_HOST_COMPATIBILITY_EPOCH = 163 as const;
-// 163: Rust preview adds published Client plugin snapshots, immutable bundle chunks and change notifications.
-// 162: Runtime Resource control and stop replies drop the unused resource
-// snapshot; start replies allow compact state. Older peers require snapshots.
-// 161: Session transcript reads return the whole transcript under a byte budget,
-// and every page says whether it stops between two Turns. The windowed read's
-// range edges are gone, and the Turn landmark query takes a Turn to look up, so
-// a peer older than this epoch asks for what this Host no longer answers.
-// 160: Usage queries add revision-consistent screens and revision-bound activity pages.
-// 159: External Session catalog queries distinguish adapter source limits from
-// persistence failures. Older Clients reject the new closed error code.
-// 158: Session transcripts advance per committed RuntimeEvent; the active overlay is gone.
-// 154: External Session import results distinguish committed Sessions from typed source limits.
-// 153: Sessions may select plugin executors and Plugin Platform queries expose them.
-// 152: Assistant completions and transcript rows preserve interrupted responses.
-// 151: WorkHub selects and delegates through a durable Host Form interaction.
-// 150: Message admission accepts an empty-text Message that carries a quote or
-// an attachment (#4804). Peers older than this epoch reject that frame at
-// admission, so the pair must refuse each other at the handshake.
-// 149: Connection model overrides retain disabled identities and separate capacity
-// from compaction. Catalog entries carry overrides; clients do not rebuild them.
-// 148: Model catalog entries include image support before a user override.
-// 147: OAuth create targets may carry a caller-selected Connection name and
-// slug, and slug collisions remain a closed typed error before or after
-// authorization. Older peers reject those strict input and output shapes.
-// 146: Code Mode settings and Session tool mode join the epoch-145 Host contract.
-// 145: Combine Antigravity setup with Session bundle Host operations and explicit
-// missing/archived Skill query refusals.
-// 144: Antigravity setup combined with explicit missing/archived Skill query refusals.
-// 143: Session bundle export and import are Host operations. Pre-merge Antigravity
-// builds also advertised 143 without this contract and remain incompatible.
-
-// 142: Invocable Skill queries expose missing and archived Session refusals explicitly.
-// 141: WorkHub root admissions bind model Intent/Recall decisions before actions.
-// 140: Plugin Platform queries expose scoped Command contribution projections.
-// Epoch-139 peers reject the added query view and result shape.
-// 139: WorkHub recovery preserves the Host-authenticated Desktop capability binding.
-// 138: Removes the unused steering display anchor from canonical MessageContent.
-// 137: Reserved by the former display anchor contract.
-// 136: WorkHub transient proposals distinguish routing dispositions from linked
-// operations. Older peers expect replace/stop_work/resume_work dispositions.
-// 135: WorkHub model Turns replace direct action proposals with active-Turn task tools.
-// 134: Coordination actions own real Runtime Turns. Removes the synthetic record
-// operation, projects typed action receipts and admitted action identities, and
-// distinguishes stale candidate refusals and resumable transcript preparation.
-// 133: WorkHub actions carry attachments and new-Work model/permission defaults.
-// Epoch-132 peers reject these additional fields on strict action shapes.
-// 132: new Tool Result archives use versioned ledger references, not Artifact payloads.
-// 131: Logical model steps bind durable Request Composition identities.
-// 130: Turn contributions carry the optional bounded `failureMessage` diagnostic.
-// Epoch-129 peers reject this added field on the strict contribution shape.
-// 129: Turn states and Turn records drop `partialOutputRetained`. The fact was
-// derived twice — once from the Turn's output rows, once off the state message
-// — and read by nothing; older peers require the field on both.
-// 128: Session transcript bootstraps drop `durableCoverage`. A durable sequence
-// is an event ordinal times its stride, so no projection has contiguous
-// sequences any more and the claim the field made is unavailable to make.
-// 127: Session Turn contributions carry only the Turn's recorded state. Older
-// peers require the derived shape booleans this projection no longer sends.
-// 126: Durable transcript cursors seek Session event ordinals instead of run indexes.
-// 125: Live Turn snapshots carry an optional `rootExecutionKind:'context_compact'`
-// so a running context-compaction Turn can render a transcript row. Epoch-124
-// peers reject the added optional field on the strict live snapshot shape.
-// 124: PTY delivery is independent of the ordered Session state stream. A
-// bounded PTY overflow requests terminal-only snapshot recovery.
-// 123: Failed turns carry canonical retry decisions through bounded projections.
-// 122: Authenticated physical handoff continuations retain logical Turn identity.
-// Older peers cannot decode the handoff source and sealed invocation facts.
-// 121: Host diagnostics report `upgradeBlockingActivity`, the Host's
-// authoritative activity answer for maintenance probes, computed by the same
-// authority that gates `host.upgrade.prepare`. Older Clients reject the
-// unknown key when decoding diagnostics, so the pair must refuse each other
-// at the handshake.
-// 120: WorkHub admits named resume proposals with an explicit resumesActionId
-// and returns a transient resume outcome. Older peers cannot decode this action.
-// 119: Session Guest principals expose optional display names and an owner-only
-// rename command. Older peers reject named principal projections.
-// 118: External-session import publishes distinct `model_unavailable` and
-// `source_unreadable` error codes so the shell classifies failures by code
-// instead of the redacted message. Older peers cannot decode the new codes.
-// 117: WorkHub exposes only one correction linkage per bounded candidate and
-// no longer returns the Host's complete active-link set.
-// 116: User deletion rejects workflow-owned Artifacts with operation_conflict.
-// 115: Artifact creation requires explicit source ownership.
-// 114: Artifacts are physically deleted and no longer expose tombstone status.
-// 113: Client Capability tool schemas add `patternProperties` and draft-07 tuple
-// `additionalItems`; validation and projection share one per-keyword shape table.
-// Older peers reject these keywords and fail the handshake.
-
-// 112: Owners can query the Host execution environment through an extensible,
-// bounded resource-envelope contract. Older Hosts do not implement the query.
-// 111: Client Capability tool schemas may use draft-07 tuple additionalItems.
-// Older Hosts reject the keyword, so peers must agree before capabilities are admitted.
-// 110: Runtime Host is the sole schema-migration authority for its State Root.
-// Epoch 109 Desktop builds could migrate the event-only AgentRun schema while
-// an older service Host still held the root, leaving that Host querying a
-// removed column. Reject the affected mixed generation before either process
-// admits domain work; the installation owner can then replace the Host.
-// 109: accepted Client Capability invocations may carry one bounded nested form
-// Interaction request/result round trip.
-// 108: Session Interaction snapshots, forwarded Runtime events, and Agent Graph
-// activity may carry the provider-neutral `form` request/answer contract.
-// 107: `token_usage` anchors record the model and connection that produced
-// them. The record decodes against a closed allowlist, so an older client
-// rejects the two new keys and, with them, the Session that carries them.
-// 106: Session transcripts gain five `system_note` kinds
-// (`context_provider_dropping`, `context_window_suggestion`,
-// `context_window_overrun`, `context_reported_window_exceeded`,
-// `context_overflow_after_compaction`) and
-// `token_usage` records reshape `lastRequestAnchor` to
-// `{ inputTokens, outputTokens }`, all behind closed allowlists in
-// @maka/core. An older client that handshakes would fail
-// `decodeStoredMessage` on the first transcript carrying them, so the pair
-// must refuse each other at the handshake instead (#4559).
-// 105: Usage summaries may carry the recorded call-time total and per-Session
-// tool-invocation totals. Older Clients reject the unknown fields, so a newer
-// Host's usage summary is unreadable to them.
-// 104: WorkHub Coordination actions add closed direct-stop proposals,
-// confirmations, expected-state preconditions, and outcomes. Older peers
-// reject these strict shapes.
-// 103: `github-copilot` joins `OAUTH_LOGIN_PROVIDERS`, the Host answers the
-// closed `oauth.enrollment.query`, and `connection.onboarding.save` admits
-// canonical OAuth material with an empty enable-all-discovered selection.
-// Older peers reject these wire values, so incompatible pairs must fail the
-// handshake. Re-derived from current `main`; epoch 102 is claimed by open PRs.
-// 101: Session Turn requests can carry regeneration intents and Guests can
-// atomically withdraw pending requests. Older peers do not share this command
-// vocabulary or the expanded Guest operation grant.
-// 100: `session.branch.create` makes `sourceTurnId` optional, so a side
-// conversation can fork with an empty context (no copied messages, no
-// fabricated `branchOfTurnId`) instead of requiring a settled turn. An older
-// Host's required-field check rejects the request that omits `sourceTurnId`;
-// the handshake keeps mixed-version peers apart. `session.revision.create`
-// still requires `sourceTurnId`, and its wire shape and fingerprint are
-// unchanged.
-// 99: ScheduledTask Agent execution templates carry immutable Connection
-// identity. Older peers cannot preserve the ID/slug/model binding and could
-// silently route a deleted Connection to a same-slug replacement.
-// 98: Peer Mesh invitations carry signed reachability leases and member route
-// projections use the convergent recovery state machine. Older peers decode a
-// different strict wire shape.
-// 97: Host status replaces unsigned route arrays with a self-signed, bounded
-// reachability lease. Older peers cannot validate the locator revision or its
-// target identity before retaining it for reconnect.
-// 96: Read image tool results may carry durable `session_context` refs.
-// 95: Catalog entries carry `describedByMetadata`, so a client asks the
-// Host-resolved entry — not its own bundled table — whether a model needs a
-// hand-written capability declaration. The field is required, so a newer Host's
-// entry fails an older client's strict decoder, and an older Host's entry
-// (lacking it) fails a newer client's.
-// 94: A failed Turn snapshot no longer carries contextBudgetExhaustedDetail; the
-// retired outcome reads as context_overflow at the ledger boundary, and an older
-// Host still sending the field fails a newer client's closed snapshot decode.
-// 93: Configuration credential transfer binds proxy destinations and
-// Connection credentials to exact Host-owned targets before secret access.
-// Proxy policy and credentials commit through one recoverable Host command;
-// older peers can split the writes and violate the shared credential basis.
-// 92: Owners can query their complete pending Session Turn-request inbox.
-// 91: Host status publishes the live Direct peer endpoint so newly issued
-// connection invitations do not preserve stale startup routes.
-// 90: `session.create.mode` accepts the Bot session mode. A Host that predates
-// it rejects the value as an invalid Session start mode.
-// 89: The Host refreshes its models.dev catalog at startup and announces the
-// swap with a `connection.catalog.changed` frame, which an older client's
-// strict frame decoder rejects as an unknown kind.
-// 88: Catalog model modalities admit video on either side and pdf as output.
-// models.dev declares both, and the modality decoder rejects any value it does
-// not name, so a newer Host describing such a model fails an older client's
-// catalog decode outright rather than losing one field. The handshake keeps
-// that pairing from forming; a newer client simply never sees the new values
-// from an older Host.
-// 87: The connection catalog projects each model as the Host resolved it —
-// a `catalog_entry` item per model, counted by the connection header. Clients
-// render those entries instead of merging the stored row against their own
-// bundled model metadata, so a Desktop and a TUI attached to one Host cannot
-// describe the same model differently. An older client ignores the new items
-// but would still resolve locally; an older Host sends none, leaving a newer
-// client with an empty catalog. Both are rejected at the handshake.
-// 86: Client Capability accepted frames carry typed admission evidence used to
-// enforce Session Grant scopes. Older peers cannot preserve that boundary.
-// 85: Plugin package and Entry composition operations become Host-owned protocol
-// surfaces. Older peers cannot safely exchange these strict operation shapes.
-// 84: Message content carries Host-bound directory references. Older peers
-// reject this field and cannot preserve its identity through admission/replay.
-// 83: WorkHub Coordination actions add linked replacement proposals,
-// destructive user confirmation, and replacement results. Older peers reject
-// these closed action and result shapes.
-// 82: Session removal reports how many linked subtasks it archived, and adds a
-// `session.remove.preview` query for that count before the delete. Older peers
-// reject the extra removed-result field and the unknown operation.
-// 81: SessionTodo replaces the Task Ledger protocol and continuity domain with
-// one bounded current-state snapshot. Older peers cannot decode the operation
-// or preserve the new invalidation vocabulary.
-// 80: Runtime Policy catalog models gained validated user-overridden fact
-// provenance. Older peers reject this projected model shape, so they must be
-// refused during the handshake before catalog admission.
-// 79: Every `turn.message.submit` disposition carries the exact Skill
-// invocation outcome. Durable queued replays may omit the previous Host
-// Epoch's transient queue revision; older strict peers reject either shape.
-// 78: OAuth login targets explicit create/existing Connection entities and
-// returns their canonical identity. Older peers reject both closed wire shapes.
-// 77: LLM and tool usage-log projections carry an optional `sessionTitle` (the
-// Host-resolved session name for the usage Task column). Older Clients reject
-// the unknown field, so a newer Host's usage logs are unreadable to them.
-// 76: Peer Mesh endpoint and Mesh display names are signed, persisted facts
-// managed through Host operations rather than local-only Client labels.
-// 75: Peer Mesh routes identify whether a peer is a Client or Runtime Host so
-// management surfaces can present the endpoint authority boundary accurately.
-// 74: Capability-provider credentials may carry one Host-authenticated owner
-// identity. Older peers cannot preserve the association and could select an
-// unrelated provider for an interactive Session.
-// 73: Transcript pages carry a Host-owned Turn range boundary. Older peers
-// cannot preserve both the complete edge Turn and the bounded projection.
-// 72: Collaboration Turn request query results require `canRequestTurns`.
-// Older peers reject the new closed result shape.
-// 71: Session Guests can submit durable exact Turn access requests and Owners
-// can decide them. Older peers do not understand this execution-authority flow.
-// 70: Session Guest connections receive resource-scoped shared catalog and
-// continuity projections. Older peers cannot enforce the Session grant fence.
-// 69: Runtime Host access authority recognizes restricted Session Guest
-// principals and typed Session collaboration grants. Older Hosts would either
-// reject the new operations or misclassify the authenticated principal.
-// 68: Connection onboarding replaces nullable canonical-slug targeting with
-// explicit create/existing identity and returns the committed Connection.
-// Older peers reject the closed target and saved-result shapes.
-// 67: Message lifecycle queries expose durable execution ownership and
-// cancellation. Older peers cannot decode or provide the closed proof list.
-// 66: Peer Mesh queries expose one canonical transit selection and runtime metrics.
-// 65: live `tool_start` frames may carry optional `intent` / `argsPreview`
-// keys. Older Clients decode the event with a strict allowed-key list and tear
-// the connection down on unknown keys, so the pair must be refused up front.
-// The strict decoder's allowed-key union also retains `shellRunRef`.
-// 64: execution.inspect drops the retired resolve operation. Older peers still
-// know execution.inspect.resolve and would send it only to fail mid-connection,
-// so removing it needs its own handshake boundary.
-// 63: Connection updates accept the full canonical enabled-model limit.
-// Older peers reject valid catalogs containing more than 64 enabled models.
-// 62: A Direct peer listener can expose owner-only Peer Mesh management
-// operations. Older peers do not have this closed operation vocabulary.
-// 61: Session explicit model targets carry immutable Connection identity,
-// configuration updates are Host-merged patches, and projections expose the
-// required nullable binding ID. Older peers cannot preserve these invariants.
-// 60: WorkHub stores a canonical delegation assignment record. Older peers
-// cannot decode this message during transcript recovery.
-// 59: Scheduled Turn provider-retry frames may carry an optional host-clock
-// `ts`, letting a mid-wait re-projection recompute the authoritative
-// remaining duration. Older peers decode the frame with an exact key list
-// and reject the added field, so mixed peers must fail the handshake.
-// 58: `runtime.resource.start` accepts an optional one-shot `command`, and the
-// durable Shell Run record carries a `visibility` field. An epoch-57 Host
-// rejects the widened closed input, while an epoch-57 binary cannot safely
-// interpret the widened durable record.
-// 57: Parked safe-boundary resume plans preserve feature-disabled, missing
-// continuation authority, and unavailable safety-observation reasons.
-// Older peers collapse these causes and can misclassify recovery failures.
-// 56: Failed Turn snapshots preserve the structured context-budget exhaustion
-// detail. Epoch-55 peers reject the optional field on the closed snapshot shape.
-// 55: Local owners can atomically revoke every credential for one access
-// principal, closing pairing-finalize races that credential-by-ID revocation cannot.
-// 54: Client-bound pairing candidates restrict pre-claim authority and bind
-// their durable credential to the claiming Client identity; it is also reserved
-// by concurrent protocol changes in #3390.
-// 53: Message admission answers `turn.message.submit` with an explicit
-// disposition, and queued Messages can be proven cancelled. Older peers read the
-// answer as a bare acknowledgement and cannot reconcile their own projection.
-// 52: Session subscriptions can forward durable steering-message echoes and
-// preserve their identity across queue and transcript projection.
-// Older peers cannot safely de-duplicate the two authoritative paths.
-// 51: WorkHub exposes bounded coordination candidates and admits only typed
-// actions through the deterministic Runtime Host Action Gate.
-// 50: WorkHub can append durable coordination summaries and admit tool-free
-// answers through its reserved Coordination Session authority.
-// 49: WorkHub resolves one durable Coordination Session per Runtime Host.
-// Older peers do not know the operation or the hidden Session role.
-// 48: Session branch creation accepts an explicit Side Conversation intent.
-// Older peers reject the strict input shape or cannot apply its snapshot semantics.
-// 47: Project registration can carry an explicit location preference. Epoch-46
-// hosts reject that optional field on the closed registration input.
-// 46: Queued message content can be edited in place (queue.entry.update).
-// 45: Connection onboarding inputs require `baseUrl` and `connectionId`, and
-// results can carry the `base_url_not_configured` / `connection_not_found`
-// rejections. Older peers reject all of these shapes.
-// 44: Session continuity and inspection stop carrying the retired Session
-// last-used timestamp. Older peers reject those strict projection shapes.
-// 43: Session tool-start events correlate hidden shell polls with `shellRunRef`.
-// Older peers reject that added closed-union field.
-// 42: Turn provider retry progress adds `provider_capacity`. Older peers reject
-// that strict retry-reason enum value, so mixed versions must fail handshake.
-// 41: Context compaction returns a typed terminal outcome on both Turn
-// snapshots and context.compact results. Epoch-40 peers reject these closed
-// shapes after admission, so mixed peers must fail during the handshake.
-// 40: The message queue gains per-entry mutation operations
-// (queue.entry.promote, queue.entry.retract, queue.entries.reorder).
-// 39: Client Capability tool descriptors carry trusted activity semantics and
-// invocations can stream bounded progress frames.
-// 38: `execute` is no longer a permission mode. Frame decoders reject it, so a
-// peer that still sends it would fail mid-Session rather than at connect.
-// 37: External Session catalog queries carry a search term.
-// 36: Session trace inspection no longer transports aggregate TraceTotals.
-// 35: Session trace inspection uses cursor pages and Session usage has its own
-// invalidation domain. Older peers cannot safely exchange those frames.
-// 34: ScheduledTask execution templates no longer emit `backend`. Epoch-33
-// Clients require that closed-shape response field, so a newer Host must reject
-// them during the handshake instead of failing on the first Automation read.
-// 33: Live tool results may carry the bounded sandbox failure reason. Older
-// Clients reject that closed-frame addition, so mixed peers must not connect.
-// 32: `request_authorization_code` leaves the OAuth presentation wire. An older
-// Client still offers it and an older Host still asks for it, and neither side
-// can carry the authorization code the other expects.
-// 31: `claude-subscription` leaves `OAUTH_LOGIN_PROVIDERS` and the
-// `oauth.account.usage.fetch` operation is removed with the provider that
-// needed its client identity. An older peer still offers both.
-// 30: Access credential pairing adds prepare/finalize operations. Older Hosts
-// cannot complete the staged credential handoff used by managed onboarding.
-// 29: `goal.arm` is a new wire operation. An older Host decodes it as unknown
-// and tears the connection down, so the pair must be refused up front.
-// 28: Relay model profiles carry the Fast service-tier declaration. Older
-// peers cannot safely preserve that Runtime Policy field.
-// 27: Runtime Policy carries the Host-owned shell preference used by tool,
-// PTY, and prompt composition. Older peers cannot safely preserve that field.
-// Transcript pages amortize storage and network round trips with a 512 KiB raw
-// payload. Base64 expansion plus the bounded fragment envelope must still fit in
-// one transport message; narrower domains retain their own encoded limits.
+export const RUNTIME_HOST_COMPATIBILITY_EPOCH = 164 as const;
 export const RUNTIME_HOST_MAX_MESSAGE_BYTES = 768 * 1024;
 export const RUNTIME_HOST_MAX_IN_FLIGHT_DOMAIN_REQUESTS = 64;
 export const INTERACTIVE_RUNTIME_HOST_COMPOSITION_ID = 'maka.interactive' as const;
@@ -449,8 +134,6 @@ export interface ClientHello {
   compositionId: string;
   generation?: string;
   takeover?: { expectedHostEpoch: string };
-  /** Opt in before a Host adds maintenance evidence to the strict activity record. */
-  activitySnapshotVersion?: 2;
 }
 
 export interface HostAccepted {
@@ -550,6 +233,19 @@ export function requireHostGeneration(value: unknown): string {
 export function decodeClientFrame(value: unknown): ClientFrame {
   const frame = requireRecord(value, 'client frame');
   if (frame.kind === 'hello') {
+    requireShapedRecord(
+      frame,
+      'Client hello',
+      [
+        'kind',
+        'clientInstanceId',
+        'protocolMin',
+        'protocolMax',
+        'compatibilityEpoch',
+        'compositionId',
+      ],
+      ['generation', 'takeover'],
+    );
     const protocolMin = requireProtocolVersion(frame.protocolMin, 'protocolMin');
     const protocolMax = requireProtocolVersion(frame.protocolMax, 'protocolMax');
     validateProtocolRange({ min: protocolMin, max: protocolMax });
@@ -561,12 +257,11 @@ export function decodeClientFrame(value: unknown): ClientFrame {
     }
     return {
       kind: 'hello',
-      ...(frame.activitySnapshotVersion === 2 ? { activitySnapshotVersion: 2 as const } : {}),
       clientInstanceId: requireClientInstanceId(frame.clientInstanceId),
       protocolMin,
       protocolMax,
-      compatibilityEpoch: decodeCompatibilityEpoch(frame.compatibilityEpoch),
-      compositionId: decodeCompositionId(frame.compositionId),
+      compatibilityEpoch: requireCompatibilityEpoch(frame.compatibilityEpoch),
+      compositionId: requireHostCompositionId(frame.compositionId),
       ...(generation === undefined ? {} : { generation }),
       ...(takeover === undefined ? {} : { takeover }),
     } satisfies ClientHello;
@@ -590,9 +285,9 @@ export function decodeHostFrame(value: unknown): HostFrame {
       hostEpoch: requireId(frame.hostEpoch, 'hostEpoch'),
       connectionId: requireId(frame.connectionId, 'connectionId'),
       selectedProtocol: requireProtocolVersion(frame.selectedProtocol, 'selectedProtocol'),
-      compatibilityEpoch: decodeCompatibilityEpoch(frame.compatibilityEpoch),
-      compositionId: decodeCompositionId(frame.compositionId),
-      compositionRevision: decodeCompositionRevision(frame.compositionRevision),
+      compatibilityEpoch: requireCompatibilityEpoch(frame.compatibilityEpoch),
+      compositionId: requireHostCompositionId(frame.compositionId),
+      compositionRevision: requireCompositionRevision(frame.compositionRevision),
       state: requireAcceptedState(frame.state),
     } satisfies HostAccepted;
   }
@@ -605,9 +300,9 @@ export function decodeHostFrame(value: unknown): HostFrame {
       hostEpoch: requireId(frame.hostEpoch, 'hostEpoch'),
       protocolMin,
       protocolMax,
-      compatibilityEpoch: decodeCompatibilityEpoch(frame.compatibilityEpoch),
-      compositionId: decodeCompositionId(frame.compositionId),
-      compositionRevision: decodeCompositionRevision(frame.compositionRevision),
+      compatibilityEpoch: requireCompatibilityEpoch(frame.compatibilityEpoch),
+      compositionId: requireHostCompositionId(frame.compositionId),
+      compositionRevision: requireCompositionRevision(frame.compositionRevision),
       ...(frame.generation === undefined
         ? {}
         : { generation: requireHostGeneration(frame.generation) }),
@@ -622,8 +317,8 @@ export function decodeHostFrame(value: unknown): HostFrame {
     return {
       kind: 'draining',
       hostEpoch: requireId(frame.hostEpoch, 'hostEpoch'),
-      compositionId: decodeCompositionId(frame.compositionId),
-      compositionRevision: decodeCompositionRevision(frame.compositionRevision),
+      compositionId: requireHostCompositionId(frame.compositionId),
+      compositionRevision: requireCompositionRevision(frame.compositionRevision),
     };
   }
   if (isSubscriptionFrameKind(frame.kind)) return decodeSubscriptionFrame(frame);
@@ -665,12 +360,9 @@ export function decodeHostRegistration(value: unknown): HostRegistration {
     ...(websocketEndpoints === undefined ? {} : { websocketEndpoints }),
     protocolMin,
     protocolMax,
-    compatibilityEpoch:
-      registration.compatibilityEpoch === undefined
-        ? 0
-        : requireCompatibilityEpoch(registration.compatibilityEpoch),
-    compositionId: decodeCompositionId(registration.compositionId),
-    compositionRevision: decodeCompositionRevision(registration.compositionRevision),
+    compatibilityEpoch: requireCompatibilityEpoch(registration.compatibilityEpoch),
+    compositionId: requireHostCompositionId(registration.compositionId),
+    compositionRevision: requireCompositionRevision(registration.compositionRevision),
     ...(registration.lifecycleMode === undefined
       ? {}
       : {
@@ -725,7 +417,7 @@ function requireHostLifecycleMode(value: unknown): 'ephemeral' | 'service' {
 
 function decodeTakeover(value: unknown): ClientHello['takeover'] {
   if (value === undefined) return undefined;
-  const takeover = requireRecord(value, 'Runtime Host takeover');
+  const takeover = requireExactRecord(value, 'Runtime Host takeover', ['expectedHostEpoch']);
   return {
     expectedHostEpoch: requireId(takeover.expectedHostEpoch, 'expectedHostEpoch'),
   };
@@ -775,21 +467,6 @@ function requireCompositionRevision(value: unknown): string {
     throw invalidProtocolFrame('Invalid compositionRevision');
   }
   return revision;
-}
-
-function decodeCompositionId(value: unknown): string {
-  return value === undefined
-    ? INTERACTIVE_RUNTIME_HOST_COMPOSITION_ID
-    : requireHostCompositionId(value);
-}
-
-function decodeCompositionRevision(value: unknown): string {
-  return value === undefined ? 'legacy' : requireCompositionRevision(value);
-}
-
-function decodeCompatibilityEpoch(value: unknown): number {
-  // Epoch 0 represents peers and registrations that do not publish this field.
-  return value === undefined ? 0 : requireCompatibilityEpoch(value);
 }
 
 function requireAcceptedState(value: unknown): Exclude<HostLifecycleState, 'draining'> {

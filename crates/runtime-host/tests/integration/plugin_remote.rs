@@ -114,10 +114,29 @@ async fn scenario() {
     let target = rpc(&mut peer, json!({"kind":"bind","binding":binding})).await["target"].clone();
     let document = rpc(&mut peer, json!({"kind":"open_document"})).await["document"].clone();
     let call = json!({"kind":"call","binding":binding,"target":target,"document":document,"input":{"hello":"world"}});
+    let mut uncertain = call.clone();
+    uncertain["input"] = json!("uncertain");
+    assert_eq!(
+        peer.rpc("plugin.remote", uncertain).await["error"]["code"],
+        "outcome_unknown"
+    );
     assert_eq!(
         rpc(&mut peer, call.clone()).await["value"],
         json!({"input":{"hello":"world"},"client":"remote-client","session":null})
     );
+    let old_views = state.views.lock().unwrap().clone().unwrap();
+    assert!(matches!(
+        old_views
+            .workspace(maka_plugins::remote::WorkspaceViewInput {
+                workspace: maka_runtime::execution::WorkspaceTarget::HostPath {
+                    path: "ungranted".into()
+                },
+                permission_mode: maka_runtime::execution::PermissionMode::Bypass,
+                collaboration_mode: maka_runtime::execution::CollaborationMode::Agent,
+            })
+            .await,
+        Err(maka_plugins::remote::Error::Cancelled)
+    ));
     success(peer.rpc("plugin.composition.apply", json!({"operations":[{"type":"update","entryId":"remote-host","patch":{"config":{"changed":true}}}]})).await);
     ready(&mut peer).await;
     assert_eq!(

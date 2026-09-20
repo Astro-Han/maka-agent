@@ -127,7 +127,9 @@ pub(super) async fn validate(
             high_water: *source_high_water,
             digest: source_digest.clone(),
         },
-        effective_source_digest.as_deref(),
+        effective_source_digest
+            .as_deref()
+            .ok_or_else(|| invalid("summary requires effective source evidence"))?,
         first_summary,
     )
     .await?;
@@ -153,14 +155,13 @@ pub(super) async fn validate(
         ));
     }
     let changed_route: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?1 AND kind = 'model_requested' AND sequence >= ?10 AND sequence < ?2
-         AND (json_extract(event_json, '$.fact.purpose') = 'summary' OR (?3 AND json_extract(event_json, '$.fact.purpose') IS NULL))
-         AND (json_extract(event_json, '$.fact.model_id') != ?4 OR json_extract(event_json, '$.fact.route_identity') != ?5
-           OR json_extract(event_json, '$.fact.source_high_water') != ?6 OR json_extract(event_json, '$.fact.source_digest') != ?7
-           OR json_extract(event_json, '$.fact.checkpoint_event_id') IS NOT ?8
-           OR json_extract(event_json, '$.fact.effective_source_digest') IS NOT ?9))",
+        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?1 AND kind = 'model_requested' AND sequence >= ?9 AND sequence < ?2
+         AND json_extract(event_json, '$.fact.purpose') = 'summary'
+         AND (json_extract(event_json, '$.fact.model_id') != ?3 OR json_extract(event_json, '$.fact.route_identity') != ?4
+           OR json_extract(event_json, '$.fact.source_high_water') != ?5 OR json_extract(event_json, '$.fact.source_digest') != ?6
+           OR json_extract(event_json, '$.fact.checkpoint_event_id') IS NOT ?7
+           OR json_extract(event_json, '$.fact.effective_source_digest') IS NOT ?8))",
     ).bind(&event.invocation.invocation_id).bind(sequence as i64)
-        .bind(matches!(input, maka_runtime::event::InvocationInput::ContextCompact { .. }))
         .bind(model_id).bind(route_identity).bind(checkpoint.covered_through as i64).bind(&checkpoint.source_digest)
         .bind(&checkpoint.previous_checkpoint_id).bind(effective_source_digest).bind(first_summary as i64).fetch_one(&mut *connection).await?;
     if changed_route {

@@ -28,7 +28,7 @@ use maka_plugins::{
     fiber::Fiber,
 };
 use maka_runtime::event::InvocationOutcome;
-use maka_runtime_host::server::{Host, local::LocalListener};
+use maka_runtime_host::server::{Host, HostOptions, local::LocalListener};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -43,6 +43,7 @@ export default async function(ctx) {
 "#;
 const CONSUMER: &str = include_str!("../fixtures/host-plugin.mjs");
 mod metering;
+mod services;
 pub(super) fn package(
     root: &Path,
     id: &str,
@@ -102,13 +103,17 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
     }
     tokio::time::timeout(Duration::from_secs(40), async {
         let fixture = ClientFixture::new("maka-js-plugin-");
+        std::fs::write(fixture.workspace.join("native-proof.txt"), "native and JS share authority\n").unwrap();
         let service = package(&fixture.workspace, "example.service", "shared", SERVICE, false);
-        let source = CONSUMER.replace("'__PROTOCOL_EXECUTABLE__'", &serde_json::to_string(&std::env::current_exe().unwrap()).unwrap());
+        let source = CONSUMER.replace("'__PROTOCOL_EXECUTABLE__'", &serde_json::to_string(&std::env::current_exe().unwrap()).unwrap())
+            .replace("'example.echo'", "'example.native'");
         let consumer = package(&fixture.workspace, "example.consumer", "dedicated", &source, true);
         let (provider, mut requests) = Provider::controlled_with_usage(3, 5).await;
         let model = configure(&fixture, &provider.base_url).await;
         for reopened in [false, true] {
-            let host = Host::open(fixture.owner()).await.unwrap();
+            let host = Host::open_with_options(fixture.owner(), None, HostOptions {
+                plugins: services::setup(), ..Default::default()
+            }).await.unwrap();
             #[cfg(unix)]
             let endpoint = fixture.workspace.parent().unwrap().join("javascript.sock");
             #[cfg(windows)]
@@ -152,7 +157,7 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
                 workspace: None,
                 operation_id: "external-child".into(), parent_session_id: "executor-parent".into(), name: "External worker".into(),
                 permission_mode: None, bound_tools: None, instructions: Some("Executor child instructions".into()),
-                target: Some(maka_plugins::execution::ChildTarget::Executor { executor_id: "example.external".to_owned().try_into().unwrap() }),
+                target: Some(maka_plugins::execution::Target::Executor { executor_id: "example.external".to_owned().try_into().unwrap() }),
             };
             let external_child = commands.create_child(child_request.clone()).await.unwrap();
             assert_eq!(commands.create_child(child_request).await.unwrap(), external_child);
@@ -161,9 +166,10 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
             let storage = host.plugin_storage(inspector.context()).unwrap();
             for waiting in if reopened { vec![false] } else { vec![false, true] } {
                 let operation = format!("request-{reopened}-{waiting}");
-                commands.submit(Submit { orchestration_mode: None, operation_id:operation.clone(), session_id:"js-session".into(), content:"Use PluginEcho".into() }).await.unwrap();
+                commands.submit(Submit { orchestration_mode: Some("example.behavior".to_owned().try_into().unwrap()), operation_id:operation.clone(), session_id:"js-session".into(), content:"Use PluginEcho".into() }).await.unwrap();
                 let search = tokio::time::timeout(Duration::from_secs(5), requests.recv()).await.unwrap().unwrap();
                 assert!(search.body.to_string().contains("JavaScript plugin acceptance"));
+                assert!(search.body.to_string().contains("External behavior instructions"));
                 assert!(!search.body.to_string().contains("nested answer"));
                 search.reply.send(tool("search", "tool_search", json!({"query":"PluginEcho"}))).unwrap();
                 let invoke = tokio::time::timeout(Duration::from_secs(5), requests.recv()).await.unwrap().unwrap();
@@ -212,9 +218,16 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
             if !reopened { external_runs.push((external_child.session_id.as_str(), true)); }
             for (session_id, waiting) in external_runs {
                 let turn = format!("external-{reopened}-{waiting}");
+                let rejected = peer.rpc("turn.start", json!({"sessionId":session_id,"turnId":format!("rejected-{turn}"),
+                    "content":{"text":"review"},"inputSelections":{"example.review":["missing"]}})).await;
+                assert_eq!(rejected["result"]["kind"], "blocked", "{rejected}");
+                assert_eq!(rejected["result"]["message"], "Review document is unavailable");
+                assert_eq!(rejected["result"]["preparation"][0]["source"]["packageId"], "example.consumer");
                 let started = peer.rpc("turn.start", json!({"sessionId":session_id, "turnId":turn,
-                    "content":{"text":if waiting {"wait"} else {"complete"}}})).await;
+                    "content":{"text":if waiting {"wait"} else {"complete"}},
+                    "inputSelections":{"example.review":["project/report.md"]}})).await;
                 assert_eq!(started["ok"], true, "{started}");
+                assert_eq!(started["result"]["preparation"][0]["receipt"]["document"], "project/report.md");
                 if waiting {
                     while storage.read("executor-waiting".into()).await.unwrap().is_none() {
                         tokio::time::sleep(Duration::from_millis(10)).await;

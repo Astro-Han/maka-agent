@@ -518,76 +518,7 @@ test('does not persist recoverable setup authority before Desktop ownership comm
   assert.equal(setupCalls, 0);
 });
 
-test('adopts a released handoff through its existing legacy operator', async (t) => {
-  const base = await mkdtemp(join(tmpdir(), 'maka-local-remote-access-prestart-'));
-  t.after(() => rm(base, { recursive: true, force: true }));
-  const clientDataRoot = join(base, 'client');
-  const rootPath = join(clientDataRoot, 'workspaces', 'default');
-  const rootId = 'a'.repeat(64);
-  const deploymentId = '22222222-2222-4222-8222-222222222222';
-  const deploymentRoot = join(base, 'installed');
-  await mkdir(rootPath, { recursive: true });
-  await writeFile(
-    join(clientDataRoot, 'runtime-host-local-service.json'),
-    `${JSON.stringify({
-      schemaVersion: 1,
-      state: 'handoff',
-      rootPath,
-      rootId,
-      coordinationRelays: [],
-      allowInterruptActiveTasks: true,
-    })}\n`,
-  );
-  const service = createDesktopLocalRuntimeHostRemoteAccess({
-    ipcMain: { handle() {}, removeHandler() {} },
-    clientDataRoot,
-    rootPath,
-    rootId,
-    directPeerAvailable: false,
-    manager: () => assert.fail('pre-start reconciliation must not require the Local manager'),
-    resolveManagedDeploymentAuthority: async () => ({
-      kind: 'active',
-      lifecycleMode: 'supervised',
-      deploymentRoot,
-      target: {
-        schemaVersion: 2,
-        serviceId: rootId,
-        operator: testOperator(join(deploymentRoot, 'operator.mjs')),
-        rootPath,
-        rootId,
-        deploymentId,
-      },
-    }),
-    resolveSetupPackage: async () =>
-      assert.fail('committed authority must not resolve a package'),
-    operator: {
-      async runSetup() {
-        assert.fail('committed authority must not replay setup');
-      },
-      async close() {},
-    } as unknown as ReturnType<typeof createDesktopRuntimeHostLocalOperator>,
-  });
-  t.after(() => service.close());
-
-  assert.equal(await service.recoverBeforeLocalHostStart(), true);
-  assert.deepEqual(
-    JSON.parse(await readFile(join(clientDataRoot, 'runtime-host-local-service.json'), 'utf8')),
-    {
-      schemaVersion: 2,
-      state: 'managed',
-      serviceId: rootId,
-      operator: {
-        kind: 'legacy_posix_executable',
-        executablePath: join(deploymentRoot, 'operator'),
-      },
-      rootPath,
-      rootId,
-      deploymentId,
-    },
-  );
-});
-
-test('migrates a released managed receipt before exposing it to lifecycle operations', async (t) => {
+test('rejects an obsolete managed receipt without changing it', async (t) => {
   const base = await mkdtemp(join(tmpdir(), 'maka-local-managed-migration-'));
   t.after(() => rm(base, { recursive: true, force: true }));
   const clientDataRoot = join(base, 'client');
@@ -622,21 +553,9 @@ test('migrates a released managed receipt before exposing it to lifecycle operat
   });
   t.after(() => service.close());
 
-  const target = await service.inspectManaged(async (managed) => managed);
-  const expected = {
-    schemaVersion: 2,
-    state: 'managed',
-    serviceId: rootId,
-    operator: {
-      kind: 'legacy_posix_executable',
-      executablePath: operatorPath,
-    },
-    rootPath,
-    rootId,
-    deploymentId: RECOVERY_DEPLOYMENT_ID,
-  };
-  assert.deepEqual(target, expected);
-  assert.deepEqual(JSON.parse(await readFile(lifecyclePath, 'utf8')), expected);
+  const before = await readFile(lifecyclePath, 'utf8');
+  await assert.rejects(service.inspectManaged(async (target) => target), /lifecycle is invalid/u);
+  assert.equal(await readFile(lifecyclePath, 'utf8'), before);
 });
 
 test('interrupted Local Host setup converges to its exact managed service', async (t) => {

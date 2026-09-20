@@ -140,8 +140,7 @@ test('MCP capability publication freezes an accepted callable tool snapshot', as
       serverId: tool.serverId,
       toolName: tool.name,
       arguments: { path: 'README.md' },
-      sessionId: 'session-1',
-      turnId: 'turn-1',
+      source: { kind: 'agent', sessionId: 'session-1', turnId: 'turn-1' },
       toolCallId: 'tool-call-1',
     },
     {

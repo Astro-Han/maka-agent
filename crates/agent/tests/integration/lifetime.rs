@@ -92,7 +92,6 @@ fn input(base: &str, suffix: &str, effect: Arc<Effect>) -> RunInput {
         supports_vision: false,
         configuration: invocation::configuration(ToolMode::Direct),
         work: maka_agent::RunWork::Message {
-            skill_invocation: Default::default(),
             source_messages: Vec::new(),
             message: format!("question {suffix}").into(),
             tools: ToolCatalog::new([ToolRegistration {

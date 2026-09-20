@@ -39,7 +39,6 @@ const SECRET: &str = "synthetic-remote-capacity-test-only";
 
 fn hello(client: usize) -> Value {
     json!({"kind":"hello", "clientInstanceId":format!("capacity-{client}"),
-        "surface":"desktop", "activitySnapshotVersion":2,
         "protocolMin":0, "protocolMax":0, "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH,
         "compositionId":"maka.interactive"})
 }

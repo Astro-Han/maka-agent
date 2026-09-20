@@ -37,7 +37,7 @@ use fixtures::*;
 
 #[tokio::test]
 async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exact_cause() {
-    for scenario in ["pending", "manual", "workhub", "interrupted", "legacy"] {
+    for scenario in ["pending", "manual", "workhub", "interrupted"] {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("events.sqlite");
         let log = EventLog::open(&path).await.unwrap();
@@ -77,7 +77,6 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
                 content: pending.source.message.content.clone(),
                 source_messages: vec![pending.source.clone()],
                 request_fingerprint: None,
-                skill_invocation: None,
             };
             append(&log, &target).await;
         }
@@ -169,7 +168,6 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
                             content: pending.source.message.content.clone(),
                             source_messages: vec![pending.source.clone()],
                             request_fingerprint: None,
-                            skill_invocation: None,
                         };
                         forbidden
                     })
@@ -250,16 +248,6 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
             }
         }
         close(&log, &coordinator).await;
-        if scenario == "legacy" {
-            // Reconstruct the pre-cutover receipt format, which recorded no
-            // control timestamps or sequence. Its absent timeline stays absent.
-            db.execute_batch(
-                "INSERT INTO legacy_workhub_stops
-                SELECT * FROM workhub_stops WHERE action_id = 'stop';
-                DELETE FROM event_log WHERE invocation_id IS NULL;",
-            )
-            .unwrap();
-        }
         let before = serde_json::to_value(log.prefix(100, 1024 * 1024).await.unwrap()).unwrap();
         log.close().await.unwrap();
         drop(db);
@@ -336,7 +324,7 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
                 controls.push((row.sequence, message));
             }
         }
-        assert_eq!(controls.len(), if scenario == "legacy" { 1 } else { 2 });
+        assert_eq!(controls.len(), 2);
         let (sequence, resolution) = controls.last().unwrap();
         assert_eq!(resolution["kind"], "delegation_stop_resolved");
         if scenario != "pending" {

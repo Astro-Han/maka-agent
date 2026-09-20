@@ -18,11 +18,14 @@
  */
 
 use super::{
-    Reference, State,
+    State,
     wire::{self, Error},
 };
 use crate::plugins::javascript::{callbacks, invocation::Authority};
+use futures_util::future::BoxFuture;
+use maka_plugins::services::method::{self, Handle, Method};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 impl State {
@@ -39,89 +42,75 @@ impl State {
             .as_deref()
             .map(|id| self.calls.get(id))
             .transpose()?;
-        let Some(authority) = authority else {
-            let stopping = self.context.lifecycle.stopping()?;
-            return invoke(reference, input.input, None, stopping).await;
-        };
-        // A forwarded invocation is a child resource, not just a JS promise.
-        // Its own resource group closes independently and reports into its parent.
-        let mut ticket = authority.resources.reserve().map_err(Error::invalid)?;
-        let (send, receive) = tokio::sync::oneshot::channel();
-        self.context
-            .lifecycle
-            .spawn_resource("service call", move |retiring| async move {
-                ticket.start();
-                let result = invoke(reference, input.input, Some(authority), retiring).await;
-                let settled = match &result {
-                    Err(error) if matches!(error.code, wire::Code::OutcomeUnknown) => {
-                        Err(error.message.clone())
-                    }
-                    _ => Ok(()),
-                };
-                ticket.complete(settled.clone());
-                let _ = send.send(result);
-                settled
-            })?;
-        receive.await.map_err(uncertain)?
+        let stopping = self.context.lifecycle.stopping()?;
+        invoke(reference, input.input, authority, stopping).await
     }
 }
 async fn invoke(
-    reference: Reference,
+    reference: Handle,
     input: Value,
     authority: Option<Authority>,
     stopping: CancellationToken,
 ) -> Result<Value, Error> {
-    let configuration = reference.configuration;
-    let service = reference.service.acquire()?;
-    let forwarded = authority
-        .map(|authority| {
-            service
-                .callback
-                .calls
-                .enter(authority.identity, authority.cancellation)
+    reference
+        .call(input, authority, stopping)
+        .await
+        .map_err(|error| Error {
+            code: match error {
+                method::Error::Retired => wire::Code::Revoked,
+                method::Error::Invalid(_) => wire::Code::Invalid,
+                method::Error::Failed(_) => wire::Code::Unavailable,
+                method::Error::OutcomeUnknown(_) => wire::Code::OutcomeUnknown,
+            },
+            message: error.to_string(),
         })
-        .transpose()
-        .map_err(Error::invalid)?;
-    let cancellation = stopping.child_token();
-    let stop = cancellation.clone().drop_guard();
-    let source = async {
-        match &forwarded {
-            Some(call) => call.authority.cancellation.cancelled().await,
-            None => std::future::pending().await,
-        }
-    };
-    let context = match &forwarded {
-        Some(call) => json!({"configuration":configuration, "authority":call.id,
-            "invocation":call.authority.identity.invocation, "operationId":call.authority.identity.operation_id}),
-        None => json!({"configuration":configuration}),
-    };
-    let invocation = callbacks::invoke(
-        &service.callback.module,
-        service.callback.id,
-        input,
-        context,
-        cancellation.clone(),
-    );
-    tokio::pin!(invocation);
-    let result = tokio::select! {
-        result = &mut invocation => result,
-        _ = source => { cancellation.cancel(); invocation.await },
-    };
-    drop(stop);
-    if let Some(forwarded) = &forwarded {
-        forwarded.finish().await.map_err(uncertain)?;
-    }
-    result.map_err(|error| Error {
-        code: match error {
-            maka_runtime::tools::ToolError::Failed(_) => wire::Code::Unavailable,
-            _ => wire::Code::OutcomeUnknown,
-        },
-        message: error.to_string(),
-    })
 }
-fn uncertain(error: impl ToString) -> Error {
-    Error {
-        code: wire::Code::OutcomeUnknown,
-        message: error.to_string(),
+
+pub(super) struct JavaScript {
+    pub callback: Arc<callbacks::Callback>,
+}
+impl Method<Value, Value> for JavaScript {
+    fn call(
+        &self,
+        input: Value,
+        context: method::Context,
+    ) -> BoxFuture<'_, Result<Value, method::Error>> {
+        Box::pin(async move {
+            let forwarded = context
+                .invocation
+                .map(|authority| self.callback.calls.forward(authority))
+                .transpose()
+                .map_err(|error| method::Error::Failed(error.to_string()))?;
+            let cancellation = context.cancellation.child_token();
+            let stop = cancellation.clone().drop_guard();
+            let source = async {
+                match &forwarded {
+                    Some(call) => call.authority.cancellation.cancelled().await,
+                    None => std::future::pending().await,
+                }
+            };
+            let context = match &forwarded {
+                Some(call) => json!({"configuration":context.configuration, "authority":call.id,
+            "source":call.authority.identity, "invocation":call.authority.identity.agent(), "operationId":call.authority.identity.operation_id()}),
+                None => json!({"configuration":context.configuration}),
+            };
+            let invocation = callbacks::invoke(
+                &self.callback.module,
+                self.callback.id,
+                input,
+                context,
+                cancellation.clone(),
+            );
+            tokio::pin!(invocation);
+            let result = tokio::select! {
+                result = &mut invocation => result,
+                _ = source => { cancellation.cancel(); invocation.await },
+            };
+            drop(stop);
+            result.map_err(|error| match error {
+                maka_runtime::tools::ToolError::Failed(message) => method::Error::Failed(message),
+                error => method::Error::OutcomeUnknown(error.to_string()),
+            })
+        })
     }
 }

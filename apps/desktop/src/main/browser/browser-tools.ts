@@ -20,7 +20,7 @@
 import { z } from 'zod';
 import { htmlToMarkdown } from '@jackwener/opencli/utils';
 import type { IPage } from '@jackwener/opencli/types';
-import type { MakaTool } from '@maka/runtime/tool-runtime';
+import type { SessionTool } from '@maka/runtime/tool-runtime';
 import { browserOriginAdmission } from './browser-origin-admission.js';
 import type { BrowserOriginLease } from './browser-host.js';
 import {
@@ -162,7 +162,7 @@ function guardBrowserPage(page: IPage, lease: BrowserOriginLease): IPage {
   }) as IPage;
 }
 
-export function buildBrowserNavigateTool(): MakaTool<{ url: string }, string> {
+export function buildBrowserNavigateTool(): SessionTool<{ url: string }, string> {
   return {
     name: 'browser_navigate',
     displayName: '浏览器导航',
@@ -203,7 +203,7 @@ export function buildBrowserNavigateTool(): MakaTool<{ url: string }, string> {
   };
 }
 
-export function buildBrowserSnapshotTool(): MakaTool<Record<string, never>, string> {
+export function buildBrowserSnapshotTool(): SessionTool<Record<string, never>, string> {
   return {
     name: 'browser_snapshot',
     displayName: '浏览器快照',
@@ -233,7 +233,7 @@ export function buildBrowserSnapshotTool(): MakaTool<Record<string, never>, stri
   };
 }
 
-export function buildBrowserClickTool(): MakaTool<{ ref: string }, string> {
+export function buildBrowserClickTool(): SessionTool<{ ref: string }, string> {
   return {
     name: 'browser_click',
     displayName: '浏览器点击',
@@ -299,7 +299,7 @@ function navigationResult(url: string, requiresApproval: boolean): string {
   );
 }
 
-export function buildBrowserTypeTool(): MakaTool<{ ref: string; text: string; submit?: boolean }, string> {
+export function buildBrowserTypeTool(): SessionTool<{ ref: string; text: string; submit?: boolean }, string> {
   return {
     name: 'browser_type',
     displayName: '浏览器输入',
@@ -341,7 +341,7 @@ export function buildBrowserTypeTool(): MakaTool<{ ref: string; text: string; su
   };
 }
 
-export function buildBrowserWaitTool(): MakaTool<
+export function buildBrowserWaitTool(): SessionTool<
   { text?: string; selector?: string; time?: number; timeout?: number },
   string
 > {
@@ -424,7 +424,7 @@ export function buildBrowserWaitTool(): MakaTool<
   };
 }
 
-export function buildBrowserExtractTool(): MakaTool<{ selector?: string; start?: number }, string> {
+export function buildBrowserExtractTool(): SessionTool<{ selector?: string; start?: number }, string> {
   return {
     name: 'browser_extract',
     displayName: '浏览器提取',
@@ -503,7 +503,7 @@ export function readHtmlJs(selectorJson: string): string {
 }
 
 /** The six generic observe→act browser tools, in observe-before-act order. */
-export function buildBrowserTools(): MakaTool[] {
+export function buildBrowserTools(): SessionTool[] {
   return [
     buildBrowserNavigateTool(),
     buildBrowserSnapshotTool(),
@@ -511,5 +511,5 @@ export function buildBrowserTools(): MakaTool[] {
     buildBrowserTypeTool(),
     buildBrowserWaitTool(),
     buildBrowserExtractTool(),
-  ] as MakaTool[];
+  ] as SessionTool[];
 }

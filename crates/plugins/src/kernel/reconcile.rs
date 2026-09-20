@@ -207,19 +207,25 @@ impl Kernel {
                 continue;
             };
             let plugin = self.definitions[package].plugin.clone();
-            let context = PluginContext {
+            let mut context = PluginContext {
                 lifecycle: live.context.clone(),
-                services: live.services.clone(),
+                services: live.services.bind(live.context.clone()),
+                contributions: self.catalog.publisher(live.context.clone()),
                 data: self
                     .data
                     .as_ref()
                     .map(|data| data.bind(live.context.clone()))
                     .transpose()?,
+                host: None,
             };
+            let host = self.host.clone();
             let config = live.plan.entry.config.clone();
             let result = live
                 .context
                 .spawn_owned("plugin initialization", async move {
+                    if let Some(host) = host {
+                        context.host = host.bind(context.lifecycle.clone()).await?;
+                    }
                     plugin.activate(context, config).await
                 })?;
             live.loading = Some(Loading {

@@ -111,7 +111,7 @@ describe('Runtime Host profiles', () => {
     );
   });
 
-  test('migrates a released WSL operator path without losing its environment', async () => {
+  test('rejects obsolete profile schemas without rewriting the document', async () => {
     const path = await profilePath();
     await writeFile(
       path,
@@ -131,26 +131,12 @@ describe('Runtime Host profiles', () => {
     );
 
     const catalog = createFileRuntimeHostProfileCatalog(path, memoryCredentials());
-    const migrated = await catalog.resolve('ubuntu');
-    assert.deepEqual(migrated, {
-      profile: {
-        id: 'ubuntu',
-        name: 'Ubuntu',
-        kind: 'environment',
-        provider: { kind: 'wsl', distribution: 'Ubuntu-24.04' },
-        rootId: ROOT_A,
-        operator: {
-          kind: 'legacy_posix_executable',
-          executablePath: '/home/operator/.local/share/maka/operator',
-        },
-      },
+    const before = await readFile(path, 'utf8');
+    await assert.rejects(catalog.read(), {
+      message: 'Runtime Host profile document is invalid',
+      cause: new Error('Runtime Host profile document has an unsupported schema'),
     });
-    assert.match(await readFile(path, 'utf8'), /operatorPath/u);
-    if (migrated.profile.kind !== 'environment') assert.fail('WSL profile was not migrated');
-    await catalog.save(migrated.profile);
-    const stored = await readFile(path, 'utf8');
-    assert.match(stored, /"schemaVersion": 5/u);
-    assert.doesNotMatch(stored, /operatorPath/u);
+    assert.equal(await readFile(path, 'utf8'), before);
   });
 
   test('normalizes, serializes, updates, and removes remote profiles', async () => {
@@ -241,12 +227,12 @@ describe('Runtime Host profiles', () => {
     );
   });
 
-  test('keeps connect-only catalogs on disk as schema 1 until activation is persisted', async () => {
+  test('writes the current catalog schema for both connect-only and activated profiles', async () => {
     const path = await profilePath();
     await writeFile(
       path,
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 5,
         profiles: [
           {
             id: 'ssh-lab',
@@ -269,13 +255,13 @@ describe('Runtime Host profiles', () => {
     assert.equal(document.schemaVersion, 5);
     assert.equal(
       (JSON.parse(await readFile(path, 'utf8')) as { schemaVersion: number }).schemaVersion,
-      1,
+      5,
     );
 
     await catalog.save(document.profiles[0], 'opaque-token');
     assert.equal(
       (JSON.parse(await readFile(path, 'utf8')) as { schemaVersion: number }).schemaVersion,
-      1,
+      5,
     );
 
     await catalog.save(
@@ -402,7 +388,7 @@ describe('Runtime Host profiles', () => {
 
   test('rejects malformed, secret-bearing, or insecure profile documents', async () => {
     const valid = {
-      schemaVersion: 1,
+      schemaVersion: 5,
       profiles: [
         {
           id: 'office',
@@ -499,7 +485,7 @@ describe('Runtime Host profiles', () => {
     assert.equal((await credentials.get(targetA))?.credential, 'token-a');
   });
 
-  test('keeps legacy access credentials readable while assigning a stable incarnation', async () => {
+  test('rejects credentials without an explicit incarnation', async () => {
     const profile = remoteProfile('office', 'wss://a.example.com', ROOT_A);
     let stored = 'legacy-token';
     const credentials = createRuntimeHostProfileCredentialStore({
@@ -512,20 +498,8 @@ describe('Runtime Host profiles', () => {
       },
     });
 
-    const first = await credentials.get(profile);
-    const second = await credentials.get(profile);
-    assert.equal(first?.credential, 'legacy-token');
-    assert.equal(first?.profileIncarnationId, second?.profileIncarnationId);
-    assert.ok(first?.profileIncarnationId);
-
-    await credentials.set(profile, {
-      credential: 'rotated-token',
-      profileIncarnationId: first.profileIncarnationId,
-    });
-    assert.deepEqual(await credentials.get(profile), {
-      credential: 'rotated-token',
-      profileIncarnationId: first.profileIncarnationId,
-    });
+    await assert.rejects(credentials.get(profile), /format is unsupported/u);
+    assert.equal(stored, 'legacy-token');
   });
 
   test('isolates capability-provider credentials by target and owning Client', async () => {
@@ -1357,6 +1331,7 @@ function incompatibleHandshake(overrides: Partial<HostIncompatible> = {}): HostI
       activeOperations: 1,
       processUptimeSeconds: 1,
       residencies: [{ label: 'activity-secret', count: 1 }],
+      drainResidencies: 1,
     },
     ...overrides,
   };

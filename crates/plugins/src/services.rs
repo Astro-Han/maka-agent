@@ -17,6 +17,8 @@
  * under the License.
  */
 
+pub mod method;
+
 use crate::{
     Error, Registration,
     composition::{Entry, Isolation},
@@ -96,7 +98,44 @@ pub struct ServiceView {
     intercepts: BTreeMap<String, Vec<Value>>,
 }
 
+/// Plugin-facing services bind both registration ownership and consumer
+/// lifetime. Composition routing and arbitrary owner selection stay with Host.
+#[derive(Clone)]
+pub struct BoundServices {
+    view: ServiceView,
+    owner: Context,
+}
+impl BoundServices {
+    pub fn provide<T: Send + Sync + 'static>(
+        &self,
+        name: &str,
+        value: Arc<T>,
+    ) -> Result<(), Error> {
+        self.register(name, value).map(Registration::retain)
+    }
+    pub fn register<T: Send + Sync + 'static>(
+        &self,
+        name: &str,
+        value: Arc<T>,
+    ) -> Result<Registration, Error> {
+        self.view.register(&self.owner, name, value)
+    }
+    pub fn get<T: Send + Sync + 'static>(&self, name: &str) -> Result<Option<Service<T>>, Error> {
+        let _lease = self.owner.resource_call()?;
+        Ok(self.view.get(name)?.map(|mut service| {
+            service.consumer = Some(self.owner.clone());
+            service
+        }))
+    }
+}
+
 impl ServiceView {
+    pub(crate) fn bind(&self, owner: Context) -> BoundServices {
+        BoundServices {
+            view: self.clone(),
+            owner,
+        }
+    }
     pub fn derive(&self, entry: &Entry) -> Result<Self, Error> {
         let mut view = self.clone();
         for (name, isolation) in &entry.isolate {
@@ -182,6 +221,7 @@ impl ServiceView {
             return Ok(None);
         };
         Ok(Some(Service {
+            consumer: None,
             active: record.active.clone(),
             value: record
                 .value
@@ -227,6 +267,7 @@ impl ServiceView {
 
 /// A captured handle never switches to another provider after retirement.
 pub struct Service<T> {
+    consumer: Option<Context>,
     active: Arc<AtomicBool>,
     value: Arc<T>,
     provider: Context,
@@ -235,6 +276,7 @@ pub struct Service<T> {
 impl<T> Clone for Service<T> {
     fn clone(&self) -> Self {
         Self {
+            consumer: self.consumer.clone(),
             active: self.active.clone(),
             value: self.value.clone(),
             provider: self.provider.clone(),
@@ -244,6 +286,11 @@ impl<T> Clone for Service<T> {
 
 impl<T> Service<T> {
     pub fn acquire(&self) -> Result<ServiceCall<T>, Error> {
+        let consumer = self
+            .consumer
+            .as_ref()
+            .map(Context::resource_call)
+            .transpose()?;
         let call = self.provider.service_call()?;
         if !self.active.load(Ordering::SeqCst) {
             return Err(Error::Retired);
@@ -251,11 +298,13 @@ impl<T> Service<T> {
         Ok(ServiceCall {
             value: self.value.clone(),
             _call: call,
+            _consumer: consumer,
         })
     }
 }
 
 pub struct ServiceCall<T> {
+    _consumer: Option<CallGuard>,
     value: Arc<T>,
     _call: CallGuard,
 }

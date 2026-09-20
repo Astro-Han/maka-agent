@@ -256,7 +256,9 @@ export default async function(ctx) {
     await ctx.input.prepare('example.transform', request => {
         if (!request.content.text.startsWith('Prepared business request:')) return { kind: 'unchanged' };
         if (request.sessionId !== 'business' || request.signal.aborted) throw new Error('invalid preparation context');
-        return { kind: 'ready', text: request.content.text + ' [JavaScript prepared]', receipt: { transformed: true } };
+        if (request.preparation.length !== 1 || request.preparation[0].receipt.ticket !== 42)
+            throw new Error('prior provider receipt is unavailable');
+        return { kind: 'ready', content: { ...request.content, text: request.content.text + ' [JavaScript prepared]' }, receipt: { transformed: true } };
     });
 }
 "#,

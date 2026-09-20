@@ -30,12 +30,6 @@ pub enum CheckpointMode {
     },
 }
 
-impl CheckpointMode {
-    pub fn is_standalone(&self) -> bool {
-        matches!(self, Self::Standalone)
-    }
-}
-
 impl<'de> Deserialize<'de> for CheckpointMode {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         // Serde's tagged unit variants ignore extra fields even with

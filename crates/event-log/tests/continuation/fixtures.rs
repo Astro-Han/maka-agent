@@ -51,7 +51,6 @@ pub(super) fn opening(id: &str, claim: Option<ContinuationClaim>) -> RuntimeEven
                 },
                 None => InvocationInput::Message {
                     content: id.into(),
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     request_fingerprint: None,
                 },

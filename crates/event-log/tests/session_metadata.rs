@@ -49,7 +49,6 @@ async fn metadata_cas_noop_and_reopen_preserve_activity_fingerprint_and_active_e
                 Fact::InvocationOpened {
                     configuration: None,
                     input: InvocationInput::Message {
-                        skill_invocation: Default::default(),
                         source_messages: Vec::new(),
                         content: "active".into(),
                         request_fingerprint: None,

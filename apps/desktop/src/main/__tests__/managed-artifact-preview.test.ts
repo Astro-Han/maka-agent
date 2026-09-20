@@ -158,7 +158,7 @@ test('tool binds to the admitted session and returns endpoint evidence only', as
       return service.prepare('h', client(), sessionId, artifactId, signal);
     });
     assert.equal((tool!.parameters as z.ZodType).safeParse({ artifactId: 'a1', sessionId: 'other' }).success, false);
-    const result = await tool!.impl({ artifactId: 'a1' }, { sessionId: 's1', turnId: 't1', cwd: '/tmp', toolCallId: 'c1', abortSignal: new AbortController().signal, emitOutput: () => {} });
+    const result = await tool!.impl({ artifactId: 'a1' }, { sessionId: 's1', cwd: '/tmp', toolCallId: 'c1', abortSignal: new AbortController().signal, emitOutput: () => {} });
     assert.equal((result as { loaded: boolean }).loaded, false);
   } finally { await service.close(); }
 });

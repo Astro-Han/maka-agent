@@ -20,7 +20,7 @@
 use super::{MAX_RESULT_BYTES, QueueEntry, encoded, ensure, identities, queue};
 use crate::{
     Operation, ProtocolError, Result,
-    turn::{self, SkillInvocationResult, TurnSnapshot},
+    turn::{self, TurnSnapshot},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -47,18 +47,19 @@ pub enum Output {
 pub enum SubmitResult {
     TurnStarted {
         turn_id: String,
-        skill_invocation: SkillInvocationResult,
+        preparation: Vec<maka_runtime::input::InputReceipt>,
     },
     Blocked {
-        skill_invocation: SkillInvocationResult,
+        message: String,
+        preparation: Vec<maka_runtime::input::InputReceipt>,
     },
     Steering {
-        skill_invocation: SkillInvocationResult,
+        preparation: Vec<maka_runtime::input::InputReceipt>,
         #[serde(skip_serializing_if = "Option::is_none")]
         queue_revision: Option<u64>,
     },
     Followup {
-        skill_invocation: SkillInvocationResult,
+        preparation: Vec<maka_runtime::input::InputReceipt>,
         #[serde(skip_serializing_if = "Option::is_none")]
         queue_revision: Option<u64>,
     },
@@ -123,29 +124,25 @@ pub fn decode_output(operation: Operation, value: &Value) -> Result<Output> {
     let output = match operation {
         TurnMessageSubmit => {
             let output: SubmitResult = turn::decode(value)?;
-            let skills = match &output {
+            let receipts = match &output {
                 SubmitResult::TurnStarted {
                     turn_id,
-                    skill_invocation,
+                    preparation,
                 } => {
                     turn::entity(turn_id)?;
-                    skill_invocation
+                    preparation
                 }
-                SubmitResult::Blocked { skill_invocation } => {
-                    ensure(
-                        skill_invocation.loaded.is_empty() && !skill_invocation.failed.is_empty(),
-                        "Blocked submission requires failed skills",
-                    )?;
-                    skill_invocation
+                SubmitResult::Blocked {
+                    message,
+                    preparation,
+                } => {
+                    turn::validate_blocked_preparation(message, preparation)?;
+                    preparation
                 }
-                SubmitResult::Steering {
-                    skill_invocation, ..
-                }
-                | SubmitResult::Followup {
-                    skill_invocation, ..
-                } => skill_invocation,
+                SubmitResult::Steering { preparation, .. }
+                | SubmitResult::Followup { preparation, .. } => preparation,
             };
-            skills.validate().map_err(ProtocolError::invalid)?;
+            turn::validate_preparation(receipts)?;
             Output::Submit(output)
         }
         TurnMessageQuery => {

@@ -17,10 +17,37 @@
  * under the License.
  */
 
-//! Invocation-scoped filesystem operations. Host supplies authority, not callers.
+//! Source-scoped filesystem operations. Host supplies authority, not callers.
 use maka_runtime::read::ReadInput;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+/// Authenticated call source and current workspace permission are both checked
+/// by Host. Supplying a Session ID is not a way to acquire this authority.
+pub trait Files: Send + Sync {
+    fn invoke(
+        &self,
+        call: crate::call::Scope,
+        operation: Operation,
+    ) -> futures_util::future::BoxFuture<'_, Result<Output, maka_runtime::tools::ToolError>>;
+}
+
+/// Native callers retain image bytes; only the JS boundary encodes them. Tool
+/// calls may instead return their canonical artifact reference as ordinary data.
+pub enum Output {
+    Value(Value),
+    Image { bytes: Vec<u8>, mime_type: String },
+}
+impl Output {
+    pub fn into_json(self) -> Value {
+        match self {
+            Self::Value(value) => value,
+            Self::Image { bytes, mime_type } => {
+                json!({"kind":"image", "mimeType":mime_type, "bytes":bytes})
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(

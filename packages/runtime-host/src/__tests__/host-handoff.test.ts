@@ -33,7 +33,13 @@ import { decodeClientFrame, decodeHostFrame } from '../protocol/index.js';
 import { decodeHostActivitySnapshot, isHostActivityIdle } from '../protocol/host-status.js';
 import { formatHostHandoff } from '../client/host-handoff-copy.js';
 
-const idle = { connections: 0, activeOperations: 0, processUptimeSeconds: 1, residencies: [] };
+const idle = {
+  connections: 0,
+  activeOperations: 0,
+  processUptimeSeconds: 1,
+  residencies: [],
+  drainResidencies: 0,
+};
 const target = {
   name: 'Local workspace',
   location: 'local' as const,
@@ -95,7 +101,7 @@ test('compatible connection needs no handoff surface', async () => {
   );
 });
 
-test('handoff copy exposes background work even with zero operations and keeps legacy counts unknown', () => {
+test('handoff copy exposes background work even with zero operations', () => {
   const view: HostHandoffView = {
     revision: 'test',
     target,
@@ -110,13 +116,12 @@ test('handoff copy exposes background work even with zero operations and keeps l
       drainResidencies: 2,
     },
   };
-  for (const [locale, known, unknown] of [
-    ['en', '2 background activities', 'Background activity count unknown'],
-    ['zh-CN', '2 个后台工作', '后台工作数量未知'],
-    ['zh-TW', '2 個背景工作', '背景工作數量未知'],
+  for (const [locale, known] of [
+    ['en', '2 background activities'],
+    ['zh-CN', '2 个后台工作'],
+    ['zh-TW', '2 個背景工作'],
   ] as const) {
     assert.ok(formatHostHandoff(view, locale).detail.includes(known));
-    assert.ok(formatHostHandoff({ ...view, activity: idle }, locale).detail.includes(unknown));
   }
 });
 
@@ -143,8 +148,12 @@ test('managed handoff copy gives the user an executable Desktop recovery path', 
   }
 });
 
-test('maintenance evidence distinguishes idle retention without guessing for legacy activity', () => {
-  const retention = { ...idle, residencies: [{ label: 'process-retention', count: 1 }] };
+test('maintenance evidence distinguishes idle retention without accepting missing evidence', () => {
+  const retention = {
+    ...idle,
+    drainResidencies: 1,
+    residencies: [{ label: 'process-retention', count: 1 }],
+  };
   assert.equal(isHostActivityIdle(decodeHostActivitySnapshot(retention)), false);
   assert.equal(
     isHostActivityIdle(decodeHostActivitySnapshot({ ...retention, drainResidencies: 0 })),
@@ -155,7 +164,7 @@ test('maintenance evidence distinguishes idle retention without guessing for leg
   assert.throws(() => decodeHostActivitySnapshot({ ...retention, drainResidencies: '0' }));
 });
 
-test('activity extension is opt-in and old handshake activity remains decodable', () => {
+test('handshake rejects obsolete activity negotiation and incomplete maintenance evidence', () => {
   const hello = {
     kind: 'hello',
     clientInstanceId: 'client',
@@ -165,23 +174,22 @@ test('activity extension is opt-in and old handshake activity remains decodable'
     compositionId: 'interactive',
   };
   assert.deepEqual(decodeClientFrame(hello), hello);
-  assert.deepEqual(decodeClientFrame({ ...hello, activitySnapshotVersion: 2 }), {
-    ...hello,
-    activitySnapshotVersion: 2,
-  });
-  const legacy = {
+  assert.throws(() => decodeClientFrame({ ...hello, activitySnapshotVersion: 2 }));
+  const incompatible = {
     kind: 'incompatible',
     hostEpoch: 'host',
     protocolMin: 0,
     protocolMax: 0,
     compatibilityEpoch: 50,
     compositionId: 'interactive',
-    compositionRevision: 'legacy',
+    compositionRevision: 'current',
     state: 'ready',
     replacement: 'blocked_by_residency',
     activity: idle,
   };
-  assert.deepEqual(decodeHostFrame(legacy), legacy);
+  assert.deepEqual(decodeHostFrame(incompatible), incompatible);
+  const { drainResidencies: _, ...incomplete } = idle;
+  assert.throws(() => decodeHostFrame({ ...incompatible, activity: incomplete }));
 });
 
 test('verified idle replacement is automatic but readiness must be reobserved', async () => {

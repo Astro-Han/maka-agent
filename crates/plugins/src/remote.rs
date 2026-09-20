@@ -53,33 +53,40 @@ pub struct Caller {
     pub client_instance_id: String,
     pub document_id: Uuid,
     pub session_id: Option<String>,
+    /// Captured endpoint requirement after transport authorization, not input.
+    pub access: Access,
+    /// Host-bound views capture the original caller. Changing metadata above
+    /// cannot retarget or elevate this capability.
+    pub views: Arc<dyn Views>,
+    pub resources: Arc<crate::call::Resources>,
     pub cancellation: CancellationToken,
 }
 
 /// A read-only view of the caller's existing Session, not filesystem authority
 /// or an Agent invocation. Embedders supply this capability explicitly.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionView {
     pub workspace: maka_runtime::execution::WorkspaceProjection,
     pub tools: std::collections::HashSet<String>,
 }
 
-pub trait Sessions: Send + Sync {
-    fn read(&self, caller: Caller) -> BoxFuture<'_, Result<SessionView, Error>>;
-}
-
 /// A proposed Session view does not create a Session or grant execution rights.
 /// Endpoints accepting Host paths must declare `Access::HostPaths`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceViewInput {
     pub workspace: maka_runtime::execution::WorkspaceTarget,
     pub permission_mode: maka_runtime::execution::PermissionMode,
     pub collaboration_mode: maka_runtime::execution::CollaborationMode,
 }
-pub trait Workspaces: Send + Sync {
-    fn read(
+pub trait Views: Send + Sync {
+    fn authorize(
         &self,
-        input: WorkspaceViewInput,
-        caller: Caller,
-    ) -> BoxFuture<'_, Result<SessionView, Error>>;
+        request: crate::authorization::Request,
+    ) -> BoxFuture<'_, Result<crate::call::Owned, Error>>;
+    fn session(&self) -> BoxFuture<'_, Result<SessionView, Error>>;
+    fn workspace(&self, input: WorkspaceViewInput) -> BoxFuture<'_, Result<SessionView, Error>>;
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -92,6 +99,10 @@ pub enum Error {
     Invalid(String),
     #[error("remote provider failed: {0}")]
     Provider(String),
+    /// The provider cannot prove whether its operation committed. Recovery,
+    /// not blind retry, determines the result; resource cleanup is independent.
+    #[error("remote operation outcome is unknown: {0}")]
+    OutcomeUnknown(String),
     #[error("remote resource cleanup is unconfirmed")]
     CleanupUnconfirmed,
 }
@@ -125,7 +136,8 @@ pub struct Endpoint {
     pub handler: Handler,
     registration: Uuid,
 }
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Access {
     /// The caller's existing Remote grant is sufficient.
     #[default]

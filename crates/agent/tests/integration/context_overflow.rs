@@ -116,7 +116,7 @@ async fn overflow_recovers_once_only_without_output_and_with_remaining_main_budg
                 .filter(|event| matches!(
                     event.event.fact,
                     Fact::ModelRequested {
-                        purpose: Some(ModelPurpose::Main),
+                        purpose: ModelPurpose::Main,
                         ..
                     }
                 ))
@@ -129,7 +129,7 @@ async fn overflow_recovers_once_only_without_output_and_with_remaining_main_budg
                 .filter(|event| matches!(
                     event.event.fact,
                     Fact::ModelRequested {
-                        purpose: Some(ModelPurpose::Summary),
+                        purpose: ModelPurpose::Summary,
                         ..
                     }
                 ))
@@ -219,7 +219,7 @@ async fn proactive_failure_spends_the_same_budget_as_overflow_recovery() {
             .filter(|event| matches!(
                 event.event.fact,
                 Fact::ModelRequested {
-                    purpose: Some(ModelPurpose::Summary),
+                    purpose: ModelPurpose::Summary,
                     ..
                 }
             ))
@@ -232,7 +232,7 @@ async fn proactive_failure_spends_the_same_budget_as_overflow_recovery() {
             .filter(|event| matches!(
                 event.event.fact,
                 Fact::ModelRequested {
-                    purpose: Some(ModelPurpose::Main),
+                    purpose: ModelPurpose::Main,
                     ..
                 }
             ))

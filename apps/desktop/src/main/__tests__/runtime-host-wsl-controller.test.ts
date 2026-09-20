@@ -19,21 +19,18 @@
 
 import assert from 'node:assert/strict';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import type { RuntimeHostWslProcessFactory } from '@maka/runtime-host/client';
 import {
   encodeRuntimeHostServiceManagementFrame,
-  encodeRuntimeHostSetupFrame,
   RUNTIME_HOST_OPERATOR_PROJECT_DIRECTORY_CONFIGURATION_REQUEST_ENV,
   RUNTIME_HOST_SETUP_SOURCE_PACKAGE_INTEGRITY_ENV,
 } from '@maka/runtime-host/operator';
 import {
   resolveDesktopRuntimeHostWslTarget,
   runDesktopRuntimeHostWslManagement,
-  runDesktopRuntimeHostWslSetup,
   runDesktopRuntimeHostWslUpdate,
 } from '../runtime-host-wsl-controller.js';
 
@@ -166,102 +163,6 @@ test('WSL management invokes the stable operator directly with the exact deploym
   ]);
 });
 
-test('WSL setup forwards the development archive and its exact evidence', async () => {
-  const launches: string[][] = [];
-  const processFactory: RuntimeHostWslProcessFactory = (_executable, args) => {
-    launches.push([...args]);
-    const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-    const stdin = new PassThrough();
-    const stdout = new PassThrough();
-    const stderr = new PassThrough();
-    Object.assign(child, { stdin, stdout, stderr, kill: () => true });
-    process.nextTick(() => {
-      if (launches.length === 1) stdout.end('/mnt/c/maka-development.tgz\n');
-      else {
-        stdout.end(encodeRuntimeHostSetupFrame({
-          schemaVersion: 1,
-          sequence: 0,
-          kind: 'complete',
-          version: '0.2.0-development',
-          serviceId: 'b'.repeat(64),
-          deploymentId: '00000000-0000-4000-8000-000000000001',
-          operator: { kind: 'native', platform: 'posix', executablePath: '/tmp/maka/maka' },
-          rootPath: '/tmp/maka/root',
-          rootId: 'a'.repeat(64),
-          endpoint: 'ws://127.0.0.1:7443/runtime-host',
-          credentialId: 'credential-1',
-          credential: 'secret-access-token',
-        }));
-      }
-      stderr.end();
-      child.emit('close', 0, null);
-    });
-    return child;
-  };
-  const integrity = `sha512-${createHash('sha512').update('archive evidence').digest('base64')}`;
-
-  const installed = await runDesktopRuntimeHostWslSetup({
-    distribution: 'Ubuntu',
-    setupPackage: {
-      kind: 'development_archive',
-      path: 'C:\\maka-development.tgz',
-      integrity,
-    },
-    principalId: 'desktop-owner:pairing',
-  }, () => undefined, undefined, { processFactory, wslExecutable: 'wsl.exe' });
-
-  assert.deepEqual(installed.operator, {
-    kind: 'native', platform: 'posix', executablePath: '/tmp/maka/maka',
-  });
-  assert.deepEqual(launches[0], [
-    '--distribution',
-    'Ubuntu',
-    '--exec',
-    'wslpath',
-    '-a',
-    '-u',
-    'C:\\maka-development.tgz',
-  ]);
-  const setupCommand = launches[1]?.at(-1) ?? '';
-  assert.match(setupCommand, /\$\{SHELL:-\/bin\/sh\}.*-lic/u);
-  assert.match(setupCommand, new RegExp(`${RUNTIME_HOST_SETUP_SOURCE_PACKAGE_INTEGRITY_ENV}=`, 'u'));
-  assert.ok(setupCommand.includes(integrity));
-  assert.match(setupCommand, /--update-existing/u);
-  assert.doesNotMatch(setupCommand, /--allow-interrupt-active-tasks/u);
-  assert.match(setupCommand, /--package.*\/mnt\/c\/maka-development\.tgz/u);
-});
-
-
-test('released WSL onboarding cannot authorize replacement or interruption', async () => {
-  let command = '';
-  await assert.rejects(runDesktopRuntimeHostWslSetup({
-    distribution: 'Ubuntu',
-    setupPackage: { kind: 'npm', specifier: 'maka-agent@0.2.0' },
-    principalId: 'desktop:client',
-  }, () => undefined, undefined, {
-    wslExecutable: 'wsl.exe',
-    processFactory: (_executable, args) => {
-      command = args.at(-1) ?? '';
-      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-      const stdout = new PassThrough();
-      const stderr = new PassThrough();
-      Object.assign(child, { stdin: new PassThrough(), stdout, stderr, kill: () => true });
-      process.nextTick(() => {
-        stdout.end(encodeRuntimeHostSetupFrame({
-          schemaVersion: 1, sequence: 0, kind: 'error',
-          error: { code: 'version_change_requires_update', message: 'Use the update workflow' },
-        }));
-        stderr.end();
-        child.emit('close', 1, null);
-      });
-      return child;
-    },
-  }), /Use the update workflow/u);
-  assert.doesNotMatch(command, /--update-existing|--allow-interrupt-active-tasks/u);
-  assert.match(command, /--reuse-existing-environment/u);
-});
-
-
 test('WSL update cancellation closes retirement input without killing the transaction', async () => {
   const abort = new AbortController();
   let finish!: () => void;
@@ -307,26 +208,4 @@ test('WSL update cancellation closes retirement input without killing the transa
   assert.equal(settled, false);
   finish();
   await rejected;
-});
-
-
-test('released WSL discovery accepts an existing binding without a credential or package mutation', async () => {
-  const existing = {
-    schemaVersion: 1 as const, sequence: 0, kind: 'existing_environment' as const,
-    version: '0.3.0', serviceId: 'a'.repeat(64), rootId: 'a'.repeat(64), rootPath: '/state',
-    deploymentId: '00000000-0000-4000-8000-000000000001', operator: OPERATOR,
-  };
-  const result = await runDesktopRuntimeHostWslSetup({
-    distribution: 'Ubuntu', setupPackage: { kind: 'npm', specifier: 'maka-agent@0.2.0' }, principalId: 'desktop:client',
-  }, () => {}, undefined, {
-    wslExecutable: 'wsl.exe',
-    processFactory: () => {
-      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-      const stdout = new PassThrough(); const stderr = new PassThrough();
-      Object.assign(child, { stdin: new PassThrough(), stdout, stderr, kill: () => true });
-      process.nextTick(() => { stdout.end(encodeRuntimeHostSetupFrame(existing)); stderr.end(); child.emit('close', 0, null); });
-      return child;
-    },
-  });
-  assert.deepEqual(result, existing);
 });

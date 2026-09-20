@@ -27,6 +27,7 @@ pub(super) async fn apply(
     request: CorrectionRequest,
     target_revision: Option<u64>,
     target_owner: Option<&Invocation>,
+    preparation: serde_json::Value,
 ) -> Result<CorrectionIntent, StoreError> {
     if super::super::actions::read(tx, &request.action_id)
         .await?
@@ -143,6 +144,6 @@ pub(super) async fn apply(
     Ok(CorrectionIntent {
         request,
         owner,
-        preparation: None,
+        preparation,
     })
 }

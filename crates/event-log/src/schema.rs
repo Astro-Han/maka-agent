@@ -38,15 +38,30 @@ pub(crate) async fn initialize_connection(
     .fetch_one(&mut *connection)
     .await?;
     if !((application_id == 0 && version == 0 && tables == 0)
-        || (application_id == 0x4d414b52 && matches!(version, 0..=27)))
+        || (application_id == 0x4d414b52 && matches!(version, 0..=1)))
     {
         return Err(StoreError::UnsupportedDatabase);
     }
+    let ledger: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = '_sqlx_migrations')",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    // Version zero is only a genuinely empty or interrupted initial setup.
+    // Existing data is never adopted by creating a new migration ledger.
+    if (version == 0 && tables != i64::from(ledger)) || (version == 1 && !ledger) {
+        return Err(StoreError::UnsupportedDatabase);
+    }
+    if ledger {
+        let applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+            .fetch_one(&mut *connection)
+            .await?;
+        if (version == 0) != (applied == 0) {
+            return Err(StoreError::UnsupportedDatabase);
+        }
+    }
     // Establish Rust identity before SQLx creates its migration ledger, so a
     // crash before migration 1 is distinguishable from an unrelated database.
-    sqlx::raw_sql("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;")
-        .execute(&mut *connection)
-        .await?;
     if application_id == 0 {
         sqlx::query("PRAGMA application_id = 1296124754")
             .execute(&mut *connection)
@@ -54,6 +69,9 @@ pub(crate) async fn initialize_connection(
     }
     crate::sqlite_functions::register(connection).await?;
     MIGRATIONS.run_direct(None, &mut *connection, false).await?;
+    sqlx::raw_sql("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;")
+        .execute(&mut *connection)
+        .await?;
     crate::message_sources::initialize(connection).await?;
     crate::transcript::initialize(connection).await?;
     crate::sessions::initialize_execution(connection).await?;

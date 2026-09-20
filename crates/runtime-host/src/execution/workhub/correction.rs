@@ -184,7 +184,7 @@ pub(super) async fn execute(
                     matches!(&request.target, Target::Existing { .. })
                         .then(|| request.target.revision()),
                     executions.active_session_owner(request.target.id()),
-                    Some(&Preparation::capture(&request.target)),
+                    &Preparation::capture(&request.target),
                 )
                 .await
                 .map_err(|error| stored(executions, error))?;

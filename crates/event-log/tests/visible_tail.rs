@@ -94,7 +94,7 @@ fn canonical(db: &Connection) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn visible_ids_match_presentation_for_accepted_and_partial_parts_across_cache_upgrade() {
+async fn visible_ids_match_presentation_for_accepted_and_partial_parts_across_cache_rebuild() {
     // Completed, explicit interruption, and terminal failure fallback share IDs.
     for seal in ["completed", "interrupted", "failed"] {
         let temp = tempfile::tempdir().unwrap();
@@ -114,7 +114,6 @@ async fn visible_ids_match_presentation_for_accepted_and_partial_parts_across_ca
             Fact::InvocationOpened {
                 configuration: None,
                 input: InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "user".into(),
                     request_fingerprint: None,
@@ -129,7 +128,7 @@ async fn visible_ids_match_presentation_for_accepted_and_partial_parts_across_ca
             &mut view,
             &mut ids,
             Fact::ModelRequested {
-                purpose: None,
+                purpose: maka_runtime::context::ModelPurpose::Main,
                 context: None,
                 checkpoint_event_id: None,
                 step_id: "step".into(),
@@ -273,33 +272,15 @@ async fn visible_ids_match_presentation_for_accepted_and_partial_parts_across_ca
         assert_eq!(last_message.preview.as_deref(), Some("answer"));
         let source = canonical(&db);
         log.close().await.unwrap();
-        // Exercise a real v3 schema, then a missing cache with a surviving v8 watermark.
-        for legacy in [true, false] {
-            db.execute_batch("DROP TABLE catalog_messages;").unwrap();
-            if legacy {
-                db.execute_batch(
-                    "CREATE TABLE catalog_messages (
-                    sequence INTEGER NOT NULL, ordinal INTEGER NOT NULL, session_id TEXT NOT NULL,
-                    message_at INTEGER NOT NULL, preview TEXT, PRIMARY KEY(sequence, ordinal));
-                    UPDATE catalog_message_watermark SET projection_version = 3;",
-                )
-                .unwrap();
-            }
+        // Either half may be discarded; rebuild both from the canonical facts.
+        for table in ["catalog_messages", "catalog_message_watermark"] {
+            db.execute_batch(&format!("DROP TABLE {table};")).unwrap();
             let reopened = EventLog::open(&path).await.unwrap();
             assert_eq!(projected(&db), ids);
             assert_eq!(canonical(&db), source);
             assert_eq!(
                 reopened.get_session::<Value>("a").await.unwrap().unwrap(),
                 session
-            );
-            assert_eq!(
-                db.query_row(
-                    "SELECT projection_version FROM catalog_message_watermark",
-                    [],
-                    |row| row.get::<_, i64>(0)
-                )
-                .unwrap(),
-                8
             );
             reopened.close().await.unwrap();
         }

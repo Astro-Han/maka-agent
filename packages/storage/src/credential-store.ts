@@ -20,7 +20,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { writeAtomicFile } from './atomic-file-write.js';
-import { withFileUpdateLock } from './file-update-lock.js';
+import { withProcessLifetimeFileUpdateLock } from './process-lifetime-file-update-lock.js';
 import { hardenDirectory } from './stable-storage.js';
 
 /**
@@ -35,8 +35,7 @@ import { hardenDirectory } from './stable-storage.js';
  * until there is a real backend, so its sync/async shape is designed
  * against that backend instead of guessed now.
  *
- * Writes are serialized across processes by an atomic-mkdir lockfile that is
- * never stolen (see withCredentialFileLock), so two store instances (or
+ * Writes are serialized across processes by an OS-owned lease, so two store instances (or
  * processes) sharing one file can't lose each other's update through a
  * read-modify-write race.
  *
@@ -255,41 +254,15 @@ async function writeSecretFileAtomic(path: string, contents: string): Promise<vo
 
 const LOCK_TIMEOUT_MS = 10_000;
 
-/**
- * Serialize a read-modify-write across processes / store instances that share
- * one credentials.json, so two writers can't lose each other's update through a
- * read, read, write, write race.
- *
- * Acquire is an atomic `mkdir` of `${targetPath}.lock` (POSIX mkdir is atomic
- * and fails EEXIST if it already exists); release deletes it. The lock is NEVER
- * stolen — a held or leftover lock is waited on, then we fail loud. That is the
- * whole design, and the reason it is correct. Every "detect a crashed holder's
- * stale lock, then remove it and re-acquire" scheme — the earlier hand-rolled
- * ones AND proper-lockfile — is a TOCTOU race: between judging a lock stale and
- * deleting it, another contender can reclaim it, so the delete drops a live
- * lock and both writers enter the critical section. There is no safe userspace
- * compare-and-steal, so we do not steal at all.
- *
- * The cost: a hard crash (SIGKILL / power loss) mid-write leaves the lock
- * directory behind, and the next writer fails loud until it is removed — an
- * explicit, one-command recovery, never a silent lost update. A clean exit or a
- * completed write releases it via the finally. credentials.json is written
- * rarely and is local, so this is the right trade for credential data.
- *
- * `timeoutMs` defaults to LOCK_TIMEOUT_MS; it is a parameter only so a test can
- * drive the fail-loud path with a small value. Exported for that test — it is
- * deliberately NOT re-exported from index.ts, so the package's public surface
- * stays the typed store and callers can't drive the lock directly.
- */
+/** Serialize credential updates; the OS releases ownership after a process crash. */
 export async function withCredentialFileLock<T>(
   targetPath: string,
   fn: () => Promise<T>,
   timeoutMs: number = LOCK_TIMEOUT_MS,
 ): Promise<T> {
-  // Same owner-only hardening the writer applies, so the lock directory can
-  // never sit looser than the secret it guards.
+  // The lease and the secret share an owner-only directory.
   await hardenDirectory(dirname(targetPath));
-  return withFileUpdateLock(targetPath, fn, timeoutMs);
+  return withProcessLifetimeFileUpdateLock(targetPath, fn, timeoutMs);
 }
 
 const STORED_CREDENTIAL_KINDS = [

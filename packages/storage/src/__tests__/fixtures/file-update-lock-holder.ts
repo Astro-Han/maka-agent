@@ -18,11 +18,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
-import {
-  withLegacyFileUpdateLockLease,
-  withProcessLifetimeFileUpdateLock,
-} from '../../process-lifetime-file-update-lock.js';
+import { withProcessLifetimeFileUpdateLock } from '../../process-lifetime-file-update-lock.js';
 
 const targetPath = process.argv[2];
 if (!targetPath) throw new Error('Missing file update lock target');
@@ -32,13 +28,7 @@ const hold = async () => {
   await new Promise<never>(() => setInterval(() => undefined, 1_000));
 };
 
-if (process.argv[3] === 'legacy') {
-  await withLegacyFileUpdateLockLease(targetPath, async (inheritedFd) => {
-    if (inheritedFd <= 2) throw new Error('Legacy lock lease is not inheritable');
-    await mkdir(`${targetPath}.lock`);
-    await hold();
-  });
-} else if (process.argv[3] === 'inherit') {
+if (process.argv[3] === 'inherit') {
   await withProcessLifetimeFileUpdateLock(targetPath, async (inheritedFd) => {
     const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], {
       stdio: ['ignore', 'ignore', 'inherit', inheritedFd],

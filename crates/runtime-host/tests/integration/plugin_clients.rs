@@ -115,7 +115,7 @@ async fn scenario() {
         .unwrap();
     let bounded = commands
         .create_child(CreateChild {
-            target: Some(maka_plugins::execution::ChildTarget::Model {
+            target: Some(maka_plugins::execution::Target::Model {
                 model,
                 thinking_level: None,
             }),
@@ -267,7 +267,7 @@ async fn scenario() {
     );
     log.close().await.unwrap();
 }
-fn publication(server: &str, tool: &str) -> Value {
+pub(super) fn publication(server: &str, tool: &str) -> Value {
     json!({"registrationId":server,"offers":[{
         "offerId":server,"version":"1","affinity":"session","hostPathAccess":"none","label":server,
         "tools":[{"serverId":server,"name":tool,"inputSchema":{"type":"object"}}]

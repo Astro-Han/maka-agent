@@ -20,27 +20,20 @@
 use super::{
     ArchiveIdentity, MAX_ARCHIVE_REF_CHARS, hash, identity_string, valid_projection_digest,
 };
-const PREFIX: &str = "maka://archive-ledger/v1/";
 const SHORT_PREFIX: &str = "archive:";
 const EVENT_PREFIX: &str = "maka://runtime/tool-results/";
 
-/// A Session-scoped locator or an exact accepted archive proof; neither grants access.
+/// A Session-scoped locator. The store resolves and verifies its evidence.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ToolResultAddress {
-    Event(String),
-    Evidence(ArchiveIdentity),
-}
+pub struct ToolResultAddress(String);
 
 impl ToolResultAddress {
     pub fn parse(path: &str) -> Result<Self, &'static str> {
         if path.len() > MAX_ARCHIVE_REF_CHARS {
             return Err("tool result address exceeds limit");
         }
-        if path.starts_with(PREFIX) {
-            return ArchiveIdentity::parse_resource_ref(path).map(Self::Evidence);
-        }
         if path.starts_with(SHORT_PREFIX) {
-            return ArchiveIdentity::parse_short_ref(path).map(Self::Event);
+            return ArchiveIdentity::parse_short_ref(path).map(Self);
         }
         let encoded = path
             .strip_prefix(EVENT_PREFIX)
@@ -49,7 +42,11 @@ impl ToolResultAddress {
         if !identity_string(&id) || encode(&id) != encoded {
             return Err("invalid or noncanonical tool result event ID");
         }
-        Ok(Self::Event(id))
+        Ok(Self(id))
+    }
+
+    pub fn event_id(&self) -> &str {
+        &self.0
     }
 
     pub fn event_path(id: &str) -> Result<String, &'static str> {
@@ -92,62 +89,6 @@ impl ArchiveIdentity {
             return Err("invalid ledger archive identity");
         }
         Ok(())
-    }
-
-    pub fn resource_ref(&self) -> Result<String, &'static str> {
-        self.validate()?;
-        let tuple = (
-            &self.runtime_event_id,
-            &self.tool_call_id,
-            &self.tool_name,
-            &self.source_projection_digest,
-            Option::<&str>::None,
-            &self.body_sha256,
-            self.original_bytes,
-        );
-        let json = serde_json::to_string(&tuple).map_err(|_| "invalid archive identity")?;
-        let result = format!("{PREFIX}{}", encode(&json));
-        if result.len() > MAX_ARCHIVE_REF_CHARS {
-            return Err("archive reference exceeds limit");
-        }
-        Ok(result)
-    }
-
-    pub fn parse_resource_ref(resource: &str) -> Result<Self, &'static str> {
-        if resource.len() > MAX_ARCHIVE_REF_CHARS {
-            return Err("archive reference exceeds limit");
-        }
-        let encoded = resource
-            .strip_prefix(PREFIX)
-            .ok_or("unsupported archive reference")?;
-        let bytes = decode(encoded)?;
-        let (
-            runtime_event_id,
-            tool_call_id,
-            tool_name,
-            source_projection_digest,
-            previous,
-            body_sha256,
-            original_bytes,
-        ): (String, String, String, String, Option<String>, String, u64) =
-            serde_json::from_slice(&bytes).map_err(|_| "invalid archive identity")?;
-        // Rust creates exactly one base replacement; legacy and chained identities
-        // are not evidence of an accepted replacement in this runtime.
-        if previous.is_some() {
-            return Err("archive predecessor is unsupported");
-        }
-        let identity = Self {
-            runtime_event_id,
-            tool_call_id,
-            tool_name,
-            source_projection_digest,
-            body_sha256,
-            original_bytes,
-        };
-        if identity.resource_ref()? != resource {
-            return Err("noncanonical archive reference");
-        }
-        Ok(identity)
     }
 }
 

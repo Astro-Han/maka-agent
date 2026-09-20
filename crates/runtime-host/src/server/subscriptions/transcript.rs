@@ -181,7 +181,6 @@ mod tests {
                 Fact::InvocationOpened {
                     configuration: None,
                     input: InvocationInput::Message {
-                        skill_invocation: Default::default(),
                         source_messages: Vec::new(),
                         content: "x".repeat(bytes).into(),
                         request_fingerprint: None,

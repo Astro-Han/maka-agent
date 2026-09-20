@@ -18,6 +18,7 @@
  */
 
 mod registry;
+mod views;
 mod worker;
 pub(super) use registry::Registry;
 
@@ -124,12 +125,27 @@ pub(super) async fn execute(
                 });
             };
             let reservation = host.plugin_remotes.get(connection, document)?.reserve()?;
+            let cancellation = reservation.document.cancellation.child_token();
+            let resources = Arc::new(maka_plugins::call::Resources::default());
             let caller = Caller {
                 connection_id: connection,
                 client_instance_id: client.into(),
                 document_id: document,
-                session_id: binding.session_id,
-                cancellation: reservation.document.cancellation.child_token(),
+                session_id: binding.session_id.clone(),
+                access: bound.endpoint.value.access,
+                views: Arc::new(views::SessionViews {
+                    host: Arc::downgrade(host),
+                    owner: bound.endpoint.owner.clone(),
+                    session_id: binding.session_id,
+                    connection_id: connection,
+                    client_instance_id: client.into(),
+                    authority: authority.clone(),
+                    access: bound.endpoint.value.access,
+                    cancellation: cancellation.clone(),
+                    resources: resources.clone(),
+                }),
+                resources,
+                cancellation,
             };
             match (&bound.endpoint.value.handler, stream) {
                 (Handler::Stream(provider), RemoteKind::Stream) => {
@@ -152,15 +168,21 @@ pub(super) async fn execute(
                 (Handler::Method(method), RemoteKind::Method) => {
                     let method = method.clone();
                     let leases = bound.admit()?;
+                    let resources = caller.resources.clone();
+                    let cancellation = caller.cancellation.clone();
                     let (send, receive) = tokio::sync::oneshot::channel();
                     host.plugin_tasks.spawn(async move {
                         let _leases = leases;
-                        let result = std::panic::AssertUnwindSafe(call_method(
+                        let mut result = std::panic::AssertUnwindSafe(call_method(
                             &bound, method, input, caller,
                         ))
                         .catch_unwind()
                         .await
                         .unwrap_or(Err(Error::CleanupUnconfirmed));
+                        cancellation.cancel();
+                        if resources.finish().await.is_err() {
+                            result = Err(Error::CleanupUnconfirmed);
+                        }
                         if matches!(result, Err(Error::CleanupUnconfirmed)) {
                             reservation.document.cleanup_failed();
                             bound
@@ -226,6 +248,7 @@ fn failure(error: Error) -> OperationError {
         code: match error {
             Error::Invalid(_) => Code::InvalidRequest,
             Error::Retired | Error::Cancelled => Code::OperationConflict,
+            Error::OutcomeUnknown(_) => Code::OutcomeUnknown,
             Error::Provider(_) | Error::CleanupUnconfirmed => Code::OperationUnavailable,
         },
         message: error.to_string(),

@@ -49,8 +49,8 @@ async fn reopened_user_and_typed_tool_images_share_actual_byte_budget_with_curre
         let prior = identity("historical");
         let message = serde_json::from_value(json!({"text":"historical", "attachments":[attachment("historical")]})).unwrap();
         let facts = [
-            Fact::InvocationOpened { input: InvocationInput::Message { skill_invocation: Default::default(), source_messages: Vec::new(), content: message, request_fingerprint: None }, configuration: None },
-            Fact::ModelRequested { effective_source_digest: None, purpose: None, context: None, checkpoint_event_id: None, step_id: "prior-step".into(), model_id: "test".into(),
+            Fact::InvocationOpened { input: InvocationInput::Message { source_messages: Vec::new(), content: message, request_fingerprint: None }, configuration: None },
+            Fact::ModelRequested { effective_source_digest: None, purpose: maka_runtime::context::ModelPurpose::Main, context: None, checkpoint_event_id: None, step_id: "prior-step".into(), model_id: "test".into(),
                 source_scope: maka_runtime::event::LogScope::Session { id: "session".into() },
                 source_high_water: 1, source_digest: "fixture".into(), input_digest: "fixture".into(), route_identity: "fixture".into() },
             Fact::ModelCompleted { step_id: "prior-step".into(), output: serde_json::from_value(json!({

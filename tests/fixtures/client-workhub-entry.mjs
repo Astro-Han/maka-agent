@@ -31,6 +31,7 @@ import { verifyWorkhubAnswer } from './client-workhub-answer.mjs';
 import { verifyWorkhubQueue } from './client-workhub-queue.mjs';
 import { verifyWorkhubDelegation } from './client-workhub-delegation.mjs';
 import { toggleWorkhub, workhubRemote } from './client-workhub-plugin.mjs';
+import { pluginRemote } from './client-plugin-remote.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -298,21 +299,18 @@ try {
         workspace: { kind: 'host_path', path: initial.workspace.hostCwd },
         modelTarget: { kind: 'default' },
       });
-      const invocable = (input) => request('skill.catalog.invocable.query', input);
-      const target = { kind: 'session', sessionId };
-      const empty = await invocable({ kind: 'start', target });
+      const skills = await pluginRemote(connection, 'maka.skills');
+      remotes.push(skills);
+      const invocable = (id, page = null) =>
+        skills.method('request', id)({ kind: 'invocable', page });
+      const empty = await invocable(sessionId);
       assert.equal(empty.kind, 'page');
       assert.deepEqual(empty.items, []);
       assert.equal(empty.nextCursor, null);
-      const ordinary = await invocable({
-        kind: 'start',
-        target: { kind: 'session', sessionId: 'ordinary-skills' },
-      });
+      const ordinary = await invocable('ordinary-skills');
       assert(ordinary.items.some((item) => item.id === 'ordinary-only'));
       await assert.rejects(
-        invocable({
-          kind: 'continue',
-          target,
+        invocable(sessionId, {
           revision: empty.revision,
           cursor: empty.revision + ':0',
         }),
@@ -323,7 +321,7 @@ try {
       });
       assert.deepEqual(await resolve(), { sessionId });
       assert.deepEqual(await query(), configured.session);
-      assert.deepEqual(await invocable({ kind: 'start', target }), empty);
+      assert.deepEqual(await invocable(sessionId), empty);
       await writeFile(file, JSON.stringify(configured.session));
       console.log('workhub-passed');
     }

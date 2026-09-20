@@ -171,7 +171,7 @@ export interface PreparedMakaToolExecution<R = unknown> {
   cancel(): Promise<void> | void;
 }
 
-export interface MakaTool<P = any, R = unknown> {
+export interface MakaTool<P = any, R = unknown, Context = MakaToolContext> {
   /** Canonical (Claude-SDK-style) name. Pi adapter translates to canonical. */
   name: string;
   /** Human-readable description shown to the model. */
@@ -218,7 +218,7 @@ export interface MakaTool<P = any, R = unknown> {
    * settle promptly after it aborts. Runtime-owned nested calls await this
    * settlement instead of detaching, so late side effects cannot outlive `exec`.
    */
-  impl: (args: P, ctx: MakaToolContext) => Promise<R> | R;
+  impl: (args: P, ctx: Context) => Promise<R> | R;
   /** Best-effort compensation after T2 rejects a result that already produced side effects. */
   compensateDurableOutcomeCommitFailure?: (input: {
     readonly result: unknown;
@@ -233,6 +233,19 @@ export interface MakaTool<P = any, R = unknown> {
     output: unknown;
   }) => ToolResultOutput | undefined;
 }
+
+/** Session-owned Client tools can run without inventing an Agent Turn. */
+export type SessionToolContext = Pick<
+  MakaToolContext,
+  | 'sessionId'
+  | 'cwd'
+  | 'toolCallId'
+  | 'abortSignal'
+  | 'emitOutput'
+  | 'requestUserForm'
+  | 'emitProgress'
+>;
+export type SessionTool<P = any, R = unknown> = MakaTool<P, R, SessionToolContext>;
 
 export interface MakaToolContext {
   sessionId: string;

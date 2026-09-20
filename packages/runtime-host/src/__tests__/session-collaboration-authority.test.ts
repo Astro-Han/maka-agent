@@ -360,7 +360,8 @@ test('an approved exact Turn request survives restart and is admitted once', asy
           ok: true,
           result: {
             kind: 'blocked',
-            skillInvocation: { loaded: [], failed: [], receipts: [] },
+            message: 'Input rejected',
+            preparation: [],
           },
         };
       },
@@ -671,7 +672,8 @@ test('recovery stays ready while an approved Turn request waits for the Session'
               ok: true,
               result: {
                 kind: 'blocked',
-                skillInvocation: { loaded: [], failed: [], receipts: [] },
+                message: 'Input rejected',
+                preparation: [],
               },
             };
       },

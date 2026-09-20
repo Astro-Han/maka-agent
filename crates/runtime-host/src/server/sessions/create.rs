@@ -27,7 +27,7 @@ use maka_runtime::configuration::policy::ChatDefaultPermissionMode;
 pub(super) async fn create(
     host: &super::super::Host,
     input: SessionCreateInput,
-) -> Result<SessionCatalogItem> {
+) -> Result<SessionCatalogProjection> {
     let log = &host.log;
     crate::session::require_unmanaged(
         log,

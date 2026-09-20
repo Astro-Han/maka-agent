@@ -196,8 +196,7 @@ test('Client Capability channel rejects Host paths before invoking a path-isolat
     offerId: 'path-isolated',
     serverId: 'fixture',
     toolName: 'inspect',
-    sessionId: 'session',
-    turnId: 'turn',
+    source: { kind: 'agent', sessionId: 'session', turnId: 'turn' },
     toolCallId: 'tool-call',
     cwd: '/srv/runtime-host',
     arguments: {},
@@ -268,8 +267,7 @@ test('Client Capability channel forwards admitted tool progress before the resul
     serverId: 'fixture',
     toolName: 'sequence',
     arguments: {},
-    sessionId: 'session-1',
-    turnId: 'turn-1',
+    source: { kind: 'agent', sessionId: 'session-1', turnId: 'turn-1' },
     toolCallId: 'tool-1',
     cwd: '/tmp',
   });
@@ -378,8 +376,7 @@ test('Client Capability channel correlates one admitted nested form before the f
     serverId: 'fixture',
     toolName: 'deploy',
     arguments: {},
-    sessionId: 'session',
-    turnId: 'turn',
+    source: { kind: 'agent', sessionId: 'session', turnId: 'turn' },
     toolCallId: 'tool-call',
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -467,8 +464,7 @@ test('Client Capability release rejects a pending nested form', async () => {
     serverId: 'fixture',
     toolName: 'deploy',
     arguments: {},
-    sessionId: 'session',
-    turnId: 'turn',
+    source: { kind: 'agent', sessionId: 'session', turnId: 'turn' },
     toolCallId: 'tool-call',
   });
   await started;

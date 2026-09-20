@@ -52,11 +52,7 @@ impl Plugin for Provider {
         Box::pin(async move {
             context
                 .services
-                .provide(
-                    &context.lifecycle,
-                    "counter",
-                    Arc::new(config.as_u64().unwrap()),
-                )
+                .provide("counter", Arc::new(config.as_u64().unwrap()))
                 .map_err(|error| error.to_string())?;
             Ok(Staged::default())
         })
@@ -83,14 +79,34 @@ impl Plugin for Consumer {
                 .ok_or("dependency disappeared")?
                 .acquire()
                 .map_err(|error| error.to_string())?;
+            assert!(matches!(
+                context.contributions.publish(Staged::default()),
+                Err(Error::Retired)
+            ));
+            let publisher = context.contributions;
+            let stopping = context
+                .lifecycle
+                .stopping()
+                .map_err(|error| error.to_string())?;
             context
                 .lifecycle
                 .spawn("business loop", async move {
+                    let mut dynamic = Staged::default();
+                    dynamic
+                        .insert("dynamic", value)
+                        .map_err(|error| error.to_string())?;
+                    let _registration = publisher
+                        .publish(dynamic)
+                        .map_err(|error| error.to_string())?;
                     starts.fetch_add(1, Ordering::SeqCst);
+                    stopping.cancelled().await;
                     Ok(())
                 })
                 .map_err(|error| error.to_string())?;
             let mut staged = Staged::default();
+            staged
+                .insert("services", context.services)
+                .map_err(|error| error.to_string())?;
             staged
                 .insert(name, value)
                 .map_err(|error| error.to_string())?;
@@ -167,6 +183,17 @@ async fn dependency_replacement_waits_for_cleanup_and_reactivates_consumers() {
         .configure(&composition(json!(1), false), definitions(&starts, "value"))
         .unwrap();
     converge(&mut kernel).await;
+    timeout(Duration::from_secs(2), async {
+        while !catalog
+            .snapshot::<u64>(&Scope::Profile)
+            .entries
+            .contains_key("dynamic")
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     let old = catalog.snapshot::<u64>(&Scope::Profile);
     let identity = old.entries["value"].owner.identity().unwrap().activation;
     let provider_call = services
@@ -194,6 +221,7 @@ async fn dependency_replacement_waits_for_cleanup_and_reactivates_consumers() {
     assert!(!kernel.status().cleanup_complete);
     assert!(services.view().get::<u64>("counter").unwrap().is_none());
     assert_eq!(old.entries["value"].admit().err(), Some(Error::Retired));
+    assert_eq!(old.entries["dynamic"].admit().err(), Some(Error::Retired));
     drop(provider_call);
     converge(&mut kernel).await;
     let updated = catalog.snapshot::<u64>(&Scope::Profile);
@@ -206,6 +234,33 @@ async fn dependency_replacement_waits_for_cleanup_and_reactivates_consumers() {
             .activation,
         identity
     );
+
+    let consumer_services = catalog
+        .snapshot::<maka_plugins::services::BoundServices>(&Scope::Profile)
+        .entries["services"]
+        .value
+        .clone();
+    let retained = consumer_services.get::<u64>("counter").unwrap().unwrap();
+    let mut without_consumer = composition(json!(2), false);
+    without_consumer.roots.get_mut(&Scope::Profile).unwrap()[1].disabled = true;
+    kernel
+        .configure(&without_consumer, definitions(&starts, "value"))
+        .unwrap();
+    converge(&mut kernel).await;
+    assert!(
+        services
+            .view()
+            .get::<u64>("counter")
+            .unwrap()
+            .unwrap()
+            .acquire()
+            .is_ok()
+    );
+    assert!(matches!(retained.acquire(), Err(Error::Retired)));
+    assert!(matches!(
+        consumer_services.get::<u64>("counter"),
+        Err(Error::Retired)
+    ));
 
     kernel
         .configure(&composition(json!(2), true), definitions(&starts, "value"))
@@ -234,63 +289,40 @@ async fn dependency_replacement_waits_for_cleanup_and_reactivates_consumers() {
 }
 
 #[tokio::test]
-async fn reserved_publication_only_admits_its_designated_package() {
-    for package in [None, Some("provider"), Some("consumer")] {
-        let catalog = Catalog::default();
-        match package {
-            None => catalog.reserve::<u64>("core").unwrap(),
-            Some(package) => catalog.reserve_for::<u64>("core", package).unwrap(),
-        }
-        assert!(catalog.reserve_for::<u64>("core", "impostor").is_err());
-        let starts = Arc::new(AtomicUsize::new(0));
-        let mut kernel = Kernel::new(Services::default(), catalog.clone());
-        kernel
-            .configure(&composition(json!(1), false), definitions(&starts, "core"))
-            .unwrap();
-        if package == Some("consumer") {
-            converge(&mut kernel).await;
-            let contribution = catalog
-                .snapshot::<u64>(&Scope::Profile)
+async fn core_name_conflict_rejects_publication_before_starting_business_work() {
+    let catalog = Catalog::default();
+    catalog.reserve::<u64>("core").unwrap();
+    let starts = Arc::new(AtomicUsize::new(0));
+    let mut kernel = Kernel::new(Services::default(), catalog.clone());
+    kernel
+        .configure(&composition(json!(1), false), definitions(&starts, "core"))
+        .unwrap();
+    timeout(Duration::from_secs(2), async {
+        loop {
+            if kernel
+                .tick()
+                .unwrap()
                 .entries
-                .remove("core")
-                .unwrap();
-            assert_eq!(*contribution.value, 1);
-            let call = contribution.admit().unwrap();
-            drop(call);
-            kernel
-                .shutdown(Instant::now() + Duration::from_secs(1))
-                .await
-                .unwrap();
-            assert!(contribution.admit().is_err());
-        } else {
-            timeout(Duration::from_secs(2), async {
-                loop {
-                    if kernel
-                        .tick()
-                        .unwrap()
-                        .entries
-                        .iter()
-                        .any(|entry| entry.error.is_some())
-                    {
-                        break;
-                    }
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-            assert_eq!(
-                starts.load(Ordering::SeqCst),
-                0,
-                "failed publication cannot start business work"
-            );
-            assert!(catalog.snapshot::<u64>(&Scope::Profile).entries.is_empty());
-            kernel
-                .shutdown(Instant::now() + Duration::from_secs(1))
-                .await
-                .unwrap();
+                .iter()
+                .any(|entry| entry.error.is_some())
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
         }
-    }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        starts.load(Ordering::SeqCst),
+        0,
+        "failed publication cannot start business work"
+    );
+    assert!(catalog.snapshot::<u64>(&Scope::Profile).entries.is_empty());
+    kernel
+        .shutdown(Instant::now() + Duration::from_secs(1))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

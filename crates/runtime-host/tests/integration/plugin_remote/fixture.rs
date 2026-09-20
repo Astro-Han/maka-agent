@@ -27,13 +27,14 @@ use maka_plugins::{
 };
 use serde_json::{Value, json};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 pub(super) struct State {
+    pub(super) views: Mutex<Option<Arc<dyn maka_plugins::remote::Views>>>,
     pub(super) calls: AtomicUsize,
     pub(super) opening: AtomicUsize,
     pub(super) live: AtomicUsize,
@@ -93,11 +94,29 @@ impl Plugin for Example {
 }
 impl Method for Adapter {
     fn call(&self, input: Value, caller: Caller) -> BoxFuture<'static, Result<Value, Error>> {
+        if input == "uncertain" {
+            return Box::pin(async {
+                Err(Error::OutcomeUnknown("publication needs recovery".into()))
+            });
+        }
         self.0.calls.fetch_add(1, Ordering::SeqCst);
+        *self.0.views.lock().unwrap() = Some(caller.views.clone());
         Box::pin(async move {
-            Ok(
-                json!({"input":input,"client":caller.client_instance_id,"session":caller.session_id}),
-            )
+            let response = json!({"input":input,"client":caller.client_instance_id,"session":caller.session_id});
+            let mut forged = caller;
+            forged.session_id = Some("not-the-captured-session".into());
+            forged.access = maka_plugins::remote::Access::HostPaths;
+            assert!(
+                matches!(forged.views.session().await, Err(Error::Invalid(reason)) if reason == "A Session is required")
+            );
+            assert!(
+                matches!(forged.views.workspace(maka_plugins::remote::WorkspaceViewInput {
+                workspace: maka_runtime::execution::WorkspaceTarget::HostPath { path: "ungranted".into() },
+                permission_mode: maka_runtime::execution::PermissionMode::Bypass,
+                collaboration_mode: maka_runtime::execution::CollaborationMode::Agent,
+            }).await, Err(Error::Invalid(reason)) if reason == "Remote endpoint does not allow Host paths")
+            );
+            Ok(response)
         })
     }
 }

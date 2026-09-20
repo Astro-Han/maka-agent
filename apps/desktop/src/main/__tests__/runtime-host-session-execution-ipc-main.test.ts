@@ -783,7 +783,7 @@ test("sends canonical content and uploads owned Attachment bytes through the Hos
       return {
         disposition: "turn_started",
         turnId: "turn-1",
-        skillInvocation: { loaded: [], failed: [], receipts: [] },
+        preparation: [],
       };
     },
   });
@@ -848,7 +848,7 @@ test("sends canonical content and uploads owned Attachment bytes through the Hos
         label: "notes.txt",
       },
     ],
-    skillInvocation: { loaded: [], failed: [], receipts: [] },
+    preparation: [],
   });
   assert.deepEqual(changes, [
     { reason: "status-change", sessionId: "session-1", turnId: "turn-1" },
@@ -892,7 +892,7 @@ test("uploads a selected workspace file as a Host-owned Session Artifact", async
           return {
             disposition: "turn_started",
             turnId: "turn-1",
-            skillInvocation: { loaded: [], failed: [], receipts: [] },
+            preparation: [],
           };
         },
       }),
@@ -936,11 +936,11 @@ test("forwards explicit Skill invocation to the Host-owned Turn admission", asyn
           return {
             disposition: "turn_started",
             turnId: "turn-skill",
-            skillInvocation: {
+            preparation: fixturePreparation({
               loaded: [{ id: "review", name: "Review" }],
               failed: [],
               receipts: [],
-            },
+            }),
           };
         },
       }),
@@ -959,7 +959,7 @@ test("forwards explicit Skill invocation to the Host-owned Turn admission", asyn
     type: "send",
     text: "",
     displayText: "/skill:review",
-    skillIds: ["review"],
+    inputSelections: { "maka.skills": ["review"] },
   });
 
   assert.deepEqual(starts, [
@@ -968,7 +968,7 @@ test("forwards explicit Skill invocation to the Host-owned Turn admission", asyn
       messageId: "turn-skill",
       placement: "current_turn",
       content: { text: "", displayText: "/skill:review", inlineReferences: [] },
-      skillIds: ["review"],
+      inputSelections: { "maka.skills": ["review"] },
     },
   ]);
   assert.deepEqual(result, {
@@ -976,11 +976,11 @@ test("forwards explicit Skill invocation to the Host-owned Turn admission", asyn
     turnId: "turn-skill",
     attachments: [],
     inlineReferences: [],
-    skillInvocation: {
+    preparation: fixturePreparation({
       loaded: [{ id: "review", name: "Review" }],
       failed: [],
       receipts: [],
-    },
+    }),
   });
 });
 
@@ -996,7 +996,7 @@ test("submits an ordinary composer message once under its stable message identit
           return {
             disposition: "turn_started",
             turnId: "host-turn",
-            skillInvocation: { loaded: [], failed: [], receipts: [] },
+            preparation: [],
           };
         },
       }),
@@ -1033,7 +1033,7 @@ test("submits an ordinary composer message once under its stable message identit
     turnId: "host-turn",
     attachments: [],
     inlineReferences: [],
-    skillInvocation: { loaded: [], failed: [], receipts: [] },
+    preparation: [],
   });
 });
 
@@ -1329,11 +1329,12 @@ test('submits a slash Skill message and reports the Host Skill outcome', async (
           submits.push(input);
           return {
             disposition: 'blocked',
-            skillInvocation: {
+            message: 'Input unavailable',
+            preparation: fixturePreparation({
               loaded: [],
               failed: [{ request: 'missing', reason: 'not_found' }],
               receipts: [],
-            },
+            }),
           };
         },
       }),
@@ -1355,12 +1356,13 @@ test('submits a slash Skill message and reports the Host Skill outcome', async (
   }]);
   assert.deepEqual(result, {
     ok: false,
-    reason: 'skill_invocation_failed',
-    skillInvocation: {
+    reason: 'input_preparation_failed',
+    message: 'Input unavailable',
+    preparation: fixturePreparation({
       loaded: [],
       failed: [{ request: 'missing', reason: 'not_found' }],
       receipts: [],
-    },
+    }),
   });
 });
 
@@ -1379,7 +1381,7 @@ test("queues a mid-turn send as steering when the Host reports the session busy"
         getSession: async () => session(),
         submitMessage: async (input) => {
           submits.push(input);
-          return { disposition: "steering", queueRevision: 1, skillInvocation };
+          return { disposition: "steering", queueRevision: 1, preparation: fixturePreparation(skillInvocation) };
         },
       }),
       observer: unusedObserver(),
@@ -1414,7 +1416,7 @@ test("queues a mid-turn send as steering when the Host reports the session busy"
     turnId: "turn-1",
     attachments: [],
     inlineReferences: [],
-    skillInvocation,
+    preparation: fixturePreparation(skillInvocation),
   });
   assert.deepEqual(changes, [
     { reason: "status-change", sessionId: "session-1" },
@@ -1458,7 +1460,7 @@ test("resolves a twice-interrupted send as an unknown outcome", async () => {
       ok: false,
       reason: "outcome_unknown",
       messageId: "turn-1",
-      skillInvocation: { loaded: [], failed: [], receipts: [] },
+      preparation: [],
     },
   );
   assert.equal(submits, 2);
@@ -1501,7 +1503,7 @@ test("retries a dispatched send with its original message identity", async () =>
           return {
             disposition: "steering",
             queueRevision: 1,
-            skillInvocation: { loaded: [], failed: [], receipts: [] },
+            preparation: [],
           };
         },
       }),
@@ -1538,7 +1540,7 @@ test("retries a dispatched send with its original message identity", async () =>
     messageId: "turn-1",
     attachments: [],
     inlineReferences: [],
-    skillInvocation: { loaded: [], failed: [], receipts: [] },
+    preparation: [],
   });
   assert.deepEqual(
     await ipc.invoke("sessions:send", "session-1", {
@@ -1550,7 +1552,7 @@ test("retries a dispatched send with its original message identity", async () =>
       ok: false,
       reason: "outcome_unknown",
       messageId: "turn-unknown",
-      skillInvocation: { loaded: [], failed: [], receipts: [] },
+      preparation: [],
     },
   );
   assert.deepEqual(
@@ -1563,7 +1565,7 @@ test("retries a dispatched send with its original message identity", async () =>
       ok: false,
       reason: "outcome_unknown",
       messageId: "turn-unknown",
-      skillInvocation: { loaded: [], failed: [], receipts: [] },
+      preparation: [],
     },
   );
 });
@@ -1581,7 +1583,7 @@ test("answers a send with the Turn the Host started for it", async () => {
           return {
             disposition: "turn_started",
             turnId: "turn-9",
-            skillInvocation: { loaded: [], failed: [], receipts: [] },
+            preparation: [],
           };
         },
       }),
@@ -1608,7 +1610,7 @@ test("answers a send with the Turn the Host started for it", async () => {
     turnId: "turn-9",
     attachments: [],
     inlineReferences: [],
-    skillInvocation: { loaded: [], failed: [], receipts: [] },
+    preparation: [],
   });
   assert.deepEqual(submits, [{
     sessionId: "session-1",
@@ -1650,7 +1652,7 @@ test("propagates a busy explicit Skill send instead of degrading it to steering"
       turnId: "turn-1",
       text: "",
       displayText: "/skill:review",
-      skillIds: ["review"],
+      inputSelections: { "maka.skills": ["review"] },
     }),
     (error: unknown) =>
       error instanceof RuntimeHostOperationError && error.code === "session_busy",
@@ -1665,7 +1667,7 @@ test("propagates a busy explicit Skill send instead of degrading it to steering"
         displayText: "/skill:review",
         inlineReferences: [],
       },
-      skillIds: ["review"],
+      inputSelections: { "maka.skills": ["review"] },
     },
   ]);
 });
@@ -1682,7 +1684,7 @@ test("lets the Host queue a textual Skill token as steering", async () => {
           return {
             disposition: "steering",
             queueRevision: 1,
-            skillInvocation: { loaded: [], failed: [], receipts: [] },
+            preparation: [],
           };
         },
       }),
@@ -1707,7 +1709,7 @@ test("lets the Host queue a textual Skill token as steering", async () => {
       turnId: "turn-1",
       attachments: [],
       inlineReferences: [],
-      skillInvocation: { loaded: [], failed: [], receipts: [] },
+      preparation: [],
     },
   );
   assert.equal(submits.length, 1);
@@ -1721,11 +1723,12 @@ test("reports a Host-blocked Skill send as a Skill failure", async () => {
         getSession: async () => session(),
         submitMessage: async () => ({
           disposition: "blocked",
-          skillInvocation: {
+          message: 'Input unavailable',
+          preparation: fixturePreparation({
             loaded: [],
             failed: [{ request: "missing", reason: "not_found" }],
             receipts: [],
-          },
+          }),
         }),
       }),
       newId: () => "id-1",
@@ -1741,12 +1744,13 @@ test("reports a Host-blocked Skill send as a Skill failure", async () => {
     }),
     {
       ok: false,
-      reason: "skill_invocation_failed",
-      skillInvocation: {
+      reason: "input_preparation_failed",
+      message: 'Input unavailable',
+      preparation: fixturePreparation({
         loaded: [],
         failed: [{ request: "missing", reason: "not_found" }],
         receipts: [],
-      },
+      }),
     },
   );
 });
@@ -1766,7 +1770,7 @@ test("queues explicit Desktop follow-ups", async () => {
         getSession: async () => session(),
         submitMessage: async (input) => {
           submits.push(input);
-          return { disposition: "followup", queueRevision: 4, skillInvocation };
+          return { disposition: "followup", queueRevision: 4, preparation: fixturePreparation(skillInvocation) };
         },
       }),
       observer: unusedObserver(),
@@ -1816,7 +1820,7 @@ test("queues explicit Desktop follow-ups", async () => {
         },
       ],
       inlineReferences: [],
-      skillInvocation,
+      preparation: fixturePreparation(skillInvocation),
     },
   );
   assert.deepEqual(submits, [
@@ -1988,7 +1992,7 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
       return {
         disposition: "steering",
         queueRevision: 2,
-        skillInvocation: { loaded: [], failed: [], receipts: [] },
+        preparation: [],
       };
     },
     interruptTurn: async (input) => {
@@ -2072,7 +2076,7 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
       disposition: "steering",
       attachments: [],
       inlineReferences: [],
-      skillInvocation: { loaded: [], failed: [], receipts: [] },
+      preparation: [],
     },
   );
   assert.deepEqual(
@@ -2448,7 +2452,7 @@ test('steers WorkHub through Host admission even though the ordinary Session cat
       getSession: async () => null,
       submitMessage: async (input) => {
         submits.push(input);
-        return { disposition: 'steering', queueRevision: 1, skillInvocation: { loaded: [], failed: [], receipts: [] } };
+        return { disposition: 'steering', queueRevision: 1, preparation: [] };
       },
     }),
     observer: unusedObserver(), attachmentApprovals: createAttachmentApprovalRegistry(),
@@ -2460,3 +2464,7 @@ test('steers WorkHub through Host admission even though the ordinary Session cat
   assert.deepEqual(submits, [{ sessionId: WORKHUB_COORDINATION_SESSION_ID, messageId: 'workhub-steering', placement: 'current_turn', content: { text: 'Change direction immediately', inlineReferences: [] } }]);
   assert.equal((result as { disposition: string }).disposition, 'steering');
 });
+
+function fixturePreparation(receipt: unknown): import('@maka/runtime-host/protocol').InputReceipt[] {
+  return [{ source: { kind: 'input', name: 'maka.skills', packageId: 'maka.skills', entryId: 'skills', activation: "fixture", revision: "1" }, receipt: JSON.parse(JSON.stringify(receipt)) }];
+}

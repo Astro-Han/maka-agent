@@ -36,7 +36,6 @@ interface HostHandoffCopy {
   manualOperatorDescription: string;
   activity(connections: number, activeOperations: number): string;
   background(count: number): string;
-  backgroundUnknown: string;
   waiting: { recheck: string; natural: string; blocked: string };
   repairNotice: string;
   labels: {
@@ -90,7 +89,6 @@ const COPY = {
       '当前版本无法连接，且尚未执行更新。请查看诊断或更新客户端，完成后重新检查。',
     activity: (connections, operations) => `${connections} 个连接 · ${operations} 个进行中的操作`,
     background: (count) => `${count} 个后台工作`,
-    backgroundUnknown: '后台工作数量未知',
     waiting: {
       recheck: '重新检查只会重试连接，不会更新服务。',
       natural: 'Maka 会持续检查，并在可以安全继续时自动继续。',
@@ -153,7 +151,6 @@ const COPY = {
       '目前版本無法連線，且尚未執行更新。請查看診斷或更新用戶端，完成後重新檢查。',
     activity: (connections, operations) => `${connections} 個連線 · ${operations} 個進行中的操作`,
     background: (count) => `${count} 個背景工作`,
-    backgroundUnknown: '背景工作數量未知',
     waiting: {
       recheck: '重新檢查只會重試連線，不會更新服務。',
       natural: 'Maka 會持續檢查，並在可以安全繼續時自動繼續。',
@@ -219,7 +216,6 @@ const COPY = {
     activity: (connections, operations) =>
       `${connections} connections · ${operations} operations in progress`,
     background: (count) => `${count} background activities`,
-    backgroundUnknown: 'Background activity count unknown',
     waiting: {
       recheck: 'Recheck retries the connection without updating the service.',
       natural: 'Maka keeps checking and continues automatically when it is safe.',
@@ -277,12 +273,7 @@ export function formatHostHandoff(
     ? `${view.target.name}: ${view.packageChange.current} → ${view.packageChange.target}`
     : '';
   const activity = view.activity;
-  const background = activity?.drainResidencies;
-  const backgroundFacts = !activity
-    ? ''
-    : background !== undefined
-      ? copy.background(background)
-      : copy.backgroundUnknown;
+  const backgroundFacts = activity ? copy.background(activity.drainResidencies) : '';
   const facts = activity ? copy.activity(activity.connections, activity.activeOperations) : '';
   const waiting = view.manualRecheck
     ? copy.waiting.recheck

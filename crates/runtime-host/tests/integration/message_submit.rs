@@ -70,21 +70,24 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
         )).unwrap();
     }
     {
-        let store = maka_config::ConfigurationStore::for_root(std::sync::Arc::new(fixture.owner()))
-            .await
-            .unwrap();
-        store
-            .set_skill_preference(
-                0,
-                "project:maka:disabled".into(),
-                maka_runtime::skills::SkillPreference {
-                    enabled: false,
-                    pinned: false,
-                },
+        let log = fixture.log().await;
+        log.plugin_data_batch(
+            &maka_plugins::storage::Namespace::new(
+                maka_skills::plugin::ID,
+                maka_plugins::composition::Scope::Profile,
             )
-            .await
-            .unwrap();
-        store.close().await.unwrap();
+            .unwrap(),
+            vec![maka_plugins::storage::Mutation {
+                key: "preferences".into(),
+                expected_revision: None,
+                data: maka_plugins::storage::Data::Present(serde_json::json!({
+                    "project:maka:disabled": {"enabled": false, "pinned": false}
+                })),
+            }],
+        )
+        .await
+        .unwrap();
+        log.close().await.unwrap();
     }
     fixture
         .run_with_options(
@@ -147,7 +150,7 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
         input:
             maka_runtime::input::InvocationInput::Message {
                 source_messages,
-                skill_invocation,
+                content,
                 ..
             },
         ..
@@ -159,7 +162,7 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
         source_messages.is_empty(),
         "legacy admission must not fabricate a Message identity"
     );
-    assert_eq!(skill_invocation.as_ref().unwrap().loaded[0].id, "legacy");
+    assert_eq!(content.preparation[0].receipt["loaded"][0]["id"], "legacy");
     let saved: serde_json::Value = serde_json::from_slice(
         &std::fs::read(fixture.workspace.join("message-submit.json")).unwrap(),
     )
@@ -232,7 +235,10 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
                 .text
                 .contains("Changed after admission.")
         );
-        assert_eq!(proof.source().skill_invocation.loaded[0].id, skill);
+        assert_eq!(
+            proof.source().message.content.preparation[0].receipt["loaded"][0]["id"],
+            skill
+        );
     }
     assert!(
         log.message_cancelled("message-submit", "retracted-user-id")

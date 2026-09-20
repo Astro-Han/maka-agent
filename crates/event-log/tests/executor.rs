@@ -46,7 +46,6 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
             content: "external task".into(),
             source_messages: vec![],
             request_fingerprint: None,
-            skill_invocation: None,
         },
         configuration: Some(Box::new(InvocationConfiguration {
             cwd: temp.path().to_string_lossy().into_owned(),

@@ -52,7 +52,7 @@ async fn artifact_mutation_faults_flush_failure_drain_and_never_publish_or_repla
         writer
             .write(
                 &json!({"kind":"hello","clientInstanceId":"artifact-boundary",
-            "surface":"desktop","activitySnapshotVersion":2,"protocolMin":0,"protocolMax":0,
+            "protocolMin":0,"protocolMax":0,
             "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH,"compositionId":"maka.interactive"}),
             )
             .await

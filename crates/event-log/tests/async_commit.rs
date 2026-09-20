@@ -39,7 +39,6 @@ async fn dropped_commit_waiter_retains_writer_until_commit_and_publishes_only_du
         Fact::InvocationOpened {
             configuration: None,
             input: InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "one commit".into(),
                 request_fingerprint: None,

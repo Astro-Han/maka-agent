@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { HOST_OPERATION_SPECS, type PluginRemoteInput, type PluginRemoteResult } from '@maka/runtime-host/protocol';
+import { HOST_OPERATION_SPECS, type PluginRemoteInput, type PluginRemoteResult, type PluginAuthorizationInput, type PluginAuthorizationResult } from '@maka/runtime-host/protocol';
 import type { IpcMain, IpcMainInvokeEvent, WebContents } from 'electron';
 import { isAbsolute } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -29,6 +29,8 @@ interface DocumentOwner {
   readonly pending: Set<Promise<unknown>>;
   pendingOpens: number;
   closed: boolean;
+  readonly cancellation: AbortController;
+  readonly authorizations: Map<string, AbortController>;
   dispose(): void;
 }
 
@@ -41,6 +43,11 @@ export function registerClientPluginRemoteIpc(input: {
   };
   readonly ownsRenderer: (contents: WebContents) => boolean;
   readonly report: (error: unknown) => void;
+  readonly authorization?: {
+    validate(client: PluginAuthorizationInput['client']): Promise<void>;
+    confirm(input: PluginAuthorizationInput, signal: AbortSignal): Promise<boolean>;
+    request(input: PluginAuthorizationInput): Promise<PluginAuthorizationResult>;
+  };
   readonly files?: {
     validate(input: PluginClientQueryInput): Promise<void>;
     pick(): Promise<string | null>;
@@ -71,10 +78,11 @@ export function registerClientPluginRemoteIpc(input: {
     if (previous?.nonce === nonce) return previous;
     previous?.dispose();
     const state: DocumentOwner = {
-      nonce, documents: new Set(), pending: new Set(), pendingOpens: 0, closed: false,
+      nonce, documents: new Set(), pending: new Set(), pendingOpens: 0, closed: false, cancellation: new AbortController(), authorizations: new Map(),
       dispose() {
         if (state.closed) return;
         state.closed = true;
+        state.cancellation.abort();
         if (owners.get(sender) === state) owners.delete(sender);
         sender.removeListener('did-start-navigation', navigation);
         sender.removeListener('render-process-gone', dispose);
@@ -149,6 +157,43 @@ export function registerClientPluginRemoteIpc(input: {
     const path = await files.pick();
     if (owner.closed) throw new Error('Client document retired during file selection');
     return path;
+  });
+
+  input.ipcMain.handle('plugins:authorization-cancel', (event, nonce: unknown, expectedEpoch: unknown, requestId: unknown) => {
+    const owner = owners.get(event.sender);
+    if (closed || !owner || owner.closed || owner.nonce !== nonce || expectedEpoch !== epoch ||
+      !input.ownsRenderer(event.sender) || event.senderFrame?.frameToken !== event.sender.mainFrame.frameToken) return;
+    if (typeof requestId === 'string') owner.authorizations.get(requestId)?.abort();
+  });
+
+  input.ipcMain.handle('plugins:authorization', async (event, nonce: unknown, expectedEpoch: unknown, raw: unknown, requestId: unknown): Promise<PluginAuthorizationResult> => {
+    const owner = ownerFor(event, nonce);
+    if (expectedEpoch !== epoch) throw new Error('Client connection has retired');
+    const authorization = input.authorization;
+    if (!authorization) throw new Error('Plugin authorization is unavailable');
+    const value = HOST_OPERATION_SPECS['plugin.authorization'].decodeInput(raw);
+    if (typeof requestId !== 'string' || !/^[0-9a-f-]{36}$/i.test(requestId) || owner.authorizations.has(requestId))
+      throw new Error('Invalid authorization request identity');
+    if (owner.authorizations.size >= 32) throw new Error('Authorization request limit exceeded');
+    const cancellation = new AbortController();
+    owner.authorizations.set(requestId, cancellation);
+    const signal = AbortSignal.any([cancellation.signal, owner.cancellation.signal, AbortSignal.timeout(90_000)]);
+    return track(owner.pending, (async () => {
+      try {
+      await authorization.validate(value.client);
+      signal.throwIfAborted();
+      if (value.command.kind === 'approve') {
+        if (!await authorization.confirm(value, signal) || signal.aborted) return {kind:'grant',grant:null};
+      }
+      signal.throwIfAborted();
+      // Revalidate publication after consent; a pending dialog never follows a replacement.
+      await authorization.validate(value.client);
+      signal.throwIfAborted();
+      // Beyond this cut Host owns the accepted command. Cancellation never
+      // retracts a durable grant; its operation identity recovers the receipt.
+      return await authorization.request(value);
+      } finally { owner.authorizations.delete(requestId); }
+    })());
   });
 
   return async () => {

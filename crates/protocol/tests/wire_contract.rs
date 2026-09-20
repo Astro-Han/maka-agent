@@ -23,15 +23,14 @@ use serde_json::{Value, json};
 // Source oracle: protocol/index.ts decodeClientFrame, client/connection.ts
 // exchangeRuntimeHostHandshake; supported domains aligned to d2e6c1f27.
 fn hello() -> Value {
-    json!({"kind":"hello", "clientInstanceId":"desktop-instance", "surface":"desktop",
-        "activitySnapshotVersion":2, "protocolMin":0, "protocolMax":0,
+    json!({"kind":"hello", "clientInstanceId":"desktop-instance",
+        "protocolMin":0, "protocolMax":0,
         "compatibilityEpoch":COMPATIBILITY_EPOCH, "compositionId":"maka.interactive"})
 }
 
 #[test]
-fn hello_preserves_source_tolerance_and_negotiates_before_admission() {
+fn hello_is_closed_and_negotiates_before_admission() {
     let mut wire = hello();
-    wire["futureField"] = json!(true);
     let parsed = decode_hello(&wire).unwrap();
     let host = ProtocolRange { min: 0, max: 0 };
     assert_eq!(
@@ -49,8 +48,6 @@ fn hello_preserves_source_tolerance_and_negotiates_before_admission() {
     );
     let normalized = decode_message(&encode_message(&parsed).unwrap()).unwrap();
     assert_eq!(normalized["kind"], "hello");
-    assert!(normalized.get("surface").is_none());
-    assert!(normalized.get("futureField").is_none());
 
     for (field, value, valid) in [
         ("clientInstanceId", json!("😀".repeat(64)), true),
@@ -63,20 +60,24 @@ fn hello_preserves_source_tolerance_and_negotiates_before_admission() {
         ("compatibilityEpoch", json!(1_000_001), false),
         ("compositionId", json!("maka..interactive"), false),
         ("compositionId", Value::Null, false),
-        ("activitySnapshotVersion", json!(99), true),
+        ("activitySnapshotVersion", json!(2), false),
+        ("surface", json!("desktop"), false),
+        ("futureField", json!(true), false),
         ("takeover", json!({"expectedHostEpoch":"old"}), false),
     ] {
         let mut frame = hello();
         frame[field] = value;
         assert_eq!(decode_hello(&frame).is_ok(), valid, "{field}: {frame}");
     }
-    wire.as_object_mut().unwrap().remove("compatibilityEpoch");
-    wire.as_object_mut().unwrap().remove("compositionId");
-    let legacy = decode_hello(&wire).unwrap();
-    assert_eq!(legacy.compatibility_epoch, 0);
-    assert_eq!(legacy.composition_id, COMPOSITION_ID);
+    for field in ["compatibilityEpoch", "compositionId"] {
+        let mut missing = wire.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(decode_hello(&missing).is_err(), "{field}");
+    }
     wire["generation"] = json!("next");
     wire["takeover"] = json!({"expectedHostEpoch":"old", "unknown":true});
+    assert!(decode_hello(&wire).is_err());
+    wire["takeover"] = json!({"expectedHostEpoch":"old"});
     assert!(decode_hello(&wire).unwrap().takeover.is_some());
 }
 
@@ -87,9 +88,10 @@ fn host_handshake_roundtrips_and_rejects_invalid_nested_evidence() {
         "compositionId":"maka.interactive", "compositionRevision":"3", "state":"ready"});
     let incompatible = json!({"kind":"incompatible", "hostEpoch":"epoch", "protocolMin":0,
         "protocolMax":0, "state":"ready", "replacement":"wait_for_idle_exit",
+        "compatibilityEpoch":COMPATIBILITY_EPOCH,"compositionId":COMPOSITION_ID,"compositionRevision":"3",
         "activity":{"connections":0, "activeOperations":0, "processUptimeSeconds":1,
         "residencies":[], "drainResidencies":0, "cooperativeHandoff":false}});
-    let draining = json!({"kind":"draining", "hostEpoch":"epoch"});
+    let draining = json!({"kind":"draining", "hostEpoch":"epoch", "compositionId":COMPOSITION_ID,"compositionRevision":"3"});
     for frame in [&accepted, &incompatible, &draining] {
         let decoded = decode_host_handshake(frame).unwrap();
         let encoded = decode_message(&encode_message(&decoded).unwrap()).unwrap();

@@ -29,10 +29,6 @@ test('releases a file update lock when its process is killed', async (t) => {
   await assertKilledHolderCanBeRecovered(t, []);
 });
 
-test('recovers a supervised legacy directory lock when its process is killed', async (t) => {
-  await assertKilledHolderCanBeRecovered(t, ['legacy']);
-});
-
 test('keeps the authority lease held by an inherited package-switch descriptor', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'maka-inherited-file-update-lock-'));
   const targetPath = join(root, 'state');

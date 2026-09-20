@@ -110,20 +110,13 @@ impl Skills {
                 entry: Some(MutationEntry::Skill(item)),
             });
         }
-        // The admitted worker retains its repository through retirement.
-        let committed = self
+        // Use the public store's commit receipt; retirement may prevent a new query.
+        let (committed, preferences) = self
             .basis
             .preferences
             .compare_exchange(preferences.revision, reference.into(), next)
-            .await
-            .map_err(Error::OutcomeUnknown)?;
-        let preferences = Some(self.basis.preferences.read().await.map_err(|error| {
-            if committed {
-                Error::OutcomeUnknown(error)
-            } else {
-                Error::Source(error)
-            }
-        })?);
+            .await?;
+        let preferences = Some(preferences);
         let revision =
             catalog::revision(&input.context, &workspace, &sources, preferences.as_ref()).map_err(
                 |error| {
@@ -210,9 +203,9 @@ impl Skills {
             Ok((change, sources)) => {
                 let preferences = self.basis.preferences.read().await.map_err(|error| {
                     if change.changed {
-                        Error::OutcomeUnknown(error)
+                        Error::OutcomeUnknown(error.to_string())
                     } else {
-                        Error::Source(error)
+                        error
                     }
                 })?;
                 let revision = if change.changed {

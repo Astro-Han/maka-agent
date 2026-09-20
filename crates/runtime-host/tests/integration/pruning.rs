@@ -119,7 +119,7 @@ async fn original_client_reads_frozen_archives_after_compaction_and_restart_with
             .iter()
             .filter_map(|stored| match &stored.event.fact {
                 Fact::ModelRequested {
-                    purpose: Some(ModelPurpose::Summary),
+                    purpose: ModelPurpose::Summary,
                     step_id,
                     effective_source_digest,
                     ..

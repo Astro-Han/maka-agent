@@ -63,7 +63,7 @@ export async function resolveDesktopWslHostHandoff(
     action: 'status', expectedTarget, signal,
   });
   if (status.kind !== 'result' || status.action !== 'status' || status.service.lifecycle?.mode !== 'on_demand' ||
-      !status.service.pid || !status.service.installedVersion) {
+      !status.service.pid || !status.service.installedVersion || !status.service.configurationFingerprint) {
     return { ...base, operatorStep: guidance.source };
   }
   const setupPackage = await deps.resolvePackage(signal);
@@ -73,8 +73,6 @@ export async function resolveDesktopWslHostHandoff(
     return { ...base, operatorStep: guidance.target };
   }
   const currentVersion = status.service.installedVersion;
-  // Legacy operators omit the fingerprint. The transaction still fences the source
-  // package version, deployment identity and exact Host generation under its lease.
   const expectedConfigFingerprint = status.service.configurationFingerprint;
   const expectedHost = { hostEpoch: error.hostEpoch, pid: status.service.pid };
   const identity = JSON.stringify([base.identity, binding.deployment, expectedHost, currentVersion, expectedConfigFingerprint, setupPackage]);

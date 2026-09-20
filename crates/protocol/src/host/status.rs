@@ -57,12 +57,11 @@ pub struct Diagnostics<'a> {
     pub composition_modules: &'a [&'a str],
     pub residencies: Vec<Residency<'a>>,
     pub upgrade_blocking_activity: bool,
+    pub drain_residencies: usize,
     pub protocol_version: u64,
     pub compatibility_epoch: u64,
     pub pid: u32,
     pub process_uptime_seconds: u64,
-    /// Legacy wire name. A native Host explicitly reports that Node is absent.
-    pub node_version: &'a str,
     pub platform: Platform,
     pub arch: &'a str,
     pub os_release: String,
@@ -82,11 +81,11 @@ const DIAGNOSTIC_FIELDS: &[&str] = &[
     "compositionModules",
     "residencies",
     "upgradeBlockingActivity",
+    "drainResidencies",
     "protocolVersion",
     "compatibilityEpoch",
     "pid",
     "processUptimeSeconds",
-    "nodeVersion",
     "platform",
     "arch",
     "osRelease",
@@ -131,10 +130,11 @@ pub fn decode_diagnostics(value: &Value) -> Result<()> {
         "compatibilityEpoch",
         "pid",
         "processUptimeSeconds",
+        "drainResidencies",
     ] {
         codec::count(&value[key], key)?;
     }
-    for (key, limit) in [("nodeVersion", 64), ("arch", 64), ("osRelease", 256)] {
+    for (key, limit) in [("arch", 64), ("osRelease", 256)] {
         codec::string(&value[key], key, limit)?;
     }
     if !matches!(

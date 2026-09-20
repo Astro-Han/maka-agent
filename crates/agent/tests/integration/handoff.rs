@@ -105,7 +105,7 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
                 for fact in [
                     Fact::InvocationOpened { configuration: Some(Box::new(run.configuration.clone())),
                         input: InvocationInput::Message { content: text.into(), request_fingerprint: None,
-                            source_messages: Vec::new(), skill_invocation: None } },
+                            source_messages: Vec::new(), } },
                     Fact::InvocationEnded { outcome: InvocationOutcome::Cancelled { source: "user".into() } },
                 ] {
                     log.append(&EventWrite::plain(RuntimeEvent::new(invocation.clone(), fact)).unwrap()).await.unwrap();

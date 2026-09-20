@@ -62,7 +62,6 @@ import type {
   RewindTarget,
   SessionResumeAvailability,
 } from '../session-driver.js';
-import { skillInvocationBlockedMessage } from '../session-driver.js';
 import { SafeBoundaryResumeParkedError } from '../runtime-host-session-driver.js';
 import { listApiKeyOnboardableProviders } from '../onboarding-catalog.js';
 import { projectRuntimeHostModelChoices } from '../runtime-host-onboarding.js';
@@ -8481,54 +8480,7 @@ Slug openai-work<cursor>
       await waitFor(() =>
         plainTerminalOutput(terminal.output())
           .replace(/\s+/g, ' ')
-          .includes('Could not load skills /skill:nope (not found); no model request was made.'),
-      );
-      assert.equal(driver.prompts.length, 0);
-
-      exitMaka(terminal);
-      await Promise.race([
-        run,
-        delay(CLOSE_BUDGET_MS).then(() => {
-          throw new Error('TUI did not close during test cleanup');
-        }),
-      ]);
-    }
-  });
-
-  test('does not create a turn when distinct skill requests exceed the preparation limit', async () => {
-    {
-      const terminal = new FakeTerminal();
-      const driver = new HostSkillDriver({
-        loaded: [],
-        failed: [{ reason: 'too_many_requests', requestLimit: 50 }],
-        receipts: [],
-      });
-      const run = runMakaPiTui({
-        title: 'Maka',
-        driver,
-        cwd: '/repo',
-        model: 'claude-sonnet-4-5',
-        connectionSlug: 'claude-subscription',
-        permissionMode: 'ask',
-        terminal,
-        listSkills: async () => [],
-      });
-      const prompt = [
-        '/skill:alpha',
-        ...Array.from({ length: 50 }, (_, index) => `/skill:missing-${index}`),
-        '帮我整理',
-      ].join(' ');
-
-      terminal.input(prompt);
-      terminal.input('\r');
-      // The notice wraps across screen lines at 80 columns, so match against a
-      // whitespace-collapsed copy instead of the raw output.
-      await waitFor(() =>
-        plainTerminalOutput(terminal.output())
-          .replace(/\s+/g, ' ')
-          .includes(
-            'more than the 50-request limit (too many requests); no model request was made.',
-          ),
+          .includes('Input preparation rejected'),
       );
       assert.equal(driver.prompts.length, 0);
 
@@ -11895,16 +11847,24 @@ class HostSkillDriver extends SlashCommandDriver {
     options: MakaSubmitMessageOptions,
   ): Promise<TurnMessageSubmitResult | undefined> {
     if (this.#refuses()) {
-      return { disposition: 'blocked', skillInvocation: this.skillInvocation };
+      return {
+        disposition: 'blocked',
+        message: 'Input preparation rejected',
+        preparation: fixturePreparation(this.skillInvocation),
+      };
     }
     // Admitted: the receipt for what was resolved rides the answer, which is
     // the client's only sight of it.
     const admitted = await super.submitMessage(text, options);
     if (this.admittedDisposition === 'steering') {
-      return { disposition: 'steering', queueRevision: 1, skillInvocation: this.skillInvocation };
+      return {
+        disposition: 'steering',
+        queueRevision: 1,
+        preparation: fixturePreparation(this.skillInvocation),
+      };
     }
     return admitted?.disposition === 'turn_started'
-      ? { ...admitted, skillInvocation: this.skillInvocation }
+      ? { ...admitted, preparation: fixturePreparation(this.skillInvocation) }
       : admitted;
   }
 
@@ -11914,7 +11874,7 @@ class HostSkillDriver extends SlashCommandDriver {
   ): Promise<MakaPreparedSessionTurn> {
     // `turn.start` still refuses outright; its only caller is headless
     // `maka run`, which reports the refusal as an ordinary failure.
-    if (this.#refuses()) throw new Error(skillInvocationBlockedMessage(this.skillInvocation));
+    if (this.#refuses()) throw new Error('Input preparation rejected');
     return super.preparePrompt(prompt, options);
   }
 }
@@ -12696,7 +12656,7 @@ async function admitMessageAsTurn(
   text: string,
   options: MakaSubmitMessageOptions,
 ): Promise<TurnMessageSubmitResult> {
-  const { skillInvocation: _admissionReceipt, ...turn } = await driver.preparePrompt(text, {
+  const { preparation: _admissionReceipt, ...turn } = await driver.preparePrompt(text, {
     turnId: options.messageId,
     ...(options.modelText !== undefined ? { modelText: options.modelText } : {}),
     ...(options.turnOrchestration ? { turnOrchestration: options.turnOrchestration } : {}),
@@ -12711,7 +12671,7 @@ async function admitMessageAsTurn(
   return {
     disposition: 'turn_started',
     turnId: turn.turnId,
-    skillInvocation: { loaded: [], failed: [], receipts: [] },
+    preparation: [],
   };
 }
 
@@ -12960,4 +12920,22 @@ async function runFatalExitProbe(
   const [code, signal] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
   clearTimeout(killTimer);
   return { code, signal, stdout, stderr };
+}
+
+function fixturePreparation(
+  receipt: unknown,
+): import('@maka/runtime-host/protocol').InputReceipt[] {
+  return [
+    {
+      source: {
+        kind: 'input',
+        name: 'maka.skills',
+        packageId: 'maka.skills',
+        entryId: 'skills',
+        activation: 'fixture',
+        revision: '1',
+      },
+      receipt: JSON.parse(JSON.stringify(receipt)),
+    },
+  ];
 }

@@ -26,21 +26,18 @@ fn input() -> Value {
 fn live() -> Value {
     json!({"sessionId":"s1","turnId":"t1","runId":"r1","status":"running"})
 }
-fn empty_skills() -> Value {
-    json!({"loaded":[],"failed":[],"receipts":[]})
-}
 
 #[test]
 fn admission_canonicalizes_and_checks_utf16_occurrences() {
     let mut request = input();
     request["maxSteps"] = json!(1.0);
-    request["skillIds"] = json!([]);
+    request["inputSelections"] = json!({});
     request["content"] = json!({"text":"😀 /skill:build","displayText":"😀 /skill:build",
         "attachments":[],"quotes":[],"directoryReferences":[],
         "inlineReferences":[{"kind":"skill","value":"/skill:build","label":"build","start":3}]});
     let decoded = decode_turn_start_input(&request).unwrap();
     assert_eq!(decoded.max_steps, Some(1));
-    assert!(decoded.skill_ids.is_none());
+    assert!(decoded.input_selections.is_empty());
     assert!(decoded.content.display_text.is_none());
     assert!(decoded.content.attachments.is_none());
     assert_eq!(decoded.content.inline_references.unwrap()[0].start, 3);
@@ -49,7 +46,7 @@ fn admission_canonicalizes_and_checks_utf16_occurrences() {
     request = input();
     request["content"]["text"] = json!("");
     assert!(decode_turn_start_input(&request).is_err());
-    request["skillIds"] = json!(["plugin:build"]);
+    request["inputSelections"] = json!({"builder":["build"]});
     assert!(decode_turn_start_input(&request).is_ok());
     for invalid in [
         json!(0),
@@ -124,9 +121,9 @@ fn snapshots_preserve_terminal_evidence_and_retry_constraints() {
 }
 
 #[test]
-fn start_results_bind_identity_and_validate_skill_receipts() {
+fn start_results_bind_identity_and_validate_provider_receipts() {
     let input = decode_turn_start_input(&input()).unwrap();
-    let mut output = json!({"kind":"started","turn":live(),"skillInvocation":empty_skills()});
+    let mut output = json!({"kind":"started","turn":live(),"preparation":[]});
     assert!(
         assert_start_output_for_input(&input, &decode_turn_start_result(&output).unwrap()).is_ok()
     );
@@ -134,15 +131,13 @@ fn start_results_bind_identity_and_validate_skill_receipts() {
     assert!(
         assert_start_output_for_input(&input, &decode_turn_start_result(&output).unwrap()).is_err()
     );
-    let mut blocked = json!({"kind":"blocked","skillInvocation":empty_skills()});
+    let mut blocked = json!({"kind":"blocked","message":"Document unavailable","preparation":[]});
     assert!(decode_turn_start_result(&blocked).is_err());
-    blocked["skillInvocation"]["failed"] =
-        json!([{"reason":"too_many_requests","requestLimit":50}]);
-    blocked["skillInvocation"]["receipts"] = json!([{"invocation":"explicit","success":false,"reason":"too_many_requests","requestLimit":50}]);
+    blocked["preparation"] = json!([{"source":{"kind":"input","name":"review","packageId":"reviewer","entryId":"entry","activation":"1","revision":"1"},"receipt":{"missing":"report.md"}}]);
     assert!(decode_turn_start_result(&blocked).is_ok());
-    blocked["skillInvocation"]["receipts"][0]["invocation"] = json!("model_tool");
+    blocked["preparation"][0]["source"]["kind"] = json!("tool");
     assert!(decode_turn_start_result(&blocked).is_err());
-    blocked["skillInvocation"]["receipts"] = json!([]);
-    blocked["skillInvocation"]["loaded"] = json!([{"id":"loaded","name":"Loaded"}]);
+    blocked["preparation"][0]["source"]["kind"] = json!("input");
+    blocked["message"] = json!("");
     assert!(decode_turn_start_result(&blocked).is_err());
 }

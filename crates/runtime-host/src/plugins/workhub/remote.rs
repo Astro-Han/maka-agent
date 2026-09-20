@@ -110,7 +110,7 @@ impl Method for Call {
                         message_id: request.message_id,
                         content: request.content,
                         placement: request.placement,
-                        skill_ids: None,
+                        input_selections: Default::default(),
                         turn_orchestration: None,
                     };
                     input.validate().map_err(invalid)?;

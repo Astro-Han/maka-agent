@@ -44,7 +44,7 @@ fn request(id: &str, source: &ModelContextSource) -> EventWrite {
         id,
         Fact::ModelRequested {
             effective_source_digest: Some(source.effective_source_digest.clone()),
-            purpose: Some(maka_runtime::context::ModelPurpose::Summary),
+            purpose: maka_runtime::context::ModelPurpose::Summary,
             context: None,
             step_id: format!("{id}-summary"),
             model_id: "test".into(),
@@ -68,7 +68,6 @@ pub(super) async fn closed(
         Fact::InvocationOpened {
             configuration: None,
             input: InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "question".into(),
                 request_fingerprint: None,
@@ -81,7 +80,7 @@ pub(super) async fn closed(
         id,
         Fact::ModelRequested {
             effective_source_digest: None,
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
             step_id: format!("{id}:step"),
             model_id: "test".into(),

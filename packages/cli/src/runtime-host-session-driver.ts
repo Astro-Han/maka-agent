@@ -68,7 +68,6 @@ import {
   InteractionPendingSnapshot,
   OperationInput,
   OperationOutput,
-  SessionCatalogItem,
   SessionCatalogProjection,
   SESSION_TRANSCRIPT_BOOTSTRAP_MAX_BYTES,
   WorkspaceTarget,
@@ -80,11 +79,7 @@ import {
 } from '@maka/runtime-host/protocol';
 import { RuntimeHostSessionChannel } from './runtime-host-session-channel.js';
 import type { RuntimeHostSessionChannelOpenResult } from './runtime-host-session-channel.js';
-import {
-  getRuntimeHostSession,
-  requireRuntimeHostSessionProjection as requireSession,
-  updateRuntimeHostSession,
-} from './runtime-host-session-update.js';
+import { getRuntimeHostSession, updateRuntimeHostSession } from './runtime-host-session-update.js';
 import type {
   InspectCwdChanges,
   MakaAttachedSessionTurn,
@@ -105,10 +100,7 @@ import type {
   RewindTarget,
   SessionResumeAvailability,
 } from './session-driver.js';
-import {
-  inspectSessionResumeAvailability,
-  skillInvocationBlockedMessage,
-} from './session-driver.js';
+import { inspectSessionResumeAvailability } from './session-driver.js';
 import {
   cwdRank,
   firstLine,
@@ -321,7 +313,6 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
 
   async listSessions(): Promise<SessionSummary[]> {
     const sessions = (await readRuntimeHostSessions(this.#connection))
-      .flatMap(representableSession)
       .filter((session) => !isSideConversationSession(session.labels))
       .map(projectSessionCatalogSummary);
     if (this.#executionLocation.kind === 'host') return sessions;
@@ -368,20 +359,16 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
       };
       const result = await this.#connection.request('turn.start', startInput);
       if (result.kind === 'blocked') {
-        throw new Error(skillInvocationBlockedMessage(result.skillInvocation));
+        throw new Error(result.message);
       }
       const started = result.turn;
-      const skillInvocation =
-        result.skillInvocation.loaded.length > 0 || result.skillInvocation.failed.length > 0
-          ? result.skillInvocation
-          : undefined;
       return {
         sessionId,
         turnId,
         runId: started.runId,
         events,
         summary: projectSessionCatalogSummary(configuration.session),
-        ...(skillInvocation ? { skillInvocation } : {}),
+        preparation: result.preparation,
       };
     } catch (error) {
       channel.failTurn(turnId, error);
@@ -897,7 +884,7 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
       });
       if (result.kind === 'committed') {
         return {
-          ...(await this.switchSession(requireSession(result.session).id)),
+          ...(await this.switchSession(result.session.id)),
           prompt: userFacingText(promptMessage),
         };
       }
@@ -1308,24 +1295,22 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
     if (!this.#llmConnectionId) {
       throw new Error('Runtime Host Session creation requires an exact Connection identity');
     }
-    const session = requireSession(
-      await this.#request('session.create', {
-        sessionId,
-        workspace,
-        name,
-        modelTarget: {
-          kind: 'explicit',
-          connectionId: this.#llmConnectionId,
-          connectionSlug: this.#llmConnectionSlug,
-          model: this.#model,
-        },
-        ...(this.#permissionMode === undefined ? {} : { permissionMode: this.#permissionMode }),
-        ...(this.#orchestrationMode === 'default'
-          ? {}
-          : { orchestrationMode: this.#orchestrationMode }),
-        ...(this.#thinkingLevel === undefined ? {} : { thinkingLevel: this.#thinkingLevel }),
-      }),
-    );
+    const session = await this.#request('session.create', {
+      sessionId,
+      workspace,
+      name,
+      modelTarget: {
+        kind: 'explicit',
+        connectionId: this.#llmConnectionId,
+        connectionSlug: this.#llmConnectionSlug,
+        model: this.#model,
+      },
+      ...(this.#permissionMode === undefined ? {} : { permissionMode: this.#permissionMode }),
+      ...(this.#orchestrationMode === 'default'
+        ? {}
+        : { orchestrationMode: this.#orchestrationMode }),
+      ...(this.#thinkingLevel === undefined ? {} : { thinkingLevel: this.#thinkingLevel }),
+    });
     this.#sessionGeneration += 1;
     this.#sessionId = sessionId;
     this.#workspace = session.workspace;
@@ -1765,10 +1750,6 @@ function workspaceTargetForCreate(
 interface LoadedSessionConfiguration {
   session: SessionCatalogProjection;
   boundaryDisplayMode: PermissionMode | undefined;
-}
-
-function representableSession(item: SessionCatalogItem): SessionCatalogProjection[] {
-  return 'kind' in item ? [] : [item];
 }
 
 function sideConversationParentStatus(

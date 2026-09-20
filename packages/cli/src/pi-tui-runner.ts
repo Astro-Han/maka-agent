@@ -37,9 +37,10 @@ import { CurrentTodoStore, TodoOverlay, renderTodoIndicator } from './pi-tui-tod
 import { isThinkingLevel, type ThinkingLevel } from '@maka/core/model-thinking';
 import { deriveConnectionSlug, type ProviderType } from '@maka/core/llm-connections';
 import type { OrchestrationMode } from '@maka/core/orchestration';
-import type {
-  SkillInvocationFailureReason,
-  SkillInvocationResult,
+import {
+  preparedSkillInvocation,
+  type SkillInvocationFailureReason,
+  type SkillInvocationResult,
 } from '@maka/core/skill-invocation';
 import { projectRevisionLinkedSessionTree } from '@maka/core/session-revisions';
 import {
@@ -1360,7 +1361,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
         // Retire the row it belongs to and report the failure in its place.
         if (result?.disposition === 'blocked') {
           removeTransientUserMessage(messageId);
-          showSkillInvocation(result.skillInvocation);
+          reportError(new Error(result.message));
           return;
         }
         // It admitted them instead. The receipt says what was loaded and what
@@ -1368,8 +1369,8 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
         // Turn arrives through the started-Turn subscription, which carries
         // Session state rather than this Message's admission.
         if (result) {
-          const { loaded, failed } = result.skillInvocation;
-          if (loaded.length > 0 || failed.length > 0) showSkillInvocation(result.skillInvocation);
+          const receipt = preparedSkillInvocation(result.preparation);
+          if (receipt.loaded.length > 0 || receipt.failed.length > 0) showSkillInvocation(receipt);
         }
       })
       .catch((error) => {

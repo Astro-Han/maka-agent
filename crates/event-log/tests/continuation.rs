@@ -70,7 +70,6 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
             },
             submitted_placement: maka_runtime::message::Placement::NextTurn,
             disposition: maka_runtime::message::MessageDisposition::TurnStarted,
-            skill_invocation: Default::default(),
             submitted_intent: None,
         });
     }

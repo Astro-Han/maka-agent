@@ -42,7 +42,6 @@ import {
   decodeRuntimeHostPeerManagementFrame,
   decodeRuntimeHostPeerMeshManagementFrame,
   decodeRuntimeHostServiceManagementFrame,
-  decodeRuntimeHostSetupFrame,
   RUNTIME_HOST_ACTIVATION_FRAME_MAX_BYTES,
   RUNTIME_HOST_ACTIVATION_FRAME_PREFIX,
   RUNTIME_HOST_ACCESS_MANAGEMENT_FRAME_PREFIX,
@@ -54,7 +53,6 @@ import {
   RUNTIME_HOST_PEER_MESH_MANAGEMENT_FRAME_MAX_BYTES,
   RUNTIME_HOST_PEER_MESH_MANAGEMENT_FRAME_PREFIX,
   RUNTIME_HOST_SERVICE_MANAGEMENT_FRAME_PREFIX,
-  RUNTIME_HOST_SETUP_FRAME_PREFIX,
   RUNTIME_HOST_SETUP_SOURCE_PACKAGE_INTEGRITY_ENV,
   type RuntimeHostAccessManagementFrame,
   type RuntimeHostActivationResult,
@@ -70,7 +68,6 @@ import {
   type RuntimeHostServiceManagementAction,
   type RuntimeHostServiceManagementFrame,
   type RuntimeHostServiceUpdatePhase,
-  type RuntimeHostSetupFrame,
   type RuntimeHostWebRtcStunPolicy,
 } from '@maka/runtime-host/operator';
 import type {
@@ -111,24 +108,12 @@ type DesktopRuntimeHostSshProcess = RuntimeHostSshProcess & {
 
 const TERMINAL_REVEAL_DELAY_MS = 500;
 const TERMINAL_OUTPUT_MAX = 64 * 1024;
-const SETUP_FRAME_PENDING_MAX = 20 * 1024;
 const MANAGEMENT_FRAME_PENDING_MAX = 128 * 1024;
 const ACCESS_MANAGEMENT_FRAME_PENDING_MAX = 768 * 1024;
 const PEER_MANAGEMENT_FRAME_PENDING_MAX = 128 * 1024;
 const SETUP_TIMEOUT_MS = 10 * 60_000;
 const MANAGEMENT_TIMEOUT_MS = 2 * 60_000;
 const PROCESS_STOP_GRACE_MS = 2_000;
-
-export interface DesktopRuntimeHostSshSetupInput {
-  readonly destination: string;
-  readonly sshPort?: number;
-  readonly setupPackage: DesktopRuntimeHostSetupPackage;
-  readonly remotePlatform: RuntimeHostOperatorPlatform;
-  readonly principalId: string;
-  readonly lifecycle?: 'supervised' | 'on_demand';
-  readonly projectDirectoryRoots?: readonly { readonly label: string; readonly path: string }[];
-  readonly signal?: AbortSignal;
-}
 
 export interface DesktopRuntimeHostSshTargetInput {
   readonly destination: string;
@@ -260,7 +245,6 @@ export type RuntimeHostServiceUpdateReconciliationTerminalFrame = Extract<
   { kind: 'result' | 'error'; action: 'reconcile_update' }
 >;
 
-type RuntimeHostSetupCompleteFrame = Extract<RuntimeHostSetupFrame, { kind: 'complete' }>;
 
 export function createDesktopRuntimeHostSshTerminal(input: {
   readonly ipcMain: Pick<IpcMain, 'handle' | 'removeHandler'>;
@@ -280,11 +264,6 @@ export function createDesktopRuntimeHostSshTerminal(input: {
   resolveTargetIdentity(
     input: DesktopRuntimeHostSshTargetInput,
   ): Promise<RuntimeHostTargetIdentity>;
-  runSetup(
-    input: DesktopRuntimeHostSshSetupInput,
-    onProgress: (frame: Extract<RuntimeHostSetupFrame, { kind: 'progress' }>) => void,
-    onComplete?: (frame: RuntimeHostSetupCompleteFrame) => void,
-  ): Promise<RuntimeHostSetupCompleteFrame>;
   runNativeSetup(input: NativeSetupInput & DesktopRuntimeHostSshTargetInput, onCommit: () => void): Promise<NativeSetupResult>;
   prepareNativePackage(input: NativeSetupInput & DesktopRuntimeHostSshTargetInput): Promise<RuntimeHostNativeOperatorCommand>;
   runServiceManagement(
@@ -800,80 +779,6 @@ export function createDesktopRuntimeHostSshTerminal(input: {
     },
     runNativeSetup: (setupInput, onCommit) => installNativeRuntimeHost(nativeTransport(setupInput), setupInput, onCommit),
     prepareNativePackage: (setupInput) => prepareNativeRuntimeHost(nativeTransport(setupInput), setupInput),
-    runSetup: async (setupInput, onProgress, onComplete) => {
-      if (closed) throw new Error('Runtime Host SSH terminal is closed');
-      setupInput.signal?.throwIfAborted();
-      const cancellation = cancellableUntilComplete(setupInput.signal);
-      try {
-        const destination = normalizeRuntimeHostSshDestination(setupInput.destination);
-        const sshPort = setupInput.sshPort === undefined
-          ? undefined
-          : requireSetupPort(setupInput.sshPort);
-        const setupPackage = await prepareSetupPackage(
-          setupInput.setupPackage,
-          destination,
-          sshPort,
-          setupInput.principalId,
-          startTerminalProcess,
-          cancellation.signal,
-          input.processStopGraceMs,
-          dismissPresentation,
-          input.terminateProcessTree,
-        );
-        const remoteCommand = runtimeHostSetupRemoteCommand(setupPackage, setupInput);
-        let complete: RuntimeHostSetupCompleteFrame | undefined;
-        let setupFailure: Error | undefined;
-        let setupTerminal: ActiveTerminal | undefined;
-        const filter = createRuntimeHostFramedOutputFilter({
-          prefix: RUNTIME_HOST_SETUP_FRAME_PREFIX,
-          pendingMaxBytes: SETUP_FRAME_PENDING_MAX,
-          decode: decodeRuntimeHostSetupFrame,
-          label: 'Remote Maka setup',
-          onFrame: (frame) => {
-            if (frame.kind === 'progress') onProgress(frame);
-            else if (frame.kind === 'complete') {
-              if (!cancellation.commit()) return;
-              complete = frame;
-              onComplete?.(frame);
-              if (setupTerminal) completePresentation(setupTerminal);
-            } else setupFailure = new Error(frame.kind === 'error' ? frame.error.message : 'SSH setup returned a local environment binding');
-          },
-          onError: (error) => {
-            setupFailure = error;
-          },
-        });
-        const { process, terminal } = startTerminalProcess(
-          'ssh',
-          sshRemoteCommandArgs(destination, sshPort, remoteCommand),
-          filter.push,
-        );
-        setupTerminal = terminal;
-        if (complete) completePresentation(terminal);
-        const wait = await waitForTerminalProcess(process, {
-          signal: cancellation.signal,
-          timeoutMs: SETUP_TIMEOUT_MS,
-          stopGraceMs: input.processStopGraceMs,
-          onAbort: () => dismissPresentation(terminal),
-        }, input.terminateProcessTree);
-        filter.finish();
-        if (setupFailure) throw setupFailure;
-        if (!complete) {
-          throw new Error(
-            wait.timedOut
-              ? 'Remote Maka setup timed out'
-              : wait.exit.code === 0
-              ? 'Remote Maka setup ended without a completion result'
-              : wait.exit.code === 2
-                ? 'The released Maka CLI on this channel does not support automated Runtime Host setup'
-                : `Remote Maka setup exited with code ${String(wait.exit.code)}`,
-          );
-        }
-        completePresentation(terminal);
-        return complete;
-      } finally {
-        cancellation.close();
-      }
-    },
     runServiceManagement: async (managementInput) => {
       const frame = await runFramedManagement({
         ...managementInput,
@@ -1071,31 +976,6 @@ export function runtimeHostPeerTargetFromPlatform(
   throw new Error(`Direct peer is not available on ${target}`);
 }
 
-function cancellableUntilComplete(signal: AbortSignal | undefined): {
-  readonly signal: AbortSignal;
-  commit(): boolean;
-  close(): void;
-} {
-  const controller = new AbortController();
-  let committed = false;
-  const onAbort = () => {
-    if (!committed) controller.abort();
-  };
-  if (signal?.aborted) onAbort();
-  else signal?.addEventListener('abort', onAbort, { once: true });
-  const close = () => signal?.removeEventListener('abort', onAbort);
-  return {
-    signal: controller.signal,
-    commit() {
-      if (controller.signal.aborted) return false;
-      committed = true;
-      close();
-      return true;
-    },
-    close,
-  };
-}
-
 type PreparedSetupPackage =
   | { readonly kind: 'npm'; readonly specifier: string }
   | {
@@ -1260,42 +1140,6 @@ async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Prom
   }
 }
 
-function runtimeHostSetupRemoteCommand(
-  setupPackage: PreparedSetupPackage,
-  input: Pick<
-    DesktopRuntimeHostSshSetupInput,
-    'principalId' | 'projectDirectoryRoots' | 'lifecycle' | 'remotePlatform'
-  >,
-): string {
-  if (!/^[A-Za-z0-9_.:-]{1,128}$/u.test(input.principalId)) {
-    throw new Error('Runtime Host setup principal is invalid');
-  }
-  return runtimeHostPackageRemoteCommand(setupPackage, [
-    'runtime-host',
-    'setup',
-    '--principal',
-    input.principalId,
-    '--preset',
-    'desktop-client',
-    '--lifecycle',
-    input.lifecycle === 'on_demand' ? 'on-demand' : 'supervised',
-    // Development archives identify every source revision as a distinct exact
-    // package. Re-running Add computer is the explicit replacement gesture in
-    // that environment; released packages keep using the normal update UI.
-    ...(setupPackage.kind === 'development_archive' ? ['--update-existing'] : []),
-    '--defer-pairing-commit',
-    ...(input.projectDirectoryRoots === undefined
-      ? []
-      : input.projectDirectoryRoots.length === 0
-        ? ['--no-project-roots']
-        : input.projectDirectoryRoots.flatMap(({ label, path }) => [
-            '--project-root-json',
-            JSON.stringify({ label, path }),
-          ])),
-    '--json',
-  ], {}, input.remotePlatform);
-}
-
 function runtimeHostActivationRemoteCommand(
   input: RuntimeHostSshOperatorActivationInput,
 ): string {
@@ -1366,7 +1210,7 @@ function runtimeHostUpdateRemoteCommand(
         RUNTIME_HOST_OPERATOR_ACCESS_MANAGEMENT_CAPABILITY,
       [RUNTIME_HOST_OPERATOR_PROJECT_DIRECTORY_CONFIGURATION_REQUEST_ENV]: '1',
     },
-    input.operator.kind === 'legacy_posix_executable' ? 'posix' : input.operator.platform,
+    input.operator.platform,
   );
 }
 

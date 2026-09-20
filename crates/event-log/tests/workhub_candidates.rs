@@ -90,7 +90,6 @@ async fn candidates_rank_all_pages_by_canonical_activity_including_blocked_work(
                 content: "actual activity".into(),
                 request_fingerprint: None,
                 source_messages: Vec::new(),
-                skill_invocation: None,
             },
         }))
         .await

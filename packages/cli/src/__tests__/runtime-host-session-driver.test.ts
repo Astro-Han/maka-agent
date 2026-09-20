@@ -2510,14 +2510,18 @@ describe('Runtime Host Maka Session driver', () => {
     await driver.switchSession('session-1');
 
     const turn = await driver.preparePrompt('/skill:alpha Help');
-    assert.deepEqual(turn.skillInvocation?.loaded, [{ id: 'alpha', name: 'Alpha' }]);
+    assert.deepEqual(turn.preparation?.[0].receipt, {
+      loaded: [{ id: 'alpha', name: 'Alpha' }],
+      failed: [],
+      receipts: [],
+    });
     assert.equal(connection.requests.at(-1)?.operation, 'turn.start');
 
     connection.skillStartBlocked = true;
     // The failure names what could not be resolved: headless `maka run` reports
     // this message and nothing reads a structured payload off it.
     await assert.rejects(driver.preparePrompt('/skill:missing', { turnId: 'turn-blocked' }), {
-      message: /Could not resolve the Skill this Turn asked for: \/skill:missing \(not found\)/,
+      message: 'missing: not_found',
     });
   });
 
@@ -3053,11 +3057,12 @@ class FakeConnection {
                     ? this.skillStartBlocked
                       ? {
                           kind: 'blocked',
-                          skillInvocation: {
+                          message: 'missing: not_found',
+                          preparation: fixturePreparation({
                             loaded: [],
                             failed: [{ request: 'missing', reason: 'not_found' }],
                             receipts: [],
-                          },
+                          }),
                         }
                       : {
                           kind: 'started',
@@ -3067,13 +3072,15 @@ class FakeConnection {
                             runId: 'run-1',
                             status: 'running',
                           },
-                          skillInvocation: turnInput.content.text.includes('/skill:')
-                            ? {
-                                loaded: [{ id: 'alpha', name: 'Alpha' }],
-                                failed: [],
-                                receipts: [],
-                              }
-                            : { loaded: [], failed: [], receipts: [] },
+                          preparation: fixturePreparation(
+                            turnInput.content.text.includes('/skill:')
+                              ? {
+                                  loaded: [{ id: 'alpha', name: 'Alpha' }],
+                                  failed: [],
+                                  receipts: [],
+                                }
+                              : { loaded: [], failed: [], receipts: [] },
+                          ),
                         }
                     : undefined;
     if (result === undefined) throw new Error(`Unexpected fake operation: ${operation}`);
@@ -4168,4 +4175,22 @@ function toolResultFrame(sequence: number, subscriptionId = 'subscription-1'): S
       status: 'completed',
     },
   };
+}
+
+function fixturePreparation(
+  receipt: unknown,
+): import('@maka/runtime-host/protocol').InputReceipt[] {
+  return [
+    {
+      source: {
+        kind: 'input',
+        name: 'maka.skills',
+        packageId: 'maka.skills',
+        entryId: 'skills',
+        activation: 'fixture',
+        revision: '1',
+      },
+      receipt: JSON.parse(JSON.stringify(receipt)),
+    },
+  ];
 }

@@ -46,7 +46,6 @@ fn events(outcome: InvocationOutcome) -> Vec<StoredEvent> {
         Fact::InvocationOpened {
             configuration: None,
             input: InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: MessageInput {
                     display_text: Some("visible input".into()),
@@ -57,7 +56,7 @@ fn events(outcome: InvocationOutcome) -> Vec<StoredEvent> {
         },
         Fact::ModelRequested {
             effective_source_digest: None,
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
             checkpoint_event_id: None,
             step_id: "step".into(),

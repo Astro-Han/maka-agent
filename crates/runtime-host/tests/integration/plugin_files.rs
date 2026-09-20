@@ -121,7 +121,7 @@ async fn scenario() {
         .unwrap();
     let ceiling = commands
         .create_child(CreateChild {
-            target: Some(maka_plugins::execution::ChildTarget::Model {
+            target: Some(maka_plugins::execution::Target::Model {
                 model,
                 thinking_level: None,
             }),

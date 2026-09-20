@@ -148,9 +148,12 @@ fn projection_requires_every_authoritative_field_and_preserves_nullable_connecti
     for field in value.as_object().unwrap().keys() {
         let mut missing = value.clone();
         missing.as_object_mut().unwrap().remove(field);
-        assert!(decode_session_catalog_item(&missing).is_err(), "{field}");
+        assert!(
+            decode_session_catalog_projection(&missing).is_err(),
+            "{field}"
+        );
     }
-    assert!(decode_session_catalog_item(&value).is_ok());
+    assert!(decode_session_catalog_projection(&value).is_ok());
     for (key, bad) in [
         ("revision", json!(0)),
         ("activityAt", json!(9_007_199_254_740_992u64)),
@@ -170,16 +173,20 @@ fn projection_requires_every_authoritative_field_and_preserves_nullable_connecti
     ] {
         let mut bad_value = value.clone();
         bad_value[key] = bad;
-        assert!(decode_session_catalog_item(&bad_value).is_err(), "{key}");
+        assert!(
+            decode_session_catalog_projection(&bad_value).is_err(),
+            "{key}"
+        );
     }
     let mut mismatch = value.clone();
     mismatch["workspace"]["hostCwd"] = json!("/other");
-    assert!(decode_session_catalog_item(&mismatch).is_err());
+    assert!(decode_session_catalog_projection(&mismatch).is_err());
     for legacy in ["review", "done"] {
         let mut old = value.clone();
         old["status"] = json!(legacy);
         old["revision"] = json!(1.0);
-        let output = serde_json::to_value(decode_session_catalog_item(&old).unwrap()).unwrap();
+        let output =
+            serde_json::to_value(decode_session_catalog_projection(&old).unwrap()).unwrap();
         assert_eq!(output["status"], "active");
         assert_eq!(output["revision"], 1);
     }
@@ -215,13 +222,16 @@ fn query_checks_revision_cursor_page_bounds_and_required_nullables() {
 #[test]
 fn retirement_validates_revision_numbers_and_request_result_relations() {
     let create = decode_session_create_input(&create()).unwrap();
-    let item = decode_session_catalog_item(&projection()).unwrap();
+    let item = decode_session_catalog_projection(&projection()).unwrap();
     assert!(assert_create_output_for_input(&create, &item).is_ok());
     let mut other = projection();
     other["id"] = json!("s2");
     assert!(
-        assert_create_output_for_input(&create, &decode_session_catalog_item(&other).unwrap())
-            .is_err()
+        assert_create_output_for_input(
+            &create,
+            &decode_session_catalog_projection(&other).unwrap()
+        )
+        .is_err()
     );
     let active =
         decode_session_lifecycle_set_input(&json!({"sessionId":"s1","state":"active"})).unwrap();
@@ -231,8 +241,6 @@ fn retirement_validates_revision_numbers_and_request_result_relations() {
         ..active
     };
     assert!(assert_lifecycle_output_for_input(&archived, &item).is_err());
-    let legacy = decode_session_catalog_item(&json!({"kind":"unsupported_legacy_record","id":"s1","revision":1,"reason":"not_wire_representable"})).unwrap();
-    assert!(assert_lifecycle_output_for_input(&archived, &legacy).is_ok());
     let input =
         decode_session_remove_input(&json!({"sessionId":"s1","expectedRevision":1e0})).unwrap();
     for (value, matches) in [

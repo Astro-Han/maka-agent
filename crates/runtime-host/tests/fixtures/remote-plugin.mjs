@@ -19,6 +19,58 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function activate(ctx) {
+  await ctx.remote.method('uncertain', () => {
+    /** @type {import('../../../../packages/plugin-sdk/src/host.js').RemoteFailure} */
+    const failure = Object.assign(new Error('publication result needs recovery'), {
+      code: /** @type {const} */ ('outcome_unknown'),
+    });
+    throw failure;
+  });
+  await ctx.remote.stream('uncertain-stream', () => ({
+    next() {
+      throw Object.assign(new Error('stream operation result needs recovery'), {
+        code: 'outcome_unknown',
+      });
+    },
+    cancel() {},
+    close() {},
+  }));
+  /** @type {import('../../../../packages/plugin-sdk/src/host.js').RemoteCaller | undefined} */
+  let previous;
+  const workspace = async (
+    /** @type {import('../../../../packages/plugin-sdk/src/host.js').Json} */ input,
+    /** @type {import('../../../../packages/plugin-sdk/src/host.js').RemoteCaller} */ caller,
+  ) => {
+    if (typeof input !== 'string') throw new Error('expected workspace path');
+    /** @type {import('../../../../packages/plugin-sdk/src/host.js').WorkspaceViewInput} */
+    const request = {
+      workspace: { kind: 'host_path', path: input },
+      permissionMode: 'explore',
+      collaborationMode: 'agent',
+    };
+    if (previous) {
+      try {
+        await previous.views.workspace(request);
+        throw new Error('completed Remote call retained authority');
+      } catch (error) {
+        if (error.code !== 'revoked') throw error;
+      }
+    }
+    const view = await caller.views.workspace(request);
+    previous = caller;
+    return { cwd: view.workspace.hostCwd };
+  };
+  await ctx.remote.method('workspace', workspace, { access: 'host_paths' });
+  await ctx.remote.method('denied-workspace', workspace);
+  await ctx.remote.stream(
+    'workspace-stream',
+    (input, caller) => ({
+      next: async () => ({ done: false, value: await workspace(input, caller) }),
+      cancel() {},
+      close() {},
+    }),
+    { access: 'host_paths' },
+  );
   const state = { generation: 0, opening: 0, active: 0, stopped: 0 };
   let echo = await ctx.remote.method('echo', (input, caller) => ({
     input,

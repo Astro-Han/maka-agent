@@ -361,7 +361,6 @@ impl Delegation {
                 DelegationDelivery::NewTurn => MessageDisposition::TurnStarted,
                 DelegationDelivery::Steering { .. } => MessageDisposition::Steering,
             },
-            skill_invocation: Default::default(),
             submitted_intent: None,
         };
         message.validate()?;

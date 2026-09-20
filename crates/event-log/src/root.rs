@@ -82,14 +82,14 @@ struct Identity {
     ino: String,
 }
 
-/// Dropping this value releases both OS leases. It cannot be cloned or fabricated.
+/// Owns the durable root lease. It cannot be cloned or fabricated.
 pub struct RootOwner {
     canonical_path: PathBuf,
     marker: Marker,
     control_directory: PathBuf,
+    control_identity: Identity,
     lock_path: PathBuf,
     durable_lease: File,
-    compatibility_lease: File,
 }
 
 /// A verified location, not a writer lease. Every mutation still needs RootOwner.
@@ -144,8 +144,8 @@ pub fn repair_after_remount(
     }
     let mut next = previous.clone();
     next.root_identity = identity;
-    // Use the same two ownership locks as normal Host startup, not executor.lock
-    // or FileLease: Linux's TS-compatible OFD locks are distinct from flock.
+    // Use the same ownership lock as normal Host startup, not executor.lock
+    // or FileLease: Linux OFD locks are distinct from flock.
     let owner = RootOwner::acquire(canonical_path, next, namespaces)?;
     let validate = || {
         owner.check_directory()?;
@@ -255,14 +255,14 @@ impl RootOwner {
         lock::private_directory(&namespaces.control)?;
         let control_directory = namespaces.control.join(&marker.root_id);
         lock::private_directory(&control_directory)?;
-        let compatibility_lease = lock::acquire(&control_directory.join("owner.lock"))?;
+        let control_identity = directory_identity(&control_directory)?;
         Ok(Self {
             canonical_path,
             marker,
             control_directory,
+            control_identity,
             lock_path,
             durable_lease,
-            compatibility_lease,
         })
     }
 
@@ -295,10 +295,11 @@ impl RootOwner {
 
     fn validate_leases(&self) -> io::Result<()> {
         lock::stable(&self.durable_lease, &self.lock_path)?;
-        lock::stable(
-            &self.compatibility_lease,
-            &self.control_directory.join("owner.lock"),
-        )?;
+        // Discovery is disposable, but its loss must fence this live owner:
+        // another launcher can no longer discover or hand off this process.
+        if directory_identity(&self.control_directory)? != self.control_identity {
+            return Err(io::Error::other("Host control directory identity changed"));
+        }
         Ok(())
     }
 

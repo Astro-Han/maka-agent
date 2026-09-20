@@ -48,12 +48,8 @@ impl Engine {
                 "executor cannot carry a model binding or mismatched workspace".into(),
             ));
         }
-        maka_runtime::message::validate_opening(
-            &input.request.content,
-            &input.source_messages,
-            None,
-        )
-        .map_err(|reason| RunError::InvalidInput(reason.into()))?;
+        maka_runtime::message::validate_sources(&input.request.content, &input.source_messages)
+            .map_err(|reason| RunError::InvalidInput(reason.into()))?;
         let identity = input
             .binding
             .identity()
@@ -82,7 +78,6 @@ impl Engine {
                             content: input.request.content,
                             request_fingerprint: input.request_fingerprint,
                             source_messages: input.source_messages,
-                            skill_invocation: None,
                         },
                     },
                     Fact::ExecutorStarted { binding: identity },

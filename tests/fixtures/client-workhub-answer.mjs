@@ -316,8 +316,8 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened, openC
         ],
         async call(frame, { accept }) {
           try {
-            assert.equal(frame.sessionId, sessionId);
-            assert.equal(frame.turnId, turnId);
+            assert.equal(frame.source.sessionId, sessionId);
+            assert.equal(frame.source.turnId, turnId);
             assert.equal(Object.hasOwn(frame, 'cwd'), false);
             await accept({ kind: 'none' });
             if (frame.toolName === 'context') {

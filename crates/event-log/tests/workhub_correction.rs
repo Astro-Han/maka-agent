@@ -49,7 +49,6 @@ fn opening(text: &str) -> Fact {
             content: text.into(),
             request_fingerprint: None,
             source_messages: vec![],
-            skill_invocation: None,
         },
     }
 }
@@ -135,7 +134,6 @@ async fn correction_recovers_sealed_source_and_atomically_retires_only_its_exact
                         content: pending.source.message.content.clone(),
                         request_fingerprint: None,
                         source_messages: vec![pending.source.clone()],
-                        skill_invocation: None,
                     },
                 },
             ))
@@ -172,9 +170,14 @@ async fn correction_recovers_sealed_source_and_atomically_retires_only_its_exact
         )
         .unwrap();
         assert!(
-            log.request_workhub_correction(request.clone(), Some(1), None, None::<&()>)
-                .await
-                .is_err()
+            log.request_workhub_correction(
+                request.clone(),
+                Some(1),
+                None,
+                &serde_json::json!({"configuration_digest": "test-target"})
+            )
+            .await
+            .is_err()
         );
         assert!(
             log.workhub_correction(&request.action_id)
@@ -187,7 +190,12 @@ async fn correction_recovers_sealed_source_and_atomically_retires_only_its_exact
         }
         db.execute_batch("DROP TRIGGER reject_intent").unwrap();
         let intent = log
-            .request_workhub_correction(request.clone(), Some(1), None, None::<&()>)
+            .request_workhub_correction(
+                request.clone(),
+                Some(1),
+                None,
+                &serde_json::json!({"configuration_digest": "test-target"}),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -195,17 +203,27 @@ async fn correction_recovers_sealed_source_and_atomically_retires_only_its_exact
             (scenario == "owned").then_some(&old_owner)
         );
         assert_eq!(
-            log.request_workhub_correction(request.clone(), Some(1), None, None::<&()>)
-                .await
-                .unwrap(),
+            log.request_workhub_correction(
+                request.clone(),
+                Some(1),
+                None,
+                &serde_json::json!({"configuration_digest": "test-target"})
+            )
+            .await
+            .unwrap(),
             intent
         );
         let mut competing = request.clone();
         competing.action_id = ActionId::new("competing").unwrap();
         assert!(
-            log.request_workhub_correction(competing, Some(1), None, None::<&()>)
-                .await
-                .is_err()
+            log.request_workhub_correction(
+                competing,
+                Some(1),
+                None,
+                &serde_json::json!({"configuration_digest": "test-target"})
+            )
+            .await
+            .is_err()
         );
         assert!(
             log.request_workhub_stop(StopRequest {
@@ -368,9 +386,14 @@ async fn correction_recovers_sealed_source_and_atomically_retires_only_its_exact
                     },
                     delegation_text: "corrected again".into(),
                 };
-                log.request_workhub_correction(next.clone(), Some(1), None, None::<&()>)
-                    .await
-                    .unwrap();
+                log.request_workhub_correction(
+                    next.clone(),
+                    Some(1),
+                    None,
+                    &serde_json::json!({"configuration_digest": "test-target"}),
+                )
+                .await
+                .unwrap();
                 let next_assignment = Delegation {
                     action_id: next.action_id.clone(),
                     request_fingerprint: next.request_fingerprint,

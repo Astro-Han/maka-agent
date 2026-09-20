@@ -30,6 +30,7 @@ import type { BotIncomingMessage, BotRegistry } from '@maka/runtime/bots';
 import type { ComputerUseToolSet } from '@maka/runtime/computer-use-tools';
 import type { ShellRunUpdate } from '@maka/core/events';
 import type { MakaTool } from '@maka/runtime/tool-runtime';
+import type { SessionTool } from '@maka/runtime/tool-runtime';
 import type {
   ClientCapabilityProvider,
   ConnectOrSpawnRuntimeHostInput,
@@ -150,6 +151,7 @@ test('updates a protocol-compatible managed Host before exposing a candidate ove
               activeOperations: 0,
               processUptimeSeconds: 1,
               residencies: [],
+              drainResidencies: 0,
             },
             replacement: {
               kind: 'repair',
@@ -733,7 +735,7 @@ test('closes the claimed Host connection when native capability construction fai
   const invalidTool = {
     ...nativeTool(),
     parameters: z.string(),
-  } as unknown as MakaTool;
+  } as unknown as SessionTool;
 
   await assert.rejects(
     () =>
@@ -1280,7 +1282,7 @@ function emptyComputerUseTools(): ComputerUseToolSet {
   return Object.assign([], { clearSession() {} }) as unknown as ComputerUseToolSet;
 }
 
-function nativeTool(): MakaTool {
+function nativeTool(): SessionTool {
   return {
     name: 'browser_snapshot',
     description: 'Capture the current page.',
@@ -1696,8 +1698,7 @@ function capabilityFrame(sessionId: string): ClientCapabilityCallFrame {
     offerId: 'desktop_browser',
     serverId: 'desktop_browser',
     toolName: 'browser_snapshot',
-    sessionId,
-    turnId: `turn-${sessionId}`,
+    source: { kind: 'agent', sessionId, turnId: `turn-${sessionId}` },
     cwd: '/workspace',
     toolCallId: `tool-${sessionId}`,
     arguments: {},

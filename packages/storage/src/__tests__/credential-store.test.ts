@@ -18,7 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
@@ -107,7 +107,7 @@ describe('FileCredentialStore', () => {
       const store = createFileCredentialStore(dir);
       await store.setSecret('a', 'api_key', 'k');
       const entries = await readdir(dir);
-      assert.deepEqual(entries, ['credentials.json']);
+      assert.deepEqual(entries.sort(), ['credentials.json', 'credentials.json.lease']);
     });
   });
 
@@ -186,44 +186,23 @@ describe('FileCredentialStore', () => {
     });
   });
 
-  test('a held lock is waited on, never stolen (no lost update)', async () => {
+  test('a held credential lease times out without stealing ownership, then permits the next write', async () => {
     await withTempDir(async (dir) => {
       const path = join(dir, 'credentials.json');
-      // Hold the lock as another process (or a crashed one) would: the lock is
-      // the `${path}.lock` directory. The store must wait for it, never steal it.
-      const lockPath = `${path}.lock`;
-      await mkdir(lockPath);
-
-      const store = createFileCredentialStore(dir);
-      let settled = false;
-      const write = store.setSecret('a', 'api_key', 'V').then(() => {
-        settled = true;
+      await withCredentialFileLock(path, async () => {
+        await assert.rejects(
+          withCredentialFileLock(
+            path,
+            async () => assert.fail('contender acquired a live lease'),
+            60,
+          ),
+          /locked by another process.*credentials\.json\.lease/u,
+        );
+        await assert.rejects(stat(path), { code: 'ENOENT' });
       });
-
-      // The lock is held, so the write is blocked before its critical section:
-      // it must not steal the lock and must not have written the file yet.
-      await assert.rejects(stat(path)); // file absent — proven blocked, not stolen
-      assert.equal(settled, false);
-
-      await rm(lockPath, { recursive: true, force: true }); // release
-      await write;
-      assert.equal(await store.getSecret('a', 'api_key'), 'V'); // proceeds only once the lock frees
-    });
-  });
-
-  test('a never-released lock fails loud with the lock path and recovery hint', async () => {
-    await withTempDir(async (dir) => {
-      const path = join(dir, 'credentials.json');
-      await mkdir(`${path}.lock`); // a crashed holder's lock that never releases
-      // A small timeout drives the fail-loud path without the production wait.
-      // The error must name the lock dir AND how to recover, so the guidance
-      // can't silently regress.
-      await assert.rejects(
-        withCredentialFileLock(path, async () => 'unreachable', 60),
-        (error: Error) =>
-          error.message.includes(`${path}.lock`) &&
-          /remove that directory and retry/.test(error.message),
-      );
+      const store = createFileCredentialStore(dir);
+      await store.setSecret('a', 'api_key', 'V');
+      assert.equal(await store.getSecret('a', 'api_key'), 'V');
     });
   });
 });

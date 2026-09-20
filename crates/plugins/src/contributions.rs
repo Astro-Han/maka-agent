@@ -44,13 +44,14 @@ struct Record {
 #[derive(Default)]
 struct State {
     records: HashMap<Key, Record>,
-    reserved: HashMap<(TypeId, String), Option<String>>,
+    reserved: HashSet<(TypeId, String)>,
     host_only: HashSet<TypeId>,
     revision: u64,
 }
 
 struct Inner {
     id: uuid::Uuid,
+    calls: Option<crate::call::Issuer>,
     state: Mutex<State>,
     changed: watch::Sender<u64>,
 }
@@ -60,10 +61,39 @@ struct Inner {
 #[derive(Clone)]
 pub struct Catalog(Arc<Inner>);
 
+/// Publication capability bound to one activation. Plugins can change their
+/// own contributions, but cannot choose another owner or inspect the catalog.
+#[derive(Clone)]
+pub struct Publisher {
+    catalog: Catalog,
+    owner: Context,
+}
+impl Publisher {
+    /// Initialization returns Staged instead; dynamic publication begins only
+    /// after this activation has been made effective.
+    pub fn publish(&self, staged: Staged) -> Result<Registration, Error> {
+        self.catalog.register(&self.owner, staged)
+    }
+
+    pub fn withdraw<T: Send + Sync + 'static>(&self, name: &str) -> Result<(), Error> {
+        self.catalog.withdraw::<T>(&self.owner, name)
+    }
+}
+
 impl Default for Catalog {
     fn default() -> Self {
+        Self::new(None)
+    }
+}
+impl Catalog {
+    /// Embedding dispatch configuration, never a plugin publication capability.
+    pub fn with_calls(calls: crate::call::Issuer) -> Self {
+        Self::new(Some(calls))
+    }
+    fn new(calls: Option<crate::call::Issuer>) -> Self {
         Self(Arc::new(Inner {
             id: uuid::Uuid::new_v4(),
+            calls,
             state: Mutex::new(State::default()),
             changed: watch::channel(0).0,
         }))
@@ -97,6 +127,12 @@ impl Staged {
 }
 
 impl Catalog {
+    pub(crate) fn publisher(&self, owner: Context) -> Publisher {
+        Publisher {
+            catalog: self.clone(),
+            owner,
+        }
+    }
     pub fn owns(&self, captured: &Captured) -> bool {
         captured.catalog_id == self.0.id
     }
@@ -118,36 +154,10 @@ impl Catalog {
 
     /// Host core names are reserved before activating any plugin.
     pub fn reserve<T: Send + Sync + 'static>(&self, name: &str) -> Result<(), Error> {
-        self.reserve_name::<T>(name, None)
-    }
-
-    /// Transfer a reserved contribution to one designated package, not to every
-    /// built-in. Publication and revocation still use the normal Fiber lifecycle.
-    pub fn reserve_for<T: Send + Sync + 'static>(
-        &self,
-        name: &str,
-        package: &str,
-    ) -> Result<(), Error> {
-        crate::name(package)?;
-        self.reserve_name::<T>(name, Some(package))
-    }
-
-    fn reserve_name<T: Send + Sync + 'static>(
-        &self,
-        name: &str,
-        package: Option<&str>,
-    ) -> Result<(), Error> {
         crate::name(name)?;
         let kind = TypeId::of::<T>();
         let mut state = self.0.state.lock().unwrap();
         let key = (kind, name.to_owned());
-        if let Some(existing) = state.reserved.get(&key) {
-            return if existing.as_deref() == package {
-                Ok(())
-            } else {
-                Err(Error::ContributionConflict(name.into()))
-            };
-        }
         if state
             .records
             .keys()
@@ -155,7 +165,7 @@ impl Catalog {
         {
             return Err(Error::ContributionConflict(name.into()));
         }
-        state.reserved.insert(key, package.map(str::to_owned));
+        state.reserved.insert(key);
         Ok(())
     }
 
@@ -252,10 +262,7 @@ impl Catalog {
                     "desktop-ui cannot publish Host capabilities".into(),
                 ));
             }
-            if state
-                .reserved
-                .get(&(*kind, name.clone()))
-                .is_some_and(|package| package.as_deref() != Some(identity.package_id.as_str()))
+            if state.reserved.contains(&(*kind, name.clone()))
                 || state
                     .records
                     .contains_key(&(*kind, scope.clone(), name.clone()))
@@ -336,6 +343,7 @@ impl Catalog {
         }
         Captured {
             catalog_id: self.0.id,
+            calls: self.0.calls.clone(),
             scope: scope.clone(),
             revision: state.revision,
             records,
@@ -345,12 +353,16 @@ impl Catalog {
 
 pub struct Captured {
     catalog_id: uuid::Uuid,
+    calls: Option<crate::call::Issuer>,
     scope: Scope,
     pub revision: u64,
     records: HashMap<(TypeId, String), Record>,
 }
 
 impl Captured {
+    pub fn call_issuer(&self) -> Option<crate::call::Issuer> {
+        self.calls.clone()
+    }
     pub fn scope(&self) -> &Scope {
         &self.scope
     }

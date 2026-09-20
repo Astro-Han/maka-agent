@@ -36,7 +36,7 @@ import type { InteractiveSessionTodoWriter } from '@maka/storage/session-todo-au
 import type { InteractiveContextOffloadWriter } from '@maka/storage/context-offload-store';
 import {
   type OperationOutcome,
-  type SessionCatalogItem,
+  type SessionCatalogProjection,
   type SessionLifecycleSetInput,
   type SessionRemoveInput,
   type SessionRemovePreviewInput,
@@ -882,7 +882,9 @@ function versionedFamily(family: StableFamily) {
   }));
 }
 
-function lifecycleSuccess(result: SessionCatalogItem): OperationOutcome<'session.lifecycle.set'> {
+function lifecycleSuccess(
+  result: SessionCatalogProjection,
+): OperationOutcome<'session.lifecycle.set'> {
   return { ok: true, result };
 }
 

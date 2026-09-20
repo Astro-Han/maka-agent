@@ -26,20 +26,15 @@ import {
   type RuntimeHostWslProcessFactory,
 } from '@maka/runtime-host/client';
 import {
-  decodeRuntimeHostSetupFrame,
   decodeRuntimeHostServiceManagementFrame,
   RUNTIME_HOST_OPERATOR_PROJECT_DIRECTORY_CONFIGURATION_REQUEST_ENV,
   RUNTIME_HOST_OPERATOR_RETIREMENT_CANCELLATION_ENV,
   RUNTIME_HOST_SERVICE_MANAGEMENT_FRAME_PREFIX,
-  RUNTIME_HOST_SETUP_FRAME_PREFIX,
   RUNTIME_HOST_SETUP_SOURCE_PACKAGE_INTEGRITY_ENV,
   decodeRuntimeHostPosixOperatorCommand,
   runtimeHostOperatorInvocation,
-  type RuntimeHostNodeOperatorCommand,
   type RuntimeHostNativeOperatorCommand,
   type RuntimeHostPosixOperatorCommand,
-  type RuntimeHostSetupFrame,
-  type RuntimeHostSetupPhase,
   type RuntimeHostServiceManagementFrame,
 } from '@maka/runtime-host/operator';
 import { createRuntimeHostFramedOutputFilter } from './runtime-host-framed-output.js';
@@ -124,10 +119,6 @@ export async function resolveDesktopRuntimeHostWslTarget(
   });
 }
 
-type RuntimeHostSetupCompleteFrame = Extract<RuntimeHostSetupFrame, { kind: 'complete' | 'existing_environment' }>;
-type RuntimeHostWslSetupCompleteFrame = Omit<RuntimeHostSetupCompleteFrame, 'operator'> & {
-  readonly operator: RuntimeHostNodeOperatorCommand<'posix'> | RuntimeHostNativeOperatorCommand<'posix'>;
-};
 type RuntimeHostManagementTerminalFrame = Exclude<
   RuntimeHostServiceManagementFrame,
   { readonly kind: 'progress' }
@@ -229,65 +220,6 @@ export async function runDesktopRuntimeHostWslManagement(
   return terminal;
 }
 
-export interface DesktopRuntimeHostWslSetupInput {
-  readonly distribution: string;
-  readonly setupPackage: DesktopRuntimeHostSetupPackage;
-  readonly principalId: string;
-  readonly projectDirectoryRoots?: readonly {
-    readonly label: string;
-    readonly path: string;
-  }[];
-  readonly signal?: AbortSignal;
-}
-
-export async function runDesktopRuntimeHostWslSetup(
-  input: DesktopRuntimeHostWslSetupInput,
-  onProgress: (frame: { readonly phase: RuntimeHostSetupPhase }) => void,
-  onComplete?: () => void,
-  overrides: {
-    readonly processFactory?: RuntimeHostWslProcessFactory;
-    readonly wslExecutable?: string;
-  } = {},
-): Promise<RuntimeHostWslSetupCompleteFrame> {
-  input.signal?.throwIfAborted();
-  const distribution = normalizeRuntimeHostWslDistribution(input.distribution);
-  const processFactory = overrides.processFactory ?? spawnWsl;
-  const executable = overrides.wslExecutable ?? resolveSystemRuntimeHostWslExecutable();
-  const setupPackage = await resolveWslPackageSpecifier(
-    input.setupPackage,
-    distribution,
-    executable,
-    processFactory,
-  );
-  const command = runtimeHostWslSetupCommand(setupPackage, input, input.setupPackage.kind === 'development_archive');
-  const child = processFactory(executable, ['--distribution', distribution, '--exec', '/bin/sh', '-lc', command]);
-  return runWslFramedProcess({
-    child,
-    signal: input.signal,
-    prefix: RUNTIME_HOST_SETUP_FRAME_PREFIX,
-    decode: decodeRuntimeHostSetupFrame,
-    label: 'WSL Maka setup',
-    onFrame: (frame) => {
-      if (frame.kind === 'progress') {
-        onProgress(frame);
-        return undefined;
-      }
-      if (frame.kind === 'error') throw new Error(frame.error.message);
-      if (frame.operator.platform !== 'posix') {
-        throw new Error('WSL Runtime Host setup returned a non-POSIX operator');
-      }
-      return {
-        ...frame,
-        operator: {
-          ...frame.operator,
-          platform: 'posix',
-        },
-      };
-    },
-    onResult: () => onComplete?.(),
-  });
-}
-
 /** Runs the explicitly selected successor, which owns the existing durable update transaction. */
 export async function runDesktopRuntimeHostWslUpdate(
   input: {
@@ -373,48 +305,6 @@ async function resolveWslPackageSpecifier(
     throw new Error(`WSL could not resolve the setup package path${diagnostic ? `: ${diagnostic}` : ''}`);
   }
   return { specifier: path, integrity: setupPackage.integrity };
-}
-
-function runtimeHostWslSetupCommand(
-  setupPackage: { readonly specifier: string; readonly integrity?: string },
-  input: Pick<DesktopRuntimeHostWslSetupInput, 'principalId' | 'projectDirectoryRoots'>,
-  development: boolean,
-): string {
-  if (!/^[A-Za-z0-9_.:-]{1,128}$/u.test(input.principalId)) {
-    throw new Error('Runtime Host setup principal is invalid');
-  }
-  const args = [
-    'maka',
-    'runtime-host',
-    'setup',
-    '--principal',
-    input.principalId,
-    '--preset',
-    'desktop-client',
-    '--lifecycle',
-    'on-demand',
-    '--repair-root-after-remount',
-    // Source development explicitly selects a new archive; released onboarding
-    // must never replace an existing shared deployment as a side effect of Connect.
-    ...(development ? ['--update-existing'] : ['--reuse-existing-environment']),
-    ...(input.projectDirectoryRoots === undefined
-      ? []
-      : input.projectDirectoryRoots.length === 0
-        ? ['--no-project-roots']
-        : input.projectDirectoryRoots.flatMap(({ label, path }) => [
-            '--project-root-json',
-            JSON.stringify({ label, path }),
-          ])),
-    '--json',
-  ];
-  const invocation = ['npx', '--yes', '--package', setupPackage.specifier, ...args]
-    .map(quotePosix)
-    .join(' ');
-  const environment = setupPackage.integrity
-    ? `${RUNTIME_HOST_SETUP_SOURCE_PACKAGE_INTEGRITY_ENV}=${quotePosix(setupPackage.integrity)} `
-    : '';
-  const command = `maka_prefix=$(mktemp -d) || exit 1; trap 'rm -rf -- "$maka_prefix"' EXIT; cd "$maka_prefix" || exit 1; ${environment}${invocation}`;
-  return runtimeHostWslLoginCommand(command);
 }
 
 function runtimeHostWslLoginCommand(command: string): string {

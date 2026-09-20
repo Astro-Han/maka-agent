@@ -41,7 +41,6 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
             Fact::InvocationOpened {
                 configuration: None,
                 input: InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "question".into(),
                     request_fingerprint: None,
@@ -234,11 +233,8 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
         }
         db.execute("DELETE FROM transcript_rows", []).unwrap();
         db.execute("DELETE FROM transcript_progress", []).unwrap();
-        db.execute(
-            "UPDATE catalog_message_watermark SET projection_version = 5",
-            [],
-        )
-        .unwrap();
+        db.execute("DROP TABLE catalog_message_watermark", [])
+            .unwrap();
         log.close().await.unwrap();
         let reopened = EventLog::open(&path).await.unwrap();
         assert!(

@@ -24,6 +24,46 @@ use maka_runtime::execution::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Explicit choices for a new root Session. No mutable Host defaults are
+/// resolved behind a retry identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Settings {
+    pub target: super::Target,
+    pub permission_mode: PermissionMode,
+    pub tool_mode: ToolMode,
+    pub collaboration_mode: CollaborationMode,
+    pub behavior: BehaviorId,
+    #[serde(default)]
+    pub bound_tools: Option<std::collections::BTreeSet<String>>,
+    #[serde(default)]
+    pub instructions: Option<String>,
+}
+impl Settings {
+    pub fn validate(&self) -> Result<(), Error> {
+        self.target.validate()?;
+        if self
+            .instructions
+            .as_ref()
+            .is_some_and(|text| text.len() > 16 * 1024)
+            || self
+                .bound_tools
+                .as_ref()
+                .is_some_and(|tools| tools.len() > 128)
+        {
+            return Err(Error::Invalid(
+                "Session settings exceed their budget".into(),
+            ));
+        }
+        if let Some(tools) = &self.bound_tools {
+            for tool in tools {
+                name(tool)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Fully explicit execution surface approved by Host. Defaults are resolved
 /// before persistence; a later restart cannot reinterpret configuration defaults.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +80,20 @@ pub struct RootTemplate {
     pub orchestration_mode: BehaviorId,
 }
 impl RootTemplate {
+    pub fn settings(&self) -> Settings {
+        Settings {
+            target: super::Target::Model {
+                model: self.model.clone(),
+                thinking_level: self.thinking_level,
+            },
+            permission_mode: self.permission_mode,
+            tool_mode: self.tool_mode,
+            collaboration_mode: self.collaboration_mode,
+            behavior: self.orchestration_mode.clone(),
+            bound_tools: None,
+            instructions: None,
+        }
+    }
     pub fn validate(&self) -> Result<(), Error> {
         name(&self.model.connection_id)?;
         name(&self.model.connection_slug)?;
@@ -74,10 +128,12 @@ pub struct RootApproval {
 pub struct CreateRoot {
     pub operation_id: String,
     pub name: String,
+    pub settings: Settings,
 }
 impl CreateRoot {
     pub fn validate(&self) -> Result<(), Error> {
         name(&self.operation_id)?;
+        self.settings.validate()?;
         if self.name.trim().is_empty() || self.name.len() > 1024 || self.name.contains('\0') {
             return Err(Error::Invalid("invalid root Session name".into()));
         }

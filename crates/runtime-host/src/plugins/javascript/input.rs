@@ -24,7 +24,6 @@ use serde_json::{Value, json};
 use std::{collections::BTreeSet, sync::Arc};
 
 pub(super) struct Input {
-    pub name: String,
     pub callback: Arc<Callback>,
 }
 #[derive(Deserialize)]
@@ -37,7 +36,7 @@ pub(super) struct Input {
 enum Outcome {
     Unchanged,
     Ready {
-        text: String,
+        content: maka_protocol::turn::MessageContent,
         receipt: Value,
         #[serde(default)]
         required_tools: BTreeSet<String>,
@@ -50,17 +49,17 @@ enum Outcome {
 impl input::Provider for Input {
     fn prepare(
         &self,
-        mut request: input::Request,
+        request: input::Request,
     ) -> BoxFuture<'static, Result<input::Outcome, Error>> {
         let callback = self.callback.clone();
-        let selections = request.selections.remove(&self.name).unwrap_or_default();
         Box::pin(async move {
             let content = maka_protocol::turn::MessageContent::from(request.content.clone());
             let value = invoke(
                 &callback.module,
                 callback.id,
                 json!({ "sessionId": request.session_id, "cwd": request.cwd,
-                    "content": content, "selections": selections, "tools": request.tools }),
+                    "content": content, "preparation": request.content.preparation,
+                    "selections": request.selections, "tools": request.tools }),
                 Value::Null,
                 request.cancellation,
             )
@@ -71,20 +70,15 @@ impl input::Provider for Input {
             Ok(match outcome {
                 Outcome::Unchanged => input::Outcome::Unchanged,
                 Outcome::Ready {
-                    text,
+                    content,
                     receipt,
                     required_tools,
-                } => {
-                    // Only prepared text changes. Attachments, original input and
-                    // prior providers' evidence retain their canonical ownership.
-                    request.content.text = text;
-                    input::Outcome::Ready {
-                        content: request.content,
-                        receipt,
-                        required_tools,
-                        basis: None,
-                    }
-                }
+                } => input::Outcome::Ready {
+                    content: content.into(),
+                    receipt,
+                    required_tools,
+                    basis: None,
+                },
                 Outcome::Blocked { message, receipt } => {
                     input::Outcome::Blocked { message, receipt }
                 }

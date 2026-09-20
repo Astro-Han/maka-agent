@@ -99,7 +99,6 @@ export {
 export {
   createRuntimeHostOperatorCommand,
   createRuntimeHostNativeOperatorCommand,
-  createRuntimeHostLegacyPosixOperatorCommand,
   decodeRuntimeHostOperatorCommand,
   decodeRuntimeHostPosixOperatorCommand,
   runtimeHostManagedOperatorCommand,
@@ -108,7 +107,6 @@ export {
   type RuntimeHostOperatorCommand,
   type RuntimeHostOperatorPlatform,
   type RuntimeHostPosixOperatorCommand,
-  type RuntimeHostLegacyPosixOperatorCommand,
   type RuntimeHostNodeOperatorCommand,
   type RuntimeHostNativeOperatorCommand,
 } from './operator-command.js';

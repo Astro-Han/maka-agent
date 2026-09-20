@@ -52,9 +52,12 @@ pub trait Plugin: Send + Sync {
 #[derive(Clone)]
 pub struct PluginContext {
     pub lifecycle: Context,
-    pub services: ServiceView,
+    pub services: crate::services::BoundServices,
+    pub contributions: crate::contributions::Publisher,
     /// Absent when the embedding Host does not provide persistent files.
     pub data: Option<crate::storage::Directory>,
+    /// Absent for client-only scopes or embedders without Host services.
+    pub host: Option<crate::host::Services>,
 }
 
 pub struct Definition {
@@ -161,6 +164,7 @@ pub struct Kernel {
     roots: Vec<Fiber>,
     activation_timeout: Duration,
     data: Option<crate::storage::Directories>,
+    host: Option<Arc<dyn crate::host::Provider>>,
 }
 
 impl Kernel {
@@ -176,11 +180,17 @@ impl Kernel {
             roots: Vec::new(),
             activation_timeout: Duration::from_secs(10),
             data: None,
+            host: None,
         }
     }
 
     pub fn with_data(mut self, data: crate::storage::Directories) -> Self {
         self.data = Some(data);
+        self
+    }
+
+    pub fn with_host(mut self, host: Arc<dyn crate::host::Provider>) -> Self {
+        self.host = Some(host);
         self
     }
 

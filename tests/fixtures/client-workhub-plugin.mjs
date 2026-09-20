@@ -19,7 +19,22 @@
 
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
-import { clientPluginRemote } from '../../apps/desktop/src/renderer/platform/desktop/client-plugin-remote.ts';
+import { pluginRemote } from './client-plugin-remote.mjs';
+
+export async function workhubRemote(connection) {
+  const remote = await pluginRemote(connection, 'maka.workhub');
+  return {
+    ...remote,
+    method(name, sessionId) {
+      const call = remote.method(name, sessionId);
+      return async (input = null) => {
+        const outcome = await call(input);
+        if (!outcome.ok) throw Object.assign(new Error(outcome.error.message), outcome.error);
+        return outcome.result;
+      };
+    },
+  };
+}
 
 export async function toggleWorkhub(connection, disabled) {
   await connection.request('plugin.composition.apply', {
@@ -48,29 +63,4 @@ export async function toggleWorkhub(connection, disabled) {
     );
     await delay(10);
   }
-}
-
-export async function workhubRemote(connection) {
-  const page = await connection.request('plugin.client.query', { kind: 'snapshot' });
-  const descriptor = page.entries.find((entry) => entry.entryId === 'maka.workhub.ui');
-  assert(descriptor, 'WorkHub must publish its Client');
-  const { entryId, extensionId, activation, contentDigest, clientDigest } = descriptor;
-  const lifetime = new AbortController();
-  const remote = clientPluginRemote(
-    (_host, _epoch, request) => connection.request('plugin.remote', request),
-    { profileId: 'test', hostId: 'test' },
-    'original-connection',
-  )({ entryId, extensionId, activation, contentDigest, clientDigest }, lifetime.signal);
-  return {
-    descriptor,
-    method(name, sessionId) {
-      const call = remote.api.method(name, sessionId);
-      return async (input = null) => {
-        const outcome = await call(input);
-        if (!outcome.ok) throw Object.assign(new Error(outcome.error.message), outcome.error);
-        return outcome.result;
-      };
-    },
-    close: remote.close,
-  };
 }

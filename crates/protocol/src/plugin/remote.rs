@@ -130,17 +130,20 @@ fn validate_target(target: &Target) -> Result<()> {
     super::client::identity(&target.entry_id)?;
     super::client::activation_id(&target.activation)
 }
-fn validate_binding(binding: &RemoteBinding) -> Result<()> {
-    super::client::identity(&binding.client.entry_id)?;
-    super::client::identity(&binding.client.extension_id)?;
+pub(super) fn validate_binding(binding: &RemoteBinding) -> Result<()> {
+    validate_client(&binding.client)?;
     super::client::identity(&binding.method)?;
-    super::client::activation_id(&binding.client.activation)?;
-    super::client::digest(&binding.client.content_digest)?;
-    super::client::digest(&binding.client.client_digest)?;
     if let Some(session) = &binding.session_id {
         maka_runtime::interaction::entity_id(session).map_err(ProtocolError::invalid)?;
     }
     Ok(())
+}
+pub(super) fn validate_client(client: &ClientIdentity) -> Result<()> {
+    super::client::identity(&client.entry_id)?;
+    super::client::identity(&client.extension_id)?;
+    super::client::activation_id(&client.activation)?;
+    super::client::digest(&client.content_digest)?;
+    super::client::digest(&client.client_digest)
 }
 fn payload(value: &Value) -> Result<()> {
     maka_plugins::remote::validate_payload(value)

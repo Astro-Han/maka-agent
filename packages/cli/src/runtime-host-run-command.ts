@@ -32,7 +32,10 @@ import {
   type RuntimeHostProfile,
 } from '@maka/runtime-host/client';
 import { runtimeHostProfileUsesHostWorkspace } from '@maka/runtime-host/profile-kind';
-import type { InteractionPendingSnapshot, SessionCatalogItem } from '@maka/runtime-host/protocol';
+import type {
+  InteractionPendingSnapshot,
+  SessionCatalogProjection,
+} from '@maka/runtime-host/protocol';
 import {
   runMakaTextCliCore,
   type MakaRunContext,
@@ -560,8 +563,8 @@ class RuntimeHostRunRuntime implements MakaRunRuntime {
   }
 }
 
-function runtimeHostSessionSummaries(items: readonly SessionCatalogItem[]): SessionSummary[] {
-  return items.flatMap((item) => ('kind' in item ? [] : [projectSessionCatalogSummary(item)]));
+function runtimeHostSessionSummaries(items: readonly SessionCatalogProjection[]): SessionSummary[] {
+  return items.map(projectSessionCatalogSummary);
 }
 
 type TurnOutcomeObservation =

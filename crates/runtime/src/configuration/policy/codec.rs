@@ -43,17 +43,11 @@ pub fn normalize_mutation(mut input: Value) -> Result<RuntimePolicyMutationInput
     Ok(input)
 }
 
-pub fn decode_canonical_snapshot(input: Value) -> Result<RuntimePolicySnapshot, String> {
+pub fn decode_canonical_snapshot(mut input: Value) -> Result<RuntimePolicySnapshot, String> {
     let encoded = crate::capability::json::stringify(&input).map_err(|e| e.to_string())?;
     if encoded.len() > MAX_POLICY_SNAPSHOT_BYTES {
         return Err("policy snapshot exceeds byte limit".into());
     }
-    decode_canonical_document(input)
-}
-
-/// Validates persisted policy semantics. The storage owner must bound document
-/// bytes before decoding; migrated documents may exceed the wire snapshot budget.
-pub fn decode_canonical_document(mut input: Value) -> Result<RuntimePolicySnapshot, String> {
     integer_field(&mut input, "revision");
     if let Some(value) = input
         .get_mut("policy")

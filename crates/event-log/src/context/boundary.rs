@@ -105,9 +105,7 @@ pub(super) async fn summary_span(
     let work: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?1 AND sequence > ?2 AND sequence < ?3
          AND (kind IN ('message_steered','tool_dispatched','tool_rejected','tool_settled')
-           OR (kind = 'model_requested' AND COALESCE(json_extract(event_json, '$.fact.purpose'),
-             (SELECT CASE json_extract(o.event_json, '$.fact.input.kind') WHEN 'context_compact' THEN 'summary' ELSE 'main' END
-               FROM runtime_events o WHERE o.invocation_id = runtime_events.invocation_id AND o.kind = 'invocation_opened')) != 'summary')))",
+           OR (kind = 'model_requested' AND json_extract(event_json, '$.fact.purpose') != 'summary')))",
     ).bind(&event.invocation.invocation_id).bind(first as i64).bind(through as i64).fetch_one(connection).await?;
     if work {
         return Err(invalid(
@@ -131,10 +129,7 @@ pub(super) async fn summary_start(
            WHERE invocation_id = ?1 AND kind = 'context_checkpoint_recorded' AND sequence < ?2)
          SELECT (SELECT MIN(s.sequence) FROM runtime_events s
            WHERE s.invocation_id = ?1 AND s.kind = 'model_requested' AND s.sequence > cut AND s.sequence < ?2
-           AND (json_extract(s.event_json, '$.fact.purpose') = 'summary'
-             OR (json_extract(s.event_json, '$.fact.purpose') IS NULL AND EXISTS (
-               SELECT 1 FROM runtime_events o WHERE o.invocation_id = ?1 AND o.kind = 'invocation_opened'
-               AND json_extract(o.event_json, '$.fact.input.kind') = 'context_compact')))),
+           AND json_extract(s.event_json, '$.fact.purpose') = 'summary'),
            cut = 0 OR EXISTS (SELECT 1 FROM runtime_events completed
              JOIN runtime_events request ON request.invocation_id = completed.invocation_id
                AND request.operation_id = completed.operation_id AND request.kind = 'model_requested'
@@ -142,7 +137,7 @@ pub(super) async fn summary_start(
              WHERE completed.invocation_id = ?1 AND completed.kind = 'model_completed'
                AND completed.sequence > cut AND completed.sequence < ?2
                AND json_extract(opening.event_json, '$.fact.input.kind') != 'context_compact'
-               AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main')
+               AND json_extract(request.event_json, '$.fact.purpose') = 'main')
          FROM boundary",
     ).bind(invocation).bind(through as i64).fetch_one(connection).await?;
     if !renewed {

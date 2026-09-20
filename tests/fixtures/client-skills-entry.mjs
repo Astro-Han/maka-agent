@@ -33,6 +33,7 @@ import * as ClientSdk from '../../packages/plugin-sdk/src/client.ts';
 import { ClientRuntime } from '../../packages/ui/src/client-plugins/runtime.ts';
 import { ClientSlot } from '../../packages/ui/src/client-plugins/slots.tsx';
 import { clientPluginRemote } from '../../apps/desktop/src/renderer/platform/desktop/client-plugin-remote.ts';
+import { pluginRemote } from './client-plugin-remote.mjs';
 import { connectRuntimeHostMessageTransport } from '../../packages/runtime-host/src/client/connection.ts';
 import { FramedTransport } from '../../packages/runtime-host/src/transport/framed-transport.ts';
 import {
@@ -72,7 +73,7 @@ document.head.append = (...nodes) => {
 };
 const socket = connect(values.socket);
 const transport = new FramedTransport(socket);
-let connection, runtime, root;
+let connection, runtime, root, skills;
 const errors = [];
 const draft = [];
 const openedFiles = [];
@@ -214,27 +215,29 @@ try {
       (button) => button.textContent === 'Pin' && !button.disabled,
     ),
   );
-  const governance = await connection.request('skill.catalog.query', {
-    kind: 'start',
-    context: { workspace: { kind: 'host_path', path: values['skills-client-workspace'] } },
-    view: 'governance',
-  });
+  skills = await pluginRemote(connection, 'maka.skills');
+  const skillRequest = (request) =>
+    skills.method('path-request')({
+      path: values['skills-client-workspace'],
+      permissionMode: 'ask',
+      collaborationMode: 'agent',
+      request,
+    });
+  const governance = await skillRequest({ kind: 'catalog', view: 'governance' });
   assert.equal(governance.items.find((item) => item.ref === 'project:maka:review').pinned, false);
-  const context = { workspace: { kind: 'host_path', path: values['skills-client-workspace'] } };
-  const disable = await connection.request('skill.catalog.mutate', {
-    context,
+  const disable = await skillRequest({
+    kind: 'mutate',
     expectedRevision: governance.revision,
     mutation: { kind: 'set_enabled', ref: 'project:maka:review', enabled: false },
   });
   assert.equal(disable.kind, 'committed');
   await until(() => !suggestions.some((item) => item.insertText === '/skill:review '));
-  const latest = await connection.request('skill.catalog.query', {
-    kind: 'start',
-    context,
+  const latest = await skillRequest({
+    kind: 'catalog',
     view: 'governance',
   });
-  const enable = await connection.request('skill.catalog.mutate', {
-    context,
+  const enable = await skillRequest({
+    kind: 'mutate',
     expectedRevision: latest.revision,
     mutation: { kind: 'set_enabled', ref: 'project:maka:review', enabled: true },
   });
@@ -314,6 +317,7 @@ try {
   assert.deepEqual(errors, []);
   console.log('skills-client-bundle-accepted');
 } finally {
+  await skills?.close();
   if (root) flushSync(() => root.unmount());
   await runtime?.close();
   transport.abort();

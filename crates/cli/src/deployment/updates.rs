@@ -194,8 +194,7 @@ mod tests {
             .await
             .unwrap();
         writer.run(|connection| Box::pin(async move {
-            // Model the published predecessor and a failure after migration.
-            sqlx::raw_sql("DROP TABLE deployment_update_policy; DELETE FROM _sqlx_migrations WHERE version = 3; CREATE TRIGGER reject_prepare BEFORE INSERT ON deployment_update BEGIN SELECT RAISE(ABORT, 'prepare failed'); END;")
+            sqlx::raw_sql("CREATE TRIGGER reject_prepare BEFORE INSERT ON deployment_update BEGIN SELECT RAISE(ABORT, 'prepare failed'); END;")
                 .execute(connection).await?;
             Ok(())
         })).await.unwrap();
@@ -208,15 +207,17 @@ mod tests {
         let writer = store::open_update_writer(&directory, lease.clone())
             .await
             .unwrap();
-        writer.run(|connection| Box::pin(async move {
-            let migrated: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version = 3)")
-                .fetch_one(&mut *connection).await?;
-            let table: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'deployment_update_policy')")
-                .fetch_one(&mut *connection).await?;
-            assert!(!migrated && !table, "failed preparation must also roll back migrations");
-            sqlx::query("DROP TRIGGER reject_prepare").execute(connection).await?;
-            Ok(())
-        })).await.unwrap();
+        writer
+            .run(|connection| {
+                Box::pin(async move {
+                    sqlx::query("DROP TRIGGER reject_prepare")
+                        .execute(connection)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .await
+            .unwrap();
         writer.close().await.unwrap();
         assert_eq!(
             read(&directory, lease.clone()).await.unwrap(),
@@ -248,7 +249,7 @@ mod tests {
         prepare(&directory, lease.clone(), current.clone(), target.clone())
             .await
             .unwrap();
-        // Old startup readers still see the sole authorized version while an
+        // Startup readers still see the sole authorized version while an
         // updater is absent. A different target cannot overwrite its intent.
         let store::Installation::Installed(active) = store::read(&directory).await.unwrap() else {
             panic!("pending intent must not change the startup reader contract");
@@ -372,7 +373,36 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(read(&directory, lease).await.unwrap(), (active, None));
+        assert_eq!(
+            read(&directory, lease.clone()).await.unwrap(),
+            (active, None)
+        );
+        let writer = store::open_writer(&directory, lease.clone(), None)
+            .await
+            .unwrap();
+        writer
+            .run(|connection| {
+                Box::pin(async move {
+                    sqlx::raw_sql(
+                        "PRAGMA journal_mode=DELETE; UPDATE _sqlx_migrations SET checksum = X'00';",
+                    )
+                    .execute(connection)
+                    .await?;
+                    Ok(())
+                })
+            })
+            .await
+            .unwrap();
+        writer.close().await.unwrap();
+        let path = directory.join("deployment.sqlite");
+        let before = std::fs::read(&path).unwrap();
+        assert!(store::read(&directory).await.is_err());
+        assert!(store::open_writer(&directory, lease, None).await.is_err());
+        assert_eq!(
+            std::fs::read(path).unwrap(),
+            before,
+            "unsupported stores must not be rewritten"
+        );
         drop(owner);
         drop(RootOwner::open(&root_path, &namespaces).unwrap());
     }

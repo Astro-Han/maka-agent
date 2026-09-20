@@ -136,8 +136,11 @@ impl Broker {
         let frame = frame(invocation_id.clone());
         let tool = match &frame {
             HostFrame::Call {
-                session_id,
-                turn_id,
+                source:
+                    maka_runtime::capability::CallSource::Agent {
+                        session_id,
+                        turn_id,
+                    },
                 tool_call_id,
                 server_id,
                 tool_name,

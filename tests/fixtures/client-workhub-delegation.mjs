@@ -350,8 +350,8 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
         ],
         async call(frame, { accept }) {
           try {
-            assert.equal(frame.sessionId, sessionId);
-            assert.equal(frame.turnId, turnId);
+            assert.equal(frame.source.sessionId, sessionId);
+            assert.equal(frame.source.turnId, turnId);
             assert.equal(frame.toolName, 'control');
             await accept({ kind: 'none' });
             input = await prepareRouting({

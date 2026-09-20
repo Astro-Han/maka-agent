@@ -64,6 +64,8 @@ Prompt 回调接收类型化的 Session 或模型步骤上下文，不伪造工�
 
 `npm --workspace @maka-agent/plugin-sdk run typecheck` 同时检查 Rust Host 集成测试实际执行的插件 fixture。
 
+`ctx.preferences.read()` 返回带 revision 的个性化设置及工作区指令开关，不暴露凭据或完整 Host 配置。激活期间即可读取，随插件退休失效；它不授予资源或执行权限。
+
 `ctx.executions.createChild({ ..., workspace: 'isolated_git' })` 为子 Session 绑定 Host 管理的 linked worktree。父会话必须允许写入，且工作目录是干净仓库的根目录。重试与 Host 重启保留子任务改动。执行及工作区写入者结束后，`workspacePatch(operationId)` 发布相对于初始提交的不可变 Git patch artifact，包含已提交与未提交改动，不自动合并到父目录。需在子会话进入下一 Turn 前导出。工作区保留用于恢复，不随插件禁用而删除。稀疏检出、子模块、外部 Git filter 和超过 50 MiB 的补丁会明确报错。Host 的 Git 操作使用 gix，不依赖系统 Git 可执行文件。
 
 输入准备使用 `ctx.input.prepare(name, callback)`，返回不变、附回执的准备文本或明确拒绝。此时没有 invocation 权限，不能替换附件或已有回执；Host 标注来源，已接受输入在重放时不重新准备。回调应无副作用；可变来源更新时关闭并重新注册，阻止旧准备结果继续准入。
@@ -81,5 +83,7 @@ Slot 包括 `session.composer.before`、`workspace.composer.before` 和 `workspa
 Desktop 通过 `@maka/ui/plugin` 提供共享 UI 模块（目前为 `Button`）。使用该入口支持的组件，不再打包一份组件库实例；它不暴露内部 UI 包的完整 API。
 
 Host 插件通过 `ctx.remote.method(name, callback)` 或 `ctx.remote.stream(name, open)` 发布接口。Client 插件通过 `ctx.remote.method<Input, Output>(name, sessionId?)` 获取调用函数，或通过 `ctx.remote.stream<Input, Output>(name, sessionId?)` 获取异步迭代器工厂。UI 发布后才能调用；句柄固定到原 Host 连接和后端注册，不随替换重定向。退出迭代会关闭流，UI 卸载或页面导航会关闭所属文档。Remote 调用不是 Agent 调用，不隐含进程权限。
+
+Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unknown` 保留业务结果不确定的语义，需要领域恢复，不能盲目重试；它不会隔离已正常结算的插件。资源清理未确认时由 Host 独立隔离。未分类异常映射为 `operation_unavailable`。
 
 接受调用者 Host 路径的 Rust endpoint 声明 `Endpoint::requiring_host_paths()`。Host 在绑定和调用时都检查路径授权，借用其他连接的注册目标也不能绕过。项目 ID 和已有 Session 查询不要求原始路径权限；插件通过显式注入的只读视图访问它们。

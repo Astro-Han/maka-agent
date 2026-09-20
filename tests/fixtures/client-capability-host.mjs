@@ -84,8 +84,8 @@ export async function verifyCapabilityHost(connection, workspace, reopened, open
         const index = calls.length + 1;
         assert.equal(generation, index <= 2 ? 1 : 2);
         assert.equal(frame.registrationId, registrations.get(generation));
-        assert.equal(frame.sessionId, sessionId);
-        assert.equal(frame.turnId, index <= 2 ? 'capability-first' : 'capability-second');
+        assert.equal(frame.source.sessionId, sessionId);
+        assert.equal(frame.source.turnId, index <= 2 ? 'capability-first' : 'capability-second');
         assert.equal(frame.serverId, `host-${frame.offerId}`);
         assert.equal(frame.toolName, 'effect');
         assert.deepEqual(frame.arguments, { index });

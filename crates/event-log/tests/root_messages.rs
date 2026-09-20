@@ -41,7 +41,6 @@ fn source(id: &str, text: &str) -> RootSourceMessage {
         },
         submitted_placement: Placement::CurrentTurn,
         disposition: MessageDisposition::Steering,
-        skill_invocation: Default::default(),
         submitted_intent: None,
     }
 }
@@ -58,7 +57,6 @@ fn opening(session: &str, turn: &str, sources: Vec<RootSourceMessage>) -> Runtim
             input: InvocationInput::Message {
                 content: message::aggregate(sources.iter().map(|source| &source.message.content)),
                 request_fingerprint: None,
-                skill_invocation: Default::default(),
                 source_messages: sources,
             },
         },
@@ -92,7 +90,7 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     first.message.content.display_text = Some("visible".into());
     first.disposition = MessageDisposition::TurnStarted;
     first.submitted_intent = Some(SubmittedTurnIntent {
-        skill_ids: vec!["project:review".into()],
+        input_selections: [("reviewer".into(), vec!["project:review".into()])].into(),
         turn_orchestration: Some(TurnOrchestration {
             mode: BehaviorId::try_from("graph".to_owned()).unwrap(),
             source: TurnOrchestrationSource::SlashCommand,
@@ -101,24 +99,16 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     let event = opening("a", "first", vec![first.clone()]);
     let mut duplicate_receipt = event.clone();
     let Fact::InvocationOpened {
-        input: InvocationInput::Message {
-            skill_invocation, ..
-        },
+        input: InvocationInput::Message { content, .. },
         ..
     } = &mut duplicate_receipt.fact
     else {
         unreachable!()
     };
-    skill_invocation
-        .get_or_insert_with(Default::default)
-        .loaded
-        .push(maka_runtime::skills::LoadedSkill {
-            id: "review".into(),
-            name: "Review".into(),
-        });
+    content.text.push_str("not in source");
     assert!(
         EventWrite::plain(duplicate_receipt).is_err(),
-        "source and legacy receipts cannot both own the opening"
+        "opening must preserve its admitted source content"
     );
     let write = EventWrite::plain(event.clone()).unwrap();
     let pending = maka_event_log::message_admissions::PendingMessageAdmission {
@@ -191,7 +181,6 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     let colliding = RuntimeEvent::new(
         event.invocation.clone(),
         Fact::MessageSteered {
-            skill_invocation: Default::default(),
             message: Box::new(first.message.clone()),
         },
     );
@@ -205,7 +194,6 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
         &EventWrite::plain(RuntimeEvent::new(
             event.invocation.clone(),
             Fact::MessageSteered {
-                skill_invocation: Default::default(),
                 message: Box::new(delivered),
             },
         ))

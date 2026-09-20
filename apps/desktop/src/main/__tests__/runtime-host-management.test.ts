@@ -24,7 +24,6 @@ import {
   RuntimeHostOperationError,
 } from '@maka/runtime-host/client';
 import {
-  RUNTIME_HOST_OPERATOR_PEER_RELAY_DISCOVERY_CAPABILITY,
   RUNTIME_HOST_OPERATOR_PEER_WEBRTC_STUN_CAPABILITY,
   runtimeHostAccessCredentialFingerprint,
   type RuntimeHostServiceManagementFrame,
@@ -1082,13 +1081,7 @@ test('retries acknowledged deployment cleanup without repeating uninstall', asyn
       ...unusedDirectPeerProfileDependencies(),
       resolveManagedService: async () => {
         const binding = managedBinding(profile, service, 'cleanup_pending');
-        return {
-          ...binding,
-          deployment: {
-            id: binding.deployment.id,
-            rootPath: binding.deployment.rootPath,
-          },
-        };
+        return binding;
       },
       resolveManagedAccess: async () => undefined,
       markManagedServiceUninstalling: async () =>
@@ -1155,13 +1148,7 @@ test('rechecks uninstall intent before retrying the remote service', async () =>
           },
           'uninstalling',
         );
-        return {
-          ...binding,
-          deployment: {
-            id: binding.deployment.id,
-            rootPath: binding.deployment.rootPath,
-          },
-        };
+        return binding;
       },
       resolveManagedAccess: async () => undefined,
       markManagedServiceUninstalling: async (binding) => {
@@ -1322,7 +1309,7 @@ test('disables a newly enabled listener when its Desktop profile cannot be commi
       directPeerClientAvailable: true,
       runServiceManagement: async () => ({
         ...serviceResult('status'),
-        operatorCapabilities: [RUNTIME_HOST_OPERATOR_PEER_RELAY_DISCOVERY_CAPABILITY],
+        operatorCapabilities: [RUNTIME_HOST_OPERATOR_PEER_WEBRTC_STUN_CAPABILITY],
       }),
       runAccessManagement: async () => assert.fail('access management is not expected'),
       runPeerManagement: async (input) => {

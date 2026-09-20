@@ -90,7 +90,6 @@ async fn delegation_copies_attachments_atomically_and_replays_without_the_delete
                 content: content.clone(),
                 request_fingerprint: None,
                 source_messages: Vec::new(),
-                skill_invocation: None,
             },
         },
     ))

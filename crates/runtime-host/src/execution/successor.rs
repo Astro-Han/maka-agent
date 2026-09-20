@@ -208,12 +208,7 @@ impl Executions {
                             content: content.into(),
                             // Accepted source content already contains the frozen
                             // instructions; recovery must not load it a second time.
-                            skill_ids: intent
-                                .filter(|intent| {
-                                    !intent.skill_ids.is_empty()
-                                        && sources[0].skill_invocation.loaded.is_empty()
-                                })
-                                .map(|intent| intent.skill_ids.clone()),
+                            input_selections: Default::default(),
                             turn_orchestration: intent
                                 .and_then(|intent| intent.turn_orchestration.clone()),
                             max_steps: None,
@@ -272,7 +267,6 @@ impl Executions {
                         sources.iter().map(|source| &source.message.content),
                     ),
                     source_messages: sources,
-                    skill_invocation: Default::default(),
                     request_fingerprint: None,
                 },
             },
@@ -352,7 +346,6 @@ mod tests {
                     Placement::CurrentTurn
                 },
                 disposition,
-                skill_invocation: Default::default(),
                 submitted_intent: None,
             },
         };

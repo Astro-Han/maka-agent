@@ -47,7 +47,6 @@ async fn turn_control_reads_survive_history_budget_exhaustion_and_reopen() {
                 (event(Fact::InvocationOpened {
                     configuration: None,
                     input: maka_runtime::input::InvocationInput::Message {
-                        skill_invocation: Default::default(),
                         source_messages: Vec::new(),
                         content: "question".into(),
                         request_fingerprint: Some("sha256:fixture".into()),
@@ -72,7 +71,7 @@ async fn turn_control_reads_survive_history_budget_exhaustion_and_reopen() {
         log.append(
             &EventWrite::plain(
                 (event(Fact::ModelRequested {
-                    purpose: None,
+                    purpose: maka_runtime::context::ModelPurpose::Main,
                     context: None,
                     checkpoint_event_id: None,
                     step_id: "step".into(),
@@ -168,7 +167,6 @@ async fn turn_control_reads_survive_history_budget_exhaustion_and_reopen() {
             Fact::InvocationOpened {
                 configuration: None,
                 input: maka_runtime::input::InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: "successor fixture".into(),
                     request_fingerprint: None,

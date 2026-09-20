@@ -254,6 +254,31 @@ function requireObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/** UI interpretation of Skills-owned input receipts; execution treats them as opaque. */
+export function preparedSkillInvocation(
+  preparation: readonly {
+    source: { name: string; packageId: string };
+    receipt: unknown;
+  }[],
+): SkillInvocationResult {
+  const loaded: Array<SkillInvocationResult['loaded'][number]> = [];
+  const failed: SkillInvocationFailure[] = [];
+  const receipts: SkillInvocationReceipt[] = [];
+  for (const item of preparation) {
+    if (item.source.name !== 'maka.skills' || item.source.packageId !== 'maka.skills') continue;
+    let decoded: SkillInvocationResult;
+    try {
+      decoded = decodeSkillInvocationResult(item.receipt);
+    } catch {
+      continue;
+    }
+    loaded.push(...decoded.loaded);
+    failed.push(...decoded.failed);
+    receipts.push(...decoded.receipts);
+  }
+  return { loaded, failed, receipts };
+}
+
 function requireExactKeys(record: Record<string, unknown>, keys: readonly string[]): void {
   const actual = Object.keys(record).sort();
   const expected = [...keys].sort();

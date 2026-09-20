@@ -33,6 +33,7 @@ import { z } from 'zod';
 import { buildClientSettingsTools } from '../client-settings-tools.js';
 import { buildManagedArtifactPreviewTools } from '../managed-artifact-preview-tools.js';
 import { browserOriginAdmission } from '../browser/browser-origin-admission.js';
+import type { SessionToolContext } from '@maka/runtime/tool-runtime';
 import { buildRiveWorkflowTool } from '../rive-workflow-tool.js';
 import { createDesktopNativeCapabilityProvider } from '../runtime-host-native-capabilities.js';
 
@@ -58,12 +59,12 @@ test('Artifact preview is discoverable and admitted without a pre-existing brows
         signal.throwIfAborted();
         invoked = true;
         return { url: 'http://127.0.0.1:12345/token/index.html', expiresAt: 123456, reachable: true, loaded: false };
-      }),
+      }).map(tool => ({ context: 'session' as const, tool })),
     }],
   }, { nativeSessionId: (sessionId) => `native:${sessionId}` });
   assert.doesNotThrow(() => decodeClientCapabilityReplaceInput({ registrationId: 'registration-1', offers: provider.offers() }));
   assert.ok(provider.offers().some((offer) => offer.offerId === 'desktop_artifact_preview' && offer.tools.some((tool) => tool.name === 'ArtifactPreview')));
-  const result = await call(provider, capabilityFrame({ offerId: 'desktop_artifact_preview', serverId: 'desktop_artifact_preview', toolName: 'ArtifactPreview', arguments: { artifactId: 'artifact-1' } }));
+  const result = await call(provider, capabilityFrame({ offerId: 'desktop_artifact_preview', serverId: 'desktop_artifact_preview', toolName: 'ArtifactPreview', arguments: { artifactId: 'artifact-1' }, source: { kind: 'background', grantId: 'preview-grant', sessionId: 'session-1' } }));
   assert.equal(invoked, true);
   assert.deepEqual(result.structuredContent, { url: 'http://127.0.0.1:12345/token/index.html', expiresAt: 123456, reachable: true, loaded: false });
 });
@@ -615,7 +616,7 @@ test('validates before admission and invokes the exact offered tool with Host co
   let received:
     | {
         args: unknown;
-        context: Pick<MakaToolContext, 'sessionId' | 'turnId' | 'cwd' | 'toolCallId'>;
+        context: Pick<SessionToolContext, 'sessionId' | 'cwd' | 'toolCallId'>;
       }
     | undefined;
   const provider = createDesktopNativeCapabilityProvider(
@@ -628,11 +629,11 @@ test('validates before admission and invokes the exact offered tool with Host co
             url: 'https://example.com/path',
           });
           invoked = true;
+          assert.equal('turnId' in context, false);
           received = {
             args,
             context: {
               sessionId: context.sessionId,
-              turnId: context.turnId,
               cwd: context.cwd,
               toolCallId: context.toolCallId,
             },
@@ -675,7 +676,6 @@ test('validates before admission and invokes the exact offered tool with Host co
     args: { url: 'https://example.com/path' },
     context: {
       sessionId: 'host-a:session-1',
-      turnId: 'turn-1',
       cwd: '/workspace',
       toolCallId: 'tool-call-1',
     },
@@ -688,6 +688,23 @@ test('validates before admission and invokes the exact offered tool with Host co
     'https://example.com/path',
     'https://example.com/path',
   ]);
+  for (const source of [
+    { kind: 'remote' as const, requestId: 'request-1', sessionId: 'session-1' },
+    { kind: 'background' as const, grantId: 'grant-1', sessionId: 'session-1' },
+  ]) {
+    admitted = false;
+    invoked = false;
+    await call(provider, capabilityFrame({ source, arguments: { url: 'https://example.com/path' } }), () => {
+      admitted = true;
+    });
+    assert.equal(invoked, true);
+    admitted = false;
+    await assert.rejects(call(provider, capabilityFrame({ source: { ...source, sessionId: null } }), () => {
+      admitted = true;
+    }), /requires a Session/u);
+    assert.equal(admitted, false);
+  }
+  await provider.close();
 });
 
 test('does not execute Browser work when its Origin changes while admission is pending', async () => {
@@ -750,7 +767,7 @@ test('watches Computer Use turns without widening Browser lifecycle', async () =
 
   await call(
     provider,
-    computerFrame({ sessionId: 'session-2', turnId: 'turn-2' }),
+    computerFrame({ source: { kind: 'agent', sessionId: 'session-2', turnId: 'turn-2' } }),
   );
   assert.deepEqual(usedSessions, ['session-1', 'session-2']);
   assert.deepEqual(computerUseTurns, [['session-2', 'turn-2']]);
@@ -798,7 +815,7 @@ test('projects Computer Use screenshots and releases all native resources for a 
   await call(
     provider,
     capabilityFrame({
-      sessionId: 'browser-session',
+      source: { kind: 'agent', sessionId: 'browser-session', turnId: 'turn-1' },
       toolName: 'browser_snapshot',
       arguments: {},
     }),
@@ -807,7 +824,7 @@ test('projects Computer Use screenshots and releases all native resources for a 
   assert.deepEqual(browserReleased, ['manual-session', 'browser-session']);
   assert.deepEqual(computerReleased, ['manual-session', 'browser-session']);
 
-  const completed = await call(provider, computerFrame({ sessionId: 'completed-session', arguments: {} }));
+  const completed = await call(provider, computerFrame({ source: { kind: 'agent', sessionId: 'completed-session', turnId: 'turn-1' }, arguments: {} }));
   assert.deepEqual(completed, {
     content: [
       { type: 'text', text: 'captured' },
@@ -818,7 +835,7 @@ test('projects Computer Use screenshots and releases all native resources for a 
   assert.deepEqual(browserReleased, ['manual-session', 'browser-session', 'completed-session']);
   assert.deepEqual(computerReleased, ['manual-session', 'browser-session', 'completed-session']);
 
-  const inFlight = call(provider, computerFrame({ sessionId: 'active-session', arguments: { wait: true } }));
+  const inFlight = call(provider, computerFrame({ source: { kind: 'agent', sessionId: 'active-session', turnId: 'turn-1' }, arguments: { wait: true } }));
   await started;
   await provider.close();
   await assert.rejects(inFlight, /provider closed/u);
@@ -1285,11 +1302,11 @@ test('forwards Host cancellation to an admitted Desktop invocation', async () =>
   await assert.rejects(inFlight, /Host cancelled invocation/u);
 });
 
-function tool<P, R>(
+function tool<P, R, Context = SessionToolContext>(
   name: string,
   parameters: z.ZodType<P>,
-  impl: (args: P, context: MakaToolContext) => Promise<R>,
-): MakaTool<P, R> {
+  impl: (args: P, context: Context) => Promise<R>,
+): MakaTool<P, R, Context> {
   return {
     name,
     displayName: name,
@@ -1372,8 +1389,7 @@ function capabilityFrame(overrides: Partial<ClientCapabilityCallFrame> = {}): Cl
     serverId: 'desktop_browser',
     toolName: 'browser_navigate',
     arguments: { url: 'https://example.com' },
-    sessionId: 'session-1',
-    turnId: 'turn-1',
+    source: { kind: 'agent', sessionId: 'session-1', turnId: 'turn-1' },
     toolCallId: 'tool-call-1',
     cwd: '/workspace',
     ...overrides,
@@ -1420,7 +1436,7 @@ test('WorkHub groups receive their target epoch and join Desktop interaction tur
   });
   const frame = capabilityFrame({ offerId: 'desktop_workhub', serverId: 'desktop_workhub', toolName: 'control', arguments: {} });
   const result = await call(provider, frame);
-  assert.deepEqual(watched, [[frame.sessionId, frame.turnId]]);
-  assert.deepEqual(result.content, [{ type: 'text', text: frame.sessionId }], 'WorkHub authority sees the real Host Session id, not a native resource alias');
+  assert.deepEqual(watched, [['session-1', 'turn-1']]);
+  assert.deepEqual(result.content, [{ type: 'text', text: frame.source.sessionId }], 'WorkHub authority sees the real Host Session id, not a native resource alias');
   await provider.close();
 });

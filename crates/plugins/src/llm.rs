@@ -20,6 +20,14 @@
 pub use maka_runtime::model::ModelGeneration;
 use serde::{Deserialize, Serialize};
 
+pub trait Models: Send + Sync {
+    fn generate(
+        &self,
+        call: crate::call::Scope,
+        input: Generate,
+    ) -> futures_util::future::BoxFuture<'_, Result<ModelGeneration, maka_runtime::tools::ToolError>>;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Generate {

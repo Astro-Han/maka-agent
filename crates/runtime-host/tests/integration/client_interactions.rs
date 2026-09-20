@@ -149,7 +149,8 @@ async fn original_client_managed_approval_gates_effects_and_persists_decisions()
                     )
                     .unwrap();
                     let stored = dispatches.last().unwrap();
-                    assert_eq!(frame["turnId"], stored.event.invocation.turn_id);
+                    assert_eq!(frame["source"]["kind"], "agent");
+                    assert_eq!(frame["source"]["turnId"], stored.event.invocation.turn_id);
                     assert_eq!(stored.event.invocation.turn_id, format!("approval-{index}"));
                     let Fact::ToolDispatched { input, .. } = &stored.event.fact else {
                         unreachable!()

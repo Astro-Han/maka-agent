@@ -19,6 +19,64 @@
 
 use super::{Peer, converged, disabled, json};
 
+pub(crate) async fn request(
+    peer: &mut Peer,
+    method: &str,
+    input: serde_json::Value,
+) -> serde_json::Value {
+    let snapshot = peer
+        .rpc("plugin.client.query", json!({"kind":"snapshot"}))
+        .await;
+    let entry = snapshot["result"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["extensionId"] == "maka.skills")
+        .unwrap();
+    let client = json!({"entryId":entry["entryId"],"extensionId":entry["extensionId"],
+        "activation":entry["activation"],"contentDigest":entry["contentDigest"],"clientDigest":entry["clientDigest"]});
+    let binding = json!({"client":client,"method":method});
+    let bound = peer
+        .rpc("plugin.remote", json!({"kind":"bind","binding":binding}))
+        .await;
+    assert_eq!(bound["ok"], true, "{bound}");
+    let opened = peer
+        .rpc("plugin.remote", json!({"kind":"open_document"}))
+        .await;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let document = &opened["result"]["document"];
+    let outcome = peer
+        .rpc(
+            "plugin.remote",
+            json!({"kind":"call","document":document,
+        "binding":binding,"target":bound["result"]["target"],"input":input}),
+        )
+        .await;
+    let closed = peer
+        .rpc(
+            "plugin.remote",
+            json!({"kind":"close_document","document":document}),
+        )
+        .await;
+    assert_eq!(closed["ok"], true, "{closed}");
+    assert_eq!(outcome["ok"], true, "{outcome}");
+    outcome["result"]["value"].clone()
+}
+
+pub(crate) async fn workspace(
+    peer: &mut Peer,
+    path: &serde_json::Value,
+    input: serde_json::Value,
+) -> serde_json::Value {
+    request(
+        peer,
+        "path-request",
+        json!({"path":path,"permissionMode":"ask",
+        "collaborationMode":"agent","request":input}),
+    )
+    .await
+}
+
 pub(super) async fn verify(peer: &mut Peer) {
     let snapshot = peer
         .rpc("plugin.client.query", json!({"kind":"snapshot"}))

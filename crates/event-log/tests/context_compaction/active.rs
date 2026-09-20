@@ -27,7 +27,7 @@ fn opening(id: &str) -> EventWrite {
         "cwd":"/tmp", "permission_mode":"ask", "collaboration_mode":"agent",
         "orchestration_mode":"default", "tool_mode":"direct",
         "model":{"connection_id":"connection", "connection_slug":"test", "model":"test"}, "thinking_level":null
-    })).unwrap()), input: InvocationInput::Message { skill_invocation: Default::default(), source_messages: Vec::new(), content: serde_json::from_value(json!({
+    })).unwrap()), input: InvocationInput::Message { source_messages: Vec::new(), content: serde_json::from_value(json!({
         "text":"Original anchor", "display_text":"Display anchor",
         "quotes":[{"text":"A retained quotation", "label":"source"}]
     })).unwrap(), request_fingerprint: None } })
@@ -41,7 +41,7 @@ fn request(id: &str, step: &str, purpose: ModelPurpose, source: &ModelContextSou
                 .then(|| source.effective_source_digest.clone()),
             step_id: step.into(),
             model_id: "test".into(),
-            purpose: Some(purpose),
+            purpose,
             context: Some(ModelRequestContext {
                 provider_id: "openai".into(),
                 context_window: Some(10_000),

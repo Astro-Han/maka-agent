@@ -40,8 +40,7 @@ describe('Client Capability protocol', () => {
       serverId: 'server',
       toolName: 'tool',
       arguments: {},
-      sessionId: 'session',
-      turnId: 'turn',
+      source: { kind: 'agent', sessionId: 'session', turnId: 'turn' },
     };
     for (const toolCallId of ['call:outer:nested:inner', 'provider/call.1+part', 'x'.repeat(256)]) {
       assert.deepEqual(decodeHostFrame({ ...frame, toolCallId }), { ...frame, toolCallId });
@@ -60,10 +59,21 @@ describe('Client Capability protocol', () => {
     ]) {
       assert.throws(() => decodeHostFrame({ ...frame, toolCallId }), RuntimeHostProtocolError);
     }
-    for (const field of ['invocationId', 'registrationId', 'offerId', 'sessionId', 'turnId']) {
+    for (const field of ['invocationId', 'registrationId', 'offerId']) {
       assert.throws(
         () =>
           decodeHostFrame({ ...frame, toolCallId: 'call:nested:inner', [field]: 'entity:invalid' }),
+        RuntimeHostProtocolError,
+      );
+    }
+    for (const field of ['sessionId', 'turnId']) {
+      assert.throws(
+        () =>
+          decodeHostFrame({
+            ...frame,
+            toolCallId: 'call',
+            source: { ...frame.source, [field]: 'entity:invalid' },
+          }),
         RuntimeHostProtocolError,
       );
     }
@@ -135,8 +145,7 @@ describe('Client Capability protocol', () => {
         serverId: 'not_known_by_host',
         toolName: 'vendor_action',
         arguments: { value: 'hello' },
-        sessionId: 'session',
-        turnId: 'turn',
+        source: { kind: 'agent', sessionId: 'session', turnId: 'turn' },
         toolCallId: 'tool-call',
       }),
       {
@@ -147,10 +156,45 @@ describe('Client Capability protocol', () => {
         serverId: 'not_known_by_host',
         toolName: 'vendor_action',
         arguments: { value: 'hello' },
-        sessionId: 'session',
-        turnId: 'turn',
+        source: { kind: 'agent', sessionId: 'session', turnId: 'turn' },
         toolCallId: 'tool-call',
       },
+    );
+    const independentCall = {
+      kind: 'client.capability.call',
+      invocationId: 'invocation',
+      registrationId: 'registration',
+      offerId: 'desktop',
+      serverId: 'desktop',
+      toolName: 'inspect',
+      arguments: {},
+      toolCallId: 'call',
+    };
+    for (const source of [
+      { kind: 'remote', requestId: 'request', sessionId: 'session' },
+      { kind: 'background', grantId: 'grant', sessionId: null },
+    ]) {
+      assert.deepEqual(decodeHostFrame({ ...independentCall, source }), {
+        ...independentCall,
+        source,
+      });
+      assert.throws(
+        () =>
+          decodeHostFrame({
+            ...independentCall,
+            source: { ...source, turnId: 'borrowed' },
+          }),
+        RuntimeHostProtocolError,
+      );
+    }
+    assert.throws(
+      () =>
+        decodeHostFrame({
+          ...independentCall,
+          sessionId: 'session',
+          turnId: 'obsolete-shape',
+        }),
+      RuntimeHostProtocolError,
     );
     assert.deepEqual(
       decodeClientFrame({

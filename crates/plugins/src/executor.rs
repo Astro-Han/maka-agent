@@ -101,6 +101,9 @@ pub trait OutputSink: Send + Sync {
 pub struct Context {
     pub cancellation: CancellationToken,
     pub output: Arc<dyn OutputSink>,
+    /// Issued by the embedding Host after admission, never reconstructed from
+    /// Request.invocation. Absent in embedders without system capabilities.
+    pub call: Option<crate::call::Scope>,
 }
 pub trait Provider: Send + Sync {
     fn execute(
@@ -120,11 +123,13 @@ pub struct Executor {
 pub struct Binding {
     session: String,
     contribution: Contribution<Executor>,
+    calls: Option<crate::call::Issuer>,
 }
 pub struct Call {
     request: Request,
     contribution: Contribution<Executor>,
     lease: CallGuard,
+    calls: Option<crate::call::Issuer>,
 }
 /// Keep this value alive until the Host commits the terminal execution fact.
 pub struct Settlement {
@@ -132,6 +137,10 @@ pub struct Settlement {
     _lease: CallGuard,
 }
 impl Binding {
+    pub fn with_calls(mut self, calls: crate::call::Issuer) -> Self {
+        self.calls = Some(calls);
+        self
+    }
     pub fn is_effective(&self) -> bool {
         self.contribution.is_effective()
     }
@@ -172,6 +181,7 @@ impl Binding {
         Ok(Self {
             session,
             contribution,
+            calls: None,
         })
     }
     pub fn admit(&self, request: Request) -> Result<Call, Error> {
@@ -207,6 +217,7 @@ impl Binding {
             request,
             contribution: self.contribution.clone(),
             lease,
+            calls: self.calls.clone(),
         })
     }
 }
@@ -218,7 +229,30 @@ impl Call {
     ) -> Settlement {
         let token = cancellation.child_token();
         let closed = token.clone().drop_guard();
+        let scope = match self
+            .calls
+            .as_ref()
+            .map(|issuer| {
+                issuer.issue(
+                    crate::call::Identity::Agent {
+                        invocation: self.request.invocation.clone(),
+                        operation_id: None,
+                    },
+                    token.clone(),
+                )
+            })
+            .transpose()
+        {
+            Ok(scope) => scope,
+            Err(_) => {
+                return Settlement {
+                    result: Err(Error::Cancelled),
+                    _lease: self.lease,
+                };
+            }
+        };
         let context = Context {
+            call: scope.clone(),
             cancellation: token.clone(),
             output: Arc::new(CheckedOutput {
                 sink: output,
@@ -236,14 +270,8 @@ impl Call {
             _ = cancellation.cancelled() => Err(Error::Cancelled),
             _ = self.contribution.retired() => Err(Error::Retired),
             result = &mut execution => {
-                let result = if self.contribution.owner.cleanup_failure().is_some() {
-                    Err(Error::CleanupUnconfirmed)
-                } else { result };
-                if matches!(result, Err(Error::CleanupUnconfirmed)) {
-                    self.contribution.owner.cleanup_failed("executor cleanup is unconfirmed".into());
-                }
                 return Settlement {
-                    result: result.and_then(|outcome| { outcome.validate()?; Ok(outcome) }),
+                    result: settle(result, &self.contribution.owner, scope.as_ref()).await,
                     _lease: self.lease,
                 };
             },
@@ -267,16 +295,32 @@ impl Call {
             }
         };
         drop(closed);
-        let result = if self.contribution.owner.cleanup_failure().is_some() {
-            Err(Error::CleanupUnconfirmed)
-        } else {
-            result
-        };
         Settlement {
-            result,
+            result: settle(result, &self.contribution.owner, scope.as_ref()).await,
             _lease: self.lease,
         }
     }
+}
+async fn settle(
+    mut result: Result<Outcome, Error>,
+    owner: &crate::fiber::Context,
+    scope: Option<&crate::call::Scope>,
+) -> Result<Outcome, Error> {
+    if let Some(scope) = scope
+        && scope.finish().await.is_err()
+    {
+        result = Err(Error::CleanupUnconfirmed);
+    }
+    if owner.cleanup_failure().is_some() {
+        result = Err(Error::CleanupUnconfirmed);
+    }
+    if matches!(result, Err(Error::CleanupUnconfirmed)) {
+        owner.cleanup_failed("executor cleanup is unconfirmed".into());
+    }
+    result.and_then(|outcome| {
+        outcome.validate()?;
+        Ok(outcome)
+    })
 }
 struct CheckedOutput {
     sink: Arc<dyn OutputSink>,

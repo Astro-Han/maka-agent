@@ -17,7 +17,10 @@
  * under the License.
  */
 
-import { decodeSessionCatalogItem, type SessionCatalogItem } from './session-catalog.js';
+import {
+  decodeSessionCatalogProjection,
+  type SessionCatalogProjection,
+} from './session-catalog.js';
 import {
   requireCount,
   requireEntityId,
@@ -87,14 +90,14 @@ export type SessionRemoveResult =
 export const SESSION_RETIREMENT_OPERATION_SPECS = {
   'session.lifecycle.set': defineOperation<
     SessionLifecycleSetInput,
-    SessionCatalogItem,
+    SessionCatalogProjection,
     (typeof LIFECYCLE_ERRORS)[number]
   >({
     mode: 'command',
     availability: 'ready',
     errors: LIFECYCLE_ERRORS,
     decodeInput: decodeSessionLifecycleSetInput,
-    decodeOutput: decodeSessionCatalogItem,
+    decodeOutput: decodeSessionCatalogProjection,
     assertOutputForInput: (input, output) => {
       if (output.id !== input.sessionId) {
         throw invalidProtocolFrame('Session lifecycle result belongs to another Session');

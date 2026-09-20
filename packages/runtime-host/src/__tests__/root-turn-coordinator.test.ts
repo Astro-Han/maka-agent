@@ -134,7 +134,7 @@ type StartedTurnOutcome = {
   result: {
     kind: 'started';
     turn: TurnSnapshot;
-    skillInvocation: Extract<TurnStartOutcome, { ok: true }>['result']['skillInvocation'];
+    preparation: Extract<TurnStartOutcome, { ok: true }>['result']['preparation'];
   };
 };
 
@@ -1258,7 +1258,7 @@ test('turn.start resolves explicit Skills once before durable admission and repl
     sessionId: fixture.sessionId,
     turnId: 'turn-hosted-skill',
     content: { text: '/skill:writer Draft this.' },
-    skillIds: ['writer'],
+    inputSelections: { 'maka.skills': ['writer'] },
   };
   try {
     await registerSessionCapability(fixture, capabilities, 'skill-provider', 'skill-registration', [
@@ -1270,7 +1270,7 @@ test('turn.start resolves explicit Skills once before durable admission and repl
     if (!started.ok) return;
     assert.equal(started.result.kind, 'started');
     if (started.result.kind !== 'started') return;
-    assert.deepEqual(started.result.skillInvocation.loaded, [{ id: 'writer', name: 'Writer' }]);
+    assert.deepEqual(started.result.preparation, []);
     assert.equal(preparationCount, 1);
     assert.equal(observedCapabilityPreview, true);
     const admission = await fixture.stores.agentRunStore.readRootTurnAdmission(
@@ -1297,7 +1297,7 @@ test('turn.start resolves explicit Skills once before durable admission and repl
     assert.equal(preparationCount, 1, 'durable replay must not resolve a mutable Skill catalog');
 
     const conflictingRetry = await fixture.interactiveTurns.handlers['turn.start'](
-      { ...input, skillIds: ['writer', 'another'] },
+      { ...input, inputSelections: { 'maka.skills': ['writer', 'another'] } },
       context,
     );
     assert.equal(conflictingRetry.ok, false);
@@ -4574,7 +4574,7 @@ test('an exact terminal retry does not require a live Client Capability binding'
       result: {
         kind: 'started',
         turn: terminal,
-        skillInvocation: { loaded: [], failed: [], receipts: [] },
+        preparation: [],
       },
     });
   } finally {

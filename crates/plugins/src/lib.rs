@@ -19,7 +19,9 @@
 
 //! Plugin composition and lifecycle contracts, independent of business policy.
 
+pub mod authorization;
 pub mod background;
+pub mod call;
 pub mod client;
 pub mod client_capability;
 pub mod composition;
@@ -29,9 +31,13 @@ pub mod execution;
 pub mod executor;
 pub mod fiber;
 pub mod filesystem;
+pub mod host;
+pub mod http;
 pub mod kernel;
 pub mod llm;
 pub mod package;
+pub mod preferences;
+pub mod process;
 pub mod prompt;
 mod registration;
 pub mod remote;
@@ -40,6 +46,7 @@ pub mod input;
 pub mod services;
 pub mod session;
 pub mod storage;
+pub mod terminal;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {

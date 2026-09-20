@@ -26,15 +26,8 @@ import {
   type ModelCatalogEntry,
   type ModelOverride,
   type ModelOverrides,
-  type SessionCatalogItem,
+  type SessionCatalogProjection,
   type SessionCatalogRevision,
-  type SkillCatalogWorkspaceContext,
-  type SkillCatalogInvocableItem,
-  type SkillCatalogInvocableTarget,
-  type SkillCatalogPageItem,
-  type SkillCatalogRevision,
-  type SkillCatalogView,
-  type WorkspaceProjection,
   type OperationOutput,
   type ProjectCatalogPageItem,
   type ProjectCatalogProject,
@@ -48,13 +41,6 @@ const MAX_STABLE_READ_ATTEMPTS = 8;
 const STABLE_READ_RETRY_BASE_DELAY_MS = 8;
 const STABLE_READ_RETRY_MAX_DELAY_MS = 64;
 type RuntimeHostCatalogConnection = Pick<RuntimeHostConnection, 'request'>;
-
-export interface RuntimeHostSkillCatalogSnapshot {
-  readonly revision: SkillCatalogRevision;
-  readonly view: SkillCatalogView;
-  readonly items: readonly SkillCatalogPageItem[];
-  readonly resolvedWorkspace: WorkspaceProjection;
-}
 
 export type RuntimeHostConnectionCatalogEntry = Omit<
   Extract<ConnectionCatalogPageItem, { kind: 'connection' }>,
@@ -75,7 +61,7 @@ export interface RuntimeHostConnectionCatalogSnapshot {
 
 export class RuntimeHostCatalogReadError extends Error {
   constructor(
-    readonly catalog: 'connection' | 'project' | 'session' | 'skill' | 'runtime_resource',
+    readonly catalog: 'connection' | 'project' | 'session' | 'runtime_resource',
     readonly reason: 'unstable' | 'invalid_projection' | 'repeated_cursor',
   ) {
     super(`Runtime Host ${catalog} catalog read failed: ${reason}`);
@@ -90,7 +76,7 @@ export interface RuntimeHostSessionCatalogPageCursor {
 
 export interface RuntimeHostSessionCatalogPage {
   readonly revision: SessionCatalogRevision;
-  readonly sessions: readonly SessionCatalogItem[];
+  readonly sessions: readonly SessionCatalogProjection[];
   readonly nextCursor: RuntimeHostSessionCatalogPageCursor | null;
 }
 
@@ -128,87 +114,9 @@ export async function readRuntimeHostConnectionCatalog(
   );
 }
 
-export async function readRuntimeHostSkillCatalog(
-  connection: RuntimeHostCatalogConnection,
-  context: SkillCatalogWorkspaceContext,
-  view: SkillCatalogView,
-): Promise<RuntimeHostSkillCatalogSnapshot> {
-  let resolvedWorkspace: WorkspaceProjection | undefined;
-  const { first, pages } = await collectStablePages(
-    'skill',
-    async () => {
-      const result = await connection.request('skill.catalog.query', {
-        kind: 'start',
-        context,
-        view,
-      });
-      if (result.kind !== 'page' || result.view !== view) return null;
-      resolvedWorkspace = result.resolvedWorkspace;
-      return result;
-    },
-    async (revision, cursor) => {
-      const result = await connection.request('skill.catalog.query', {
-        kind: 'continue',
-        context,
-        view,
-        revision,
-        cursor,
-      });
-      return result.kind === 'page' &&
-        result.view === view &&
-        workspaceProjectionsEqual(result.resolvedWorkspace, resolvedWorkspace)
-        ? result
-        : null;
-    },
-  );
-  return {
-    revision: first.revision,
-    view,
-    items: pages.flatMap((page) => page.items),
-    resolvedWorkspace: first.resolvedWorkspace,
-  };
-}
-
-function workspaceProjectionsEqual(
-  left: WorkspaceProjection,
-  right: WorkspaceProjection | undefined,
-): boolean {
-  if (!right) return false;
-  if (left.hostCwd !== right.hostCwd || left.target.kind !== right.target.kind) return false;
-  return left.target.kind === 'project'
-    ? right.target.kind === 'project' && left.target.projectId === right.target.projectId
-    : right.target.kind === 'host_path' && left.target.path === right.target.path;
-}
-
-export async function readRuntimeHostInvocableSkills(
-  connection: RuntimeHostCatalogConnection,
-  target: SkillCatalogInvocableTarget,
-): Promise<readonly SkillCatalogInvocableItem[]> {
-  const { pages } = await collectStablePages(
-    'skill',
-    async () => {
-      const result = await connection.request('skill.catalog.invocable.query', {
-        kind: 'start',
-        target,
-      });
-      return result.kind === 'page' ? result : null;
-    },
-    async (revision, cursor) => {
-      const result = await connection.request('skill.catalog.invocable.query', {
-        kind: 'continue',
-        target,
-        revision,
-        cursor,
-      });
-      return result.kind === 'page' ? result : null;
-    },
-  );
-  return pages.flatMap((page) => page.items);
-}
-
 export async function readRuntimeHostSessions(
   connection: RuntimeHostCatalogConnection,
-): Promise<SessionCatalogItem[]> {
+): Promise<SessionCatalogProjection[]> {
   const readPageOrRestart = async (
     cursor?: RuntimeHostSessionCatalogPageCursor,
   ): Promise<RuntimeHostSessionCatalogPage | null> => {

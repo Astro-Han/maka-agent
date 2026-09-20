@@ -108,7 +108,6 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
             content: pending.source.message.content.clone(),
             source_messages: vec![pending.source],
             request_fingerprint: None,
-            skill_invocation: None,
         };
         append(&log, &target).await;
         if id == "completed-delegation" {

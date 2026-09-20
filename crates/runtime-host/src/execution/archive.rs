@@ -17,15 +17,9 @@
  * under the License.
  */
 
-use maka_event_log::{
-    EventLog, StoreError,
-    archive::{ArchiveError, ToolResultResource},
-};
+use maka_event_log::{EventLog, StoreError, archive::ArchiveError};
 use maka_runtime::{
-    archive::{MAX_ARCHIVE_BYTES, ToolResultAddress},
-    read::ReadRequest,
-    tool_output::ToolSuccess,
-    tools::ToolError,
+    archive::ToolResultAddress, read::ReadRequest, tool_output::ToolSuccess, tools::ToolError,
 };
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
@@ -34,7 +28,6 @@ use tokio_util::sync::CancellationToken;
 #[serde(rename_all = "snake_case")]
 enum ReadFailure {
     NotFound,
-    TooLarge,
     SourceMismatch,
     SizeMismatch,
     Corrupt,
@@ -54,28 +47,7 @@ pub(super) async fn read(
     request: &ReadRequest,
     cancellation: &CancellationToken,
 ) -> Result<ToolSuccess, ToolError> {
-    let result = match address {
-        ToolResultAddress::Event(event) => log.read_tool_result(session, &event).await,
-        ToolResultAddress::Evidence(identity) => {
-            if identity.original_bytes > MAX_ARCHIVE_BYTES as u64 {
-                return Ok(unavailable(ReadFailure::TooLarge));
-            }
-            log.read_archive(session, &identity)
-                .await
-                .and_then(|bytes| {
-                    bytes
-                        .map(|bytes| {
-                            String::from_utf8(bytes)
-                                .map(|serialized_result| ToolResultResource {
-                                    tool_name: identity.tool_name,
-                                    serialized_result,
-                                })
-                                .map_err(|_| ArchiveError::Corrupt.into())
-                        })
-                        .transpose()
-                })
-        }
-    };
+    let result = log.read_tool_result(session, address.event_id()).await;
     if cancellation.is_cancelled() {
         return Err(ToolError::Failed("Read cancelled".into()));
     }

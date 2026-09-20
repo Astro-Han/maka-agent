@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import type { ClientContext, ClientDescriptor, ClientIdentity, ClientPlugin, ClientRemote, ClientLocalFiles } from '@maka-agent/plugin-sdk/client';
+import type { ClientContext, ClientDescriptor, ClientIdentity, ClientPlugin, ClientRemote, ClientLocalFiles, ClientAuthorization } from '@maka-agent/plugin-sdk/client';
 import type { Json } from '@maka-agent/plugin-sdk/host';
 import type { SlotEntry } from './slots.js';
 import { createElement } from 'react';
@@ -29,6 +29,7 @@ export type ClientRemoteFactory = (identity: ClientIdentity, signal: AbortSignal
   close(): Promise<void>;
 };
 export type ClientFilesFactory = (identity: ClientIdentity, signal: AbortSignal) => ClientLocalFiles | undefined;
+export type ClientAuthorizationFactory = (identity: ClientIdentity, signal: AbortSignal) => ClientAuthorization;
 
 export class ClientInstance {
   readonly lifetime = new AbortController();
@@ -41,8 +42,9 @@ export class ClientInstance {
   readonly #remote?: ReturnType<ClientRemoteFactory>;
   readonly #identity: ClientIdentity;
   readonly #files?: ClientLocalFiles;
+  readonly #authorization?: ClientAuthorization;
 
-  constructor(readonly descriptor: ClientDescriptor, onError: (error: unknown) => void, remote?: ClientRemoteFactory, files?: ClientFilesFactory, readonly hostEpoch?: string) {
+  constructor(readonly descriptor: ClientDescriptor, onError: (error: unknown) => void, remote?: ClientRemoteFactory, files?: ClientFilesFactory, readonly hostEpoch?: string, authorization?: ClientAuthorizationFactory) {
     this.#onError = onError;
     this.#identity = Object.freeze({
       entryId: descriptor.entryId, extensionId: descriptor.extensionId,
@@ -51,6 +53,7 @@ export class ClientInstance {
     });
     this.#remote = remote?.(this.#identity, this.lifetime.signal);
     this.#files = files?.(this.#identity, this.lifetime.signal);
+    this.#authorization = authorization?.(this.#identity, this.lifetime.signal);
   }
 
   initialize(plugin: ClientPlugin, document: Document): Promise<void> {
@@ -63,6 +66,23 @@ export class ClientInstance {
       identity: this.#identity,
       hostEpoch: this.hostEpoch,
       signal: this.lifetime.signal,
+      authorization: {
+        approve: async (scope, request) => {
+          this.#assertActive();
+          if (!this.#authorization) throw new Error('Plugin authorization is unavailable');
+          return this.#authorization.approve(scope, request);
+        },
+        query: async (scope, id) => {
+          this.#assertActive();
+          if (!this.#authorization) throw new Error('Plugin authorization is unavailable');
+          return this.#authorization.query(scope, id);
+        },
+        revoke: async (scope, id) => {
+          this.#assertActive();
+          if (!this.#authorization) throw new Error('Plugin authorization is unavailable');
+          await this.#authorization.revoke(scope, id);
+        },
+      },
       localFiles: this.#files ? {
         pick: async () => {
           this.#assertActive();

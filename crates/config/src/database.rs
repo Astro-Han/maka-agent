@@ -107,21 +107,37 @@ async fn initialize(connection: &mut SqliteConnection) -> std::result::Result<()
     .fetch_one(&mut *connection)
     .await?;
     if !((application_id == 0 && version == 0 && tables == 0)
-        || (application_id == 0x4d414b43 && matches!(version, 0..=10)))
+        || (application_id == 0x4d414b43 && matches!(version, 0..=1)))
     {
         return Err(StoreError::UnsupportedDatabase);
     }
-    // Stamp identity before SQLx creates its ledger so interrupted setup can retry.
-    sqlx::raw_sql(
-        "PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA secure_delete = ON;",
+    let ledger: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = '_sqlx_migrations')",
     )
-    .execute(&mut *connection)
+    .fetch_one(&mut *connection)
     .await?;
+    if (version == 0 && tables != i64::from(ledger)) || (version == 1 && !ledger) {
+        return Err(StoreError::UnsupportedDatabase);
+    }
+    if ledger {
+        let applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+            .fetch_one(&mut *connection)
+            .await?;
+        if (version == 0) != (applied == 0) {
+            return Err(StoreError::UnsupportedDatabase);
+        }
+    }
+    // Stamp identity before SQLx creates its ledger so interrupted setup can retry.
     if application_id == 0 {
         sqlx::query("PRAGMA application_id = 1296124739")
             .execute(&mut *connection)
             .await?;
     }
     MIGRATIONS.run_direct(None, &mut *connection, false).await?;
+    sqlx::raw_sql(
+        "PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA secure_delete = ON;",
+    )
+    .execute(&mut *connection)
+    .await?;
     Ok(())
 }

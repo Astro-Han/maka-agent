@@ -26,6 +26,7 @@ import {
 } from '@maka/runtime/goal-turn-lifecycle';
 import { type GoalTurnOutcome } from '@maka/runtime/goal-continuation';
 import type { MakaPreparedSessionTurn } from './session-driver.js';
+import { preparedSkillInvocation } from '@maka/core/skill-invocation';
 
 export interface MakaPiTuiTurnActivity {
   activities: SessionActivityRegistry;
@@ -80,7 +81,8 @@ export async function runMakaPiTuiTurn(input: RunMakaPiTuiTurnInput): Promise<Go
     // Turn's canonical messages, so a Skill card projected before it would be
     // wiped by the very adoption that follows.
     await input.onPrepared?.(turn);
-    if (turn.skillInvocation) await input.onSkillInvocation?.(turn.skillInvocation);
+    if (turn.preparation)
+      await input.onSkillInvocation?.(preparedSkillInvocation(turn.preparation));
 
     if (!activity) activity = await input.turnActivity.activities.acquire(turn.sessionId);
     if (input.shouldAbort()) {

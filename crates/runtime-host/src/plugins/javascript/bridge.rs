@@ -22,7 +22,9 @@ mod wire;
 
 use futures_util::future::BoxFuture;
 use maka_js_runtime::plugin::{Bridge, Error as VmError, Module, WeakModule};
-use maka_plugins::{execution::Commands, kernel::PluginContext, services::Service, storage::Store};
+use maka_plugins::{
+    execution::Access, kernel::PluginContext, services::method::Handle, storage::Store,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
@@ -32,59 +34,62 @@ use std::{
 };
 use wire::{Error, Request};
 
-struct JsService {
-    callback: Arc<super::callbacks::Callback>,
-}
-#[derive(Clone)]
-struct Reference {
-    service: Service<JsService>,
-    configuration: Vec<Value>,
-}
 struct State {
+    preferences: Arc<dyn maka_plugins::preferences::Preferences>,
     source: Arc<super::remote::Source>,
-    processes: super::process::Processes,
-    http: super::http::Http,
-    effects: super::effects::Effects,
-    terminals: super::terminal::Terminals,
+    processes: Arc<dyn maka_plugins::process::Processes>,
+    http: Arc<dyn maka_plugins::http::Client>,
+    responses: Mutex<BTreeMap<String, HttpResponse>>,
+    files: Arc<dyn maka_plugins::filesystem::Files>,
+    models: Arc<dyn maka_plugins::llm::Models>,
+    clients: Arc<dyn maka_plugins::client_capability::Clients>,
+    terminals: Arc<dyn maka_plugins::terminal::Terminals>,
     calls: Arc<super::invocation::Calls>,
     outputs: Arc<super::executor::Outputs>,
-    catalog: maka_plugins::contributions::Catalog,
     registrations: Mutex<BTreeMap<String, maka_plugins::contributions::Registration>>,
     context: PluginContext,
-    storage: Arc<crate::plugins::storage::BoundStore>,
-    commands: Arc<dyn Commands>,
+    storage: Arc<dyn Store>,
+    credentials: Arc<dyn maka_plugins::credentials::Credentials>,
+    commands: Arc<dyn Access>,
+    execution_handles: Mutex<BTreeMap<String, Arc<dyn maka_plugins::execution::Commands>>>,
+    authorizations: Arc<dyn maka_plugins::authorization::Access>,
+    authorized_calls:
+        Mutex<BTreeMap<String, (maka_plugins::call::Owned, super::invocation::Guard)>>,
     module: OnceLock<WeakModule>,
-    handles: Mutex<BTreeMap<String, Reference>>,
+    handles: Mutex<BTreeMap<String, Handle>>,
 }
 pub(super) struct HostBridge(Arc<State>);
+struct HttpResponse {
+    call: maka_plugins::call::Scope,
+    body: Arc<dyn maka_plugins::http::Body>,
+}
 impl HostBridge {
     pub fn new(
         context: PluginContext,
-        storage: Arc<crate::plugins::storage::BoundStore>,
-        commands: Arc<dyn Commands>,
-        catalog: maka_plugins::contributions::Catalog,
-        executions: std::sync::Weak<crate::execution::Executions>,
+        host: maka_plugins::host::Services,
+        issuer: maka_plugins::call::Issuer,
         source: Arc<super::remote::Source>,
     ) -> Self {
         Self(Arc::new(State {
+            preferences: host.preferences,
             source,
-            http: super::http::Http::new(executions.clone(), context.lifecycle.clone()),
-            effects: super::effects::Effects::new(executions.clone(), context.lifecycle.clone()),
-            processes: super::process::Processes::new(
-                executions.clone(),
-                context.lifecycle.clone(),
-            ),
-            terminals: super::terminal::Terminals::new(
-                executions.clone(),
-                context.lifecycle.clone(),
-            ),
-            calls: Arc::default(),
+            http: host.http,
+            responses: Default::default(),
+            files: host.files,
+            models: host.models,
+            clients: host.clients,
+            processes: host.processes,
+            terminals: host.terminals,
+            calls: Arc::new(super::invocation::Calls::new(issuer)),
             outputs: Arc::default(),
-            catalog,
             registrations: Mutex::default(),
             context,
-            storage,
-            commands,
+            storage: host.storage,
+            credentials: host.credentials,
+            commands: host.executions,
+            execution_handles: Mutex::default(),
+            authorizations: host.authorizations,
+            authorized_calls: Mutex::default(),
             module: OnceLock::new(),
             handles: Mutex::default(),
         }))
@@ -130,167 +135,207 @@ impl Bridge for HostBridge {
     }
 }
 impl State {
+    fn authorize(&self, owned: maka_plugins::call::Owned) -> Result<Value, Error> {
+        let call = self.calls.forward(owned.scope()).map_err(Error::tool)?;
+        let mut calls = self.authorized_calls.lock().unwrap();
+        if calls.len() >= 32 {
+            return Err(Error::invalid("too many open authorization scopes"));
+        }
+        let value = json!({"handle":call.id, "source":call.authority.identity});
+        calls.insert(call.id.clone(), (owned, call));
+        Ok(value)
+    }
+    fn execution<T>(
+        &self,
+        scoped: wire::Execution<T>,
+    ) -> Result<(Arc<dyn maka_plugins::execution::Commands>, T), Error> {
+        let commands = self
+            .execution_handles
+            .lock()
+            .unwrap()
+            .get(&scoped.handle)
+            .cloned()
+            .ok_or(maka_plugins::execution::CommandError::Revoked)?;
+        Ok((commands, scoped.input))
+    }
+    fn execution_handle(
+        &self,
+        commands: Arc<dyn maka_plugins::execution::Commands>,
+    ) -> Result<Value, Error> {
+        let mut handles = self.execution_handles.lock().unwrap();
+        if handles.len() >= 128 {
+            return Err(Error::invalid(
+                "execution view capacity exceeded; close unused views",
+            ));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        handles.insert(id.clone(), commands);
+        encode(id)
+    }
+    fn terminal(
+        &self,
+        input: wire::ProcessHandle,
+    ) -> Result<maka_plugins::terminal::Handle, Error> {
+        let call = self.calls.get(&input.authority)?;
+        Ok(self
+            .terminals
+            .open(call, maka_plugins::terminal::Id(input.handle))?)
+    }
+    fn process(&self, input: wire::ProcessHandle) -> Result<maka_plugins::process::Handle, Error> {
+        let call = self.calls.get(&input.authority)?;
+        Ok(self
+            .processes
+            .open(call, maka_plugins::process::Id(input.handle))?)
+    }
+    fn data(&self) -> Result<&maka_plugins::storage::Directory, Error> {
+        self.context.data.as_ref().ok_or_else(|| Error {
+            code: wire::Code::Unavailable,
+            message: "private files are unavailable in this scope".into(),
+        })
+    }
     async fn call(&self, request: Request) -> Result<Value, Error> {
         // Initialization may access declared Services and data, not submit work.
         // Execution commands independently require effective business admission.
         let _lease = self.context.lifecycle.resource_call()?;
         match request {
-            Request::CredentialRead(input) => encode(
-                maka_plugins::credentials::Credentials::read(&*self.storage, input.key).await?,
-            ),
-            Request::CredentialWrite(input) => {
-                encode(maka_plugins::credentials::Credentials::write(&*self.storage, input).await?)
+            Request::Preferences => encode(self.preferences.read().await?),
+            Request::OpenAuthorization(input) => {
+                self.authorize(self.authorizations.open(input.id).await?)
             }
+            Request::AuthorizeRemote(input) => {
+                let caller = self.calls.remote(&input.authority)?;
+                self.authorize(
+                    caller
+                        .views
+                        .authorize(input.request)
+                        .await
+                        .map_err(|error| Error::invalid(error.to_string()))?,
+                )
+            }
+            Request::CloseAuthorization(input) => {
+                let call = self.authorized_calls.lock().unwrap().remove(&input.handle);
+                if let Some((owned, _guard)) = call {
+                    owned.finish().await.map_err(Error::tool)?;
+                }
+                Ok(Value::Null)
+            }
+            Request::SessionView(input) => {
+                let caller = self.calls.remote(&input.authority)?;
+                encode(caller.views.session().await?)
+            }
+            Request::WorkspaceView(input) => {
+                let caller = self.calls.remote(&input.authority)?;
+                encode(caller.views.workspace(input.input).await?)
+            }
+            Request::CredentialRead(input) => encode(self.credentials.read(input.key).await?),
+            Request::CredentialWrite(input) => encode(self.credentials.write(input).await?),
             Request::TerminalSpawn(input) => {
                 let authority = self.calls.get(&input.authority)?;
-                encode(
-                    self.terminals
-                        .spawn(authority, input)
-                        .await
-                        .map_err(Error::invalid)?,
-                )
+                encode(self.terminals.spawn(authority, input.input).await?.id)
             }
-            Request::TerminalControl(input) => {
-                let authority = self.calls.get(&input.authority)?;
-                encode(
-                    self.terminals
-                        .control(&authority, input)
-                        .await
-                        .map_err(Error::invalid)?,
-                )
-            }
-            Request::TerminalNext(input) => {
-                let authority = self.calls.get(&input.authority)?;
-                encode(
-                    self.terminals
-                        .next(&authority, &input.handle)
-                        .await
-                        .map_err(Error::invalid)?,
-                )
-            }
-            Request::TerminalWait(input) => {
-                let authority = self.calls.get(&input.authority)?;
-                encode(
-                    self.terminals
-                        .wait(&authority, &input.handle)
-                        .await
-                        .map_err(Error::invalid)?,
-                )
-            }
+            Request::TerminalControl(input) => encode(
+                self.terminal(wire::ProcessHandle {
+                    authority: input.authority,
+                    handle: input.handle,
+                })?
+                .io
+                .control(input.input)
+                .await?,
+            ),
+            Request::TerminalNext(input) => encode(self.terminal(input)?.io.next().await?),
+            Request::TerminalWait(input) => encode(self.terminal(input)?.io.wait().await?),
             Request::TerminalClose(input) => {
                 self.terminals
-                    .close(&input.handle)
-                    .await
-                    .map_err(Error::invalid)?;
+                    .close(maka_plugins::terminal::Id(input.handle))
+                    .await?;
                 Ok(Value::Null)
             }
             Request::Files(input) => {
                 let authority = self.calls.get(&input.authority)?;
-                self.effects
-                    .invoke(authority, super::effects::Effect::File(input.operation))
+                self.files
+                    .invoke(authority, input.operation)
                     .await
+                    .map(maka_plugins::filesystem::Output::into_json)
                     .map_err(Error::tool)
             }
             Request::Generate(input) => {
                 let authority = self.calls.get(&input.authority)?;
-                self.effects
-                    .invoke(authority, super::effects::Effect::Model(input.input))
-                    .await
-                    .map_err(Error::tool)
+                encode(
+                    self.models
+                        .generate(authority, input.input)
+                        .await
+                        .map_err(Error::tool)?,
+                )
             }
             Request::ClientCatalog(input) => {
                 let authority = self.calls.get(&input.authority)?;
-                self.effects
-                    .clients(authority)
-                    .await
-                    .map_err(Error::invalid)
+                encode(self.clients.tools(authority).await.map_err(Error::tool)?)
             }
             Request::ClientCall(input) => {
                 let authority = self.calls.get(&input.authority)?;
-                self.effects
-                    .invoke(authority, super::effects::Effect::Client(input.call))
+                self.clients
+                    .call(authority, input.call)
                     .await
                     .map_err(Error::tool)
             }
             Request::HttpSend(input) => {
                 let authority = self.calls.get(&input.authority)?;
-                encode(
-                    self.http
-                        .request(authority, input)
-                        .await
-                        .map_err(Error::invalid)?,
+                self.responses
+                    .lock()
+                    .unwrap()
+                    .retain(|_, response| !response.call.cancellation.is_cancelled());
+                let response = self.http.request(authority.clone(), input.request).await?;
+                let id = uuid::Uuid::new_v4().to_string();
+                self.responses.lock().unwrap().insert(
+                    id.clone(),
+                    HttpResponse {
+                        call: authority,
+                        body: response.body,
+                    },
+                );
+                Ok(
+                    json!({"handle":id, "status":response.head.status, "url":response.head.url, "headers":response.head.headers}),
                 )
             }
             Request::HttpNext(input) => {
                 let authority = self.calls.get(&input.authority)?;
-                encode(
-                    self.http
-                        .next(&authority, &input.handle)
-                        .await
-                        .map_err(Error::invalid)?,
-                )
+                let body = {
+                    let responses = self.responses.lock().unwrap();
+                    let response = responses
+                        .get(&input.handle)
+                        .ok_or_else(|| Error::from(maka_plugins::http::Error::Denied))?;
+                    if response.call.identity != authority.identity {
+                        return Err(maka_plugins::http::Error::Denied.into());
+                    }
+                    response.body.clone()
+                };
+                encode(body.next().await?)
             }
             Request::HttpClose(input) => {
-                self.http
-                    .close(&input.handle)
-                    .await
-                    .map_err(|message| Error {
-                        code: wire::Code::OutcomeUnknown,
-                        message,
-                    })?;
+                let response = self.responses.lock().unwrap().remove(&input.handle);
+                if let Some(response) = response {
+                    response.body.close().await?;
+                }
                 Ok(Value::Null)
             }
             Request::ProcessSpawn(input) => {
                 let authority = self.calls.get(&input.authority)?;
-                encode(
-                    self.processes
-                        .spawn(authority, input.command)
-                        .await
-                        .map_err(Error::invalid)?,
-                )
+                encode(self.processes.spawn(authority, input.command).await?.id)
             }
             Request::ProcessWrite(input) => {
-                let authority = self.calls.get(&input.target.authority)?;
-                self.processes
-                    .write(&authority, &input.target.handle, input.bytes)
-                    .await
-                    .map_err(Error::invalid)?;
+                self.process(input.target)?.io.write(input.bytes).await?;
                 Ok(Value::Null)
             }
             Request::ProcessEndInput(input) => {
-                let authority = self.calls.get(&input.authority)?;
-                self.processes
-                    .end_input(&authority, &input.handle)
-                    .await
-                    .map_err(Error::invalid)?;
+                self.process(input)?.io.end_input().await?;
                 Ok(Value::Null)
             }
-            Request::ProcessNext(input) => {
-                let authority = self.calls.get(&input.authority)?;
-                encode(
-                    self.processes
-                        .next(&authority, &input.handle)
-                        .await
-                        .map_err(Error::invalid)?,
-                )
-            }
-            Request::ProcessWait(input) => {
-                let authority = self.calls.get(&input.authority)?;
-                encode(
-                    self.processes
-                        .wait(&authority, &input.handle)
-                        .await
-                        .map_err(Error::invalid)?,
-                )
-            }
+            Request::ProcessNext(input) => encode(self.process(input)?.io.next().await?),
+            Request::ProcessWait(input) => encode(self.process(input)?.io.wait().await?),
             Request::ProcessClose(input) => {
                 self.processes
-                    .close(&input.handle)
-                    .await
-                    .map_err(|message| Error {
-                        code: wire::Code::OutcomeUnknown,
-                        message,
-                    })?;
+                    .close(maka_plugins::process::Id(input.handle))
+                    .await?;
                 Ok(Value::Null)
             }
             Request::ExecutorEmit(input) => {
@@ -321,7 +366,7 @@ impl State {
                 if registrations.len() >= 128 {
                     return Err(Error::invalid("dynamic registration capacity exceeded"));
                 }
-                let registration = self.catalog.register(&self.context.lifecycle, staged)?;
+                let registration = self.context.contributions.publish(staged)?;
                 let id = uuid::Uuid::new_v4().to_string();
                 registrations.insert(id.clone(), registration);
                 Ok(json!(id))
@@ -332,7 +377,7 @@ impl State {
             }
             Request::Withdraw(input) => {
                 super::registration::withdraw(
-                    &self.catalog,
+                    &self.context.contributions,
                     &self.context.lifecycle,
                     input.kind,
                     &input.name,
@@ -341,23 +386,70 @@ impl State {
             }
             Request::Read(input) => encode(self.storage.read(input.key).await?),
             Request::Batch(input) => encode(self.storage.batch(input.mutations).await?),
-            Request::Submit(input) => encode(self.commands.submit(input).await?),
-            Request::CreateChild(input) => encode(self.commands.create_child(input).await?),
-            Request::WorkspacePatch(input) => {
-                encode(self.commands.workspace_patch(input.operation_id).await?)
+            Request::DataRead(input) => encode(self.data()?.read(input).await?),
+            Request::DataWrite(input) => encode(self.data()?.write(input).await?),
+            Request::DataList(input) => encode(self.data()?.list(input).await?),
+            Request::DataCreateDirectory(input) => {
+                encode(self.data()?.create_directory(input.path).await?)
             }
-            Request::Query(input) => encode(self.commands.query(input.operation_id).await?),
-            Request::Cancel(input) => encode(self.commands.cancel(input.operation_id).await?),
-            Request::Events(input) => encode(
-                self.commands
-                    .events(input.operation_id, input.after, input.through)
-                    .await?,
-            ),
-            Request::Event(input) => encode(
-                self.commands
-                    .event(input.operation_id, input.event_id, input.through)
-                    .await?,
-            ),
+            Request::DataRemove(input) => encode(self.data()?.remove(input.path).await?),
+            Request::DataRename(input) => encode(self.data()?.rename(input.from, input.to).await?),
+            Request::RestoreExecution(input) => {
+                let commands = self.commands.restore(input.id).await?;
+                self.execution_handle(commands)
+            }
+            Request::AcquireExecution(input) => {
+                let call = self.calls.get(&input.authority)?;
+                self.execution_handle(self.commands.acquire(call).await?)
+            }
+            Request::CloseExecution(input) => {
+                self.execution_handles.lock().unwrap().remove(&input.handle);
+                Ok(Value::Null)
+            }
+            Request::Submit(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.submit(input).await?)
+            }
+            Request::ExecutionSession(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.session(input.session_id).await?)
+            }
+            Request::CreateChild(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.create_child(input).await?)
+            }
+            Request::CreateRoot(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.create_root(input).await?)
+            }
+            Request::WorkspacePatch(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.workspace_patch(input.operation_id).await?)
+            }
+            Request::Query(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.query(input.operation_id).await?)
+            }
+            Request::Cancel(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.cancel(input.operation_id).await?)
+            }
+            Request::Events(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(
+                    commands
+                        .events(input.operation_id, input.after, input.through)
+                        .await?,
+                )
+            }
+            Request::Event(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(
+                    commands
+                        .event(input.operation_id, input.event_id, input.through)
+                        .await?,
+                )
+            }
             Request::Provide(input) => {
                 if input.callback == 0 {
                     return Err(Error::invalid("invalid service callback"));
@@ -376,17 +468,16 @@ impl State {
                 if registrations.len() >= 128 {
                     return Err(Error::invalid("dynamic registration capacity exceeded"));
                 }
-                let registration = self.context.services.register(
-                    &self.context.lifecycle,
-                    &input.name,
-                    Arc::new(JsService { callback }),
-                )?;
+                let registration = self
+                    .context
+                    .services
+                    .register_method(&input.name, Arc::new(service::JavaScript { callback }))?;
                 let id = uuid::Uuid::new_v4().to_string();
                 registrations.insert(id.clone(), registration);
                 Ok(json!(id))
             }
             Request::Get(input) => {
-                let Some(service) = self.context.services.get::<JsService>(&input.name)? else {
+                let Some(service) = self.context.services.method(&input.name)? else {
                     return Ok(Value::Null);
                 };
                 let mut handles = self.handles.lock().unwrap();
@@ -394,13 +485,7 @@ impl State {
                     return Err(Error::invalid("service handle limit exceeded"));
                 }
                 let id = uuid::Uuid::new_v4().to_string();
-                handles.insert(
-                    id.clone(),
-                    Reference {
-                        service,
-                        configuration: self.context.services.intercepts(&input.name).to_vec(),
-                    },
-                );
+                handles.insert(id.clone(), service);
                 Ok(json!(id))
             }
             Request::Call(input) => self.call_service(input).await,

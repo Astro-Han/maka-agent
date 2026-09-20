@@ -52,7 +52,6 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
             Fact::InvocationOpened {
                 configuration: None,
                 input: maka_runtime::input::InvocationInput::Message {
-                    skill_invocation: Default::default(),
                     source_messages: Vec::new(),
                     content: maka_runtime::input::MessageInput {
                         display_text: Some(format!("\n {}  ", "答".repeat(120))),
@@ -98,7 +97,7 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
             (RuntimeEvent::new(
                 invocation.clone(),
                 Fact::ModelRequested {
-                    purpose: None,
+                    purpose: maka_runtime::context::ModelPurpose::Main,
                     context: None,
                     checkpoint_event_id: None,
                     step_id: "step".into(),
@@ -306,14 +305,9 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
     );
     assert_eq!(rollback.last_message, ended.execution.unwrap().last_message);
     log.close().await.unwrap();
-    // An older projection version may contain the previously accepted stale
-    // preview. Rebuild its commit-order guards, not just max(time)/latest(text).
+    // Rebuild commit-order guards from canonical facts, not max(time)/latest(text).
     source
-        .execute_batch(
-            "UPDATE catalog_message_watermark SET projection_version = 1;
-            UPDATE catalog_messages SET preview = 'obsolete stale preview'
-            WHERE sequence = (SELECT max(sequence) FROM catalog_messages);",
-        )
+        .execute_batch("DROP TABLE catalog_message_watermark;")
         .unwrap();
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(

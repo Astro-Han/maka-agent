@@ -46,7 +46,7 @@ pub async fn provider_completion(log: &EventLog, session: &str, event_id: &str) 
             input_digest: "input".into(),
             route_identity: "route".into(),
             effective_source_digest: None,
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
             checkpoint_event_id: None,
         },
@@ -148,7 +148,6 @@ pub fn steering(session: &str, id: &str) -> EventWrite {
     write(
         session,
         Fact::MessageSteered {
-            skill_invocation: Default::default(),
             message: Box::new(DeliveredMessage {
                 message_id: id.into(),
                 content,

@@ -92,7 +92,6 @@ pub async fn accepted(log: &EventLog, invocation: &Invocation, calls: &[ModelToo
         Fact::InvocationOpened {
             configuration: None,
             input: InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "test".into(),
                 request_fingerprint: None,
@@ -108,7 +107,7 @@ pub async fn accepted(log: &EventLog, invocation: &Invocation, calls: &[ModelToo
             input_digest: "".into(),
             route_identity: "".into(),
             checkpoint_event_id: None,
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
         },
         Fact::ModelCompleted {

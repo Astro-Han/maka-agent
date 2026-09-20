@@ -96,7 +96,7 @@ async fn original_client_keeps_auto_summary_private_and_reopens_anchor_without_r
                 .filter(|stored| matches!(
                     stored.event.fact,
                     Fact::ModelRequested {
-                        purpose: Some(ModelPurpose::Summary),
+                        purpose: ModelPurpose::Summary,
                         ..
                     }
                 ))

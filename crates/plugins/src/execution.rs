@@ -22,7 +22,7 @@ use maka_runtime::{event::Invocation, input::MessageInput};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 mod root;
-pub use root::{CreateRoot, RootApproval, RootTemplate};
+pub use root::{CreateRoot, RootApproval, RootTemplate, Settings as RootSettings};
 
 /// Persisted constraints, not a bearer capability. Only an explicit Host grant
 /// binds them to a live plugin instance; current boundaries are still checked.
@@ -67,7 +67,7 @@ impl Submit {
         if self.content.text_bytes() > 64 * 1024 {
             return Err(Error::Invalid("execution message exceeds 64 KiB".into()));
         }
-        maka_runtime::message::validate_opening(&self.content, &[], None)
+        maka_runtime::message::validate_sources(&self.content, &[])
             .map_err(|reason| Error::Invalid(reason.into()))
     }
 
@@ -100,7 +100,7 @@ pub struct CreateChild {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<ChildTarget>,
+    pub target: Option<Target>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<ChildWorkspace>,
 }
@@ -119,7 +119,7 @@ pub enum ChildWorkspace {
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub enum ChildTarget {
+pub enum Target {
     Model {
         model: maka_runtime::execution::ModelBinding,
         thinking_level: Option<maka_runtime::execution::ThinkingLevel>,
@@ -127,6 +127,16 @@ pub enum ChildTarget {
     Executor {
         executor_id: maka_runtime::executor::ExecutorId,
     },
+}
+impl Target {
+    pub fn validate(&self) -> Result<(), Error> {
+        if let Self::Model { model, .. } = self {
+            name(&model.connection_id)?;
+            name(&model.connection_slug)?;
+            name(&model.model)?;
+        }
+        Ok(())
+    }
 }
 
 impl CreateChild {
@@ -157,10 +167,8 @@ impl CreateChild {
                 name(tool)?;
             }
         }
-        if let Some(ChildTarget::Model { model, .. }) = &self.target {
-            name(&model.connection_id)?;
-            name(&model.connection_slug)?;
-            name(&model.model)?;
+        if let Some(target) = &self.target {
+            target.validate()?;
         }
         Ok(())
     }
@@ -241,21 +249,36 @@ pub enum CommandError {
 
 /// A Host-authorized, instance-bound interface. Plugins cannot supply another
 /// namespace or activation with a command; Host binds both when granting it.
+pub trait Access: Send + Sync {
+    /// Restore a Host-recorded consent reference, never plugin-supplied boundary data.
+    fn restore(
+        &self,
+        id: crate::authorization::Id,
+    ) -> futures_util::future::BoxFuture<'_, Result<std::sync::Arc<dyn Commands>, CommandError>>;
+    /// Borrow a real Host call's execution authority. Entry placement and a
+    /// caller-supplied Session identity never authorize execution on their own.
+    fn acquire(
+        &self,
+        call: crate::call::Scope,
+    ) -> futures_util::future::BoxFuture<'_, Result<std::sync::Arc<dyn Commands>, CommandError>>;
+}
+
+/// An acquired execution capability retains its captured permission ceiling.
 pub trait Commands: Send + Sync {
+    /// Current configuration of an authorized Session; not a grant or an
+    /// unrestricted catalog. Returns no plugin-owned domain state.
+    fn session(
+        &self,
+        session_id: String,
+    ) -> futures_util::future::BoxFuture<'_, Result<crate::session::View, CommandError>>;
     /// Check current instance and Session boundaries without submitting work.
-    fn validate_authority(&self) -> futures_util::future::BoxFuture<'_, Result<(), CommandError>> {
-        Box::pin(async { Err(CommandError::Denied) })
-    }
+    fn validate_authority(&self) -> futures_util::future::BoxFuture<'_, Result<(), CommandError>>;
     fn create_root(
         &self,
-        _request: CreateRoot,
-    ) -> futures_util::future::BoxFuture<'_, Result<ChildSession, CommandError>> {
-        Box::pin(async { Err(CommandError::Denied) })
-    }
+        request: CreateRoot,
+    ) -> futures_util::future::BoxFuture<'_, Result<ChildSession, CommandError>>;
     /// Host-captured constraints suitable for persisting with a business intent.
-    fn boundaries(&self) -> Result<Vec<SessionBoundary>, CommandError> {
-        Err(CommandError::Denied)
-    }
+    fn boundaries(&self) -> Result<Vec<SessionBoundary>, CommandError>;
     /// Export a settled child workspace once; exact retries return its immutable Artifact.
     fn workspace_patch(
         &self,

@@ -50,25 +50,25 @@ fn original_message_codec_agrees_on_identity_intent_queue_states_and_bounded_pro
         );
     };
     cases_input::inputs(&mut add);
-    let skills = json!({"loaded":[],"failed":[],"receipts":[]});
+    let preparation = json!([]);
     let entry = json!({"entryId":"e","messageId":"m","content":{"text":"hello"},"placement":"current_turn","state":"retracted"});
     let turn = json!({"sessionId":"s","turnId":"t","runId":"r","status":"completed","terminalEventId":"terminal"});
     for (op, output) in [
         (
             TurnMessageSubmit,
-            json!({"disposition":"turn_started","turnId":"t","skillInvocation":skills}),
+            json!({"disposition":"turn_started","turnId":"t","preparation":preparation}),
         ),
         (
             TurnMessageSubmit,
-            json!({"disposition":"steering","queueRevision":1.0,"skillInvocation":skills}),
+            json!({"disposition":"steering","queueRevision":1.0,"preparation":preparation}),
         ),
         (
             TurnMessageSubmit,
-            json!({"disposition":"followup","skillInvocation":skills}),
+            json!({"disposition":"followup","preparation":preparation}),
         ),
         (
             TurnMessageSubmit,
-            json!({"disposition":"blocked","skillInvocation":{"loaded":[],"failed":[{"request":"skill","reason":"not_found"}],"receipts":[]}}),
+            json!({"disposition":"blocked","message":"Document unavailable","preparation":[{"source":{"kind":"input","name":"review","packageId":"reviewer","entryId":"entry","activation":"1","revision":"1"},"receipt":{"missing":"report.md"}}]}),
         ),
         (TurnMessageQuery, json!({"cancelledMessageIds":["m"]})),
         (
@@ -104,7 +104,7 @@ fn original_message_codec_agrees_on_identity_intent_queue_states_and_bounded_pro
     add(
         TurnMessageSubmit,
         "output",
-        json!({"disposition":"blocked","skillInvocation":skills}),
+        json!({"disposition":"blocked","message":"Document unavailable","preparation":preparation}),
     );
     for resolution in [
         json!({"state":"unknown","messageId":"m"}),

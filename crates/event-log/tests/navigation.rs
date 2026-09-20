@@ -45,7 +45,6 @@ async fn open(log: &EventLog, run: &str, turn: &str, text: &str) -> u64 {
             input: InvocationInput::Message {
                 content: text.into(),
                 request_fingerprint: None,
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
             },
         },

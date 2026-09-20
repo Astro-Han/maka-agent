@@ -106,7 +106,6 @@ pub enum RunWork {
     Message {
         message: MessageInput,
         source_messages: Vec<maka_runtime::message::RootSourceMessage>,
-        skill_invocation: Option<Box<maka_runtime::skills::SkillInvocationResult>>,
         tools: ToolCatalog,
         max_steps: usize,
     },
@@ -245,15 +244,10 @@ impl Engine {
             RunWork::Message {
                 message,
                 source_messages,
-                skill_invocation,
                 ..
             } => {
-                maka_runtime::message::validate_opening(
-                    message,
-                    source_messages,
-                    skill_invocation.as_deref(),
-                )
-                .map_err(|reason| RunError::InvalidInput(reason.into()))?;
+                maka_runtime::message::validate_sources(message, source_messages)
+                    .map_err(|reason| RunError::InvalidInput(reason.into()))?;
             }
             _ => {}
         }

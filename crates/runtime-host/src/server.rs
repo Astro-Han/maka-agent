@@ -41,6 +41,7 @@ mod oauth;
 mod onboarding;
 mod operations;
 mod outbound;
+pub(crate) mod plugin_authorization;
 mod plugin_remote;
 mod projects;
 mod scheduler;
@@ -52,7 +53,6 @@ pub(crate) mod retirement;
 mod sessions;
 pub(crate) use sessions::create::resolve as resolve_session_configuration;
 pub(crate) use sessions::workspace::resolve_path as resolve_workspace_path;
-mod skills;
 mod subscriptions;
 mod turns;
 pub mod websocket;
@@ -209,6 +209,7 @@ impl Host {
                 .as_millis(),
         )?;
         log.recover_shell_runs(recovered_at).await?;
+        log.recover_host_effects().await?;
         log.recover_workhub_stops().await?;
         let configuration = Arc::new(ConfigurationStore::for_root(root.clone()).await?);
         let draining = CancellationToken::new();
@@ -245,14 +246,12 @@ impl Host {
         let mut setup = std::mem::take(&mut options.plugins);
         crate::plugins::skills::install(
             &mut setup,
-            configuration.clone(),
             root.canonical_path().to_owned(),
             options.skill_home.take(),
             &executions,
         )?;
         crate::plugins::assistant::install(
             &mut setup,
-            configuration.clone(),
             global_instructions,
             &executions.plugin_catalog,
         )?;
@@ -284,7 +283,6 @@ impl Host {
         if setup.loader.is_none() {
             setup.loader = Some(Arc::new(crate::plugins::javascript::Loader::new(
                 &executions,
-                root.root_id().into(),
             )?));
         }
         for claim in &setup.managed_sessions {
@@ -305,7 +303,12 @@ impl Host {
             maka_plugins::services::Services::default(),
             executions.plugin_catalog.clone(),
         )
-        .with_data(data);
+        .with_data(data)
+        .with_host(crate::plugins::host::Issuer::new(
+            &executions,
+            configuration.clone(),
+            root.root_id().into(),
+        ));
         let (plugins, plugin_owner) = crate::plugins::Platform::open(
             log.clone(),
             Arc::new(crate::plugins::ExternalLoader(setup.loader)),

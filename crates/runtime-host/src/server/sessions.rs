@@ -37,7 +37,7 @@ type Result<T> = std::result::Result<T, OperationError>;
 #[serde(untagged)]
 pub(super) enum Output {
     Query(SessionCatalogQueryResult),
-    Item(SessionCatalogItem),
+    Item(Box<SessionCatalogProjection>),
     Mutation(SessionUpdateResult),
 }
 
@@ -102,7 +102,7 @@ pub(super) fn decode_output(operation: Operation, value: &Value) -> maka_protoco
     ) {
         decode_session_update_result(value)?;
     } else {
-        decode_session_catalog_item(value)?;
+        decode_session_catalog_projection(value)?;
     }
     Ok(value.clone())
 }
@@ -118,7 +118,7 @@ pub(super) async fn execute(
             let input = decode_session_create_input(value).map_err(invalid)?;
             let item = create::create(host, input.clone()).await?;
             assert_create_output_for_input(&input, &item).map_err(invalid)?;
-            Ok(Output::Item(item))
+            Ok(Output::Item(Box::new(item)))
         }
         Operation::SessionCatalogQuery => query(
             log,
@@ -157,14 +157,14 @@ pub(super) async fn execute(
                 .map_err(stored)?;
             let item = item(record);
             assert_lifecycle_output_for_input(&input, &item).map_err(invalid)?;
-            Ok(Output::Item(item))
+            Ok(Output::Item(Box::new(item)))
         }
         Operation::SessionMetadataUpdate => {
             mutation::metadata(log, value).await.map(Output::Mutation)
         }
-        Operation::SessionReadMarkerSet => {
-            mutation::read_marker(log, value).await.map(Output::Item)
-        }
+        Operation::SessionReadMarkerSet => mutation::read_marker(log, value)
+            .await
+            .map(|item| Output::Item(Box::new(item))),
         Operation::SessionConfigurationUpdate => configuration::update(host, value)
             .await
             .map(Output::Mutation),
@@ -184,7 +184,11 @@ async fn query(
 ) -> Result<SessionCatalogQueryResult> {
     if let SessionCatalogQueryInput::Get { session_id } = &input {
         return Ok(SessionCatalogQueryResult::Session {
-            session: log.get_session(session_id).await.map_err(stored)?.map(item),
+            session: log
+                .get_session(session_id)
+                .await
+                .map_err(stored)?
+                .map(|record| Box::new(item(record))),
         });
     }
     let (revision, cursor) = match &input {
@@ -220,7 +224,7 @@ async fn query(
                     "Session item exceeds catalog page budget",
                 ));
             }
-            page.next_cursor = sessions.last().map(|item| item.id().to_owned());
+            page.next_cursor = sessions.last().map(|item| item.id.clone());
             break;
         }
     }
@@ -231,8 +235,8 @@ async fn query(
     })
 }
 
-fn item(record: SessionRecord<SessionConfiguration>) -> SessionCatalogItem {
-    SessionCatalogItem::Projection(Box::new(crate::session::catalog_projection(record)))
+fn item(record: SessionRecord<SessionConfiguration>) -> SessionCatalogProjection {
+    crate::session::catalog_projection(record)
 }
 
 fn invalid(error: ProtocolError) -> OperationError {

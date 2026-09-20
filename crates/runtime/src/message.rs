@@ -21,7 +21,6 @@
 use crate::{
     execution::BehaviorId,
     input::{DeliveredMessage, MessageInput},
-    skills::SkillInvocationResult,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -48,24 +47,13 @@ pub enum TurnOrchestrationSource {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmittedTurnIntent {
-    pub skill_ids: Vec<String>,
+    pub input_selections: crate::input::Selections,
     pub turn_orchestration: Option<TurnOrchestration>,
 }
 impl SubmittedTurnIntent {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if (self.skill_ids.is_empty() && self.turn_orchestration.is_none())
-            || self.skill_ids.len() > 50
-            || self.skill_ids.iter().any(|id| {
-                id.len() > 512
-                    || id.split(':').any(|part| {
-                        part.is_empty()
-                            || !part.as_bytes()[0].is_ascii_alphanumeric()
-                            || !part
-                                .bytes()
-                                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-                    })
-            })
-        {
+        crate::input::validate_selections(&self.input_selections)?;
+        if self.input_selections.is_empty() && self.turn_orchestration.is_none() {
             return Err("invalid submitted Turn intent");
         }
         Ok(())
@@ -87,13 +75,11 @@ pub struct RootSourceMessage {
     pub message: DeliveredMessage,
     pub submitted_placement: Placement,
     pub disposition: MessageDisposition,
-    pub skill_invocation: SkillInvocationResult,
     pub submitted_intent: Option<SubmittedTurnIntent>,
 }
 impl RootSourceMessage {
     pub fn validate(&self) -> Result<(), &'static str> {
         self.message.validate()?;
-        self.skill_invocation.validate()?;
         if let Some(intent) = &self.submitted_intent {
             intent.validate()?;
             if self.submitted_placement != Placement::CurrentTurn {
@@ -105,27 +91,11 @@ impl RootSourceMessage {
 }
 
 /// The canonical opening must consume exactly its ordered source batch.
-pub fn validate_opening(
-    content: &MessageInput,
-    sources: &[RootSourceMessage],
-    skill_invocation: Option<&SkillInvocationResult>,
-) -> Result<(), &'static str> {
-    if let Some(skill_invocation) = skill_invocation {
-        skill_invocation.validate()?;
-        if !sources.is_empty() && !skill_invocation.is_empty() {
-            return Err("message source receipts must not be duplicated in the opening");
-        }
-        if !skill_invocation.is_empty() && skill_invocation.loaded.is_empty() {
-            return Err("blocked skill preparation cannot open an invocation");
-        }
-    }
-    validate_sources(content, sources)
-}
-
 pub fn validate_sources(
     content: &MessageInput,
     sources: &[RootSourceMessage],
 ) -> Result<(), &'static str> {
+    crate::input::validate_receipts(&content.preparation)?;
     if sources.is_empty() {
         return Ok(());
     }

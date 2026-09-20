@@ -56,7 +56,6 @@ fn now_ms() -> u64 {
 
 fn hello(client: &str) -> Value {
     json!({"kind":"hello", "clientInstanceId":client,
-        "surface":"desktop", "activitySnapshotVersion":2,
         "protocolMin":0, "protocolMax":0, "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH,
         "compositionId":"maka.interactive"})
 }

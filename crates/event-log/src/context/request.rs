@@ -43,18 +43,6 @@ pub(super) async fn validate(
     else {
         return Ok(());
     };
-    // Legacy facts remain replayable. New explicit purposes must agree with the
-    // canonical opening; automatic summaries can never use the legacy default.
-    if purpose.is_none() {
-        let compact: bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id=? AND kind='invocation_opened' AND json_extract(event_json,'$.fact.input.kind') IN ('context_compact','continuation','handoff'))")
-            .bind(&event.invocation.invocation_id).fetch_one(connection).await?;
-        if compact {
-            return Err(invalid(
-                "compact requires explicit summary purpose; continuation requires explicit main/summary purpose and effective source",
-            ));
-        }
-        return Ok(());
-    }
     let (opened, opening) = proof::by_kind(
         connection,
         &event.invocation.invocation_id,
@@ -125,13 +113,12 @@ pub(super) async fn validate(
         high_water: high,
         digest: source_digest.clone(),
     };
-    if effective_source_digest.is_none() {
-        return Err(invalid("model request requires effective source evidence"));
-    }
     crate::archive::validate_summary(
         connection,
         &source,
-        effective_source_digest.as_deref(),
+        effective_source_digest
+            .as_deref()
+            .ok_or_else(|| invalid("model request requires effective source evidence"))?,
         i64::MAX as u64,
     )
     .await?;
@@ -150,8 +137,15 @@ pub(super) async fn validate(
         if expected != *effective_source_digest {
             return Err(invalid("summary repair changed effective source"));
         }
-        crate::archive::validate_summary(connection, &source, expected.as_deref(), sequence as u64)
-            .await?;
+        crate::archive::validate_summary(
+            connection,
+            &source,
+            expected
+                .as_deref()
+                .ok_or_else(|| invalid("summary requires effective source evidence"))?,
+            sequence as u64,
+        )
+        .await?;
     }
     let first: Option<(String, String, i64, String, Option<String>)> = sqlx::query_as(
         "SELECT json_extract(event_json, '$.fact.model_id'), json_extract(event_json, '$.fact.route_identity'),

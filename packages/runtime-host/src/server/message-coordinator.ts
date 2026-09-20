@@ -1340,10 +1340,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           // a completed submit, so the same identity can be submitted again once
           // the Skill resolves.
           if ('blocked' in started) {
-            return success({
-              disposition: 'blocked',
-              skillInvocation: started.blocked,
-            } as const);
+            return failure('operation_conflict', 'Input preparation was rejected');
           }
           if (!isEntityId(started.turnId)) {
             throw new RuntimeMessageAuthorityInvariantError(
@@ -1353,7 +1350,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           const result = {
             disposition: 'turn_started',
             turnId: started.turnId,
-            skillInvocation: started.skillInvocation ?? EMPTY_SKILL_INVOCATION,
+            preparation: [],
           } as const;
           return success(result);
         }
@@ -1393,7 +1390,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           const result = {
             disposition: existingEntry.disposition,
             queueRevision: state.revision,
-            skillInvocation: existingEntry.skillInvocation,
+            preparation: [],
           } as const;
           this.#rememberCompletedOperation(
             'submit',
@@ -1416,12 +1413,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
               });
         preparedForRoot = { identity: rootState, outcome: prepared };
         if (prepared.kind === 'rejected') {
-          if (prepared.skillInvocation) {
-            return success({
-              disposition: 'blocked',
-              skillInvocation: prepared.skillInvocation,
-            } as const);
-          }
           return failure('operation_conflict', prepared.error);
         }
         if (allLiveEntries(state).length >= MESSAGE_QUEUE_MAX_ENTRIES) {
@@ -1506,7 +1497,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
         const result = {
           disposition,
           queueRevision: candidateRevision + 1,
-          skillInvocation: prepared.skillInvocation,
+          preparation: [],
         } as const;
         const messageAdmission: PendingMessageAdmission = {
           sessionId: input.sessionId,
@@ -2208,18 +2199,16 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       if (!sameSourcePayload(receipt, payload)) {
         return failure('operation_conflict', 'Durable message receipt has a different payload');
       }
-      const skillInvocation =
-        source.skillInvocation ?? receipt.admission.skillInvocation ?? EMPTY_SKILL_INVOCATION;
       if (source.disposition === 'turn_started') {
         return success({
           disposition: 'turn_started',
           turnId: receipt.admission.turnId,
-          skillInvocation,
+          preparation: [],
         });
       }
       return success({
         disposition: source.disposition,
-        skillInvocation,
+        preparation: [],
       });
     }
     const steeringProof = await this.#durableProof.readImmutableSteeringMessageProof(
@@ -2884,13 +2873,16 @@ function completedPayloadIdentity(operation: MessageOperationKind, payload: obje
 }
 
 function canonicalSubmitPayload(input: TurnMessageSubmitInput): CanonicalSubmitPayload {
+  if (Object.keys(input.inputSelections ?? {}).some((name) => name !== 'maka.skills')) {
+    throw new Error('Input preparation provider is not installed');
+  }
   return {
     originHostEpoch: input.originHostEpoch,
     sessionId: input.sessionId,
     messageId: input.messageId,
     content: normalizeMessageContent(input.content),
     placement: input.placement,
-    skillIds: [...(input.skillIds ?? [])],
+    skillIds: [...(input.inputSelections?.['maka.skills'] ?? [])],
     ...(input.turnOrchestration ? { turnOrchestration: input.turnOrchestration } : {}),
   };
 }

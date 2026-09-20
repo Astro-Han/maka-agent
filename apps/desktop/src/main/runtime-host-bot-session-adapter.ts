@@ -151,13 +151,7 @@ export function createRuntimeHostBotSessionAdapter(
           if (started.kind === 'blocked') {
             return {
               kind: 'errored' as const,
-              reason: started.skillInvocation.failed
-                .map((failure) =>
-                  failure.reason === 'too_many_requests'
-                    ? `Skill request limit exceeded: ${failure.requestLimit}`
-                    : `${failure.request}: ${failure.reason}`,
-                )
-                .join(', '),
+              reason: started.message,
             };
           }
         } catch (error) {

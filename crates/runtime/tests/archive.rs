@@ -110,52 +110,32 @@ process.stdout.write(JSON.stringify(cases.map(p => {
 }
 
 #[test]
-fn canonical_reference_roundtrip_rejects_aliases_and_chains() {
+fn result_locators_are_canonical_and_do_not_accept_client_supplied_evidence() {
+    use maka_runtime::archive::ToolResultAddress;
     let identity = identity();
     let short = identity.short_ref().unwrap();
-    assert_eq!(
-        ArchiveIdentity::parse_short_ref(&short).unwrap(),
-        identity.runtime_event_id
-    );
-    assert!(ArchiveIdentity::parse_short_ref("archive:%65vent").is_err());
-    assert!(ArchiveIdentity::parse_short_ref("archive:").is_err());
-    assert!(ArchiveIdentity::parse_short_ref("archive:%FF").is_err());
-    assert!(ArchiveIdentity::parse_short_ref(&format!("{short}?forged=1")).is_err());
-    let resource = identity.resource_ref().unwrap();
-    let event_path =
-        maka_runtime::archive::ToolResultAddress::event_path(&identity.runtime_event_id).unwrap();
+    let event_path = ToolResultAddress::event_path(&identity.runtime_event_id).unwrap();
     for path in [&short, &event_path] {
         assert_eq!(
-            maka_runtime::archive::ToolResultAddress::parse(path).unwrap(),
-            maka_runtime::archive::ToolResultAddress::Event(identity.runtime_event_id.clone())
+            ToolResultAddress::parse(path).unwrap().event_id(),
+            identity.runtime_event_id
         );
-        assert!(
-            maka_runtime::archive::ToolResultAddress::parse(&format!("{path}?forged=1")).is_err()
-        );
+        for bad in [
+            format!("{path}?forged=1"),
+            format!("{path}#x"),
+            format!("{path}%41"),
+        ] {
+            assert!(ToolResultAddress::parse(&bad).is_err(), "{bad}");
+        }
     }
-    assert_eq!(
-        maka_runtime::archive::ToolResultAddress::parse(&resource).unwrap(),
-        maka_runtime::archive::ToolResultAddress::Evidence(identity.clone())
-    );
-    assert!(
-        maka_runtime::archive::ToolResultAddress::parse("maka://runtime/tool-results/%65vent")
-            .is_err()
-    );
-    assert!(resource.contains("!~*'()"));
-    assert_eq!(
-        ArchiveIdentity::parse_resource_ref(&resource).unwrap(),
-        identity
-    );
     for bad in [
-        resource.replace("%2F", "%2f"),
-        format!("{resource}#x"),
-        resource.replace(
-            "null",
-            "%22mptransition-00000000000000000000000000000000%22",
-        ),
-        "maka://archive/legacy/hash/4".into(),
+        "archive:%65vent",
+        "archive:",
+        "archive:%FF",
+        "maka://runtime/tool-results/%65vent",
+        "maka://archive-ledger/v1/anything",
     ] {
-        assert!(ArchiveIdentity::parse_resource_ref(&bad).is_err(), "{bad}");
+        assert!(ToolResultAddress::parse(bad).is_err(), "{bad}");
     }
 }
 

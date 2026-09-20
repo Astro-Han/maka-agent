@@ -28,10 +28,9 @@ use maka_runtime::{
     event::Invocation,
     model::{ModelEvent, ModelPart, TextKind},
     tool_call::{ToolCallIdentity, ToolOrigin},
-    tool_output::{ToolOutput, ToolSuccess},
+    tool_output::ToolOutput,
     tools::{PreparedEffect, ToolError, ToolJournal},
 };
-use serde_json::Value;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -43,7 +42,8 @@ impl Executions {
         parent_operation_id: Option<String>,
         input: Generate,
         cancellation: CancellationToken,
-    ) -> Result<impl Future<Output = Result<Value, ToolError>> + Send + 'static, Error> {
+    ) -> Result<impl Future<Output = Result<ModelGeneration, ToolError>> + Send + 'static, Error>
+    {
         input
             .validate()
             .map_err(|error| Error::Invalid(error.to_string()))?;
@@ -84,30 +84,14 @@ impl Executions {
         .map_err(|error| Error::Host(error.to_string()))?;
         let evidence =
             serde_json::to_value(&input).map_err(|error| Error::Invalid(error.to_string()))?;
-        let requested = input.max_output_tokens.unwrap_or(2048);
-        let max_output_tokens = Some(
-            prepared
-                .main_output_limit
-                .map_or(requested, |limit| limit.min(requested)),
-        );
-        let mut prompt = Vec::new();
-        if let Some(content) = input.system {
-            prompt.push(Message::System {
-                content,
-                provider_options: None,
-            });
-        }
-        prompt.push(Message::user(input.prompt));
-        let request = ModelRequest {
-            provider: prepared.config,
-            prompt,
-            tools: Vec::new(),
-            provider_options: prepared.options,
-            max_output_tokens,
-        };
+        let request = request(prepared, input);
         let models = self.models.clone();
         let effect = PreparedEffect::new(move |cancellation| {
-            Box::pin(generate(models, request, cancellation))
+            Box::pin(async move {
+                generate(models, request, cancellation)
+                    .await
+                    .map(|output| ToolOutput::Model(Box::new(output)).into())
+            })
         });
         let operation_id = uuid::Uuid::new_v4().to_string();
         let journal = ToolJournal::new(self.log.clone(), invocation);
@@ -116,7 +100,7 @@ impl Executions {
         self.workers.spawn(async move {
             drop(gate);
             let result = journal
-                .invoke_prepared_call(
+                .invoke_prepared_output(
                     operation_id,
                     ToolCallIdentity {
                         tool_call_id: uuid::Uuid::new_v4().to_string(),
@@ -143,18 +127,48 @@ impl Executions {
             let _ = send.send(result);
         });
         Ok(async move {
-            receive.await.map_err(|_| {
+            let output = receive.await.map_err(|_| {
                 ToolError::OutcomeUnknown("model resource worker disappeared".into())
-            })?
+            })??;
+            match output {
+                ToolOutput::Model(result) => Ok(*result),
+                _ => Err(ToolError::OutcomeUnknown(
+                    "model journal returned a non-model output".into(),
+                )),
+            }
         })
     }
 }
 
-async fn generate(
+pub(super) fn request(prepared: provider::PreparedProvider, input: Generate) -> ModelRequest {
+    let requested = input.max_output_tokens.unwrap_or(2048);
+    let max_output_tokens = Some(
+        prepared
+            .main_output_limit
+            .map_or(requested, |limit| limit.min(requested)),
+    );
+    let mut prompt = Vec::new();
+    if let Some(content) = input.system {
+        prompt.push(Message::System {
+            content,
+            provider_options: None,
+        });
+    }
+    prompt.push(Message::user(input.prompt));
+    ModelRequest {
+        provider: prepared.config,
+        prompt,
+        tools: Vec::new(),
+        provider_options: prepared.options,
+        max_output_tokens,
+    }
+}
+
+pub(super) async fn generate(
     models: ModelExecutor,
     request: ModelRequest,
     cancellation: CancellationToken,
-) -> Result<ToolSuccess, ToolError> {
+) -> Result<ModelGeneration, ToolError> {
     let model_id = request.provider.model.clone();
     let mut stream = models.stream(request, cancellation).await.map_err(failed)?;
     let result = async {
@@ -197,13 +211,12 @@ async fn generate(
             _ => None,
         })
         .collect();
-    Ok(ToolOutput::Model(Box::new(ModelGeneration {
+    Ok(ModelGeneration {
         text,
         model_id,
         finish_reason: step.finish_reason,
         usage: step.usage,
-    }))
-    .into())
+    })
 }
 fn failed(error: impl ToString) -> ToolError {
     ToolError::Failed(error.to_string())

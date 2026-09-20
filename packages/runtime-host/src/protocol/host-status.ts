@@ -42,18 +42,13 @@ export interface HostActivitySnapshot {
   readonly activeOperations: number;
   readonly processUptimeSeconds: number;
   readonly residencies: readonly { readonly label: string; readonly count: number }[];
-  /** Negotiated maintenance evidence. Absent on released Hosts: every residency is conservative. */
-  readonly drainResidencies?: number;
+  readonly drainResidencies: number;
   readonly cooperativeHandoff?: boolean;
 }
 
 export function isHostActivityIdle(activity: HostActivitySnapshot): boolean {
   return (
-    activity.connections === 0 &&
-    activity.activeOperations === 0 &&
-    (activity.drainResidencies === undefined
-      ? activity.residencies.length === 0
-      : activity.drainResidencies === 0)
+    activity.connections === 0 && activity.activeOperations === 0 && activity.drainResidencies === 0
   );
 }
 
@@ -94,11 +89,11 @@ export interface HostDiagnosticsResult extends HostStatusResult {
    * mixed-version peers, so there is no wire case where it is absent.
    */
   upgradeBlockingActivity: boolean;
+  drainResidencies: number;
   protocolVersion: number;
   compatibilityEpoch: number;
   pid: number;
   processUptimeSeconds: number;
-  nodeVersion: string;
   platform: NodeJS.Platform;
   arch: string;
   osRelease: string;
@@ -173,13 +168,13 @@ function decodeHostDiagnosticsResult(value: unknown): HostDiagnosticsResult {
     'activeResidencies',
     ...(valueRecord.peerEndpoint === undefined ? [] : ['peerEndpoint']),
     'upgradeBlockingActivity',
+    'drainResidencies',
     'compositionModules',
     'residencies',
     'protocolVersion',
     'compatibilityEpoch',
     'pid',
     'processUptimeSeconds',
-    'nodeVersion',
     'platform',
     'arch',
     'osRelease',
@@ -197,6 +192,7 @@ function decodeHostDiagnosticsResult(value: unknown): HostDiagnosticsResult {
   return {
     ...decodeHostStatusFields(record),
     upgradeBlockingActivity: requireUpgradeBlockingActivity(record.upgradeBlockingActivity),
+    drainResidencies: requireCount(record.drainResidencies, 'Runtime Host drain residencies'),
     compositionModules: record.compositionModules.map((moduleId) =>
       requireString(moduleId, 'Runtime Host composition module id', 64),
     ),
@@ -211,7 +207,6 @@ function decodeHostDiagnosticsResult(value: unknown): HostDiagnosticsResult {
     compatibilityEpoch: requireCount(record.compatibilityEpoch, 'Runtime Host compatibility epoch'),
     pid: requireCount(record.pid, 'Runtime Host pid'),
     processUptimeSeconds: requireCount(record.processUptimeSeconds, 'Runtime Host process uptime'),
-    nodeVersion: requireString(record.nodeVersion, 'Runtime Host Node version', 64),
     platform: requirePlatform(record.platform),
     arch: requireString(record.arch, 'Runtime Host architecture', 64),
     osRelease: requireString(record.osRelease, 'Runtime Host OS release', 256),
@@ -236,8 +231,8 @@ export function decodeHostActivitySnapshot(value: unknown): HostActivitySnapshot
   const record = requireShapedRecord(
     value,
     'Runtime Host activity',
-    ['connections', 'activeOperations', 'processUptimeSeconds', 'residencies'],
-    ['drainResidencies', 'cooperativeHandoff'],
+    ['connections', 'activeOperations', 'processUptimeSeconds', 'residencies', 'drainResidencies'],
+    ['cooperativeHandoff'],
   );
   if (!Array.isArray(record.residencies) || record.residencies.length > 128) {
     throw invalidProtocolFrame('Invalid Runtime Host activity residencies');
@@ -251,11 +246,7 @@ export function decodeHostActivitySnapshot(value: unknown): HostActivitySnapshot
             'Runtime Host cooperative handoff capability',
           ),
         }),
-    ...(record.drainResidencies === undefined
-      ? {}
-      : {
-          drainResidencies: requireCount(record.drainResidencies, 'Runtime Host drain residencies'),
-        }),
+    drainResidencies: requireCount(record.drainResidencies, 'Runtime Host drain residencies'),
     connections: requireCount(record.connections, 'Runtime Host activity connections'),
     activeOperations: requireCount(
       record.activeOperations,

@@ -55,9 +55,8 @@ pub struct CorrectionRequest {
 pub struct CorrectionIntent {
     pub request: CorrectionRequest,
     /// Host-owned execution preparation. Opaque here because Session
-    /// configuration belongs to the Host; absent only on legacy accepted intents.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preparation: Option<serde_json::Value>,
+    /// configuration belongs to the Host.
+    pub preparation: serde_json::Value,
     /// None proves the old pending Message was cancelled, already cancelled,
     /// or shared. A shared Run is never owned by this operation.
     pub owner: Option<Invocation>,

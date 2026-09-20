@@ -19,6 +19,14 @@
 
 import type { ComponentType } from 'react';
 import type { Awaitable, Json } from './host.js';
+import type { ClientAuthorization } from './authorization.js';
+export type {
+  ClientAuthorization,
+  AuthorizationCapability,
+  AuthorizationScope,
+  AuthorizationRequest,
+  AuthorizationGrant,
+} from './authorization.js';
 
 /** Independent of the application release and Host protocol epoch. */
 export const CLIENT_SDK_VERSION = 1;
@@ -99,6 +107,7 @@ export interface ClientContext {
   readonly hostEpoch?: string;
   readonly signal: AbortSignal;
   readonly remote: ClientRemote;
+  readonly authorization: ClientAuthorization;
   /** Optional desktop-local paths; never interpreted as paths on a remote Host. */
   readonly localFiles?: ClientLocalFiles;
   readonly slots: {

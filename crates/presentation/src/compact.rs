@@ -23,8 +23,7 @@ use maka_runtime::event::{Fact, InvocationInput, RuntimeEvent};
 
 impl InvocationView {
     // Summary attempts produce no transcript rows, whether standalone or inside
-    // a Message Turn. State::Active already proves a canonical Message opening,
-    // so its legacy None purpose means Main; ContextCompact None means Summary.
+    // a Message Turn. Every request records its explicit purpose.
     pub(super) fn compact(&mut self, event: &RuntimeEvent) -> Result<bool, ProjectionError> {
         if let State::Active { invocation, step } = &self.state {
             if *invocation != event.invocation {
@@ -32,7 +31,7 @@ impl InvocationView {
             }
             if let Fact::ModelRequested {
                 step_id,
-                purpose: Some(ModelPurpose::Summary),
+                purpose: ModelPurpose::Summary,
                 ..
             } = &event.fact
             {
@@ -82,7 +81,7 @@ impl InvocationView {
         }
         match event.fact {
             Fact::ModelRequested {
-                purpose: Some(ModelPurpose::Main),
+                purpose: ModelPurpose::Main,
                 ..
             } => {
                 return Err(ProjectionError::Invalid(

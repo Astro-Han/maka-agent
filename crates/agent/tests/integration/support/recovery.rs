@@ -43,7 +43,6 @@ pub async fn opening(log: &EventLog) -> RuntimeEvent {
         Fact::InvocationOpened {
             configuration: None,
             input: maka_runtime::input::InvocationInput::Message {
-                skill_invocation: Default::default(),
                 source_messages: Vec::new(),
                 content: "perform the operation".into(),
                 request_fingerprint: Some("stable".into()),
@@ -68,7 +67,7 @@ pub async fn request(log: &EventLog) {
         log,
         Fact::ModelRequested {
             effective_source_digest: None,
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
             checkpoint_event_id: None,
             step_id: "step".into(),

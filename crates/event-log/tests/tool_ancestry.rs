@@ -265,7 +265,7 @@ async fn provider_dispatch_requires_the_exact_accepted_local_call() {
     let request = event(
         "one",
         Fact::ModelRequested {
-            purpose: None,
+            purpose: maka_runtime::context::ModelPurpose::Main,
             context: None,
             checkpoint_event_id: None,
             step_id: "step".into(),
@@ -279,12 +279,26 @@ async fn provider_dispatch_requires_the_exact_accepted_local_call() {
         },
     );
     log.append_batch(
-        &([opening("one"), opening("two"), request])
-            .iter()
-            .cloned()
-            .map(EventWrite::plain)
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap(),
+        &([
+            event(
+                "one",
+                Fact::InvocationOpened {
+                    configuration: None,
+                    input: InvocationInput::Message {
+                        content: "use a tool".into(),
+                        request_fingerprint: None,
+                        source_messages: Vec::new(),
+                    },
+                },
+            ),
+            opening("two"),
+            request,
+        ])
+        .iter()
+        .cloned()
+        .map(EventWrite::plain)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap(),
     )
     .await
     .unwrap();

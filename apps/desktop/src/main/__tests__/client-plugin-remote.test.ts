@@ -41,6 +41,73 @@ function deferred<T>() {
   return { resolve, promise };
 }
 
+test('plugin consent is explicit and cannot outlive its document or publication', async () => {
+  const owner = renderer();
+  const handlers = new Map<string, IpcHandler>();
+  let nonce = randomUUID();
+  let published = true;
+  let confirmation = deferred<boolean>();
+  let showing = deferred<AbortSignal>();
+  let writes = 0;
+  const identity = {entryId:'view',extensionId:'example',activation:randomUUID(),contentDigest:'sha256-'+'a'.repeat(64),clientDigest:'sha256-'+'b'.repeat(64)};
+  const proposal = {client:identity,scope:'profile',command:{kind:'approve',request:{operationId:randomUUID(),title:'Send reminders',target:{kind:'profile'},capabilities:['notifications']}}};
+  const dispose = registerClientPluginRemoteIpc({
+    ipcMain: {handle: (name, handler) => {handlers.set(name,handler);}},
+    ownsRenderer: (contents) => contents === owner.emitter as unknown as WebContents,
+    report: assert.ifError,
+    client: {hostEpoch:'host',async request() {throw new Error('Unexpected Remote command');}},
+    authorization: {
+      async validate() {if (!published) throw new Error('Client publication retired');},
+      confirm(_input, signal) {showing.resolve(signal); return confirmation.promise;},
+      async request() {writes++; return {kind:'grant',grant:null};},
+    },
+  });
+  try {
+    const {epoch} = await handlers.get('plugins:connection')!(owner.event, nonce);
+    const invoke = (requestId = randomUUID()) => handlers.get('plugins:authorization')!(owner.event, nonce, epoch, proposal, requestId);
+    let pending = invoke();
+    await showing.promise;
+    confirmation.resolve(false);
+    assert.deepEqual(await pending,{kind:'grant',grant:null});
+    assert.equal(writes,0);
+    confirmation = deferred(); showing = deferred();
+    pending = invoke();
+    await showing.promise;
+    confirmation.resolve(true);
+    await pending;
+    assert.equal(writes,1);
+    confirmation = deferred(); showing = deferred();
+    const requestId = randomUUID();
+    pending = invoke(requestId);
+    const retiredSignal = await showing.promise;
+    await handlers.get('plugins:authorization-cancel')!(owner.event, randomUUID(), epoch, requestId);
+    assert.equal(retiredSignal.aborted,false,'another document cannot cancel this approval');
+    await handlers.get('plugins:authorization-cancel')!(owner.event, nonce, epoch, requestId);
+    assert.equal(retiredSignal.aborted,true);
+    confirmation.resolve(true);
+    assert.deepEqual(await pending,{kind:'grant',grant:null});
+    assert.equal(writes,1);
+    confirmation = deferred(); showing = deferred();
+    pending = invoke();
+    const signal = await showing.promise;
+    owner.emitter.emit('did-start-navigation',{},'new-page',false,true);
+    assert.equal(signal.aborted,true);
+    confirmation.resolve(true); // A late click must never reach Host.
+    assert.deepEqual(await pending,{kind:'grant',grant:null});
+    assert.equal(writes,1);
+    nonce = randomUUID();
+    await handlers.get('plugins:connection')!(owner.event, nonce);
+    confirmation = deferred(); showing = deferred();
+    const rejected = assert.rejects(invoke(),/publication retired/);
+    await showing.promise;
+    published = false;
+    confirmation.resolve(true);
+    await rejected;
+    assert.equal(writes,1);
+  } finally {await dispose();}
+  assert.deepEqual(owner.emitter.eventNames(),[]);
+});
+
 test('reconnecting to the same Host revokes old Remote leases without fencing the replacement Client', async () => {
   const owner = renderer();
   const nonce = randomUUID();
@@ -101,7 +168,7 @@ test('Remote documents belong to one Renderer and drain navigation, late opens a
   let late: ReturnType<typeof deferred<string>> | undefined;
   let attempts = 0;
   const dispose = registerClientPluginRemoteIpc({
-    ipcMain: { handle: (channel, listener) => { if (channel === 'plugins:remote') handler = listener; else if (channel === 'plugins:files') files = listener; else connection = listener; } },
+    ipcMain: { handle: (channel, listener) => { if (channel === 'plugins:remote') handler = listener; else if (channel === 'plugins:files') files = listener; else if (channel === 'plugins:connection') connection = listener; } },
     ownsRenderer: (contents: WebContents) => allowed.has(contents as unknown as typeof one.emitter),
     report: (error) => errors.push(error),
     client: { hostEpoch: 'host-process', async request(_operation, input) {

@@ -17,72 +17,42 @@
  * under the License.
  */
 
-use super::skills::{FrozenSkills, SkillPreparation};
 use super::{Result, failure, internal};
 use maka_plugins::{
     composition::Scope,
     contributions::Catalog,
     input::{Prepared, Request},
 };
-use maka_protocol::OperationErrorCode;
 mod prepared;
 pub(crate) use prepared::PreparedMessageInput;
 
-/// Compatibility projection for the existing Skill receipt fields. The execution
-/// pipeline itself dispatches every published input provider without domain names.
-pub(super) async fn prepare(
-    catalog: &Catalog,
-    mut request: Request,
-) -> Result<(Prepared, SkillPreparation)> {
+pub(crate) enum Outcome {
+    Ready {
+        required_tools: std::collections::BTreeSet<String>,
+    },
+    Blocked {
+        message: String,
+    },
+}
+
+pub(super) async fn prepare(catalog: &Catalog, request: Request) -> Result<(Prepared, Outcome)> {
     let scope = Scope::Session(request.session_id.clone());
-    let skills = catalog
-        .snapshot::<maka_plugins::input::InputPreparation>(&scope)
-        .entries
-        .contains_key(maka_skills::plugin::ID);
-    if !skills {
-        let ids = request
-            .selections
-            .remove(maka_skills::plugin::ID)
-            .unwrap_or_default();
-        if let SkillPreparation::Blocked(receipt) = FrozenSkills::empty()
-            .prepare(&mut request.content, &ids)
-            .map_err(super::skills::skill_error)?
-        {
-            return Ok((
-                Prepared::unchanged(request.content),
-                SkillPreparation::Blocked(receipt),
-            ));
-        }
-    }
     let prepared = maka_plugins::input::prepare(catalog, &scope, request)
         .await
-        .map_err(internal)?;
-    let receipt = prepared
-        .content
-        .preparation
-        .iter()
-        .rev()
-        .find(|receipt| {
-            receipt.source.name == maka_skills::plugin::ID
-                && receipt.source.package_id == maka_skills::plugin::ID
-        })
-        .map(|receipt| {
-            serde_json::from_value::<maka_runtime::skills::SkillInvocationResult>(
-                receipt.receipt.clone(),
-            )
-        })
-        .transpose()
-        .map_err(internal)?
-        .unwrap_or_default();
-    if let Some(message) = &prepared.blocked {
-        if !receipt.failed.is_empty() {
-            return Ok((prepared, SkillPreparation::Blocked(receipt)));
-        }
-        return Err(failure(OperationErrorCode::OperationUnavailable, message));
-    }
-    let selection = SkillPreparation::Ready {
-        skill_invocation: receipt,
-        required_tools: prepared.required_tools.clone(),
+        .map_err(|error| match error {
+            maka_plugins::Error::Retired | maka_plugins::Error::Invalid(_) => failure(
+                maka_protocol::OperationErrorCode::OperationUnavailable,
+                &error.to_string(),
+            ),
+            other => internal(other),
+        })?;
+    let selection = match &prepared.blocked {
+        Some(message) => Outcome::Blocked {
+            message: message.clone(),
+        },
+        None => Outcome::Ready {
+            required_tools: prepared.required_tools.clone(),
+        },
     };
     Ok((prepared, selection))
 }

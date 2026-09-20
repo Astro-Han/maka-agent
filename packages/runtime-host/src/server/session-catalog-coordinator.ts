@@ -19,7 +19,6 @@
 
 import { JsonArrayPageBudget } from './json-array-page-budget.js';
 
-import { RuntimeHostProtocolError } from '../protocol/errors.js';
 import { createHash } from 'node:crypto';
 import { authorizeConnectionModel, connectionEnabledModelIds } from '@maka/core/llm-connections';
 import { isModelExplicitlyUnsupportedForChat } from '@maka/core/model-catalog';
@@ -77,7 +76,6 @@ import {
   type OperationError,
   type OperationOutcome,
   type WorkHubCoordinationConfigureModelInput,
-  type SessionCatalogItem,
   type SessionCatalogLiveRunState,
   type SessionCatalogProjection,
   type SharedSessionCatalogProjection,
@@ -480,7 +478,7 @@ export class HostSessionCatalogCoordinator {
     }
   }
 
-  #projectCatalogQueryRecord(record: SessionCatalogRecord): SessionCatalogItem {
+  #projectCatalogQueryRecord(record: SessionCatalogRecord): SessionCatalogProjection {
     return projectSessionCatalogRecord(
       record,
       projectCatalogLiveRunState(this.#manager.runningTurnIds(record.header.id)),
@@ -1417,7 +1415,7 @@ function createRequestFingerprint(
 export function projectSessionCatalogRecord(
   record: SessionCatalogRecord,
   liveRunState?: SessionCatalogLiveRunState,
-): SessionCatalogItem {
+): SessionCatalogProjection {
   const { header, summary } = record;
   const projectedLabels = projectCatalogLabels(header.labels);
   const projection: SessionCatalogProjection = {
@@ -1487,17 +1485,7 @@ export function projectSessionCatalogRecord(
     collaborationMode: header.collaborationMode ?? 'agent',
     orchestrationMode: header.orchestrationMode ?? 'default',
   };
-  try {
-    return decodeSessionCatalogProjection(projection);
-  } catch (error) {
-    if (!(error instanceof RuntimeHostProtocolError) || error.code !== 'invalid_frame') throw error;
-    return {
-      kind: 'unsupported_legacy_record',
-      id: header.id,
-      revision: record.revision,
-      reason: 'not_wire_representable',
-    };
-  }
+  return decodeSessionCatalogProjection(projection);
 }
 
 function projectSharedSessionCatalogRecord(
@@ -1564,9 +1552,9 @@ function page(
   records: readonly SessionCatalogRecord[],
   revision: SessionCatalogRevision,
   hasMore: boolean,
-  project: (record: SessionCatalogRecord) => SessionCatalogItem = projectSessionCatalogRecord,
+  project: (record: SessionCatalogRecord) => SessionCatalogProjection = projectSessionCatalogRecord,
 ): SessionCatalogQueryResult {
-  const items: SessionCatalogItem[] = [];
+  const items: SessionCatalogProjection[] = [];
   const budget = new JsonArrayPageBudget(SESSION_CATALOG_RESULT_MAX_BYTES, {
     kind: 'page',
     revision,
@@ -1703,7 +1691,7 @@ function successQuery(
   return { ok: true, result };
 }
 
-function createSuccess(result: SessionCatalogItem): OperationOutcome<'session.create'> {
+function createSuccess(result: SessionCatalogProjection): OperationOutcome<'session.create'> {
   return { ok: true, result };
 }
 

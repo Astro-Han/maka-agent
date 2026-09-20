@@ -48,7 +48,6 @@ pub use operation_error::OperationErrorCode;
 pub mod network_proxy;
 pub mod runtime_policy;
 pub mod session;
-pub mod skills;
 pub mod subscription;
 pub mod transcript;
 pub mod turn;
@@ -59,7 +58,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub const PROTOCOL_VERSION: u64 = 0;
-pub const COMPATIBILITY_EPOCH: u64 = 163;
+pub const COMPATIBILITY_EPOCH: u64 = 164;
 pub const COMPOSITION_ID: &str = "maka.interactive";
 pub const MAX_MESSAGE_BYTES: usize = 768 * 1024;
 pub const MAX_IN_FLIGHT_DOMAIN_REQUESTS: usize = 64;

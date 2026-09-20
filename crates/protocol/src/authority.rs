@@ -28,6 +28,7 @@ impl Operation {
             Self::AccessCredentialFinalize
                 | Self::PluginClientQuery
                 | Self::PluginRemote
+                | Self::PluginAuthorization
                 | Self::AgentGraphEpochsQuery
                 | Self::AgentGraphOperatorQuery
                 | Self::AgentGraphQuery
@@ -125,12 +126,6 @@ impl Operation {
                 | Self::SessionTurnLandmarksQuery
                 | Self::SessionTurnsQuery
                 | Self::SessionWorkspaceRelocate
-                | Self::SkillCatalogInvocableQuery
-                | Self::SkillCatalogMutate
-                | Self::SkillCatalogPreviewUpdate
-                | Self::SkillCatalogQuery
-                | Self::SkillCatalogResolvePath
-                | Self::SkillSourceImport
                 | Self::SubscriptionClose
                 | Self::SubscriptionOpen
                 | Self::SubscriptionPtyInterestSet

@@ -56,8 +56,6 @@ pub struct ClientHello {
     pub generation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub takeover: Option<Takeover>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub activity_snapshot_version: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -71,6 +69,18 @@ pub fn decode_hello(value: &Value) -> Result<ClientHello> {
     if value["kind"] != "hello" {
         return Err(ProtocolError::invalid("Expected hello"));
     }
+    crate::codec::shaped(
+        frame,
+        &[
+            "kind",
+            "clientInstanceId",
+            "protocolMin",
+            "protocolMax",
+            "compatibilityEpoch",
+            "compositionId",
+        ],
+        &["generation", "takeover"],
+    )?;
     let range = decode_range(value)?;
     let generation = frame
         .get("generation")
@@ -79,7 +89,7 @@ pub fn decode_hello(value: &Value) -> Result<ClientHello> {
     let takeover = frame
         .get("takeover")
         .map(|v| {
-            record(v, "Runtime Host takeover")?;
+            crate::codec::exact(record(v, "Runtime Host takeover")?, &["expectedHostEpoch"])?;
             Ok(Takeover {
                 expected_host_epoch: string(&v["expectedHostEpoch"], "expectedHostEpoch", 128)?,
             })
@@ -94,12 +104,10 @@ pub fn decode_hello(value: &Value) -> Result<ClientHello> {
         client_instance_id: string(&value["clientInstanceId"], "clientInstanceId", 128)?,
         protocol_min: range.min,
         protocol_max: range.max,
-        compatibility_epoch: epoch(frame.get("compatibilityEpoch"))?,
-        composition_id: composition(frame.get("compositionId"))?,
+        compatibility_epoch: epoch(&value["compatibilityEpoch"])?,
+        composition_id: composition(&value["compositionId"])?,
         generation,
         takeover,
-        activity_snapshot_version: (value["activitySnapshotVersion"].as_f64() == Some(2.0))
-            .then_some(2),
     })
 }
 
@@ -195,17 +203,14 @@ pub enum Replacement {
 pub fn decode_host_handshake(value: &Value) -> Result<HostHandshake> {
     let frame = record(value, "host frame")?;
     let host_epoch = string(&value["hostEpoch"], "hostEpoch", 128)?;
-    let composition_id = composition(frame.get("compositionId"))?;
-    let composition_revision = match frame.get("compositionRevision") {
-        None => "legacy".into(),
-        Some(v) => {
-            let revision = string(v, "compositionRevision", 128)?;
-            if revision.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}') {
-                return Err(ProtocolError::invalid("Invalid compositionRevision"));
-            }
-            revision
-        }
-    };
+    let composition_id = composition(&value["compositionId"])?;
+    let composition_revision = string(&value["compositionRevision"], "compositionRevision", 128)?;
+    if composition_revision
+        .chars()
+        .any(|c| c <= '\u{1f}' || c == '\u{7f}')
+    {
+        return Err(ProtocolError::invalid("Invalid compositionRevision"));
+    }
     match value["kind"].as_str() {
         Some("draining") => Ok(HostHandshake::Draining {
             host_epoch,
@@ -246,7 +251,7 @@ pub fn decode_host_handshake(value: &Value) -> Result<HostHandshake> {
                 cooperative_handoff,
                 connection_id: string(&value["connectionId"], "connectionId", 128)?,
                 selected_protocol: count(&value["selectedProtocol"], "selectedProtocol")?,
-                compatibility_epoch: epoch(frame.get("compatibilityEpoch"))?,
+                compatibility_epoch: epoch(&value["compatibilityEpoch"])?,
             })
         }
         Some("incompatible") => {
@@ -263,7 +268,7 @@ pub fn decode_host_handshake(value: &Value) -> Result<HostHandshake> {
                 replacement,
                 protocol_min: range.min,
                 protocol_max: range.max,
-                compatibility_epoch: epoch(frame.get("compatibilityEpoch"))?,
+                compatibility_epoch: epoch(&value["compatibilityEpoch"])?,
                 state: lifecycle(&value["state"])?,
                 generation: frame
                     .get("generation")

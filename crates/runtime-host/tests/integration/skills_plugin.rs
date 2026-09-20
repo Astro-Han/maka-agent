@@ -26,7 +26,7 @@ use maka_runtime_host::server::{Host, local::LocalListener};
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-mod client;
+pub(super) mod client;
 
 pub(super) async fn converged(peer: &mut Peer) {
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -97,64 +97,50 @@ async fn disabled_skills_preserve_plain_chat_and_explicit_failure_across_host_re
                 "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
             })).await;
             assert_eq!(created["ok"], true, "{created}");
-            let context = json!({"workspace":{"kind":"host_path","path":fixture.workspace}});
-            let catalog = peer
-                .rpc(
-                    "skill.catalog.query",
-                    json!({
-                        "kind":"start","context":context,"view":"governance"
-                    }),
-                )
-                .await;
-            assert_eq!(catalog["ok"], true, "{catalog}");
-            let revision = catalog["result"]["revision"].clone();
-            let bundled = peer
-                .rpc(
-                    "skill.catalog.query",
-                    json!({
-                        "kind":"start","context":context,"view":"bundled"
-                    }),
-                )
-                .await;
-            assert_eq!(bundled["result"]["revision"], revision);
-            let preview = peer
-                .rpc(
-                    "skill.catalog.preview-update",
-                    json!({
-                        "context":context,"expectedRevision":revision,"ref":"project:maka:review"
-                    }),
-                )
-                .await;
-            assert_eq!(preview["result"]["reason"], "not_managed", "{preview}");
-            client::verify(&mut peer).await;
-        }
-        let catalog = peer
-            .rpc(
-                "skill.catalog.invocable.query",
-                json!({
-                    "kind":"start","target":{"kind":"session","sessionId":"skills-session"}
-                }),
+            let path = json!(fixture.workspace);
+            let catalog = client::workspace(
+                &mut peer,
+                &path,
+                json!({"kind":"catalog","view":"governance"}),
             )
             .await;
-        assert_eq!(catalog["result"]["items"], json!([]), "{catalog}");
-        let governance = peer.rpc("skill.catalog.query", json!({
-            "kind":"start","context":{"workspace":{"kind":"host_path","path":fixture.workspace}},"view":"governance"
-        })).await;
-        assert_eq!(governance["ok"], false, "{governance}");
-        assert_eq!(
-            governance["error"]["code"], "operation_unavailable",
-            "{governance}"
+            let revision = catalog["revision"].clone();
+            let bundled =
+                client::workspace(&mut peer, &path, json!({"kind":"catalog","view":"bundled"}))
+                    .await;
+            assert_eq!(bundled["revision"], revision);
+            let preview = client::workspace(
+                &mut peer,
+                &path,
+                json!({"kind":"preview","expectedRevision":revision,"ref":"project:maka:review"}),
+            )
+            .await;
+            assert_eq!(preview["reason"], "not_managed", "{preview}");
+            client::verify(&mut peer).await;
+        }
+        let clients = peer
+            .rpc("plugin.client.query", json!({"kind":"snapshot"}))
+            .await;
+        assert!(
+            !clients["result"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["extensionId"] == "maka.skills")
         );
         let blocked = peer
             .rpc(
                 "turn.start",
                 json!({
                     "sessionId":"skills-session","turnId":format!("explicit-{reopened}"),
-                    "content":{"text":"Please review"},"skillIds":["review"]
+                    "content":{"text":"Please review"},"inputSelections":{"maka.skills":["review"]}
                 }),
             )
             .await;
-        assert_eq!(blocked["result"]["kind"], "blocked", "{blocked}");
+        assert_eq!(
+            blocked["error"]["code"], "operation_unavailable",
+            "{blocked}"
+        );
         let input = json!({
             "sessionId":"skills-session","turnId":"ordinary-chat","content":{"text":"Ordinary chat"}
         });
@@ -193,10 +179,13 @@ async fn disabled_skills_preserve_plain_chat_and_explicit_failure_across_host_re
         .unwrap();
         if reopened {
             disabled(&mut peer, false).await;
-            let governance = peer.rpc("skill.catalog.query", json!({
-                "kind":"start","context":{"workspace":{"kind":"host_path","path":fixture.workspace}},"view":"governance"
-            })).await;
-            let review = governance["result"]["items"]
+            let governance = client::workspace(
+                &mut peer,
+                &json!(fixture.workspace),
+                json!({"kind":"catalog","view":"governance"}),
+            )
+            .await;
+            let review = governance["items"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -206,16 +195,14 @@ async fn disabled_skills_preserve_plain_chat_and_explicit_failure_across_host_re
                 review["pinned"], true,
                 "preference survives plugin retirement and Host restart"
             );
-            let catalog = peer
-                .rpc(
-                    "skill.catalog.invocable.query",
-                    json!({
-                        "kind":"start","target":{"kind":"session","sessionId":"skills-session"}
-                    }),
-                )
-                .await;
+            let catalog = client::workspace(
+                &mut peer,
+                &json!(fixture.workspace),
+                json!({"kind":"invocable"}),
+            )
+            .await;
             assert!(
-                catalog["result"]["items"]
+                catalog["items"]
                     .as_array()
                     .unwrap()
                     .iter()

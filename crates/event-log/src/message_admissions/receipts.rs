@@ -20,8 +20,8 @@
 use super::{PendingMessageAdmission, insert, invalid};
 use crate::{EventLog, StoreError};
 use maka_runtime::{
+    input::InputReceipt,
     message::{MessageDisposition, Placement, RootSourceMessage, SubmittedTurnIntent},
-    skills::SkillInvocationResult,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, SqliteConnection};
@@ -33,7 +33,7 @@ pub struct MessageSubmitReceipt {
     pub submitted_placement: Placement,
     pub submitted_intent: Option<SubmittedTurnIntent>,
     pub disposition: MessageDisposition,
-    pub skill_invocation: SkillInvocationResult,
+    pub preparation: Vec<InputReceipt>,
     pub queue_revision: u64,
 }
 impl MessageSubmitReceipt {
@@ -109,7 +109,7 @@ impl EventLog {
                         submitted_placement: source.submitted_placement,
                         submitted_intent: source.submitted_intent.clone(),
                         disposition: source.disposition,
-                        skill_invocation: source.skill_invocation.clone(),
+                        preparation: source.message.content.preparation.clone(),
                         queue_revision,
                     };
                     let encoded = serde_json::to_string(&receipt)?;

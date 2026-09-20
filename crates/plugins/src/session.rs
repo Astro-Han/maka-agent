@@ -18,7 +18,26 @@
  */
 
 use futures_util::future::BoxFuture;
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};
+
+/// A bounded configuration projection. Revision is for optimistic control;
+/// reading this document cannot mint execution or filesystem authority.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct View {
+    pub session_id: String,
+    pub revision: u64,
+    pub name: String,
+    pub boundary_revision: u64,
+    pub workspace: maka_runtime::execution::WorkspaceProjection,
+    pub target: crate::execution::Target,
+    pub permission_mode: maka_runtime::execution::PermissionMode,
+    pub collaboration_mode: maka_runtime::execution::CollaborationMode,
+    pub behavior: maka_runtime::execution::BehaviorId,
+    pub tool_mode: maka_runtime::execution::ToolMode,
+    pub bound_tools: Option<BTreeSet<String>>,
+}
 
 /// Session behavior prepares its scoped capabilities. It cannot modify an
 /// already-frozen model request or replace Host execution authority.
@@ -28,7 +47,8 @@ pub trait Behavior: Send + Sync {
 
 pub struct SessionBehavior(pub Arc<dyn Behavior>);
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Preparation {
     pub instructions: String,
     /// A behavior may select its invocation presentation; it never widens tools.
@@ -37,14 +57,19 @@ pub struct Preparation {
     pub required_clients: Option<ClientTools>,
     pub tool_ceiling: Option<BTreeSet<String>>,
     /// A business epoch may close after preparation but before Host admission.
+    #[serde(skip)]
     pub admission: Option<tokio_util::sync::CancellationToken>,
 }
 
 /// Required tools must share one Session-bound provider. Optional tools are
 /// exposed only when available; neither list can grant a Client capability.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClientTools {
     pub required: Vec<String>,
+    #[serde(default)]
     pub optional: Vec<String>,
+    #[serde(default)]
     pub private: BTreeSet<String>,
 }
 impl Preparation {
