@@ -20,10 +20,10 @@
 import { memo, useRef, useState } from 'react';
 import type { TransientUserMessageProjection } from './chat-view.js';
 import type { MessageQueueEntryProjection } from '@maka/core/events';
-import { IconButton, Tooltip } from '@astryxdesign/core';
+import { IconButton } from '@astryxdesign/core';
 import { List, ListItem } from '@astryxdesign/core/List';
 import type { ConversationCopy } from './conversation-copy.js';
-import { Check, CornerDownLeft, GripVertical, HelpCircle, ICON_SIZE, Pencil, Trash2, X } from './icons.js';
+import { Check, CornerDownLeft, GripVertical, ICON_SIZE, Pencil, Trash2, X } from './icons.js';
 import { useMountedRef } from './use-mounted-ref.js';
 
 type ComposerQueueEntry = Omit<MessageQueueEntryProjection, 'state'> & {
@@ -144,11 +144,6 @@ export const ComposerMessageQueue = memo(function ComposerMessageQueue(
       role="region"
       aria-label={copy.queuedMessagesAriaLabel(entries.length)}
     >
-      <Tooltip alignment="end" content={<span style={{ whiteSpace: 'pre-line' }}>{copy.queueShortcuts}</span>}>
-        <IconButton className="maka-composer-queue-help" variant="ghost" size="sm" type="button"
-          label={copy.queueShortcutsLabel}
-          icon={<HelpCircle size={ICON_SIZE.control} aria-hidden="true" />} />
-      </Tooltip>
       <List className="maka-composer-queue-list" density="compact">
         {entries.map((entry) => {
           const editing = editingEntryId === entry.entryId;
