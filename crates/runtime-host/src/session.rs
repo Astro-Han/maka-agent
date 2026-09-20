@@ -117,6 +117,35 @@ pub struct SessionConfiguration {
 }
 
 impl SessionConfiguration {
+    pub(crate) fn plugin_view(
+        &self,
+        session_id: String,
+        revision: u64,
+    ) -> maka_plugins::session::View {
+        let target = match &self.target {
+            SessionTarget::Model { model } => maka_plugins::execution::Target::Model {
+                model: model.clone(),
+                thinking_level: self.thinking_level,
+            },
+            SessionTarget::Executor { executor_id } => maka_plugins::execution::Target::Executor {
+                executor_id: executor_id.clone(),
+            },
+        };
+        maka_plugins::session::View {
+            session_id,
+            revision,
+            name: self.name.clone(),
+            boundary_revision: self.boundary_revision,
+            workspace: self.workspace.clone(),
+            target,
+            permission_mode: self.permission_mode,
+            collaboration_mode: self.collaboration_mode,
+            behavior: self.orchestration_mode.clone(),
+            tool_mode: self.tool_mode,
+            bound_tools: self.bound_tools.clone(),
+        }
+    }
+
     pub async fn invocation_configuration(
         &self,
     ) -> std::io::Result<maka_runtime::execution::InvocationConfiguration> {

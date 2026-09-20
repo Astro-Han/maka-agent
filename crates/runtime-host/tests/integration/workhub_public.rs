@@ -1,0 +1,693 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::support::{
+    client_probe::ClientFixture,
+    message_recovery::{Provider, configure},
+    peer::Peer,
+};
+use maka_plugins::{client::Bundle, kernel::Definition};
+use maka_runtime_host::{
+    plugins::Setup,
+    server::{Host, HostOptions, local::LocalListener},
+};
+use serde_json::{Value, json};
+use std::{sync::Arc, time::Duration};
+use tokio_util::sync::CancellationToken;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn renamed_workhub_uses_public_consent_and_recovers_exact_receipts() {
+    tokio::time::timeout(Duration::from_secs(30), scenario())
+        .await
+        .unwrap();
+}
+async fn scenario() {
+    let fixture = ClientFixture::new("maka-workhub-public-");
+    let database_path = fixture
+        .owner()
+        .canonical_path()
+        .join(maka_event_log::root::ROOT_DATABASE);
+    let (provider, mut requests) = Provider::controlled().await;
+    let tool = Arc::new(std::sync::Mutex::new(None::<Value>));
+    let pending = tool.clone();
+    let hold = Arc::new(std::sync::Mutex::new(
+        None::<tokio::sync::oneshot::Sender<super::support::message_recovery::ModelRequest>>,
+    ));
+    let holding = hold.clone();
+    let replies = tokio::spawn(async move {
+        while let Some(request) = requests.recv().await {
+            if let Some(send) = holding.lock().unwrap().take() {
+                assert!(send.send(request).is_ok());
+                continue;
+            }
+            let choice = match pending.lock().unwrap().take() {
+                Some(input) => json!({"index":0,"delta":{"tool_calls":[{
+                    "index":0,"id":"route-from-model","type":"function",
+                    "function":{"name":"workhub_tasks","arguments":input.to_string()}
+                }]},"finish_reason":"tool_calls"}),
+                None => json!({"index":0,"delta":{"content":"finished"},"finish_reason":"stop"}),
+            };
+            let _ = request.reply.send(choice);
+        }
+    });
+    let model = configure(&fixture, &provider.base_url).await;
+    let config = maka_config::ConfigurationStore::for_root(Arc::new(fixture.owner()))
+        .await
+        .unwrap();
+    let revision = config.catalog().await.unwrap().revision;
+    config.set_default_target(serde_json::from_value(json!({
+        "expectedCatalogRevision":revision, "target":{"connectionId":model.connection_id,"modelId":model.model}
+    })).unwrap()).await.unwrap();
+    config.close().await.unwrap();
+    let mut original = Value::Null;
+    let mut intent = Value::Null;
+    let mut coordinator = String::new();
+    let mut controls = Vec::<Value>::new();
+    for reopened in [false, true] {
+        let host = Host::open_with_options(
+            fixture.owner(),
+            None,
+            HostOptions {
+                plugins: setup(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        #[cfg(unix)]
+        let endpoint = fixture
+            .workspace
+            .parent()
+            .unwrap()
+            .join("public-workhub.sock");
+        #[cfg(windows)]
+        let endpoint = std::path::PathBuf::from(format!(
+            r"\\.\pipe\maka-workhub-public-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let stop = CancellationToken::new();
+        let cleanup = stop.clone().drop_guard();
+        let server = tokio::spawn(
+            LocalListener::bind(&endpoint)
+                .unwrap()
+                .serve(host.clone(), stop.clone()),
+        );
+        let mut peer = Peer::new(host.clone(), "public-workhub-client").await;
+        super::javascript_plugins::ready(&mut peer).await;
+        let page = success(
+            peer.rpc("plugin.client.query", json!({"kind":"snapshot"}))
+                .await,
+        );
+        let entry = page["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["entryId"] == "public-workhub-ui")
+            .unwrap();
+        let client = json!({"entryId":entry["entryId"],"extensionId":entry["extensionId"],"activation":entry["activation"],
+            "contentDigest":entry["contentDigest"],"clientDigest":entry["clientDigest"]});
+        let document = success(
+            peer.rpc("plugin.remote", json!({"kind":"open_document"}))
+                .await,
+        )["document"]
+            .clone();
+        let offer = super::plugin_clients::publication("desktop_workhub", "control");
+        success(peer.rpc("client.capability.replace", offer).await);
+        if !reopened {
+            let workspace = approve(
+                &mut peer,
+                &client,
+                json!({"kind":"plugin_workspace","permissionMode":"bypass"}),
+            )
+            .await;
+            remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "authorize",
+                json!({"id":workspace["id"]}),
+            )
+            .await;
+            let view = remote(&mut peer, &client, &document, None, "resolve", Value::Null).await;
+            coordinator = view["sessionId"].as_str().unwrap().to_owned();
+            assert_ne!(coordinator, "maka_workhub_coordination");
+            assert_eq!(view["behavior"], "z.workhub.coordinator");
+            success(peer.rpc("session.create", json!({
+                "sessionId":"workhub-target", "workspace":{"kind":"host_path","path":fixture.workspace},
+                "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
+            })).await);
+            let target = approve(
+                &mut peer,
+                &client,
+                json!({"kind":"session","sessionId":"workhub-target"}),
+            )
+            .await;
+            let attachment = upload(&mut peer, &coordinator).await;
+            let answer = json!({"operationId":"user-answer","text":"Do the approved work","attachments":[attachment]});
+            let source = remote(
+                &mut peer,
+                &client,
+                &document,
+                Some(&coordinator),
+                "answer",
+                answer.clone(),
+            )
+            .await;
+            loop {
+                let observed = remote(
+                    &mut peer,
+                    &client,
+                    &document,
+                    Some(&coordinator),
+                    "answer-receipt",
+                    answer.clone(),
+                )
+                .await;
+                if observed["progress"]["state"] == "ended" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            intent = json!({
+                "operationId":"route-once", "source":source["invocation"], "authorization":{"kind":"session","sessionId":"workhub-target"},
+                "target":{"kind":"existing","sessionId":"workhub-target"},
+                "content":{"text":"Delegated work","attachments":[attachment]}
+            });
+            // Plugin intent is durable, but absent consent must not admit Host work.
+            let denied = remote_result(
+                &mut peer,
+                &client,
+                &document,
+                Some(&coordinator),
+                "route",
+                intent.clone(),
+            )
+            .await;
+            assert_eq!(denied["ok"], false, "{denied}");
+            assert_eq!(provider.requests.lock().unwrap().len(), 1);
+            remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "authorize",
+                json!({"id":target["id"]}),
+            )
+            .await;
+            // A fresh grant wakes recovery without asking the caller to reconstruct the route.
+            loop {
+                let view = remote(
+                    &mut peer,
+                    &client,
+                    &document,
+                    None,
+                    "inspect",
+                    json!({"assignmentId":"route-once"}),
+                )
+                .await;
+                if !view["delivery"].is_null() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            original = remote(
+                &mut peer,
+                &client,
+                &document,
+                Some(&coordinator),
+                "route",
+                intent.clone(),
+            )
+            .await;
+            assert_eq!(original["kind"], "submitted");
+            wait_assignment(&mut peer, &client, &document, "route-once").await;
+            let discovery = success(peer.rpc("plugin.authorization", json!({"client":client,"scope":"profile","command":{"kind":"approve","request":{
+                "operationId":uuid::Uuid::new_v4(),"title":"Discover work","target":{"kind":"profile"},"capabilities":["read_sessions"]
+            }}})).await)["grant"].clone();
+            remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "authorize",
+                json!({"id":discovery["id"]}),
+            )
+            .await;
+            let candidates = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "candidates",
+                Value::Null,
+            )
+            .await;
+            let candidate = candidates["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["summary"]["session"]["sessionId"] == "workhub-target")
+                .unwrap();
+            *tool.lock().unwrap() = Some(json!({
+                "operation":"route","target":{"kind":"existing","revision":candidates["revision"],"candidate":candidate["reference"]},
+                "text":"Execute the user's approved instruction"
+            }));
+            let answer =
+                json!({"operationId":"tool-answer","text":"Route this through the WorkHub tool"});
+            remote(
+                &mut peer,
+                &client,
+                &document,
+                Some(&coordinator),
+                "answer",
+                answer.clone(),
+            )
+            .await;
+            loop {
+                let observed = remote(
+                    &mut peer,
+                    &client,
+                    &document,
+                    Some(&coordinator),
+                    "answer-receipt",
+                    answer.clone(),
+                )
+                .await;
+                if observed["progress"]["state"] == "ended" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let history = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "assignments",
+                json!({}),
+            )
+            .await;
+            let assignments = history["entries"].as_array().unwrap();
+            assert_eq!(assignments.len(), 2, "{history}");
+            let routed = assignments
+                .iter()
+                .find(|entry| entry["operationId"] != "route-once")
+                .unwrap();
+            let assignment = routed["operationId"].as_str().unwrap();
+            wait_assignment(&mut peer, &client, &document, assignment).await;
+            let resume = json!({"operationId":"resume-tool-route","assignmentId":assignment,"action":{"kind":"resume"}});
+            let resumed = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "control",
+                resume.clone(),
+            )
+            .await;
+            assert_eq!(resumed["kind"], "resumed");
+            wait_assignment(&mut peer, &client, &document, assignment).await;
+            controls.push(resume);
+            let mut replacement = intent.clone();
+            replacement["operationId"] = json!("replacement-route");
+            let correction = json!({"operationId":"correct-tool-route","assignmentId":assignment,"action":{"kind":"correct","replacement":replacement}});
+            let corrected = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "control",
+                correction.clone(),
+            )
+            .await;
+            assert_eq!(corrected["kind"], "corrected");
+            wait_assignment(&mut peer, &client, &document, "replacement-route").await;
+            controls.push(correction);
+            // Two assignments can share one Run. Retracting one pending input or
+            // stopping consumed shared input must not stop the other owner's work.
+            let (send, receive) = tokio::sync::oneshot::channel();
+            *hold.lock().unwrap() = Some(send);
+            let mut owner = intent.clone();
+            owner["operationId"] = json!("shared-owner");
+            remote(
+                &mut peer,
+                &client,
+                &document,
+                Some(&coordinator),
+                "route",
+                owner,
+            )
+            .await;
+            let active = receive.await.unwrap();
+            for id in ["pending-input", "shared-input"] {
+                let mut input = intent.clone();
+                input["operationId"] = json!(id);
+                let queued = remote(
+                    &mut peer,
+                    &client,
+                    &document,
+                    Some(&coordinator),
+                    "route",
+                    input,
+                )
+                .await;
+                assert_eq!(queued["kind"], "queued");
+            }
+            let cancelled = remote(&mut peer, &client, &document, None, "control", json!({
+                "operationId":"withdraw-pending","assignmentId":"pending-input","action":{"kind":"stop"}
+            })).await;
+            assert_eq!(cancelled["disposition"], "cancelled");
+            assert!(
+                !active.reply.is_closed(),
+                "withdrawing input stopped its shared Run"
+            );
+            success(peer.rpc("plugin.composition.apply", json!({"operations":[{"type":"update","entryId":"public-workhub","patch":{"disabled":true}}]})).await);
+            super::javascript_plugins::ready(&mut peer).await;
+            let (send, receive) = tokio::sync::oneshot::channel();
+            *hold.lock().unwrap() = Some(send);
+            active
+                .reply
+                .send(json!({"index":0,"delta":{"content":"first step"},"finish_reason":"stop"}))
+                .unwrap();
+            // Already accepted Host work continues after its submitting plugin retires.
+            let continued = receive.await.unwrap();
+            success(peer.rpc("plugin.composition.apply", json!({"operations":[{"type":"update","entryId":"public-workhub","patch":{"disabled":false}}]})).await);
+            super::javascript_plugins::ready(&mut peer).await;
+            let shared = remote(&mut peer, &client, &document, None, "control", json!({
+                "operationId":"stop-shared","assignmentId":"shared-input","action":{"kind":"stop"}
+            })).await;
+            assert_eq!(shared["disposition"], "shared");
+            assert!(
+                !continued.reply.is_closed(),
+                "plugin cancelled a Run it did not exclusively own"
+            );
+            continued.reply.send(json!({"index":0,"delta":{"content":"shared work completed"},"finish_reason":"stop"})).unwrap();
+            wait_assignment(&mut peer, &client, &document, "shared-owner").await;
+            success(peer.rpc("session.create", json!({
+                "sessionId":"alternative-target", "workspace":{"kind":"host_path","path":fixture.workspace},
+                "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
+            })).await);
+            let candidates = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "candidates",
+                Value::Null,
+            )
+            .await;
+            let entries = candidates["entries"].as_array().unwrap();
+            let choice = entries
+                .iter()
+                .find(|entry| entry["summary"]["session"]["sessionId"] == "workhub-target")
+                .unwrap()["reference"]
+                .clone();
+            *tool.lock().unwrap() = Some(json!({
+                "operation":"select","revision":candidates["revision"],
+                "candidates":entries.iter().map(|entry| entry["reference"].clone()).collect::<Vec<_>>(),
+                "text":"Continue the chosen work"
+            }));
+            let answer =
+                json!({"operationId":"selection-answer","text":"Let me select existing work"});
+            remote(
+                &mut peer,
+                &client,
+                &document,
+                Some(&coordinator),
+                "answer",
+                answer.clone(),
+            )
+            .await;
+            use sqlx::Connection;
+            let mut database = sqlx::SqliteConnection::connect_with(
+                &sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&database_path)
+                    .read_only(true),
+            )
+            .await
+            .unwrap();
+            let interaction: String = loop {
+                let id = sqlx::query_scalar("SELECT request_id FROM interaction_requests WHERE session_id = ? AND request_id NOT IN (SELECT request_id FROM interaction_outcomes)")
+                    .bind(&coordinator).fetch_optional(&mut database).await.unwrap();
+                if let Some(id) = id {
+                    break id;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            };
+            database.close().await.unwrap();
+            let query = json!({"sessionId":coordinator,"interactionId":interaction});
+            let frozen = success(peer.rpc("interaction.query", query.clone()).await);
+            // A new catalog and changed compact references cannot reinterpret an
+            // already displayed choice.
+            success(peer.rpc("session.create", json!({
+                "sessionId":"later-target", "workspace":{"kind":"host_path","path":fixture.workspace},
+                "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
+            })).await);
+            let changed = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "candidates",
+                Value::Null,
+            )
+            .await;
+            assert_ne!(changed["revision"], candidates["revision"]);
+            assert_eq!(success(peer.rpc("interaction.query", query).await), frozen);
+            success(
+                peer.rpc(
+                    "interaction.answer",
+                    json!({
+                        "sessionId":coordinator,"interactionId":interaction,
+                        "answer":{"kind":"form","action":"accept","values":{"target":choice}}
+                    }),
+                )
+                .await,
+            );
+            loop {
+                let observed = remote(
+                    &mut peer,
+                    &client,
+                    &document,
+                    Some(&coordinator),
+                    "answer-receipt",
+                    answer.clone(),
+                )
+                .await;
+                if observed["progress"]["state"] == "ended" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let history = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "assignments",
+                json!({}),
+            )
+            .await;
+            let selected = history["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|assignment| assignment["source"]["turn_id"] == frozen["turnId"])
+                .expect("selection produced no durable assignment");
+            assert_eq!(
+                selected["delivery"]["receipt"]["invocation"]["session_id"],
+                "workhub-target"
+            );
+            wait_assignment(
+                &mut peer,
+                &client,
+                &document,
+                selected["operationId"].as_str().unwrap(),
+            )
+            .await;
+        } else {
+            let view = remote(&mut peer, &client, &document, None, "resolve", Value::Null).await;
+            assert_eq!(view["sessionId"], coordinator);
+        }
+        for control in &controls {
+            let result = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "control",
+                control.clone(),
+            )
+            .await;
+            assert!(
+                matches!(result["kind"].as_str(), Some("resumed" | "corrected")),
+                "{result}"
+            );
+        }
+        let replay = remote(
+            &mut peer,
+            &client,
+            &document,
+            Some(&coordinator),
+            "route",
+            intent.clone(),
+        )
+        .await;
+        assert_eq!(replay, original);
+        let stopped = remote(
+            &mut peer,
+            &client,
+            &document,
+            None,
+            "control",
+            json!({
+                "operationId":"stop-once", "assignmentId":"route-once", "action":{"kind":"stop"}
+            }),
+        )
+        .await;
+        assert_eq!(stopped["kind"], "stopped");
+        peer.close().await;
+        stop.cancel();
+        server.await.unwrap().unwrap();
+        cleanup.disarm();
+        drop(host);
+    }
+    // Seven original steps, two shared-work and three selection steps; no replayed admission.
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 12);
+    let advertised = |request: &Value| {
+        request["tools"].as_array().is_some_and(|tools| {
+            tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "workhub_tasks")
+        })
+    };
+    assert!(advertised(&requests[0]));
+    assert!(
+        !advertised(&requests[1]),
+        "WorkHub tools leaked into an ordinary Session"
+    );
+    replies.abort();
+}
+fn setup() -> Setup {
+    let id = "z.workhub";
+    Setup {
+        builtins: [(id.into(), Arc::new(Definition {
+            id:id.into(), revision:"binary".into(), dependencies:vec![], inject:vec![],
+            plugin: Arc::new(maka_workhub::Builtin {
+                bundle: Bundle::builtin(id, "binary", "export default function() {}").unwrap(),
+            }),
+        }))].into(),
+        layers:[(id.into(), vec![
+            serde_json::from_value(json!({"type":"insert","rootId":"profile","entry":{"id":"public-workhub","packageId":id}})).unwrap(),
+            serde_json::from_value(json!({"type":"insert","rootId":"desktop-ui","entry":{"id":"public-workhub-ui","packageId":id}})).unwrap(),
+            serde_json::from_value(json!({"type":"update","entryId":"maka.workhub","patch":{"disabled":true}})).unwrap(),
+        ])].into(),
+        ..Default::default()
+    }
+}
+async fn approve(peer: &mut Peer, client: &Value, target: Value) -> Value {
+    success(peer.rpc("plugin.authorization", json!({"client":client,"scope":"profile","command":{"kind":"approve","request":{
+        "operationId":uuid::Uuid::new_v4(), "title":"Approve WorkHub work", "target":target, "capabilities":["executions"]
+    }}})).await)["grant"].clone()
+}
+async fn remote(
+    peer: &mut Peer,
+    client: &Value,
+    document: &Value,
+    session: Option<&str>,
+    method: &str,
+    input: Value,
+) -> Value {
+    success(remote_result(peer, client, document, session, method, input).await)["value"].clone()
+}
+async fn remote_result(
+    peer: &mut Peer,
+    client: &Value,
+    document: &Value,
+    session: Option<&str>,
+    method: &str,
+    input: Value,
+) -> Value {
+    let binding = json!({"client":client,"method":method,"sessionId":session});
+    let target = success(
+        peer.rpc("plugin.remote", json!({"kind":"bind","binding":binding}))
+            .await,
+    )["target"]
+        .clone();
+    peer.rpc(
+        "plugin.remote",
+        json!({"kind":"call","binding":binding,"target":target,"document":document,"input":input}),
+    )
+    .await
+}
+fn success(value: Value) -> Value {
+    assert_eq!(value["ok"], true, "{value}");
+    value["result"].clone()
+}
+
+async fn upload(peer: &mut Peer, session: &str) -> Value {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let bytes = b"delegation evidence";
+    success(
+        peer.rpc(
+            "artifact.ingest",
+            json!({
+                "kind":"begin","sessionId":session,"uploadId":"original-attachment",
+                "name":"evidence.txt","mimeType":"text/plain","totalBytes":bytes.len(),
+                "contentSha256":maka_runtime::artifact::content_digest(bytes)
+            }),
+        )
+        .await,
+    );
+    success(peer.rpc("artifact.ingest", json!({
+        "kind":"chunk","sessionId":session,"uploadId":"original-attachment","offset":0,"chunkBase64":STANDARD.encode(bytes)
+    })).await);
+    success(
+        peer.rpc(
+            "artifact.ingest",
+            json!({"kind":"commit","sessionId":session,"uploadId":"original-attachment"}),
+        )
+        .await,
+    )["attachment"]
+        .clone()
+}
+
+async fn wait_assignment(peer: &mut Peer, client: &Value, document: &Value, id: &str) {
+    loop {
+        let view = remote(
+            peer,
+            client,
+            document,
+            None,
+            "inspect",
+            json!({"assignmentId":id}),
+        )
+        .await;
+        if view["observation"]["state"]["progress"]["state"] == "ended" {
+            assert_eq!(
+                view["observation"]["state"]["progress"]["outcome"]["kind"], "completed",
+                "{view}"
+            );
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}

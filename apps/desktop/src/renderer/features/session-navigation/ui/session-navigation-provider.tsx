@@ -25,7 +25,6 @@ import {
   type ReactNode,
 } from 'react';
 import type { ProjectRecord } from '@maka/core/project';
-import type { ScheduledTask } from '@maka/core/scheduled-task';
 import {
   SessionRailProvider,
   type NavModuleMemory,
@@ -49,7 +48,7 @@ import type { SessionNavigationPorts, SessionNavigationSession } from '../ports.
 export interface SessionNavigationChromeInput {
   NavigationExtras?: ComponentType<{ readonly onOpenSession: (sessionId: string) => void }>;
   selection: NavSelection;
-  scheduledTasks?: readonly ScheduledTask[];
+  navigationStatus?: ReactNode;
   moduleMemory?: NavModuleMemory;
   workHubActive: boolean;
   workHubEntry?: { active: boolean; label: string; onSelect(): void };
@@ -208,7 +207,7 @@ export function SessionNavigationProvider(props: SessionNavigationProviderProps)
     viewMode: controller.layout.viewMode,
     onViewModeChange: sessionRailLayoutStore.setViewMode,
     selection: props.selection,
-    scheduledTasks: props.scheduledTasks,
+    navigationStatus: props.navigationStatus,
     moduleMemory: props.moduleMemory,
     onSelect: (selection) => {
       props.onExitWorkHub();

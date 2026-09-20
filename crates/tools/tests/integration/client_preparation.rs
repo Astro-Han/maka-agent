@@ -388,7 +388,7 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
     }
     let result = execution.await.unwrap();
     if matches!(cut, Cut::Lost | Cut::Interaction) {
-        assert!(matches!(result, Err(ToolError::OutcomeUnknown(_))));
+        assert!(matches!(result, Err(ToolError::CleanupUnconfirmed(_))));
     }
     if matches!(cut, Cut::Success | Cut::ManagedAllow | Cut::Settings) {
         assert!(result.is_ok());

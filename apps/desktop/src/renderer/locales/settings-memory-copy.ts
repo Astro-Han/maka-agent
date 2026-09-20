@@ -239,8 +239,3 @@ export function memoryResultMessage(
 ): string {
   return lookupCopy(copy.results, result.code) || fallback;
 }
-
-export function memoryOpenFailureMessage(result: { code?: string }, locale: UiLocale): string {
-  const copy = getMemorySettingsCopy(locale);
-  return memoryResultMessage(result, copy, copy.text.openFailed);
-}

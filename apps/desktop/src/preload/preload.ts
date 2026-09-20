@@ -189,7 +189,6 @@ import type {
 import type { CapabilitySnapshotCollection, PermissionSnapshot } from '@maka/core/capabilities';
 import type { LocalMemoryState } from '@maka/core/local-memory';
 import type { SubscriptionActionResult } from '@maka/core/oauth-subscription';
-import type { CreateScheduledTaskInput, ScheduledTask, UpdateScheduledTaskInput } from '@maka/core/scheduled-task';
 import type { ProjectRecord } from '@maka/core/project';
 import type {
   DailyReviewArchive,
@@ -244,7 +243,6 @@ import type { AttachmentRef, InlineReference, QuoteRef } from '@maka/core/events
 import type { OnboardingMilestoneId } from '@maka/core/onboarding';
 import {
   decodeSharedSessionCatalogProjection,
-  SCHEDULED_TASK_CATALOG_MAX_ITEMS,
   type OperationInput,
   type OperationOutcome,
   type OperationOutput,
@@ -1152,60 +1150,6 @@ const runtimeHost: MakaBridge['runtimeHost'] = {
   },
 };
 
-async function listScheduledTasks(target?: DesktopRuntimeHostRef): Promise<ScheduledTask[]> {
-  const host = scopedRuntimeHost(await selectedRuntimeHostScope(target));
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const tasks: ScheduledTask[] = [];
-    const taskIds = new Set<string>();
-    const cursors = new Set<string>();
-    let cursor: string | undefined;
-    let revision: number | undefined;
-    let retry = false;
-    do {
-      const result = await host.query('scheduled-task.query', {
-        kind: 'list',
-        ...(cursor === undefined ? {} : { cursor, expectedRevision: revision! }),
-      });
-      if (result.kind === 'revision_changed') {
-        retry = true;
-        break;
-      }
-      if (result.kind !== 'page') throw new Error('Invalid ScheduledTask catalog page');
-      revision ??= result.revision;
-      if (result.revision !== revision) {
-        throw new Error('ScheduledTask catalog revision changed without a restart signal');
-      }
-      for (const task of result.tasks) {
-        if (taskIds.has(task.id)) throw new Error('ScheduledTask catalog repeated a task');
-        taskIds.add(task.id);
-      }
-      tasks.push(...result.tasks);
-      if (tasks.length > SCHEDULED_TASK_CATALOG_MAX_ITEMS) {
-        throw new Error('ScheduledTask catalog exceeds its item limit');
-      }
-      cursor = result.nextCursor ?? undefined;
-      if (cursor !== undefined) {
-        if (result.tasks.length === 0 || cursors.has(cursor)) {
-          throw new Error('ScheduledTask catalog repeated a page cursor');
-        }
-        cursors.add(cursor);
-      }
-    } while (cursor !== undefined);
-    if (!retry) return tasks;
-  }
-  throw new Error('ScheduledTask catalog kept changing while Desktop read it');
-}
-
-async function mutateScheduledTask(
-  input: OperationInput<'scheduled-task.mutate'>,
-  target?: DesktopRuntimeHostRef,
-): Promise<ScheduledTask> {
-  const host = scopedRuntimeHost(await selectedRuntimeHostScope(target));
-  const result = await host.command('scheduled-task.mutate', input);
-  if (result.kind !== 'task') throw new Error('Runtime Host returned no ScheduledTask');
-  return result.task;
-}
-
 async function loadSessionTracePage(
   sessionId: string,
   cursor?: string,
@@ -1448,15 +1392,13 @@ const makaBridge = {
     },
     async remote(host, connectionEpoch, input) {
       const scope = await runtimeHostScope(host);
-      let value = HOST_OPERATION_SPECS['plugin.remote'].decodeInput(input);
-      if ('binding' in value && value.binding.sessionId !== null) {
-        const session = await runtimeHostSessionRef(value.binding.sessionId);
-        if (runtimeHostScopeKey(scope) !== runtimeHostScopeKey(session.scope))
-          throw new Error('Remote Session belongs to another Host');
-        value = { ...value, binding: { ...value.binding, sessionId: session.sessionId } };
-      }
+      // Public plugin bindings are canonical IDs on their originating Host,
+      // never Desktop projection keys. The selected connection fixes the Host.
+      const value = HOST_OPERATION_SPECS['plugin.remote'].decodeInput(input);
       const result = await ipcRenderer.invoke('plugins:remote', scope, browserDocumentId, connectionEpoch, value);
       if (result?.kind === 'connection_retired') return { kind: 'connection_retired' };
+      if (result?.kind === 'remote_error' && typeof result.message === 'string' &&
+          HOST_OPERATION_SPECS['plugin.remote'].errors.includes(result.code)) return result;
       return HOST_OPERATION_SPECS['plugin.remote'].decodeOutput(result);
     },
     async query(host, input) {
@@ -3344,51 +3286,6 @@ const makaBridge = {
     },
     logout(host: DesktopRuntimeHostRef | undefined, connectionId: string): Promise<SubscriptionActionResult> {
       return invokeSelectedRuntimeHost(host, 'github-copilot:logout', connectionId);
-    },
-  },
-  scheduledTasks: {
-    list(host?: DesktopRuntimeHostRef): Promise<ScheduledTask[]> {
-      return listScheduledTasks(host);
-    },
-    create(input: Omit<CreateScheduledTaskInput, 'createdBy'>, host?: DesktopRuntimeHostRef): Promise<ScheduledTask> {
-      return mutateScheduledTask({ kind: 'create', input }, host);
-    },
-    update(id: string, patch: UpdateScheduledTaskInput, host?: DesktopRuntimeHostRef): Promise<ScheduledTask> {
-      return mutateScheduledTask({ kind: 'update', taskId: id, patch }, host);
-    },
-    setEnabled(id: string, enabled: boolean, host?: DesktopRuntimeHostRef): Promise<ScheduledTask> {
-      return mutateScheduledTask({
-        kind: enabled ? 'resume' : 'pause',
-        taskId: id,
-      }, host);
-    },
-    triggerNow(id: string, host?: DesktopRuntimeHostRef): Promise<ScheduledTask> {
-      return mutateScheduledTask({ kind: 'trigger_now', taskId: id }, host);
-    },
-    snooze(id: string, host?: DesktopRuntimeHostRef): Promise<ScheduledTask> {
-      return mutateScheduledTask({
-        kind: 'snooze',
-        taskId: id,
-        delayMs: 10 * 60 * 1000,
-      }, host);
-    },
-    clearRunHistory(id: string, host?: DesktopRuntimeHostRef): Promise<ScheduledTask> {
-      return mutateScheduledTask({ kind: 'clear_history', taskId: id }, host);
-    },
-    async delete(id: string, host?: DesktopRuntimeHostRef): Promise<void> {
-      await scopedRuntimeHost(await selectedRuntimeHostScope(host)).command('scheduled-task.mutate', {
-        kind: 'delete',
-        taskId: id,
-      });
-    },
-    subscribeChanges(handler: (event: { type: 'scheduled_tasks_changed'; reason: string; taskId?: string; ts: number }) => void): () => void {
-      return subscribeActiveRuntimeHostEvent('scheduled-tasks:changed', handler);
-    },
-    subscribeDue(handler: (task: Pick<ScheduledTask, 'id' | 'title'>) => void): () => void {
-      return subscribeEveryRuntimeHostEvent(
-        'scheduled-tasks:fired',
-        (_scope, task: Pick<ScheduledTask, 'id' | 'title'>) => handler(task),
-      );
     },
   },
   externalAgents: {

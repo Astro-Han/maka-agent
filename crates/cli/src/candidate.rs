@@ -80,6 +80,7 @@ impl Candidate {
             root,
             super::serve::global_instructions()?,
             HostOptions {
+                input_roots: Default::default(),
                 plugins: Default::default(),
                 lifecycle_mode: maka_runtime_host::server::LifecycleMode::Ephemeral,
                 skill_home: super::serve::home_directory()?,

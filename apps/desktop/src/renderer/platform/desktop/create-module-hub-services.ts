@@ -23,16 +23,13 @@ import type {
   ModuleHubServices,
 } from '../../features/module-hub/index.js';
 
-type DesktopModuleHubSettingsBridge = Partial<
-  Pick<MakaBridge['settings'], 'getClient' | 'updateClient' | 'subscribeClientChanged'>
->;
+type DesktopModuleHubSettingsBridge = Pick<MakaBridge['settings'], 'getClient' | 'updateClient' | 'subscribeClientChanged'>;
 
 export type DesktopModuleHubBridge = Pick<
   MakaBridge,
-  'dailyReview' | 'runtimeHostProfiles' | 'scheduledTasks'
+  'dailyReview' | 'runtimeHostProfiles'
 > & {
-  /** Optional at runtime so a renderer can coexist with an older preload. */
-  readonly settings?: DesktopModuleHubSettingsBridge;
+  readonly settings: DesktopModuleHubSettingsBridge;
 };
 
 export interface DesktopModuleHubServiceDependencies {
@@ -44,13 +41,6 @@ export function createDesktopModuleHubServices(
   bridge: DesktopModuleHubBridge = window.maka,
   dependencies: DesktopModuleHubServiceDependencies = {},
 ): ModuleHubServices {
-  const getClientSettings = bridge.settings?.getClient;
-  const updateClientSettings = bridge.settings?.updateClient;
-  const subscribeClientSettings = bridge.settings?.subscribeClientChanged;
-  const clientSettingsSupported =
-    typeof getClientSettings === 'function' &&
-    typeof updateClientSettings === 'function';
-
   return {
     runtimeHosts: {
       getDefault: () => bridge.runtimeHostProfiles.getDefaultHost(),
@@ -65,28 +55,20 @@ export function createDesktopModuleHubServices(
           }),
         ),
     },
-    scheduledTasks: bridge.scheduledTasks,
     clientSettings: {
-      supported: clientSettingsSupported,
+      supported: true,
       async getKeepSystemAwake() {
-        if (!getClientSettings) {
-          throw new Error('Client settings are unavailable');
-        }
-        const settings = await getClientSettings.call(bridge.settings);
+        const settings = await bridge.settings.getClient();
         return settings.system.keepSystemAwake;
       },
       async setKeepSystemAwake(next) {
-        if (!updateClientSettings) {
-          throw new Error('Client settings are unavailable');
-        }
-        const result = await updateClientSettings.call(bridge.settings, {
+        const result = await bridge.settings.updateClient({
           system: { keepSystemAwake: next },
         });
         return result.settings.system.keepSystemAwake;
       },
       subscribeChanges(handler) {
-        if (!subscribeClientSettings) return () => undefined;
-        return subscribeClientSettings.call(bridge.settings, handler);
+        return bridge.settings.subscribeClientChanged(handler);
       },
     },
     dailyReview: {

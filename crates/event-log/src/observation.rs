@@ -110,14 +110,10 @@ impl EventLog {
             let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
                 "SELECT session.id, session.revision,
                     COALESCE((SELECT revision FROM message_queue_state WHERE session_id = session.id), 0),
-                    MAX(COALESCE((SELECT sequence FROM event_log INDEXED BY session_event_sequence
+                    COALESCE((SELECT sequence FROM event_log INDEXED BY session_event_sequence
                         WHERE invocation_id IS NOT NULL
                         AND json_extract(event_json, '$.invocation.session_id') = session.id
-                        ORDER BY sequence DESC LIMIT 1), 0),
-                        COALESCE((SELECT sequence FROM event_log INDEXED BY session_control_sequence
-                            WHERE invocation_id IS NULL
-                              AND json_extract(event_json, '$.session_id') = session.id
-                            ORDER BY sequence DESC LIMIT 1), 0))
+                        ORDER BY sequence DESC LIMIT 1), 0)
                  FROM session_control session WHERE session.id IN (SELECT value FROM json_each(?))"
             ).bind(sessions).fetch_all(connection).await?;
             rows.into_iter().map(|(id, metadata, queue, event)| Ok((id, ObservationVersion {

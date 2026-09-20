@@ -21,12 +21,11 @@ use crate::{InvalidDocument, SkillDocument};
 use maka_runtime::skills::{SkillScope, SkillSource};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 use tokio_util::sync::CancellationToken;
 
 pub(crate) mod artifact;
-mod directory;
 mod origin;
 mod source;
 mod sources;
@@ -38,9 +37,10 @@ pub use sources::{
 const MAX_ENTRIES: usize = 16_384;
 const MAX_CONTENT_BYTES: usize = 16 * 1024 * 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Source {
     pub root: PathBuf,
+    pub access: maka_plugins::filesystem::ReadDirectory,
     pub directory: PathBuf,
     pub scope: SkillScope,
     pub source: SkillSource,
@@ -49,7 +49,11 @@ pub struct Source {
 
 impl Source {
     /// The Host supplies all roots, including home; the library never searches ambient home.
-    pub fn standard(cwd: &Path, workspace: &Path, home: Option<&Path>) -> Vec<Self> {
+    pub fn standard(
+        cwd: &maka_plugins::filesystem::ReadDirectory,
+        workspace: &maka_plugins::filesystem::ReadDirectory,
+        home: Option<&maka_plugins::filesystem::ReadDirectory>,
+    ) -> Vec<Self> {
         let mut sources = vec![
             Self::at(
                 cwd,
@@ -95,14 +99,15 @@ impl Source {
     }
 
     fn at(
-        root: &Path,
+        access: &maka_plugins::filesystem::ReadDirectory,
         directory: &str,
         scope: SkillScope,
         source: SkillSource,
         prefix: &str,
     ) -> Self {
         Self {
-            root: root.into(),
+            root: access.location(),
+            access: access.clone(),
             directory: directory.into(),
             scope,
             source,
@@ -169,6 +174,7 @@ pub struct DiscoveryDiagnostic {
 pub enum ScanError {
     Cancelled,
     LimitExceeded,
+    Unavailable,
 }
 
 impl std::fmt::Display for ScanError {
@@ -176,6 +182,7 @@ impl std::fmt::Display for ScanError {
         f.write_str(match self {
             Self::Cancelled => "skill discovery cancelled",
             Self::LimitExceeded => "skill discovery exceeds inventory limits",
+            Self::Unavailable => "skill discovery worker is unavailable",
         })
     }
 }
@@ -192,45 +199,91 @@ pub struct DiscoverySnapshot {
 #[derive(Debug, Default)]
 pub struct QuerySnapshot {
     pub discovery: DiscoverySnapshot,
+    /// Exact bytes belonging to this query's revision; never reopened by pathname.
+    pub(crate) contents: BTreeMap<String, Box<[u8]>>,
     pub origins: BTreeMap<String, Origin>,
     pub occupied: BTreeSet<String>,
     pub empty: Vec<SkillLocation>,
 }
 
-fn scan_with_origins(
+async fn scan_with_origins(
     sources: &[Source],
     cancellation: &CancellationToken,
 ) -> Result<QuerySnapshot, ScanError> {
     let mut query = QuerySnapshot::default();
-    query.discovery = scan_impl(sources, cancellation, Some(&mut query))?;
+    query.discovery = scan_impl(sources, cancellation, Some(&mut query)).await?;
     Ok(query)
 }
 
 /// Bounded blocking I/O; callers must join it before releasing execution ownership.
 /// Preferences and capability gating are applied later, against this same snapshot.
-pub fn scan(
+pub async fn scan(
     sources: &[Source],
     cancellation: &CancellationToken,
 ) -> Result<DiscoverySnapshot, ScanError> {
-    scan_impl(sources, cancellation, None)
+    scan_impl(sources, cancellation, None).await
 }
 
-fn scan_impl(
+async fn scan_impl(
     sources: &[Source],
     cancellation: &CancellationToken,
-    mut query: Option<&mut QuerySnapshot>,
+    query: Option<&mut QuerySnapshot>,
 ) -> Result<DiscoverySnapshot, ScanError> {
     if sources.len() > 32 {
         return Err(ScanError::LimitExceeded);
     }
-    let mut snapshot = DiscoverySnapshot::default();
-    let mut remaining_entries = MAX_ENTRIES;
-    let mut remaining_bytes = MAX_CONTENT_BYTES;
+    let mut state = Scan {
+        snapshot: DiscoverySnapshot::default(),
+        query: query.as_ref().map(|_| QuerySnapshot::default()),
+        remaining_entries: MAX_ENTRIES,
+        remaining_bytes: MAX_CONTENT_BYTES,
+    };
     for (precedence, source) in sources.iter().enumerate() {
         check_cancelled(cancellation)?;
-        let captured = match source::Captured::open(source) {
-            Ok(Some(captured)) => captured,
-            Ok(None) => continue,
+        let source = source.clone();
+        let access = source.access.clone();
+        let cancellation = cancellation.clone();
+        state = access
+            .with_reader(move |reader| {
+                state.source(&source, &reader, precedence, &cancellation)?;
+                Ok::<_, ScanError>(state)
+            })
+            .await
+            .map_err(|error| match error {
+                maka_plugins::filesystem::ReadError::Retired => ScanError::Cancelled,
+                _ => ScanError::Unavailable,
+            })??;
+    }
+    check_cancelled(cancellation)?;
+    state.snapshot.resolve_precedence();
+    if let (Some(destination), Some(updated)) = (query, state.query) {
+        *destination = updated;
+    }
+    Ok(state.snapshot)
+}
+
+struct Scan {
+    snapshot: DiscoverySnapshot,
+    query: Option<QuerySnapshot>,
+    remaining_entries: usize,
+    remaining_bytes: usize,
+}
+impl Scan {
+    fn source(
+        &mut self,
+        source: &Source,
+        reader: &maka_plugins::filesystem::Reader<'_>,
+        precedence: usize,
+        cancellation: &CancellationToken,
+    ) -> Result<(), ScanError> {
+        let Self {
+            snapshot,
+            query,
+            remaining_entries,
+            remaining_bytes,
+        } = self;
+        let mut captured = match source::Captured::open(source, reader) {
+            Ok(captured) => captured,
             Err(reason) => {
                 snapshot.diagnostic(
                     source,
@@ -238,25 +291,25 @@ fn scan_impl(
                     source.root.join(&source.directory),
                     reason,
                 );
-                continue;
+                return Ok(());
             }
         };
-        let entries = match captured.entries(&mut remaining_entries, cancellation) {
+        let entries = match captured.entries(remaining_entries, cancellation) {
             Ok(entries) => entries,
             Err(source::EntriesError::Scan(error)) => return Err(error),
-            Err(source::EntriesError::Read) => {
+            Err(source::EntriesError::Read(reason)) => {
                 snapshot.diagnostic(
                     source,
                     precedence,
                     source.root.join(&source.directory),
-                    DiscoveryFailure::ReadFailed,
+                    reason,
                 );
-                continue;
+                return Ok(());
             }
         };
         let publication =
             source.scope == SkillScope::Workspace && source.source == SkillSource::Legacy;
-        if publication && let Some(query) = query.as_deref_mut() {
+        if publication && let Some(query) = query.as_mut() {
             query.occupied.extend(
                 entries
                     .iter()
@@ -287,19 +340,20 @@ fn scan_impl(
                 origin_bytes,
             } = read
             else {
-                if publication && let Some(query) = query.as_deref_mut() {
+                if publication && let Some(query) = query.as_mut() {
                     query.empty.push(location);
                 }
                 continue;
             };
-            remaining_bytes = remaining_bytes
+            *remaining_bytes = remaining_bytes
                 .checked_sub(bytes.len() + origin_bytes)
                 .ok_or(ScanError::LimitExceeded)?;
             if let Some(origin) = origin
-                && let Some(query) = query.as_deref_mut()
+                && let Some(query) = query.as_mut()
             {
                 query.origins.insert(location.reference.clone(), origin);
             }
+            let reference = location.reference.clone();
             match crate::parse(&String::from_utf8_lossy(&bytes)) {
                 Ok(document) => snapshot.inventory.push(DiscoveredSkill {
                     location,
@@ -313,11 +367,13 @@ fn scan_impl(
                     content_sha256: maka_runtime::artifact::content_digest(&bytes),
                 }),
             }
+            if let Some(query) = query.as_mut() {
+                query.contents.insert(reference, bytes.into_boxed_slice());
+            }
         }
+
+        Ok(())
     }
-    check_cancelled(cancellation)?;
-    snapshot.resolve_precedence();
-    Ok(snapshot)
 }
 
 impl DiscoverySnapshot {

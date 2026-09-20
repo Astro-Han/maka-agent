@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod binding;
 mod bridge;
 mod callbacks;
 mod executor;
@@ -24,6 +25,7 @@ mod input;
 mod invocation;
 mod registration;
 mod remote;
+mod revision;
 
 use super::PackageLoader;
 use crate::execution::Executions;

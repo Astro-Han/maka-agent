@@ -4162,6 +4162,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "maka-assistant"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "maka-plugins",
+ "maka-runtime",
+ "serde_json",
+]
+
+[[package]]
 name = "maka-cli"
 version = "0.2.0"
 dependencies = [
@@ -4236,7 +4246,6 @@ version = "0.2.0"
 dependencies = [
  "futures-util",
  "libc",
- "maka-graph",
  "maka-plugins",
  "maka-presentation",
  "maka-runtime",
@@ -4286,11 +4295,14 @@ name = "maka-graph"
 version = "0.2.0"
 dependencies = [
  "futures-util",
+ "maka-event-log",
  "maka-plugins",
  "maka-runtime",
+ "maka-tool-catalog",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tokio-util",
@@ -4370,6 +4382,7 @@ dependencies = [
  "futures-util",
  "libc",
  "maka-runtime",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4378,6 +4391,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
+ "windows-sys 0.61.2",
  "yaml-rust2",
 ]
 
@@ -4446,6 +4460,8 @@ name = "maka-runtime-host"
 version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
+ "cap-fs-ext",
+ "cap-std",
  "futures-util",
  "getrandom 0.4.3",
  "hmac 0.12.1",
@@ -4456,6 +4472,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "maka-agent",
+ "maka-assistant",
  "maka-client-capability",
  "maka-config",
  "maka-event-log",
@@ -4473,6 +4490,7 @@ dependencies = [
  "maka-skills",
  "maka-tools",
  "maka-transport",
+ "maka-workhub",
  "reqwest",
  "serde",
  "serde_json",
@@ -4499,6 +4517,7 @@ dependencies = [
  "maka-event-log",
  "maka-plugins",
  "maka-runtime",
+ "maka-tool-catalog",
  "serde",
  "serde_json",
  "tempfile",
@@ -4519,7 +4538,6 @@ dependencies = [
  "maka-plugins",
  "maka-runtime",
  "maka-tool-catalog",
- "rustix 1.1.4",
  "serde",
  "serde_json",
  "tempfile",
@@ -4527,7 +4545,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
- "windows-sys 0.61.2",
  "yaml-rust2",
 ]
 
@@ -4576,6 +4593,23 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
+]
+
+[[package]]
+name = "maka-workhub"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "maka-plugins",
+ "maka-runtime",
+ "maka-tool-catalog",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]

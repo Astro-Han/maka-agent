@@ -68,7 +68,7 @@ import { createDefaultSettings, DEFAULT_APP_ICON } from '@maka/core/settings';
 import { Banner, Selector, useMountedRef, useToast, useUiLocale } from '@maka/ui';
 import { ProvidersPanel } from './providers-panel';
 import { ExternalAgentsSettingsPage } from '../features/external-agent-settings/index.js';
-import { SubagentSettingsPage } from './subagent-settings-page';
+import { ClientPluginSlot } from '../features/client-plugins/index.js';
 import { safeLocalStorageSet } from '../browser-storage';
 import { ProjectsSettingsPage } from './projects-settings-page';
 import { NativeRuntimeHostManagementDialog } from './native-runtime-host-management-dialog.js';
@@ -79,7 +79,6 @@ import { DailyReviewSettingsPage } from './daily-review-settings-page';
 import { DataSettingsPage } from './data-settings-page';
 import { GeneralSettingsPage } from './general-settings-page';
 import { HealthCenterPage } from './health-center-page';
-import { MemorySettingsPage } from './memory-settings-page';
 import { PermissionCenterPage } from './permission-center-page';
 import { SettingsSkeleton } from './settings-skeleton';
 import {
@@ -464,8 +463,8 @@ function SettingsSurfaceContent(
     );
     return () => props.onSelectedRuntimeHostProfileIdChange(undefined);
   }, [props.onSelectedRuntimeHostProfileIdChange, selectedProfileId, showsRuntimeHost]);
-  const sectionNeedsSettings = ['general', 'subagents', 'memory', 'search', 'external-agents'].includes(section);
-  const sectionNeedsConnections = ['general', 'models', 'subagents', 'daily-review'].includes(section);
+  const sectionNeedsSettings = ['general', 'search', 'external-agents'].includes(section);
+  const sectionNeedsConnections = ['general', 'models', 'daily-review'].includes(section);
   const runtimeHostAvailabilityStatus: RuntimeHostAvailabilityStatus =
     selectedRuntimeHost
       ? 'ready'
@@ -1154,13 +1153,7 @@ function SettingsPageBody(props: {
     case 'external-agents':
       return <ExternalAgentsSettingsPage settings={props.settings} onUpdate={props.onUpdateSettings} />;
     case 'subagents':
-      return (
-        <SubagentSettingsPage
-          settings={props.settings}
-          connections={props.connections}
-          onUpdate={props.onUpdateSettings}
-        />
-      );
+      return props.runtimeHost ? <ClientPluginSlot host={props.runtimeHost} name="application.manage" input={{section: 'subagents', locale}} /> : null;
     case 'usage':
       // State lives in the persistent `UsageScopeMount` above the loading gate;
       // this view is disposable and reads it from context.
@@ -1253,16 +1246,6 @@ function SettingsPageBody(props: {
       return <PermissionCenterPage />;
     case 'health':
       return <HealthCenterPage />;
-    case 'memory':
-      // PR-SETTINGS-REVIEW-0 (WAWQAQ msg `886f6406`): the merged
-      // memory-review page was too dense; 记忆 is its own page again.
-      return (
-        <MemorySettingsPage
-          settings={props.settings}
-          onUpdate={props.onUpdateSettings}
-          onReloadSettings={props.onReloadSettings}
-        />
-      );
     case 'daily-review':
       return <DailyReviewSettingsPage connections={props.connections} />;
     case 'search':

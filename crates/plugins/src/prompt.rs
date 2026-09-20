@@ -67,7 +67,8 @@ impl Target {
 }
 
 pub trait Provider: Send + Sync {
-    fn evaluate(&self, request: Request) -> TextFuture;
+    fn evaluate(&self, request: Request, workspace: crate::filesystem::ReadDirectory)
+    -> TextFuture;
 }
 
 #[derive(Clone)]
@@ -149,45 +150,65 @@ pub async fn resolve(
     if sections.len() + variables.len() + contexts.len() > 128 {
         return Err(Error::Invalid("prompt contribution limit exceeded".into()));
     }
-    if sections
-        .values()
-        .filter(|entry| entry.value.mode == SectionMode::Complete)
-        .count()
-        > 1
-    {
-        return Err(Error::Invalid("multiple complete prompt sections".into()));
-    }
     // One deadline bounds the entire assembly, not 128 sequential timeouts.
     let assembly = async {
+        let workspace = crate::filesystem::ReadRoot::open(request.target.cwd())
+            .await
+            .map_err(|error| Error::Invalid(error.to_string()))?;
         let mut values = BTreeMap::new();
         for (name, entry) in variables {
-            let text = evaluate(&entry.value.0, &entry, &request).await?;
+            let text = evaluate(&entry.value.0, &entry, &request, &workspace).await?;
             result
                 .sources
                 .push(source(&entry, SourceKind::PromptVariable, &name, &text)?);
             values.insert(name, text);
         }
-        let complete = sections
-            .values()
-            .any(|entry| entry.value.mode == SectionMode::Complete);
         let mut rendered = Vec::new();
         // Explicit Session/behavior instructions are execution constraints, not
         // the replaceable assistant persona supplied by another Contribution.
         if let Some(base) = base {
             rendered.push((0, String::new(), base.to_owned()));
         }
-        for (name, entry) in sections {
-            if complete && entry.value.mode != SectionMode::Complete {
-                continue;
-            }
-            let text = evaluate(&entry.value.text, &entry, &request)
-                .await?
-                .unwrap_or_default();
-            let text = entry.value.format.render(&text, &values)?;
+        // Complete sections can opt out for this Session. Presence in a Profile
+        // is not a global replacement; only an evaluated value selects one.
+        let mut complete = false;
+        for (name, entry) in sections
+            .iter()
+            .filter(|(_, entry)| entry.value.mode == SectionMode::Complete)
+        {
+            let text = evaluate(&entry.value.text, entry, &request, &workspace).await?;
+            let text = text
+                .map(|text| entry.value.format.render(&text, &values))
+                .transpose()?;
             result
                 .sources
-                .push(source(&entry, SourceKind::PromptSection, &name, &text)?);
-            rendered.push((entry.value.order, name, text));
+                .push(source(entry, SourceKind::PromptSection, name, &text)?);
+            if let Some(text) = text {
+                if complete {
+                    return Err(Error::Invalid(
+                        "multiple active complete prompt sections".into(),
+                    ));
+                }
+                complete = true;
+                rendered.push((entry.value.order, name.clone(), text));
+            }
+        }
+        if !complete {
+            for (name, entry) in sections
+                .into_iter()
+                .filter(|(_, entry)| entry.value.mode == SectionMode::Append)
+            {
+                let text = evaluate(&entry.value.text, &entry, &request, &workspace).await?;
+                let text = text
+                    .map(|text| entry.value.format.render(&text, &values))
+                    .transpose()?;
+                result
+                    .sources
+                    .push(source(&entry, SourceKind::PromptSection, &name, &text)?);
+                if let Some(text) = text {
+                    rendered.push((entry.value.order, name, text));
+                }
+            }
         }
         rendered.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
         result.system = render::join(rendered.into_iter().map(|(_, _, text)| text))?;
@@ -195,7 +216,7 @@ pub async fn resolve(
         ordered.sort_by(|a, b| (&a.1.value.order, &a.0).cmp(&(&b.1.value.order, &b.0)));
         let mut total = 0usize;
         for (name, entry) in ordered {
-            let text = evaluate(&entry.value.text, &entry, &request)
+            let text = evaluate(&entry.value.text, &entry, &request, &workspace)
                 .await?
                 .unwrap_or_default();
             let text = entry.value.format.render(&text, &values)?;
@@ -258,15 +279,18 @@ async fn evaluate<T>(
     text: &Text,
     entry: &Contribution<T>,
     request: &Request,
+    workspace: &crate::filesystem::ReadRoot,
 ) -> Result<Option<String>, Error> {
     let _call = entry.admit()?;
     let stopping = entry.owner.stopping()?;
+    let cancellation = request.cancellation.child_token();
+    let _closed = cancellation.clone().drop_guard();
     let value = match text {
         Text::Literal(value) => Some(value.clone()),
         Text::Dynamic(provider) => tokio::select! {
             biased;
             _ = stopping.cancelled() => return Err(Error::Retired),
-            result = provider.evaluate(request.clone()) => result?,
+            result = provider.evaluate(request.clone(), workspace.bind(entry.owner.clone(), cancellation)) => result?,
         },
     };
     if value.as_ref().is_some_and(|text| text.len() > 64 * 1024) {
@@ -305,7 +329,7 @@ mod tests {
 
     struct OptionalText(Option<String>);
     impl Provider for OptionalText {
-        fn evaluate(&self, _: Request) -> TextFuture {
+        fn evaluate(&self, _: Request, _: crate::filesystem::ReadDirectory) -> TextFuture {
             let text = self.0.clone();
             Box::pin(async move { Ok(text) })
         }
@@ -326,7 +350,7 @@ mod tests {
                     run_id: "run".into(),
                     invocation_id: "invocation".into(),
                 },
-                cwd: "/workspace".into(),
+                cwd: ".".into(),
             },
             cancellation: CancellationToken::new(),
         };
@@ -381,6 +405,84 @@ mod tests {
             drop(registration);
         }
         assert_ne!(revisions[0], revisions[1]);
+        owner
+            .shutdown(tokio::time::Instant::now() + Duration::from_secs(1))
+            .await
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn complete_sections_are_selected_per_request_and_preserve_constraints() {
+        let owner = Fiber::new("example", "example", Scope::Profile).unwrap();
+        owner.begin_loading().unwrap();
+        owner.ready().unwrap();
+        owner.publish().unwrap();
+        let catalog = Catalog::default();
+        let request = Request {
+            target: Target::Session {
+                session_id: "session".into(),
+                cwd: ".".into(),
+            },
+            cancellation: CancellationToken::new(),
+        };
+        for active in 0..=2 {
+            let mut staged = Staged::default();
+            for index in 0..2 {
+                staged
+                    .insert(
+                        format!("special-{index}"),
+                        Section {
+                            format: Format::Plain,
+                            order: 1,
+                            mode: SectionMode::Complete,
+                            text: Text::Dynamic(Arc::new(OptionalText(
+                                (index < active).then(|| "specialist".into()),
+                            ))),
+                        },
+                    )
+                    .unwrap();
+            }
+            // A malformed template must not be evaluated when a complete section won.
+            staged
+                .insert(
+                    "persona",
+                    Section {
+                        format: if active == 0 {
+                            Format::Plain
+                        } else {
+                            Format::Template
+                        },
+                        order: 2,
+                        mode: SectionMode::Append,
+                        text: Text::Literal("default {{undefined}}".into()),
+                    },
+                )
+                .unwrap();
+            let registration = catalog.register(&owner.context(), staged).unwrap();
+            let captured = catalog.capture(&Scope::Session("session".into()));
+            let result = resolve(
+                Some(&captured),
+                Some("execution constraints"),
+                request.clone(),
+            )
+            .await;
+            if active == 2 {
+                assert!(
+                    matches!(result, Err(Error::Invalid(reason)) if reason.contains("multiple active"))
+                );
+            } else {
+                let result = result.unwrap();
+                let text = result.system.unwrap();
+                assert!(text.contains("execution constraints"));
+                assert_eq!(text.contains("specialist"), active == 1);
+                assert_eq!(text.contains("default {{undefined}}"), active == 0);
+                assert_eq!(result.sources.len(), if active == 0 { 3 } else { 2 });
+                assert_eq!(
+                    admit(&captured, &result.sources).unwrap().len(),
+                    result.sources.len()
+                );
+            }
+            drop(registration);
+        }
         owner
             .shutdown(tokio::time::Instant::now() + Duration::from_secs(1))
             .await

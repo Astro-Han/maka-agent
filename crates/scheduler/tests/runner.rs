@@ -50,6 +50,12 @@ struct LostSettlement {
     armed: Arc<AtomicBool>,
 }
 impl Store for LostSettlement {
+    fn scan(
+        &self,
+        query: maka_plugins::storage::Scan,
+    ) -> BoxFuture<'_, Result<maka_plugins::storage::Page, StoreError>> {
+        self.inner.scan(query)
+    }
     fn read(&self, key: String) -> BoxFuture<'_, Result<Option<Record>, StoreError>> {
         self.inner.read(key)
     }
@@ -89,20 +95,11 @@ impl Dispatcher for DeliveryHost {
     fn authorize(
         &self,
         _: Origin,
-        effect: Effect,
+        _: Effect,
     ) -> BoxFuture<'_, Result<Authorization, maka_scheduler::Error>> {
         Box::pin(async move {
-            Ok(match effect {
-                Effect::Notify(_) => Authorization::Notification { source: None },
-                Effect::SessionResume { session_id } => Authorization::Session {
-                    boundary: maka_plugins::execution::SessionBoundary {
-                        session_id,
-                        boundary_revision: 0,
-                        permission_mode: maka_runtime::execution::PermissionMode::Ask,
-                        cwd: "/fixture".into(),
-                    },
-                },
-                Effect::AgentRun { .. } => panic!("fixture does not provision root Sessions"),
+            Ok(Authorization {
+                grant: maka_plugins::authorization::Id(uuid::Uuid::nil()),
             })
         })
     }
@@ -192,7 +189,7 @@ async fn slow_delivery_does_not_block_edits_and_recovery_never_duplicates_unknow
                         },
                     ),
                 },
-                Origin::User,
+                Origin::User { grant: None },
             )
             .await
             .unwrap()
@@ -210,7 +207,7 @@ async fn slow_delivery_does_not_block_edits_and_recovery_never_duplicates_unknow
                 Mutation::Pause {
                     task_id: id.clone(),
                 },
-                Origin::User,
+                Origin::User { grant: None },
             )
             .await
             .unwrap();
@@ -222,7 +219,7 @@ async fn slow_delivery_does_not_block_edits_and_recovery_never_duplicates_unknow
                         Effect::Notify(Notification::Local),
                     ),
                 },
-                Origin::User,
+                Origin::User { grant: None },
             )
             .await
             .unwrap()

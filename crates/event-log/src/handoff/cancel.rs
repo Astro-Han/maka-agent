@@ -20,10 +20,7 @@
 use crate::{EventLog, StoreError, turns::TurnBoundary};
 use maka_runtime::{
     continuation::{ContinuationClaim, MAX_SOURCE_BYTES, MAX_SOURCE_EVENTS, RunBoundary},
-    event::{
-        CancellationCause, EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome,
-        RuntimeEvent,
-    },
+    event::{EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent},
 };
 use sqlx::{Connection, SqliteConnection};
 
@@ -31,11 +28,7 @@ impl EventLog {
     /// Settle an unclaimed seal without loading a provider or replaying effects.
     /// If another actor already claimed it, return the current physical owner;
     /// stopping that live execution remains the caller's responsibility.
-    pub async fn cancel_handoff(
-        &self,
-        source: &Invocation,
-        cause: CancellationCause,
-    ) -> Result<TurnBoundary, StoreError> {
+    pub async fn cancel_handoff(&self, source: &Invocation) -> Result<TurnBoundary, StoreError> {
         self.validate_root()?;
         for id in [
             &source.session_id,
@@ -51,7 +44,7 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-                    let (boundary, sequence) = apply(&mut tx, &source, cause).await?;
+                    let (boundary, sequence) = apply(&mut tx, &source).await?;
                     tx.commit().await.map_err(StoreError::CommitUnknown)?;
                     if let Some(sequence) = sequence {
                         commits.send_replace(sequence);
@@ -66,7 +59,6 @@ impl EventLog {
 pub(crate) async fn apply(
     tx: &mut SqliteConnection,
     source: &Invocation,
-    cause: CancellationCause,
 ) -> Result<(TurnBoundary, Option<u64>), StoreError> {
     let prefix = crate::run_prefix::read(
         tx,
@@ -143,7 +135,7 @@ pub(crate) async fn apply(
             invocation,
             Fact::InvocationEnded {
                 outcome: InvocationOutcome::Cancelled {
-                    source: cause.source(),
+                    source: "runtime_cancellation".into(),
                 },
             },
         )),

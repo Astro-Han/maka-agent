@@ -62,13 +62,12 @@ pub struct Caller {
     pub cancellation: CancellationToken,
 }
 
-/// A read-only view of the caller's existing Session, not filesystem authority
-/// or an Agent invocation. Embedders supply this capability explicitly.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+/// Read-only user-request scope, including a borrowed workspace capability.
+/// The projection is observation; only `files` permits bounded filesystem reads.
 pub struct SessionView {
     pub workspace: maka_runtime::execution::WorkspaceProjection,
     pub tools: std::collections::HashSet<String>,
+    pub files: crate::filesystem::ReadDirectory,
 }
 
 /// A proposed Session view does not create a Session or grant execution rights.

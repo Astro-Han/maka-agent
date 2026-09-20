@@ -25,6 +25,7 @@ import * as React from 'react';
 import * as JsxRuntime from 'react/jsx-runtime';
 import { renderToString } from 'react-dom/server';
 import { build } from 'esbuild';
+import * as ClientSdk from '@maka-agent/plugin-sdk/client';
 import { buildClient } from '@maka-agent/plugin-sdk/build';
 import * as ClientUi from '@maka/ui/plugin';
 import { LocaleProvider, ToastProvider } from '@maka/ui';
@@ -56,7 +57,12 @@ test('the bundled WorkHub surface uses the application UI and locale without a s
       },
     },
   });
-  const modules = { react: React, 'react/jsx-runtime': JsxRuntime, '@maka/ui/plugin': ClientUi };
+  const modules = {
+    '@maka-agent/plugin-sdk/client': ClientSdk,
+    react: React,
+    'react/jsx-runtime': JsxRuntime,
+    '@maka/ui/plugin': ClientUi,
+  };
   const { default: plugin } = bundle.factory((name) => {
     assert.ok(Object.hasOwn(modules, name), 'unsupported shared module: ' + name);
     return modules[name];

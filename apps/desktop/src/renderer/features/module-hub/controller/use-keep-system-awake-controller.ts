@@ -22,7 +22,7 @@ import { useMountedRef } from '@maka/ui';
 import type { ModuleHubServices } from '../ports.js';
 
 export interface KeepSystemAwakeController {
-  /** False for a non-Electron surface or older preload without this bridge. */
+  /** False for a surface without power-policy controls. */
   readonly supported: boolean;
   /** Last confirmed persisted value; undefined until the first read settles. */
   readonly keepSystemAwake: boolean | undefined;

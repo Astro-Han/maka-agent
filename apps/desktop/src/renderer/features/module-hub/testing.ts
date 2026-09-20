@@ -21,17 +21,12 @@ import type { ModuleHubServices } from "./ports.js";
 import type { NavSelection } from "@maka/ui";
 import type { ModuleHubHostModel } from "./controller/use-module-hub-controller.js";
 
-export { ModuleHubServicesProvider } from "./services-context.js";
 export type { ModuleHubServices } from "./ports.js";
 export {
   createModuleHubCommandPort,
-  ModuleHubProvider,
-  ModuleHubScheduledTasksBoundary,
   type ModuleHubCommands,
 } from "./ui/module-hub-provider.js";
-export { startModuleHubLifecycle } from "./controller/module-hub-lifecycle.js";
 export {
-  useModuleHubController,
   type ModuleHubHostModel,
 } from "./controller/use-module-hub-controller.js";
 export {
@@ -43,13 +38,7 @@ export {
   useKeepSystemAwakeController,
   type KeepSystemAwakeController,
 } from "./controller/use-keep-system-awake-controller.js";
-export {
-  useScheduledTasksController,
-  type ScheduledTasksController,
-  type ScheduledTasksToastApi,
-} from "./controller/use-scheduled-tasks-controller.js";
 export type {
-  ModuleHubRuntimeHostChangedEvent,
   ModuleHubRuntimeHostRef,
 } from "./ports.js";
 
@@ -66,21 +55,6 @@ export function createFakeModuleHubHostModel(
   return {
     selection,
     selectModule: () => undefined,
-    scheduledTasks: {
-      scheduledTasks: [],
-      createRequestNonce: 0,
-      openCreate: () => undefined,
-      handleCreateRequest: () => undefined,
-      refresh: async () => undefined,
-      refreshSurface: async () => undefined,
-      create: async () => false,
-      update: async () => false,
-      toggle: async () => undefined,
-      triggerNow: async () => undefined,
-      snooze: async () => undefined,
-      clearRunHistory: async () => undefined,
-      delete: async () => undefined,
-    },
     keepSystemAwake: {
       supported: false,
       keepSystemAwake: undefined,
@@ -110,19 +84,6 @@ export function createFakeModuleHubServices(
     runtimeHosts: {
       getDefault: async () => ({ profileId: "local", hostId: "local" }),
       subscribeChanges: noopSubscription,
-    },
-    scheduledTasks: {
-      list: async () => [],
-      create: async () => notConfigured("scheduledTasks.create"),
-      update: async () => notConfigured("scheduledTasks.update"),
-      setEnabled: async () => notConfigured("scheduledTasks.setEnabled"),
-      triggerNow: async () => notConfigured("scheduledTasks.triggerNow"),
-      snooze: async () => notConfigured("scheduledTasks.snooze"),
-      clearRunHistory: async () =>
-        notConfigured("scheduledTasks.clearRunHistory"),
-      delete: async () => notConfigured("scheduledTasks.delete"),
-      subscribeChanges: noopSubscription,
-      subscribeDue: noopSubscription,
     },
     clientSettings: {
       supported: true,

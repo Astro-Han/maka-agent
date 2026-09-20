@@ -19,6 +19,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { RemoteError } from '@maka-agent/plugin-sdk/client';
 import type { MakaBridge } from '../../preload/bridge-contract.js';
 import { clientPluginRemote } from '../../renderer/platform/desktop/client-plugin-remote.js';
 
@@ -49,7 +50,7 @@ test('Remote SDK preserves exact bindings, distinguishes pending/null/end and cl
       case 'bind': return { kind: 'bound', target, handler: input.binding.method === 'echo' ? 'method' : 'stream' };
       case 'call':
         assert.deepEqual(input.target, target);
-        if (stale) throw new Error('registration retired');
+        if (stale) return { kind: 'remote_error', code: 'operation_conflict', message: 'registration retired' };
         return { kind: 'value', value: input.input };
       case 'open': return { kind: 'opened', stream: 'stream' };
       case 'next':
@@ -61,7 +62,7 @@ test('Remote SDK preserves exact bindings, distinguishes pending/null/end and cl
   const call = remote.api.method<string, string>('echo', 'projected-session');
   assert.equal(await call('one'), 'one');
   stale = true;
-  await assert.rejects(call('two'), /registration retired/);
+  await assert.rejects(call('two'), (error) => error instanceof RemoteError && error.code === 'operation_conflict' && error.message === 'registration retired');
   assert.equal(requests.filter((r) => r.kind === 'bind').length, 1);
   const stream = remote.api.stream<null, null>('events', 'projected-session');
   const received = [];

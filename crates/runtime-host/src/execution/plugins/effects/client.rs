@@ -66,7 +66,11 @@ impl Executions {
             super::super::ResourceTarget::Workspace(_) => (false, None),
         };
         let mut tools = BTreeMap::new();
-        for registration in self.plugin_resource_clients(scope).await.map_err(failed)? {
+        for registration in self
+            .plugin_resource_clients(scope, Capability::ClientCapabilities)
+            .await
+            .map_err(failed)?
+        {
             if !registration.available() {
                 return Err(failed("pinned client provider is unavailable"));
             }
@@ -132,7 +136,9 @@ impl Executions {
         let (session_id, cwd) = match boundary {
             Boundary::Session { boundary, .. } => (Some(boundary.session_id), boundary.cwd),
             Boundary::Workspace { workspace, .. } => (None, workspace.host_cwd),
-            Boundary::Profile => return Err(failed("client tools require a workspace")),
+            Boundary::Profile | Boundary::Directory { .. } => {
+                return Err(failed("client tools require a workspace"));
+            }
         };
         let selected = self
             .resource_client_tools(&scope)
@@ -201,7 +207,7 @@ impl Executions {
                         .map(|result| ToolOutput::Mcp(result).into_json())
                         .map_err(|error| match error {
                             CallError::OutcomeUnknown(_) => {
-                                ToolError::OutcomeUnknown(error.to_string())
+                                ToolError::CleanupUnconfirmed(error.to_string())
                             }
                             error => failed(error),
                         })

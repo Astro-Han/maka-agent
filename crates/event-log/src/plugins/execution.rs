@@ -27,14 +27,9 @@ use maka_plugins::{
     execution::{Observation, Progress, Receipt, Submit},
     storage::Namespace,
 };
-use maka_runtime::{
-    event::Invocation,
-    input::DeliveredMessage,
-    message::{MessageDisposition, Placement, RootSourceMessage},
-};
+use maka_runtime::message::{MessageDisposition, Placement};
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, SqliteConnection};
-use uuid::Uuid;
 
 impl EventLog {
     /// Observe pending admission and canonical delivery in one read transaction.
@@ -90,6 +85,7 @@ impl EventLog {
         &self,
         namespace: &Namespace,
         request: Submit,
+        pending: PendingMessageAdmission,
     ) -> Result<Receipt, StoreError> {
         self.validate_root()?;
         request
@@ -101,6 +97,32 @@ impl EventLog {
         let digest = request
             .digest()
             .map_err(|error| invalid(&error.to_string()))?;
+        let expected_placement = if request.orchestration_mode.is_some() {
+            Placement::CurrentTurn
+        } else {
+            Placement::NextTurn
+        };
+        if pending.invocation.session_id != request.session_id
+            || pending.steering_invocation.is_some()
+            || pending.source.disposition != MessageDisposition::TurnStarted
+            || pending.source.submitted_placement != expected_placement
+            || pending.source.message.submitted_content_digest
+                != request.content.content_digest()?
+            || pending
+                .source
+                .submitted_intent
+                .as_ref()
+                .and_then(|intent| intent.turn_orchestration.as_ref())
+                .map(|o| &o.mode)
+                != request.orchestration_mode.as_ref()
+            || pending
+                .source
+                .submitted_intent
+                .as_ref()
+                .is_some_and(|intent| !intent.input_selections.is_empty())
+        {
+            return Err(invalid("prepared execution does not match its submission"));
+        }
         let package = namespace.package().to_owned();
         let scope = String::from(namespace.scope().clone());
         let commits = self.commits.clone();
@@ -119,53 +141,16 @@ impl EventLog {
                         return Ok(receipt);
                     }
                     let receipt = Receipt {
-                        invocation: Invocation {
-                            session_id: request.session_id,
-                            turn_id: Uuid::new_v4().to_string(),
-                            run_id: Uuid::new_v4().to_string(),
-                            invocation_id: Uuid::new_v4().to_string(),
-                        },
-                        message_id: Uuid::new_v4().to_string(),
+                        invocation: pending.invocation.clone(),
+                        message_id: pending.source.message.message_id.clone(),
                         content_digest: digest,
                     };
-                    let source = RootSourceMessage {
-                        message: DeliveredMessage {
-                            message_id: receipt.message_id.clone(),
-                            submitted_content_digest: request.content.content_digest()?,
-                            content: request.content,
-                        },
-                        submitted_placement: if request.orchestration_mode.is_some() {
-                            Placement::CurrentTurn
-                        } else {
-                            Placement::NextTurn
-                        },
-                        disposition: MessageDisposition::TurnStarted,
-                        submitted_intent: request.orchestration_mode.map(|mode| {
-                            maka_runtime::message::SubmittedTurnIntent {
-                                input_selections: Default::default(),
-                                turn_orchestration: Some(
-                                    maka_runtime::message::TurnOrchestration {
-                                        mode,
-                                        source:
-                                            maka_runtime::message::TurnOrchestrationSource::HostApi,
-                                    },
-                                ),
-                            }
-                        }),
-                    };
-                    let admitted_at = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_err(|_| invalid("system clock precedes epoch"))?
-                        .as_millis();
-                    let pending = PendingMessageAdmission {
-                        invocation: receipt.invocation.clone(),
-                        steering_invocation: None,
-                        source,
-                        required_tools: Default::default(),
-                        admitted_at: u64::try_from(admitted_at)
-                            .map_err(|_| invalid("clock overflow"))?,
-                    };
-                    insert::insert(&mut tx, &pending, insert::Owner::Unsealed).await?;
+                    if insert::insert(&mut tx, &pending, insert::Owner::Unsealed)
+                        .await?
+                        .is_none()
+                    {
+                        return Err(StoreError::EventConflict);
+                    }
                     sqlx::query("INSERT INTO plugin_execution_receipts VALUES (?, ?, ?, ?)")
                         .bind(&package)
                         .bind(&scope)

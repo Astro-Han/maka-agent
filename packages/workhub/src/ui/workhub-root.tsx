@@ -101,6 +101,7 @@ function revealWordmark(element: HTMLDivElement | null, content: HTMLDivElement 
 export interface WorkHubRootProps {
   continuation?: WorkHubContinuation;
   sessionId: string | undefined;
+  projectSession: (hostSessionId: string) => string;
   signal?: AbortSignal;
   sessions: CoordinationSessionServices;
   native: WorkHubWindowServices;
@@ -112,6 +113,7 @@ export interface WorkHubRootProps {
 export function WorkHubRoot({
   continuation,
   sessionId,
+  projectSession,
   signal,
   sessions,
   native,
@@ -377,8 +379,13 @@ export function WorkHubRoot({
     }));
   const links = useMemo(
     () =>
-      workHubLinkedWork(transcript.messages, controller.sessions, getWorkHubRailCopy(locale).work),
-    [transcript.messages, controller.sessions, locale],
+      workHubLinkedWork(
+        transcript.messages,
+        controller.sessions,
+        getWorkHubRailCopy(locale).work,
+        projectSession,
+      ),
+    [transcript.messages, controller.sessions, locale, projectSession],
   );
   const [delegationFeedback, setDelegationFeedback] = useState<
     readonly WorkHubDelegationFeedback[]

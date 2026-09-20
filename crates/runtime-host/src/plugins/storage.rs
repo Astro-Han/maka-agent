@@ -57,6 +57,24 @@ impl BoundStore {
 }
 
 impl Store for BoundStore {
+    fn scan(
+        &self,
+        query: maka_plugins::storage::Scan,
+    ) -> BoxFuture<'_, Result<maka_plugins::storage::Page, StoreError>> {
+        Box::pin(async move {
+            if self.shutdown.is_cancelled() {
+                return Err(StoreError::Retired);
+            }
+            let _lease = self
+                .context
+                .resource_call()
+                .map_err(|_| StoreError::Retired)?;
+            self.log
+                .plugin_data_scan(&self.namespace, query)
+                .await
+                .map_err(storage)
+        })
+    }
     fn read(&self, key: String) -> BoxFuture<'_, Result<Option<Record>, StoreError>> {
         Box::pin(async move {
             if self.shutdown.is_cancelled() {

@@ -29,10 +29,21 @@ import { WorkHubRoot } from '@maka/workhub/surface';
 import '@maka/workhub/styles.css';
 import { getDesktopConversationCopy } from '../src/renderer/locales/conversation-copy.js';
 import { WorkHubConversation, WorkHubHighlightContext } from '@maka/workhub/conversation';
-import { desktopSessionKey } from '../src/shared/runtime-host-identity.js';
+import { desktopSessionKey, parseDesktopSessionKey } from '../src/shared/runtime-host-identity.js';
 
 // Real host: a persistent WebContentsView mounts WorkHubRoot once and moves between windows.
-const sessionId = desktopSessionKey({ hostId: 'story-host', sessionId: 'maka_workhub_coordination' });
+function linkMessages(turnId: string, work: SessionSummary, index: number): StoredMessage[] {
+  const id = `link-${index}`;
+  return [
+    { type: 'tool_call', id, turnId, ts: index * 4 + 2, toolName: 'workhub_tasks', args: { operation: 'route' } },
+    { type: 'tool_result', id: `${id}-result`, toolUseId: id, turnId, ts: index * 4 + 3, isError: false,
+      content: { kind: 'json', value: { operationId: `delegation-${index}`, result: { kind: 'submitted',
+        receipt: { invocation: { session_id: parseDesktopSessionKey(work.id).sessionId, turn_id: 'target-turn', run_id: 'target-run', invocation_id: 'target-invocation' }, messageId: 'target-message' },
+      } } },
+    },
+  ];
+}
+const sessionId = desktopSessionKey({ hostId: 'story-host', sessionId: 'plugin-root-story-coordinator' });
 const targetId = desktopSessionKey({ hostId: 'story-host', sessionId: 'payments' });
 const writes = { panel: fn(), answer: fn(), model: fn(), upload: fn(), open: fn(), question: fn(), form: fn() };
 const choices = ['model-a', 'model-b'].map((model, index) => ({
@@ -50,17 +61,16 @@ function makeServices(failFirst: boolean, withHistory: boolean | 'usage', colore
   let messages: StoredMessage[] = withHistory ? [
     { type: 'user', id: 'user-1', turnId: 'turn-1', ts: 1, text: '继续支付回调幂等性，补充重复投递测试点。' },
     { type: 'assistant', id: 'answer-1', turnId: 'turn-1', ts: 2, modelId: 'model-a', text: withHistory === 'usage' ? '已补充重复投递测试：同一支付回调多次到达时，只记录一次支付结果，并返回一致的响应。\n\n接下来会核对并发回调的处理结果。' : '已将任务交给支付回调工作。完整说明保留在工作台。\n\n' + '重复请求需要保持同一响应。'.repeat(70) + '\n\nEND_OF_FULL_RESPONSE' },
-    { type: 'workhub_coordination', kind: 'delegation_assigned', id: 'link-1', turnId: 'turn-1', coordinationTurnId: 'turn-1', ts: 3, schemaVersion: 1, actionId: 'action-1', actionFingerprint: `sha256:${'0'.repeat(64)}`, disposition: 'delegate_existing', userText: '继续支付回调幂等性，补充重复投递测试点。', targetSessionId: targetId, targetSessionName: target.name, targetTurnId: 'target-turn', targetMessageId: 'target-message', delegationId: 'delegation-1' },
+    ...linkMessages('turn-1', target, 1),
   ] : [];
   const secondTarget = { ...target, id: desktopSessionKey({ hostId: 'story-host', sessionId: 'release' }), name: '发布检查清单', cwd: '/projects/desktop' };
   if (coloredHistory) {
-    const link = messages.find((message) => message.type === 'workhub_coordination' && message.kind === 'delegation_assigned')!;
     messages = [target, secondTarget, target].flatMap((work, index): StoredMessage[] => {
       const turnId = `turn-${index + 1}`;
       return [
         { type: 'user', id: `user-${index}`, turnId, ts: index * 3, text: index === 2 ? '继续补充异常场景。' : `请检查${work.name}。` },
         { type: 'assistant', id: `answer-${index}`, turnId, ts: index * 3 + 1, modelId: 'model-a', text: '任务已交给对应 Work。' },
-        { ...link, id: `link-${index}`, turnId, coordinationTurnId: turnId, targetSessionId: work.id, targetSessionName: work.name } as StoredMessage,
+        ...linkMessages(turnId, work, index + 1),
       ];
     });
     messages.push({ type: 'user', id: 'unlinked', turnId: 'unlinked-turn', ts: 20, text: '先讨论一下整体计划。' });
@@ -104,7 +114,7 @@ function makeServices(failFirst: boolean, withHistory: boolean | 'usage', colore
     listSessions: async () => coloredHistory ? [target, secondTarget] : [target], subscribeSessions: (handler) => { updateSessions = handler; return () => { updateSessions = undefined; }; }, modelChoices: async () => choices,
     attachments: { pickFiles: async () => ({ ok: true, files: [{ approvalId: 'file-1', name: 'requirements.txt', size: 12, mimeType: 'text/plain' }] }), previewApproval: async () => ({ ok: false, reason: 'not-image' }) },
     readAttachmentBytes: async () => { throw new Error('Not an image'); },
-    prepareAttachments: async (id, items) => { writes.upload(id, items); return [{ name: 'requirements.txt', kind: 'other', mimeType: 'text/plain', bytes: 12, ref: { kind: 'session_file', sessionId: 'maka_workhub_coordination', relativePath: 'artifact-1' } }]; },
+    prepareAttachments: async (id, items) => { writes.upload(id, items); return [{ name: 'requirements.txt', kind: 'other', mimeType: 'text/plain', bytes: 12, ref: { kind: 'session_file', sessionId: 'plugin-root-story-coordinator', relativePath: 'artifact-1' } }]; },
     listActiveInteractions: async () => pendingForm ? [pendingForm] : questionPending ? [questionRequest] : [],
     subscribeActiveInteractions: (handler) => { interactionUpdate = handler; return () => { interactionUpdate = undefined; }; },
     respondToUserForm: async (id, response) => {
@@ -128,22 +138,25 @@ function makeServices(failFirst: boolean, withHistory: boolean | 'usage', colore
     },
     answer: async (id, input) => {
       writes.answer(id, input);
+      const turnId = `turn-${input.operationId}`;
+      const receipt = { invocation: { session_id: id, turn_id: turnId, run_id: `run-${input.operationId}`, invocation_id: `invocation-${input.operationId}` }, messageId: `message-${input.operationId}`, contentDigest: `digest-${input.operationId}` };
       if (selectTarget) {
-        pendingForm = { type: 'form_request', id: `form-${input.turnId}`, requestId: `selection-${input.turnId}`, turnId: input.turnId,
+        pendingForm = { type: 'form_request', id: `form-${turnId}`, requestId: `selection-${turnId}`, turnId: turnId,
           ts: 5, toolUseId: 'select-and-delegate', message: '选择要继续的工作', requester: { name: 'WorkHub' },
           fields: [{ kind: 'single_select', name: 'target', label: '工作 / 工作区', required: true,
             options: [{ value: 'candidate-0', label: '支付回调幂等性 / maka' }, { value: 'candidate-1', label: '发布检查清单 / desktop' }] }] };
-        messages = [...messages, { type: 'user', id: input.turnId, turnId: input.turnId, ts: 4, text: input.text }];
+        messages = [...messages, { type: 'user', id: turnId, turnId: turnId, ts: 4, text: input.text }];
         interactionUpdate?.({ sessionId, interactions: [pendingForm] });
-        publish(); return { kind: 'admitted', turnId: input.turnId };
+        publish(); return { kind: 'admitted', receipt };
       }
       if (failures-- > 0) throw new Error('Temporary Host failure');
-      messages = [...messages, { type: 'user', id: input.turnId, turnId: input.turnId, ts: 4, text: input.text, attachments: input.attachments }, { type: 'assistant', id: `${input.turnId}-answer`, turnId: input.turnId, ts: 5, modelId: 'model-a', text: '已收到。' }, { type: 'turn_state', id: `${input.turnId}-done`, turnId: input.turnId, ts: 6, status: 'completed' }];
-      publish(); return { kind: 'admitted', turnId: input.turnId };
+      messages = [...messages, { type: 'user', id: turnId, turnId: turnId, ts: 4, text: input.text, attachments: input.attachments }, { type: 'assistant', id: `${turnId}-answer`, turnId: turnId, ts: 5, modelId: 'model-a', text: '已收到。' }, { type: 'turn_state', id: `${turnId}-done`, turnId: turnId, ts: 6, status: 'completed' }];
+      publish(); return { kind: 'admitted', receipt };
     },
+    cancelAnswer: async () => { session = { ...session, runningTurnIds: [] }; updateSessions?.(); },
     configureModel: async (id, input) => {
-      writes.model(id, input); session = { ...session, revision: session.revision + 1, model: input.modelTarget.model, thinkingLevel: input.thinkingLevel ?? undefined }; updateSessions?.();
-      return { kind: 'committed', session: { ...session, workspace: { target: { kind: 'host_path', path: '/projects/maka' }, hostCwd: '/projects/maka' }, createdAt: 0, activityAt: 0, labelsTruncated: false, llmConnectionId: 'connection-test', collaborationMode: 'agent', orchestrationMode: 'default' } };
+      writes.model(id, input); session = { ...session, revision: session.revision + 1, model: input.target.model.model, thinkingLevel: input.target.thinkingLevel ?? undefined }; updateSessions?.();
+      return { kind: 'committed', session: { sessionId: id, revision: session.revision, name: session.name, boundaryRevision: 1, workspace: { target: { kind: 'host_path', path: '/projects/maka' }, hostCwd: '/projects/maka' }, target: input.target, permissionMode: 'ask', toolMode: 'direct', collaborationMode: 'agent', behavior: 'default', boundTools: null } };
     },
     observe: (_id, _event, _error, _phase, execution) => { updateExecution = execution; publishExecution(); return () => { updateExecution = undefined; }; },
     openTranscript: async (_id, handler) => { updateTranscript = handler; publish(); return { observationChanged: () => {}, loadEarlier: async () => {}, close: async () => { updateTranscript = undefined; } }; },
@@ -167,7 +180,7 @@ function Surface({ failFirst = false, history = false, colors = false, selectTar
     if (progress) services.presentation.resizeProgress = async (_request, height) => { setProgressHeight(height); };
     return services;
   });
-  return <LocaleProvider locale="zh-CN"><AstryxLocaleProvider><ToastProvider><div style={{ height: progress ? progressHeight : '100dvh', width: progress ? 360 : undefined, maxWidth: '100%' }}><WorkHubRoot sessionId={sessionId}
+  return <LocaleProvider locale="zh-CN"><AstryxLocaleProvider><ToastProvider><div style={{ height: progress ? progressHeight : '100dvh', width: progress ? 360 : undefined, maxWidth: '100%' }}><WorkHubRoot sessionId={sessionId} projectSession={(id) => desktopSessionKey({ hostId: 'story-host', sessionId: id })}
     sessions={services} native={services} contextUsage={services.inspector} attachments={{
       staging: services.attachments, read: services.readAttachmentBytes, prepare: services.prepareAttachments,
       copy: (locale) => getDesktopConversationCopy(locale).actions, formatError: (error) => String(error),

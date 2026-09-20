@@ -28,6 +28,7 @@ pub struct Snapshot {
     pub revision: u64,
     pub personalization: Personalization,
     pub workspace_instructions: bool,
+    pub tool_mode: maka_runtime::execution::ToolMode,
 }
 
 /// This view is not configuration authority: it grants no filesystem or

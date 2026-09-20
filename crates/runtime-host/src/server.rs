@@ -44,19 +44,16 @@ mod outbound;
 pub(crate) mod plugin_authorization;
 mod plugin_remote;
 mod projects;
-mod scheduler;
 pub(crate) use projects::Usage as ProjectUsage;
 pub(crate) use projects::resolve_record as resolve_project_workspace;
 mod registration;
 mod resources;
 pub(crate) mod retirement;
 mod sessions;
-pub(crate) use sessions::create::resolve as resolve_session_configuration;
 pub(crate) use sessions::workspace::resolve_path as resolve_workspace_path;
 mod subscriptions;
 mod turns;
 pub mod websocket;
-mod workhub;
 
 use std::error::Error;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -88,6 +85,8 @@ pub enum LifecycleMode {
 }
 
 pub struct HostOptions {
+    /// Explicit non-secret, read-only inputs shared equally with all Host plugins.
+    pub input_roots: maka_plugins::filesystem::ReadRoots,
     pub plugins: crate::plugins::Setup,
     pub lifecycle_mode: LifecycleMode,
     pub project_directory_roots: Option<Vec<DirectoryRootSpec>>,
@@ -100,6 +99,7 @@ pub struct HostOptions {
 impl Default for HostOptions {
     fn default() -> Self {
         Self {
+            input_roots: Default::default(),
             plugins: Default::default(),
             lifecycle_mode: LifecycleMode::Ephemeral,
             project_directory_roots: None,
@@ -210,7 +210,6 @@ impl Host {
         )?;
         log.recover_shell_runs(recovered_at).await?;
         log.recover_host_effects().await?;
-        log.recover_workhub_stops().await?;
         let configuration = Arc::new(ConfigurationStore::for_root(root.clone()).await?);
         let draining = CancellationToken::new();
         let startup_guard = draining.clone().drop_guard();
@@ -223,13 +222,13 @@ impl Host {
             ProjectUsage::new(log.clone(), changes.clone(), change_revision.clone());
         let session_catalog = Arc::new(catalog_feed::CatalogFeed::new(
             *log.subscribe_commits().borrow(),
+            changes.clone(),
         ));
         let interactions = Arc::new(interactions::Interactions::new(
             log.clone(),
             draining.clone(),
             epoch.clone(),
             session_catalog.clone(),
-            changes.clone(),
         ));
         let runtime = maka_js_runtime::trusted::TrustedRuntime::default();
         let executions = Arc::new(crate::execution::Executions::new(
@@ -244,55 +243,41 @@ impl Host {
             runtime.clone(),
         )?);
         let mut setup = std::mem::take(&mut options.plugins);
-        crate::plugins::skills::install(
-            &mut setup,
-            root.canonical_path().to_owned(),
-            options.skill_home.take(),
-            &executions,
-        )?;
-        crate::plugins::assistant::install(
-            &mut setup,
-            global_instructions,
-            &executions.plugin_catalog,
-        )?;
-        crate::plugins::graph::install(
-            &mut setup,
-            log.clone(),
-            crate::execution::GraphSessions::new(&executions, root.root_id().into()),
-            executions.plugin_catalog.clone(),
-        )?;
-        let workhub_commands = Arc::new(crate::execution::WorkHubCommands::new(
-            &executions,
-            project_usage.clone(),
-            root.root_id().into(),
-            epoch.clone(),
-            session_catalog.clone(),
-            changes.clone(),
-        ));
-        crate::plugins::workhub::install(
-            &mut setup,
-            &executions.plugin_catalog,
-            workhub_commands.clone(),
-            root.canonical_path(),
-        )?;
-        crate::plugins::scheduler::install(
-            &mut setup,
-            crate::execution::SchedulerServices::new(&executions, root.root_id().into()),
-            changes.clone(),
-        )?;
+        if let Some(home) = &options.skill_home {
+            let root = maka_plugins::filesystem::ReadRoot::open(home).await?;
+            options.input_roots.0.insert(
+                "user-skills".into(),
+                root.select(
+                    [
+                        ".maka/skills/".into(),
+                        ".agents/skills/".into(),
+                        ".maka/skill-sources/".into(),
+                    ]
+                    .into(),
+                )?,
+            );
+        }
+        crate::plugins::skills::install(&mut setup)?;
+        crate::plugins::assistant::install(&mut setup)?;
+        if let Some(path) = global_instructions {
+            match maka_plugins::filesystem::ReadRoot::open(path).await {
+                Ok(root) => {
+                    options.input_roots.0.insert(
+                        "user-instructions".into(),
+                        root.select(maka_assistant::input_files())?,
+                    );
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        crate::plugins::graph::install(&mut setup)?;
+        crate::plugins::workhub::install(&mut setup)?;
+        crate::plugins::scheduler::install(&mut setup)?;
         if setup.loader.is_none() {
             setup.loader = Some(Arc::new(crate::plugins::javascript::Loader::new(
                 &executions,
             )?));
-        }
-        for claim in &setup.managed_sessions {
-            if !setup.builtins.contains_key(claim.manager.package()) {
-                return Err(maka_plugins::Error::Invalid(
-                    "Session manager is not a linked plugin".into(),
-                )
-                .into());
-            }
-            log.reserve_managed_session(claim).await?;
         }
         let data_root = root.canonical_path().to_owned();
         let data = tokio::task::spawn_blocking(move || {
@@ -308,6 +293,7 @@ impl Host {
             &executions,
             configuration.clone(),
             root.root_id().into(),
+            std::mem::take(&mut options.input_roots),
         ));
         let (plugins, plugin_owner) = crate::plugins::Platform::open(
             log.clone(),
@@ -366,11 +352,7 @@ impl Host {
             commands: TaskTracker::new(),
             diagnostic_log: Mutex::default(),
         });
-        let recovery = async {
-            workhub_commands.recover().await?;
-            host.executions.recover_messages().await
-        }
-        .await;
+        let recovery = host.executions.recover_messages().await;
         if let Err(error) = recovery {
             host.draining.cancel();
             host.plugin_tasks.close();

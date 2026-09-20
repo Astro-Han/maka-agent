@@ -46,7 +46,7 @@ pub(super) fn opening(id: &str, claim: Option<ContinuationClaim>) -> RuntimeEven
             input: match claim {
                 Some(claim) => InvocationInput::Continuation {
                     claim: Box::new(claim),
-                    workhub_resume: None,
+
                     request_fingerprint: digest('f'),
                 },
                 None => InvocationInput::Message {

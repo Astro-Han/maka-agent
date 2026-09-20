@@ -43,17 +43,13 @@ fn every_operation_matches_current_typescript_remote_owner_grants() {
             .strip_prefix('\'')
             .and_then(|line| line.strip_suffix("',"))
             .expect("Remote owner grant must remain an explicit string entry");
-        let operation = name.parse::<Operation>().expect("Known operation grant");
-        assert!(
-            grants.insert(operation),
-            "Duplicate remote owner grant: {name}"
-        );
+        assert!(grants.insert(name), "Duplicate remote owner grant: {name}");
     }
     assert!(!grants.is_empty(), "Authority policy cannot be empty");
     for &operation in Operation::ALL {
         assert_eq!(
             operation.allows_remote_owner(),
-            grants.contains(&operation),
+            grants.contains(operation.as_str()),
             "Remote owner policy drift for {operation}"
         );
     }

@@ -40,6 +40,7 @@ enum Outcome {
         receipt: Value,
         #[serde(default)]
         required_tools: BTreeSet<String>,
+        basis: Option<super::revision::Reference>,
     },
     Blocked {
         message: String,
@@ -50,9 +51,11 @@ impl input::Provider for Input {
     fn prepare(
         &self,
         request: input::Request,
+        workspace: maka_plugins::filesystem::ReadDirectory,
     ) -> BoxFuture<'static, Result<input::Outcome, Error>> {
         let callback = self.callback.clone();
         Box::pin(async move {
+            let view = callback.calls.borrow_read(workspace)?;
             let content = maka_protocol::turn::MessageContent::from(request.content.clone());
             let value = invoke(
                 &callback.module,
@@ -60,7 +63,7 @@ impl input::Provider for Input {
                 json!({ "sessionId": request.session_id, "cwd": request.cwd,
                     "content": content, "preparation": request.content.preparation,
                     "selections": request.selections, "tools": request.tools }),
-                Value::Null,
+                json!({"readView": view.id}),
                 request.cancellation,
             )
             .await
@@ -73,11 +76,14 @@ impl input::Provider for Input {
                     content,
                     receipt,
                     required_tools,
+                    basis,
                 } => input::Outcome::Ready {
                     content: content.into(),
                     receipt,
                     required_tools,
-                    basis: None,
+                    basis: basis
+                        .map(|basis| callback.calls.revisions.basis(basis))
+                        .transpose()?,
                 },
                 Outcome::Blocked { message, receipt } => {
                     input::Outcome::Blocked { message, receipt }

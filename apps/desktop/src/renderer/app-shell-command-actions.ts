@@ -41,7 +41,6 @@ import {
   commandPaletteConnectionTestFailureMessage,
 } from "./app-shell-copy.js";
 import { getShellCopy } from "./locales/shell-copy.js";
-import { memoryOpenFailureMessage } from "./locales/settings-memory-copy.js";
 import { settingsTestResultMessage } from "./locales/settings-test-result-copy.js";
 
 type ToastApi = {
@@ -289,33 +288,6 @@ export function buildAppShellCommandList(
             copy.exportFallback,
             locale,
           ),
-        );
-      }
-    },
-    onOpenLocalMemoryFile: async () => {
-      const { toastApi } = optionsRef.current;
-      try {
-        const { value: result, diagnosticTarget } = await runOnDefaultRuntimeHost((host) =>
-          window.maka.memory.openFile(host),
-        );
-        if (!result.ok) {
-          toastApi.error(
-            copy.memoryOpenFailedTitle,
-            memoryOpenFailureMessage(result, locale),
-            undefined,
-            diagnosticTarget,
-          );
-        }
-      } catch (err) {
-        toastApi.error(
-          copy.openFailedTitle,
-          commandPaletteActionErrorMessage(
-            err,
-            copy.memoryOpenFallback,
-            locale,
-          ),
-          undefined,
-          defaultRuntimeHostDiagnosticTarget(err),
         );
       }
     },

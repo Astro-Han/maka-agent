@@ -43,7 +43,6 @@ import {
   normalizeUiLocalePreference,
   type UiLocalePreference,
 } from './ui-locale.js';
-import { normalizeSubagentSettings, type SubagentSettings } from './subagent-settings.js';
 import { isPetPackId } from './pet.js';
 
 export { UI_LOCALE_PREFERENCES, isUiLocalePreference } from './ui-locale.js';
@@ -589,7 +588,6 @@ export interface AppSettings {
   system: SystemSettings;
   externalAgents: { antigravity: { executable: string } };
   shell: ShellSettings;
-  subagents: SubagentSettings;
 }
 
 export interface RuntimeHostAppSettings extends Omit<AppSettings, 'network'> {
@@ -780,7 +778,6 @@ export type UpdateAppSettingsInput = Partial<{
   externalAgents: AppSettings['externalAgents'];
   shell: Partial<ShellSettings>;
   webSearch: WebSearchSettingsPatch;
-  subagents: SubagentSettings;
 }>;
 
 /** Preconditions for a Host-owned Settings write that must not be retried past a semantic change. */
@@ -874,7 +871,6 @@ export function createDefaultSettings(): AppSettings {
       preference: 'auto',
       executable: '',
     },
-    subagents: { presets: [] },
   };
 }
 
@@ -964,10 +960,6 @@ export function mergeSettings(current: AppSettings, patch: UpdateAppSettingsInpu
       ...(patch.shell ?? {}),
     },
     webSearch: mergeWebSearchSettings(current.webSearch, patch.webSearch),
-    subagents:
-      patch.subagents === undefined
-        ? current.subagents
-        : normalizeSubagentSettings(patch.subagents),
   };
 }
 
@@ -992,7 +984,6 @@ export function normalizeSettings(input: unknown): AppSettings {
     system: value.system,
     externalAgents: value.externalAgents,
     shell: value.shell,
-    subagents: value.subagents,
   });
   // PR110b: milestones bypass the generic patch surface so we can
   // sanitize them with the closed-enum + at-most-one validator on
@@ -1104,7 +1095,6 @@ export function normalizeSettings(input: unknown): AppSettings {
       },
     },
     shell: normalizeShellSettings(base.shell),
-    subagents: normalizeSubagentSettings(base.subagents),
   };
 }
 

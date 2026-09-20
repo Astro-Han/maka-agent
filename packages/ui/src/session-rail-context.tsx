@@ -18,7 +18,6 @@
  */
 
 import { createContext, useContext, type ReactNode, type Ref } from 'react';
-import type { ScheduledTask } from '@maka/core/scheduled-task';
 import type { SessionSummary } from '@maka/core/session';
 import type { SideNavImperativeCollapseHandle } from '@astryxdesign/core/SideNav';
 import type { NavModuleMemory, NavSelection } from './nav-selection.js';
@@ -82,7 +81,7 @@ export interface SessionRailChrome {
   viewMode: SessionViewMode;
   onViewModeChange?(mode: SessionViewMode): void;
   selection: NavSelection;
-  scheduledTasks?: readonly ScheduledTask[];
+  navigationStatus?: ReactNode;
   moduleMemory?: NavModuleMemory;
   onSelect(selection: NavSelection): void;
   onNew(): void;

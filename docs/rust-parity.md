@@ -40,7 +40,7 @@ own business state and recovery through built-in plugins.
 - **Plugin:** workflow decisions, domain data/migrations, external protocol adapters, derived indexes,
   reports and business UI. It cannot rewrite Host facts or manufacture invocation authority.
 - **Shared boundary:** plugins use narrow typed Host services. Each datum has one durable owner.
-  Built-in domain stores may use SQLx; external plugins do not receive arbitrary Host SQL access.
+  Rust and JS use the same authorized capabilities. Domain stores may use their own migrations; no plugin receives arbitrary Host SQL access.
 
 A built-in Rust plugin is statically linked code activated through the existing Fiber lifecycle,
 not a new executable, thread, V8 or necessarily a new crate. Disabling withdraws new capability
@@ -52,26 +52,26 @@ plugin contribution, as Scheduler already does. New plugin business interfaces u
 Do not maintain two implementations or grow the kernel's enum with business actions.
 Client changes are allowed when they remove an obsolete path, as with Graph.
 
-## Existing domains to migrate
+## Existing domain ownership
 
 | Domain / current coupling | Target and completion condition |
 | --- | --- |
 | **Skills:** `maka.skills` owns discovery, input preparation, per-step tool/context snapshots, governance, preference CAS, preview, import and workspace/user publication. Published Client Contributions own Session/new-workspace pickers, management and draft suggestions. | Desktop supplies target-bound Slots, generic Remote transport and authorized native file actions. The old scanner, importer, controller and Skills IPC/preload facade are removed. Host retains thin external protocol adapters, admission and immutable receipts, not Skill resolution. |
-| **WorkHub:** `maka.workhub` owns coordinator configuration, answer composition, native `workhub_tasks`, routing/selection/correction/Stop/Resume, steering/followup and recovery policy. Its Session behavior freezes tools and Direct/Code Mode consistently for initial and successor Turns. | The published Client owns the complete main/floating surface in `packages/workhub`, using Remote and origin-bound Session/attachment ports. Desktop owns native presentation, not orchestration. Host owns managed Session reservations, precise admission, canonical receipts and settlement. Client replacement reconciles pending submissions by their original identity; it never redispatches across Host epochs. |
+| **WorkHub:** `maka.workhub` owns coordinator configuration, answer composition, native `workhub_tasks`, routing/selection/correction/Stop/Resume, steering/followup and recovery policy. Its Session behavior freezes tools and Direct/Code Mode consistently for initial and successor Turns. | The published Client owns the complete main/floating surface in `packages/workhub`, using Remote and origin-bound Session/attachment ports. Desktop owns native presentation, not orchestration. Host owns atomic managed Session creation, precise admission, canonical receipts and settlement. Client replacement reconciles pending submissions by their original identity; it never redispatches across Host epochs. |
 | **Default assistant behavior:** `maka.assistant` publishes the default behavior, persona, personalization and workspace instructions. | Sources are frozen per logical model step; disabling the plugin removes its persona. Explicit Session/child instructions remain independent of replaceable prompt Contributions. Execution/compaction invariants remain Host-owned. |
-| **Graph/Swarm:** built-in plugins; behavior selection uses an open typed identity. Graph uses atomic activate/stop/retire-idle commands and read-only preferences, without `Executions`, configuration writers or Host locks. | Preserve existing orchestration and wakeup behavior. Reuse narrow commands where semantics match; typed domain repositories remain legitimate. |
-| **Scheduler:** the plugin owns schedules, frozen triggers, misfire/retry policy and notification withdrawal. Activation receives scoped storage and typed scheduling operations, not Host objects or capability registries. | Host resolves authorization and admits execution/native delivery. Pausing withdraws unadmitted notifications, including late provider acceptance; accepted executions remain Host-owned. Recovery reuses exact Fire identities and never replays uncertain notifications. Existing Desktop operations remain thin adapters to the plugin. |
+| **Graph/Swarm:** built-in plugins; behavior selection uses an open typed identity. Graph uses public authorized Session/execution commands, scoped data and read-only preferences, without private Host handles. | Preserve existing orchestration and wakeup behavior. Reuse narrow commands where semantics match; typed domain repositories remain legitimate. |
+| **Scheduler:** the plugin owns schedules, frozen triggers, misfire/retry policy and notification withdrawal. Activation receives public scoped storage, authorization, execution and notification capabilities, not scheduling-specific Host services. | Host resolves authorization and admits execution/native delivery. Pausing withdraws unadmitted notifications, including late provider acceptance; accepted executions remain Host-owned. Recovery reuses exact Fire identities and never replays uncertain notifications. Existing Desktop operations remain thin adapters to the plugin. |
 | **Code Mode:** mode selection, nested dispatch and history projection cross several crates. | After the first domain migrations, move its user-facing tool and mode policy where a real contribution boundary helps. Keep V8 ownership, nested-call permissions, dispatch/settlement and canonical history in the runtime. Do not invent a universal executor hook merely to move `exec`. |
 | **Files and Shell tools:** registrations are assembled in Host over existing filesystem/process owners. | Tool definitions and assembly can become built-in contributions. Resource ownership, write coordination and PTY cancellation remain Host services. Defer this structural migration until it removes concrete coupling; a plugin per tool adds no value. |
 | **Client Capability / MCP, providers and transport** | Keep their current resource/authority boundaries. Desktop-owned MCP does not move into Host, and model vendors do not each require a plugin. Complete their functional gaps independently of structural migrations. |
 
-Linked plugins declare managed Sessions through `Setup::managed_sessions`. Host persists the
-package/scope owner and creation identity before serving clients. Ordinary mutation/execution
-and other plugins' execution grants cannot bypass that owner, including after disable or restart.
-This reservation does not validate or adopt existing Session data.
+Any authorized plugin can request managed ownership with `createRoot({ managed: true, ... })`.
+Host commits package/scope ownership and creation identity atomically. Ordinary mutations and other
+plugins cannot bypass that ownership; replay never adopts an unrelated existing Session.
 
 “Whole domain” means one business implementation and lifecycle, not moving every related type or
-table. Canonical Skill receipts and WorkHub execution facts may remain typed runtime contracts.
+table. Host-stamped input receipts and execution facts are generic runtime contracts. Skill interpretation
+and WorkHub delegation/correction links belong exclusively to their plugins.
 Reuse SQLx migrations and domain stores; changing ownership does not require changing disk format,
 moving all data into KV, or creating a crate per plugin. Runtime contracts must not depend on plugin
 implementations; wire adapters may retain existing client vocabulary.
@@ -82,12 +82,12 @@ implementations; wire adapters may retain existing client vocabulary.
 
 | Domain | Remaining functionality | Target owner / necessary boundary |
 | --- | --- | --- |
-| Plan | Query/control/start, planning artifacts, approval and transition to execution; non-Agent collaboration mode currently fails admission. | **Plugin + Host.** Workflow and records in a plugin; Host owns approval evidence, grants and Turn admission. Extend behavior selection beyond Graph, not the execution engine per workflow. |
+| Plan | Query/control/start, planning artifacts, approval and transition to execution; non-Agent collaboration mode currently fails admission. | **Plugin + Host.** Workflow and records in a plugin; Host owns approval evidence, grants and Turn admission. Use public Behavior registration, not a new execution engine per workflow. |
 | Goal | Query/arm/control, continuation, termination, budget and recovery semantics. | **Plugin + Host.** Goal policy owns subsequent submissions; Host enforces admitted hard limits and records usage. Retiring the plugin must close future submission admission. |
 | Session todos | `todo_read`/`todo_write` and `session.todo.query`. | **Plugin.** One typed todo domain backs tools and UI, with durable revisions; not a second execution queue. |
 | Deep research | Research workflow, query/progress, results and recovery. | **Plugin.** Reuse Graph/Swarm, Web, bounded model calls and reliable submission. Do not build another generic orchestration engine. |
 | Daily review / recap | Daily-review query/mutate, scheduled review and `session.recap.generate`. | **Plugin + Host.** Summarization/selection/output in plugins; reuse Scheduler and authorized history/model services. Host retains any canonical Session metadata commit. |
-| Web | Built-in WebSearch/WebFetch, `web-search.execute`, provider selection/settings, extraction and explicit truncation. | **Plugin + Host.** Providers and extraction in a Web plugin. Host retains network/proxy/credential/permission boundaries. Invocation HTTP exists; user/background entrypoints still need explicit authority, not a fabricated Tool call. |
+| Web | Built-in WebSearch/WebFetch, `web-search.execute`, provider selection/settings, extraction and explicit truncation. | **Plugin + Host.** Providers and extraction in a Web plugin. Host retains network/proxy/credential/permission boundaries. Invocation, Remote and explicitly authorized background HTTP share current permission and resource-settlement rules. |
 | Recall | Ranked cross-Session passages and RecallMore expansion. | **Plugin + Host.** Ranking and rebuildable indexes belong to Recall; Host supplies scoped history/citations and checks current access/deletion. Existing per-operation event reads are not a cross-Session history API. Recall is not Memory. |
 | External agents | Setup start/query/cancel; execution adapters, configuration, auth, conversation identity, adapter-specific attachments/interactions/resume/fork; Command Code GO execution. | **Plugin + Host.** Implement concrete CLI/ACP adapters as Executor plugins over owned processes/HTTP. Generic Executor support is not a shipped adapter. Host owns authorization, cancellation and canonical external-event recording. |
 | Usage / Pricing | Usage queries, revision-consistent screens/activity pages, pricing query/mutate and valuation. | **Plugin + Host.** Reports, price policy and rebuildable projections may be an Insights domain; Host records usage independently of plugin availability and provides consistent reads. Missing usage must not become zero. |
@@ -110,12 +110,12 @@ Original TS plugins are not source-compatible with the new SDK.
 | Consumer / needed capability | Current evidence / smallest useful extension |
 | --- | --- |
 | Input preparation | Native typed Contributions and JS `ctx.input.prepare` share ordered preparation, stamped receipts and retirement checks. Native revisions provide nonblocking admission/invalidation ordering. Queue edits and steering prepare before admission; accepted promotion/replay never rescan sources. |
-| Skills: reserved tool ownership | Skill/SkillSearch are ordinary Contributions reserved for their designated package. Per-step bindings capture handlers and supporting context together, after tool ceilings; physical retries retain the same snapshot. |
-| WorkHub: precise execution commands | Typed commands carry stable operation IDs, exact targets and expected revisions. Correction atomically updates intent, delivery and canonical links; accepted work settles independently of plugin availability. Queue editing preserves the original submission proof. Plugins receive neither SQL transaction callbacks nor unrestricted execution handles. |
+| Skills: tool publication | Skill/SkillSearch are ordinary Contributions, without a package-name privilege. Per-step bindings capture handlers and supporting context together, after tool ceilings; physical retries retain the same snapshot. |
+| WorkHub: precise execution commands | Typed commands carry stable operation IDs, exact targets and expected revisions. Correction freezes plugin intent before exact Host control/submission and atomically commits its business receipt; accepted work settles independently of plugin availability. Queue editing preserves the original submission proof. Plugins receive neither SQL transaction callbacks nor unrestricted execution handles. |
 | WorkHub / Graph / Plan: selectable behavior | Open `BehaviorId` selects a typed Contribution; Graph/Swarm register independently. Host acceptance covers a non-builtin business. Preserve Session defaults and durable per-Turn choices; a requested unavailable behavior fails explicitly. Behavior preparation and input preparation are separate contracts, not one hook bus. |
-| Skills / Web / Recall / Insights: authorized services | Execution SDK reads are scoped to its submitted operation. Add bounded history/usage/resource queries and user/background resource capabilities when their first consumer needs them. Invocation, Remote and background callers retain distinct authority; broad `Executions`/Host handles are not a substitute. Domain catalog/mutation APIs can be typed plugin Services rather than new kernel methods. |
+| Skills / Web / Recall / Insights: authorized services | Execution SDK reads are scoped to its submitted operation. User/background resource capabilities and bounded Session metadata queries are public; cross-Session history/usage queries still need consumer-driven contracts. Invocation, Remote and background callers retain distinct authority; broad `Executions`/Host handles are not a substitute. Domain catalog/mutation APIs can be typed plugin Services rather than new kernel methods. |
 | Skills / WorkHub / default behavior: business UI and prompt context | Published Clients own the actual Skills picker/management and WorkHub surface through Slots and Remote. Native adapters validate the originating Host and document; connection replacement revokes old Remote leases without replay. Prompt Contributions own business instructions. Inactive features remain visibly unavailable without blocking ordinary chat. |
-| Other TS extension services | New SDK lacks equivalent public registrations/services for LSP routing, commands, Skills/Goals queries, shell environment contributions, Settings definitions, authorization flows and LLM adapter registration; direct ask/approval and attachment-service convenience APIs also need consumer-driven adaptation. Implement domain registries as plugin services where possible, retaining Host authority for sensitive actions. `llm.generate` is not adapter registration. |
+| Other TS extension services | New SDK lacks equivalent public registrations/services for LSP routing, commands, Skills/Goals queries, shell environment contributions, Settings definitions, authorization flows and LLM adapter registration; questions/forms and source-input/attachment-copy contracts are public; permission approvals remain Host-owned. Implement domain registries as plugin services where possible, retaining Host authority for sensitive actions. `llm.generate` is not adapter registration. |
 
 These are functional extension points to assess and implement, not a promise to copy every TS method.
 TS LLM adapter registration serves plugin model calls; it does not itself register a main Session transport.
@@ -128,23 +128,19 @@ not become a JS API. Do not postpone necessary API work by granting a built-in u
 
 Pending submissions belong to the Desktop document, scoped to the originating Host and Session;
 resolver withdrawal and Client replacement preserve their exact inputs and Stop intent.
-Accepted corrections persist prepared execution settings in the canonical log and settle without
-reloading plugin policy or current defaults. Legacy unresolved intents without preparation abort
-explicitly rather than reinterpret the request.
+Corrections persist frozen business intents before Host commands. Recovery observes exact receipts;
+it does not reinterpret uncertain work using current policy or defaults.
 
 ## Delivery order
 
-1. **Skills:** migrate existing discovery/invocation and finish governance/publication in one domain.
-   Exercise preparation, reserved registration, domain Services, prompt and real Desktop consumers.
-2. **WorkHub — migrated:** orchestration, correction, attachments, stop/resume, recovery and the
-   complete Client surface use plugin boundaries; precise Host commands preserve atomicity.
-3. **Default behavior and existing plugin convergence:** persona/workspace policy is a Contribution;
-   Graph uses narrow execution commands, and Scheduler uses activation-scoped scheduling services.
-   Preserve these boundaries when adding consumers.
-4. **Missing business domains:** complete Web, Recall and todo, then Plan/Goal and research/review;
+1. **Public API consumers — migrated:** Skills, default assistant, Scheduler, Graph and WorkHub use
+   the same scoped contracts as external plugins. Maintain Rust/JS parity as new consumers appear.
+2. **External acceptance:** the JS workflow fixture exercises UI consent, durable background work,
+   exact receipts, disable/reactivation and revocation across Host restart.
+3. **Missing business domains:** complete Web, Recall and todo, then Plan/Goal and research/review;
    finish external adapters and Insights/health. Reuse the domain boundaries rather than first
    implementing new business logic in Host and moving it later.
-5. **Remaining core parity:** complete Session lifecycle/lineage/transfer, policy, access/collaboration,
+4. **Remaining core parity:** complete Session lifecycle/lineage/transfer, policy, access/collaboration,
    Peer Mesh, providers and diagnostics. Pull required core commands into their consumer's earlier
    stage; core work is not blocked on all plugins or a marketplace. Assess Code Mode/tool assembly
    migration after the first domains establish a useful boundary, not as a prerequisite to parity.
@@ -195,6 +191,6 @@ Legacy state-root migration is a separate scope decision, not implicitly authori
 
 - [Host registry](../crates/runtime-host/src/server/operations.rs), [dispatch](../crates/runtime-host/src/server/dispatch.rs), [operation vocabulary](../crates/protocol/src/operation.rs).
 - [Execution preparation](../crates/runtime-host/src/execution/prepare/environment.rs), [tool assembly](../crates/runtime-host/src/execution/tools.rs), [policy consumers](../crates/runtime-host/src/server/configuration/policy.rs), [provider routing](../crates/runtime-host/src/provider_route.rs).
-- [Skills domain](../crates/skills/src/lib.rs), [input preparation](../crates/runtime-host/src/execution/input/prepared.rs), [WorkHub workflow](../crates/runtime-host/src/plugins/workhub/correction.rs), [Host commands](../crates/runtime-host/src/execution/workhub/commands.rs), [correction transaction](../crates/event-log/src/workhub/correction.rs), [default prompt](../crates/runtime-host/src/plugins/assistant/prompt.rs), [Graph wiring](../crates/runtime-host/src/plugins/graph.rs).
+- [Skills domain](../crates/skills/src/lib.rs), [input preparation](../crates/runtime-host/src/execution/input/prepared.rs), [WorkHub workflow](../crates/workhub/src/control.rs), [Host commands](../crates/runtime-host/src/execution/plugins.rs), [business transactions](../crates/workhub/src/repository.rs), [default prompt](../crates/assistant/src/prompt.rs), [Graph wiring](../crates/runtime-host/src/plugins/graph.rs).
 - [SDK contracts](../packages/plugin-sdk/README.md), [execution services](../crates/plugins/src/execution.rs), [Session behavior](../crates/plugins/src/session.rs), [Scheduler router](../crates/runtime-host/src/server/scheduler.rs).
 - TS [composition](../packages/runtime-host/src/server/execution-composition.ts), [interactive tools](../packages/runtime-host/src/server/interactive-run-composer.ts), [inspection](../packages/runtime-host/src/server/execution-inspect-coordinator.ts), [external imports](architecture/external-session-import-design.md).

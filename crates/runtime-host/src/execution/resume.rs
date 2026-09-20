@@ -25,10 +25,9 @@ use maka_runtime::{continuation::RunBoundary, event::Fact, input::InvocationInpu
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
-mod prepare;
-mod workhub;
+pub(super) mod prepare;
 
-enum Selection {
+pub(super) enum Selection {
     Ready(RunBoundary),
     Parked(TurnResumeParkReason),
 }
@@ -178,86 +177,79 @@ impl Executions {
             let Some(candidate) = prepared.take() else {
                 drop(admission);
                 prepared = Some(
-                    self.prepare_environment(
-                        &input.session_id,
-                        Some(connection),
-                        maka_client_capability::BindingMode::Strict,
-                        self.log
-                            .invocation_configuration(&source.invocation)
+                    async {
+                        let environment = self
+                            .prepare_environment(
+                                &input.session_id,
+                                Some(connection),
+                                maka_client_capability::BindingMode::Strict,
+                                self.log
+                                    .invocation_configuration(&source.invocation)
+                                    .await
+                                    .map_err(internal)?
+                                    .map(|configuration| configuration.orchestration_mode),
+                            )
+                            .await?;
+                        let run = self
+                            .prepare_resume(
+                                &session,
+                                source,
+                                input.turn_id.clone(),
+                                Some(fingerprint),
+                                prepare::Mode::Prepared(&environment),
+                            )
+                            .await?;
+                        let run = self
+                            .engine
+                            .prepare_continuation(run, &self.shutdown)
                             .await
-                            .map_err(internal)?
-                            .map(|configuration| configuration.orchestration_mode),
-                    )
+                            .map_err(|error| {
+                                failure(Code::OperationUnavailable, &error.to_string())
+                            })?;
+                        Ok::<_, maka_protocol::OperationError>((environment, run))
+                    }
                     .await,
                 );
                 continue;
             };
-            let candidate = match candidate {
+            let (candidate, run) = match candidate {
                 Ok(candidate) => candidate,
                 Err(error) if error.code == Code::OperationUnavailable => {
                     return Ok(TurnResumeStartResult::Parked {
-                        plan: parked(
-                            input.session_id,
-                            TurnResumeParkReason::SafetyObservationUnavailable,
-                        ),
+                        plan: parked(input.session_id, TurnResumeParkReason::SafetyCheckFailed),
                     });
                 }
                 Err(error) => return Err(error),
             };
-            let Some((environment, _input_admission)) =
+            let Some((_environment, _input_admission)) =
                 candidate.commit(self, &input.session_id).await?
             else {
                 continue;
             };
-            let run = match self
-                .prepare_resume(
-                    &session,
-                    source,
-                    input.turn_id,
-                    Some(fingerprint),
-                    prepare::Mode::Prepared(Box::new(environment)),
-                )
+            let invocation = run.invocation().clone();
+            let running = self
+                .engine
+                .start_continuation(run, self.shutdown.child_token())
                 .await
-            {
-                Ok(run) => run,
-                Err(error) if error.code == Code::OperationUnavailable => {
-                    return Ok(TurnResumeStartResult::Parked {
-                        plan: parked(
-                            input.session_id,
-                            TurnResumeParkReason::SafetyObservationUnavailable,
-                        ),
-                    });
-                }
-                Err(error) => return Err(error),
-            };
-            return self.launch_resume(run).await;
+                .map_err(|error| {
+                    if super::requires_drain(&error) {
+                        self.begin_drain();
+                    }
+                    super::execution_error(error)
+                })?;
+            self.track(running);
+            return self
+                .query(TurnQueryInput {
+                    session_id: invocation.session_id,
+                    turn_id: invocation.turn_id,
+                })
+                .await
+                .map(|turn| TurnResumeStartResult::Started { turn })
+                .map_err(|error| failure(Code::OutcomeUnknown, &error.message));
         }
     }
 
-    async fn launch_resume(
-        self: &Arc<Self>,
-        run: maka_agent::RunInput,
-    ) -> Result<TurnResumeStartResult> {
-        match self.engine.check_continuation(&run, &self.shutdown).await {
-            Ok(()) => {}
-            Err(RunError::Cancelled) => {
-                return Err(failure(Code::HostDraining, "Host is draining"));
-            }
-            Err(_) => {
-                return Ok(TurnResumeStartResult::Parked {
-                    plan: parked(
-                        run.invocation.session_id,
-                        TurnResumeParkReason::SafetyCheckFailed,
-                    ),
-                });
-            }
-        }
-        Ok(TurnResumeStartResult::Started {
-            turn: self.launch(run).await?,
-        })
-    }
-
-    async fn resume_session(&self, id: &str) -> Result<SessionConfiguration> {
+    pub(super) async fn resume_session(&self, id: &str) -> Result<SessionConfiguration> {
         if self.shutdown.is_cancelled() {
             return Err(failure(Code::HostDraining, "Host is draining"));
         }
@@ -283,7 +275,7 @@ impl Executions {
         Ok(session.configuration)
     }
 
-    async fn resume_source(&self, input: &TurnResumeQueryInput) -> Result<Selection> {
+    pub(super) async fn resume_source(&self, input: &TurnResumeQueryInput) -> Result<Selection> {
         use TurnResumeParkReason as Reason;
         let run_id = match &input.source_run_id {
             Some(id) => {

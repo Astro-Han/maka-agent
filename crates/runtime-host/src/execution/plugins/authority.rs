@@ -222,7 +222,7 @@ impl Executions {
                     source: None,
                 }),
             ),
-            Boundary::Profile => return Err(Error::Denied),
+            Boundary::Profile | Boundary::Directory { .. } => return Err(Error::Denied),
         };
         self.bind_plugin_authority(context, sessions, root, root_id, submission_stop)
     }

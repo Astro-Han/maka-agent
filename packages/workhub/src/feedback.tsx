@@ -19,14 +19,9 @@
 
 import { useEffect } from 'react';
 import type { ClientContext } from '@maka-agent/plugin-sdk/client';
-import type { DelegationFeedback, DelegationReference, FeedbackInput } from './slots.js';
-
-type Outcome =
-  | { ok: true; result: DelegationFeedback[] }
-  | { ok: false; error: { code: string; message: string } };
+import type { DelegationFeedback, FeedbackInput } from './slots.js';
 
 export function registerFeedback(context: ClientContext): void {
-  const read = context.remote.method<DelegationReference[], Outcome>('feedback');
   context.slots.register(
     'workhub.feedback',
     'delegations',
@@ -35,12 +30,13 @@ export function registerFeedback(context: ClientContext): void {
         const observation = new AbortController();
         void (async () => {
           const feedback: DelegationFeedback[] = [];
-          // Serial bounded batches avoid one request per historical assignment.
-          for (let offset = 0; offset < props.references.length; offset += 64) {
-            const outcome = await read(props.references.slice(offset, offset + 64));
+          const read = context.remote.method<string[], DelegationFeedback[]>('feedback');
+          for (let offset = 0; offset < props.references.length; offset += 32) {
+            const result = await read(
+              props.references.slice(offset, offset + 32).map(({ id }) => id),
+            );
             if (observation.signal.aborted || context.signal.aborted) return;
-            if (!outcome.ok) throw new Error(outcome.error.message);
-            feedback.push(...outcome.result);
+            feedback.push(...result);
           }
           if (!observation.signal.aborted && !context.signal.aborted) props.onFeedback(feedback);
         })().catch((error: unknown) => {

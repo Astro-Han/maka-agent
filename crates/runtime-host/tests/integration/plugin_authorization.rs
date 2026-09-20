@@ -153,6 +153,7 @@ async fn scenario() {
             success(peer.rpc("session.create", json!({"sessionId":"background-session", "workspace":{"kind":"host_path","path":fixture.workspace}, "executorId":"example.background","permissionMode":"bypass"})).await);
         }
         let mut publication = super::plugin_clients::publication("desktop", "inspect");
+        publication["services"] = json!([{"serviceId":"maka_notifications","version":"1"}]);
         let mut turn_only =
             super::plugin_clients::publication("desktop-turn", "turn_only")["offers"][0].clone();
         turn_only["affinity"] = json!("turn");
@@ -174,6 +175,10 @@ async fn scenario() {
             "operationId":"9d8b0ab1-200d-41c4-b05f-590471670d43", "title":"Use my Client", "target":{"kind":"session","sessionId":"background-session"}, "capabilities":["client_capabilities"]
         }}})).await)["grant"].clone();
         client_call(&mut peer, &client, &document, &client_grant).await;
+        let notification_grant = success(peer.rpc("plugin.authorization", json!({"client":client,"scope":"profile","command":{"kind":"approve","request":{
+            "operationId":"d20f56d8-cccd-45f0-ae1c-d5766680b70e", "title":"Read sessions and notify me", "target":{"kind":"profile"}, "capabilities":["notifications","read_sessions"]
+        }}})).await)["grant"].clone();
+        notification_call(&mut peer, &client, &document, &notification_grant).await;
         foreign.close().await;
         if !reopened {
             assert_eq!(
@@ -232,7 +237,7 @@ async fn scenario() {
             root_grant = success(peer.rpc("plugin.authorization", json!({
                 "client":client,"scope":"profile","command":{"kind":"approve","request":{
                     "operationId":uuid::Uuid::new_v4(),"title":"Create independent Sessions",
-                    "target":{"kind":"workspace","workspace":{"kind":"host_path","path":fixture.workspace},"permissionMode":"explore"},
+                    "target":{"kind":"plugin_workspace","permissionMode":"explore"},
                     "capabilities":["executions"]
                 }}
             })).await)["grant"].clone();
@@ -247,6 +252,36 @@ async fn scenario() {
             }),
         )
         .await;
+        let managed = success(
+            peer.rpc(
+                "session.catalog.query",
+                json!({
+                    "kind":"get", "sessionId":created["root"]["sessionId"]
+                }),
+            )
+            .await,
+        )["session"]
+            .clone();
+        let private_workspace =
+            std::path::Path::new(managed["workspace"]["hostCwd"].as_str().unwrap());
+        assert!(
+            private_workspace.starts_with(
+                fixture
+                    .workspace
+                    .parent()
+                    .unwrap()
+                    .join("root")
+                    .canonicalize()
+                    .unwrap()
+                    .join("plugin-workspaces")
+            )
+        );
+        assert_ne!(private_workspace, fixture.workspace.canonicalize().unwrap());
+        let ordinary = peer.rpc("session.configuration.update", json!({
+            "sessionId":created["root"]["sessionId"], "expectedRevision":managed["revision"],
+            "patch":{"permissionMode":"bypass"}
+        })).await;
+        assert_eq!(ordinary["ok"], false, "{ordinary}");
         if reopened {
             assert_eq!(created, root_result);
         } else {
@@ -335,6 +370,55 @@ async fn scenario() {
     http_stop.cancel();
     http.await.unwrap();
 }
+async fn notification_call(peer: &mut Peer, client: &Value, document: &Value, grant: &Value) {
+    let binding = json!({"client":client,"method":"notify","sessionId":null});
+    let target = success(
+        peer.rpc("plugin.remote", json!({"kind":"bind","binding":binding}))
+            .await,
+    )["target"]
+        .clone();
+    peer.send_rpc(
+        "notification",
+        "plugin.remote",
+        json!({
+            "kind":"call","binding":binding,"target":target,"document":document,
+            "input":{"grant":grant["id"],"operation":"notification"}
+        }),
+    );
+    let mut invocation = None;
+    let mut admitted = false;
+    loop {
+        let frame = peer.frame().await;
+        match frame["kind"].as_str() {
+            Some("client.capability.service_call") => {
+                assert!(invocation.is_none(), "notification replayed");
+                assert_eq!(frame["serviceId"], "maka_notifications");
+                assert_eq!(frame["method"], "send");
+                assert_eq!(frame["input"]["packageId"], "example.background");
+                assert_eq!(
+                    frame["input"]["notification"]["destination"]["kind"],
+                    "local"
+                );
+                assert!(frame.get("sessionId").is_none());
+                invocation = Some(frame["invocationId"].clone());
+                peer.send_frame(json!({"kind":"client.capability.accepted","invocationId":frame["invocationId"],"admissionEvidence":{"kind":"none"}}));
+            }
+            Some("client.capability.admitted") => {
+                assert!(!admitted);
+                assert_eq!(Some(&frame["invocationId"]), invocation.as_ref());
+                admitted = true;
+                peer.send_frame(json!({"kind":"client.capability.result","invocationId":frame["invocationId"],"result":{"content":[],"structuredContent":{"ok":true}}}));
+            }
+            _ if frame["requestId"] == "notification" => {
+                assert_eq!(success(frame)["value"], true);
+                assert!(admitted);
+                break;
+            }
+            _ => assert!(frame.get("requestId").is_none(), "{frame}"),
+        }
+    }
+}
+
 async fn client_call(peer: &mut Peer, client: &Value, document: &Value, grant: &Value) {
     let binding = json!({"client":client,"method":"clients","sessionId":"background-session"});
     let target = success(

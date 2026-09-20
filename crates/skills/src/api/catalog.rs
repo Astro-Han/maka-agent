@@ -106,6 +106,7 @@ pub enum CatalogItem {
 )]
 pub enum CatalogResult {
     Page {
+        user_recovery: Option<String>,
         view: CatalogView,
         revision: String,
         items: Vec<CatalogItem>,

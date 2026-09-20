@@ -158,7 +158,6 @@ impl EventLog {
         crate::steering::validate_append(transaction, event).await?;
         crate::message_identity::validate(transaction, event).await?;
         crate::message_admissions::consume(transaction, event).await?;
-        crate::workhub::apply(transaction, event).await?;
         crate::context::validate_append(transaction, event).await?;
         crate::archive::validate_append(transaction, event).await?;
         if matches!(event.fact, Fact::InvocationEnded { .. }) {

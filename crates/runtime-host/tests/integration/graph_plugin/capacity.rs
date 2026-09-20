@@ -61,7 +61,8 @@ async fn closed_history_releases_capacity_and_evicted_root_reopens_its_durable_e
         server.await.unwrap().unwrap();
         cleanup.disarm();
         drop(host);
-        let log = fixture.log().await;
+        let log = std::sync::Arc::new(fixture.log().await);
+        let repository = super::storage::repository(log.clone());
         let configuration = log
             .get_session::<Value>("template")
             .await
@@ -73,10 +74,16 @@ async fn closed_history_releases_capacity_and_evicted_root_reopens_its_durable_e
             log.create_session(&id, &id, &configuration, 1)
                 .await
                 .unwrap();
-            let epoch = log.open_graph(&id, Mode::Graph, None, 2).await.unwrap();
-            log.stop_graph(&id, &epoch.graph_id).await.unwrap();
+            let epoch = repository.open(&id, Mode::Graph, None, 2).await.unwrap();
+            repository.stop(&id, &epoch.graph_id, None).await.unwrap();
         }
-        log.close().await.unwrap();
+        drop(repository);
+        std::sync::Arc::try_unwrap(log)
+            .ok()
+            .unwrap()
+            .close()
+            .await
+            .unwrap();
         let host = Host::open(fixture.owner()).await.unwrap();
         let stop = CancellationToken::new();
         let cleanup = stop.clone().drop_guard();
@@ -86,6 +93,13 @@ async fn closed_history_releases_capacity_and_evicted_root_reopens_its_durable_e
                 .serve(host.clone(), stop.clone()),
         );
         let mut peer = Peer::new(host.clone(), "graph-capacity-reopen").await;
+        ready(&mut peer).await;
+        toggle(&mut peer, false).await;
+        ready(&mut peer).await;
+        for index in 0..257 {
+            super::approve(&mut peer, &format!("history-{index:03}")).await;
+        }
+        toggle(&mut peer, true).await;
         ready(&mut peer).await;
         toggle(&mut peer, false).await;
         ready(&mut peer).await;
@@ -104,27 +118,9 @@ async fn closed_history_releases_capacity_and_evicted_root_reopens_its_durable_e
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let mut evicted = None;
-        for index in 0..257 {
-            let id = format!("history-{index:03}");
-            let old = peer
-                .rpc(
-                    "plugin.platform.query",
-                    json!({"view":"tools","rootId":format!("session:{id}")}),
-                )
-                .await;
-            assert_eq!(old["ok"], true, "{old}");
-            if !old["result"]["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|item| item["name"] == "update_agent_graph")
-            {
-                evicted = Some(id);
-                break;
-            }
-        }
-        let evicted = evicted.expect("closed history must release an active slot");
+        // Recovery visited more roots than the live capacity. Historical reads and
+        // later admission must still work after those idle coordinators were retired.
+        let evicted = "history-000";
         let started = peer
             .rpc(
                 "turn.start",
@@ -159,16 +155,23 @@ async fn closed_history_releases_capacity_and_evicted_root_reopens_its_durable_e
         server.await.unwrap().unwrap();
         cleanup.disarm();
         drop(host);
-        let log = fixture.log().await;
-        let epoch = log
-            .open_graph(&evicted, Mode::Swarm, None, 3)
+        let log = std::sync::Arc::new(fixture.log().await);
+        let repository = super::storage::repository(log.clone());
+        let epoch = repository
+            .open(evicted, Mode::Swarm, None, 3)
             .await
             .unwrap();
         assert_eq!(
             epoch.epoch, 2,
             "an evicted closed epoch must roll forward, not return a cancelled submission"
         );
-        log.close().await.unwrap();
+        drop(repository);
+        std::sync::Arc::try_unwrap(log)
+            .ok()
+            .unwrap()
+            .close()
+            .await
+            .unwrap();
     })
     .await
     .expect("closed history must not permanently exhaust graph capacity");

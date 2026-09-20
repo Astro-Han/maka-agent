@@ -17,98 +17,77 @@
  * under the License.
  */
 
-//! Governance re-reads raw artifacts through the same containment rules as discovery.
-use super::{SkillLocation, directory::Directory, source::read_file};
-use crate::plugin::Error;
-use std::path::Path;
-use tokio_util::sync::CancellationToken;
+use super::SkillLocation;
+use maka_plugins::{
+    filesystem::entries::{ListFiles, ReadFile},
+    filesystem::{ReadDirectory, ReadError, ReadViewInput, Symlinks},
+};
 
-/// This is a current path projection for an OS open action, not a file capability.
-/// Subsequent file operations must still enforce their own containment checks.
-pub(crate) fn resolve_path(
+/// An OS-open projection, not authority to reopen a pathname. Validate through
+/// the admitted read capability; later OS actions must enforce their own boundary.
+pub(crate) async fn resolve_path(
+    files: &ReadDirectory,
     location: &SkillLocation,
     target: crate::api::PathTarget,
 ) -> crate::api::ResolvePathResult {
-    use crate::api::{PathRejection as Rejection, PathTarget, ResolvePathResult as Result};
-    let resolve = || -> std::result::Result<String, Rejection> {
-        let root = location
-            .discovery_root
-            .canonicalize()
-            .map_err(|_| Rejection::Missing)?;
-        let directory = location
-            .path
-            .canonicalize()
-            .map_err(|_| Rejection::Missing)?;
-        if !directory.starts_with(&root) {
-            return Err(Rejection::BlockedPath);
-        }
-        let path = match target {
-            PathTarget::Directory => directory,
-            PathTarget::File => directory
-                .join("SKILL.md")
-                .canonicalize()
-                .map_err(|_| Rejection::Missing)?,
-        };
-        if !path.starts_with(&root) {
-            return Err(Rejection::BlockedPath);
-        }
-        let metadata = path.metadata().map_err(|_| Rejection::Missing)?;
-        match target {
-            PathTarget::Directory if !metadata.is_dir() => return Err(Rejection::NotDirectory),
-            PathTarget::File if !metadata.is_file() => return Err(Rejection::NotFile),
-            _ => {}
-        }
-        path.to_str()
-            .filter(|path| path.len() <= 4096)
-            .map(str::to_owned)
-            .ok_or(Rejection::BlockedPath)
-    };
-    match resolve() {
-        Ok(path) => Result::Resolved { path, target },
-        Err(reason) => Result::Rejected { reason },
+    use crate::api::{PathRejection as Rejection, PathTarget, ResolvePathResult as Outcome};
+    let rejected = |reason| Outcome::Rejected { reason };
+    if files.location() != location.discovery_root {
+        return rejected(Rejection::BlockedPath);
     }
-}
-
-pub(crate) struct Artifacts {
-    pub content: Option<Vec<u8>>,
-    pub baseline: Option<Vec<u8>>,
-}
-
-pub(crate) fn read(
-    location: &SkillLocation,
-    baseline: bool,
-    cancellation: &CancellationToken,
-) -> Result<Artifacts, Error> {
-    let relative = location
-        .path
-        .strip_prefix(&location.discovery_root)
-        .map_err(|error| Error::Source(error.to_string()))?;
-    let parent = relative
-        .parent()
-        .ok_or_else(|| Error::Source("Missing Skill parent".into()))?;
-    let name = relative
-        .file_name()
-        .ok_or_else(|| Error::Source("Missing Skill name".into()))?;
-    let directory = Directory::capture(&location.discovery_root, parent)
-        .and_then(|directory| directory.child(Path::new(name)))
-        .map_err(|error| Error::Source(error.to_string()))?;
-    let content = read_file(&directory, "SKILL.md", 1024 * 1024, cancellation).map_err(failure)?;
-    let baseline = if baseline {
-        match directory.child(Path::new(".maka/baseline")) {
-            Ok(directory) => {
-                read_file(&directory, "SKILL.md", 1024 * 1024, cancellation).map_err(failure)?
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(Error::Source(error.to_string())),
-        }
-    } else {
-        None
+    let path = match target {
+        PathTarget::Directory => location.path.clone(),
+        PathTarget::File => location.path.join("SKILL.md"),
     };
-    Ok(Artifacts { content, baseline })
-}
-fn failure(error: super::source::ReadError) -> Error {
-    match error {
-        super::source::ReadError::Cancelled => Error::Retired,
-        super::source::ReadError::Failure(reason) => Error::Source(format!("{reason:?}")),
+    let Ok(relative) = path.strip_prefix(files.location()) else {
+        return rejected(Rejection::BlockedPath);
+    };
+    let Some(parts) = relative
+        .components()
+        .map(|part| match part {
+            std::path::Component::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()
+    else {
+        return rejected(Rejection::BlockedPath);
+    };
+    let relative = parts.join("/");
+    let result = match target {
+        PathTarget::Directory => files
+            .list(ListFiles {
+                path: relative,
+                after: None,
+                limit: 1,
+            })
+            .await
+            .map(|_| ()),
+        PathTarget::File => files
+            .read(ReadViewInput {
+                file: ReadFile {
+                    path: relative,
+                    offset: 0,
+                    limit: 1,
+                },
+                symlinks: Symlinks::Reject,
+            })
+            .await
+            .map(|_| ()),
+    };
+    match result {
+        Ok(()) => match path.to_str().filter(|path| path.len() <= 4096) {
+            Some(path) => Outcome::Resolved {
+                path: path.into(),
+                target,
+            },
+            None => rejected(Rejection::BlockedPath),
+        },
+        Err(ReadError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            rejected(Rejection::Missing)
+        }
+        Err(ReadError::Io(error)) if error.kind() == std::io::ErrorKind::NotADirectory => {
+            rejected(Rejection::NotDirectory)
+        }
+        Err(_) => rejected(Rejection::BlockedPath),
     }
 }

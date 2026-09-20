@@ -46,6 +46,7 @@ pub(super) enum Request {
         page: Option<Page>,
     },
     Mutate {
+        grant: Option<maka_plugins::authorization::Id>,
         expected_revision: String,
         mutation: Mutation,
     },
@@ -63,6 +64,10 @@ pub(super) struct Page {
 }
 
 impl Request {
+    pub(super) fn requires_user_files(&self) -> bool {
+        matches!(self, Self::Mutate { mutation: Mutation::Delete { reference }, .. }
+            if reference.starts_with("user:"))
+    }
     pub(super) async fn execute(
         self,
         skills: &Skills,
@@ -81,7 +86,7 @@ impl Request {
                             reference,
                             target,
                         },
-                        &view.workspace,
+                        view.files,
                     )
                     .await
                     .map_err(failure)?,
@@ -97,7 +102,7 @@ impl Request {
                 };
                 let snapshot = if view.tools.contains("Skill") {
                     skills
-                        .capture(&view.workspace.host_cwd, view.tools)
+                        .capture(&view.files, view.tools)
                         .await
                         .map_err(failure)?
                 } else {
@@ -127,23 +132,26 @@ impl Request {
                 };
                 encode(
                     skills
-                        .query(&input, view.workspace)
+                        .query(&input, view.workspace, view.files)
                         .await
                         .map_err(failure)?,
                 )
             }
             Request::Mutate {
+                grant,
                 expected_revision,
                 mutation,
             } => encode(
                 skills
                     .mutate(
                         MutateInput {
+                            grant,
                             context,
                             expected_revision,
                             mutation,
                         },
                         view.workspace,
+                        view.files,
                     )
                     .await
                     .map_err(failure)?,
@@ -160,6 +168,7 @@ impl Request {
                             reference,
                         },
                         view.workspace,
+                        view.files,
                     )
                     .await
                     .map_err(failure)?,

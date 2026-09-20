@@ -31,7 +31,6 @@ mod executor;
 mod handoff;
 pub use handoff::PendingHandoff;
 pub mod composition;
-pub mod graph;
 pub mod interactions;
 pub mod message_admissions;
 mod message_identity;
@@ -56,7 +55,6 @@ mod tool_calls;
 mod tool_payloads;
 pub mod transcript;
 pub mod turns;
-pub mod workhub;
 pub mod workspace;
 
 use std::path::Path;

@@ -34,7 +34,10 @@ use maka_runtime_host::server::{Host, local::LocalListener};
 use serde_json::json;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+mod attachments;
 mod boundary;
+mod interaction;
+mod messages;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plugin_retirement_stops_admission_not_accepted_work_and_reactivation_keeps_receipts() {
@@ -80,6 +83,8 @@ async fn scenario() {
     };
     let mut original = None;
     let mut original_patch = None;
+    let mut offered = None;
+    let mut queued = None;
     for reopened in [false, true] {
         let host = Host::open_with_options(
             fixture.owner(),
@@ -183,7 +188,13 @@ async fn scenario() {
                 thinking_level: None,
             }),
         };
-        let child = commands.create_child(provision.clone()).await.unwrap();
+        let restored = commands.restore_child(provision.clone()).await.unwrap();
+        let child = if reopened {
+            restored.expect("restore existing child without touching its dirty workspace")
+        } else {
+            assert!(restored.is_none());
+            commands.create_child(provision.clone()).await.unwrap()
+        };
         assert!(matches!(
             commands
                 .create_child(CreateChild {
@@ -195,6 +206,7 @@ async fn scenario() {
                 .await,
             Err(CommandError::Denied)
         ));
+        attachments::verify(&host, &mut peer, commands.clone(), &child.session_id).await;
         let request = Submit {
             session_id: child.session_id.clone(),
             ..request.clone()
@@ -202,7 +214,7 @@ async fn scenario() {
         let mut changed_provision = provision.clone();
         changed_provision.name = "different".into();
         assert!(matches!(
-            commands.create_child(changed_provision).await,
+            commands.restore_child(changed_provision).await,
             Err(CommandError::Conflict)
         ));
         let mut foreign = request.clone();
@@ -211,9 +223,46 @@ async fn scenario() {
             commands.submit(foreign).await,
             Err(CommandError::Denied)
         ));
+        if !reopened {
+            let blocked = Submit {
+                content: "block".into(),
+                ..request.clone()
+            };
+            assert!(matches!(
+                commands.submit(blocked).await,
+                Err(CommandError::Invalid(_))
+            ));
+            assert!(matches!(
+                commands.query(request.operation_id.clone()).await,
+                Err(CommandError::NotFound)
+            ));
+        }
         let receipt = commands.submit(request.clone()).await.unwrap();
         if reopened {
+            let input = commands
+                .input(receipt.invocation.clone())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(input.text.contains("work"));
+            assert_eq!(input.text.matches("PUBLIC_INPUT_PREPARED").count(), 1);
+            let mut wrong = receipt.invocation.clone();
+            wrong.turn_id = "unrelated".into();
+            assert!(matches!(
+                commands.input(wrong).await,
+                Err(CommandError::NotFound)
+            ));
+            let mut foreign = receipt.invocation.clone();
+            foreign.session_id = "ungranted".into();
+            assert!(matches!(
+                commands.input(foreign).await,
+                Err(CommandError::Denied)
+            ));
+        }
+        if reopened {
             assert_eq!(original.as_ref(), Some(&receipt));
+            interaction::replay(commands.as_ref(), offered.as_ref().unwrap()).await;
+            messages::replay(commands.as_ref(), queued.as_ref().unwrap()).await;
             assert_eq!(
                 commands
                     .workspace_patch(request.operation_id.clone())
@@ -243,7 +292,7 @@ async fn scenario() {
                 .await
                 .unwrap();
         } else {
-            original = Some(receipt);
+            original = Some(receipt.clone());
             assert!(matches!(
                 commands.workspace_patch(request.operation_id.clone()).await,
                 Err(CommandError::Busy)
@@ -255,6 +304,22 @@ async fn scenario() {
                     commands.query(request.operation_id.clone()).await
                 ),
             };
+            assert!(
+                active.body["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|message| {
+                        message["role"] == "user"
+                            && message["content"].as_str().is_some_and(|text| {
+                                text.matches("PUBLIC_INPUT_PREPARED").count() == 1
+                            })
+                    }),
+                "public submit must freeze prepared input before acceptance: {}",
+                active.body
+            );
+            queued = Some(messages::admit(commands.as_ref(), receipt.invocation.clone()).await);
+            offered = Some(interaction::offer(commands.as_ref(), receipt.invocation).await);
             assert!(
                 active.body["messages"]
                     .as_array()
@@ -289,6 +354,7 @@ async fn scenario() {
                 commands.submit(request.clone()).await,
                 Err(CommandError::Revoked)
             ));
+            interaction::answer(&mut peer, offered.as_ref().unwrap()).await;
             assert!(
                 active.body["tools"]
                     .as_array()
@@ -305,6 +371,11 @@ async fn scenario() {
                 ))
                 .unwrap();
             let next = requests.recv().await.unwrap();
+            assert!(
+                next.body
+                    .to_string()
+                    .contains("Keep this accepted steering")
+            );
             assert!(
                 next.body["tools"].as_array().unwrap().iter().all(|tool| {
                     matches!(
@@ -336,7 +407,12 @@ async fn scenario() {
                 .authorize_plugin_execution(replacement.context(), &["plugin-session".into()])
                 .await
                 .unwrap();
-            assert_eq!(recovered.create_child(provision).await.unwrap(), child);
+            assert_eq!(
+                recovered.restore_child(provision).await.unwrap(),
+                Some(child.clone())
+            );
+            interaction::replay(recovered.as_ref(), offered.as_ref().unwrap()).await;
+            messages::replay(recovered.as_ref(), queued.as_ref().unwrap()).await;
             loop {
                 let observation = recovered.query(request.operation_id.clone()).await.unwrap();
                 if let Progress::Ended { outcome } = observation.progress {
@@ -400,6 +476,29 @@ async fn scenario() {
                 }
             };
             assert!(patch.bytes > 0);
+            let chunk = recovered
+                .artifact(maka_plugins::execution::ReadArtifact {
+                    operation_id: request.operation_id.clone(),
+                    artifact_id: patch.artifact_id.clone(),
+                    offset: 0,
+                    limit: 4096,
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(chunk.total_bytes, patch.bytes);
+            assert!(!chunk.bytes.is_empty());
+            assert!(
+                recovered
+                    .artifact(maka_plugins::execution::ReadArtifact {
+                        operation_id: "unknown-operation".into(),
+                        artifact_id: patch.artifact_id.clone(),
+                        offset: 0,
+                        limit: 4096,
+                    })
+                    .await
+                    .is_err()
+            );
             assert_eq!(patch.session_id, child.session_id);
             original_patch = Some(patch);
             std::fs::write(
@@ -490,6 +589,12 @@ impl maka_plugins::kernel::Plugin for Finish {
             staged
                 .insert("FinishPlugin", tool)
                 .map_err(|error| error.to_string())?;
+            staged
+                .insert(
+                    "prepare-public-input",
+                    maka_plugins::input::InputPreparation(std::sync::Arc::new(Finish)),
+                )
+                .map_err(|error| error.to_string())?;
             Ok(staged)
         })
     }
@@ -505,5 +610,36 @@ impl maka_runtime::tools::ToolExecutor for Finish {
         _: CancellationToken,
     ) -> maka_runtime::tools::ToolFuture {
         Box::pin(async move { Ok(input) })
+    }
+}
+
+impl maka_plugins::input::Provider for Finish {
+    fn prepare(
+        &self,
+        mut request: maka_plugins::input::Request,
+        _: maka_plugins::filesystem::ReadDirectory,
+    ) -> futures_util::future::BoxFuture<
+        'static,
+        Result<maka_plugins::input::Outcome, maka_plugins::Error>,
+    > {
+        Box::pin(async move {
+            use maka_plugins::input::Outcome;
+            match request.content.text.as_str() {
+                "block" => Ok(Outcome::Blocked {
+                    message: "Input explicitly blocked".into(),
+                    receipt: json!(null),
+                }),
+                "work" => {
+                    request.content.text.push_str("\nPUBLIC_INPUT_PREPARED");
+                    Ok(Outcome::Ready {
+                        content: request.content,
+                        receipt: json!({"prepared":true}),
+                        required_tools: Default::default(),
+                        basis: None,
+                    })
+                }
+                _ => Ok(Outcome::Unchanged),
+            }
+        })
     }
 }

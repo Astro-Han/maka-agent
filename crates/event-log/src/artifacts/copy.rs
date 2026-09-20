@@ -111,3 +111,54 @@ pub(crate) async fn copy_in_transaction(
     }
     advance(tx, target_session).await
 }
+
+impl crate::EventLog {
+    /// Idempotent immutable copy, authorized by Host at both endpoints. Payloads
+    /// stay inside SQLite; even a 50 MiB attachment never crosses a V8 heap.
+    pub async fn copy_plugin_attachment(
+        &self,
+        namespace: &maka_plugins::storage::Namespace,
+        request: maka_plugins::execution::CopyAttachment,
+    ) -> Result<AttachmentRef, StoreError> {
+        use sha2::{Digest, Sha256};
+        use sqlx::Connection;
+        self.validate_root()?;
+        request
+            .validate()
+            .map_err(|error| invalid(&error.to_string()))?;
+        let identity = serde_json::to_vec(&(namespace.package(), namespace.scope(), &request))?;
+        let id = format!("attachment-{:x}", Sha256::digest(identity));
+        let mut destination = request.attachment.clone();
+        destination.storage_ref = StorageRef::SessionFile {
+            session_id: request.target_session_id.clone(),
+            relative_path: id.clone(),
+        };
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
+                    let created_at =
+                        match read_record(&mut tx, &request.target_session_id, &id).await? {
+                            Some((artifact, _)) => artifact.created_at,
+                            None => std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_err(|error| invalid(&error.to_string()))?
+                                .as_millis()
+                                .try_into()
+                                .map_err(|_| invalid("clock overflow"))?,
+                        };
+                    copy_in_transaction(
+                        &mut tx,
+                        &request.attachment,
+                        &destination,
+                        &id,
+                        created_at,
+                    )
+                    .await?;
+                    tx.commit().await.map_err(StoreError::CommitUnknown)?;
+                    Ok(destination)
+                })
+            })
+            .await
+    }
+}

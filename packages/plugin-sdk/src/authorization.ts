@@ -25,7 +25,8 @@ export type AuthorizationCapability =
   | 'processes'
   | 'client_capabilities'
   | 'executions'
-  | 'notifications';
+  | 'notifications'
+  | 'read_sessions';
 export type AuthorizationScope = 'profile' | `session:${string}`;
 export interface AuthorizationRequest {
   /** Retain across lost replies; changing the proposal requires a new UUID. */
@@ -34,6 +35,8 @@ export interface AuthorizationRequest {
   readonly capabilities: readonly AuthorizationCapability[];
   readonly target:
     | { readonly kind: 'profile' }
+    | { readonly kind: 'plugin_workspace'; readonly permissionMode: 'explore' | 'ask' | 'bypass' }
+    | { readonly kind: 'directory'; readonly path: string }
     | { readonly kind: 'session'; readonly sessionId: string }
     | {
         readonly kind: 'workspace';
@@ -49,6 +52,26 @@ export interface AuthorizationGrant {
   readonly request: AuthorizationRequest;
   readonly revoked: boolean;
 }
+/** Resolved observation, not a capability. Paths may differ from proposal aliases. */
+export type AuthorizationBoundary =
+  | { readonly kind: 'profile' }
+  | { readonly kind: 'directory'; readonly path: string; readonly identity: string }
+  | {
+      readonly kind: 'session';
+      readonly workspaceIdentity: string;
+      readonly boundary: {
+        readonly sessionId: string;
+        readonly boundaryRevision: number;
+        readonly permissionMode: 'explore' | 'ask' | 'bypass';
+        readonly cwd: string;
+      };
+    }
+  | {
+      readonly kind: 'workspace';
+      readonly workspaceIdentity: string;
+      readonly permissionMode: 'explore' | 'ask' | 'bypass';
+      readonly workspace: import('./execution.js').SessionConfiguration['workspace'];
+    };
 export interface ClientAuthorization {
   /** The application presents consent outside plugin UI. Cancellation returns null. */
   approve(

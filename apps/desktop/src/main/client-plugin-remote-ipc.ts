@@ -20,6 +20,8 @@
 import { HOST_OPERATION_SPECS, type PluginRemoteInput, type PluginRemoteResult, type PluginAuthorizationInput, type PluginAuthorizationResult } from '@maka/runtime-host/protocol';
 import type { IpcMain, IpcMainInvokeEvent, WebContents } from 'electron';
 import { isAbsolute } from 'node:path';
+import { RuntimeHostOperationError } from '@maka/runtime-host/client';
+import type { RemoteFailure } from '@maka-agent/plugin-sdk/client';
 import { randomUUID } from 'node:crypto';
 import type { PluginClientQueryInput } from '@maka/runtime-host/protocol';
 
@@ -59,7 +61,18 @@ export function registerClientPluginRemoteIpc(input: {
   const epoch = randomUUID();
   const draining = new Set<Promise<unknown>>();
   let closed = false;
-  const request = (value: PluginRemoteInput) => input.client.request('plugin.remote', value, 40_000);
+  const request = async (value: PluginRemoteInput): Promise<PluginRemoteResult | RemoteFailure> => {
+    try { return await input.client.request('plugin.remote', value, 40_000); }
+    catch (error) {
+      // Electron does not preserve custom Error properties across invoke(). Keep
+      // confirmed Host outcomes as data; transport failures remain exceptions.
+      if (error instanceof RuntimeHostOperationError && error.operation === 'plugin.remote' &&
+          HOST_OPERATION_SPECS['plugin.remote'].errors.some((code) => code === error.code)) {
+        return { kind: 'remote_error', code: error.code as RemoteFailure['code'], message: error.message };
+      }
+      throw error;
+    }
+  };
   const closeDocument = (document: string) => input.client.request(
     'plugin.remote', { kind: 'close_document', document }, 10_000,
   ).catch(input.report);
@@ -109,7 +122,7 @@ export function registerClientPluginRemoteIpc(input: {
     return { epoch, hostEpoch: input.client.hostEpoch };
   });
 
-  input.ipcMain.handle('plugins:remote', async (event, nonce: unknown, expectedEpoch: unknown, raw: unknown): Promise<PluginRemoteResult | { kind: 'connection_retired' }> => {
+  input.ipcMain.handle('plugins:remote', async (event, nonce: unknown, expectedEpoch: unknown, raw: unknown): Promise<PluginRemoteResult | RemoteFailure | { kind: 'connection_retired' }> => {
     const value = HOST_OPERATION_SPECS['plugin.remote'].decodeInput(raw);
     const owner = ownerFor(event, nonce);
     if (expectedEpoch !== epoch) return { kind: 'connection_retired' };
@@ -119,6 +132,7 @@ export function registerClientPluginRemoteIpc(input: {
       return track(owner.pending, (async () => {
         try {
           const result = await request(value);
+          if (result.kind === 'remote_error') return result;
           if (result.kind !== 'document') throw new Error('Unexpected Remote document result');
           if (owner.closed) {
             await closeDocument(result.document);

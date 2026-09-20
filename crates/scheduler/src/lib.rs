@@ -25,6 +25,7 @@ mod cron;
 pub mod delivery;
 pub mod owner;
 pub mod plan;
+pub mod plugin;
 pub mod repository;
 pub mod schedule;
 pub mod task;
@@ -32,6 +33,10 @@ pub mod view;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error(transparent)]
+    Authority(#[from] maka_plugins::execution::CommandError),
+    #[error(transparent)]
+    Resource(#[from] maka_runtime::tools::ToolError),
     #[error("scheduled task does not exist")]
     NotFound,
     #[error("scheduler is closed")]

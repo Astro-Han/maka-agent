@@ -113,13 +113,16 @@ impl ToolScope {
                 .catch_unwind()
                 .await;
                 let result = result.unwrap_or_else(|_| {
-                    Err(ToolError::OutcomeUnknown("tool executor panicked".into()))
+                    Err(ToolError::CleanupUnconfirmed(
+                        "tool executor panicked".into(),
+                    ))
                 });
                 {
                     let mut admission = scope.admission.lock().unwrap();
                     admission.in_flight -= 1;
-                    if let Err(error @ (ToolError::Persistence(_) | ToolError::OutcomeUnknown(_))) =
-                        &result
+                    if let Err(
+                        error @ (ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_)),
+                    ) = &result
                     {
                         admission.fatal.get_or_insert_with(|| error.clone());
                         scope.cancellation.cancel();

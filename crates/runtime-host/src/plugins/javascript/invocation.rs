@@ -26,16 +26,24 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Calls {
+    pub revisions: super::revision::Revisions,
     issuer: maka_plugins::call::Issuer,
     invocations: Mutex<BTreeMap<String, Authority>>,
     remotes: Mutex<BTreeMap<String, maka_plugins::remote::Caller>>,
+    reads: Mutex<BTreeMap<String, ReadEntry>>,
+}
+struct ReadEntry {
+    view: maka_plugins::filesystem::ReadDirectory,
+    remote: Option<String>,
 }
 impl Calls {
     pub fn new(issuer: maka_plugins::call::Issuer) -> Self {
         Self {
             issuer,
+            revisions: Default::default(),
             invocations: Default::default(),
             remotes: Default::default(),
+            reads: Default::default(),
         }
     }
     pub fn forward(self: &Arc<Self>, authority: Authority) -> Result<Guard, ToolError> {
@@ -66,6 +74,63 @@ impl Calls {
             .filter(|call| !call.cancellation.is_cancelled())
             .cloned()
             .ok_or(maka_plugins::Error::Retired)
+    }
+
+    pub fn borrow_read(
+        self: &Arc<Self>,
+        view: maka_plugins::filesystem::ReadDirectory,
+    ) -> Result<ReadGuard, maka_plugins::Error> {
+        let mut reads = self.reads.lock().unwrap();
+        if reads.len() >= 128 {
+            return Err(maka_plugins::Error::Invalid(
+                "read-view capacity exceeded".into(),
+            ));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        reads.insert(id.clone(), ReadEntry { view, remote: None });
+        Ok(ReadGuard {
+            calls: self.clone(),
+            id,
+        })
+    }
+
+    pub fn read(
+        &self,
+        id: &str,
+    ) -> Result<maka_plugins::filesystem::ReadDirectory, maka_plugins::Error> {
+        self.reads
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|entry| entry.view.clone())
+            .ok_or(maka_plugins::Error::Retired)
+    }
+
+    pub fn remote_read(
+        &self,
+        authority: &str,
+        view: maka_plugins::filesystem::ReadDirectory,
+    ) -> Result<String, maka_plugins::Error> {
+        let remotes = self.remotes.lock().unwrap();
+        let caller = remotes.get(authority).ok_or(maka_plugins::Error::Retired)?;
+        if caller.cancellation.is_cancelled() {
+            return Err(maka_plugins::Error::Retired);
+        }
+        let mut reads = self.reads.lock().unwrap();
+        if reads.len() >= 128 {
+            return Err(maka_plugins::Error::Invalid(
+                "read-view capacity exceeded".into(),
+            ));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        reads.insert(
+            id.clone(),
+            ReadEntry {
+                view,
+                remote: Some(authority.into()),
+            },
+        );
+        Ok(id)
     }
 
     pub fn enter_remote(
@@ -107,10 +172,28 @@ pub(super) struct RemoteGuard {
     pub id: String,
     pub cancellation: CancellationToken,
 }
+pub(super) struct ReadGuard {
+    calls: Arc<Calls>,
+    pub id: String,
+}
+impl Drop for ReadGuard {
+    fn drop(&mut self) {
+        let removed = self.calls.reads.lock().unwrap().remove(&self.id);
+        drop(removed);
+    }
+}
 impl Drop for RemoteGuard {
     fn drop(&mut self) {
         self.cancellation.cancel();
         self.calls.remotes.lock().unwrap().remove(&self.id);
+        let removed: Vec<_> = self
+            .calls
+            .reads
+            .lock()
+            .unwrap()
+            .extract_if(.., |_, entry| entry.remote.as_ref() == Some(&self.id))
+            .collect();
+        drop(removed);
     }
 }
 pub(super) struct Guard {

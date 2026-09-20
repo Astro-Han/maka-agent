@@ -54,6 +54,7 @@ const capabilities: readonly AuthorizationCapability[] = [
   'client_capabilities',
   'executions',
   'notifications',
+  'read_sessions',
 ];
 
 export const PLUGIN_AUTHORIZATION_OPERATION_SPECS = {
@@ -164,9 +165,39 @@ function proposal(value: unknown): AuthorizationRequest {
   const target = requireRecord(row.target, 'Authorization target');
   let resolved: AuthorizationRequest['target'];
   switch (target.kind) {
+    case 'plugin_workspace': {
+      requireExactRecord(target, 'Plugin workspace authorization', ['kind', 'permissionMode']);
+      const mode = target.permissionMode;
+      if (mode !== 'explore' && mode !== 'ask' && mode !== 'bypass')
+        throw invalidProtocolFrame('Invalid authorization permission mode');
+      if (
+        mode !== 'bypass' &&
+        requested.some((capability) =>
+          ['write_files', 'network', 'processes', 'client_capabilities'].includes(capability),
+        )
+      )
+        throw invalidProtocolFrame('Unattended side effects require bypass permission');
+      resolved = { kind: 'plugin_workspace', permissionMode: mode };
+      break;
+    }
+    case 'directory': {
+      requireExactRecord(target, 'Directory authorization', ['kind', 'path']);
+      const path = requireString(target.path, 'Authorization directory', 32768);
+      if (
+        path.includes('\0') ||
+        requested.some((capability) => !['read_files', 'write_files'].includes(capability))
+      )
+        throw invalidProtocolFrame('Directory consent only authorizes file access');
+      resolved = { kind: 'directory', path };
+      break;
+    }
     case 'profile':
       requireExactRecord(target, 'Profile authorization', ['kind']);
-      if (requested.some((capability) => capability !== 'notifications'))
+      if (
+        requested.some(
+          (capability) => capability !== 'notifications' && capability !== 'read_sessions',
+        )
+      )
         throw invalidProtocolFrame('Profile has no workspace authority');
       resolved = { kind: 'profile' };
       break;

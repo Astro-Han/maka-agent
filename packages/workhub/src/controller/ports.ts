@@ -17,6 +17,12 @@
  * under the License.
  */
 
+import type {
+  Configured,
+  ExecutionTarget,
+  ExecutionReceipt,
+  ExecutionObservation,
+} from '@maka-agent/plugin-sdk/host';
 import type { ChatModelChoice } from '@maka/core/chat-model-choice';
 import type { StoredMessage, SessionSummary } from '@maka/core/session';
 import type {
@@ -25,19 +31,24 @@ import type {
   MessageQueuePlacement,
   ActiveInteractionRequestEvent,
 } from '@maka/core/events';
-import type { OperationInput, OperationOutput, TurnSnapshot } from '@maka/runtime-host/protocol';
+import type { TurnSnapshot } from '@maka/runtime-host/protocol';
 import type { SessionExecutionProjection } from '@maka/ui/session-execution';
 import type { InteractionFormResponse } from '@maka/core/interaction';
 import type { UserQuestionResponse } from '@maka/core/user-question';
 
-/** Retry retains the exact original Host epoch, Turn and payload. */
-export type WorkHubAnswerInput = OperationInput<'workhub.coordination.answer'> & {
-  readonly originHostEpoch?: string;
-};
+/** Retries retain the original operation identity and payload across Host restarts. */
+export interface WorkHubAnswerInput {
+  readonly operationId: string;
+  readonly text: string;
+  readonly attachments?: AttachmentRef[];
+}
 export type WorkHubAnswerResult =
-  | { readonly kind: 'admitted'; readonly turnId: string; readonly status?: TurnSnapshot['status'] }
-  | { readonly kind: 'unknown'; readonly originHostEpoch: string }
-  | { readonly kind: 'not_admitted' };
+  | {
+      readonly kind: 'admitted';
+      readonly receipt: ExecutionReceipt;
+      readonly progress?: ExecutionObservation['progress'];
+    }
+  | { readonly kind: 'unknown' };
 
 export interface WorkHubTranscriptSnapshot {
   readonly messages: readonly StoredMessage[];
@@ -53,7 +64,7 @@ export interface WorkHubTranscript {
 /** The conversation controller has no native-window, browser or local-file access. */
 export type CoordinationCommands = Pick<
   CoordinationSessionServices,
-  'hostEpoch' | 'answer' | 'configureModel' | 'enqueueMessage'
+  'answer' | 'cancelAnswer' | 'configureModel' | 'enqueueMessage'
 >;
 export type CoordinationSessionAdapter = Omit<
   CoordinationSessionServices,
@@ -61,7 +72,6 @@ export type CoordinationSessionAdapter = Omit<
 >;
 
 export interface CoordinationSessionServices {
-  readonly hostEpoch?: string;
   subscribeAvailability(handler: () => void): () => void;
   getSession(sessionId: string): Promise<SessionSummary & { revision: number }>;
   subscribeSessions(handler: () => void): () => void;
@@ -74,6 +84,7 @@ export interface CoordinationSessionServices {
   respondToUserForm(sessionId: string, response: InteractionFormResponse): Promise<void>;
   respondToUserQuestion(sessionId: string, response: UserQuestionResponse): Promise<void>;
   answer(sessionId: string, input: WorkHubAnswerInput): Promise<WorkHubAnswerResult>;
+  cancelAnswer(sessionId: string, input: WorkHubAnswerInput): Promise<void>;
   enqueueMessage(
     sessionId: string,
     messageId: string,
@@ -81,7 +92,6 @@ export interface CoordinationSessionServices {
     attachments: AttachmentRef[],
     placement: MessageQueuePlacement,
     expectedTurnId: string,
-    originHostEpoch?: string,
   ): Promise<'admitted' | 'unknown' | 'rejected'>;
   retractQueueEntry(sessionId: string, entryId: string): Promise<void>;
   promoteQueueEntry(sessionId: string, entryId: string): Promise<void>;
@@ -94,8 +104,8 @@ export interface CoordinationSessionServices {
   reorderQueueEntries(sessionId: string, entryIds: readonly string[]): Promise<void>;
   configureModel(
     sessionId: string,
-    input: OperationInput<'workhub.coordination.configureModel'>,
-  ): Promise<OperationOutput<'workhub.coordination.configureModel'>>;
+    input: { expectedRevision: number; target: Extract<ExecutionTarget, { kind: 'model' }> },
+  ): Promise<Configured>;
   observe(
     sessionId: string,
     handler: (event: SessionEvent) => void,

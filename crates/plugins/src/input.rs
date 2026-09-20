@@ -33,8 +33,7 @@ use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
-mod revision;
-pub use revision::{Basis, Invalidation, Revision};
+use crate::revision::Basis;
 
 #[derive(Clone)]
 pub struct Request {
@@ -47,7 +46,11 @@ pub struct Request {
 }
 
 pub trait Provider: Send + Sync {
-    fn prepare(&self, request: Request) -> BoxFuture<'static, Result<Outcome, Error>>;
+    fn prepare(
+        &self,
+        request: Request,
+        workspace: crate::filesystem::ReadDirectory,
+    ) -> BoxFuture<'static, Result<Outcome, Error>>;
 }
 pub struct InputPreparation(pub Arc<dyn Provider>);
 
@@ -132,15 +135,30 @@ pub async fn prepare(
         validity: Vec::new(),
     };
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let workspace = if providers.is_empty() {
+        None
+    } else {
+        Some(
+            crate::filesystem::ReadRoot::open(&request.cwd)
+                .await
+                .map_err(|error| Error::Invalid(error.to_string()))?,
+        )
+    };
     for (name, source) in providers {
         let _call = source.admit()?;
         let stopping = source.owner.stopping()?;
         request.content = result.content.clone();
+        let cancellation = request.cancellation.child_token();
+        let _closed = cancellation.clone().drop_guard();
+        let files = workspace
+            .as_ref()
+            .expect("provider workspace")
+            .bind(source.owner.clone(), cancellation);
         let outcome = tokio::select! {
             biased;
             _ = request.cancellation.cancelled() => return Err(Error::Invalid("input preparation cancelled".into())),
             _ = stopping.cancelled() => return Err(Error::Retired),
-            outcome = tokio::time::timeout_at(deadline, source.value.0.prepare(request.clone())) =>
+            outcome = tokio::time::timeout_at(deadline, source.value.0.prepare(request.clone(), files)) =>
                 outcome.map_err(|_| Error::Invalid("input preparation timed out".into()))??,
         };
         let (receipt, basis) = match outcome {
@@ -154,6 +172,11 @@ pub async fn prepare(
                 if !required_tools.is_subset(&request.tools) {
                     return Err(Error::Invalid(
                         "prepared input requires unavailable tools".into(),
+                    ));
+                }
+                if content.attachments != result.content.attachments {
+                    return Err(Error::Invalid(
+                        "input preparation cannot replace attachments".into(),
                     ));
                 }
                 // Providers cannot rewrite another provider's evidence.

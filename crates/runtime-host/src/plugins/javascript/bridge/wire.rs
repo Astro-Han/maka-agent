@@ -27,6 +27,22 @@ use serde_json::Value;
 #[derive(Deserialize)]
 #[serde(tag = "method", content = "input", deny_unknown_fields)]
 pub(super) enum Request {
+    #[serde(rename = "revision")]
+    Revision(super::super::revision::Request),
+    #[serde(rename = "inputs.names")]
+    InputNames,
+    #[serde(rename = "inputs.location")]
+    InputLocation(Handle),
+    #[serde(rename = "view.location")]
+    ViewLocation(Handle),
+    #[serde(rename = "inputs.read")]
+    InputRead(Execution<maka_plugins::filesystem::ReadViewInput>),
+    #[serde(rename = "inputs.list")]
+    InputList(Execution<maka_plugins::filesystem::ListInput>),
+    #[serde(rename = "view.read")]
+    ViewRead(Execution<maka_plugins::filesystem::ReadViewInput>),
+    #[serde(rename = "view.list")]
+    ViewList(Execution<maka_plugins::filesystem::ListInput>),
     #[serde(rename = "preferences.read")]
     Preferences,
     #[serde(rename = "remote.session")]
@@ -55,12 +71,18 @@ pub(super) enum Request {
     TerminalClose(Handle),
     #[serde(rename = "files.invoke")]
     Files(FileRequest),
+    #[serde(rename = "sessions.list")]
+    Sessions(SessionList),
+    #[serde(rename = "models.resolve")]
+    ResolveModel(maka_plugins::llm::Selection),
     #[serde(rename = "llm.generate")]
     Generate(ModelRequest),
     #[serde(rename = "clients.tools")]
     ClientCatalog(Authority),
     #[serde(rename = "clients.call")]
     ClientCall(ClientRequest),
+    #[serde(rename = "clients.notify")]
+    ClientNotify(NotificationRequest),
     #[serde(rename = "http.request")]
     HttpSend(HttpRequest),
     #[serde(rename = "http.next")]
@@ -89,24 +111,48 @@ pub(super) enum Request {
     Withdraw(Withdraw),
     #[serde(rename = "storage.read")]
     Read(Key),
+    #[serde(rename = "storage.scan")]
+    Scan(maka_plugins::storage::Scan),
     #[serde(rename = "storage.batch")]
     Batch(Batch),
-    #[serde(rename = "data.read")]
-    DataRead(maka_plugins::storage::files::ReadFile),
-    #[serde(rename = "data.write")]
-    DataWrite(maka_plugins::storage::files::WriteFile),
-    #[serde(rename = "data.list")]
-    DataList(maka_plugins::storage::files::ListFiles),
-    #[serde(rename = "data.createDirectory")]
-    DataCreateDirectory(Path),
-    #[serde(rename = "data.remove")]
-    DataRemove(Path),
-    #[serde(rename = "data.rename")]
-    DataRename(Rename),
+    #[serde(rename = "data")]
+    Data(maka_plugins::filesystem::entries::Operation),
+    #[serde(rename = "execution.offerInteraction")]
+    OfferInteraction(Execution<maka_plugins::execution::OfferInteraction>),
+    #[serde(rename = "execution.interaction")]
+    Interaction(Execution<Operation>),
+    #[serde(rename = "execution.waitInteraction")]
+    WaitInteraction(Execution<Operation>),
+    #[serde(rename = "execution.closeInteraction")]
+    CloseInteraction(Execution<Operation>),
+    #[serde(rename = "execution.copyAttachment")]
+    CopyAttachment(Execution<CopyAttachment>),
+    #[serde(rename = "execution.input")]
+    ExecutionInput(Execution<maka_runtime::event::Invocation>),
+    #[serde(rename = "execution.resume")]
+    ResumeExecution(Execution<maka_plugins::execution::Resume>),
+    #[serde(rename = "execution.configure")]
+    ConfigureExecution(Execution<maka_plugins::execution::Configure>),
+    #[serde(rename = "execution.readMessage")]
+    ReadMessage(Execution<maka_plugins::execution::SessionMessage>),
+    #[serde(rename = "execution.enqueue")]
+    Enqueue(Execution<maka_plugins::execution::Enqueue>),
+    #[serde(rename = "execution.message")]
+    Message(Execution<Operation>),
+    #[serde(rename = "execution.retract")]
+    Retract(Execution<Operation>),
     #[serde(rename = "execution.submit")]
     Submit(Execution<Submit>),
+    #[serde(rename = "execution.capabilities")]
+    ExecutionCapabilities(Execution<SessionQuery>),
+    #[serde(rename = "execution.activity")]
+    Activity(Execution<SessionQuery>),
+    #[serde(rename = "execution.stop")]
+    Stop(Execution<maka_runtime::event::Invocation>),
     #[serde(rename = "execution.session")]
     ExecutionSession(Execution<SessionQuery>),
+    #[serde(rename = "execution.restoreChild")]
+    RestoreChild(Execution<CreateChild>),
     #[serde(rename = "execution.createChild")]
     CreateChild(Execution<CreateChild>),
     #[serde(rename = "execution.createRoot")]
@@ -119,6 +165,8 @@ pub(super) enum Request {
     Cancel(Execution<Operation>),
     #[serde(rename = "execution.events")]
     Events(Execution<Events>),
+    #[serde(rename = "execution.artifact")]
+    Artifact(Execution<maka_plugins::execution::ReadArtifact>),
     #[serde(rename = "execution.event")]
     Event(Execution<Event>),
     #[serde(rename = "execution.restore")]
@@ -217,6 +265,12 @@ pub(super) struct ClientRequest {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct NotificationRequest {
+    pub authority: String,
+    pub input: maka_plugins::client_capability::Notification,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct WorkspaceView {
     pub authority: String,
     pub input: maka_plugins::remote::WorkspaceViewInput,
@@ -238,23 +292,12 @@ pub(super) struct ExecutorOutput {
 #[serde(deny_unknown_fields)]
 pub(super) struct Withdraw {
     pub kind: super::super::registration::Kind,
-    pub name: String,
+    pub names: Vec<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Key {
     pub key: String,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct Path {
-    pub path: String,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct Rename {
-    pub from: String,
-    pub to: String,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -330,6 +373,11 @@ impl Error {
         Self {
             code: match error {
                 maka_runtime::tools::ToolError::Failed(_) => Code::Invalid,
+                maka_runtime::tools::ToolError::Io { kind, .. } => match kind {
+                    std::io::ErrorKind::NotFound => Code::NotFound,
+                    std::io::ErrorKind::AlreadyExists => Code::Conflict,
+                    _ => Code::Unavailable,
+                },
                 _ => Code::OutcomeUnknown,
             },
             message: error.to_string(),
@@ -338,6 +386,21 @@ impl Error {
     pub fn invalid(error: impl ToString) -> Self {
         Self {
             code: Code::Invalid,
+            message: error.to_string(),
+        }
+    }
+}
+impl From<maka_plugins::filesystem::ReadError> for Error {
+    fn from(error: maka_plugins::filesystem::ReadError) -> Self {
+        use maka_plugins::filesystem::ReadError;
+        let code = match &error {
+            ReadError::Retired => Code::Revoked,
+            ReadError::Invalid(_) => Code::Invalid,
+            ReadError::Io(error) if error.kind() == std::io::ErrorKind::NotFound => Code::NotFound,
+            ReadError::Io(_) => Code::Unavailable,
+        };
+        Self {
+            code,
             message: error.to_string(),
         }
     }
@@ -411,15 +474,15 @@ impl From<maka_plugins::process::Error> for Error {
         }
     }
 }
-impl From<maka_plugins::storage::files::Error> for Error {
-    fn from(error: maka_plugins::storage::files::Error) -> Self {
-        use maka_plugins::storage::files::Error as File;
+impl From<maka_plugins::filesystem::entries::Error> for Error {
+    fn from(error: maka_plugins::filesystem::entries::Error) -> Self {
+        use maka_plugins::filesystem::entries::Error as File;
         Self {
             code: match &error {
                 File::Invalid(_) => Code::Invalid,
                 File::NotFound => Code::NotFound,
                 File::AlreadyExists => Code::Conflict,
-                File::Retired => Code::Revoked,
+                File::Retired | File::Cancelled => Code::Revoked,
                 File::Io(_) => Code::Unavailable,
                 File::OutcomeUnknown(_) => Code::OutcomeUnknown,
             },
@@ -437,11 +500,28 @@ impl From<maka_plugins::execution::CommandError> for Error {
             CommandError::Busy => Code::Busy,
             CommandError::OutcomeUnknown(_) => Code::OutcomeUnknown,
             CommandError::Invalid(_) => Code::Invalid,
-            CommandError::Draining | CommandError::Host(_) => Code::Unavailable,
+            CommandError::Draining | CommandError::Unavailable(_) | CommandError::Host(_) => {
+                Code::Unavailable
+            }
         };
         Self {
             code,
             message: error.to_string(),
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SessionList {
+    pub authority: String,
+    pub input: maka_plugins::session::catalog::List,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct CopyAttachment {
+    pub source_handle: String,
+    pub target_session_id: String,
+    pub attachment: maka_runtime::attachment::AttachmentRef,
 }

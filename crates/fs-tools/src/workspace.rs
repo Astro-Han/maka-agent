@@ -46,12 +46,45 @@ pub fn read_identity(path: &Path) -> io::Result<WorkspaceIdentity> {
     Workspace::capture(path)?.read()
 }
 
+/// Return the very directory whose intrinsic identity was verified, rather than
+/// reopening its ambient name between admission and a filesystem operation.
+pub fn open_directory(path: &Path, expected: &WorkspaceIdentity) -> io::Result<Dir> {
+    let workspace = Workspace::capture(path)?;
+    if &workspace.read()? != expected {
+        return Err(invalid("workspace identity changed"));
+    }
+    Ok(workspace.dir)
+}
+
 /// Prepare an execution workspace. A concurrent first publisher wins; an existing
 /// malformed or changing marker is an error, not permission to mint another identity.
 pub async fn ensure_identity(path: &Path) -> io::Result<WorkspaceIdentity> {
     let path = path.to_owned();
+    ensure_captured(move || Workspace::capture(&path)).await
+}
+
+/// Initialize the already-opened directory, rejecting replacement of its name.
+/// Callers allocating private workspaces must not recapture a replaced ambient path.
+pub async fn ensure_directory_identity(
+    path: PathBuf,
+    directory: Dir,
+) -> io::Result<WorkspaceIdentity> {
+    ensure_captured(move || {
+        let workspace = Workspace {
+            path,
+            dir: directory,
+        };
+        workspace.validate_directory()?;
+        Ok(workspace)
+    })
+    .await
+}
+
+async fn ensure_captured(
+    capture: impl FnOnce() -> io::Result<Workspace> + Send + 'static,
+) -> io::Result<WorkspaceIdentity> {
     let (workspace, existing, in_git) = tokio::task::spawn_blocking(move || {
-        let workspace = Workspace::capture(&path)?;
+        let workspace = capture()?;
         let existing = match workspace.read() {
             Ok(identity) => Some(identity),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,

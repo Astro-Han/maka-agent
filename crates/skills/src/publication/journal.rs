@@ -18,14 +18,13 @@
  */
 
 use super::{
-    Error, io,
+    Error,
+    directory::Directory,
     tree::{Fact, Manifest, Tree},
     validate_id,
 };
-use cap_fs_ext::DirExt;
-use cap_std::fs::Dir;
+use maka_plugins::filesystem::entries::Kind;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Serialize, Deserialize)]
@@ -58,39 +57,38 @@ impl Intent {
         Ok(())
     }
 }
-pub(super) fn replay(
-    skills: &Dir,
-    transaction: &Dir,
+pub(super) async fn replay(
+    skills: &Directory,
+    transaction: &Directory,
     intent: &Intent,
     hash: &str,
 ) -> Result<(), Error> {
-    for entry in transaction.entries()? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let directory = matches!(name.to_str(), Some("old" | "next"));
+    for entry in transaction.entries().await? {
+        let name = entry.name.as_str();
+        let directory = matches!(name, "old" | "next");
         if (!directory
             && !matches!(
-                name.to_str(),
-                Some("intent.json" | "intent.pending" | "committed" | "committed.pending")
+                name,
+                "intent.json" | "intent.pending" | "committed" | "committed.pending"
             ))
-            || entry.file_type()?.is_symlink()
-            || (directory && !entry.file_type()?.is_dir())
-            || (!directory && !entry.file_type()?.is_file())
+            || matches!(entry.kind, Kind::Other)
+            || (directory && !matches!(entry.kind, Kind::Directory))
+            || (!directory && !matches!(entry.kind, Kind::File))
         {
             return Err(Error::Invalid(
                 "Unexpected Skill transaction artifact".into(),
             ));
         }
     }
-    match io::read(transaction, Path::new("committed"), 80) {
+    match transaction.read("committed", 80).await {
         Ok((bytes, _)) if bytes == hash.as_bytes() => return Ok(()),
         Ok(_) => return Err(Error::Invalid("Invalid Skill commit marker".into())),
         Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    let mut target = manifest(skills, &intent.id)?;
-    let mut old = manifest(transaction, "old")?;
-    let next = manifest(transaction, "next")?;
+    let mut target = manifest(skills, &intent.id).await?;
+    let mut old = manifest(transaction, "old").await?;
+    let next = manifest(transaction, "next").await?;
     if let Some(old) = &old
         && Some(old) != intent.expected.as_ref()
     {
@@ -105,11 +103,11 @@ pub(super) fn replay(
         if target != intent.expected {
             return Err(Error::Conflict);
         }
-        io::rename(skills, &intent.id, transaction, "old")?;
-        old = manifest(transaction, "old")?;
+        skills.rename(&intent.id, transaction, "old").await?;
+        old = manifest(transaction, "old").await?;
         if old != intent.expected {
             // Preserve an edit which raced takeover; never overwrite a new target.
-            io::rename(transaction, "old", skills, &intent.id)?;
+            transaction.rename("old", skills, &intent.id).await?;
             return Err(Error::Conflict);
         }
         target = None;
@@ -125,8 +123,8 @@ pub(super) fn replay(
                     )
                 });
             }
-            io::rename(transaction, "next", skills, &intent.id)?;
-            if manifest(skills, &intent.id)?.as_ref() != Some(expected_next) {
+            transaction.rename("next", skills, &intent.id).await?;
+            if manifest(skills, &intent.id).await?.as_ref() != Some(expected_next) {
                 return Err(Error::Invalid("Published Skill files changed".into()));
             }
         } else if target.as_ref() != Some(expected_next) {
@@ -140,29 +138,30 @@ pub(super) fn replay(
         ));
     }
     // Reconfirm rename durability on recovery before recording the completed cut.
-    io::sync(skills)?;
-    io::sync(transaction)?;
-    match transaction.remove_file("committed.pending") {
+    skills.sync().await?;
+    transaction.sync().await?;
+    match transaction.remove("committed.pending").await {
         Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
+        Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
-    io::write_new(
-        transaction,
-        Path::new("committed.pending"),
-        hash.as_bytes(),
-        0o600,
-    )?;
-    io::rename(transaction, "committed.pending", transaction, "committed")?;
+    transaction
+        .write_new("committed.pending", hash.as_bytes(), 0o600)
+        .await?;
+    transaction
+        .rename("committed.pending", transaction, "committed")
+        .await?;
     Ok(())
 }
-fn manifest(parent: &Dir, name: &str) -> Result<Option<Manifest>, Error> {
-    match parent.open_dir_nofollow(name) {
+async fn manifest(parent: &Directory, name: &str) -> Result<Option<Manifest>, Error> {
+    match parent.open(name).await {
         Ok(directory) => Ok(Some(
-            Tree::read(&directory, &CancellationToken::new())?.manifest(),
+            Tree::read(&directory, &CancellationToken::new())
+                .await?
+                .manifest(),
         )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.into()),
+        Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
     }
 }
 fn valid_hash(hash: &str) -> bool {

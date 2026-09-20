@@ -297,7 +297,6 @@ async function loadRuntimeHostSettingsWithoutLane(
         tavily: projectWebSearchCredential(local, webSearchCredential),
       },
     },
-    subagents: policy.subagents,
   };
 }
 
@@ -428,12 +427,6 @@ async function applyHostPatchWithoutLane(
         await deleteCredential(client, WEB_SEARCH_CREDENTIAL);
       else await setCredential(client, WEB_SEARCH_CREDENTIAL, apiKey);
     }
-  }
-  if (patch.subagents) {
-    await client.updateRuntimePolicy(() => ({
-      kind: "set_subagents",
-      value: patch.subagents!,
-    }));
   }
   return skippedCredentials;
 }

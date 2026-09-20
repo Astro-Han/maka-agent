@@ -18,13 +18,12 @@
  */
 
 mod client;
+mod notification;
 use super::Executions;
 use futures_util::future::BoxFuture;
 use maka_config::plugin_authorization::Boundary;
 use maka_event_log::effects::{Operation, Outcome, Request};
-use maka_fs_tools::{
-    MutationExecutor, ReadExecutor, ReadLimits, ReadOutput, ReadScope, WriteScope,
-};
+use maka_fs_tools::{MutationExecutor, ReadExecutor, ReadLimits, ReadOutput};
 use maka_plugins::{
     authorization::Capability,
     call::Scope,
@@ -54,6 +53,12 @@ impl Recorded for Output {
                 },
                 None,
             ),
+            Self::Entries(value) => (
+                Outcome::Completed {
+                    value: serde_json::to_value(value).map_err(failed)?,
+                },
+                None,
+            ),
             Self::Image { bytes, mime_type } => (
                 Outcome::Image {
                     mime_type: mime_type.clone(),
@@ -67,7 +72,7 @@ impl Recorded for Output {
 impl Recorded for ModelGeneration {
     fn evidence(&self) -> Result<Evidence, ToolError> {
         let value = serde_json::to_value(self)
-            .map_err(|error| ToolError::OutcomeUnknown(error.to_string()))?;
+            .map_err(|error| ToolError::Persistence(error.to_string()))?;
         Ok((Outcome::Completed { value }, None))
     }
 }
@@ -90,9 +95,10 @@ impl Executions {
         input: File,
         cancellation: CancellationToken,
     ) -> Result<Output, ToolError> {
-        let capability = match input {
-            File::Read(_) | File::Glob(_) | File::Grep(_) => Capability::ReadFiles,
-            _ => Capability::WriteFiles,
+        let capability = if input.is_read() {
+            Capability::ReadFiles
+        } else {
+            Capability::WriteFiles
         };
         let boundary = self
             .plugin_resource_boundary(&call, capability)
@@ -168,9 +174,9 @@ impl Executions {
             Ok(value) => value.evidence().inspect_err(|_| {
                 self.begin_drain();
             })?,
-            Err(ToolError::Failed(message)) => (
+            Err(error @ (ToolError::Failed(_) | ToolError::Io { .. })) => (
                 Outcome::Failed {
-                    message: message.clone(),
+                    message: error.to_string(),
                 },
                 None,
             ),
@@ -186,11 +192,11 @@ impl Executions {
             .await
             .map_err(|error| {
                 self.begin_drain();
-                ToolError::OutcomeUnknown(error.to_string())
+                ToolError::Persistence(error.to_string())
             })?;
         if matches!(
             result,
-            Err(ToolError::Persistence(_) | ToolError::OutcomeUnknown(_))
+            Err(ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_))
         ) {
             self.begin_drain();
         }
@@ -203,39 +209,69 @@ impl Executions {
         input: File,
         cancellation: CancellationToken,
     ) -> Result<BoxFuture<'static, Result<Output, ToolError>>, ToolError> {
-        let cwd = match boundary {
-            Boundary::Session { boundary, .. } => boundary.cwd,
-            Boundary::Workspace { workspace, .. } => workspace.host_cwd,
-            Boundary::Profile => return Err(failed("file access requires a workspace")),
-        };
-        let writes = self.writes.clone();
-        let write = matches!(input, File::Write(_) | File::Edit(_) | File::Patch(_));
-        // Capture capability-relative filesystem roots before dispatch. Bypass
-        // removes interactive approval, not the explicit grant's path boundary.
-        let (read, mutation) = tokio::task::spawn_blocking(move || {
-            let root = PathBuf::from(&cwd);
-            let read = ReadExecutor::new(
-                &root,
-                ReadScope::Restricted {
-                    roots: vec![root.clone()],
-                },
-                ReadLimits::default(),
-            )?;
-            let mutation = write
-                .then(|| {
-                    MutationExecutor::new(
-                        &root,
-                        WriteScope::Restricted {
-                            roots: vec![root.clone()],
-                        },
-                        writes,
-                    )
-                })
-                .transpose()?;
-            Ok::<_, ToolError>((read, mutation))
+        let (root, directory) = tokio::task::spawn_blocking(move || {
+            let (path, directory) = match boundary {
+                Boundary::Directory { path, identity } => {
+                    let directory =
+                        maka_fs_tools::directory::open(std::path::Path::new(&path), &identity)?;
+                    (path, directory)
+                }
+                Boundary::Session {
+                    boundary,
+                    workspace_identity,
+                } => {
+                    let directory = maka_fs_tools::workspace::open_directory(
+                        std::path::Path::new(&boundary.cwd),
+                        &workspace_identity,
+                    )?;
+                    (boundary.cwd, directory)
+                }
+                Boundary::Workspace {
+                    workspace,
+                    workspace_identity,
+                    ..
+                } => {
+                    let directory = maka_fs_tools::workspace::open_directory(
+                        std::path::Path::new(&workspace.host_cwd),
+                        &workspace_identity,
+                    )?;
+                    (workspace.host_cwd, directory)
+                }
+                Boundary::Profile => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "file access requires a directory grant",
+                    ));
+                }
+            };
+            Ok::<_, std::io::Error>((PathBuf::from(path), directory))
         })
         .await
-        .map_err(failed)??;
+        .map_err(failed)?
+        .map_err(failed)?;
+        if let File::Entries(operation) = input {
+            return Ok(Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    if cancellation.is_cancelled() {
+                        return Err(failed("file operation cancelled before effect"));
+                    }
+                    maka_plugins::filesystem::entries::execute(&directory, operation, &cancellation)
+                        .map(Output::Entries)
+                        .map_err(super::filesystem::entry_error)
+                })
+                .await
+                .map_err(failed)?
+            }));
+        }
+        let write = matches!(input, File::Write(_) | File::Edit(_) | File::Patch(_));
+        let read = ReadExecutor::from_directory(
+            root.clone(),
+            directory.try_clone().map_err(failed)?,
+            ReadLimits::default(),
+        )?;
+        let mutation = write
+            .then(|| MutationExecutor::from_directory(root, directory, self.writes.clone()))
+            .transpose()?;
         Ok(Box::pin(async move {
             if let File::Read(input) = input {
                 return match read
@@ -299,7 +335,9 @@ impl Executions {
                 };
                 (key, None, None)
             }
-            Boundary::Profile => return Err(failed("model generation requires a workspace")),
+            Boundary::Profile | Boundary::Directory { .. } => {
+                return Err(failed("model generation requires a workspace"));
+            }
         };
         let model = match model {
             Some(model) => model,

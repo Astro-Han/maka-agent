@@ -28,6 +28,7 @@ use maka_plugins::{
 use std::sync::{Arc, Weak};
 
 pub(crate) struct Issuer {
+    inputs: maka_plugins::filesystem::ReadRoots,
     executions: Weak<Executions>,
     configuration: Arc<maka_config::ConfigurationStore>,
     root: String,
@@ -37,8 +38,10 @@ impl Issuer {
         executions: &Arc<Executions>,
         configuration: Arc<maka_config::ConfigurationStore>,
         root: String,
+        inputs: maka_plugins::filesystem::ReadRoots,
     ) -> Arc<Self> {
         Arc::new(Self {
+            inputs,
             executions: Arc::downgrade(executions),
             configuration,
             root,
@@ -63,6 +66,7 @@ impl Provider for Issuer {
                 owner.clone(),
             ));
             Ok(Some(Services {
+                inputs: self.inputs.bind(owner.clone()),
                 preferences: Arc::new(Preferences {
                     configuration: self.configuration.clone(),
                     owner: owner.clone(),
@@ -73,7 +77,8 @@ impl Provider for Issuer {
                 authorizations: executions,
                 files: effects.clone(),
                 models: effects.clone(),
-                clients: effects,
+                clients: effects.clone(),
+                sessions: effects,
                 http: Arc::new(super::http::Http::new(
                     self.executions.clone(),
                     owner.clone(),
@@ -114,6 +119,11 @@ impl maka_plugins::preferences::Preferences for Preferences {
                 revision: snapshot.revision,
                 personalization: snapshot.policy.personalization,
                 workspace_instructions: snapshot.policy.workspace_instructions.enabled,
+                tool_mode: if snapshot.policy.chat_defaults.code_mode_enabled {
+                    maka_runtime::execution::ToolMode::CodeMode
+                } else {
+                    maka_runtime::execution::ToolMode::Direct
+                },
             })
         })
     }
@@ -122,7 +132,7 @@ impl maka_plugins::authorization::Access for ExecutionAccess {
     fn open(
         &self,
         id: maka_plugins::authorization::Id,
-    ) -> BoxFuture<'_, Result<maka_plugins::call::Owned, CommandError>> {
+    ) -> BoxFuture<'_, Result<maka_plugins::authorization::Authorized, CommandError>> {
         Box::pin(async move {
             self.host
                 .upgrade()

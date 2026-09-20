@@ -27,7 +27,6 @@ pub mod shell;
 mod step;
 mod tools;
 mod user;
-pub mod workhub;
 use maka_runtime::event::{Fact, Invocation, InvocationInput, StoredEvent};
 use maka_runtime::tool_output::ToolOutput;
 use message::timestamp;
@@ -77,7 +76,6 @@ pub struct InvocationView {
     max_text_bytes: usize,
     tools: tools::Tools,
     summary_step: Option<String>,
-    workhub_source: Option<(String, maka_runtime::input::MessageInput)>,
 }
 
 impl InvocationView {
@@ -92,7 +90,6 @@ impl InvocationView {
             max_text_bytes,
             tools: tools::Tools::new(max_text_bytes),
             summary_step: None,
-            workhub_source: None,
         })
     }
 
@@ -155,10 +152,6 @@ impl InvocationView {
                     ..
                 } = input
                 {
-                    if event.invocation.session_id == maka_runtime::workhub::COORDINATION_SESSION_ID
-                    {
-                        self.workhub_source = Some((event.id.clone(), content.clone()));
-                    }
                     messages.push(user::project(
                         if source_messages.len() == 1 {
                             &source_messages[0].message.message_id
@@ -322,24 +315,8 @@ impl InvocationView {
                     | Fact::ToolRejected { .. } => {
                         messages.extend(self.tools.boundary(event, ts, resolved)?);
                     }
-                    Fact::WorkhubDelegated { delegation } => {
-                        let (opening, source) =
-                            self.workhub_source
-                                .as_ref()
-                                .ok_or(ProjectionError::Invalid(
-                                    "WorkHub assignment has no user source",
-                                ))?;
-                        if *opening != delegation.source_message_event_id {
-                            return Err(ProjectionError::Invalid(
-                                "WorkHub assignment source changed",
-                            ));
-                        }
-                        messages.extend(workhub::assigned(event, delegation, source)?);
-                    }
                     Fact::InvocationOpened { .. } => unreachable!(),
-                    Fact::ContextCheckpointRecorded { .. }
-                    | Fact::ToolResultArchived { .. }
-                    | Fact::WorkhubResumeObserved { .. } => {}
+                    Fact::ContextCheckpointRecorded { .. } | Fact::ToolResultArchived { .. } => {}
                 }
             }
         }

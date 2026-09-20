@@ -155,7 +155,9 @@ impl Execution {
                 let mut text = String::new();
                 let mut truncated = false;
                 match outcome {
-                    ToolOutcome::Failed { message } => append(&mut text, message, &mut truncated),
+                    ToolOutcome::Failed { message } | ToolOutcome::Unknown { message } => {
+                        append(&mut text, message, &mut truncated)
+                    }
                     ToolOutcome::Succeeded {
                         model_projection, ..
                     } => match model_projection {

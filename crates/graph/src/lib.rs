@@ -18,12 +18,16 @@
  */
 
 //! Agent Graph business policy. Host execution and plugin lifecycle are separate authorities.
+pub mod access;
 pub mod control;
 pub mod coordinator;
 pub mod decision;
 pub mod owner;
+pub mod plugin;
 pub mod projection;
+pub mod repository;
 pub mod schedule;
+pub mod settings;
 pub mod store;
 pub mod swarm;
 pub mod view;
@@ -40,8 +44,12 @@ pub enum Error {
     Conflict,
     #[error("Agent Graph item not found: {0}")]
     NotFound(String),
+    #[error("Agent Graph decision outcome is unknown: {0}")]
+    OutcomeUnknown(String),
     #[error("Agent Graph persistence failed: {0}")]
     Persistence(String),
+    #[error(transparent)]
+    Storage(#[from] maka_plugins::storage::StoreError),
     #[error(transparent)]
     Host(#[from] maka_plugins::execution::CommandError),
 }

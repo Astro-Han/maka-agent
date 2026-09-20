@@ -17,12 +17,10 @@
  * under the License.
  */
 
-import { useEffect, useMemo, useRef } from 'react';
-import type { ScheduledTask } from '@maka/core/scheduled-task';
+import { useMemo, useRef, useState } from 'react';
 import type { NavSelection } from '@maka/ui';
 import { useToast, useUiLocale } from '@maka/ui';
 import { useModuleHubServices } from '../services-context.js';
-import { startModuleHubLifecycle } from './module-hub-lifecycle.js';
 import {
   useDailyReviewController,
   type ActiveComposerClaim,
@@ -32,22 +30,18 @@ import {
   useKeepSystemAwakeController,
   type KeepSystemAwakeController,
 } from './use-keep-system-awake-controller.js';
-import {
-  useScheduledTasksController,
-  type ScheduledTasksController,
-} from './use-scheduled-tasks-controller.js';
 
 export interface ModuleHubHostModel {
   readonly selection: NavSelection;
   readonly selectModule: (selection: NavSelection) => void;
-  readonly scheduledTasks: ScheduledTasksController;
+  readonly action?: { id: number; name: string; handled: () => void };
   readonly keepSystemAwake: KeepSystemAwakeController;
   readonly dailyReview: DailyReviewController;
   readonly openSession: (sessionId: string) => void;
 }
 
 export interface ModuleHubCommands {
-  openScheduledTaskCreate(): void;
+  openAction(selection: NavSelection, name: string): void;
   copyTodayDailyReview(): Promise<void>;
   pasteTodayDailyReview(): Promise<void>;
   saveTodayDailyReview(): Promise<void>;
@@ -56,9 +50,6 @@ export interface ModuleHubCommands {
 export interface ModuleHubController {
   readonly host: ModuleHubHostModel;
   readonly commands: ModuleHubCommands;
-  readonly selectors: {
-    readonly scheduledTasks: readonly ScheduledTask[];
-  };
 }
 
 export interface UseModuleHubControllerInput {
@@ -76,12 +67,8 @@ export function useModuleHubController(
   const services = useModuleHubServices();
   const uiLocale = useUiLocale();
   const toastApi = useToast();
-  const scheduledTasks = useScheduledTasksController({
-    uiLocale,
-    toastApi,
-    selection: input.selection,
-    selectModule: input.selectModule,
-  });
+  const [action, setAction] = useState<ModuleHubHostModel['action']>();
+  const actionId = useRef(0);
   const keepSystemAwake = useKeepSystemAwakeController(services);
   const selectionRef = useRef(input.selection);
   selectionRef.current = input.selection;
@@ -96,34 +83,25 @@ export function useModuleHubController(
       selectionRef.current.module === 'daily-review',
   });
 
-  const refreshScheduledTasksRef = useRef(scheduledTasks.refresh);
-  refreshScheduledTasksRef.current = scheduledTasks.refresh;
-
-  useEffect(() => {
-    return startModuleHubLifecycle({
-      runtimeHosts: services.runtimeHosts,
-      refreshScheduledTasks: () => void refreshScheduledTasksRef.current(),
-    });
-  }, [services.runtimeHosts]);
-
   return useMemo(
     () => ({
       host: {
         selection: input.selection,
         selectModule: input.selectModule,
-        scheduledTasks,
+        action,
         keepSystemAwake,
         dailyReview,
         openSession: input.openSession,
       },
       commands: {
-        openScheduledTaskCreate: scheduledTasks.openCreate,
+        openAction: (selection: NavSelection, name: string) => {
+          input.selectModule(selection);
+          const id = ++actionId.current;
+          setAction({ id, name, handled: () => setAction((current) => current?.id === id ? undefined : current) });
+        },
         copyTodayDailyReview: dailyReview.copyToday,
         pasteTodayDailyReview: dailyReview.pasteToday,
         saveTodayDailyReview: dailyReview.saveToday,
-      },
-      selectors: {
-        scheduledTasks: scheduledTasks.scheduledTasks,
       },
     }),
     [
@@ -132,7 +110,7 @@ export function useModuleHubController(
       input.selectModule,
       input.selection,
       keepSystemAwake,
-      scheduledTasks,
+      action,
     ],
   );
 }

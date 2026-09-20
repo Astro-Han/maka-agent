@@ -62,6 +62,7 @@ declare module '@maka-agent/plugin-sdk/client' {
     'workhub.surface': Omit<WorkHubRootProps, 'sessions'> & {
       readonly sessions: CoordinationSessionAdapter;
       readonly hostAttachments: HostAttachments;
+      readonly hostSessionId: string | undefined;
       readonly locale: 'en' | 'zh-CN' | 'zh-TW';
       readonly contextRevision?: number;
     };

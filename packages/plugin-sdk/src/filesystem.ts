@@ -47,6 +47,8 @@ export type Patch =
   | { type: 'delete_file'; path: string };
 
 export interface Files {
+  /** Bounded primitives rooted in this call's granted workspace. */
+  readonly entries: FileEntries;
   /** Bounded text page or image; Agent images use durable refs, other sources receive bytes. */
   read(input: ReadInput): Promise<TextPage | ImageReference | ImageBytes>;
   /** UTF-8, at most 1 MiB. Existing parent directory required. */
@@ -69,4 +71,45 @@ export interface Files {
     glob?: string;
   }): Promise<{ matches: string[]; complete: boolean }>;
   patch(operation: Patch): Promise<{ status: 'completed' }>;
+}
+export interface ReadDirectory extends ReadFiles<'follow' | 'reject'> {
+  /** Observed mount location, not filesystem authority or a promise of continued identity. */
+  location(): Promise<string>;
+}
+/** Private files never follow symlinks; input views may follow confined aliases. */
+export interface ReadFiles<Links extends 'follow' | 'reject' = 'reject'> {
+  /** Reads at most 1 MiB (default 64 KiB). A non-null cursor means more bytes exist. */
+  read(input: { path: string; offset?: number; limit?: number; symlinks?: Links }): Promise<{
+    bytes: Uint8Array;
+    nextOffset: number | null;
+  }>;
+  /** Lexical pagination, not a snapshot across concurrent directory mutations. */
+  list(input?: {
+    path?: string;
+    after?: string | null;
+    limit?: number;
+    symlinks?: Links;
+  }): Promise<{
+    entries: { name: string; kind: 'file' | 'directory' | 'other' }[];
+    nextAfter: string | null;
+  }>;
+}
+export interface FileEntries extends ReadFiles<never> {
+  /** Flush a bounded write, not an atomic replacement. outcome_unknown requires recovery. */
+  write(input: {
+    path: string;
+    offset?: number;
+    bytes: Uint8Array | readonly number[];
+    truncate?: boolean;
+    createNew?: boolean;
+    mode?: number;
+  }): Promise<void>;
+  stat(path: string): Promise<{ kind: 'file' | 'directory' | 'other'; size: number; mode: number }>;
+  createDirectory(path: string): Promise<void>;
+  /** Reconfirm directory durability during recovery; empty selects the root. */
+  sync(path?: string): Promise<void>;
+  /** Removes only a file/link or an empty directory. */
+  remove(path: string): Promise<void>;
+  /** Atomic move; an existing destination is never overwritten. */
+  rename(from: string, to: string): Promise<void>;
 }

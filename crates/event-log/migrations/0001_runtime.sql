@@ -195,18 +195,11 @@ CREATE TABLE "tool_result_payloads" (
 CREATE VIEW runtime_events AS
     SELECT * FROM event_log WHERE invocation_id IS NOT NULL;
 
-CREATE VIEW session_events AS
-    SELECT sequence, event_id, kind, event_json FROM event_log WHERE invocation_id IS NULL;
-
 CREATE INDEX invocation_sequence ON event_log(invocation_id, sequence);
 
 CREATE INDEX session_event_sequence ON event_log(
     json_extract(event_json, '$.invocation.session_id'), sequence
 );
-
-CREATE INDEX session_control_sequence ON event_log(
-    json_extract(event_json, '$.session_id'), sequence
-) WHERE invocation_id IS NULL;
 
 CREATE INDEX turn_opening_lookup ON event_log(
     json_extract(event_json, '$.invocation.session_id'),
@@ -223,74 +216,6 @@ CREATE UNIQUE INDEX message_steering_identity ON event_log(
     json_extract(event_json, '$.invocation.session_id'),
     json_extract(event_json, '$.fact.message.message_id')
 ) WHERE kind = 'message_steered';
-
-CREATE UNIQUE INDEX workhub_stop_resolution ON event_log(
-    json_extract(event_json, '$.fact.action_id')
-) WHERE kind = 'workhub_stop_resolved';
-
-CREATE INDEX workhub_stop_request_subject ON event_log(
-    json_extract(event_json, '$.fact.intent.delegation_action_id')
-) WHERE kind = 'workhub_stop_requested';
-
-CREATE VIEW workhub_stops AS
-    SELECT json_extract(q.event_json, '$.fact.intent.request.action_id') AS action_id,
-           json_extract(q.event_json, '$.fact.intent.delegation_action_id') AS delegation_action_id,
-           json_extract(q.event_json, '$.fact.intent') AS record_json,
-           json_extract(r.event_json, '$.fact.resolution') AS resolution_json
-    FROM session_events q LEFT JOIN session_events r
-      ON r.kind = 'workhub_stop_resolved'
-     AND json_extract(r.event_json, '$.fact.action_id') =
-         json_extract(q.event_json, '$.fact.intent.request.action_id')
-    WHERE q.kind = 'workhub_stop_requested';
-
-CREATE INDEX workhub_assignment_target ON event_log(
-    json_extract(event_json, '$.fact.delegation.target.session_id'), sequence DESC
-) WHERE kind = 'workhub_delegated';
-
-CREATE UNIQUE INDEX workhub_action_identity ON event_log(
-    CASE
-        WHEN kind IN ('workhub_stop_requested', 'workhub_correction_requested')
-            THEN json_extract(event_json, '$.fact.intent.request.action_id')
-        WHEN kind = 'workhub_delegated' AND invocation_id IS NOT NULL
-            THEN json_extract(event_json, '$.fact.delegation.action_id')
-        WHEN kind = 'workhub_resume_observed'
-            THEN json_extract(event_json, '$.fact.resume.action_id')
-        WHEN kind = 'invocation_opened'
-            AND json_extract(event_json, '$.fact.input.kind') = 'continuation'
-            THEN json_extract(event_json, '$.fact.input.workhub_resume.action_id')
-    END
-) WHERE kind IN ('workhub_delegated', 'workhub_resume_observed', 'invocation_opened', 'workhub_stop_requested', 'workhub_correction_requested');
-
-CREATE UNIQUE INDEX workhub_assignment_action ON event_log(
-    json_extract(event_json, '$.fact.delegation.action_id')
-) WHERE kind = 'workhub_delegated';
-
-CREATE UNIQUE INDEX workhub_correction_subject ON event_log(
-    json_extract(event_json, '$.fact.intent.request.replaces_action_id')
-) WHERE kind = 'workhub_correction_requested';
-
-CREATE UNIQUE INDEX workhub_correction_resolution ON event_log(
-    json_extract(event_json, '$.fact.action_id')
-) WHERE kind IN ('workhub_superseded', 'workhub_correction_aborted');
-
-CREATE VIEW workhub_assignments AS
-    SELECT sequence, event_id, event_json,
-           COALESCE(json_extract(event_json, '$.invocation'),
-                    json_extract(event_json, '$.fact.coordinator')) AS coordinator_json
-    FROM event_log WHERE kind = 'workhub_delegated';
-
-CREATE VIEW workhub_corrections AS
-    SELECT q.sequence,
-           json_extract(q.event_json, '$.fact.intent.request.action_id') AS action_id,
-           json_extract(q.event_json, '$.fact.intent.request.replaces_action_id') AS replaces_action_id,
-           json_extract(q.event_json, '$.fact.intent') AS intent_json,
-           r.kind AS resolution_kind,
-           json_extract(r.event_json, '$.fact.reason') AS abort_reason
-    FROM session_events q LEFT JOIN session_events r
-      ON r.kind IN ('workhub_superseded', 'workhub_correction_aborted')
-     AND json_extract(r.event_json, '$.fact.action_id') =
-         json_extract(q.event_json, '$.fact.intent.request.action_id')
-    WHERE q.kind = 'workhub_correction_requested';
 
 CREATE UNIQUE INDEX continuation_claim_id ON event_log(
     json_extract(event_json, '$.fact.input.claim.id')
@@ -344,48 +269,20 @@ CREATE TABLE plugin_data (
     PRIMARY KEY (package_id, scope_id, key)
 );
 
+CREATE TABLE plugin_message_receipts (
+    package_id TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    PRIMARY KEY (package_id, scope_id, operation_id)
+);
+
 CREATE TABLE plugin_execution_receipts (
     package_id TEXT NOT NULL,
     scope_id TEXT NOT NULL,
     operation_id TEXT NOT NULL,
     receipt_json TEXT NOT NULL CHECK (json_valid(receipt_json)),
     PRIMARY KEY (package_id, scope_id, operation_id)
-);
-
-CREATE TABLE graph_epochs (
-    root_session_id TEXT NOT NULL,
-    epoch INTEGER NOT NULL CHECK(epoch > 0),
-    graph_id TEXT NOT NULL UNIQUE,
-    mode TEXT NOT NULL CHECK(mode IN ('graph', 'swarm')),
-    created_at INTEGER NOT NULL CHECK(created_at >= 0),
-    stop_requested INTEGER NOT NULL DEFAULT 0 CHECK(stop_requested IN (0, 1)),
-    PRIMARY KEY(root_session_id, epoch)
-);
-
-CREATE TABLE graph_updates (
-    graph_id TEXT NOT NULL REFERENCES graph_epochs(graph_id),
-    update_id TEXT NOT NULL,
-    revision INTEGER NOT NULL CHECK(revision > 0),
-    fingerprint TEXT NOT NULL,
-    update_json TEXT NOT NULL CHECK(json_valid(update_json)),
-    byte_count INTEGER GENERATED ALWAYS AS (length(CAST(update_json AS BLOB))) STORED,
-    committed_at INTEGER NOT NULL CHECK(committed_at >= 0),
-    PRIMARY KEY(graph_id, revision),
-    UNIQUE(graph_id, update_id)
-);
-
-CREATE TABLE graph_intents (
-    graph_id TEXT NOT NULL REFERENCES graph_epochs(graph_id),
-    work_id TEXT NOT NULL,
-    intent_json TEXT NOT NULL CHECK(json_valid(intent_json)),
-    PRIMARY KEY(graph_id, work_id)
-);
-
-CREATE TABLE graph_wakes (
-    graph_id TEXT NOT NULL REFERENCES graph_epochs(graph_id),
-    snapshot_key TEXT NOT NULL,
-    request_json TEXT NOT NULL CHECK(json_valid(request_json)),
-    PRIMARY KEY(graph_id, snapshot_key)
 );
 
 CREATE TABLE request_compositions (

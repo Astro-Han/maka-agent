@@ -36,12 +36,10 @@ impl EventLog {
         }
         self.connection.run(move |connection| Box::pin(async move {
         let rows: Vec<(i64, String)> = sqlx::query_as(
-            "SELECT sequence, CASE WHEN kind = 'workhub_delegated'
-                 THEN json_extract(event_json, '$.fact.delegation.target.session_id')
-                 ELSE json_extract(event_json, '$.invocation.session_id') END
+            "SELECT sequence, json_extract(event_json, '$.invocation.session_id')
              FROM runtime_events
              WHERE sequence > ?1 AND sequence <= ?2
-             AND kind IN ('invocation_opened', 'model_completed', 'model_interrupted', 'invocation_ended', 'workhub_delegated')
+             AND kind IN ('invocation_opened', 'model_completed', 'model_interrupted', 'invocation_ended')
              AND EXISTS (SELECT 1 FROM session_control
                  WHERE id = json_extract(event_json, '$.invocation.session_id'))
              ORDER BY sequence LIMIT ?3",

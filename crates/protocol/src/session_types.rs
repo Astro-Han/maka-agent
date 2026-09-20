@@ -30,7 +30,7 @@ macro_rules! wire_enum {
     };
 }
 wire_enum!(SessionStartMode { DeepResearch=>"deep_research", Bot=>"bot" });
-wire_enum!(SessionToolProfile { HeadlessCodingV1=>"headless-coding-v1", WorkhubCoordinationV1=>"workhub-coordination-v1", WorkhubCoordinationV2=>"workhub-coordination-v2" });
+wire_enum!(SessionToolProfile { HeadlessCodingV1=>"headless-coding-v1" });
 wire_enum!(SessionStatus { Active=>"active", Running=>"running", WaitingForUser=>"waiting_for_user", Blocked=>"blocked", Aborted=>"aborted" });
 wire_enum!(BlockedReason { NoRealConnection=>"NO_REAL_CONNECTION", Auth=>"auth", PermissionRequired=>"permission_required", ToolFailed=>"tool_failed", Unknown=>"unknown" });
 wire_enum!(Backend { AiSdk=>"ai-sdk", PluginExecutor=>"plugin-executor", Fake=>"fake" });

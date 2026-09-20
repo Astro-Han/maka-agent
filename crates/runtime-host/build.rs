@@ -19,11 +19,13 @@
 
 fn main() {
     for path in [
-        "src/plugins/graph/client.tsx",
-        "src/plugins/graph/client",
+        "../graph/src/client.tsx",
+        "../graph/src/client",
         "../../packages/workhub/src",
         "../skills/src/client",
         "../skills/src/client.tsx",
+        "../scheduler/src/client",
+        "../scheduler/src/client.tsx",
         "../../packages/plugin-sdk/src",
         "../../scripts/rust/bundle-plugin-clients.mjs",
         "../../package-lock.json",

@@ -20,30 +20,35 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@maka/ui/plugin';
 import type { ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
+import { authorize, registerAccess } from './access.js';
 import { registerFeedback } from './feedback.js';
 import { WorkHubRoot } from './surface.js';
 import { coordinationCommands } from './client-session.js';
 import { bindSurface } from './client-surface.js';
 import styles from './styles.css';
 
-type Resolution =
-  | { ok: true; result: { sessionId: string } }
-  | { ok: false; error: { code: string; message: string } };
+type Resolution = { sessionId: string };
 
 const plugin: ClientPlugin = {
   activate(context) {
     context.style(`@layer components {\n${styles}\n}`);
     registerFeedback(context);
+    registerAccess(context);
     context.slots.register('workhub.surface', 'conversation', function Surface(props) {
       const bound = useMemo(
         () =>
-          bindSurface(props, coordinationCommands(context, props.hostAttachments), context.signal),
+          bindSurface(
+            props,
+            coordinationCommands(context, props.hostAttachments, props.hostSessionId),
+            context.signal,
+          ),
         [
           props.sessions,
           props.native,
           props.attachments,
           props.contextUsage,
           props.hostAttachments,
+          props.hostSessionId,
         ],
       );
       return <WorkHubRoot {...props} {...bound} signal={context.signal} />;
@@ -65,8 +70,7 @@ const plugin: ClientPlugin = {
           void resolve(null)
             .then((outcome) => {
               if (observation.signal.aborted) return;
-              if (!outcome.ok) throw new Error(outcome.error.message);
-              props.onResolved(outcome.result.sessionId, observation.signal);
+              props.onResolved(outcome.sessionId, observation.signal);
             })
             .catch((error: unknown) => {
               if (!observation.signal.aborted) {
@@ -83,7 +87,22 @@ const plugin: ClientPlugin = {
             label={props.locale === 'en' ? 'Retry' : props.locale === 'zh-TW' ? '重試' : '重试'}
             onClick={() => {
               props.onResolving();
-              setRetry((current) => current + 1);
+              void (async () => {
+                const zh = props.locale !== 'en';
+                await authorize(
+                  context,
+                  { kind: 'plugin_workspace', permissionMode: 'bypass' },
+                  zh ? '启用 WorkHub 协调会话' : 'Enable the WorkHub coordinator',
+                );
+                await authorize(
+                  context,
+                  { kind: 'profile' },
+                  zh ? '允许 WorkHub 发现任务' : 'Allow WorkHub to discover tasks',
+                );
+                setRetry((current) => current + 1);
+              })().catch((error: unknown) =>
+                props.onError(error instanceof Error ? error.message : String(error)),
+              );
             }}
           />
         ) : null;

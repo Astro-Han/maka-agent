@@ -29,6 +29,28 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+fn owner() -> maka_plugins::fiber::Fiber {
+    let owner = maka_plugins::fiber::Fiber::new(
+        "example.discovery",
+        "reader",
+        maka_plugins::composition::Scope::Profile,
+    )
+    .unwrap();
+    owner.begin_loading().unwrap();
+    owner.ready().unwrap();
+    owner.publish().unwrap();
+    owner
+}
+async fn view(
+    owner: &maka_plugins::fiber::Fiber,
+    path: &Path,
+) -> maka_plugins::filesystem::ReadDirectory {
+    maka_plugins::filesystem::ReadRoot::open(path)
+        .await
+        .unwrap()
+        .bind(owner.context(), CancellationToken::new())
+}
+
 fn skill(path: &Path, name: &str, requirements: &str, body: &str) -> Vec<u8> {
     fs::create_dir_all(path).unwrap();
     let bytes = format!(
@@ -39,8 +61,8 @@ fn skill(path: &Path, name: &str, requirements: &str, body: &str) -> Vec<u8> {
     bytes
 }
 
-#[test]
-fn snapshot_precedence_preferences_and_capabilities_preserve_selected_identity() {
+#[tokio::test]
+async fn snapshot_precedence_preferences_and_capabilities_preserve_selected_identity() {
     let temporary = tempfile::tempdir().unwrap();
     let project = temporary.path().join("project");
     let workspace = temporary.path().join("workspace");
@@ -82,8 +104,12 @@ fn snapshot_precedence_preferences_and_capabilities_preserve_selected_identity()
         "required-tools: 42\r\n",
         "invalid",
     );
-    let sources = Source::standard(&project, &workspace, Some(&home));
-    let snapshot = scan(&sources, &CancellationToken::new()).unwrap();
+    let owner = owner();
+    let project_files = view(&owner, &project).await;
+    let workspace_files = view(&owner, &workspace).await;
+    let home_files = view(&owner, &home).await;
+    let sources = Source::standard(&project_files, &workspace_files, Some(&home_files));
+    let snapshot = scan(&sources, &CancellationToken::new()).await.unwrap();
     assert!(snapshot.diagnostics.is_empty());
     assert_eq!(snapshot.inventory.len(), 7);
     assert_eq!(snapshot.rejected.len(), 1);
@@ -223,9 +249,14 @@ fn snapshot_precedence_preferences_and_capabilities_preserve_selected_identity()
         catalog.load("review").unwrap_err(),
         SkillFailureReason::ResolutionFailed
     );
-    let missing_library =
-        maka_skills::source_catalog(&workspace, Some(&home), &CancellationToken::new()).unwrap();
-    assert!(missing_library.managed.inventory.is_empty());
+    let missing_library = maka_skills::source_catalog(
+        &workspace_files,
+        Some(&home_files),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert!(missing_library.managed.discovery.inventory.is_empty());
     assert_eq!(missing_library.bundled[0].id, "computer-use");
     skill(
         &home.join(".maka/skill-sources/source"),
@@ -234,10 +265,18 @@ fn snapshot_precedence_preferences_and_capabilities_preserve_selected_identity()
         "Not installed",
     );
     fs::create_dir_all(workspace.join("skills/computer-use")).unwrap();
-    let library =
-        maka_skills::source_catalog(&workspace, Some(&home), &CancellationToken::new()).unwrap();
+    let library = maka_skills::source_catalog(
+        &workspace_files,
+        Some(&home_files),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        library.managed.inventory[0].document.manifest.name,
+        library.managed.discovery.inventory[0]
+            .document
+            .manifest
+            .name,
         "Source"
     );
     assert!(
@@ -258,11 +297,23 @@ fn snapshot_precedence_preferences_and_capabilities_preserve_selected_identity()
         "contentSha256": hash, "sourceContentSha256": hash,
     });
     let lock_path = alias.join("skill.lock.json");
-    let inspect =
-        || maka_skills::source_catalog(&workspace, Some(&home), &CancellationToken::new()).unwrap();
-    assert!(!inspect().installed_managed_sources().contains("source"));
+    let inspect = || async {
+        maka_skills::source_catalog(
+            &workspace_files,
+            Some(&home_files),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap()
+    };
+    assert!(
+        !inspect()
+            .await
+            .installed_managed_sources()
+            .contains("source")
+    );
     fs::write(&lock_path, serde_json::to_vec(&lock).unwrap()).unwrap();
-    let installed = inspect();
+    let installed = inspect().await;
     assert!(
         installed.installed_managed_sources().contains("source"),
         "local body changes do not erase a valid origin"
@@ -296,7 +347,10 @@ fn snapshot_precedence_preferences_and_capabilities_preserve_selected_identity()
         invalid[field] = value;
         fs::write(&lock_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
         assert!(
-            !inspect().installed_managed_sources().contains("source"),
+            !inspect()
+                .await
+                .installed_managed_sources()
+                .contains("source"),
             "invalid {field} must not create an installation alias"
         );
     }
@@ -304,7 +358,7 @@ fn snapshot_precedence_preferences_and_capabilities_preserve_selected_identity()
     invalid_utf8.pop();
     invalid_utf8.extend_from_slice(b",\"ignored\":\"\xff\"}");
     fs::write(&lock_path, &invalid_utf8).unwrap();
-    let invalid = inspect();
+    let invalid = inspect().await;
     assert!(!invalid.installed_managed_sources().contains("source"));
     assert_eq!(
         invalid.publication.origins["workspace:legacy:alias"].lock_sha256,
@@ -313,23 +367,23 @@ fn snapshot_precedence_preferences_and_capabilities_preserve_selected_identity()
     fs::remove_file(&lock_path).unwrap();
     directory_link(&home, &lock_path);
     assert!(matches!(
-        inspect().publication.origins["workspace:legacy:alias"].status,
+        inspect().await.publication.origins["workspace:legacy:alias"].status,
         maka_skills::OriginStatus::Invalid(maka_skills::OriginFailure::UnsafePath)
     ));
     let cancellation = CancellationToken::new();
     cancellation.cancel();
     assert_eq!(
-        scan(&sources, &cancellation).unwrap_err(),
+        scan(&sources, &cancellation).await.unwrap_err(),
         ScanError::Cancelled
     );
     assert!(matches!(
-        maka_skills::source_catalog(&workspace, Some(&home), &cancellation),
+        maka_skills::source_catalog(&workspace_files, Some(&home_files), &cancellation).await,
         Err(maka_skills::SourceCatalogError::Scan(ScanError::Cancelled))
     ));
 }
 
-#[test]
-fn discovery_reads_only_contained_regular_files_and_reports_source_failures() {
+#[tokio::test]
+async fn discovery_reads_only_contained_regular_files_and_reports_source_failures() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().join("root");
     let outside = temporary.path().join("outside");
@@ -355,8 +409,12 @@ fn discovery_reads_only_contained_regular_files_and_reports_source_failures() {
         &root.join("skills/EmptyCase"),
         &root.join("skills/empty-alias"),
     );
+    let owner = owner();
+    let root_files = view(&owner, &root).await;
     let governance =
-        maka_skills::governance_catalog(&root, &root, None, &CancellationToken::new()).unwrap();
+        maka_skills::governance_catalog(&root_files, &root_files, None, &CancellationToken::new())
+            .await
+            .unwrap();
     assert_eq!(
         governance
             .publication
@@ -392,9 +450,10 @@ fn discovery_reads_only_contained_regular_files_and_reports_source_failures() {
         assert!(status.success());
     }
     let snapshot = scan(
-        &Source::standard(&root, &root, None),
+        &Source::standard(&root_files, &root_files, None),
         &CancellationToken::new(),
     )
+    .await
     .unwrap();
     let ids: BTreeSet<_> = snapshot
         .inventory
@@ -420,7 +479,8 @@ fn discovery_reads_only_contained_regular_files_and_reports_source_failures() {
     directory_link(&outside, &root.join(".maka/skill-sources"));
     assert!(
         matches!(
-            maka_skills::source_catalog(&root, Some(&root), &CancellationToken::new()),
+            maka_skills::source_catalog(&root_files, Some(&root_files), &CancellationToken::new())
+                .await,
             Err(maka_skills::SourceCatalogError::Read(
                 DiscoveryFailure::BlockedPath
             ))

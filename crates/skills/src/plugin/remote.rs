@@ -41,6 +41,7 @@ pub const CLIENT_SERVICE: &str = "maka.skills.client";
 
 #[derive(Clone, Copy)]
 enum Source {
+    User,
     Session,
     Project,
     Path,
@@ -62,6 +63,12 @@ struct PathRequest {
     collaboration_mode: CollaborationMode,
     request: Request,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserRequest {
+    workspace: Option<WorkspaceViewInput>,
+    request: Request,
+}
 
 pub(super) fn publish(
     skills: &Skills,
@@ -78,6 +85,7 @@ pub(super) fn publish(
         )
         .map_err(message)?;
     for (name, source) in [
+        ("user-request", Source::User),
         ("request", Source::Session),
         ("project-request", Source::Project),
         ("path-request", Source::Path),
@@ -89,7 +97,7 @@ pub(super) fn publish(
                 source,
             })),
         );
-        let endpoint = if matches!(source, Source::Path) {
+        let endpoint = if matches!(source, Source::Path | Source::User) {
             endpoint.requiring_host_paths()
         } else {
             endpoint
@@ -98,6 +106,16 @@ pub(super) fn publish(
             .insert(key(ID, name).map_err(message)?, endpoint)
             .map_err(message)?;
     }
+    staged
+        .insert(
+            key(ID, "user-authorization").map_err(message)?,
+            Endpoint::new(
+                support.bundle.content_digest.clone(),
+                Handler::Method(Arc::new(UserAuthorization(skills.clone()))),
+            )
+            .requiring_host_paths(),
+        )
+        .map_err(message)?;
     staged
         .insert(
             key(ID, "import-source").map_err(message)?,
@@ -119,6 +137,39 @@ impl Method for Service {
         let source = self.source;
         Box::pin(async move {
             let (request, view, target) = match source {
+                Source::User => {
+                    let UserRequest { workspace, request } = decode(input)?;
+                    if !request.requires_user_files() {
+                        return Err(Error::Invalid(
+                            "User request requires a user-library mutation".into(),
+                        ));
+                    }
+                    match workspace {
+                        Some(input) => {
+                            let permission_mode = input.permission_mode;
+                            let collaboration_mode = input.collaboration_mode;
+                            let view = caller.views.workspace(input).await?;
+                            let target = InvocableTarget::NewSession {
+                                context: WorkspaceContext {
+                                    workspace: view.workspace.target.clone(),
+                                },
+                                permission_mode,
+                                collaboration_mode,
+                            };
+                            (request, view, target)
+                        }
+                        None => {
+                            let session_id = caller.session_id.clone().ok_or_else(|| {
+                                Error::Invalid("Skills requires a Session".into())
+                            })?;
+                            (
+                                request,
+                                caller.views.session().await?,
+                                InvocableTarget::Session { session_id },
+                            )
+                        }
+                    }
+                }
                 Source::Session => {
                     let request = decode(input)?;
                     let session_id = caller
@@ -162,7 +213,7 @@ impl Method for Service {
                                 },
                             )
                         }
-                        Source::Session => unreachable!(),
+                        Source::Session | Source::User => unreachable!(),
                     };
                     let permission_mode = input.permission_mode;
                     let collaboration_mode = input.collaboration_mode;
@@ -177,6 +228,11 @@ impl Method for Service {
                     (request, view, target)
                 }
             };
+            if request.requires_user_files() && !matches!(source, Source::User) {
+                return Err(Error::Invalid(
+                    "User-library mutations require the user-request endpoint".into(),
+                ));
+            }
             if caller.cancellation.is_cancelled() {
                 return Err(Error::Cancelled);
             }
@@ -185,6 +241,32 @@ impl Method for Service {
     }
 }
 struct Import(Skills);
+struct UserAuthorization(Skills);
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum UserAuthorizationRequest {
+    Status,
+    Recover {
+        grant: maka_plugins::authorization::Id,
+    },
+}
+impl Method for UserAuthorization {
+    fn call(&self, input: Value, caller: Caller) -> BoxFuture<'static, Result<Value, Error>> {
+        let skills = self.0.clone();
+        Box::pin(async move {
+            if caller.cancellation.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            match decode::<UserAuthorizationRequest>(input)? {
+                UserAuthorizationRequest::Status => {}
+                UserAuthorizationRequest::Recover { grant } => {
+                    skills.resume_user(grant).await.map_err(failure)?
+                }
+            }
+            encode(skills.user_status().await.map_err(failure)?)
+        })
+    }
+}
 impl Method for Import {
     fn call(&self, input: Value, caller: Caller) -> BoxFuture<'static, Result<Value, Error>> {
         let skills = self.0.clone();
@@ -193,7 +275,28 @@ impl Method for Import {
                 return Err(Error::Cancelled);
             }
             let input: ImportSourceInput = decode(input)?;
-            encode(skills.import_source(input).await.map_err(failure)?)
+            let path = std::path::Path::new(&input.source_path);
+            let parent = path
+                .parent()
+                .filter(|_| path.is_absolute())
+                .and_then(|parent| parent.to_str())
+                .ok_or_else(|| Error::Invalid("Import requires an absolute file path".into()))?;
+            let source = caller
+                .views
+                .workspace(WorkspaceViewInput {
+                    workspace: WorkspaceTarget::HostPath {
+                        path: parent.into(),
+                    },
+                    permission_mode: PermissionMode::Explore,
+                    collaboration_mode: CollaborationMode::Agent,
+                })
+                .await?;
+            encode(
+                skills
+                    .import_source(input, source.files)
+                    .await
+                    .map_err(failure)?,
+            )
         })
     }
 }

@@ -17,7 +17,12 @@
  * under the License.
  */
 
-import type { ClientIdentity, ClientRemote } from '@maka-agent/plugin-sdk/client';
+import {
+  RemoteError,
+  type ClientIdentity,
+  type ClientRemote,
+  type RemoteFailure,
+} from '@maka-agent/plugin-sdk/client';
 import type { Json } from '@maka-agent/plugin-sdk/host';
 import type {
   PluginRemoteInput,
@@ -28,12 +33,17 @@ import type {
 
 /** One document per consumer, lazily allocated and never retargeted. */
 export function createPluginRemote(
-  request: (
+  transport: (
     input: PluginRemoteInput,
-  ) => Promise<PluginRemoteResult | { kind: 'connection_retired' }>,
+  ) => Promise<PluginRemoteResult | RemoteFailure | { kind: 'connection_retired' }>,
   identity: ClientIdentity,
   signal: AbortSignal,
 ): { api: ClientRemote; close(): Promise<void> } {
+  const request = async (input: PluginRemoteInput) => {
+    const result = await transport(input);
+    if (result.kind === 'remote_error') throw new RemoteError(result.code, result.message);
+    return result;
+  };
   let document: Promise<string> | undefined;
   let closing: Promise<void> | undefined;
   const assertLive = () => {

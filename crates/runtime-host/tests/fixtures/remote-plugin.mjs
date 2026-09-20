@@ -37,6 +37,8 @@ export default async function activate(ctx) {
   }));
   /** @type {import('../../../../packages/plugin-sdk/src/host.js').RemoteCaller | undefined} */
   let previous;
+  /** @type {import('../../../../packages/plugin-sdk/src/host.js').ReadDirectory | undefined} */
+  let previousFiles;
   const workspace = async (
     /** @type {import('../../../../packages/plugin-sdk/src/host.js').Json} */ input,
     /** @type {import('../../../../packages/plugin-sdk/src/host.js').RemoteCaller} */ caller,
@@ -56,8 +58,24 @@ export default async function activate(ctx) {
         if (error.code !== 'revoked') throw error;
       }
     }
+    if (previousFiles) {
+      try {
+        await previousFiles.list();
+        throw new Error('completed Remote call retained filesystem authority');
+      } catch (error) {
+        if (error.code !== 'revoked') throw error;
+      }
+    }
     const view = await caller.views.workspace(request);
+    await view.files.list({ limit: 1 });
+    try {
+      await view.files.read({ path: '../outside' });
+      throw new Error('Remote read escaped its workspace');
+    } catch (error) {
+      if (error.code !== 'invalid') throw error;
+    }
     previous = caller;
+    previousFiles = view.files;
     return { cwd: view.workspace.hostCwd };
   };
   await ctx.remote.method('workspace', workspace, { access: 'host_paths' });

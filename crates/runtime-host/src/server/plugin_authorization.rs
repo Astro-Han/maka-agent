@@ -35,6 +35,7 @@ use maka_protocol::{
 };
 use maka_runtime::execution::{WorkspaceIdentity, WorkspaceTarget};
 use std::sync::Arc;
+mod workspace;
 
 pub(super) async fn execute(
     host: &Arc<Host>,
@@ -100,7 +101,8 @@ pub(super) async fn execute(
             }
             // A concurrent approval may commit while the target is resolving.
             // Recover its receipt before interpreting a now-stale capture.
-            let boundary = capture(&host.log, &request).await;
+            let boundary =
+                capture(&host.log, host.root.canonical_path(), &namespace, &request).await;
             let _gate = host.executions.lock_admission().await;
             let current = principal_authority(&host.configuration, &principal).await?;
             if !current.has_grant(Operation::PluginAuthorization) {
@@ -265,7 +267,7 @@ fn allow(authority: &Authority, request: &Request) -> Result<(), OperationError>
         Target::Workspace {
             workspace: WorkspaceTarget::HostPath { .. },
             ..
-        }
+        } | Target::Directory { .. }
     ) && !authority.can_use_host_paths()
     {
         return Err(denied());
@@ -289,6 +291,7 @@ fn allow(authority: &Authority, request: &Request) -> Result<(), OperationError>
             | Capability::Models
             | Capability::ClientCapabilities => &[Operation::TurnStart],
             Capability::Notifications => &[],
+            Capability::ReadSessions => &[Operation::SessionCatalogQuery],
         };
         if required
             .iter()
@@ -300,9 +303,38 @@ fn allow(authority: &Authority, request: &Request) -> Result<(), OperationError>
     Ok(())
 }
 
-pub(crate) async fn capture(log: &EventLog, request: &Request) -> Result<Boundary, OperationError> {
+pub(crate) async fn capture(
+    log: &EventLog,
+    state_root: &std::path::Path,
+    namespace: &Namespace,
+    request: &Request,
+) -> Result<Boundary, OperationError> {
     Ok(match &request.target {
         Target::Profile => Boundary::Profile,
+        Target::PluginWorkspace { permission_mode } => {
+            let (workspace, workspace_identity) = workspace::prepare(state_root, namespace).await?;
+            Boundary::Workspace {
+                workspace,
+                workspace_identity,
+                permission_mode: *permission_mode,
+            }
+        }
+        Target::Directory { path } => {
+            let path = path.clone();
+            let (path, identity) = tokio::task::spawn_blocking(move || {
+                maka_fs_tools::directory::capture(std::path::Path::new(&path))
+            })
+            .await
+            .map_err(invalid)?
+            .map_err(invalid)?;
+            Boundary::Directory {
+                path: path
+                    .to_str()
+                    .ok_or_else(|| invalid("Directory path is not UTF-8"))?
+                    .into(),
+                identity,
+            }
+        }
         Target::Session { session_id } => {
             let session = log
                 .get_session::<SessionConfiguration>(session_id)
@@ -366,6 +398,16 @@ pub(crate) async fn validate_boundary(
 ) -> Result<(), OperationError> {
     let (cwd, expected) = match boundary {
         Boundary::Profile => return Ok(()),
+        Boundary::Directory { path, identity } => {
+            let path = path.clone();
+            let identity = identity.clone();
+            return tokio::task::spawn_blocking(move || {
+                maka_fs_tools::directory::open(std::path::Path::new(&path), &identity).map(|_| ())
+            })
+            .await
+            .map_err(invalid)?
+            .map_err(|_| denied());
+        }
         Boundary::Session {
             boundary,
             workspace_identity,

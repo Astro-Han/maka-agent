@@ -17,9 +17,8 @@
  * under the License.
  */
 
-use super::{Error, io};
-use cap_fs_ext::DirExt;
-use cap_std::fs::Dir;
+use super::{Error, directory::Directory};
+use maka_plugins::filesystem::entries::Kind;
 use maka_runtime::artifact::content_digest;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -58,10 +57,15 @@ impl Tree {
     }
 
     /// Only ordinary files and directories are admitted. Captured handles refuse links.
-    pub fn read(directory: &Dir, cancellation: &CancellationToken) -> Result<Self, Error> {
+    pub(super) async fn read(
+        directory: &Directory,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, Error> {
         let mut result = Self::empty();
         let mut budget = MAX_TREE_BYTES;
-        result.collect(directory, "", &mut budget, cancellation)?;
+        result
+            .collect(directory, "", &mut budget, cancellation)
+            .await?;
         Ok(result)
     }
     pub fn insert(&mut self, path: &str, bytes: Vec<u8>) -> Result<(), Error> {
@@ -131,29 +135,20 @@ impl Tree {
             })
             .collect()
     }
-    pub(super) fn write(&self, directory: &Dir) -> Result<(), Error> {
+    pub(super) async fn write(&self, directory: &Directory) -> Result<(), Error> {
         for (path, entry) in &self.entries {
-            let path = Path::new(path);
-            let parent = io::open_path(directory, path.parent().unwrap_or(Path::new("")))?;
-            let name = path.file_name().expect("validated resource path");
             match entry {
-                Entry::Directory => {
-                    parent.create_dir(name)?;
-                    io::sync(&parent)?;
-                }
-                Entry::File { bytes, mode } => {
-                    io::write_new(&parent, name.as_ref(), bytes, *mode)?;
-                }
+                Entry::Directory => directory.create_dir(path).await?,
+                Entry::File { bytes, mode } => directory.write_new(path, bytes, *mode).await?,
             }
         }
-        // Flush all created parents after their children, not just the outer directory.
+        // Reconfirm descendants before their parents during publication.
         for (path, entry) in self.entries.iter().rev() {
             if matches!(entry, Entry::Directory) {
-                io::sync(&io::open_path(directory, Path::new(path))?)?;
+                directory.open(path).await?.sync().await?;
             }
         }
-        io::sync(directory)?;
-        Ok(())
+        directory.sync().await
     }
     fn bytes(&self) -> usize {
         self.entries
@@ -164,39 +159,34 @@ impl Tree {
             })
             .sum()
     }
-    fn collect(
+    async fn collect(
         &mut self,
-        directory: &Dir,
+        directory: &Directory,
         prefix: &str,
         budget: &mut usize,
         cancellation: &CancellationToken,
     ) -> Result<(), Error> {
-        for entry in directory.entries()? {
+        for entry in directory.entries().await? {
             if cancellation.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            let entry = entry?;
             if self.entries.len() == MAX_ENTRIES {
                 return Err(Error::Invalid("Too many Skill resources".into()));
             }
-            let name = entry.file_name();
-            let name = name
-                .to_str()
-                .ok_or_else(|| Error::Invalid("Non-UTF8 Skill resource".into()))?;
+            let name = entry.name.as_str();
             let path = if prefix.is_empty() {
                 name.into()
             } else {
                 format!("{prefix}/{name}")
             };
             validate(&path)?;
-            let kind = entry.file_type()?;
-            if kind.is_dir() && !kind.is_symlink() {
-                let child = directory.open_dir_nofollow(name)?;
+            let kind = entry.kind;
+            if matches!(kind, Kind::Directory) {
+                let child = directory.open(name).await?;
                 self.entries.insert(path.clone(), Entry::Directory);
-                self.collect(&child, &path, budget, cancellation)?;
-            } else if kind.is_file() && !kind.is_symlink() {
-                let (bytes, mode) =
-                    io::read(directory, Path::new(name), MAX_FILE_BYTES.min(*budget))?;
+                Box::pin(self.collect(&child, &path, budget, cancellation)).await?;
+            } else if matches!(kind, Kind::File) {
+                let (bytes, mode) = directory.read(name, MAX_FILE_BYTES.min(*budget)).await?;
                 *budget -= bytes.len();
                 self.entries.insert(path, Entry::File { bytes, mode });
             } else {

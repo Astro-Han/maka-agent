@@ -24,6 +24,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+maka-workhub.workspace = true
+maka-assistant.workspace = true
 futures-util.workspace = true
 jsonschema.workspace = true
 maka-client-capability.workspace = true
@@ -49,6 +51,8 @@ maka-transport.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 sha2.workspace = true
+cap-std.workspace = true
+cap-fs-ext.workspace = true
 hmac = "0.12"
 base64 = "0.22"
 getrandom = "0.4.3"

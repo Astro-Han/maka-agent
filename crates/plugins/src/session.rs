@@ -17,6 +17,8 @@
  * under the License.
  */
 
+pub mod catalog;
+
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};
@@ -41,8 +43,15 @@ pub struct View {
 
 /// Session behavior prepares its scoped capabilities. It cannot modify an
 /// already-frozen model request or replace Host execution authority.
+pub struct Request {
+    /// The candidate configuration, including any per-execution behavior override.
+    /// This is an observation, not permission to access or execute the Session.
+    pub session: View,
+    pub cancellation: tokio_util::sync::CancellationToken,
+}
+
 pub trait Behavior: Send + Sync {
-    fn prepare(&self, session_id: String) -> BoxFuture<'_, Result<Preparation, String>>;
+    fn prepare(&self, request: Request) -> BoxFuture<'_, Result<Preparation, String>>;
 }
 
 pub struct SessionBehavior(pub Arc<dyn Behavior>);
@@ -56,9 +65,9 @@ pub struct Preparation {
     pub native_tools: maka_runtime::execution::NativeToolSet,
     pub required_clients: Option<ClientTools>,
     pub tool_ceiling: Option<BTreeSet<String>>,
-    /// A business epoch may close after preparation but before Host admission.
+    /// A captured domain version, checked and pinned during durable admission.
     #[serde(skip)]
-    pub admission: Option<tokio_util::sync::CancellationToken>,
+    pub basis: Option<crate::revision::Basis>,
 }
 
 /// Required tools must share one Session-bound provider. Optional tools are

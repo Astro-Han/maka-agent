@@ -47,6 +47,22 @@ async fn mutate(peer: &mut Peer, context: &Value, mutation: Value) -> Value {
 fn document(body: &str) -> String {
     format!("---\nname: Review\ndescription: Review code\n---\n{body}\n")
 }
+async fn approve_user(peer: &mut Peer) -> Value {
+    let status =
+        super::skills_plugin::client::request(peer, "user-authorization", json!({"kind":"status"}))
+            .await;
+    super::skills_plugin::client::authorization(
+        peer,
+        json!({
+            "kind":"approve","request":{
+                "operationId":uuid::Uuid::new_v4(),"title":"Manage user Skills",
+                "target":status["target"],"capabilities":["read_files","write_files"]
+            }
+        }),
+    )
+    .await["grant"]["id"]
+        .clone()
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn skill_publication_and_confirmed_update_work_through_host_without_a_model() {
@@ -65,10 +81,11 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
         std::fs::write(directory.join("SKILL.md"), &original).unwrap();
     }
     let context = json!({"workspace":{"kind":"host_path","path":fixture.workspace}});
+    let mut approved = Value::Null;
+    let mut pending_recovery = None::<std::path::PathBuf>;
     for reopened in [false, true] {
         let owner = fixture.owner();
         let root = owner.canonical_path().to_owned();
-        let installed = root.join("skills/review");
         let host = Host::open_with_options(
             owner,
             None,
@@ -95,11 +112,43 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
         );
         let mut peer = Peer::new(host, "management").await;
         converged(&mut peer).await;
+        if reopened {
+            disabled(&mut peer, false).await;
+        }
+        let namespace = std::fs::read_dir(root.join("plugin-data"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.join("skills").is_dir())
+            .unwrap();
+        let installed = namespace.join("skills/review");
+        if reopened {
+            let page = catalog(&mut peer, &context, "governance").await;
+            assert!(page["userRecovery"].is_string(), "{page}");
+            let pending = pending_recovery.as_ref().unwrap();
+            assert!(
+                pending.join("proof").is_file(),
+                "revoked consent must leave pending files untouched"
+            );
+            approved = approve_user(&mut peer).await;
+            let status = super::skills_plugin::client::request(
+                &mut peer,
+                "user-authorization",
+                json!({"kind":"recover","grant":approved}),
+            )
+            .await;
+            assert!(status["recovery"].is_null(), "{status}");
+            assert!(
+                !pending.exists(),
+                "re-consent resumes the same durable publication"
+            );
+        }
         if !reopened {
+            approved = approve_user(&mut peer).await;
+            let grant = approved.clone();
             let imported = super::skills_plugin::client::request(
                 &mut peer,
                 "import-source",
-                json!({"sourcePath":import_file}),
+                json!({"sourcePath":import_file,"grant":grant}),
             )
             .await;
             assert_eq!(imported["kind"], "imported", "{imported}");
@@ -111,7 +160,7 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
             let duplicate = super::skills_plugin::client::request(
                 &mut peer,
                 "import-source",
-                json!({"sourcePath":import_file}),
+                json!({"sourcePath":import_file,"grant":grant}),
             )
             .await;
             assert_eq!(duplicate["reason"], "already_exists", "{duplicate}");
@@ -120,7 +169,7 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
             let rejected = super::skills_plugin::client::request(
                 &mut peer,
                 "import-source",
-                json!({"sourcePath":invalid}),
+                json!({"sourcePath":invalid,"grant":grant}),
             )
             .await;
             assert_eq!(rejected["reason"], "invalid_skill", "{rejected}");
@@ -140,13 +189,16 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
                 .await;
                 assert_eq!(resolved["kind"], "resolved", "{resolved}");
                 let path = std::path::Path::new(resolved["path"].as_str().unwrap());
-                assert_eq!(path, directory.join("SKILL.md").canonicalize().unwrap());
-                let removed = mutate(
-                    &mut peer,
-                    &context,
-                    json!({"kind":"delete","ref":reference}),
-                )
-                .await;
+                assert_eq!(
+                    path.canonicalize().unwrap(),
+                    directory.join("SKILL.md").canonicalize().unwrap()
+                );
+                let basis = catalog(&mut peer, &context, "governance").await;
+                let removed = super::skills_plugin::client::request(&mut peer, "user-request", json!({
+                    "workspace":{"workspace":context["workspace"],"permissionMode":"ask","collaborationMode":"agent"},
+                    "request":{"kind":"mutate","expectedRevision":basis["revision"],"grant":grant,
+                        "mutation":{"kind":"delete","ref":reference}}
+                })).await;
                 assert_eq!(removed["kind"], "committed", "{removed}");
                 assert!(!directory.exists());
                 let missing = super::skills_plugin::client::workspace(
@@ -255,9 +307,7 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
                 std::fs::read(installed.join("notes.txt")).unwrap(),
                 b"keep my resource"
             );
-            disabled(&mut peer, true).await;
         } else {
-            disabled(&mut peer, false).await;
             let page = catalog(&mut peer, &context, "governance").await;
             let review = page["items"]
                 .as_array()
@@ -286,25 +336,52 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
             ".agents/.skills-publication",
             ".maka/.skill-sources-publication",
         ] {
+            let publications = std::fs::read_dir(home.join(journal))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
             assert_eq!(
-                std::fs::read_dir(home.join(journal).join("transactions"))
+                publications.len(),
+                1,
+                "each Host owns its recovery namespace"
+            );
+            assert_eq!(
+                std::fs::read_dir(publications[0].join("transactions"))
                     .unwrap()
                     .count(),
                 0
             );
         }
-        let namespace = std::fs::read_dir(root.join("plugin-data"))
-            .unwrap()
-            .next()
-            .unwrap()
-            .unwrap()
-            .path();
         assert_eq!(
             std::fs::read_dir(namespace.join("transactions"))
                 .unwrap()
                 .count(),
             0
         );
+        assert!(
+            !home.join(".maka-workspace.json").exists(),
+            "file consent must not initialize an execution workspace"
+        );
+        if !reopened {
+            let journal = std::fs::read_dir(home.join(".maka/.skill-sources-publication"))
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path()
+                .join("transactions");
+            let digest = content_digest(b"interrupted collection");
+            let pending = journal.join(format!("gc-{}-{}", uuid::Uuid::new_v4(), &digest[7..]));
+            std::fs::create_dir(&pending).unwrap();
+            std::fs::write(pending.join("proof"), b"accepted publication").unwrap();
+            pending_recovery = Some(pending);
+            super::skills_plugin::client::authorization(
+                &mut peer,
+                json!({"kind":"revoke","id":approved}),
+            )
+            .await;
+            disabled(&mut peer, true).await;
+        }
         peer.close().await;
         drop(cleanup);
         tokio::time::timeout(Duration::from_secs(10), server)

@@ -112,5 +112,3 @@ export function createActionsDeps() {
     newTaskTarget: { profileId: 'local', hostId: 'host-local', projectId: null },
   };
 }
-
-export const EMPTY_SKILL_INVOCATION = { loaded: [], failed: [], receipts: [] };

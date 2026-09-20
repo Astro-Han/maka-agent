@@ -187,7 +187,6 @@ import {
   ComposerMentionsProvider,
 } from './composer-mentions';
 import { useAppShellSessionWorkspace } from './use-app-shell-session-workspace';
-import { useShellMemoryPill } from './use-shell-memory-pill';
 import { useShellConnections } from './use-shell-connections';
 import { useShellChatModel } from './use-shell-chat-model';
 import { useShellLiveTurn } from './use-shell-live-turn';
@@ -469,14 +468,6 @@ function AppShellContent({
     activeLiveTurnSnapshot,
     activeExecution,
   } = useAppShellSessionUiReads(sessionUiController, activeId);
-  // The chat surface follows the active Session's Host. Settings and global
-  // commands remain owned by the default Host.
-  const { memoryActive, refreshMemoryActive } = useShellMemoryPill({
-    toastApi,
-    uiLocale,
-    sessionId: ownerActiveId,
-    disabled: sharedSessionActive,
-  });
   const newTaskHost = taskEntry.selectors.selectedHost
     ? {
         profileId: taskEntry.selectors.selectedHost.profileId,
@@ -1882,7 +1873,6 @@ function AppShellContent({
     projectPickerPendingRef,
     projectPickerRequestRef,
     refreshConnections: refreshConnectionProjections,
-    refreshMemoryActive,
     refreshMessages,
     refreshProjects,
     refreshShellSettings,
@@ -2046,10 +2036,6 @@ function AppShellContent({
     // sessions events cover most state changes, but a settings-only
     // write (e.g. defaultSlug picked) may not always fire one.
     onboarding.refresh();
-    // PR-MEMORY-VISIBILITY-INDICATOR-0: same recompute path for the
-    // session-context memory state — user may have just flipped the
-    // agentReadEnabled switch.
-    void refreshMemoryActive();
     void defaultHostConnections.refreshConnections();
     // Settings pages own optimistic local drafts, so the shell does not see
     // every write live. Refresh its display mirrors on close (e.g. default
@@ -2137,7 +2123,7 @@ function AppShellContent({
     openHelp,
     openScheduledTaskCreate: () => {
       closePalette();
-      moduleHubCommands.openScheduledTaskCreate();
+      moduleHubCommands.openAction({ section: 'automations', module: 'scheduled-tasks' }, 'create');
     },
     openProjectFolder,
     openSessionInChat,
@@ -2323,10 +2309,9 @@ function AppShellContent({
         aria-hidden={shellObscured ? 'true' : undefined}
         inert={shellObscured ? true : undefined}
         sideNav={
-          <ModuleHub.ModuleHubScheduledTasksBoundary
-            render={(scheduledTasks) => (
               <SessionNavigationProvider
-                scheduledTasks={scheduledTasks}
+                navigationStatus={newTaskHost ? <ClientPluginSlot host={newTaskHost} name="navigation.status"
+                  input={{ section: 'automations', locale: uiLocale }} /> : null}
                 rail={sessionRail}
                 projects={localProjects}
                 streamingSessionIds={streamingSessionIds}
@@ -2352,8 +2337,6 @@ function AppShellContent({
               >
                 {SESSION_RAIL}
               </SessionNavigationProvider>
-            )}
-          />
         }
       >
         <AppShellDetailPanel agentsView={agentsView}>
@@ -2375,6 +2358,9 @@ function AppShellContent({
               <ModuleHub.ModuleHubHost extensionContent={newTaskHost && pluginWorkspace ? (
                 <ClientPluginSlot host={newTaskHost} name="workspace.manage"
                   input={{ ...pluginWorkspace, locale: uiLocale, section: 'skills' }} />
+              ) : null} applicationContent={(section, action) => newTaskHost ? (
+                <ClientPluginSlot host={newTaskHost} name="application.manage"
+                  input={{ section, action, locale: uiLocale }} />
               ) : null} />
               <WorkHubMainNavigation workbarReady={workHubActive && Boolean(workbar.host.activeId)}
                 onOpenUsage={() => commands.toggleTool('inspector')} onToggleWorkbar={commands.toggleRight}
@@ -2600,8 +2586,6 @@ function AppShellContent({
                   if (activeId) void setSessionModel(activeId, input);
                 }}
                 userLabel={userLabel}
-                memoryActive={memoryActive}
-                onOpenMemorySettings={sharedSessionActive ? undefined : () => openSettingsSection('memory')}
                 messageLoadError={activeId ? messageLoadErrorBySession[activeId] : undefined}
                 messageLoadRetryPending={activeId ? messageRetryPendingBySession[activeId] === true : false}
                 onRetryMessages={activeId ? () => void retryMessages(activeId) : undefined}

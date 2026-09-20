@@ -87,36 +87,52 @@ pub(super) struct Behavior {
 impl maka_plugins::session::Behavior for Behavior {
     fn prepare(
         &self,
-        session_id: String,
+        request: maka_plugins::session::Request,
     ) -> futures_util::future::BoxFuture<'_, Result<maka_plugins::session::Preparation, String>>
     {
         Box::pin(async move {
-            let value = invoke(
+            let mut value = invoke(
                 &self.callback.module,
                 self.callback.id,
-                json!({"sessionId": session_id}),
+                json!({"session": request.session}),
                 Value::Null,
-                CancellationToken::new(),
+                request.cancellation,
             )
             .await
             .map_err(|error| error.to_string())?;
-            let preparation: maka_plugins::session::Preparation =
+            let basis = value
+                .as_object_mut()
+                .and_then(|object| object.remove("basis"))
+                .filter(|value| !value.is_null())
+                .map(serde_json::from_value::<super::revision::Reference>)
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            let mut preparation: maka_plugins::session::Preparation =
                 serde_json::from_value(value).map_err(|error| error.to_string())?;
+            preparation.basis = basis
+                .map(|basis| self.callback.calls.revisions.basis(basis))
+                .transpose()
+                .map_err(|error| error.to_string())?;
             preparation.validate().map_err(|error| error.to_string())?;
             Ok(preparation)
         })
     }
 }
 impl Provider for Prompt {
-    fn evaluate(&self, request: Request) -> TextFuture {
+    fn evaluate(
+        &self,
+        request: Request,
+        workspace: maka_plugins::filesystem::ReadDirectory,
+    ) -> TextFuture {
         let callback = self.callback.clone();
         Box::pin(async move {
+            let view = callback.calls.borrow_read(workspace)?;
             let value = invoke(
                 &callback.module,
                 callback.id,
                 serde_json::to_value(request.target)
                     .map_err(|e| maka_plugins::Error::Invalid(e.to_string()))?,
-                Value::Null,
+                json!({"readView": view.id}),
                 request.cancellation,
             )
             .await
@@ -157,14 +173,14 @@ pub(super) async fn invoke(
                 Ok(result) => result,
                 Err(_) => {
                     module.terminate_vm("plugin callback ignored cancellation");
-                    return Err(ToolError::OutcomeUnknown("plugin callback did not settle after cancellation".into()));
+                    return Err(ToolError::CleanupUnconfirmed("plugin callback did not settle after cancellation".into()));
                 }
             }
         }
     };
     result.map_err(|error| {
         if module.vm_failed() {
-            ToolError::OutcomeUnknown(error.to_string())
+            ToolError::CleanupUnconfirmed(error.to_string())
         } else {
             ToolError::Failed(error.to_string())
         }

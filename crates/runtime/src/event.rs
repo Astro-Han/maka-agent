@@ -61,25 +61,6 @@ pub enum InvocationOutcome {
     },
 }
 
-#[derive(Clone, Debug)]
-pub enum CancellationCause {
-    Runtime,
-    WorkhubStop { action_id: crate::workhub::ActionId },
-    WorkhubCorrection { action_id: crate::workhub::ActionId },
-}
-
-impl CancellationCause {
-    pub fn source(&self) -> String {
-        match self {
-            Self::Runtime => "runtime_cancellation".into(),
-            Self::WorkhubStop { action_id } => crate::workhub::stop_abort_source(action_id),
-            Self::WorkhubCorrection { action_id } => {
-                crate::workhub::correction_abort_source(action_id)
-            }
-        }
-    }
-}
-
 impl InvocationOutcome {
     pub fn status(&self) -> TerminalStatus {
         match self {
@@ -99,6 +80,9 @@ pub enum ToolOutcome {
         model_projection: crate::tool_output::DurableToolProjection,
     },
     Failed {
+        message: String,
+    },
+    Unknown {
         message: String,
     },
 }
@@ -140,13 +124,6 @@ pub enum Fact {
     },
     MessageSteered {
         message: Box<crate::input::DeliveredMessage>,
-    },
-    WorkhubDelegated {
-        delegation: Box<crate::workhub::Delegation>,
-    },
-    WorkhubResumeObserved {
-        resume: Box<crate::workhub::ResumeOrigin>,
-        target: Invocation,
     },
     ContextCheckpointRecorded {
         checkpoint: crate::context::ContextCheckpoint,
@@ -198,8 +175,6 @@ impl Fact {
             Self::ExecutorCompleted { .. } => "executor_completed",
             Self::InvocationOpened { .. } => "invocation_opened",
             Self::MessageSteered { .. } => "message_steered",
-            Self::WorkhubDelegated { .. } => "workhub_delegated",
-            Self::WorkhubResumeObserved { .. } => "workhub_resume_observed",
             Self::ModelRequested { .. } => "model_requested",
             Self::ContextCheckpointRecorded { .. } => "context_checkpoint_recorded",
             Self::ToolResultArchived { .. } => "tool_result_archived",
@@ -326,8 +301,6 @@ impl LogPrefix {
                 }
                 Fact::InvocationOpened { .. }
                 | Fact::MessageSteered { .. }
-                | Fact::WorkhubDelegated { .. }
-                | Fact::WorkhubResumeObserved { .. }
                 | Fact::ContextCheckpointRecorded { .. }
                 | Fact::ToolResultArchived { .. }
                 | Fact::ExecutorObserved { .. }

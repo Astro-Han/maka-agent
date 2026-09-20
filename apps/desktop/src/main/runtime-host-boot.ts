@@ -18,6 +18,7 @@
  */
 
 import { resolveDesktopWslHostHandoff } from './runtime-host-wsl-handoff.js';
+import { pluginNotifications } from './plugin-notifications.js';
 import {
   app,
   type BrowserWindow,
@@ -26,6 +27,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  Notification,
   powerMonitor,
   powerSaveBlocker,
   shell,
@@ -50,10 +52,6 @@ import {
   providerAuthRequiresSecret,
 } from "@maka/core/llm-connections";
 import { BotRegistry, type BotIncomingMessage } from '@maka/runtime/bots';
-import {
-  SCHEDULED_TASK_NATIVE_EFFECT_SERVICE_ID,
-  SCHEDULED_TASK_NATIVE_EFFECT_SERVICE_VERSION,
-} from '@maka/runtime/scheduled-task-tools';
 import { buildMcpToolsWithIdentities } from '@maka/runtime/mcp-tools';
 import {
   createClientRuntimeHostCredentialStore,
@@ -1030,10 +1028,6 @@ const isCurrentWorkHubTarget = (scope: DesktopTargetScope): boolean => {
 const workHubRuntime = createWorkHubRuntime({
   client: (scope) => requireWorkHubTarget(scope).client,
   isCurrent: isCurrentWorkHubTarget,
-  createContext: async (scope) => ({
-    workspace: await currentDesktopWorkspaceTarget(requireWorkHubTarget(scope).policy),
-    defaults: { permissionMode: (await settingsStore.get()).chatDefaults.permissionMode },
-  }),
 });
 const workHubControl = createWorkHubControl({
   ipcMain,
@@ -1337,37 +1331,21 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
           })),
         ];
       },
-      additionalServices: (scope) => [
-        {
-          serviceId: SCHEDULED_TASK_NATIVE_EFFECT_SERVICE_ID,
-          version: SCHEDULED_TASK_NATIVE_EFFECT_SERVICE_VERSION,
-          async call(method, input) {
-            if (method === "notify_local") {
-              const taskId = requireScheduledTaskEffectString(input.taskId, "taskId");
-              const title = requireScheduledTaskEffectString(input.title, "title");
-              mainWindowController.send("scheduled-tasks:fired", scope, {
-                id: taskId,
-                title,
-              });
-              return { ok: true };
-            }
-            if (method === "notify_bot") {
-              const platform = input.platform;
-              if (!isBotDeliveryProvider(platform)) {
-                throw new Error("ScheduledTask bot platform is invalid");
-              }
-              const chatId = requireScheduledTaskEffectString(input.chatId, "chatId");
-              const title = requireScheduledTaskEffectString(input.title, "title");
-              const body = typeof input.body === "string" ? input.body.trim() : "";
-              // Bot-channel notices follow the bot audience language; localization tracked under #2672
-              const text = [`【定时任务】${title}`, ...(body ? ["", body] : [])].join("\n");
-              const sent = await botRegistry.sendMessage(platform, chatId, text);
-              if (!sent) throw new Error("ScheduledTask bot channel is unavailable");
-              return { ok: true };
-            }
-            throw new Error(`Unknown ScheduledTask native effect: ${method}`);
+      additionalServices: () => [
+        pluginNotifications({
+          local(packageId, title, body) {
+            if (isE2e) return;
+            if (!Notification.isSupported()) throw new Error('Native notifications are unavailable');
+            const notification = new Notification({ title, body: `${packageId}\n${body}` });
+            notification.on('click', () => mainWindowController.focus());
+            notification.show();
           },
-        },
+          async channel(channel, recipient, title, body) {
+            if (!isBotDeliveryProvider(channel)) throw new Error('Notification channel is unavailable');
+            if (!await botRegistry.sendMessage(channel, recipient, [title, body].filter(Boolean).join('\n\n')))
+              throw new Error('Notification delivery failed');
+          },
+        }),
       ],
       oauthPresentation,
       releaseDesktopInteractionSession,
@@ -1765,26 +1743,6 @@ function registerHostClientIpc(
   const unsubscribePluginClientChanges = client.subscribePluginClientChanges((revision) => {
     sendToRenderer("plugins:client-changed", revision);
   });
-  const unsubscribeScheduledTaskChanges = client.subscribeScheduledTaskChanges((frame) => {
-    if (!isTargetActive()) return;
-    sendToRenderer("scheduled-tasks:changed", {
-      type: "scheduled_tasks_changed",
-      reason: frame.reason,
-      taskId: frame.taskId,
-      ts: Date.now(),
-    });
-    if (frame.reason !== "fired") return;
-    void client
-      .request('scheduled-task.query', { kind: 'get', taskId: frame.taskId })
-      .then((result) => {
-        const task = result.kind === 'task' ? result.task : null;
-        if (!task) return;
-        if (task.effect.kind !== "notify" || task.effect.channel === "bot") {
-          sendToRenderer("scheduled-tasks:fired", task);
-        }
-      })
-      .catch(() => undefined);
-  });
   const capabilityBinding = mcpCapabilityPublisher.bind(
     controls.refreshClientCapabilities,
   );
@@ -2034,7 +1992,6 @@ function registerHostClientIpc(
     unsubscribeSessionCatalogChanges();
     unsubscribeProjectCatalogChanges();
     unsubscribePluginClientChanges();
-    unsubscribeScheduledTaskChanges();
     runtimePolicyTargets.delete(target);
     if (runtimePolicyTargetsByEpoch.get(scope.targetEpoch) === targetContext) {
       runtimePolicyTargetsByEpoch.delete(scope.targetEpoch);
@@ -2044,12 +2001,6 @@ function registerHostClientIpc(
   };
 }
 
-function requireScheduledTaskEffectString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`ScheduledTask native effect requires ${label}`);
-  }
-  return value.trim();
-}
 
 function registerPersistentClientIpc(): void {
   registerAppClientIpc({

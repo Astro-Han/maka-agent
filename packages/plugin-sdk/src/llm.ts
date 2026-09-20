@@ -31,7 +31,7 @@ export interface ModelGeneration {
   };
 }
 export interface Llm {
-  /** Uses the invocation's frozen model, Host proxy/OAuth and shared executor.
+  /** Uses the authorized source's model binding, Host proxy/OAuth and shared executor.
    * No tools or parent conversation are sent. Result and usage settle before delivery.
    */
   generate(input: {

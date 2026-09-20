@@ -42,6 +42,7 @@ enum Source {
     Remote {
         principal: Principal,
         request: Request,
+        connection: uuid::Uuid,
     },
 }
 
@@ -60,7 +61,19 @@ impl ResourceTarget {
 }
 
 impl Executions {
-    pub(crate) async fn open_plugin_consent(&self, owner: Context, id: Id) -> Result<Owned, Error> {
+    /// Only the authenticated transport can supply an initiating connection.
+    pub(super) fn plugin_initiating_connection(&self, call: &Scope) -> Option<uuid::Uuid> {
+        match &self.plugin_calls.evidence::<Evidence>(call)?.source {
+            Source::Remote { connection, .. } => Some(*connection),
+            Source::Background(_) => None,
+        }
+    }
+
+    pub(crate) async fn open_plugin_consent(
+        &self,
+        owner: Context,
+        id: Id,
+    ) -> Result<maka_plugins::authorization::Authorized, Error> {
         let _lease = owner.admit().map_err(|_| Error::Revoked)?;
         let identity = owner.identity().map_err(|_| Error::Revoked)?;
         let namespace =
@@ -76,14 +89,18 @@ impl Executions {
                 Evidence {
                     owner,
                     namespace,
-                    boundary: record.boundary,
+                    boundary: record.boundary.clone(),
                     source: Source::Background(id),
                     clients: Default::default(),
                 },
                 cancellation,
             )
             .map_err(|error| Error::Host(error.to_string()))?;
-        self.track_plugin_scope(scope, None)
+        Ok(maka_plugins::authorization::Authorized {
+            grant: record.grant,
+            boundary: record.boundary,
+            call: self.track_plugin_scope(scope, None)?,
+        })
     }
 
     pub(crate) async fn open_plugin_remote(
@@ -91,6 +108,7 @@ impl Executions {
         owner: Context,
         principal: Principal,
         request: Request,
+        connection: uuid::Uuid,
         cancellation: CancellationToken,
         resources: std::sync::Arc<maka_plugins::call::Resources>,
     ) -> Result<Owned, Error> {
@@ -104,7 +122,7 @@ impl Executions {
         consent::validate_principal(&self.configuration, &principal, &request)
             .await
             .map_err(super::authority::consent_error)?;
-        let boundary = consent::capture(&self.log, &request)
+        let boundary = consent::capture(&self.log, &self.paths.state_root, &namespace, &request)
             .await
             .map_err(super::authority::consent_error)?;
         let scope = self
@@ -117,7 +135,11 @@ impl Executions {
                     owner,
                     namespace,
                     boundary,
-                    source: Source::Remote { principal, request },
+                    source: Source::Remote {
+                        principal,
+                        request,
+                        connection,
+                    },
                     clients: Default::default(),
                 },
                 cancellation,
@@ -179,7 +201,7 @@ impl Executions {
             Boundary::Workspace { workspace, .. } => {
                 Ok(ResourceTarget::Workspace(workspace.host_cwd.clone()))
             }
-            Boundary::Profile => Err(Error::Denied),
+            Boundary::Profile | Boundary::Directory { .. } => Err(Error::Denied),
         }
     }
 
@@ -210,7 +232,9 @@ impl Executions {
                 .map_err(super::authority::consent_error)?;
                 Ok(record.boundary)
             }
-            Source::Remote { principal, request } => {
+            Source::Remote {
+                principal, request, ..
+            } => {
                 if !request.capabilities.contains(&capability) {
                     return Err(Error::Denied);
                 }
@@ -228,9 +252,9 @@ impl Executions {
     pub(crate) async fn plugin_resource_clients(
         &self,
         scope: &Scope,
+        capability: Capability,
     ) -> Result<Vec<std::sync::Arc<maka_client_capability::Registration>>, Error> {
-        self.plugin_resource_boundary(scope, Capability::ClientCapabilities)
-            .await?;
+        self.plugin_resource_boundary(scope, capability).await?;
         let evidence = self
             .plugin_calls
             .evidence::<Evidence>(scope)
@@ -289,7 +313,7 @@ impl Executions {
         match self.plugin_resource_boundary(scope, capability).await? {
             Boundary::Session { boundary, .. } => Ok(boundary.cwd),
             Boundary::Workspace { workspace, .. } => Ok(workspace.host_cwd),
-            Boundary::Profile => Err(Error::Denied),
+            Boundary::Profile | Boundary::Directory { .. } => Err(Error::Denied),
         }
     }
 }

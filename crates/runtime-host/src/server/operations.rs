@@ -30,15 +30,9 @@ pub struct Operations;
 
 impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
-        if super::scheduler::supports(operation) {
-            return super::scheduler::decode_input(operation, value);
-        }
         if maka_protocol::plugin::supports(operation) {
             maka_protocol::plugin::decode_input(operation, value)?;
             return Ok(value.clone());
-        }
-        if maka_protocol::workhub::supports(operation) {
-            return maka_protocol::workhub::decode_input(operation, value);
         }
         if maka_protocol::navigation::supports(operation) {
             return maka_protocol::navigation::decode_input(operation, value);
@@ -113,14 +107,8 @@ impl OperationRegistry for Operations {
         }
     }
     fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
-        if super::scheduler::supports(operation) {
-            return super::scheduler::decode_output(operation, value);
-        }
         if maka_protocol::plugin::supports(operation) {
             return maka_protocol::plugin::decode_output(operation, value);
-        }
-        if maka_protocol::workhub::supports(operation) {
-            return maka_protocol::workhub::decode_output(operation, value);
         }
         if maka_protocol::navigation::supports(operation) {
             return maka_protocol::navigation::decode_output(operation, value);
@@ -191,37 +179,8 @@ impl OperationRegistry for Operations {
         }
     }
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
-        if super::scheduler::supports(operation) {
-            return Some(if operation == Operation::ScheduledTaskQuery {
-                super::scheduler::QUERY_ERRORS
-            } else {
-                super::scheduler::MUTATION_ERRORS
-            });
-        }
         if maka_protocol::plugin::supports(operation) {
             return Some(maka_protocol::plugin::ERRORS);
-        }
-        if maka_protocol::workhub::supports(operation) {
-            if matches!(
-                operation,
-                Operation::WorkhubCoordinationActFromTurn
-                    | Operation::WorkhubCoordinationSelectAndDelegate
-            ) {
-                return Some(super::workhub::ACTION_ERRORS);
-            }
-            if operation == Operation::WorkhubCoordinationCandidates {
-                return Some(super::workhub::CANDIDATE_ERRORS);
-            }
-            if operation == Operation::WorkhubCoordinationAnswer {
-                return Some(super::workhub::TURN_ERRORS);
-            }
-            return Some(
-                if operation == Operation::WorkhubCoordinationConfigureModel {
-                    sessions::configuration::ERRORS
-                } else {
-                    super::workhub::ERRORS
-                },
-            );
         }
         if maka_protocol::navigation::supports(operation) {
             return Some(super::navigation::ERRORS);

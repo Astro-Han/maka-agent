@@ -34,7 +34,6 @@ import { createAppShellChatActions } from '../../renderer/app-shell-chat-actions
 import {
   createActionsDeps,
   createTransientState,
-  EMPTY_SKILL_INVOCATION,
   installWindow,
 } from './app-shell-chat-actions-fixture.js';
 
@@ -43,7 +42,7 @@ describe('busy-raced send settlement', () => {
     const restoreWindow = installWindow({ sessions: {
       submitMessage: async (_sessionId: string, placement: string) => {
         assert.equal(placement, 'next_turn');
-        return { ok: true, disposition: 'followup', attachments: [], inlineReferences: [], skillInvocation: EMPTY_SKILL_INVOCATION };
+        return { ok: true, disposition: 'followup', attachments: [], inlineReferences: [], preparation: [] };
       },
     } });
     try {
@@ -60,7 +59,7 @@ describe('busy-raced send settlement', () => {
     const restoreWindow = installWindow({ sessions: {
       submitMessage: async (_sessionId: string, _placement: string, _command: unknown) => {
         assert.equal([...transient.values()][0]?.pendingSteering, true);
-        return { ok: true, disposition: 'steering', attachments: [], inlineReferences: [], skillInvocation: EMPTY_SKILL_INVOCATION };
+        return { ok: true, disposition: 'steering', attachments: [], inlineReferences: [], preparation: [] };
       },
     } });
     try {
@@ -102,7 +101,7 @@ describe('busy-raced send settlement', () => {
             disposition: 'followup',
             attachments: [],
             inlineReferences: [],
-            skillInvocation: EMPTY_SKILL_INVOCATION,
+            preparation: [],
           };
         },
       },
@@ -167,12 +166,8 @@ describe('busy-raced send settlement', () => {
       sessions: {
         submitMessage: async () => ({
           ok: false,
-          reason: 'skill_invocation_failed' as const,
-          skillInvocation: {
-            loaded: [],
-            failed: [{ request: 'typo', reason: 'not_found' as const }],
-            receipts: [],
-          },
+          reason: 'input_preparation_failed' as const,
+          preparation: [],
         }),
       },
     });
@@ -198,12 +193,8 @@ describe('busy-raced send settlement', () => {
       sessions: {
         submitMessage: async () => ({
           ok: false as const,
-          reason: 'skill_invocation_failed' as const,
-          skillInvocation: {
-            loaded: [],
-            failed: [{ request: 'typo', reason: 'not_found' }],
-            receipts: [],
-          },
+          reason: 'input_preparation_failed' as const,
+          preparation: [],
         }),
       },
     });
@@ -271,7 +262,7 @@ describe('busy-raced send settlement', () => {
             disposition: 'followup' as const,
             attachments: [],
             inlineReferences: [],
-            skillInvocation: EMPTY_SKILL_INVOCATION,
+            preparation: [],
           };
         },
       },
@@ -329,7 +320,7 @@ describe('busy-raced send settlement', () => {
             turnId: 'host-turn',
             attachments: [],
             inlineReferences: [],
-            skillInvocation: EMPTY_SKILL_INVOCATION,
+            preparation: [],
           };
         },
       },
@@ -370,7 +361,7 @@ describe('busy-raced send settlement', () => {
           turnId: 'host-turn',
           attachments: [],
           inlineReferences: [],
-          skillInvocation: EMPTY_SKILL_INVOCATION,
+          preparation: [],
         }),
       },
     });
@@ -408,7 +399,7 @@ describe('busy-raced send settlement', () => {
           messageId: command.messageId,
           attachments: [],
           inlineReferences: [],
-          skillInvocation: EMPTY_SKILL_INVOCATION,
+          preparation: [],
         }),
       },
     });
@@ -449,7 +440,7 @@ describe('busy-raced send settlement', () => {
           turnId: 'host-turn',
           attachments: [],
           inlineReferences: [],
-          skillInvocation: EMPTY_SKILL_INVOCATION,
+          preparation: [],
         }),
       },
     });

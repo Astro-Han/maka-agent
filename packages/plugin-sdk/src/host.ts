@@ -22,9 +22,10 @@ import type { Processes } from './process.js';
 import type { Terminals } from './terminal.js';
 import type { Credentials } from './credentials.js';
 import type { Http } from './http.js';
-import type { Files } from './filesystem.js';
+import type { Files, ReadDirectory, FileEntries } from './filesystem.js';
 
 export type * from './execution.js';
+export type * from './interaction.js';
 export type * from './process.js';
 export type * from './terminal.js';
 export type * from './credentials.js';
@@ -82,6 +83,8 @@ export interface WorkspaceViewInput {
   collaborationMode: 'agent' | 'plan';
 }
 export interface SessionView {
+  /** Borrowed for this Remote callback; current credentials and workspace are rechecked. */
+  readonly files: ReadDirectory;
   workspace: { target: WorkspaceViewInput['workspace']; hostCwd: string };
   tools: readonly string[];
 }
@@ -119,7 +122,18 @@ export interface ResourceContext {
   readonly processes: Processes;
   readonly terminals: Terminals;
   readonly http: Http;
-  /** Uses the source's admitted and current permissions. */
+  /** Metadata only; Agent scopes see their own Session, independent scopes require read_sessions. */
+  readonly sessions: {
+    list(input?: { revision?: string; cursor?: string }): Promise<{
+      revision: string;
+      entries: readonly {
+        session: import('./execution.js').SessionConfiguration;
+        labels: readonly string[];
+        updatedAt: number;
+      }[];
+      nextCursor: string | null;
+    }>;
+  };
   readonly files: Files;
   readonly llm: import('./llm.js').Llm;
   readonly clients: import('./clients.js').ClientCapabilities;
@@ -142,6 +156,7 @@ export interface ToolDefinition {
   description: string;
   inputSchema: Json;
   directOnly?: boolean;
+  alwaysVisible?: boolean;
   semantics?: 'parallel' | 'exclusive_step' | 'finish_turn';
 }
 export interface ExecutorDefinition {
@@ -173,7 +188,7 @@ export type TextProvider =
   | string
   | ((
       request: PromptRequest,
-      call: { signal: Cancellation },
+      call: { signal: Cancellation; workspace: ReadDirectory },
     ) => Awaitable<string | null | undefined>);
 export type PromptRequest =
   | { readonly kind: 'session'; readonly sessionId: string; readonly cwd: string }
@@ -196,7 +211,19 @@ export interface StorageMutation {
   expectedRevision: number | null;
   data: StorageData;
 }
+/** Process-local observation; never persist it or treat it as permission. */
+export interface PreparationBasis {
+  readonly handle: string;
+  readonly version: number;
+}
+export interface PreparationRevision extends Registration {
+  /** Capture before reading the domain state used for preparation. */
+  capture(): Promise<PreparationBasis>;
+  /** Order the domain update with accepted preparations; the callback owns its transaction. */
+  invalidate<T>(update: () => Awaitable<T>): Promise<T>;
+}
 export interface BehaviorPreparation {
+  basis?: PreparationBasis;
   instructions?: string;
   toolMode?: 'direct' | 'code_mode';
   nativeTools?: 'workspace' | 'attachments';
@@ -208,10 +235,20 @@ export interface BehaviorPreparation {
   toolCeiling?: readonly string[] | null;
 }
 export interface HostContext {
+  revision(): Promise<PreparationRevision>;
+  /** Explicitly shared non-secret inputs, never ambient home or Host state access. */
+  readonly inputs: {
+    names(): Promise<readonly string[]>;
+    at(name: string): ReadDirectory;
+  };
   /** Opens current background authority and confirms cleanup after the callback. */
   withAuthorization<T>(
     id: string,
-    use: (call: ResourceContext & { readonly source: CallSource }) => Awaitable<T>,
+    use: (
+      call: ResourceContext & { readonly source: CallSource },
+      grant: import('./authorization.js').AuthorizationGrant,
+      boundary: import('./authorization.js').AuthorizationBoundary,
+    ) => Awaitable<T>,
   ): Promise<T>;
   readonly behaviors: {
     /** Preparation narrows capabilities; it never grants execution authority.
@@ -220,7 +257,7 @@ export interface HostContext {
     register(
       name: string,
       prepare: (
-        request: { readonly sessionId: string },
+        request: { readonly session: import('./execution.js').SessionConfiguration },
         call: { readonly signal: Cancellation },
       ) => Awaitable<BehaviorPreparation>,
     ): Promise<Registration>;
@@ -247,6 +284,28 @@ export interface HostContext {
   readonly identity: Identity;
   readonly signal: Cancellation;
   readonly tools: {
+    /** Capture one handler/context for this group per logical model step.
+     * Returning null omits the group. Physical retries and returned calls keep
+     * the captured implementation; retiring its registration rejects new starts.
+     */
+    bind<Input = Json>(
+      definitions: readonly ToolDefinition[],
+      capture: (
+        request: {
+          readonly invocation: Invocation;
+          readonly cwd: string;
+          readonly tools: readonly string[];
+        },
+        call: { readonly signal: Cancellation; readonly workspace: ReadDirectory },
+      ) => Awaitable<
+        | {
+            readonly context?: string;
+            invoke(name: string, input: Input, call: CallContext): Awaitable<Json>;
+          }
+        | null
+        | undefined
+      >,
+    ): Promise<Registration>;
     register<Input = Json>(
       definition: ToolDefinition,
       invoke: (input: Input, call: CallContext) => Awaitable<Json>,
@@ -270,8 +329,23 @@ export interface HostContext {
     ): Promise<Registration>;
   };
   readonly storage: {
+    /** Current ordered pages, including tombstones; not a cross-page snapshot. */
+    scan(query?: { prefix?: string; after?: string }): Promise<{
+      entries: { key: string; record: StorageRecord }[];
+      nextAfter: string | null;
+    }>;
     read(key: string): Promise<StorageRecord | null>;
     batch(mutations: readonly StorageMutation[]): Promise<StorageRecord[]>;
+  };
+  /** Non-secret selection lookup; grants no model execution permission. */
+  readonly models: {
+    resolve(
+      selection: { kind: 'default' } | { kind: 'named'; connectionSlug: string; model: string },
+    ): Promise<{
+      connection_id: string;
+      connection_slug: string;
+      model: string;
+    } | null>;
   };
   /** Non-secret user preferences; no configuration or execution authority. */
   readonly preferences: {
@@ -279,6 +353,7 @@ export interface HostContext {
       revision: number;
       personalization: { displayName: string; assistantTone: string };
       workspaceInstructions: boolean;
+      toolMode: 'direct' | 'code_mode';
     }>;
   };
   readonly executions: {
@@ -286,7 +361,8 @@ export interface HostContext {
      * releases this view, never cancels work already accepted by the Host. */
     restore(id: string): Promise<Executions & Registration>;
   };
-  readonly data: PrivateFiles;
+  /** Package/scope-private files; the plugin owns file formats and recovery. */
+  readonly data: FileEntries;
   readonly credentials: Credentials;
   sleep(milliseconds: number): Promise<void>;
   /** Cleanup runs in reverse registration order. */
@@ -294,36 +370,7 @@ export interface HostContext {
   /** Stage during activation; starts only after publication becomes effective. */
   run(task: () => Awaitable<void>): void;
 }
-/** Package/scope-private files, not the user's workspace. Operations are
- * independent; the plugin owns its file format and multi-operation recovery.
- * Paths use portable relative components, never links or parent traversal.
- * Files are flushed, but namespace mutations do not promise power-loss durability.
- */
-export interface PrivateFiles {
-  /** Reads at most 1 MiB (default 64 KiB). A non-null cursor means more bytes exist. */
-  read(input: { path: string; offset?: number; limit?: number }): Promise<{
-    bytes: Uint8Array;
-    nextOffset: number | null;
-  }>;
-  /** Flush a bounded write, not an atomic replacement. outcome_unknown requires recovery. */
-  write(input: {
-    path: string;
-    offset?: number;
-    bytes: Uint8Array | readonly number[];
-    truncate?: boolean;
-  }): Promise<void>;
-  /** Lexical pagination, not a snapshot across concurrent directory mutations. */
-  list(input?: { path?: string; after?: string | null; limit?: number }): Promise<{
-    entries: { name: string; kind: 'file' | 'directory' | 'other' }[];
-    nextAfter: string | null;
-  }>;
-  createDirectory(path: string): Promise<void>;
-  /** Removes only a file/link or an empty directory. */
-  remove(path: string): Promise<void>;
-  /** May replace an existing destination file. */
-  rename(from: string, to: string): Promise<void>;
-}
-/** No invocation exists yet; preparation does not grant tool, file or process authority. */
+/** No invocation exists yet; preparation borrows read-only workspace access, not execution authority. */
 export interface InputReceipt {
   readonly source: {
     readonly kind: 'input';
@@ -336,6 +383,7 @@ export interface InputReceipt {
   readonly receipt: Json;
 }
 export interface InputPreparationRequest {
+  readonly workspace: ReadDirectory;
   readonly sessionId: string;
   readonly cwd: string;
   readonly content: MessageContent;
@@ -352,6 +400,7 @@ export type InputPreparationOutcome =
       readonly content: MessageContent;
       readonly receipt: Json;
       readonly requiredTools?: readonly string[];
+      readonly basis?: PreparationBasis;
     }
   | { readonly kind: 'blocked'; readonly message: string; readonly receipt: Json };
 export type HostPlugin<Config = Json> = (

@@ -19,10 +19,7 @@
 
 use super::*;
 use maka_event_log::turns::InvocationState;
-use maka_runtime::{
-    event::CancellationCause,
-    handoff::{HandoffIntent, HandoffPause},
-};
+use maka_runtime::handoff::{HandoffIntent, HandoffPause};
 use std::num::NonZeroU16;
 
 #[tokio::test]
@@ -99,10 +96,7 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
             };
             append(&log, &target).await;
             let before = log.prefix(100, 65536).await.unwrap();
-            let result = log
-                .cancel_handoff(&source.invocation, CancellationCause::Runtime)
-                .await
-                .unwrap();
+            let result = log.cancel_handoff(&source.invocation).await.unwrap();
             assert_eq!(result.invocation, target.invocation);
             assert!(
                 !matches!(result.state, InvocationState::Ended { .. }),
@@ -118,11 +112,7 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
                  BEGIN SELECT RAISE(ABORT, 'cancel fault'); END;"
             ).unwrap();
             let before = log.prefix(100, 65536).await.unwrap();
-            assert!(
-                log.cancel_handoff(&source.invocation, CancellationCause::Runtime)
-                    .await
-                    .is_err()
-            );
+            assert!(log.cancel_handoff(&source.invocation).await.is_err());
             assert_eq!(
                 log.prefix(100, 65536).await.unwrap().digest,
                 before.digest,
@@ -132,13 +122,8 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
                 .execute_batch("DROP TRIGGER reject_cancel")
                 .unwrap();
             let (first, retry) = tokio::join!(
-                log.cancel_handoff(&source.invocation, CancellationCause::Runtime),
-                log.cancel_handoff(
-                    &source.invocation,
-                    CancellationCause::WorkhubStop {
-                        action_id: "stop".parse().unwrap()
-                    }
-                ),
+                log.cancel_handoff(&source.invocation),
+                log.cancel_handoff(&source.invocation),
             );
             let first = first.unwrap();
             let retry = retry.unwrap();
@@ -190,10 +175,7 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
         let before = log.prefix(100, 65536).await.unwrap().digest;
         log.close().await.unwrap();
         let log = EventLog::open(&path).await.unwrap();
-        let replay = log
-            .cancel_handoff(&source.invocation, CancellationCause::Runtime)
-            .await
-            .unwrap();
+        let replay = log.cancel_handoff(&source.invocation).await.unwrap();
         assert_eq!(
             replay.invocation.turn_id, source.invocation.turn_id,
             "a later Session Turn is not the claim owner"

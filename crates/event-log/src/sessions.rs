@@ -62,6 +62,13 @@ pub struct SessionRecord<T> {
 }
 
 #[derive(Clone, Debug)]
+pub enum CatalogScope {
+    Profile,
+    Session(String),
+    Workspace(String),
+}
+
+#[derive(Clone, Debug)]
 pub struct SessionPage<T> {
     pub revision: String,
     pub sessions: Vec<SessionRecord<T>>,
@@ -95,6 +102,39 @@ impl EventLog {
         configuration: &T,
         now: u64,
     ) -> Result<SessionRecord<T>, StoreError> {
+        self.create_session_owned(id, fingerprint, configuration, now, None)
+            .await
+    }
+
+    /// Manager ownership and Session creation share the same transaction.
+    /// Only Host admission supplies the bound package/scope.
+    pub async fn create_managed_session<T: Serialize + DeserializeOwned + Send + 'static>(
+        &self,
+        claim: &ManagedSession,
+        configuration: &T,
+        now: u64,
+    ) -> Result<SessionRecord<T>, StoreError> {
+        if claim.manager.scope() == &maka_plugins::composition::Scope::DesktopUi {
+            return Err(invalid("Desktop UI cannot manage Host Sessions"));
+        }
+        self.create_session_owned(
+            &claim.session_id,
+            &claim.fingerprint,
+            configuration,
+            now,
+            Some(claim.manager.clone()),
+        )
+        .await
+    }
+
+    async fn create_session_owned<T: Serialize + DeserializeOwned + Send + 'static>(
+        &self,
+        id: &str,
+        fingerprint: &str,
+        configuration: &T,
+        now: u64,
+        manager: Option<maka_plugins::storage::Namespace>,
+    ) -> Result<SessionRecord<T>, StoreError> {
         self.validate_root()?;
         validate_id(id)?;
         validate_time(now)?;
@@ -108,7 +148,25 @@ impl EventLog {
                 Box::pin(async move {
                     let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
                     if let Some(record) = probe(&mut tx, &id, &fingerprint).await? {
+                        let stored: Option<(String, String)> = sqlx::query_as(
+                            "SELECT package_id, scope_id FROM session_managers WHERE session_id = ?",
+                        ).bind(&id).fetch_optional(&mut *tx).await?;
+                        let requested = manager.as_ref().map(|owner| (
+                            owner.package().to_owned(), String::from(owner.scope().clone()),
+                        ));
+                        if stored != requested {
+                            return Err(StoreError::SessionConflict);
+                        }
                         return Ok(record);
+                    }
+                    if let Some(manager) = manager {
+                        sqlx::query("INSERT INTO session_managers VALUES (?, ?, ?, ?)")
+                            .bind(&id)
+                            .bind(manager.package())
+                            .bind(String::from(manager.scope().clone()))
+                            .bind(&fingerprint)
+                            .execute(&mut *tx)
+                            .await?;
                     }
                     insert(&mut tx, &id, &fingerprint, &configuration, now).await?;
                     let record = read(&mut tx, &id)
@@ -145,6 +203,28 @@ impl EventLog {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<SessionPage<T>, StoreError> {
+        self.session_page(None, expected_revision, cursor, limit)
+            .await
+    }
+
+    /// Active metadata within a Host-authorized scope; never plugin-defined SQL.
+    pub async fn scoped_sessions<T: DeserializeOwned + Send + 'static>(
+        &self,
+        scope: CatalogScope,
+        expected_revision: Option<&str>,
+        cursor: Option<&str>,
+    ) -> Result<SessionPage<T>, StoreError> {
+        self.session_page(Some(scope), expected_revision, cursor, MAX_SESSION_PAGE)
+            .await
+    }
+
+    async fn session_page<T: DeserializeOwned + Send + 'static>(
+        &self,
+        scope: Option<CatalogScope>,
+        expected_revision: Option<&str>,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<SessionPage<T>, StoreError> {
         self.validate_root()?;
         if limit == 0 || limit > MAX_SESSION_PAGE {
             return Err(invalid("session page limit must be 1..=32"));
@@ -155,6 +235,15 @@ impl EventLog {
                 return Err(invalid("session continuation requires catalog revision"));
             }
         }
+        let active_only = scope.is_some();
+        let (session, cwd) = match scope {
+            Some(CatalogScope::Session(id)) => {
+                validate_id(&id)?;
+                (Some(id), None)
+            }
+            Some(CatalogScope::Workspace(cwd)) => (None, Some(cwd)),
+            Some(CatalogScope::Profile) | None => (None, None),
+        };
         let expected_revision = expected_revision.map(str::to_owned);
         let cursor = cursor.map(str::to_owned);
         self.connection
@@ -179,9 +268,18 @@ impl EventLog {
                         });
                     }
                     let ids = sqlx::query_scalar::<_, String>(
-                        "SELECT id FROM session_control WHERE id > ? ORDER BY id LIMIT ?",
+                        "SELECT id FROM session_control WHERE id > ?
+                         AND (? = 0 OR archived = 0)
+                         AND (? IS NULL OR id = ?)
+                         AND (? IS NULL OR json_extract(configuration, '$.workspace.hostCwd') = ?)
+                         ORDER BY id LIMIT ?",
                     )
                     .bind(cursor.as_deref().unwrap_or(""))
+                    .bind(active_only)
+                    .bind(&session)
+                    .bind(&session)
+                    .bind(&cwd)
+                    .bind(&cwd)
                     .bind((limit + 1) as i64)
                     .fetch_all(&mut *tx)
                     .await?;

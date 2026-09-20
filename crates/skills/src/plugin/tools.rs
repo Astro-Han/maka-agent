@@ -45,11 +45,12 @@ impl BindingProvider for Skills {
     fn bind(
         &self,
         request: BindingRequest,
+        workspace: maka_plugins::filesystem::ReadDirectory,
     ) -> BoxFuture<'static, Result<Option<Binding>, ToolError>> {
         let skills = self.clone();
         Box::pin(async move {
             let snapshot = skills
-                .capture(&request.cwd, request.tools.into_iter().collect())
+                .capture(&workspace, request.tools.into_iter().collect())
                 .await
                 .map_err(|error| ToolError::Failed(error.to_string()))?;
             if snapshot.catalog().available().next().is_none() {

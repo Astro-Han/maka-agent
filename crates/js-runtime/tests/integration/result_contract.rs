@@ -136,7 +136,7 @@ async fn ordinary_errors_are_catchable_but_fatal_errors_prevent_later_effects() 
     for error in [
         ToolError::Failed("parse_error".into()),
         ToolError::Persistence("T1 failed".into()),
-        ToolError::OutcomeUnknown("T2 failed".into()),
+        ToolError::CleanupUnconfirmed("worker did not settle".into()),
     ] {
         let fatal = !matches!(error, ToolError::Failed(_));
         let tools = Arc::new(Failure {
@@ -155,7 +155,7 @@ async fn ordinary_errors_are_catchable_but_fatal_errors_prevent_later_effects() 
             assert!(matches!(
                 result,
                 Err(CellAbort::Tool(
-                    ToolError::Persistence(_) | ToolError::OutcomeUnknown(_)
+                    ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_)
                 ))
             ));
         } else {

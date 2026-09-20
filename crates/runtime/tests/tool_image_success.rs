@@ -131,7 +131,7 @@ async fn raw_depth_rejection_after_effect_keeps_outcome_unknown() {
         )
         .await;
     assert!(
-        matches!(result, Err(ToolError::OutcomeUnknown(message)) if message.contains("depth limit"))
+        matches!(result, Err(ToolError::Persistence(message)) if message.contains("depth limit"))
     );
     assert_eq!(sink.events.lock().unwrap().len(), 1);
 }

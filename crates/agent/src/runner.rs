@@ -29,11 +29,12 @@ use std::sync::Arc;
 pub async fn run(
     inner: Arc<Inner>,
     input: RunInput,
-    cancellation_owner: crate::RunCancellation,
+    cancellation_owner: tokio_util::sync::CancellationToken,
     admitted: tokio::sync::oneshot::Sender<()>,
     handoff: Option<crate::HandoffGate>,
+    prepared_claim: Option<maka_runtime::continuation::ContinuationClaim>,
 ) -> Result<Invocation, RunError> {
-    let cancellation = cancellation_owner.token().clone();
+    let cancellation = cancellation_owner.clone();
     if cancellation.is_cancelled() {
         return Err(RunError::Cancelled);
     }
@@ -48,8 +49,12 @@ pub async fn run(
         }
         Err(error) => return Err(error.into()),
     }
-    let claim = match &input.work {
-        RunWork::Continuation { source, tools, .. } | RunWork::Handoff { source, tools, .. } => {
+    let claim = match (prepared_claim, &input.work) {
+        (Some(claim), _) => Some(claim),
+        (
+            None,
+            RunWork::Continuation { source, tools, .. } | RunWork::Handoff { source, tools, .. },
+        ) => {
             Some(crate::continuation::prepare(&inner, &input, source, tools, &cancellation).await?)
         }
         _ => None,
@@ -63,9 +68,8 @@ pub async fn run(
             claim: Box::new(claim.expect("prepared handoff")),
             pause: pause.clone(),
         },
-        RunWork::Continuation { workhub_resume, .. } => InvocationInput::Continuation {
+        RunWork::Continuation { .. } => InvocationInput::Continuation {
             claim: Box::new(claim.expect("prepared continuation")),
-            workhub_resume: workhub_resume.clone(),
             request_fingerprint: input
                 .request_fingerprint
                 .clone()
@@ -155,7 +159,7 @@ pub async fn run(
         Ok((outcome, checkpoint)) => (outcome.clone(), checkpoint.clone()),
         Err(RunError::Cancelled | RunError::Model(maka_model::ModelError::Cancelled)) => (
             InvocationOutcome::Cancelled {
-                source: cancellation_owner.source(),
+                source: "runtime_cancellation".into(),
             },
             None,
         ),

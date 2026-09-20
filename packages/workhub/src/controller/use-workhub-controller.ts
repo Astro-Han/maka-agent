@@ -64,8 +64,9 @@ const emptyTranscript: WorkHubTranscriptSnapshot = {
 interface SendAttempt {
   sessionId: string;
   input: WorkHubAnswerInput;
+  receipt?: import('@maka-agent/plugin-sdk/host').ExecutionReceipt;
   admission: 'pending' | 'unknown' | 'admitted' | 'terminal' | 'rejected';
-  reconciling?: boolean;
+  reconciling?: 'reading' | 'again';
   stop?: 'requested' | 'sending' | 'resend';
 }
 interface QueuedAttempt {
@@ -75,7 +76,6 @@ interface QueuedAttempt {
   text: string;
   attachments: AttachmentRef[];
   placement: MessageQueuePlacement;
-  originHostEpoch?: string;
   observed: boolean;
 }
 
@@ -115,6 +115,7 @@ export function useWorkHubController(
       messageQueue: { entries: [] },
     });
   const [execution, setExecution] = useState<SessionExecutionProjection>();
+  const executionRef = useRef<SessionExecutionProjection>(undefined);
   const [liveTurns, setLiveTurns] = useState<LiveTurnBuffer>();
   const liveTurn =
     liveTurns?.find((turn) => turn.turnId === execution?.rootTurn?.turnId) ?? liveTurns?.at(-1);
@@ -139,8 +140,13 @@ export function useWorkHubController(
   const sendingRef = useRef(false);
   const pendingSend = useRef<SendAttempt | undefined>(undefined);
   const pendingQueued = useRef<QueuedAttempt>(undefined);
-  const forgetAnswer = (turnId: string) => {
-    if (continuation?.answer?.input.turnId === turnId) continuation.answer = undefined;
+  const ownedAnswer = useRef<WorkHubContinuation['answer']>(undefined);
+  const forgetAnswer = (operationId: string) => {
+    if (
+      continuation?.answer === ownedAnswer.current &&
+      continuation?.answer?.input.operationId === operationId
+    )
+      continuation.answer = undefined;
   };
   const forgetQueued = (messageId: string) => {
     if (continuation?.queued?.messageId === messageId) continuation.queued = undefined;
@@ -172,6 +178,7 @@ export function useWorkHubController(
 
   async function deliverStop(attempt: SendAttempt): Promise<void> {
     if (
+      !attempt.receipt ||
       !attempt.stop ||
       pendingSend.current !== attempt ||
       currentSessionId.current !== attempt.sessionId
@@ -184,11 +191,12 @@ export function useWorkHubController(
     attempt.stop = 'sending';
     let failed = false;
     try {
-      const result = await stopTurn(attempt.sessionId, attempt.input.turnId);
-      if (result) {
-        attempt.stop = undefined;
-        forgetAnswer(attempt.input.turnId);
-      }
+      const target = attempt.receipt.invocation.turn_id;
+      if (executionRef.current?.rootTurn?.turnId === target)
+        await stopTurn(attempt.sessionId, target);
+      else await services.cancelAnswer(attempt.sessionId, attempt.input);
+      attempt.stop = undefined;
+      forgetAnswer(attempt.input.operationId);
     } catch (reason) {
       failed = true;
       if (currentSessionId.current === attempt.sessionId) report(reason);
@@ -208,12 +216,12 @@ export function useWorkHubController(
     if (
       !attempt ||
       attempt.sessionId !== target ||
-      attempt.input.turnId !== turnId ||
+      attempt.receipt?.invocation.turn_id !== turnId ||
       attempt.admission === 'rejected'
     )
       return;
     if (attempt.admission === 'unknown' && currentSessionId.current === target) setError(undefined);
-    if (terminal || !attempt.stop) forgetAnswer(turnId);
+    if (terminal || !attempt.stop) forgetAnswer(attempt.input.operationId);
     if (terminal) {
       attempt.admission = 'terminal';
       attempt.stop = undefined;
@@ -225,43 +233,52 @@ export function useWorkHubController(
   }
 
   function acceptAnswer(attempt: SendAttempt, result: WorkHubAnswerResult): boolean {
-    if (pendingSend.current !== attempt) return result.kind !== 'not_admitted';
+    if (pendingSend.current !== attempt) return true;
     const current = currentSessionId.current === attempt.sessionId;
     if (result.kind === 'unknown') {
-      // Late Host evidence outranks a missing response; never turn confirmed
-      // execution back into an uncertain local submission.
       if (attempt.admission === 'pending' || attempt.admission === 'unknown') {
         attempt.admission = 'unknown';
-        attempt.input = { ...attempt.input, originHostEpoch: result.originHostEpoch };
         if (current) setError(workHubLiveCopy[localeRef.current].sendUnknown);
       }
       return true;
     }
-    if (result.kind === 'not_admitted') {
-      if (attempt.admission === 'admitted' || attempt.admission === 'terminal') return true;
-      attempt.admission = 'rejected';
-      forgetAnswer(attempt.input.turnId);
-      attempt.stop = undefined;
-      if (current) {
-        setStopPending(false);
-        setTurnStates((states) => ({ ...states, [attempt.input.turnId]: 'failed' }));
-        setLiveTurns((previous) =>
-          previous?.filter((turn) => turn.turnId !== attempt.input.turnId || !turn.unconfirmed),
-        );
-        setError(workHubLiveCopy[localeRef.current].sendNotAdmitted);
-      }
-      return false;
-    }
+    attempt.receipt = result.receipt;
+    const turnId = result.receipt.invocation.turn_id;
+    const observed = executionRef.current?.rootTurn;
     const terminal =
-      result.status === 'completed' || result.status === 'failed' || result.status === 'cancelled';
-    reconcileAdmission(attempt.sessionId, result.turnId, terminal);
+      result.progress?.state === 'ended' ||
+      (observed?.turnId === turnId &&
+        ['completed', 'failed', 'cancelled'].includes(observed.status)) ||
+      transcriptRef.current.messages.some(
+        (message) =>
+          message.turnId === turnId &&
+          message.type === 'turn_state' &&
+          message.status !== 'running',
+      );
+    reconcileAdmission(attempt.sessionId, turnId, terminal);
     if (current) {
       setError(undefined);
+      setMessagePresentation((previous) => ({
+        ...previous,
+        transientMessages: previous.transientMessages.flatMap((message) => {
+          if (message.id !== attempt.input.operationId) return [message];
+          if (
+            transcriptRef.current.messages.some(
+              (row) => row.type === 'user' && row.id === result.receipt.messageId,
+            )
+          )
+            return [];
+          return [{ ...message, id: result.receipt.messageId, hostTurnId: turnId }];
+        }),
+      }));
       if (terminal) refreshSessions.current();
       setLiveTurns((previous) => {
-        if (attempt.admission === 'terminal') return previous;
+        const observed = previous?.filter((turn) => turn.turnId !== attempt.input.operationId);
+        if (attempt.admission === 'terminal') return observed;
         return reconcileLiveTurnBuffer(
-          retainLiveTurn(previous, armLiveTurn(result.turnId)),
+          observed?.some((turn) => turn.turnId === turnId)
+            ? observed
+            : retainLiveTurn(observed, armLiveTurn(turnId)),
           transcriptRef.current.messages,
         );
       });
@@ -274,11 +291,14 @@ export function useWorkHubController(
     if (
       !attempt ||
       attempt.sessionId !== currentSessionId.current ||
-      attempt.admission !== 'unknown' ||
-      attempt.reconciling
+      attempt.admission !== 'unknown'
     )
       return;
-    attempt.reconciling = true;
+    if (attempt.reconciling) {
+      attempt.reconciling = 'again';
+      return;
+    }
+    attempt.reconciling = 'reading';
     try {
       acceptAnswer(attempt, await services.answer(attempt.sessionId, attempt.input));
     } catch (reason) {
@@ -286,7 +306,9 @@ export function useWorkHubController(
       if (pendingSend.current === attempt && currentSessionId.current === attempt.sessionId)
         report(reason);
     } finally {
-      attempt.reconciling = false;
+      const again = (attempt.reconciling as SendAttempt['reconciling']) === 'again';
+      attempt.reconciling = undefined;
+      if (again) void recoverSend();
     }
   }
 
@@ -337,6 +359,8 @@ export function useWorkHubController(
     // cannot clear a successor submission with a different identity.
     const retained = continuation?.answer;
     if (!pendingSend.current && retained && retained.sessionId === sessionId) {
+      ownedAnswer.current = { ...retained };
+      continuation.answer = ownedAnswer.current;
       pendingSend.current = {
         ...retained,
         admission: 'unknown',
@@ -362,8 +386,9 @@ export function useWorkHubController(
       attempt.admission !== 'rejected'
         ? attempt
         : undefined;
+    executionRef.current = undefined;
     setExecution(undefined);
-    setLiveTurns(pending ? [armLiveTurn(pending.input.turnId)] : undefined);
+    setLiveTurns(pending ? [armLiveTurn(pending.input.operationId)] : undefined);
     setStopPending(Boolean(pending?.stop));
     const queued =
       pendingQueued.current &&
@@ -378,8 +403,8 @@ export function useWorkHubController(
         ...(pending
           ? [
               {
-                id: pending.input.turnId,
-                hostTurnId: pending.input.turnId,
+                id: pending.input.operationId,
+                hostTurnId: pending.input.operationId,
                 text: pending.input.text,
                 attachments: pending.input.attachments,
                 ts: Date.now(),
@@ -616,7 +641,10 @@ export function useWorkHubController(
         }
       },
       (projection) => {
-        if (!disposed) setExecution(projection);
+        if (!disposed) {
+          executionRef.current = projection;
+          setExecution(projection);
+        }
       },
     );
     const opening = services.openTranscript(
@@ -624,14 +652,14 @@ export function useWorkHubController(
       (snapshot) => {
         if (disposed) return;
         const attempt = pendingSend.current;
-        if (attempt?.sessionId === sessionId) {
+        if (attempt?.sessionId === sessionId && attempt.receipt) {
           const messages = snapshot.messages.filter(
-            (message) => message.turnId === attempt.input.turnId,
+            (message) => message.turnId === attempt.receipt?.invocation.turn_id,
           );
           if (messages.length)
             reconcileAdmission(
               sessionId,
-              attempt.input.turnId,
+              attempt.receipt.invocation.turn_id,
               messages.some(
                 (message) => message.type === 'turn_state' && message.status !== 'running',
               ),
@@ -698,16 +726,22 @@ export function useWorkHubController(
 
   const session = sessions.find((candidate) => candidate.id === sessionId);
   const attempt = pendingSend.current;
-  const pendingTurnId =
-    attempt &&
+  const pendingAdmission =
+    !!attempt &&
     attempt.sessionId === sessionId &&
-    (attempt.admission === 'pending' || attempt.admission === 'unknown')
-      ? attempt.input.turnId
-      : undefined;
-  const runningTurnId = pendingTurnId ?? activeHostTurn(execution)?.turnId;
-  const busy = sending || Boolean(runningTurnId);
+    (attempt.admission === 'pending' || attempt.admission === 'unknown');
+  const runningTurnId =
+    activeHostTurn(execution)?.turnId ??
+    (attempt && attempt.sessionId === sessionId && attempt.admission === 'admitted'
+      ? attempt.receipt?.invocation.turn_id
+      : undefined);
+  const busy = sending || pendingAdmission || Boolean(runningTurnId);
   async function send(text: string, attachments: AttachmentRef[], requestedMode?: FollowUpMode) {
     if (!sessionId || !text.trim() || sendingRef.current) return false;
+    if (pendingAdmission) {
+      if (attempt?.admission === 'unknown') void recoverSend();
+      return false;
+    }
     const target = sessionId;
     const placement = requestedMode === 'steer' ? 'current_turn' : 'next_turn';
     const previousQueued = pendingQueued.current;
@@ -743,7 +777,6 @@ export function useWorkHubController(
           text,
           attachments: [...attachments],
           placement,
-          originHostEpoch: services.hostEpoch,
           observed: false,
         };
         pendingQueued.current = attempt;
@@ -772,7 +805,6 @@ export function useWorkHubController(
           attachments,
           attempt.placement,
           attempt.turnId,
-          attempt.originHostEpoch,
         );
         if (result === 'rejected' && pendingQueued.current === attempt) {
           forgetQueued(attempt.messageId);
@@ -805,36 +837,32 @@ export function useWorkHubController(
       const attempt: SendAttempt = {
         sessionId: target,
         input: {
-          turnId: sameRejected ? previous.input.turnId : crypto.randomUUID(),
+          operationId: sameRejected ? previous.input.operationId : crypto.randomUUID(),
           text,
           ...(attachments.length ? { attachments: [...attachments] } : {}),
         },
         admission: 'pending',
       };
       const pendingRejectedTurnId =
-        previous?.admission === 'rejected' ? previous.input.turnId : undefined;
+        previous?.admission === 'rejected' ? previous.input.operationId : undefined;
       pendingSend.current = attempt;
-      if (continuation)
-        continuation.answer = {
-          sessionId: target,
-          input: {
-            ...attempt.input,
-            ...(services.hostEpoch ? { originHostEpoch: services.hostEpoch } : {}),
-          },
-        };
-      setTurnStates((states) => ({ ...states, [attempt.input.turnId]: 'running' }));
-      setLiveTurns((previous) => retainLiveTurn(previous, armLiveTurn(attempt.input.turnId)));
+      if (continuation) {
+        ownedAnswer.current = { sessionId: target, input: attempt.input };
+        continuation.answer = ownedAnswer.current;
+      }
+      setTurnStates((states) => ({ ...states, [attempt.input.operationId]: 'running' }));
+      setLiveTurns((previous) => retainLiveTurn(previous, armLiveTurn(attempt.input.operationId)));
       setMessagePresentation((previous) => ({
         ...previous,
         transientMessages: [
           ...previous.transientMessages.filter(
             (message) =>
-              message.hostTurnId !== attempt.input.turnId &&
+              message.hostTurnId !== attempt.input.operationId &&
               message.hostTurnId !== pendingRejectedTurnId,
           ),
           {
-            id: attempt.input.turnId,
-            hostTurnId: attempt.input.turnId,
+            id: attempt.input.operationId,
+            hostTurnId: attempt.input.operationId,
             text,
             ts: Date.now(),
             attachments: [...attachments],
@@ -852,10 +880,10 @@ export function useWorkHubController(
       }
       if (currentSessionId.current === target) {
         const attempt = pendingSend.current;
-        const failedTurnId = attempt?.input.turnId;
+        const failedTurnId = attempt?.input.operationId;
         if (attempt?.admission === 'pending') {
           attempt.admission = 'rejected';
-          forgetAnswer(attempt.input.turnId);
+          forgetAnswer(attempt.input.operationId);
           attempt.stop = undefined;
           setStopPending(false);
         }
@@ -873,23 +901,24 @@ export function useWorkHubController(
     }
   }
   async function stop() {
-    if (!sessionId || !runningTurnId || stopPending) return;
+    if (!sessionId || (!runningTurnId && !pendingAdmission) || stopPending) return;
     setStopPending(true);
     const attempt = pendingSend.current;
     if (
       attempt?.sessionId === sessionId &&
-      attempt.input.turnId === runningTurnId &&
+      (pendingAdmission || attempt.receipt?.invocation.turn_id === runningTurnId) &&
       attempt.admission !== 'terminal' &&
       attempt.admission !== 'rejected'
     ) {
       attempt.stop = 'requested';
-      if (continuation?.answer?.input.turnId === attempt.input.turnId)
+      if (continuation?.answer?.input.operationId === attempt.input.operationId)
         continuation.answer.stop = true;
+      if (attempt.admission === 'unknown') await recoverSend();
       await deliverStop(attempt);
       return;
     }
     try {
-      await stopTurn(sessionId, runningTurnId);
+      if (runningTurnId) await stopTurn(sessionId, runningTurnId);
     } catch (reason) {
       report(reason);
     } finally {
@@ -910,12 +939,14 @@ export function useWorkHubController(
     try {
       const result = await services.configureModel(sessionId, {
         expectedRevision: session.revision,
-        thinkingLevel,
-        modelTarget: {
-          kind: 'explicit',
-          connectionId: input.llmConnectionId,
-          connectionSlug: input.llmConnectionSlug,
-          model: input.model,
+        target: {
+          kind: 'model',
+          ...(thinkingLevel ? { thinkingLevel } : {}),
+          model: {
+            connection_id: input.llmConnectionId,
+            connection_slug: input.llmConnectionSlug,
+            model: input.model,
+          },
         },
       });
       if (result.kind === 'revision_conflict')
@@ -966,7 +997,9 @@ export function useWorkHubController(
     activeInteraction,
     turnStates,
     pendingTurnId:
-      pendingSend.current?.sessionId === sessionId ? pendingSend.current?.input.turnId : undefined,
+      pendingSend.current?.sessionId === sessionId
+        ? pendingSend.current?.receipt?.invocation.turn_id
+        : undefined,
     respondToUserQuestion: async (
       response: import('@maka/core/user-question').UserQuestionResponse,
     ) => {

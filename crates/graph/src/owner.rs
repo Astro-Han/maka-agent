@@ -71,9 +71,9 @@ impl Handle {
             })
             .await
             .map_err(|_| Error::Closed)?;
-        receive
-            .await
-            .map_err(|_| Error::Persistence("accepted graph decision outcome is unknown".into()))?
+        receive.await.map_err(|_| {
+            Error::OutcomeUnknown("accepted graph decision owner disappeared".into())
+        })?
     }
 }
 

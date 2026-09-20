@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { IpcMain, WebContents } from "electron";
 import { createDefaultSettings } from "@maka/core/settings";
-import { WORKHUB_COORDINATION_SESSION_ID } from "@maka/core/session";
+const WORKHUB_COORDINATION_SESSION_ID = "plugin-owned-session";
 import { createWorkHubControl } from "../workhub-control.js";
 import { WorkHubSurface } from "../workhub-surface.js";
 import { WorkHubUi } from "../workhub-ui.js";
@@ -54,16 +54,12 @@ function harness(prepareWindow: () => Promise<void> = async () => {}) {
     readSettings: async () => createDefaultSettings(),
     client: () => ({}) as DesktopRuntimeHostClient,
     isCurrent: () => current,
-    assertTurn: async (_scope, turnId) => {
+    assertTurn: async (_scope, _session, turnId) => {
       if (turnId !== activeTurn) throw new Error("Inactive turn");
     },
-    interrupt: async (_scope, turnId) => {
+    interrupt: async (_scope, _session, turnId) => {
       interrupted.push(turnId);
     },
-    createContext: async () => ({
-      workspace: { kind: "project", projectId: "selected-project" },
-      defaults: { permissionMode: "ask" },
-    }),
   });
   const tool = control.group(scope).tools[0] as MakaTool;
   const ctx = (turnId = activeTurn) => ({
@@ -96,7 +92,7 @@ function harness(prepareWindow: () => Promise<void> = async () => {}) {
   };
 }
 
-test("control rejects ordinary Sessions, stale turns and switched Host epochs before observation", async (t) => {
+test("control rejects missing or stale turns and switched Host epochs before observation", async (t) => {
   const h = harness();
   t.after(() => h.control.close());
   t.mock.method(WorkHubUi.prototype, "observe", async () => {
@@ -106,9 +102,9 @@ test("control rejects ordinary Sessions, stale turns and switched Host epochs be
     async () =>
       h.tool.impl(
         { status: "Checking Maka", request: { operation: "observe" } },
-        { ...h.ctx(), sessionId: "ordinary" },
+        { ...h.ctx(), turnId: "" },
       ),
-    /Only the active WorkHub/,
+    /active Agent turn/,
   );
   await assert.rejects(
     async () => h.tool.impl({ status: "Checking Maka", request: { operation: "observe" } }, h.ctx("stale")),
@@ -435,17 +431,6 @@ test("window preparation cannot admit input after takeover or a Host switch", as
   );
 });
 
-test("reading workspace context does not open or focus the controlled main window", async (t) => {
-  const h = harness(async () => {
-    throw new Error("Must not prepare the window");
-  });
-  t.after(() => h.control.close());
-  const context = h.control.group(scope).tools[1] as MakaTool;
-  assert.deepEqual(await context.impl({}, h.ctx()), {
-    workspace: { kind: "project", projectId: "selected-project" },
-    defaults: { permissionMode: "ask" },
-  });
-});
 
 
 test("takeover stops an action without exposing its internal abort reason as a conversation error", async (t) => {

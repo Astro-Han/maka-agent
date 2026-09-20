@@ -18,7 +18,7 @@
  */
 
 use super::{Error, Skills, catalog};
-use crate::{OriginStatus, api::*, discovery::artifact};
+use crate::{OriginStatus, api::*};
 use maka_runtime::{artifact::content_digest, execution::WorkspaceProjection};
 
 impl Skills {
@@ -26,10 +26,11 @@ impl Skills {
         &self,
         input: &PreviewInput,
         workspace: WorkspaceProjection,
+        workspace_files: maka_plugins::filesystem::ReadDirectory,
     ) -> Result<PreviewResult, Error> {
         let _call = self.basis.owner.admit().map_err(|_| Error::Retired)?;
         let _view = self.mutations.read().await;
-        let (sources, preferences) = self.governance(&workspace.host_cwd).await?;
+        let (sources, preferences) = self.governance(&workspace_files).await?;
         let revision =
             catalog::revision(&input.context, &workspace, &sources, preferences.as_ref())?;
         let outcome = if revision != input.expected_revision {
@@ -39,11 +40,33 @@ impl Skills {
             }
         } else {
             let reference = input.reference.clone();
-            let cancellation = self.basis.owner.stopping().map_err(|_| Error::Retired)?;
-            tokio::task::spawn_blocking(move || {
-                preview(&sources, &reference, revision, &cancellation)
-            })
-            .await??
+            let baseline = if let Some(id) = reference
+                .strip_prefix("workspace:legacy:")
+                .filter(|id| crate::safe_source_id(id))
+            {
+                match self
+                    .data
+                    .read(maka_plugins::filesystem::entries::ReadFile {
+                        path: format!("skills/{id}/.maka/baseline/SKILL.md"),
+                        offset: 0,
+                        limit: 1024 * 1024,
+                    })
+                    .await
+                {
+                    Ok(page) if page.next_offset.is_none() => Some(page.bytes),
+                    Ok(_) => {
+                        return Err(Error::Source(
+                            "Skill baseline exceeds its size limit".into(),
+                        ));
+                    }
+                    Err(maka_plugins::filesystem::entries::Error::NotFound) => None,
+                    Err(error) => return Err(Error::Source(error.to_string())),
+                }
+            } else {
+                None
+            };
+            tokio::task::spawn_blocking(move || preview(&sources, &reference, revision, baseline))
+                .await??
         };
         if !self.basis.owner.is_effective() {
             return Err(Error::Retired);
@@ -59,7 +82,7 @@ fn preview(
     sources: &crate::SourceCatalog,
     reference: &str,
     revision: String,
-    cancellation: &tokio_util::sync::CancellationToken,
+    baseline: Option<Vec<u8>>,
 ) -> Result<PreviewOutcome, Error> {
     let reject = |reason| Ok(PreviewOutcome::Rejected { reason });
     let discovered = &sources.publication.discovery;
@@ -92,6 +115,7 @@ fn preview(
     };
     let Some(source) = sources
         .managed
+        .discovery
         .inventory
         .iter()
         .find(|skill| &skill.location.id == source_id)
@@ -99,6 +123,7 @@ fn preview(
         return reject(
             if sources
                 .managed
+                .discovery
                 .rejected
                 .iter()
                 .any(|skill| &skill.location.id == source_id)
@@ -109,26 +134,16 @@ fn preview(
             },
         );
     };
-    let current = artifact::read(location, true, cancellation)?;
-    let source_bytes = artifact::read(&source.location, false, cancellation)?.content;
-    let Some(current_bytes) = current.content else {
+    let Some(current_bytes) = sources.publication.contents.get(&location.reference) else {
         return reject(PreviewRejection::MetadataError);
     };
-    let Some(source_bytes) = source_bytes else {
+    let Some(source_bytes) = sources.managed.contents.get(&source.location.reference) else {
         return reject(PreviewRejection::SourceMissing);
     };
-    // Never pair a stale catalog revision with newly read, unconfirmed content.
-    if content_digest(&current_bytes) != *current_hash
-        || content_digest(&source_bytes) != source.content_sha256
-    {
-        return Err(Error::Source(
-            "Skill content changed during preview; refresh the catalog".into(),
-        ));
-    }
-    let Ok(current_text) = std::str::from_utf8(&current_bytes) else {
+    let Ok(current_text) = std::str::from_utf8(current_bytes) else {
         return reject(PreviewRejection::MetadataError);
     };
-    let Ok(source_text) = std::str::from_utf8(&source_bytes) else {
+    let Ok(source_text) = std::str::from_utf8(source_bytes) else {
         return reject(PreviewRejection::SourceInvalid);
     };
     let current_lines = lines(current_text);
@@ -148,8 +163,7 @@ fn preview(
         source_snippet,
         current_truncated,
         source_truncated,
-        has_managed_baseline: current
-            .baseline
+        has_managed_baseline: baseline
             .as_ref()
             .is_some_and(|bytes| content_digest(bytes) == *baseline_hash),
         summary,

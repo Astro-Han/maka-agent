@@ -19,6 +19,31 @@
 
 use super::{Peer, converged, disabled, json};
 
+pub(crate) async fn authorization(
+    peer: &mut Peer,
+    command: serde_json::Value,
+) -> serde_json::Value {
+    let snapshot = peer
+        .rpc("plugin.client.query", json!({"kind":"snapshot"}))
+        .await;
+    let entry = snapshot["result"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["extensionId"] == "maka.skills")
+        .unwrap();
+    let client = json!({"entryId":entry["entryId"],"extensionId":entry["extensionId"],
+        "activation":entry["activation"],"contentDigest":entry["contentDigest"],"clientDigest":entry["clientDigest"]});
+    let result = peer
+        .rpc(
+            "plugin.authorization",
+            json!({"client":client,"scope":"profile","command":command}),
+        )
+        .await;
+    assert_eq!(result["ok"], true, "{result}");
+    result["result"].clone()
+}
+
 pub(crate) async fn request(
     peer: &mut Peer,
     method: &str,

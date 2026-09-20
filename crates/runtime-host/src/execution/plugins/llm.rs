@@ -35,6 +35,58 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 impl Executions {
+    pub(crate) async fn resolve_plugin_model(
+        &self,
+        selection: maka_plugins::llm::Selection,
+    ) -> Result<Option<maka_runtime::execution::ModelBinding>, maka_plugins::Error> {
+        let catalog = self
+            .configuration
+            .catalog()
+            .await
+            .map_err(|error| maka_plugins::Error::Invalid(error.to_string()))?;
+        use maka_plugins::llm::Selection;
+        let (row, model) = match selection {
+            Selection::Named {
+                connection_slug,
+                model,
+            } => (
+                catalog
+                    .connections
+                    .into_iter()
+                    .find(|row| row.slug == connection_slug),
+                model,
+            ),
+            Selection::Default => {
+                let Some(target) = catalog.default_target else {
+                    return Ok(None);
+                };
+                (
+                    catalog
+                        .connections
+                        .into_iter()
+                        .find(|row| row.connection_id == target.connection_id),
+                    target.model_id,
+                )
+            }
+        };
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        if !row.enabled
+            || !row.enabled_model_ids.contains(&model)
+            || maka_config::model_catalog::provider_facts(&row.provider_type)
+                .map_err(|error| maka_plugins::Error::Invalid(error.to_string()))?
+                .retired
+        {
+            return Ok(None);
+        }
+        Ok(Some(maka_runtime::execution::ModelBinding {
+            connection_id: row.connection_id,
+            connection_slug: row.slug,
+            model,
+        }))
+    }
+
     pub(crate) async fn plugin_model(
         self: &Arc<Self>,
         owner: Context,
@@ -119,7 +171,7 @@ impl Executions {
                 .await;
             if matches!(
                 result,
-                Err(ToolError::Persistence(_) | ToolError::OutcomeUnknown(_))
+                Err(ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_))
             ) {
                 host.begin_drain();
             }
@@ -128,7 +180,7 @@ impl Executions {
         });
         Ok(async move {
             let output = receive.await.map_err(|_| {
-                ToolError::OutcomeUnknown("model resource worker disappeared".into())
+                ToolError::CleanupUnconfirmed("model resource worker disappeared".into())
             })??;
             match output {
                 ToolOutput::Model(result) => Ok(*result),

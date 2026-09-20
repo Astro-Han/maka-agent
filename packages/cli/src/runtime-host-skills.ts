@@ -18,7 +18,8 @@
  */
 
 import type { PermissionMode } from '@maka/core/permission';
-import { createPluginRemote, type RuntimeHostConnection } from '@maka/runtime-host/client';
+import type { RuntimeHostConnection } from '@maka/runtime-host/client';
+import { createPluginRemote } from '@maka/runtime-host/client/plugin-remote';
 import type { WorkspaceTarget } from '@maka/runtime-host/protocol';
 import type { InvocableSkillEntry } from '@maka/runtime/skill-invocation';
 

@@ -30,9 +30,10 @@ impl Skills {
         &self,
         input: &CatalogInput,
         workspace: WorkspaceProjection,
+        workspace_files: maka_plugins::filesystem::ReadDirectory,
     ) -> Result<CatalogResult, Error> {
         let _view = self.mutations.read().await;
-        let (sources, preferences) = self.governance(&workspace.host_cwd).await?;
+        let (sources, preferences) = self.governance(&workspace_files).await?;
         let governance = governance::items(&sources, preferences.as_ref());
         let revision = revision(input.context(), &workspace, &sources, preferences.as_ref())?;
         let cursor_revision =
@@ -89,7 +90,7 @@ impl Skills {
                 .collect::<Vec<_>>(),
             CatalogView::ManagedSources => {
                 let installed = sources.installed_managed_sources();
-                let valid = sources.managed.inventory.iter().map(|s| {
+                let valid = sources.managed.discovery.inventory.iter().map(|s| {
                     (
                         &s.location.id,
                         Some(s.document.manifest.name.as_str()),
@@ -97,7 +98,7 @@ impl Skills {
                         s.document.manifest.attributes.category.as_deref(),
                     )
                 });
-                let rejected = sources.managed.rejected.iter().map(|s| {
+                let rejected = sources.managed.discovery.rejected.iter().map(|s| {
                     (
                         &s.location.id,
                         s.document.manifest.name.as_deref(),
@@ -133,6 +134,12 @@ impl Skills {
             return Err(Error::Invalid("Invalid skill source cursor".into()));
         }
         let view = input.view();
+        let user_recovery = self
+            .user_recovery
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|message| bounded(message, 2048).0);
         let workspace_overhead = ",\"resolvedWorkspace\":".len() + encode(&workspace)?.len();
         let mut selected = Vec::new();
         let mut bytes = 0;
@@ -141,6 +148,7 @@ impl Skills {
             let next_cursor =
                 (end < items.len()).then(|| super::page::cursor(&cursor_revision, end));
             let envelope = CatalogResult::Page {
+                user_recovery: user_recovery.clone(),
                 view,
                 revision: revision.clone(),
                 items: Vec::new(),
@@ -164,6 +172,7 @@ impl Skills {
         }
         let end = offset + selected.len();
         Ok(CatalogResult::Page {
+            user_recovery,
             view,
             revision: revision.clone(),
             items: selected,
@@ -243,12 +252,14 @@ pub(super) fn revision(
             .collect::<Vec<_>>(),
         sources
             .managed
+            .discovery
             .inventory
             .iter()
             .map(|s| (&s.location.id, &s.content_sha256))
             .collect::<Vec<_>>(),
         sources
             .managed
+            .discovery
             .rejected
             .iter()
             .map(|s| (&s.location.id, &s.content_sha256))

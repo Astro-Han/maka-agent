@@ -28,7 +28,6 @@ use maka_plugins::{
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashSet},
-    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -44,6 +43,7 @@ mod preview;
 pub mod remote;
 mod snapshot;
 mod tools;
+mod user;
 pub use snapshot::{InputPreparation, Snapshot};
 
 pub const ID: &str = "maka.skills";
@@ -74,19 +74,18 @@ pub struct PreferenceSnapshot {
 }
 
 pub struct Builtin {
-    pub state_root: PathBuf,
-    pub home: Option<PathBuf>,
     pub client: Option<Arc<maka_plugins::client::Bundle>>,
 }
 
 #[derive(Clone)]
 pub struct Skills {
-    state_root: PathBuf,
+    inputs: maka_plugins::filesystem::ReadInputs,
     data: maka_plugins::storage::Directory,
-    home: Option<PathBuf>,
+    user: Arc<user::UserAccess>,
+    user_recovery: Arc<std::sync::Mutex<Option<String>>>,
     basis: Basis,
     mutations: Arc<tokio::sync::RwLock<()>>,
-    input_revision: maka_plugins::input::Revision,
+    input_revision: maka_plugins::revision::Revision,
     changed: tokio::sync::watch::Sender<()>,
 }
 
@@ -160,28 +159,49 @@ impl Plugin for Builtin {
             mutations: Arc::default(),
             input_revision: Default::default(),
             changed: tokio::sync::watch::channel(()).0,
-            state_root: self.state_root.clone(),
-            home: self.home.clone(),
+            inputs: host.inputs,
+            user: Arc::new(user::UserAccess {
+                store: host.storage.clone(),
+                authorizations: host.authorizations,
+                files: host.files,
+            }),
+            user_recovery: Default::default(),
             basis: Basis {
                 owner: context.lifecycle,
                 preferences: Arc::new(preferences::Preferences(host.storage)),
             },
         };
         Box::pin(async move {
-            let root = skills.state_root.clone();
-            let home = skills.home.clone();
-            skills
+            let publisher = skills
                 .data
-                .run(move |data| {
-                    let publisher = crate::publication::Publisher::open(&root, data)?;
-                    publisher.recover()?;
-                    if let Some(home) = home {
-                        crate::publication::UserStore::recover_existing(&home)?;
-                    }
-                    Ok::<_, crate::publication::Error>(())
-                })
+                .run(crate::publication::Publisher::open)
                 .await
                 .map_err(|error| error.to_string())?
+                .map_err(|error| error.to_string())?;
+            publisher
+                .recover()
+                .await
+                .map_err(|error| error.to_string())?;
+            drop(publisher);
+            let recovering = skills.clone();
+            skills
+                .basis
+                .owner
+                .spawn_resource("Skills recovery", move |_| async move {
+                    if recovering.basis.owner.effective().await.is_err() {
+                        return Ok(());
+                    }
+                    let _serial = recovering.mutations.write().await;
+                    let _invalidation = recovering.input_revision.invalidate().await;
+                    let _notice = recovering.notify_on_exit();
+                    let failure = recovering
+                        .recover_user()
+                        .await
+                        .err()
+                        .map(|error| error.to_string());
+                    *recovering.user_recovery.lock().unwrap() = failure;
+                    Ok(())
+                })
                 .map_err(|error| error.to_string())?;
             let mut staged = Staged::default();
             tools::publish(&skills, &mut staged)?;
@@ -206,9 +226,13 @@ impl Skills {
     fn notify_on_exit(&self) -> ChangeNotice {
         ChangeNotice(self.changed.clone())
     }
-    pub async fn capture(&self, cwd: &str, tools: HashSet<String>) -> Result<Snapshot, Error> {
+    pub async fn capture(
+        &self,
+        workspace: &maka_plugins::filesystem::ReadDirectory,
+        tools: HashSet<String>,
+    ) -> Result<Snapshot, Error> {
         let _call = self.basis.owner.admit().map_err(|_| Error::Retired)?;
-        let view = self.mutations.clone().read_owned().await;
+        let _view = self.mutations.read().await;
         let input_basis = Some(self.input_revision.capture().await);
         let (preference_revision, preferences) = match self.basis.preferences.read().await {
             Ok(snapshot) => (
@@ -217,15 +241,20 @@ impl Skills {
             ),
             Err(_) => (None, crate::Preferences::Unavailable),
         };
-        let sources =
-            crate::Source::standard(Path::new(cwd), &self.state_root, self.home.as_deref());
+        let published = self
+            .data
+            .read_only()
+            .await
+            .map_err(|error| Error::Source(error.to_string()))?;
+        let user = self
+            .inputs
+            .open("user-skills")
+            .map_err(|error| Error::Source(error.to_string()))?;
+        let sources = crate::Source::standard(workspace, &published, user.as_ref());
         let cancellation = self.basis.owner.stopping().map_err(|_| Error::Retired)?;
-        let discovery = tokio::task::spawn_blocking(move || {
-            let (_call, _view) = (_call, view);
-            crate::scan(&sources, &cancellation)
-        })
-        .await?
-        .map_err(|error| Error::Source(error.to_string()))?;
+        let discovery = crate::scan(&sources, &cancellation)
+            .await
+            .map_err(|error| Error::Source(error.to_string()))?;
         if !self.basis.owner.is_effective() {
             return Err(Error::Retired);
         }
@@ -244,20 +273,23 @@ impl Skills {
 
     async fn governance(
         &self,
-        cwd: &str,
+        workspace: &maka_plugins::filesystem::ReadDirectory,
     ) -> Result<(crate::SourceCatalog, Option<PreferenceSnapshot>), Error> {
         let _call = self.basis.owner.admit().map_err(|_| Error::Retired)?;
         let preferences = self.basis.preferences.read().await.ok();
-        let cwd = PathBuf::from(cwd);
-        let root = self.state_root.clone();
-        let home = self.home.clone();
+        let published = self
+            .data
+            .read_only()
+            .await
+            .map_err(|error| Error::Source(error.to_string()))?;
+        let user = self
+            .inputs
+            .open("user-skills")
+            .map_err(|error| Error::Source(error.to_string()))?;
         let cancellation = self.basis.owner.stopping().map_err(|_| Error::Retired)?;
-        let result = tokio::task::spawn_blocking(move || {
-            let _call = _call;
-            crate::governance_catalog(&cwd, &root, home.as_deref(), &cancellation)
-        })
-        .await?
-        .map_err(|error| Error::Source(error.to_string()))?;
+        let result = crate::governance_catalog(workspace, &published, user.as_ref(), &cancellation)
+            .await
+            .map_err(|error| Error::Source(error.to_string()))?;
         if !self.basis.owner.is_effective() {
             return Err(Error::Retired);
         }

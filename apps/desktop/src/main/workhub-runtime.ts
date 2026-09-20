@@ -17,47 +17,38 @@
  * under the License.
  */
 
-import { WORKHUB_COORDINATION_SESSION_ID, type WorkHubCreateDefaults } from '@maka/core/session';
-import type { WorkspaceTarget } from '@maka/runtime-host/protocol';
 import { type DesktopTargetScope } from '../shared/runtime-host-identity.js';
 import type { DesktopRuntimeHostClient } from './runtime-host-client.js';
 
 interface WorkHubRuntimeDeps {
   client(scope: DesktopTargetScope): Pick<DesktopRuntimeHostClient, 'queryTurn' | 'stopTurn'>;
   isCurrent(scope: DesktopTargetScope): boolean;
-  createContext(scope: DesktopTargetScope): Promise<{ workspace: WorkspaceTarget; defaults: WorkHubCreateDefaults }>;
 }
 
-/** Keep task authority in the Host; Desktop supplies only its selected workspace and preferences. */
+/** Validate the exact calling Session and turn; never infer a coordinator by name. */
 export function createWorkHubRuntime(deps: WorkHubRuntimeDeps) {
   const requireCurrent = (scope: DesktopTargetScope) => {
     if (!deps.isCurrent(scope)) throw new Error('Runtime Host changed');
   };
-  const queryTurn = async (client: ReturnType<WorkHubRuntimeDeps['client']>, turnId: string) => {
-    const turn = await client.queryTurn({ sessionId: WORKHUB_COORDINATION_SESSION_ID, turnId });
-    if (turn.sessionId !== WORKHUB_COORDINATION_SESSION_ID || turn.turnId !== turnId) throw new Error('WorkHub turn identity changed');
+  const queryTurn = async (client: ReturnType<WorkHubRuntimeDeps['client']>, sessionId: string, turnId: string) => {
+    const turn = await client.queryTurn({ sessionId, turnId });
+    if (turn.sessionId !== sessionId || turn.turnId !== turnId) throw new Error('WorkHub turn identity changed');
     return turn;
   };
   const isLive = (turn: Awaited<ReturnType<typeof queryTurn>>) =>
     turn.status !== 'completed' && turn.status !== 'failed' && turn.status !== 'cancelled';
 
   return {
-    async assertTurn(scope: DesktopTargetScope, turnId: string): Promise<void> {
+    async assertTurn(scope: DesktopTargetScope, sessionId: string, turnId: string): Promise<void> {
       requireCurrent(scope);
-      const turn = await queryTurn(deps.client(scope), turnId);
+      const turn = await queryTurn(deps.client(scope), sessionId, turnId);
       requireCurrent(scope);
       if (!isLive(turn)) throw new Error('WorkHub turn is no longer active');
     },
-    async interrupt(scope: DesktopTargetScope, turnId: string): Promise<void> {
+    async interrupt(scope: DesktopTargetScope, sessionId: string, turnId: string): Promise<void> {
       const client = deps.client(scope);
-      const turn = await queryTurn(client, turnId);
+      const turn = await queryTurn(client, sessionId, turnId);
       if (isLive(turn)) await client.stopTurn({ sessionId: turn.sessionId, turnId: turn.turnId, runId: turn.runId });
-    },
-    async createContext(scope: DesktopTargetScope) {
-      requireCurrent(scope);
-      const context = await deps.createContext(scope);
-      requireCurrent(scope);
-      return context;
     },
   };
 }

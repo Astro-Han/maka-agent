@@ -17,19 +17,23 @@
  * under the License.
  */
 
-import { useCallback, useMemo } from 'react';
-import type { HostAttachments } from '@maka/workhub/slots';
+import { useCallback, useMemo, useEffect, type ReactNode } from 'react';
+import type { ClientSlots } from '@maka-agent/plugin-sdk/client';
+import type { HostAttachments, FeedbackInput } from '@maka/workhub/slots';
 import type { CoordinationSessionAdapter } from '@maka/workhub/controller';
 import type { WorkHubRootProps, WorkHubAttachmentServices, WorkHubWindowServices } from '@maka/workhub/surface';
 import { useUiLocale } from '@maka/ui';
-import { ClientPluginSlot, type ClientHostRef } from '../../client-plugins/index.js';
 import { getDesktopConversationCopy } from '../../../locales/conversation-copy.js';
 import { localizedShellErrorMessage } from '../../../locales/shell-copy.js';
 import { useWorkHubServices, useWorkHubContinuation } from '../services.js';
 import { hostAttachmentRefs } from '../../../../shared/desktop-session-projection.js';
-import { parseDesktopSessionKey } from '../../../../shared/runtime-host-identity.js';
+import { desktopSessionKey, parseDesktopSessionKey, type DesktopHostRef } from '../../../../shared/runtime-host-identity.js';
 
-export function WorkHubRoot({ host, ...props }: Pick<WorkHubRootProps, 'sessionId' | 'feedback'> & { host: ClientHostRef }) {
+export function WorkHubRoot({ host, surface, feedback, ...props }: Pick<WorkHubRootProps, 'sessionId'> & {
+  host: DesktopHostRef;
+  surface: (input: ClientSlots['workhub.surface']) => ReactNode;
+  feedback: (input: FeedbackInput) => ReactNode;
+}) {
   const locale = useUiLocale();
   const services = useWorkHubServices();
   const continuation = useWorkHubContinuation(host.hostId, props.sessionId);
@@ -91,10 +95,33 @@ export function WorkHubRoot({ host, ...props }: Pick<WorkHubRootProps, 'sessionI
     context: (id) => services.inspector.context(sessionKey(id)),
     subscribeSessionEvents: (id, handler) => services.inspector.subscribeSessionEvents(sessionKey(id), handler),
   }), [services, sessionKey]);
+  const projectSession = useCallback((sessionId: string) => desktopSessionKey({ hostId: host.hostId, sessionId }), [host.hostId]);
   const hostAttachments = useCallback<HostAttachments>((sessionId, refs) => {
     const session = parseDesktopSessionKey(sessionKey(sessionId));
     return hostAttachmentRefs({ scope: host, sessionId: session.sessionId }, refs);
   }, [host.hostId, sessionKey]);
-  return <ClientPluginSlot host={host} entryId="maka.workhub.ui" name="workhub.surface" className="workHubPluginSurface"
-    input={{ ...props, locale, continuation, sessions, native, attachments, hostAttachments, contextUsage }} />;
+  return surface({
+    ...props, locale, continuation, projectSession, sessions, native, attachments, hostAttachments,
+    feedback: (input) => <WorkHubFeedback host={host} input={input} render={feedback} />,
+    hostSessionId: props.sessionId ? parseDesktopSessionKey(props.sessionId).sessionId : undefined,
+    contextUsage,
+  });
+}
+
+function WorkHubFeedback({ host, input, render }: {
+  host: DesktopHostRef; input: FeedbackInput; render: (input: FeedbackInput) => ReactNode;
+}) {
+  const converted = useMemo(() => {
+    try {
+      return { references: input.references.map((reference) => {
+        const target = parseDesktopSessionKey(reference.targetSessionId);
+        if (target.hostId !== host.hostId) throw new Error('Delegation belongs to another Host');
+        return { ...reference, targetSessionId: target.sessionId };
+      }) };
+    } catch (error) { return { error }; }
+  }, [host.hostId, input.references]);
+  useEffect(() => {
+    if ('error' in converted) { input.onFeedback([]); input.onError(converted.error); }
+  }, [converted, input.onFeedback, input.onError]);
+  return converted.references ? render({ ...input, references: converted.references }) : null;
 }

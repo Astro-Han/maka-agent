@@ -21,6 +21,55 @@ use super::*;
 use records::{ids, revision};
 
 impl EventLog {
+    /// The turn constraint and payload slice are checked in the same read. A
+    /// known artifact ID never grants access to a different execution's output.
+    pub async fn execution_artifact(
+        &self,
+        invocation: &maka_runtime::event::Invocation,
+        artifact_id: &str,
+        offset: u64,
+        limit: usize,
+    ) -> Result<Option<ArtifactChunk>, StoreError> {
+        self.validate_root()?;
+        ids(&invocation.session_id, Some(artifact_id))?;
+        crate::sessions::validate_id(&invocation.turn_id)?;
+        if limit == 0 || limit > 64 * 1024 || offset >= (1 << 53) {
+            return Err(invalid("Invalid execution artifact window"));
+        }
+        let (session, turn, artifact) = (
+            invocation.session_id.clone(),
+            invocation.turn_id.clone(),
+            artifact_id.to_owned(),
+        );
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let row: Option<(i64, Vec<u8>)> = sqlx::query_as(
+                        "SELECT length(payload), substr(payload, ?1, ?2) FROM artifacts
+                 WHERE session_id = ?3 AND id = ?4 AND json_extract(record_json, '$.turnId') = ?5",
+                    )
+                    .bind(offset as i64 + 1)
+                    .bind(limit as i64)
+                    .bind(session)
+                    .bind(artifact)
+                    .bind(turn)
+                    .fetch_optional(connection)
+                    .await?;
+                    row.map(|(total, bytes)| {
+                        if offset > total as u64 {
+                            return Err(StoreError::ArtifactOffset);
+                        }
+                        Ok(ArtifactChunk {
+                            total_bytes: total as u64,
+                            bytes,
+                        })
+                    })
+                    .transpose()
+                })
+            })
+            .await
+    }
+
     /// One read snapshot binds revision, ordering and total; no payload is read.
     pub async fn list_artifacts(
         &self,

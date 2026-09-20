@@ -84,7 +84,8 @@ describe('resolveCreateSessionRequest', () => {
 
   it('rejects an invalid collaboration or orchestration mode', () => {
     assert.throws(() => resolve({ collaborationMode: 'nonsense' }), TypeError);
-    assert.throws(() => resolve({ orchestrationMode: 'nonsense' }), TypeError);
+    assert.throws(() => resolve({ orchestrationMode: 'invalid behavior' }), TypeError);
+    assert.equal(resolve({ orchestrationMode: 'example.workflow' }).orchestrationMode, 'example.workflow');
   });
 
   /**

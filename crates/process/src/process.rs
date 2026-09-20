@@ -105,7 +105,9 @@ async fn settle(
     let _ = child.start_kill();
     tokio::time::timeout(REAP, child.wait())
         .await
-        .map_err(|_| ToolError::OutcomeUnknown("Bash root exit not confirmed after KILL".into()))?
+        .map_err(|_| {
+            ToolError::CleanupUnconfirmed("Bash root exit not confirmed after KILL".into())
+        })?
         .map_err(unknown)?;
     Ok(Outcome::Interrupted {
         reason,
@@ -119,5 +121,5 @@ fn signal_group(pid: u32, signal: libc::c_int) -> bool {
     unsafe { libc::kill(-(pid as libc::pid_t), signal) == 0 }
 }
 fn unknown(error: io::Error) -> ToolError {
-    ToolError::OutcomeUnknown(format!("Bash root exit not confirmed: {error}"))
+    ToolError::CleanupUnconfirmed(format!("Bash root exit not confirmed: {error}"))
 }

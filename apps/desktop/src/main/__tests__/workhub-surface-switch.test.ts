@@ -27,7 +27,7 @@ import {
   WorkHubSurfaceSwitch,
   type WorkHubServices,
 } from '../../renderer/features/workhub/index.js';
-import { useWorkHubContinuation } from '../../renderer/features/workhub/services.js';
+import { useWorkHubContinuation } from '../../renderer/features/workhub/testing.js';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 
 afterEach(cleanupFakeDom);
@@ -48,7 +48,7 @@ test('resolver withdrawal does not discard submission identities or mix originat
   const retained = current;
   const submission = {
     sessionId: 'coordinator',
-    input: { turnId: 'pending', text: 'original', originHostEpoch: 'old' },
+    input: { operationId: 'pending', text: 'original' },
     stop: true,
   };
   current.answer = submission;

@@ -22,7 +22,7 @@ use maka_runtime::{
     continuation::{
         ContinuationClaim, MAX_SOURCE_BYTES, MAX_SOURCE_EVENTS, RunBoundary, SessionBase,
     },
-    event::{CancellationCause, Fact, InvocationInput, InvocationOutcome, RuntimeEvent},
+    event::{Fact, InvocationInput, InvocationOutcome, RuntimeEvent},
     handoff::HandoffPause,
 };
 use sqlx::SqliteConnection;
@@ -76,28 +76,15 @@ pub(super) async fn check(
             },
         },
     );
-    // Attribution strings are fixed prefixes plus fixed-width digests, regardless
-    // of the action ID. Size every supported cause, never a guessed byte allowance.
-    let action_id = maka_runtime::workhub::ActionId::new(pause.intent.claim_id.clone())
-        .map_err(super::invalid)?;
-    let mut cancelled_bytes = 0;
-    for cause in [
-        CancellationCause::Runtime,
-        CancellationCause::WorkhubStop {
-            action_id: action_id.clone(),
-        },
-        CancellationCause::WorkhubCorrection { action_id },
-    ] {
-        let cancelled = RuntimeEvent::new(
-            successor.invocation.clone(),
-            Fact::InvocationEnded {
-                outcome: InvocationOutcome::Cancelled {
-                    source: cause.source(),
-                },
+    let cancelled = RuntimeEvent::new(
+        successor.invocation.clone(),
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Cancelled {
+                source: "runtime_cancellation".into(),
             },
-        );
-        cancelled_bytes = cancelled_bytes.max(envelope_bytes(&cancelled)?);
-    }
+        },
+    );
+    let cancelled_bytes = envelope_bytes(&cancelled)?;
     let bytes = MAX_SOURCE_BYTES
         .checked_sub(seal_bytes + envelope_bytes(&successor)? + cancelled_bytes)
         .ok_or(StoreError::PrefixTooLarge)?;

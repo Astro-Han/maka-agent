@@ -25,10 +25,12 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Services {
+    pub inputs: crate::filesystem::ReadInputs,
     pub preferences: Arc<dyn crate::preferences::Preferences>,
     pub storage: Arc<dyn Store>,
     pub credentials: Arc<dyn Credentials>,
     pub executions: Arc<dyn Access>,
+    pub sessions: Arc<dyn crate::session::catalog::Queries>,
     pub authorizations: Arc<dyn crate::authorization::Access>,
     pub files: Arc<dyn crate::filesystem::Files>,
     pub models: Arc<dyn crate::llm::Models>,

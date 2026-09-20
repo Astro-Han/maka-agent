@@ -144,7 +144,8 @@ async fn invoke(
     )
     .await
     .map_err(|error| match error {
-        ToolError::OutcomeUnknown(_) => Error::CleanupUnconfirmed,
+        ToolError::CleanupUnconfirmed(_) => Error::CleanupUnconfirmed,
+        ToolError::OutcomeUnknown(message) => Error::OutcomeUnknown(message),
         _ => Error::Provider(error.to_string()),
     })?;
     Ok((result(value)?, guard))

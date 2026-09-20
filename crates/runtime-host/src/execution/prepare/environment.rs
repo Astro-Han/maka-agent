@@ -37,6 +37,7 @@ pub(crate) struct Environment {
     directory: maka_fs_tools::workspace::directory::PublishedDirectory,
     input_catalog: maka_plugins::contributions::Catalog,
     prepared_input: Option<maka_plugins::input::Prepared>,
+    cancellation: tokio_util::sync::CancellationToken,
 }
 pub(crate) enum Backend {
     Model(Box<ModelEnvironment>),
@@ -50,12 +51,13 @@ pub(crate) struct ModelEnvironment {
 pub(crate) struct Admission {
     _input: Option<maka_plugins::input::Admission>,
     _behavior: Option<maka_plugins::fiber::CallGuard>,
+    _behavior_revision: Option<tokio::sync::OwnedRwLockReadGuard<u64>>,
     _prompt: Vec<maka_plugins::fiber::CallGuard>,
 }
 
 struct BehaviorBasis {
     source: maka_plugins::contributions::Contribution<maka_plugins::session::SessionBehavior>,
-    admission: Option<tokio_util::sync::CancellationToken>,
+    revision: Option<maka_plugins::revision::Basis>,
 }
 
 impl Executions {
@@ -174,6 +176,7 @@ impl Executions {
                 directory,
                 input_catalog: self.plugin_catalog.clone(),
                 prepared_input: None,
+                cancellation: self.shutdown.child_token(),
             });
         }
         let (behavior, basis) = {
@@ -193,16 +196,25 @@ impl Executions {
                     )
                 })?;
             let _lease = behavior.admit().map_err(internal)?;
-            let preparation = behavior
-                .value
-                .0
-                .prepare(session_id.clone())
-                .await
-                .map_err(internal)?;
+            let cancellation = self.shutdown.child_token();
+            let _cancel = cancellation.clone().drop_guard();
+            let stopping = behavior.owner.stopping().map_err(internal)?;
+            let prepare = behavior.value.0.prepare(maka_plugins::session::Request {
+                session: session.plugin_view(session_id.clone(), record.revision),
+                cancellation: cancellation.clone(),
+            });
+            let preparation = tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return Err(failure(Code::HostDraining, "Host is draining")),
+                _ = stopping.cancelled() => return Err(failure(Code::OperationUnavailable, "Session behavior retired")),
+                result = tokio::time::timeout(std::time::Duration::from_secs(10), prepare) =>
+                    result.map_err(|_| failure(Code::OperationUnavailable, "Session behavior preparation timed out"))?
+                        .map_err(internal)?,
+            };
             preparation.validate().map_err(internal)?;
             let basis = BehaviorBasis {
                 source: behavior.clone(),
-                admission: preparation.admission.clone(),
+                revision: preparation.basis.clone(),
             };
             (preparation, Some(basis))
         };
@@ -294,6 +306,7 @@ impl Executions {
             directory,
             input_catalog: self.plugin_catalog.clone(),
             prepared_input: None,
+            cancellation: self.shutdown.child_token(),
         })
     }
 }
@@ -326,7 +339,7 @@ impl Environment {
                 content,
                 selections,
                 tools,
-                cancellation: tokio_util::sync::CancellationToken::new(),
+                cancellation: self.cancellation.clone(),
             },
         )
         .await?;
@@ -372,13 +385,11 @@ impl Environment {
             .map_err(internal)?;
         match &mut self.backend {
             Backend::Model(model) => {
-                if model.behavior.as_ref().is_some_and(|basis| {
-                    !basis.source.is_effective()
-                        || basis
-                            .admission
-                            .as_ref()
-                            .is_some_and(|gate| gate.is_cancelled())
-                }) {
+                if model
+                    .behavior
+                    .as_ref()
+                    .is_some_and(|basis| !basis.source.is_effective())
+                {
                     return Err(failure(
                         Code::OperationUnavailable,
                         "Prepared Session behavior has retired",
@@ -393,6 +404,7 @@ impl Environment {
         let mut admission = Admission {
             _input: None,
             _behavior: None,
+            _behavior_revision: None,
             _prompt: Vec::new(),
         };
         if let (Some(captured), Some(prompt)) = (&self.prompt_capture, &self.prompt) {
@@ -403,6 +415,14 @@ impl Environment {
             && let Some(basis) = &model.behavior
         {
             admission._behavior = Some(basis.source.admit().map_err(internal)?);
+            if let Some(revision) = &basis.revision {
+                admission._behavior_revision = Some(revision.admit().ok_or_else(|| {
+                    failure(
+                        Code::OperationUnavailable,
+                        "Prepared Session behavior changed",
+                    )
+                })?);
+            }
         }
         if let Some(prepared) = &self.prepared_input {
             let Some(guard) = prepared.admit().map_err(internal)? else {

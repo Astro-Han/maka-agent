@@ -160,7 +160,7 @@ async fn mutate(host: &Host, input: Mutation) -> Result<MutationResult> {
                 .map_err(stored)?;
             for id in result.updated_session_ids {
                 host.session_catalog
-                    .publish_session(&host.changes, &id)
+                    .publish_session(&id)
                     .await
                     .map_err(internal)?;
             }

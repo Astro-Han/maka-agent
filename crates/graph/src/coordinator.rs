@@ -105,6 +105,7 @@ impl Coordinator {
                 epoch,
                 schedule_revision: 0,
                 stop_requested: false,
+                stop_target: None,
                 finished: false,
             },
             executions: BTreeMap::new(),
@@ -123,6 +124,9 @@ impl Coordinator {
             return Err(Error::Closed);
         }
         self.refresh_schedule().await?;
+        if let Some(target) = &self.control.stop_target {
+            self.commands.stop(target.clone()).await?;
+        }
         let work = self.schedule.work.keys().cloned().collect::<Vec<_>>();
         self.failures.clear();
         self.waiting.clear();

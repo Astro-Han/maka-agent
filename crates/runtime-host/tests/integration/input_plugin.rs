@@ -64,7 +64,7 @@ impl Plugin for Business {
     }
 }
 impl session::Behavior for Business {
-    fn prepare(&self, _: String) -> BoxFuture<'_, Result<session::Preparation, String>> {
+    fn prepare(&self, _: session::Request) -> BoxFuture<'_, Result<session::Preparation, String>> {
         Box::pin(async {
             Ok(session::Preparation {
                 instructions: "Follow the example review workflow.".into(),
@@ -77,6 +77,7 @@ impl input::Provider for Business {
     fn prepare(
         &self,
         mut request: input::Request,
+        _workspace: maka_plugins::filesystem::ReadDirectory,
     ) -> BoxFuture<'static, Result<input::Outcome, maka_plugins::Error>> {
         let count = self.0.clone();
         Box::pin(async move {
@@ -114,125 +115,6 @@ fn setup(business: &Business) -> Setup {
             .unwrap(),
         )]),
         ..Default::default()
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn custom_session_manager_blocks_ordinary_access_after_disable_and_restart() {
-    let fixture = ClientFixture::new("maka-managed-plugin-");
-    for reopened in [false, true] {
-        let mut plugins = setup(&Business::default());
-        if !reopened {
-            plugins
-                .managed_sessions
-                .push(maka_event_log::sessions::ManagedSession {
-                    session_id: "example-inbox".into(),
-                    manager: maka_plugins::storage::Namespace::new(
-                        "example",
-                        maka_plugins::composition::Scope::Profile,
-                    )
-                    .unwrap(),
-                    fingerprint: "example-owned-creation".into(),
-                });
-        }
-        let host = Host::open_with_options(
-            fixture.owner(),
-            None,
-            HostOptions {
-                plugins,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-        #[cfg(unix)]
-        let endpoint = fixture.workspace.parent().unwrap().join("managed.sock");
-        #[cfg(windows)]
-        let endpoint =
-            std::path::PathBuf::from(format!(r"\\.\pipe\maka-managed-{}", uuid::Uuid::new_v4()));
-        let stop = CancellationToken::new();
-        let cleanup = stop.clone().drop_guard();
-        let server = tokio::spawn(
-            LocalListener::bind(&endpoint)
-                .unwrap()
-                .serve(host.clone(), stop),
-        );
-        let mut peer = Peer::new(host.clone(), "managed-plugin").await;
-        super::skills_plugin::converged(&mut peer).await;
-        if !reopened {
-            let disabled = peer.rpc("plugin.composition.apply", json!({
-                "operations":[{"type":"update","entryId":"example","patch":{"disabled":true}}]
-            })).await;
-            assert_eq!(disabled["ok"], true, "{disabled}");
-            super::skills_plugin::converged(&mut peer).await;
-        }
-        for (operation, input) in [
-            (
-                "session.create",
-                json!({
-                    "sessionId":"example-inbox", "workspace":{"kind":"host_path","path":fixture.workspace},
-                    "modelTarget":{"kind":"default"}
-                }),
-            ),
-            (
-                "turn.start",
-                json!({"sessionId":"example-inbox","turnId":"bypass","content":{"text":"ordinary"}}),
-            ),
-            (
-                "session.lifecycle.set",
-                json!({"sessionId":"example-inbox","state":"archived"}),
-            ),
-        ] {
-            let result = peer.rpc(operation, input).await;
-            assert_eq!(
-                result["error"]["code"], "operation_conflict",
-                "{operation}: {result}"
-            );
-            assert_eq!(
-                result["error"]["message"],
-                "Session operation requires its manager"
-            );
-        }
-        // Even an explicitly restored execution grant is not management authority.
-        let fiber = maka_plugins::fiber::Fiber::new(
-            "other",
-            "other",
-            maka_plugins::composition::Scope::Profile,
-        )
-        .unwrap();
-        fiber.begin_loading().unwrap();
-        fiber.ready().unwrap();
-        fiber.publish().unwrap();
-        let commands = host
-            .restore_plugin_execution(
-                fiber.context(),
-                vec![maka_plugins::execution::SessionBoundary {
-                    session_id: "example-inbox".into(),
-                    boundary_revision: 0,
-                    permission_mode: maka_runtime::execution::PermissionMode::Bypass,
-                    cwd: fixture.workspace.to_string_lossy().into_owned(),
-                }],
-            )
-            .unwrap();
-        assert!(matches!(
-            commands
-                .submit(maka_plugins::execution::Submit {
-                    operation_id: "bypass".into(),
-                    session_id: "example-inbox".into(),
-                    content: "ordinary".into(),
-                    orchestration_mode: None,
-                })
-                .await,
-            Err(maka_plugins::execution::CommandError::Denied)
-        ));
-        fiber
-            .shutdown(tokio::time::Instant::now() + Duration::from_secs(1))
-            .await
-            .unwrap();
-        peer.close().await;
-        drop(cleanup);
-        server.await.unwrap().unwrap();
-        drop(host);
     }
 }
 

@@ -70,6 +70,7 @@ pub enum InstallSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MutateInput {
+    pub grant: Option<maka_plugins::authorization::Id>,
     pub context: WorkspaceContext,
     pub expected_revision: String,
     pub mutation: Mutation,

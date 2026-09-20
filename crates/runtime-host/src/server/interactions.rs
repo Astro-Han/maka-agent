@@ -43,8 +43,7 @@ pub(crate) struct Interactions {
     pub(crate) retirement: Arc<std::sync::Mutex<super::retirement::Phase>>,
     shutdown: CancellationToken,
     epoch: String,
-    catalog: Arc<super::catalog_feed::CatalogFeed>,
-    changes: tokio::sync::broadcast::Sender<serde_json::Value>,
+    pub(crate) catalog: Arc<super::catalog_feed::CatalogFeed>,
 }
 impl ClientInteractions for Interactions {
     fn permission_mode(&self, context: ToolCallContext) -> maka_tools::PermissionFuture {
@@ -95,7 +94,6 @@ impl Interactions {
         shutdown: CancellationToken,
         epoch: String,
         catalog: Arc<super::catalog_feed::CatalogFeed>,
-        changes: tokio::sync::broadcast::Sender<serde_json::Value>,
     ) -> Self {
         Self {
             log,
@@ -104,7 +102,6 @@ impl Interactions {
             shutdown,
             epoch,
             catalog,
-            changes,
         }
     }
 
@@ -140,12 +137,29 @@ impl Interactions {
 
     async fn publish_catalog(&self, session_id: &str) -> Result<(), OperationError> {
         self.catalog
-            .publish_session(&self.changes, session_id)
+            .publish_session(session_id)
             .await
             .map_err(|error| {
                 self.shutdown.cancel();
                 failure(Code::InternalFailure, &error.to_string())
             })
+    }
+
+    /// Caller holds shared admission and has verified ownership of the offer.
+    pub(crate) async fn withdraw(
+        &self,
+        request_id: &str,
+    ) -> Result<InteractionRecord, OperationError> {
+        Ok(self
+            .commit_outcome(
+                request_id,
+                maka_runtime::interaction::InteractionOutcome::Closure {
+                    reason: maka_runtime::interaction::ClosureReason::ProducerCancelled,
+                    committed_at: self.timestamp()?,
+                },
+            )
+            .await?
+            .record)
     }
 
     async fn commit_outcome(

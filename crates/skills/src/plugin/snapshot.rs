@@ -30,7 +30,7 @@ pub(super) use model::registrations;
 
 /// Immutable domain input. Host persists its result, not this executable object.
 pub struct Snapshot {
-    pub(super) input_basis: Option<maka_plugins::input::Basis>,
+    pub(super) input_basis: Option<maka_plugins::revision::Basis>,
     pub preference_revision: Option<u64>,
     pub discovery: crate::DiscoverySnapshot,
     pub preferences: Preferences,

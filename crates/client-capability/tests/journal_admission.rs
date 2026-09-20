@@ -170,7 +170,9 @@ async fn run(boundary: Boundary) {
         move |_| {
             Box::pin(async move {
                 let result = accepted.admit().await.map_err(|error| match error {
-                    CallError::OutcomeUnknown(_) => ToolError::OutcomeUnknown(error.to_string()),
+                    CallError::OutcomeUnknown(_) => {
+                        ToolError::CleanupUnconfirmed(error.to_string())
+                    }
                     _ => ToolError::Failed(error.to_string()),
                 })?;
                 serde_json::to_value(result).map_err(|e| ToolError::OutcomeUnknown(e.to_string()))
@@ -239,8 +241,11 @@ async fn run(boundary: Boundary) {
         Boundary::CancelAfterT1 | Boundary::LostAfterT1 => {
             assert!(matches!(result, Err(ToolError::Failed(_))))
         }
-        Boundary::UnknownT2 | Boundary::LostAfterEffect => {
-            assert!(matches!(result, Err(ToolError::OutcomeUnknown(_))))
+        Boundary::UnknownT2 => {
+            assert!(matches!(result, Err(ToolError::Persistence(_))))
+        }
+        Boundary::LostAfterEffect => {
+            assert!(matches!(result, Err(ToolError::CleanupUnconfirmed(_))))
         }
     }
     assert_eq!(effect_path.exists(), should_execute);

@@ -23,6 +23,7 @@ use maka_plugins::{
     contributions::{Catalog, Staged},
     fiber::Fiber,
     input::*,
+    revision::Revision,
 };
 use serde_json::json;
 use std::{sync::Arc, time::Duration};
@@ -32,10 +33,14 @@ impl Provider for Example {
     fn prepare(
         &self,
         mut request: Request,
+        _workspace: maka_plugins::filesystem::ReadDirectory,
     ) -> BoxFuture<'static, Result<Outcome, maka_plugins::Error>> {
         let revision = self.0.clone();
         Box::pin(async move {
             let basis = revision.capture().await;
+            if request.content.text == "replace attachment" {
+                request.content.attachments = Some(Vec::new());
+            }
             request.content.text.push_str("\nprepared business input");
             Ok(Outcome::Ready {
                 content: request.content,
@@ -70,6 +75,19 @@ async fn admission_orders_domain_invalidation_and_retirement_without_executing_c
         tools: Default::default(),
         cancellation: Default::default(),
     };
+    assert!(
+        prepare(
+            &catalog,
+            &Scope::Session("session".into()),
+            Request {
+                content: "replace attachment".into(),
+                ..request.clone()
+            }
+        )
+        .await
+        .is_err(),
+        "native preparation cannot rewrite user attachments"
+    );
     let first = prepare(&catalog, &Scope::Session("session".into()), request.clone())
         .await
         .unwrap();

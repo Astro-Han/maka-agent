@@ -83,3 +83,140 @@ async fn original_client_resumes_selected_lineage_streams_and_reopens_exact_admi
         log.close().await.unwrap();
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn public_resume_replays_admission_after_lost_reply_and_restart() {
+    tokio::time::timeout(std::time::Duration::from_secs(30), public_resume())
+        .await
+        .unwrap();
+}
+
+async fn public_resume() {
+    use super::support::{
+        message_recovery::{Provider, configure},
+        peer::Peer,
+    };
+    use maka_plugins::{
+        composition::Scope,
+        execution::{CommandError, Progress, Resume, Submit},
+        fiber::Fiber,
+    };
+    use maka_runtime_host::server::{Host, local::LocalListener};
+    use serde_json::json;
+    use tokio_util::sync::CancellationToken;
+
+    let fixture = ClientFixture::new("maka-public-resume-");
+    let provider = Provider::start().await;
+    let model = configure(&fixture, &provider.base_url).await;
+    let mut saved: Option<(Resume, maka_runtime::event::Invocation)> = None;
+    for reopened in [false, true] {
+        let host = Host::open(fixture.owner()).await.unwrap();
+        #[cfg(unix)]
+        let endpoint = fixture.workspace.parent().unwrap().join("resume.sock");
+        #[cfg(windows)]
+        let endpoint =
+            std::path::PathBuf::from(format!(r"\\.\pipe\maka-resume-{}", uuid::Uuid::new_v4()));
+        let stop = CancellationToken::new();
+        let cleanup = stop.clone().drop_guard();
+        let server = tokio::spawn(
+            LocalListener::bind(&endpoint)
+                .unwrap()
+                .serve(host.clone(), stop.clone()),
+        );
+        let mut peer = Peer::new(host.clone(), "public-resume").await;
+        if !reopened {
+            let response = peer.rpc("session.create", json!({
+                "sessionId":"public-resume", "workspace":{"kind":"host_path","path":fixture.workspace},
+                "modelTarget":{"kind":"explicit","connectionId":model.connection_id,
+                    "connectionSlug":model.connection_slug,"model":model.model}
+            })).await;
+            assert_eq!(response["ok"], true, "{response}");
+        }
+        let fiber = Fiber::new("resume-consumer", "resume-consumer", Scope::Profile).unwrap();
+        fiber.begin_loading().unwrap();
+        fiber.ready().unwrap();
+        fiber.publish().unwrap();
+        let commands = host
+            .authorize_plugin_execution(fiber.context(), &["public-resume".into()])
+            .await
+            .unwrap();
+        let (request, resumed) = if let Some((request, resumed)) = &saved {
+            assert_eq!(commands.resume(request.clone()).await.unwrap(), *resumed);
+            (request.clone(), resumed.clone())
+        } else {
+            let source = commands
+                .submit(Submit {
+                    operation_id: "source".into(),
+                    session_id: "public-resume".into(),
+                    content: "Resume this precise lineage".into(),
+                    orchestration_mode: None,
+                })
+                .await
+                .unwrap();
+            loop {
+                let current = commands.activity("public-resume".into()).await.unwrap();
+                if !current.busy
+                    && current
+                        .execution
+                        .as_ref()
+                        .is_some_and(|run| matches!(run.progress, Progress::Ended { .. }))
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            let request = Resume {
+                operation_id: "continuation".into(),
+                source: source.invocation,
+            };
+            // Dropping the observation must not detach Host's admission owner.
+            let mut waiter = Box::pin(commands.resume(request.clone()));
+            assert!(futures_util::FutureExt::now_or_never(waiter.as_mut()).is_none());
+            drop(waiter);
+            let resumed = loop {
+                match commands.resume(request.clone()).await {
+                    Ok(invocation) => break invocation,
+                    Err(CommandError::Busy) => tokio::task::yield_now().await,
+                    result => panic!("resume failed: {result:?}"),
+                }
+            };
+            assert_ne!(resumed, request.source);
+            (request, resumed)
+        };
+        let mut wrong = request.clone();
+        wrong.source.invocation_id = "another-owner".into();
+        assert!(matches!(
+            commands.resume(wrong).await,
+            Err(CommandError::Conflict)
+        ));
+        loop {
+            let current = commands.activity("public-resume".into()).await.unwrap();
+            if !current.busy {
+                let execution = current.execution.unwrap();
+                assert_eq!(execution.invocation, resumed);
+                assert!(matches!(execution.progress, Progress::Ended { .. }));
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(commands.resume(request.clone()).await.unwrap(), resumed);
+        saved = Some((request, resumed));
+        fiber
+            .shutdown(tokio::time::Instant::now() + std::time::Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(matches!(
+            commands.resume(saved.as_ref().unwrap().0.clone()).await,
+            Err(CommandError::Revoked)
+        ));
+        peer.close().await;
+        stop.cancel();
+        server.await.unwrap().unwrap();
+        cleanup.disarm();
+    }
+    assert_eq!(
+        provider.requests.lock().unwrap().len(),
+        2,
+        "retry and restart must not execute again"
+    );
+}

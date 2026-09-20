@@ -42,7 +42,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
     hostId: 'upload-host', targetEpoch: 'upload-epoch', profileId: 'local',
     profileName: 'Local', profileKind: 'local', profileAccess: 'owner', readiness: 'ready',
   };
-  const nativeSessionId = 'maka_workhub_coordination';
+  const nativeSessionId = 'managed-coordinator';
   const sessionId = desktopSessionKey({ hostId: owner.hostId, sessionId: nativeSessionId });
   const uploaded: AttachmentRef = {
     kind: 'doc', name: 'brief.txt', mimeType: 'text/plain', bytes: 5,
@@ -94,19 +94,20 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
   assert.equal(connection.epoch, 'remote-connection-epoch');
   assert.equal(connection.hostEpoch, 'host-process-epoch');
   const commands = coordinationCommands({
-    hostEpoch: connection.hostEpoch, signal: new AbortController().signal,
+    signal: new AbortController().signal,
     remote: { method: (name: string) => async (input: { originHostEpoch?: string; turnId?: string; attachments?: AttachmentRef[]; placement?: string; content?: { attachments: AttachmentRef[] } }) => {
-      if (name === 'enqueue') assert.equal(input.originHostEpoch, 'host-process-epoch');
+      if (name === 'answer-receipt') return null;
+      if (name === 'enqueue') assert.equal(input.originHostEpoch, undefined);
       sent.push({ channel: name, attachments: input.attachments ?? input.content!.attachments });
-      return { ok: true, result: name === 'answer' ? { turnId: input.turnId } : { disposition: input.placement === 'current_turn' ? 'steering' : 'followup' } };
+      return name === 'answer' ? { invocation: { session_id: nativeSessionId, turn_id: 'accepted-turn', run_id: 'run', invocation_id: 'inv' }, messageId: 'message', contentDigest: 'digest' } : { disposition: input.placement === 'current_turn' ? 'steering' : 'followup' };
     } } as unknown as Parameters<typeof coordinationCommands>[0]['remote'],
-  }, (_sessionId, refs) => hostAttachmentRefs({ scope: owner, sessionId: nativeSessionId }, refs));
+  }, (_sessionId, refs) => hostAttachmentRefs({ scope: owner, sessionId: nativeSessionId }, refs), nativeSessionId);
   const attachments = await services.prepareAttachments(sessionId, [
     { file: new File(['hello'], 'brief.txt', { type: 'text/plain' }) },
   ]);
   assert.equal(attachments[0]!.ref.kind, 'session_file');
   assert.equal(attachments[0]!.ref.kind === 'session_file' && attachments[0]!.ref.sessionId, sessionId);
-  assert.equal((await commands.answer(sessionId, { turnId: 'idle-answer', text: 'read this', attachments })).kind, 'admitted');
+  assert.equal((await commands.answer(sessionId, { operationId: 'idle-answer', text: 'read this', attachments })).kind, 'admitted');
   for (const placement of ['next_turn', 'current_turn'] as const) {
     assert.equal(await commands.enqueueMessage(sessionId, `message-${placement}`, 'read this', attachments, placement, 'active-turn'), 'admitted');
   }
@@ -124,7 +125,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
     },
   );
   const foreign = [{ ...uploaded, ref: { ...uploaded.ref, kind: 'session_file' as const, sessionId: desktopSessionKey({ hostId: 'foreign-host', sessionId: nativeSessionId }), relativePath: 'brief.txt' } }];
-  await assert.rejects(commands.answer(sessionId, { turnId: 'foreign', text: 'read this', attachments: foreign }), /another Host or Session/);
+  await assert.rejects(commands.answer(sessionId, { operationId: 'foreign', text: 'read this', attachments: foreign }), /another Host or Session/);
   await assert.rejects(commands.enqueueMessage(sessionId, 'foreign', 'read this', foreign, 'next_turn', 'active-turn'), /another Host or Session/);
 });
 

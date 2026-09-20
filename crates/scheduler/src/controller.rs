@@ -78,7 +78,7 @@ impl Controller {
         now: i64,
         dispatcher: &dyn Dispatcher,
     ) -> Result<MutationResult, Error> {
-        if let Origin::Agent(invocation) = &origin {
+        if let Some(invocation) = origin.agent()? {
             let id = match &request {
                 Mutation::Create { .. } => None,
                 Mutation::Update { task_id, .. }
@@ -102,7 +102,7 @@ impl Controller {
             Mutation::Create { input } => Plan::create(
                 format!("task-{}", uuid::Uuid::new_v4()),
                 input,
-                origin.creator(),
+                origin.creator()?,
                 self.timezone.clone(),
                 now,
             )?,

@@ -52,7 +52,7 @@ async fn execution_receipts_commit_with_work_and_survive_delivery_restarts_and_l
     )
     .unwrap();
     assert!(
-        log.admit_plugin_execution(&namespace, request.clone())
+        log.admit_plugin_execution(&namespace, request.clone(), pending(&request))
             .await
             .is_err()
     );
@@ -67,12 +67,12 @@ async fn execution_receipts_commit_with_work_and_survive_delivery_restarts_and_l
 
     // Lose the receipt waiter after the SQL owner has accepted the command.
     assert!(
-        log.admit_plugin_execution(&namespace, request.clone())
+        log.admit_plugin_execution(&namespace, request.clone(), pending(&request))
             .now_or_never()
             .is_none()
     );
     let receipt = log
-        .admit_plugin_execution(&namespace, request.clone())
+        .admit_plugin_execution(&namespace, request.clone(), pending(&request))
         .await
         .unwrap();
     assert_eq!(log.pending_messages("session").await.unwrap().len(), 1);
@@ -179,7 +179,7 @@ async fn execution_receipts_commit_with_work_and_survive_delivery_restarts_and_l
 
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(
-        log.admit_plugin_execution(&namespace, request.clone())
+        log.admit_plugin_execution(&namespace, request.clone(), pending(&request))
             .await
             .unwrap(),
         receipt
@@ -189,28 +189,68 @@ async fn execution_receipts_commit_with_work_and_survive_delivery_restarts_and_l
     changed.orchestration_mode =
         Some(maka_runtime::execution::BehaviorId::try_from("swarm".to_owned()).unwrap());
     assert!(matches!(
-        log.admit_plugin_execution(&namespace, changed).await,
+        log.admit_plugin_execution(&namespace, changed.clone(), pending(&changed))
+            .await,
         Err(StoreError::EventConflict)
     ));
     let mut changed = request.clone();
     changed.content = "Different work".into();
     assert!(matches!(
-        log.admit_plugin_execution(&namespace, changed).await,
+        log.admit_plugin_execution(&namespace, changed.clone(), pending(&changed))
+            .await,
         Err(StoreError::EventConflict)
     ));
     let foreign = Namespace::new("graph", Scope::DesktopUi).unwrap();
     assert!(
-        log.admit_plugin_execution(&foreign, request.clone())
+        log.admit_plugin_execution(&foreign, request.clone(), pending(&request))
             .await
             .is_err()
     );
     let separate = Namespace::new("schedule", Scope::Profile).unwrap();
     let other = log
-        .admit_plugin_execution(&separate, request)
+        .admit_plugin_execution(&separate, request.clone(), pending(&request))
         .await
         .unwrap();
     assert_ne!(other.invocation, receipt.invocation);
     log.close().await.unwrap();
+}
+
+fn pending(
+    request: &maka_plugins::execution::Submit,
+) -> maka_event_log::message_admissions::PendingMessageAdmission {
+    use maka_runtime::{event::Invocation, input::DeliveredMessage, message::*};
+    let mode = request.orchestration_mode.clone();
+    maka_event_log::message_admissions::PendingMessageAdmission {
+        invocation: Invocation {
+            session_id: request.session_id.clone(),
+            turn_id: uuid::Uuid::new_v4().to_string(),
+            run_id: uuid::Uuid::new_v4().to_string(),
+            invocation_id: uuid::Uuid::new_v4().to_string(),
+        },
+        steering_invocation: None,
+        source: RootSourceMessage {
+            message: DeliveredMessage {
+                message_id: uuid::Uuid::new_v4().to_string(),
+                submitted_content_digest: request.content.content_digest().unwrap(),
+                content: request.content.clone(),
+            },
+            submitted_placement: if mode.is_some() {
+                Placement::CurrentTurn
+            } else {
+                Placement::NextTurn
+            },
+            disposition: MessageDisposition::TurnStarted,
+            submitted_intent: mode.map(|mode| SubmittedTurnIntent {
+                input_selections: Default::default(),
+                turn_orchestration: Some(TurnOrchestration {
+                    mode,
+                    source: TurnOrchestrationSource::HostApi,
+                }),
+            }),
+        },
+        required_tools: Default::default(),
+        admitted_at: 1,
+    }
 }
 
 fn package(source: &[u8]) -> Package {
@@ -232,7 +272,7 @@ fn package(source: &[u8]) -> Package {
 async fn data_batches_are_namespaced_atomic_and_preserve_tombstone_revisions() {
     use maka_plugins::{
         composition::Scope,
-        storage::{Data, Mutation, Namespace},
+        storage::{Data, Mutation, Namespace, Scan},
     };
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("data.sqlite");
@@ -271,6 +311,13 @@ async fn data_batches_are_namespaced_atomic_and_preserve_tombstone_revisions() {
     let deleted = log.plugin_data(&namespace, "state").await.unwrap().unwrap();
     assert_eq!(deleted.revision, 2);
     assert_eq!(deleted.data, Data::Deleted);
+    let page = log
+        .plugin_data_scan(&namespace, Scan::default())
+        .await
+        .unwrap();
+    assert_eq!(page.entries.len(), 1);
+    assert_eq!(page.entries[0].record, deleted);
+    assert!(page.next_after.is_none());
     assert!(
         log.plugin_data_batch(
             &namespace,
@@ -281,6 +328,97 @@ async fn data_batches_are_namespaced_atomic_and_preserve_tombstone_revisions() {
     );
     let separate = Namespace::new("graph", Scope::Session("other".into())).unwrap();
     assert!(log.plugin_data(&separate, "state").await.unwrap().is_none());
+    assert!(
+        log.plugin_data_scan(&separate, Scan::default())
+            .await
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+    let mut records = (0..66)
+        .map(|n| mutation(&format!("r%_/{n:03}"), None, Data::Present(json!(n))))
+        .collect::<Vec<_>>();
+    records.push(mutation(
+        "rax/not-selected",
+        None,
+        Data::Present(json!(false)),
+    ));
+    log.plugin_data_batch(&namespace, records).await.unwrap();
+    let page = log
+        .plugin_data_scan(
+            &namespace,
+            Scan {
+                prefix: "r%_/".into(),
+                after: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.entries.len(), 64);
+    assert_eq!(page.next_after.as_deref(), Some("r%_/063"));
+    let tail = log
+        .plugin_data_scan(
+            &namespace,
+            Scan {
+                prefix: "r%_/".into(),
+                after: page.next_after,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tail.entries
+            .iter()
+            .map(|entry| entry.key.as_str())
+            .collect::<Vec<_>>(),
+        ["r%_/064", "r%_/065"]
+    );
+    assert!(tail.next_after.is_none());
+    log.plugin_data_batch(
+        &namespace,
+        (0..3)
+            .map(|n| {
+                mutation(
+                    &format!("large/{n}"),
+                    None,
+                    Data::Present(json!("x".repeat(900_000))),
+                )
+            })
+            .collect(),
+    )
+    .await
+    .unwrap();
+    let page = log
+        .plugin_data_scan(
+            &namespace,
+            Scan {
+                prefix: "large/".into(),
+                after: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        page.entries.len(),
+        2,
+        "byte budget also bounds decoded rows"
+    );
+    assert_eq!(page.next_after.as_deref(), Some("large/1"));
+    let tail = log
+        .plugin_data_scan(
+            &namespace,
+            Scan {
+                prefix: "large/".into(),
+                after: page.next_after,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(tail.entries.len(), 1);
+    assert!(
+        matches!(&tail.entries[0].record.data, Data::Present(value) if value.as_str().unwrap().len() == 900_000)
+    );
+    assert!(tail.next_after.is_none());
     log.plugin_data_batch(
         &namespace,
         vec![mutation("state", Some(2), Data::Present(json!(3)))],

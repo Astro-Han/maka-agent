@@ -55,9 +55,9 @@ impl Resources {
         self.tasks.close();
         tokio::time::timeout(Duration::from_secs(5), self.tasks.wait())
             .await
-            .map_err(|_| ToolError::OutcomeUnknown("plugin resources did not settle".into()))?;
+            .map_err(|_| ToolError::CleanupUnconfirmed("plugin resources did not settle".into()))?;
         match &self.state.lock().unwrap().failure {
-            Some(error) => Err(ToolError::OutcomeUnknown(error.clone())),
+            Some(error) => Err(ToolError::CleanupUnconfirmed(error.clone())),
             None => Ok(()),
         }
     }

@@ -307,7 +307,9 @@ pub(super) fn build<'a>(
                         } => {
                             super::output::project(model_projection, messages.len(), images, vision)
                         }
-                        ToolOutcome::Failed { message } => ToolOutput::ErrorText(message.clone()),
+                        ToolOutcome::Failed { message } | ToolOutcome::Unknown { message } => {
+                            ToolOutput::ErrorText(message.clone())
+                        }
                     };
                     messages.push(Message::tool(id, name, output));
                 }

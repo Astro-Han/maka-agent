@@ -18,6 +18,7 @@
  */
 
 import * as React from 'react';
+import { useUiLocale } from '@maka/ui';
 import * as JsxRuntime from 'react/jsx-runtime';
 import * as ClientSdk from '@maka-agent/plugin-sdk/client';
 import * as ClientUi from '@maka/ui/plugin';
@@ -73,7 +74,7 @@ export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
   }, [session, resolving, resolutionError]);
   const composerInput = {...props.input, contextRevision,
     ...(props.name === 'session.resolve' ? {onResolved} :
-      props.name === 'workspace.manage' ? {} : {publishSuggestions})};
+      props.name.endsWith('.composer.before') ? {publishSuggestions} : {})};
   const input = 'onOpenSession' in composerInput ? {
     ...composerInput,
     onOpenSession(sessionId: string) {
@@ -144,4 +145,14 @@ export function usePluginSession(entryId: string, enabled: boolean, locale: 'en'
       {error ? <div role="status" className="clientPluginFailure">{error}</div> : null}
     </> : null,
   };
+}
+
+/** Owns resolution lifetime; composition only supplies the selected surface. */
+export function ClientPluginSession(props: {
+  entryId: string;
+  children: (binding: { host: ClientHostRef; sessionId: string }) => React.ReactNode;
+}) {
+  const binding = usePluginSession(props.entryId, true, useUiLocale());
+  return <>{binding.resolver}{binding.host && binding.sessionId
+    ? props.children({ host: binding.host, sessionId: binding.sessionId }) : null}</>;
 }

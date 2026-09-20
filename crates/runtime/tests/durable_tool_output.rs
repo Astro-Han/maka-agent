@@ -325,7 +325,7 @@ async fn journal_effect_runs_once_and_raw_is_delivered_only_after_t2_ack() {
                 assert_eq!(calls.load(Ordering::SeqCst), 0);
                 continue;
             }
-            Fault::OutcomeAck => assert!(matches!(result, Err(ToolError::OutcomeUnknown(_)))),
+            Fault::OutcomeAck => assert!(matches!(result, Err(ToolError::Persistence(_)))),
         }
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         let events = sink.events.lock().unwrap();

@@ -57,6 +57,15 @@
     })();
     return stream.closing;
   };
+  const readDirectory = (prefix, handle) =>
+    Object.freeze({
+      location: () => host(`${prefix}.location`, { handle }),
+      read: async (input) => {
+        const page = await host(`${prefix}.read`, { handle, input });
+        return { ...page, bytes: Uint8Array.from(page.bytes) };
+      },
+      list: (input = {}) => host(`${prefix}.list`, { handle, input }),
+    });
   const processes = (authority) => {
     const open = (handle) =>
       Object.freeze({
@@ -104,9 +113,26 @@
       open,
     });
   };
+  const fileEntries = (invoke) =>
+    Object.freeze({
+      async read(input) {
+        const page = await invoke('read', input);
+        return { ...page, bytes: Uint8Array.from(page.bytes) };
+      },
+      write: (input) => invoke('write', { ...input, bytes: Array.from(input.bytes) }),
+      list: (input = {}) => invoke('list', input),
+      stat: (path) => invoke('stat', { path }),
+      sync: (path = '') => invoke('sync', { path }),
+      createDirectory: (path) => invoke('create_directory', { path }),
+      remove: (path) => invoke('remove', { path }),
+      rename: (from, to) => invoke('rename', { from, to }),
+    });
   const files = (authority) =>
-    Object.freeze(
-      Object.fromEntries(
+    Object.freeze({
+      entries: fileEntries((kind, input) =>
+        host('files.invoke', { authority, operation: { kind: 'entries', input: { kind, input } } }),
+      ),
+      ...Object.fromEntries(
         ['read', 'write', 'edit', 'glob', 'grep', 'patch'].map((kind) => [
           kind,
           async (input) => {
@@ -117,7 +143,7 @@
           },
         ]),
       ),
-    );
+    });
   const http = (authority) =>
     Object.freeze({
       request: async ({ body, ...request }) => {
@@ -170,12 +196,33 @@
     if (reply.ok) return reply.value;
     throw Object.assign(new Error(reply.error.message), { code: reply.error.code });
   };
+  const executionHandles = new WeakMap();
   const executions = (handle) => {
     const call = (method, input) => host(`execution.${method}`, { handle, input });
     let closing;
-    return Object.freeze({
+    const capability = Object.freeze({
+      copyAttachment: (source, targetSessionId, attachment) => {
+        const sourceHandle = executionHandles.get(source);
+        if (sourceHandle === undefined) throw new TypeError('Expected a Host execution capability');
+        return call('copyAttachment', { sourceHandle, targetSessionId, attachment });
+      },
+      resume: (input) => call('resume', input),
+      configure: (input) => call('configure', input),
+      input: (invocation) => call('input', invocation),
+      readMessage: (input) => call('readMessage', input),
+      enqueue: (input) => call('enqueue', input),
+      message: (operationId) => call('message', { operationId }),
+      retract: (operationId) => call('retract', { operationId }),
+      offerInteraction: (input) => call('offerInteraction', input),
+      interaction: (operationId) => call('interaction', { operationId }),
+      waitInteraction: (operationId) => call('waitInteraction', { operationId }),
+      closeInteraction: (operationId) => call('closeInteraction', { operationId }),
       submit: (input) => call('submit', input),
       session: (sessionId) => call('session', { sessionId }),
+      capabilities: (sessionId) => call('capabilities', { sessionId }),
+      activity: (sessionId) => call('activity', { sessionId }),
+      stop: (invocation) => call('stop', invocation),
+      restoreChild: (input) => call('restoreChild', input),
       createChild: (input) => call('createChild', input),
       createRoot: (input) => call('createRoot', input),
       workspacePatch: (operationId) => call('workspacePatch', { operationId }),
@@ -183,11 +230,14 @@
       cancel: (operationId) => call('cancel', { operationId }),
       events: (input) => call('events', input),
       event: (input) => call('event', input),
+      artifact: (input) => call('artifact', input),
       close() {
         closing ??= host('execution.close', { handle });
         return closing;
       },
     });
+    executionHandles.set(capability, handle);
+    return capability;
   };
   const callback = (fn) => {
     if (typeof fn !== 'function' || callbacks.size >= 256 || next >= 0xffff_ffff) {
@@ -226,7 +276,14 @@
             callbacks.delete(descriptor.callback);
           } else if (phase !== 'retired') {
             if (handle) await host('contribution.release', { handle });
-            else await host('contribution.withdraw', { kind, name: descriptor.name });
+            else
+              await host('contribution.withdraw', {
+                kind: kind === 'tool_group' ? 'tool' : kind,
+                names:
+                  kind === 'tool_group'
+                    ? descriptor.tools.map((tool) => tool.name)
+                    : [descriptor.name],
+              });
           }
         })();
         return closing;
@@ -235,6 +292,7 @@
   };
   const text = (value) => (typeof value === 'function' ? value : () => value);
   const resources = (authority) => ({
+    sessions: Object.freeze({ list: (input = {}) => host('sessions.list', { authority, input }) }),
     executions: Object.freeze({
       open: async () => executions(await host('execution.acquire', { authority })),
     }),
@@ -245,14 +303,19 @@
     files: files(authority),
     llm: Object.freeze({ generate: (input) => host('llm.generate', { authority, input }) }),
     clients: Object.freeze({
+      notify: (input) => host('clients.notify', { authority, input }),
       tools: () => host('clients.tools', { authority }),
       call: (input) => host('clients.call', { authority, call: input }),
     }),
   });
   const authorized = async (opened, signal, callback) => {
-    const { handle, source } = await opened;
+    const { handle, source, grant, boundary } = await opened;
     try {
-      return await callback(Object.freeze({ ...resources(handle), source, signal }));
+      return await callback(
+        Object.freeze({ ...resources(handle), source, signal }),
+        grant,
+        boundary,
+      );
     } finally {
       await host('authorization.close', { handle });
     }
@@ -269,11 +332,26 @@
         input: Object.freeze({
           prepare: (name, prepare) =>
             register('input_preparation', { name }, (request, call) =>
-              prepare(Object.freeze({ ...request, signal: call.signal })),
+              prepare(
+                Object.freeze({ ...request, workspace: call.workspace, signal: call.signal }),
+              ),
             ),
         }),
         tools: Object.freeze({
           register: (definition, invoke) => register('tool', definition, invoke),
+          bind: (tools, capture) =>
+            register('tool_group', { tools }, async (request, call) => {
+              const bound = await capture(request, call);
+              if (bound === null || bound === undefined) return null;
+              if (typeof bound.invoke !== 'function')
+                throw new Error('Tool binding requires an invoke function');
+              return {
+                callback: callback((input, invocation) =>
+                  bound.invoke(input.name, input.input, invocation),
+                ),
+                context: bound.context ?? null,
+              };
+            }),
         }),
         executors: Object.freeze({
           register: (definition, execute) => register('executor', definition, execute),
@@ -377,22 +455,44 @@
         }),
         storage: Object.freeze({
           read: (key) => host('storage.read', { key }),
+          scan: (query = {}) => host('storage.scan', query),
           batch: (mutations) => host('storage.batch', { mutations }),
         }),
+        models: Object.freeze({
+          resolve: (selection) => host('models.resolve', selection),
+        }),
+        async revision() {
+          const handle = await host('revision', { kind: 'new' });
+          let closed = false;
+          return Object.freeze({
+            async capture() {
+              if (closed) throw new Error('Preparation revision is closed');
+              return host('revision', { kind: 'capture', handle });
+            },
+            async invalidate(update) {
+              if (closed) throw new Error('Preparation revision is closed');
+              const guard = await host('revision', { kind: 'invalidate', handle });
+              try {
+                return await update();
+              } finally {
+                await host('revision', { kind: 'release', handle: guard });
+              }
+            },
+            async close() {
+              if (closed) return;
+              await host('revision', { kind: 'close', handle });
+              closed = true;
+            },
+          });
+        },
         preferences: Object.freeze({
           read: () => host('preferences.read'),
         }),
-        data: Object.freeze({
-          async read(input) {
-            const page = await host('data.read', input);
-            return { ...page, bytes: Uint8Array.from(page.bytes) };
-          },
-          write: (input) => host('data.write', { ...input, bytes: Array.from(input.bytes) }),
-          list: (input = {}) => host('data.list', input),
-          createDirectory: (path) => host('data.createDirectory', { path }),
-          remove: (path) => host('data.remove', { path }),
-          rename: (from, to) => host('data.rename', { from, to }),
+        inputs: Object.freeze({
+          names: () => host('inputs.names'),
+          at: (name) => readDirectory('inputs', name),
         }),
+        data: fileEntries((kind, input) => host('data', { kind, input })),
         credentials: Object.freeze({
           read: (key) => host('credentials.read', { key }),
           write: (input) => host('credentials.write', input),
@@ -447,6 +547,9 @@
       });
       try {
         const context = { ...call, signal: callSignal };
+        if (call?.readView) {
+          context.workspace = readDirectory('view', call.readView);
+        }
         if (call?.remoteAuthority) {
           context.views = Object.freeze({
             authorize: (request, callback) =>
@@ -455,9 +558,17 @@
                 callSignal,
                 callback,
               ),
-            session: () => host('remote.session', { authority: call.remoteAuthority }),
-            workspace: (input) =>
-              host('remote.workspace', { authority: call.remoteAuthority, input }),
+            session: async () => {
+              const view = await host('remote.session', { authority: call.remoteAuthority });
+              return { ...view, files: readDirectory('view', view.files) };
+            },
+            workspace: async (input) => {
+              const view = await host('remote.workspace', {
+                authority: call.remoteAuthority,
+                input,
+              });
+              return { ...view, files: readDirectory('view', view.files) };
+            },
           });
         }
         if (call?.authority) {

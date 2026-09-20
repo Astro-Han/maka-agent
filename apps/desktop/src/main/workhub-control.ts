@@ -22,8 +22,6 @@ import { z } from "zod";
 import type { IpcMain, WebContents } from "electron";
 import { redactSecrets } from '@maka/core/redaction';
 import type { AppSettings } from "@maka/core/settings";
-import { WORKHUB_COORDINATION_SESSION_ID, type WorkHubCreateDefaults } from "@maka/core/session";
-import type { WorkspaceTarget } from "@maka/runtime-host/protocol";
 import type { MakaTool } from "@maka/runtime/tool-runtime";
 import type { DesktopRuntimeHostClient } from "./runtime-host-client.js";
 import type { DesktopCapabilityGroup } from "./runtime-host-native-capabilities.js";
@@ -44,7 +42,6 @@ const controlParameters = z.object({
   status: z.string().trim().min(1).max(80).regex(/^[^\r\n]+$/).describe('A short user-facing description of the current action, in the user\'s language. Match the language of the user\'s current request: Chinese for Chinese requests, English for English requests. Do not default to the language of these tool instructions. For example: Opening project settings. Describe the action, not reasoning or a claim of completion.'),
   request: workHubControlSchema,
 }).strict();
-const contextParameters = z.object({}).strict();
 
 interface WorkHubControlDeps {
   ipcMain: Pick<IpcMain, "handle" | "removeHandler">;
@@ -56,13 +53,13 @@ interface WorkHubControlDeps {
   readSettings(): Promise<AppSettings>;
   client(scope: DesktopTargetScope): DesktopRuntimeHostClient;
   isCurrent(scope: DesktopTargetScope): boolean;
-  assertTurn(scope: DesktopTargetScope, turnId: string): Promise<void>;
-  interrupt(scope: DesktopTargetScope, turnId: string): Promise<void>;
-  createContext(scope: DesktopTargetScope): Promise<{ workspace: WorkspaceTarget; defaults: WorkHubCreateDefaults }>;
+  assertTurn(scope: DesktopTargetScope, sessionId: string, turnId: string): Promise<void>;
+  interrupt(scope: DesktopTargetScope, sessionId: string, turnId: string): Promise<void>;
 }
 interface Owner {
   readonly scope: DesktopTargetScope;
   readonly resourceKey: string;
+  readonly sessionId: string;
   readonly turnId: string;
   readonly controller: AbortController;
   failures: number;
@@ -114,9 +111,8 @@ export function createWorkHubControl(deps: WorkHubControlDeps) {
     ctx: Parameters<MakaTool["impl"]>[1],
   ) => {
     requireCurrent(scope);
-    if (ctx.sessionId !== WORKHUB_COORDINATION_SESSION_ID || !ctx.turnId)
-      throw new Error("Only the active WorkHub turn may control Maka");
-    await deps.assertTurn(scope, ctx.turnId);
+    if (!ctx.turnId) throw new Error("Desktop control requires an active Agent turn");
+    await deps.assertTurn(scope, ctx.sessionId, ctx.turnId);
     requireCurrent(scope);
     ctx.abortSignal.throwIfAborted();
     const resourceKey = desktopSessionResourceKey({
@@ -134,6 +130,7 @@ export function createWorkHubControl(deps: WorkHubControlDeps) {
     owner ??= {
       scope,
       resourceKey,
+      sessionId: ctx.sessionId,
       turnId: ctx.turnId,
       controller: new AbortController(),
       failures: 0,
@@ -151,7 +148,7 @@ export function createWorkHubControl(deps: WorkHubControlDeps) {
     active.controller.abort(new Error("User took control"));
     update({ phase: "paused", cursor: undefined, error: undefined });
     // This callback must compare the exact turn before sending sessions.stop.
-    await deps.interrupt(active.scope, active.turnId);
+    await deps.interrupt(active.scope, active.sessionId, active.turnId);
   };
   const group = (scope?: DesktopTargetScope): DesktopCapabilityGroup => {
     if (!scope)
@@ -177,7 +174,7 @@ export function createWorkHubControl(deps: WorkHubControlDeps) {
           await deps.prepareWindow(active.turnId);
           signal.throwIfAborted();
           requireCurrent(scope);
-          await deps.assertTurn(scope, active.turnId);
+          await deps.assertTurn(scope, active.sessionId, active.turnId);
           signal.throwIfAborted();
           requireCurrent(scope);
           if (args.operation === "observe") {
@@ -200,7 +197,7 @@ export function createWorkHubControl(deps: WorkHubControlDeps) {
             for (const action of args.actions) {
               signal.throwIfAborted();
               requireCurrent(scope);
-              await deps.assertTurn(scope, active.turnId);
+              await deps.assertTurn(scope, active.sessionId, active.turnId);
               signal.throwIfAborted();
               inputBeforeAction = ui.dispatchedInputs;
               const result = await ui.execute(action, signal);
@@ -272,27 +269,11 @@ export function createWorkHubControl(deps: WorkHubControlDeps) {
         return { type: "text", value: JSON.stringify(output) };
       },
     };
-    const context: MakaTool = {
-      name: "context",
-      description: "Read this Desktop window's selected workspace and new-task preferences. Does not create or control tasks.",
-      parameters: contextParameters,
-      impl: async (input, ctx) => {
-        contextParameters.parse(input);
-        const active = await claim(scope, ctx);
-        active.controller.signal.throwIfAborted();
-        const context = await deps.createContext(scope);
-        active.controller.signal.throwIfAborted();
-        ctx.abortSignal.throwIfAborted();
-        requireCurrent(scope);
-        await deps.assertTurn(scope, active.turnId);
-        return context;
-      },
-    };
     return {
       offerId: "desktop_workhub",
       label: "WorkHub",
-      description: "Operate Maka and read this window’s workspace context.",
-      tools: [control, context],
+      description: "Operate Maka with verified native input.",
+      tools: [control],
     };
   };
   const complete = (resourceKey: string) => {

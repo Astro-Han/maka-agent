@@ -115,7 +115,15 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
       },
     ]);
     assert(process.env.MAKA_TEST_STATE_ROOT);
-    const alias = join(process.env.MAKA_TEST_STATE_ROOT, 'skills/library-alias');
+    const namespace = createHash('sha256')
+      .update(JSON.stringify(['maka.skills', 'profile']))
+      .digest('hex');
+    const alias = join(
+      process.env.MAKA_TEST_STATE_ROOT,
+      'plugin-data',
+      namespace,
+      'skills/library-alias',
+    );
     await mkdir(alias);
     const original = '---\nname: Installed library\ndescription: local alias\n---\nInstalled body.';
     const hash = 'sha256:' + createHash('sha256').update(original).digest('hex');

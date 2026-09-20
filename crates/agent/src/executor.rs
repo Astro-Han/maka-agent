@@ -19,7 +19,7 @@
 
 mod output;
 
-use crate::{Engine, RunCancellation, RunError, RunningInvocation};
+use crate::{Engine, RunError, RunningInvocation};
 use maka_plugins::executor::{Binding, Error, Outcome, Request};
 use maka_runtime::{
     event::{EventWrite, Fact, InvocationInput, InvocationOutcome, RuntimeEvent},
@@ -90,11 +90,9 @@ impl Engine {
                 let output = Arc::new(output::Recorder::new(
                     inner.log.clone(),
                     invocation.clone(),
-                    cancellation.token().clone(),
+                    cancellation.clone(),
                 ));
-                let settlement = call
-                    .execute(output.clone(), cancellation.token().clone())
-                    .await;
+                let settlement = call.execute(output.clone(), cancellation.clone()).await;
                 let outcome = outcome(&settlement.result, &cancellation);
                 let committed = output.finish(&settlement.result, &outcome).await;
                 drop(settlement); // the terminal fact owns the lease through its commit
@@ -113,13 +111,13 @@ impl Engine {
     }
 }
 
-fn outcome(result: &Result<Outcome, Error>, cancellation: &RunCancellation) -> InvocationOutcome {
+fn outcome(result: &Result<Outcome, Error>, cancellation: &CancellationToken) -> InvocationOutcome {
     match result {
         Ok(Outcome::Completed { .. }) if !cancellation.is_cancelled() => {
             InvocationOutcome::Completed
         }
         Err(Error::Cancelled) | Ok(Outcome::Completed { .. }) => InvocationOutcome::Cancelled {
-            source: cancellation.source(),
+            source: "runtime_cancellation".into(),
         },
         Ok(Outcome::Cancelled { .. }) => InvocationOutcome::Cancelled {
             source: "executor_provider".into(),

@@ -75,6 +75,7 @@ async fn scenario() {
                 "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model},
                 "permissionMode":"ask"
             })).await;
+            approve(&mut peer, json!({"kind":"workspace","workspace":{"kind":"host_path","path":fixture.workspace},"permissionMode":"ask"})).await;
             rpc(&mut peer, "turn.start", json!({
                 "sessionId":"scheduler-source","turnId":"schedule-turn","content":{"text":"Schedule independent work"},
                 "maxSteps":5
@@ -117,9 +118,9 @@ async fn scenario() {
             let listed = tool_result(&final_step.body);
             assert_eq!(listed["tasks"][0]["id"], task_id, "{listed}");
             final_step.reply.send(answer("Scheduled.")).unwrap();
-            rpc(
+            scheduler(
                 &mut peer,
-                "scheduled-task.mutate",
+                "mutate",
                 json!({"kind":"trigger_now","taskId":task_id}),
             )
             .await;
@@ -161,7 +162,12 @@ async fn scenario() {
             )
             .await;
             ready(&mut peer).await;
-            let denied = rpc(&mut peer, "scheduled-task.mutate", json!({"kind":"create","input":{
+            approve(
+                &mut peer,
+                json!({"kind":"session","sessionId":"scheduler-source"}),
+            )
+            .await;
+            let denied = scheduler(&mut peer, "mutate", json!({"kind":"create","input":{
                 "title":"Old permission","intentBody":"MUST_NOT_RUN",
                 "schedule":{"kind":"once","runAt":jiff::Timestamp::now().as_millisecond()+3_600_000},
                 "effect":{"kind":"session_resume","sessionId":"scheduler-source"}
@@ -176,21 +182,16 @@ async fn scenario() {
                 "sessionId":"scheduler-source","expectedRevision":current["session"]["revision"],"patch":{"permissionMode":"bypass"}
             })).await;
             assert_eq!(update["kind"], "committed", "{update}");
-            rpc(
+            scheduler(
                 &mut peer,
-                "scheduled-task.mutate",
+                "mutate",
                 json!({"kind":"trigger_now","taskId":denied["task"]["id"]}),
             )
             .await;
             let blocked = settled(&mut peer, denied["task"]["id"].as_str().unwrap()).await;
             assert_eq!(blocked["runs"][0]["outcome"], "blocked", "{blocked}");
         } else {
-            let task = rpc(
-                &mut peer,
-                "scheduled-task.query",
-                json!({"kind":"get","taskId":task_id}),
-            )
-            .await;
+            let task = scheduler(&mut peer, "query", json!({"kind":"get","taskId":task_id})).await;
             assert_eq!(task["task"]["fireCount"], 1);
             assert_eq!(task["task"]["runs"][0]["runId"], run_id);
         }
@@ -204,20 +205,21 @@ async fn scenario() {
                 "type":"update","entryId":"maka.scheduler","patch":{"config":{"timezone":"UTC","misfire":"latest"}}
             }]})).await;
             ready(&mut peer).await;
-            rpc(&mut peer, "scheduled-task.mutate", json!({"kind":"create","input":{
+            scheduler(&mut peer, "mutate", json!({"kind":"create","input":{
                 "title":"Restart recovery","intentBody":"HEADLESS_RECOVERY",
                 "schedule":{"kind":"once","runAt":jiff::Timestamp::now().as_millisecond()+1000},
                 "effect":{"kind":"agent_run","execution":{
                     "cwd":fixture.workspace,"llmConnectionId":model.connection_id,
                     "llmConnectionSlug":model.connection_slug,"model":model.model,
-                    "permissionMode":"ask","collaborationMode":"agent","orchestrationMode":"default"
+                    "permissionMode":"ask","toolMode":"direct","collaborationMode":"agent","orchestrationMode":"default"
                 }}
             }})).await;
         }
         peer.close().await;
         if reopened {
             let mut peer = Peer::new(host.clone(), "background-residency").await;
-            rpc(&mut peer, "scheduled-task.mutate", json!({"kind":"create","input":{
+            approve(&mut peer, json!({"kind":"profile"})).await;
+            scheduler(&mut peer, "mutate", json!({"kind":"create","input":{
                 "title":"Future work","intentBody":"",
                 "schedule":{"kind":"once","runAt":jiff::Timestamp::now().as_millisecond()+3_600_000},
                 "effect":{"kind":"notify","channel":"local"}
@@ -257,24 +259,74 @@ async fn rpc(peer: &mut Peer, operation: &str, input: Value) -> Value {
 }
 async fn ready(peer: &mut Peer) {
     loop {
-        let result = peer
-            .rpc("scheduled-task.query", json!({"kind":"list"}))
-            .await;
-        if result["ok"] == true {
+        let status = rpc(peer, "plugin.platform.query", json!({"view":"status"})).await;
+        if status["convergence"] == "converged" {
             return;
         }
-        assert_eq!(result["error"]["code"], "operation_unavailable", "{result}");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
+async fn client(peer: &mut Peer) -> Value {
+    ready(peer).await;
+    let page = rpc(peer, "plugin.client.query", json!({"kind":"snapshot"})).await;
+    let entry = page["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["entryId"] == "maka.scheduler.ui")
+        .expect("Scheduler UI active");
+    json!({"entryId":entry["entryId"],"extensionId":entry["extensionId"],"activation":entry["activation"],
+        "contentDigest":entry["contentDigest"],"clientDigest":entry["clientDigest"]})
+}
+async fn remote(peer: &mut Peer, input: Value) -> Value {
+    let client = client(peer).await;
+    let document =
+        rpc(peer, "plugin.remote", json!({"kind":"open_document"})).await["document"].clone();
+    let binding = json!({"client":client,"method":"request","sessionId":null});
+    let target = rpc(
+        peer,
+        "plugin.remote",
+        json!({"kind":"bind","binding":binding}),
+    )
+    .await["target"]
+        .clone();
+    let result = rpc(
+        peer,
+        "plugin.remote",
+        json!({"kind":"call","binding":binding,"target":target,"document":document,"input":input}),
+    )
+    .await;
+    rpc(
+        peer,
+        "plugin.remote",
+        json!({"kind":"close_document","document":document}),
+    )
+    .await;
+    result["value"].clone()
+}
+async fn scheduler(peer: &mut Peer, kind: &str, input: Value) -> Value {
+    let request = match kind {
+        "query" => json!({"kind":"query","query":input}),
+        "mutate" => json!({"kind":"mutate","mutation":input}),
+        _ => panic!("invalid Scheduler request"),
+    };
+    remote(peer, request).await
+}
+async fn approve(peer: &mut Peer, target: Value) {
+    let client = client(peer).await;
+    let capabilities = if target["kind"] == "profile" {
+        json!(["notifications"])
+    } else {
+        json!(["executions", "notifications"])
+    };
+    let grant = rpc(peer, "plugin.authorization", json!({"client":client,"scope":"profile","command":{
+        "kind":"approve","request":{"operationId":uuid::Uuid::new_v4(),"title":"Scheduled background work","target":target,"capabilities":capabilities}
+    }})).await["grant"].clone();
+    remote(peer, json!({"kind":"remember_grant","id":grant["id"]})).await;
+}
 async fn settled(peer: &mut Peer, id: &str) -> Value {
     loop {
-        let result = rpc(
-            peer,
-            "scheduled-task.query",
-            json!({"kind":"get","taskId":id}),
-        )
-        .await;
+        let result = scheduler(peer, "query", json!({"kind":"get","taskId":id})).await;
         if result["task"]["fireCount"] == 1 {
             return result["task"].clone();
         }
@@ -295,7 +347,8 @@ fn tool_result(body: &Value) -> Value {
         .rev()
         .find(|message| message["role"] == "tool")
         .unwrap();
-    serde_json::from_str(result["content"].as_str().unwrap()).unwrap()
+    serde_json::from_str(result["content"].as_str().unwrap())
+        .unwrap_or_else(|error| panic!("{error}: {result}"))
 }
 fn tool(id: &str, name: &str, input: Value) -> Value {
     json!({"index":0,"delta":{"tool_calls":[{"index":0,"id":id,"type":"function","function":{"name":name,"arguments":input.to_string()}}]},"finish_reason":"tool_calls"})

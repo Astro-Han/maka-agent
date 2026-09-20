@@ -116,7 +116,7 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
             run.work = maka_agent::RunWork::Continuation {
                 source: maka_runtime::continuation::RunBoundary {
                     invocation: source, high_water: prefix.high_water, digest: prefix.digest,
-                }, workhub_resume: None, tools, max_steps,
+                },tools, max_steps,
             };
         }
         let configuration = run.configuration.clone();

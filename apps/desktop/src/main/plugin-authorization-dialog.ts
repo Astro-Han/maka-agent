@@ -34,10 +34,13 @@ export function pluginAuthorizationDialog(input: PluginAuthorizationInput, local
     client_capabilities: ['Invoke connected client capabilities', '调用已连接客户端的能力'],
     executions: ['Create, submit, inspect and control executions', '创建、提交、查询与控制执行'],
     notifications: ['Send notifications', '发送通知'],
+    read_sessions: ['Read Session catalog', '读取会话目录'],
   };
   const {request} = input.command;
   const target = request.target.kind === 'profile' ? 'profile' : request.target.kind === 'session'
     ? `${request.target.sessionId} (${zh ? '当前工作区与权限' : 'current workspace and permissions'})`
+    : request.target.kind === 'plugin_workspace' ? `${zh ? '插件私有工作区' : 'Plugin-private workspace'} (${request.target.permissionMode})`
+    : request.target.kind === 'directory' ? request.target.path
     : `${request.target.workspace.kind === 'project' ? request.target.workspace.projectId : request.target.workspace.path} (${request.target.permissionMode})`;
   return {
     type: 'warning', title: zh ? '插件后台授权' : 'Plugin background authorization',

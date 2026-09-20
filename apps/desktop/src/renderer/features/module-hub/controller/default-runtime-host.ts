@@ -76,15 +76,6 @@ export async function isDefaultRuntimeHostCurrent(
   }
 }
 
-export async function runIfDefaultRuntimeHostCurrent(
-  runtimeHosts: ModuleHubRuntimeHostsService,
-  host: ModuleHubRuntimeHostRef,
-  operation: () => unknown | Promise<unknown>,
-): Promise<boolean> {
-  if (!(await isDefaultRuntimeHostCurrent(runtimeHosts, host))) return false;
-  await operation();
-  return true;
-}
 
 export function defaultRuntimeHostDiagnosticTarget(
   error: unknown,

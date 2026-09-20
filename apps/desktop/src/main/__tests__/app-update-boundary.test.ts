@@ -237,21 +237,6 @@ function desktopAppUpdateAdapterBindings(file: string): string[] {
   );
 }
 
-function sidebarProjectionEntryBindings(file: string): string[] {
-  return moduleEntryBindings(
-    file,
-    (dependency) =>
-      dependency === '@maka/ui' ||
-      dependency.startsWith('@maka/ui/') ||
-      dependency.includes('sidebar-update-projection-context'),
-  ).filter((binding) => {
-    const name = binding.replace(/^(?:export:|dynamic:)/, '');
-    return name === '*' ||
-      name === 'SidebarUpdateProjectionProvider' ||
-      name === 'useSidebarUpdateProjection';
-  });
-}
-
 describe('App Update feature boundary', () => {
 
 
@@ -319,21 +304,6 @@ describe('App Update feature boundary', () => {
     }
     assert.deepEqual(bindings, [
       'src/renderer/composition/desktop-feature-services.tsx: createDesktopAppUpdateServices',
-    ]);
-  });
-
-  test('pins sidebar projection runtime bindings to its provider and footer owners', () => {
-    const bindings: string[] = [];
-    for (const path of [...productionRendererSources(), ...productionUiSources()]) {
-      for (const binding of sidebarProjectionEntryBindings(path)) {
-        bindings.push(`${productSourceLabel(path)}: ${binding}`);
-      }
-    }
-    assert.deepEqual(bindings.sort(), [
-      'apps/desktop/src/renderer/features/app-update/ui/app-update-provider.tsx: SidebarUpdateProjectionProvider',
-      'packages/ui/src/components.tsx: export:SidebarUpdateProjectionProvider',
-      'packages/ui/src/components.tsx: export:useSidebarUpdateProjection',
-      'packages/ui/src/session-sidebar-nav.tsx: useSidebarUpdateProjection',
     ]);
   });
 

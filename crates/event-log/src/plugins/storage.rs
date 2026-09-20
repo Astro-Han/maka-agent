@@ -24,6 +24,49 @@ use sqlx::{Connection, SqliteConnection};
 use std::collections::BTreeSet;
 
 impl EventLog {
+    pub async fn plugin_data_scan(
+        &self,
+        namespace: &Namespace,
+        query: maka_plugins::storage::Scan,
+    ) -> Result<maka_plugins::storage::Page, StoreError> {
+        self.validate_root()?;
+        query
+            .validate()
+            .map_err(|error| invalid(&error.to_string()))?;
+        let namespace = namespace.clone();
+        self.connection.run(move |connection| Box::pin(async move {
+            // Select key/size first: the page budget must bound decoding and
+            // allocation as well as the serialized reply. Keep one overflow key.
+            let rows: Vec<(String, i64, Option<String>, bool)> = sqlx::query_as(
+                "WITH candidates AS (
+                    SELECT key, COALESCE(length(CAST(value_json AS BLOB)), 0) + length(CAST(key AS BLOB)) + 128 AS bytes
+                    FROM plugin_data WHERE package_id = ?1 AND scope_id = ?2
+                      AND key >= ?3 AND key > ?4 ORDER BY key LIMIT 65
+                 ), bounded AS (
+                    SELECT key, ROW_NUMBER() OVER (ORDER BY key) AS position,
+                        SUM(bytes) OVER (ORDER BY key) AS total FROM candidates
+                 ) SELECT data.key, data.revision,
+                    CASE WHEN bounded.position <= 64 AND bounded.total <= 2097152 THEN data.value_json END,
+                    bounded.position <= 64 AND bounded.total <= 2097152
+                 FROM bounded JOIN plugin_data AS data
+                   ON data.package_id = ?1 AND data.scope_id = ?2 AND data.key = bounded.key
+                 ORDER BY data.key"
+            ).bind(namespace.package()).bind(String::from(namespace.scope().clone()))
+                .bind(&query.prefix).bind(query.after.as_deref().unwrap_or("")).fetch_all(connection).await?;
+            let mut entries: Vec<maka_plugins::storage::Entry> = Vec::new();
+            let mut next_after = None;
+            for (key, revision, value, fits) in rows {
+                if !key.starts_with(&query.prefix) { break; }
+                if !fits {
+                    next_after = Some(entries.last().ok_or_else(|| invalid("stored plugin value exceeds page budget"))?
+                        .key.clone());
+                    break;
+                }
+                entries.push(maka_plugins::storage::Entry { key, record: decode(revision, value)? });
+            }
+            Ok(maka_plugins::storage::Page { entries, next_after })
+        })).await
+    }
     pub async fn plugin_data(
         &self,
         namespace: &Namespace,
@@ -109,19 +152,20 @@ async fn read(
         "SELECT revision, value_json FROM plugin_data WHERE package_id = ? AND scope_id = ? AND key = ?")
         .bind(namespace.package()).bind(String::from(namespace.scope().clone())).bind(key)
         .fetch_optional(connection).await?;
-    row.map(|(revision, value)| {
-        let revision =
-            u64::try_from(revision).map_err(|_| invalid("invalid stored plugin data revision"))?;
-        if revision == 0 || revision > (1 << 53) - 1 {
-            return Err(invalid("invalid stored plugin data revision"));
-        }
-        Ok(Record {
-            revision,
-            data: match value {
-                Some(value) => Data::Present(serde_json::from_str(&value)?),
-                None => Data::Deleted,
-            },
-        })
+    row.map(|(revision, value)| decode(revision, value))
+        .transpose()
+}
+fn decode(revision: i64, value: Option<String>) -> Result<Record, StoreError> {
+    let revision =
+        u64::try_from(revision).map_err(|_| invalid("invalid stored plugin data revision"))?;
+    if revision == 0 || revision > (1 << 53) - 1 {
+        return Err(invalid("invalid stored plugin data revision"));
+    }
+    Ok(Record {
+        revision,
+        data: match value {
+            Some(value) => Data::Present(serde_json::from_str(&value)?),
+            None => Data::Deleted,
+        },
     })
-    .transpose()
 }

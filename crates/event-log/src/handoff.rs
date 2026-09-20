@@ -24,7 +24,6 @@ use sqlx::{Connection, SqliteConnection};
 mod budget;
 mod cancel;
 mod owner;
-pub(crate) use cancel::apply as cancel;
 pub(crate) use owner::read as owner;
 
 /// Bounded discovery metadata. Only a canonical successor opening claims work.

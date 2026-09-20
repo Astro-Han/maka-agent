@@ -18,17 +18,16 @@
  */
 use super::{Error, Skills};
 use crate::api::{PathRejection, ResolvePathInput, ResolvePathResult};
-use maka_runtime::execution::WorkspaceProjection;
 
 impl Skills {
     pub async fn resolve_path(
         &self,
         input: &ResolvePathInput,
-        workspace: &WorkspaceProjection,
+        workspace_files: maka_plugins::filesystem::ReadDirectory,
     ) -> Result<ResolvePathResult, Error> {
-        let call = self.basis.owner.admit().map_err(|_| Error::Retired)?;
-        let view = self.mutations.clone().read_owned().await;
-        let (sources, _) = self.governance(&workspace.host_cwd).await?;
+        let _call = self.basis.owner.admit().map_err(|_| Error::Retired)?;
+        let _view = self.mutations.read().await;
+        let (sources, _) = self.governance(&workspace_files).await?;
         let discovery = &sources.publication.discovery;
         let location = discovery
             .inventory
@@ -43,12 +42,25 @@ impl Skills {
                 reason: PathRejection::Missing,
             });
         };
-        let target = input.target;
-        tokio::task::spawn_blocking(move || {
-            let (_call, _view) = (call, view);
-            crate::discovery::artifact::resolve_path(&location, target)
-        })
-        .await
-        .map_err(Error::from)
+        use maka_runtime::skills::SkillScope;
+        let files = match location.scope {
+            SkillScope::Project => workspace_files,
+            SkillScope::Workspace => self
+                .data
+                .read_only()
+                .await
+                .map_err(|error| Error::Source(error.to_string()))?,
+            SkillScope::User => self
+                .inputs
+                .open("user-skills")
+                .map_err(|error| Error::Source(error.to_string()))?
+                .ok_or(Error::Retired)?,
+            SkillScope::Custom => {
+                return Ok(ResolvePathResult::Rejected {
+                    reason: PathRejection::BlockedPath,
+                });
+            }
+        };
+        Ok(crate::discovery::artifact::resolve_path(&files, &location, input.target).await)
     }
 }

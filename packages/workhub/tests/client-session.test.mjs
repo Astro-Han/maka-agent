@@ -19,20 +19,31 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { RemoteError } from '@maka-agent/plugin-sdk/client';
 import { coordinationCommands } from '../dist/client-session.js';
 import { bindSurface } from '../dist/client-surface.js';
 
-test('Remote answers reconcile exact receipts without redispatching across Host epochs', async () => {
-  const request = { turnId: 'turn', text: 'original' };
+test('Remote answers recover stable operation receipts, cancellation and attachments across reconnects', async () => {
+  const request = { operationId: 'request', text: 'original' };
+  const accepted = {
+    invocation: {
+      session_id: 'canonical-session',
+      turn_id: 'host-turn',
+      run_id: 'run',
+      invocation_id: 'inv',
+    },
+    messageId: 'host-message',
+    contentDigest: 'digest',
+  };
   const lifetime = new AbortController();
   const calls = [];
   const replies = new Map();
   const commands = coordinationCommands(
     {
-      hostEpoch: 'new',
       signal: lifetime.signal,
       remote: {
-        method(name) {
+        method(name, sessionId) {
+          assert.equal(sessionId, 'canonical-session');
           return async (input) => {
             calls.push([name, structuredClone(input)]);
             const reply = replies.get(name);
@@ -47,25 +58,25 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
         if (attachment.ref.sessionId !== 'projected-session') throw new Error('foreign attachment');
         return { ...attachment, ref: { ...attachment.ref, sessionId: 'canonical-session' } };
       }),
+    'canonical-session',
   );
+  replies.set('answer-receipt', null);
   replies.set('answer', new Error('response lost after dispatch'));
   assert.deepEqual(await commands.answer('session', request), {
     kind: 'unknown',
-    originHostEpoch: 'new',
   });
-  for (const code of ['outcome_unknown', 'commit_outcome_unknown']) {
-    replies.set('answer', { ok: false, error: { code, message: 'commit not confirmed' } });
+  for (const code of ['outcome_unknown', 'internal_failure']) {
+    replies.set('answer', new RemoteError(code, 'commit not confirmed'));
     assert.deepEqual(await commands.answer('session', request), {
       kind: 'unknown',
-      originHostEpoch: 'new',
     });
   }
-  replies.set('answer-receipt', { ok: true, result: null });
-  replies.set('answer', { ok: true, result: { turnId: 'turn' } });
+  replies.set('answer-receipt', null);
+  replies.set('answer', accepted);
   calls.length = 0;
-  assert.deepEqual(await commands.answer('session', { ...request, originHostEpoch: 'new' }), {
+  assert.deepEqual(await commands.answer('session', request), {
     kind: 'admitted',
-    turnId: 'turn',
+    receipt: accepted,
   });
   assert.deepEqual(calls, [
     ['answer-receipt', request],
@@ -73,30 +84,25 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
   ]);
 
   calls.length = 0;
-  assert.deepEqual(await commands.answer('session', { ...request, originHostEpoch: 'old' }), {
-    kind: 'not_admitted',
+  const progress = { state: 'ended', outcome: { kind: 'completed' } };
+  replies.set('answer-receipt', { receipt: accepted, progress });
+  assert.deepEqual(await commands.answer('session', request), {
+    kind: 'admitted',
+    receipt: accepted,
+    progress,
   });
   assert.deepEqual(calls, [['answer-receipt', request]]);
-  replies.set('answer-receipt', { ok: true, result: { turnId: 'turn', status: 'completed' } });
-  assert.deepEqual(await commands.answer('session', { ...request, originHostEpoch: 'old' }), {
-    kind: 'admitted',
-    turnId: 'turn',
-    status: 'completed',
-  });
+  replies.set('answer-cancel', { receipt: accepted, progress });
+  await commands.cancelAnswer('session', request);
+  assert.deepEqual(calls.at(-1), ['answer-cancel', request]);
   replies.set('answer-receipt', new Error('receipt unavailable'));
-  assert.deepEqual(await commands.answer('session', { ...request, originHostEpoch: 'old' }), {
+  assert.deepEqual(await commands.answer('session', request), {
     kind: 'unknown',
-    originHostEpoch: 'old',
   });
-  replies.set('answer-receipt', {
-    ok: false,
-    error: { code: 'operation_conflict', message: 'changed payload' },
-  });
-  await assert.rejects(
-    commands.answer('session', { ...request, originHostEpoch: 'old' }),
-    /changed payload/,
-  );
+  replies.set('answer-receipt', new RemoteError('invalid_request', 'changed payload'));
+  await assert.rejects(commands.answer('session', request), /changed payload/);
 
+  replies.set('answer-receipt', null);
   const attachments = [
     {
       name: 'brief.txt',
@@ -115,7 +121,7 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
     }),
     /foreign attachment/,
   );
-  replies.set('enqueue', { ok: true, result: { disposition: 'followup' } });
+  replies.set('enqueue', { disposition: 'followup' });
   assert.equal(
     await commands.enqueueMessage(
       'projected-session',
@@ -130,7 +136,6 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
   assert.deepEqual(calls.at(-1), [
     'enqueue',
     {
-      originHostEpoch: 'new',
       expectedTurnId: 'observed-turn',
       messageId: 'message',
       content: { text: 'queued', attachments: canonical },
@@ -149,10 +154,7 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
     ),
     'unknown',
   );
-  replies.set('enqueue', {
-    ok: false,
-    error: { code: 'operation_conflict', message: 'Turn ended' },
-  });
+  replies.set('enqueue', new RemoteError('invalid_request', 'Turn ended'));
   assert.equal(
     await commands.enqueueMessage(
       'projected-session',
@@ -169,10 +171,10 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
   const pending = Promise.withResolvers();
   replies.set('answer-receipt', pending.promise);
   calls.length = 0;
-  const reconciling = commands.answer('session', { ...request, originHostEpoch: 'new' });
+  const reconciling = commands.answer('session', request);
   lifetime.abort(new Error('retired'));
-  pending.resolve({ ok: true, result: null });
-  assert.deepEqual(await reconciling, { kind: 'unknown', originHostEpoch: 'new' });
+  pending.resolve(null);
+  assert.deepEqual(await reconciling, { kind: 'unknown' });
   assert.deepEqual(calls, [['answer-receipt', request]]);
   await assert.rejects(commands.configureModel('session', {}), /retired/);
   await assert.rejects(commands.answer('session', request), /retired/);

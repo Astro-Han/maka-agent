@@ -35,15 +35,14 @@ fn tree(body: &str) -> Tree {
     }
     tree
 }
-#[test]
-fn publication_replaces_complete_directories_preserves_resources_and_rejects_local_edits() {
+#[tokio::test]
+async fn publication_replaces_complete_directories_preserves_resources_and_rejects_local_edits() {
     let root = tempfile::tempdir().unwrap();
-    let private = tempfile::tempdir().unwrap();
     let data =
-        cap_std::fs::Dir::open_ambient_dir(private.path(), cap_std::ambient_authority()).unwrap();
-    let publisher = Publisher::open(root.path(), &data).unwrap();
+        cap_std::fs::Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+    let publisher = Publisher::open(&data, &CancellationToken::new()).unwrap();
     assert!(
-        matches!(Publisher::open(root.path(), &data),
+        matches!(Publisher::open(&data, &CancellationToken::new()),
         Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::WouldBlock),
         "another Entry must not recover or publish the same namespace concurrently"
     );
@@ -51,8 +50,13 @@ fn publication_replaces_complete_directories_preserves_resources_and_rejects_loc
     let original = tree("old instructions");
     publisher
         .publish("review", None, Some(&original), &cancellation)
+        .await
         .unwrap();
-    let captured = publisher.capture("review", &cancellation).unwrap().unwrap();
+    let captured = publisher
+        .capture("review", &cancellation)
+        .await
+        .unwrap()
+        .unwrap();
     let mut next = captured.clone();
     next.insert("SKILL.md", b"new instructions".to_vec())
         .unwrap();
@@ -60,18 +64,29 @@ fn publication_replaces_complete_directories_preserves_resources_and_rejects_loc
         .unwrap();
     std::fs::write(root.path().join("skills/review/SKILL.md"), "local edit").unwrap();
     assert!(matches!(
-        publisher.publish("review", Some(&captured), Some(&next), &cancellation),
+        publisher
+            .publish("review", Some(&captured), Some(&next), &cancellation)
+            .await,
         Err(Error::Conflict)
     ));
     assert_eq!(
         std::fs::read(root.path().join("skills/review/SKILL.md")).unwrap(),
         b"local edit"
     );
-    let captured = publisher.capture("review", &cancellation).unwrap().unwrap();
+    let captured = publisher
+        .capture("review", &cancellation)
+        .await
+        .unwrap()
+        .unwrap();
     publisher
         .publish("review", Some(&captured), Some(&next), &cancellation)
+        .await
         .unwrap();
-    let updated = publisher.capture("review", &cancellation).unwrap().unwrap();
+    let updated = publisher
+        .capture("review", &cancellation)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         updated.get("SKILL.md"),
         Some(b"new instructions".as_slice())
@@ -89,30 +104,41 @@ fn publication_replaces_complete_directories_preserves_resources_and_rejects_loc
         use std::os::unix::fs::PermissionsExt;
         let executable = root.path().join("skills/review/scripts/check");
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o751)).unwrap();
-        let captured = publisher.capture("review", &cancellation).unwrap().unwrap();
+        let captured = publisher
+            .capture("review", &cancellation)
+            .await
+            .unwrap()
+            .unwrap();
         let mut next = captured.clone();
         next.insert("SKILL.md", b"another update".to_vec()).unwrap();
         publisher
             .publish("review", Some(&captured), Some(&next), &cancellation)
+            .await
             .unwrap();
         assert_eq!(
             std::fs::metadata(&executable).unwrap().permissions().mode() & 0o777,
             0o751
         );
     }
-    let captured = publisher.capture("review", &cancellation).unwrap().unwrap();
+    let captured = publisher
+        .capture("review", &cancellation)
+        .await
+        .unwrap()
+        .unwrap();
     publisher
         .publish("review", Some(&captured), None, &cancellation)
+        .await
         .unwrap();
     assert!(
         publisher
             .capture("review", &cancellation)
+            .await
             .unwrap()
             .is_none()
     );
-    publisher.recover().unwrap();
+    publisher.recover().await.unwrap();
     assert_eq!(
-        std::fs::read_dir(private.path().join("transactions"))
+        std::fs::read_dir(root.path().join("transactions"))
             .unwrap()
             .count(),
         0
@@ -147,8 +173,8 @@ fn write_tree(path: &Path, body: &str) {
         }
     }
 }
-#[test]
-fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
+#[tokio::test]
+async fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
     for cut in [
         "intent",
         "old_moved",
@@ -158,10 +184,9 @@ fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
         "lost_intent",
     ] {
         let root = tempfile::tempdir().unwrap();
-        let private = tempfile::tempdir().unwrap();
-        let data = cap_std::fs::Dir::open_ambient_dir(private.path(), cap_std::ambient_authority())
-            .unwrap();
-        let publisher = Publisher::open(root.path(), &data).unwrap();
+        let data =
+            cap_std::fs::Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+        let publisher = Publisher::open(&data, &CancellationToken::new()).unwrap();
         let target = root.path().join("skills/review");
         write_tree(&target, "old");
         let intent = serde_json::to_vec(&json!({
@@ -169,7 +194,7 @@ fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
         }))
         .unwrap();
         let hash = content_digest(&intent);
-        let transactions = private.path().join("transactions");
+        let transactions = root.path().join("transactions");
         let transaction = transactions.join(format!("tx-{}-{}", uuid::Uuid::new_v4(), &hash[7..]));
         write_tree(&transaction.join("next"), "new");
         std::fs::write(transaction.join("intent.json"), &intent).unwrap();
@@ -181,7 +206,7 @@ fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
         }
         if cut == "lost_intent" {
             std::fs::remove_file(transaction.join("intent.json")).unwrap();
-            assert!(publisher.recover().is_err());
+            assert!(publisher.recover().await.is_err());
             assert_eq!(
                 std::fs::read(transaction.join("old/SKILL.md")).unwrap(),
                 b"old"
@@ -194,7 +219,7 @@ fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
         } else if cut == "conflict" {
             std::fs::write(target.join("SKILL.md"), "edit before takeover").unwrap();
         }
-        publisher.recover().unwrap();
+        publisher.recover().await.unwrap();
         let expected = match cut {
             "committed" => "edit after commit",
             "conflict" => "edit before takeover",
@@ -210,6 +235,6 @@ fn recovery_finishes_each_publication_cut_and_preserves_edits_after_commit() {
             b"keep this resource"
         );
         assert_eq!(std::fs::read_dir(transactions).unwrap().count(), 0);
-        publisher.recover().unwrap();
+        publisher.recover().await.unwrap();
     }
 }

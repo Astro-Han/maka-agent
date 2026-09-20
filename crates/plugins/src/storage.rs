@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod directory;
-pub mod files;
 pub use directory::{Directories, Directory};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +54,42 @@ impl Namespace {
 pub struct Record {
     pub revision: u64,
     pub data: Data,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Scan {
+    #[serde(default)]
+    pub prefix: String,
+    pub after: Option<String>,
+}
+impl Scan {
+    pub fn validate(&self) -> Result<(), Error> {
+        if !self.prefix.is_empty() {
+            validate_key(&self.prefix)?;
+        }
+        if let Some(after) = &self.after {
+            validate_key(after)?;
+            if !after.starts_with(&self.prefix) {
+                return Err(Error::Invalid(
+                    "storage cursor is outside its prefix".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Entry {
+    pub key: String,
+    pub record: Record,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Page {
+    pub entries: Vec<Entry>,
+    pub next_after: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -127,6 +162,9 @@ pub enum StoreError {
 
 /// Namespace is bound by Host, not supplied by each plugin operation.
 pub trait Store: Send + Sync {
+    /// Ordered, bounded enumeration including tombstones. Each page is current,
+    /// not a cross-page snapshot; domain consistency uses revisions and batches.
+    fn scan(&self, query: Scan) -> futures_util::future::BoxFuture<'_, Result<Page, StoreError>>;
     fn read(
         &self,
         key: String,

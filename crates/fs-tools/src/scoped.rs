@@ -59,6 +59,19 @@ enum CapturedScope {
 }
 
 impl Authority {
+    pub(crate) fn from_directory(path: PathBuf, dir: Dir) -> Result<Self, ToolError> {
+        if !path.is_absolute() {
+            return Err(failed("Captured directory location must be absolute"));
+        }
+        Ok(Self {
+            cwd: path.clone(),
+            scope: CapturedScope::Restricted(vec![Root {
+                aliases: vec![path.clone()],
+                path,
+                dir,
+            }]),
+        })
+    }
     pub(crate) fn cwd(&self) -> &Path {
         &self.cwd
     }

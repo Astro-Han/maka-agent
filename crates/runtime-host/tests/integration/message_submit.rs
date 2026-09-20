@@ -31,7 +31,22 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
         "---\nname: Library\ndescription: managed source\ncategory: custom category\n---\nNot installed.",
     )
     .unwrap();
-    std::fs::create_dir_all(fixture.owner().canonical_path().join("skills/computer-use")).unwrap();
+    let namespace = maka_runtime::artifact::content_digest(
+        &serde_json::to_vec(&(
+            maka_skills::plugin::ID,
+            maka_plugins::composition::Scope::Profile,
+        ))
+        .unwrap(),
+    );
+    std::fs::create_dir_all(
+        fixture
+            .owner()
+            .canonical_path()
+            .join("plugin-data")
+            .join(namespace.strip_prefix("sha256:").unwrap())
+            .join("skills/computer-use"),
+    )
+    .unwrap();
     let archival = fixture.workspace.join(".maka/skills/archival");
     std::fs::create_dir_all(&archival).unwrap();
     std::fs::write(

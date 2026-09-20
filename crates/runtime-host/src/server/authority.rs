@@ -168,7 +168,6 @@ impl Authority {
             Some("connection.catalog.changed") => Operation::ConnectionCatalogQuery,
             Some("project.catalog.changed") => Operation::ProjectCatalogQuery,
             Some("session.catalog.changed") => Operation::SessionCatalogQuery,
-            Some("scheduled-task.changed") => Operation::ScheduledTaskQuery,
             _ => return false,
         };
         self.has_grant(operation)
@@ -197,10 +196,6 @@ fn path_free(request: &Request) -> bool {
             maka_protocol::plugin::AuthorizationInput,
         >(request.input.clone())
         .is_ok_and(|input| !input.uses_host_paths()),
-        Operation::ScheduledTaskMutate => {
-            serde_json::from_value::<maka_scheduler::command::Mutation>(request.input.clone())
-                .is_ok_and(|input| !input.uses_host_paths())
-        }
         Operation::ProjectCatalogQuery => maka_protocol::project::decode_query(&request.input)
             .is_ok_and(|input| !input.uses_host_paths()),
         Operation::ProjectCatalogMutate => maka_protocol::project::decode_mutation(&request.input)
@@ -210,9 +205,6 @@ fn path_free(request: &Request) -> bool {
             .is_some_and(|offers| offers.iter().all(|offer| offer["hostPathAccess"] != "cwd")),
         Operation::SessionCreate | Operation::SessionWorkspaceRelocate => {
             request.input["workspace"]["kind"] != "host_path"
-        }
-        Operation::WorkhubCoordinationActFromTurn => {
-            request.input["create"]["workspace"]["kind"] != "host_path"
         }
         Operation::ClientCapabilityUnregister
         | Operation::ArtifactIngest
@@ -241,12 +233,6 @@ fn path_free(request: &Request) -> bool {
         | Operation::CredentialVaultSet
         | Operation::CredentialVaultDelete
         | Operation::SessionCatalogQuery
-        | Operation::ScheduledTaskQuery
-        | Operation::WorkhubCoordinationResolve
-        | Operation::WorkhubCoordinationAnswer
-        | Operation::WorkhubCoordinationCandidates
-        | Operation::WorkhubCoordinationQuery
-        | Operation::WorkhubCoordinationConfigureModel
         | Operation::SessionExecutionBoundaryQuery
         | Operation::SessionTurnsQuery
         | Operation::SessionTurnLandmarksQuery

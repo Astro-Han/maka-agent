@@ -82,16 +82,6 @@ pub enum Mutation {
     Delete { task_id: String },
     Snooze { task_id: String, delay_ms: i64 },
 }
-impl Mutation {
-    pub fn uses_host_paths(&self) -> bool {
-        let effect = match self {
-            Self::Create { input } => Some(&input.effect),
-            Self::Update { patch, .. } => patch.effect.as_ref(),
-            _ => None,
-        };
-        matches!(effect, Some(Effect::AgentRun { execution }) if execution.project_id.is_none())
-    }
-}
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Update {

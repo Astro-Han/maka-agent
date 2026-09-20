@@ -25,7 +25,11 @@ use maka_plugins::{
 };
 
 impl Provider for Skills {
-    fn prepare(&self, request: Request) -> BoxFuture<'static, Result<Outcome, Error>> {
+    fn prepare(
+        &self,
+        request: Request,
+        workspace: maka_plugins::filesystem::ReadDirectory,
+    ) -> BoxFuture<'static, Result<Outcome, Error>> {
         let skills = self.clone();
         Box::pin(async move {
             let ids = request.selections.get(ID).cloned().unwrap_or_default();
@@ -43,7 +47,7 @@ impl Provider for Skills {
                 return Ok(Outcome::Unchanged);
             }
             let snapshot = skills
-                .capture(&request.cwd, request.tools.into_iter().collect())
+                .capture(&workspace, request.tools.into_iter().collect())
                 .await
                 .map_err(|error| Error::Invalid(error.to_string()))?;
             let mut content = request.content;

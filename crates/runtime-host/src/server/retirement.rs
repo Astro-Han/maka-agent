@@ -240,8 +240,6 @@ pub(super) fn allows_preparing(operation: maka_protocol::Operation) -> bool {
                 | SubscriptionClose
                 | SubscriptionPtyInterestSet
                 | SubscriptionReady
-                | WorkhubCoordinationActFromTurn
-                | WorkhubCoordinationSelectAndDelegate
         )
 }
 fn failure(code: Code, message: &str) -> OperationError {

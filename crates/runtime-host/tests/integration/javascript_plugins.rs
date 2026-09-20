@@ -35,6 +35,11 @@ use tokio_util::sync::CancellationToken;
 
 const SERVICE: &str = r#"
 export default async function(ctx) {
+    await ctx.prompt.variable('shared-proof', async (_request, call) => {
+        const page = await call.workspace.read({path:'native-proof.txt', limit:6});
+        if (new TextDecoder().decode(page.bytes) !== 'native') throw new Error('shared VM has no read view');
+        return 'shared';
+    });
     if (await ctx.credentials.read('test-token') !== null) throw new Error('credential leaked across packages');
     await ctx.services.provide('example.echo', async (value, call) => value.inspect
         ? {invocation:call.invocation, operationId:call.operationId ?? null}
@@ -104,6 +109,7 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
     tokio::time::timeout(Duration::from_secs(40), async {
         let fixture = ClientFixture::new("maka-js-plugin-");
         std::fs::write(fixture.workspace.join("native-proof.txt"), "native and JS share authority\n").unwrap();
+        std::fs::write(fixture.workspace.join("unshared.txt"), "not granted").unwrap();
         let service = package(&fixture.workspace, "example.service", "shared", SERVICE, false);
         let source = CONSUMER.replace("'__PROTOCOL_EXECUTABLE__'", &serde_json::to_string(&std::env::current_exe().unwrap()).unwrap())
             .replace("'example.echo'", "'example.native'");
@@ -112,6 +118,11 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
         let model = configure(&fixture, &provider.base_url).await;
         for reopened in [false, true] {
             let host = Host::open_with_options(fixture.owner(), None, HostOptions {
+                input_roots: maka_plugins::filesystem::ReadRoots(std::collections::BTreeMap::from([(
+                    "public-notes".into(),
+                    maka_plugins::filesystem::ReadRoot::open(&fixture.workspace).await.unwrap()
+                        .select(["native-proof.txt".into()].into()).unwrap(),
+                )])),
                 plugins: services::setup(), ..Default::default()
             }).await.unwrap();
             #[cfg(unix)]
@@ -165,6 +176,7 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
             inspector.begin_loading().unwrap();
             let storage = host.plugin_storage(inspector.context()).unwrap();
             for waiting in if reopened { vec![false] } else { vec![false, true] } {
+                std::fs::write(fixture.workspace.join("binding-proof.txt"), "before").unwrap();
                 let operation = format!("request-{reopened}-{waiting}");
                 commands.submit(Submit { orchestration_mode: Some("example.behavior".to_owned().try_into().unwrap()), operation_id:operation.clone(), session_id:"js-session".into(), content:"Use PluginEcho".into() }).await.unwrap();
                 let search = tokio::time::timeout(Duration::from_secs(5), requests.recv()).await.unwrap().unwrap();
@@ -174,6 +186,8 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
                 search.reply.send(tool("search", "tool_search", json!({"query":"PluginEcho"}))).unwrap();
                 let invoke = tokio::time::timeout(Duration::from_secs(5), requests.recv()).await.unwrap().unwrap();
                 assert!(invoke.body["tools"].as_array().unwrap().iter().any(|tool| tool["function"]["name"] == "PluginEcho"));
+                assert!(invoke.body.to_string().contains("binding proof: before"));
+                std::fs::write(fixture.workspace.join("binding-proof.txt"), "after").unwrap();
                 invoke.reply.send(tool("echo", "PluginEcho", json!({"wait":waiting}))).unwrap();
                 if !waiting {
                     let nested = tokio::time::timeout(Duration::from_secs(5), requests.recv()).await.unwrap().unwrap();
@@ -210,6 +224,7 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
                 }
             }
             let count = storage.read("count".into()).await.unwrap().unwrap();
+            assert_eq!(storage.read("bound-proof".into()).await.unwrap().unwrap().data.value(), Some(&json!("before")));
             assert_eq!(count.data.value(), Some(&json!(if reopened { 2 } else { 1 })));
             let executors = peer.rpc("plugin.platform.query", json!({"view":"executors"})).await;
             assert_eq!(executors["ok"], true, "{executors}");

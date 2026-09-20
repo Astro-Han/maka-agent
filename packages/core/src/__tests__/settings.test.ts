@@ -52,55 +52,6 @@ test('defaults new sessions to bypass while preserving saved choices and rejecti
   );
 });
 
-test('normalizes user-approved subagent presets without widening the catalog', () => {
-  const normalized = normalizeSettings({
-    subagents: {
-      presets: [
-        {
-          id: 'fast-reader',
-          name: ' Fast reader ',
-          description: ' Cheap repository scans ',
-          profile: 'local_read',
-          connectionSlug: 'openai-main',
-          model: 'gpt-5-mini',
-          thinkingLevel: 'low',
-          enabled: true,
-        },
-        {
-          id: 'fast-reader',
-          name: 'duplicate',
-          description: '',
-          profile: 'implementation',
-          connectionSlug: 'other',
-          model: 'other',
-          enabled: true,
-        },
-        {
-          id: 'unsafe id',
-          name: 'unsafe',
-          profile: 'root',
-          connectionSlug: 'other',
-          model: 'other',
-          enabled: true,
-        },
-      ],
-    },
-  });
-
-  assert.deepStrictEqual(normalized.subagents.presets, [
-    {
-      id: 'fast-reader',
-      name: 'Fast reader',
-      description: 'Cheap repository scans',
-      profile: 'local_read',
-      connectionSlug: 'openai-main',
-      model: 'gpt-5-mini',
-      thinkingLevel: 'low',
-      enabled: true,
-    },
-  ]);
-});
-
 describe('custom pet selection settings', () => {
   test('fails closed for missing, unsafe, or malformed persisted selections', () => {
     for (const selectedPetId of [undefined, '../maodie', 42]) {

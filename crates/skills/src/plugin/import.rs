@@ -30,8 +30,33 @@ impl Skills {
     pub async fn import_source(
         &self,
         input: ImportSourceInput,
+        source: maka_plugins::filesystem::ReadDirectory,
     ) -> Result<ImportSourceResult, Error> {
         let admitted = self.basis.owner.admit().map_err(|_| Error::Retired)?;
+        let path = Path::new(&input.source_path);
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return Ok(ImportSourceResult::Rejected {
+                reason: ImportRejection::BlockedPath,
+            });
+        };
+        let bytes = match source
+            .read(maka_plugins::filesystem::ReadViewInput {
+                file: maka_plugins::filesystem::entries::ReadFile {
+                    path: name.into(),
+                    offset: 0,
+                    limit: 1024 * 1024,
+                },
+                symlinks: maka_plugins::filesystem::Symlinks::Reject,
+            })
+            .await
+        {
+            Ok(page) if page.next_offset.is_none() => page.bytes,
+            _ => {
+                return Ok(ImportSourceResult::Rejected {
+                    reason: ImportRejection::BlockedPath,
+                });
+            }
+        };
         let skills = self.clone();
         let receiver = self
             .basis
@@ -41,19 +66,40 @@ impl Skills {
                 let _serial = skills.mutations.write().await;
                 let _invalidation = skills.input_revision.invalidate().await;
                 let _notice = skills.notify_on_exit();
-                let Some(home) = skills.home.clone() else {
-                    return Ok(Err(Error::Source(
-                        "Managed Skills require a user home".into(),
-                    )));
-                };
                 let cancellation = skills.basis.owner.stopping().map_err(|e| e.to_string())?;
-                let result = skills
-                    .data
-                    .run(move |_| import(&home, Path::new(&input.source_path), &cancellation))
+                let user = match skills.user_files(input.grant).await {
+                    Ok(user) => user,
+                    Err(error) => return Ok(Err(error)),
+                };
+                let result = async {
+                    let publisher = user
+                        .open(
+                            UserStore::ManagedSources,
+                            skills.private_publisher().await?,
+                            true,
+                        )
+                        .await
+                        .map_err(|e| Error::Source(e.to_string()))?
+                        .ok_or_else(|| {
+                            Error::Source("Managed Skills store is unavailable".into())
+                        })?;
+                    import(
+                        publisher,
+                        Path::new(&input.source_path),
+                        bytes,
+                        &cancellation,
+                    )
                     .await
-                    .map_err(|e| e.to_string())?;
-                if let Err(Error::OutcomeUnknown(message)) = &result {
-                    skills.basis.owner.cleanup_failed(message.clone());
+                }
+                .await;
+                let settled = user
+                    .finish()
+                    .await
+                    .map_err(|e| Error::Source(e.to_string()));
+                *skills.user_recovery.lock().unwrap() =
+                    result.as_ref().err().map(ToString::to_string);
+                if let Err(error) = settled {
+                    return Ok(Err(error));
                 }
                 Ok(result)
             })
@@ -65,19 +111,16 @@ impl Skills {
     }
 }
 
-fn import(
-    home: &Path,
+async fn import(
+    publisher: publication::Publisher,
     path: &Path,
+    bytes: Vec<u8>,
     cancellation: &CancellationToken,
 ) -> Result<ImportSourceResult, Error> {
     use ImportRejection as Rejection;
     let rejected = |reason| Ok(ImportSourceResult::Rejected { reason });
     let Some(id) = source_id(path) else {
         return rejected(Rejection::InvalidSkill);
-    };
-    let bytes = match publication::read_import(path) {
-        Ok(bytes) => bytes,
-        Err(_) => return rejected(Rejection::BlockedPath),
     };
     let Ok(content) = std::str::from_utf8(&bytes) else {
         return rejected(Rejection::InvalidSkill);
@@ -93,13 +136,13 @@ fn import(
             .into(),
         source_type: ManagedSourceType::Local,
     };
-    let publisher = UserStore::ManagedSources
-        .open(home)
-        .map_err(|e| Error::Source(e.to_string()))?;
     let mut tree = Tree::empty();
     tree.insert("SKILL.md", bytes)
         .map_err(|e| Error::Source(e.to_string()))?;
-    match publisher.publish(&id, None, Some(&tree), cancellation) {
+    match publisher
+        .publish(&id, None, Some(&tree), cancellation)
+        .await
+    {
         Ok(()) => Ok(ImportSourceResult::Imported { source }),
         Err(publication::Error::Conflict) => rejected(Rejection::AlreadyExists),
         Err(publication::Error::Cancelled) => Err(Error::Retired),

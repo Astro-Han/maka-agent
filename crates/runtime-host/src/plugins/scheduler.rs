@@ -17,38 +17,16 @@
  * under the License.
  */
 
-mod changes;
-pub(crate) mod host;
-mod tools;
-
 use super::Setup;
-use futures_util::future::BoxFuture;
 use maka_plugins::{
-    composition::{Entry, Operation, Scope},
-    contributions::Staged,
-    fiber::Context,
-    kernel::{Definition, Plugin, PluginContext},
+    client::Bundle,
+    composition::{Entry, Injection, Operation, Scope},
+    kernel::Definition,
 };
-use maka_scheduler::{
-    authorization::Origin,
-    command::{Mutation, MutationResult, Query, QueryResult},
-    controller::Controller,
-    delivery::SystemClock,
-    owner::Handle,
-    plan::Misfire,
-    repository::Repository,
-};
-use serde::Deserialize;
-use serde_json::Value;
+use maka_scheduler::plugin::{Builtin, CLIENT_SERVICE, ID};
 use std::sync::Arc;
 
-pub(crate) const ID: &str = "maka.scheduler";
-
-pub(crate) fn install(
-    setup: &mut Setup,
-    services: Arc<dyn host::Services>,
-    changes: tokio::sync::broadcast::Sender<Value>,
-) -> Result<(), maka_plugins::Error> {
+pub(crate) fn install(setup: &mut Setup) -> Result<(), maka_plugins::Error> {
     if setup.builtins.contains_key(ID) || setup.layers.contains_key(ID) {
         return Err(maka_plugins::Error::Invalid(
             "built-in Scheduler identity is reserved".into(),
@@ -61,151 +39,36 @@ pub(crate) fn install(
             revision: env!("CARGO_PKG_VERSION").into(),
             dependencies: vec![],
             inject: vec![],
-            plugin: Arc::new(Scheduler { services, changes }),
+            plugin: Arc::new(Builtin {
+                client: Bundle::builtin(
+                    ID,
+                    env!("CARGO_PKG_VERSION"),
+                    include_str!(concat!(env!("OUT_DIR"), "/scheduler-client.js")),
+                )?,
+            }),
         }),
     );
     let mut entry = Entry::new(ID)?;
     entry.package_id = Some(ID.into());
+    let mut client = Entry::new("maka.scheduler.ui")?;
+    client.package_id = Some(ID.into());
+    client.inject = Injection::Names(vec![CLIENT_SERVICE.into()]);
     setup.layers.insert(
         ID.into(),
-        vec![Operation::Insert {
-            root_id: Some(Scope::Profile),
-            parent_id: None,
-            position: None,
-            entry,
-        }],
+        vec![
+            Operation::Insert {
+                root_id: Some(Scope::Profile),
+                parent_id: None,
+                position: None,
+                entry,
+            },
+            Operation::Insert {
+                root_id: Some(Scope::DesktopUi),
+                parent_id: None,
+                position: None,
+                entry: client,
+            },
+        ],
     );
     Ok(())
-}
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Config {
-    timezone: Option<String>,
-    #[serde(default)]
-    misfire: Misfire,
-}
-impl Config {
-    fn parse(value: Value) -> Result<Self, String> {
-        if value.is_null() {
-            Ok(Self::default())
-        } else {
-            serde_json::from_value(value).map_err(|error| error.to_string())
-        }
-    }
-    fn timezone(&self) -> Result<String, String> {
-        if let Some(zone) = &self.timezone {
-            jiff::tz::TimeZone::get(zone).map_err(|error| error.to_string())?;
-            return Ok(zone.clone());
-        }
-        let zone = jiff::tz::TimeZone::try_system().map_err(|error| error.to_string())?;
-        zone.iana_name()
-            .map(str::to_owned)
-            .ok_or_else(|| "Configure an IANA timezone for the Scheduler".into())
-    }
-}
-struct Scheduler {
-    services: Arc<dyn host::Services>,
-    changes: tokio::sync::broadcast::Sender<Value>,
-}
-impl Plugin for Scheduler {
-    fn supports_scope(&self, scope: &Scope) -> bool {
-        matches!(scope, Scope::Profile)
-    }
-    fn validate(&self, _: &Scope, config: &Value) -> Result<(), maka_plugins::Error> {
-        Config::parse(config.clone())
-            .and_then(|config| config.timezone())
-            .map(|_| ())
-            .map_err(maka_plugins::Error::Invalid)
-    }
-    fn activate(
-        &self,
-        context: PluginContext,
-        config: Value,
-    ) -> BoxFuture<'static, Result<Staged, String>> {
-        let changes = self.changes.clone();
-        let opened = self.services.open(context.lifecycle.clone());
-        Box::pin(async move {
-            let config = Config::parse(config)?;
-            let identity = context.lifecycle.identity().map_err(display)?;
-            let host::Opened {
-                storage,
-                operations,
-            } = opened?;
-            let repository = Repository::new(storage, &identity.entry_id).map_err(display)?;
-            let controller = Controller::open(
-                repository,
-                config.timezone()?,
-                jiff::Timestamp::now().as_millisecond(),
-            )
-            .await
-            .map_err(display)?
-            .with_misfire(config.misfire);
-            let (handle, owner) = maka_scheduler::owner::start(
-                controller,
-                operations.clone(),
-                Arc::new(SystemClock),
-                context.lifecycle.stopping().map_err(display)?,
-            );
-            context
-                .lifecycle
-                .spawn("scheduled tasks", owner)
-                .map_err(display)?;
-            context
-                .lifecycle
-                .spawn(
-                    "scheduled task changes",
-                    changes::publish(handle.subscribe(), changes),
-                )
-                .map_err(display)?;
-            let mut staged = Staged::default();
-            staged
-                .insert(
-                    identity.entry_id.clone(),
-                    Arc::new(handle.clone()) as Arc<dyn maka_plugins::background::BackgroundWork>,
-                )
-                .map_err(display)?;
-            let service = Arc::new(Service {
-                context: context.lifecycle,
-                handle,
-            });
-            staged
-                .insert(
-                    "ScheduledTask",
-                    tools::register(service.clone(), operations)?,
-                )
-                .map_err(display)?;
-            staged
-                .insert(identity.entry_id, (*service).clone())
-                .map_err(display)?;
-            Ok(staged)
-        })
-    }
-}
-#[derive(Clone)]
-pub(crate) struct Service {
-    context: Context,
-    pub(crate) handle: Handle,
-}
-impl Service {
-    pub(crate) fn query(&self, query: Query) -> Result<QueryResult, maka_scheduler::Error> {
-        let _lease = self
-            .context
-            .admit()
-            .map_err(|_| maka_scheduler::Error::Closed)?;
-        self.handle.query(query)
-    }
-    pub(crate) async fn mutate(
-        &self,
-        mutation: Mutation,
-        origin: Origin,
-    ) -> Result<MutationResult, maka_scheduler::Error> {
-        let _lease = self
-            .context
-            .admit()
-            .map_err(|_| maka_scheduler::Error::Closed)?;
-        self.handle.mutate(mutation, origin).await
-    }
-}
-fn display(error: impl ToString) -> String {
-    error.to_string()
 }

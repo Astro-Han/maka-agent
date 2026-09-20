@@ -67,11 +67,14 @@ pub struct EpochPage {
     pub next_before: Option<u64>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Control {
     pub epoch: Epoch,
     pub schedule_revision: u64,
     pub stop_requested: bool,
+    /// Exact supervisor control intent. Retrying after a crash cannot stop a
+    /// later, unrelated Turn in the same Session.
+    pub stop_target: Option<maka_runtime::event::Invocation>,
     pub finished: bool,
 }
 

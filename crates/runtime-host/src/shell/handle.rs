@@ -135,7 +135,7 @@ impl ShellHandle {
         let applied = if owner {
             self.stop.lock().unwrap().signal_applied.ok_or_else(|| {
                 Arc::new(ShellError::Process(
-                    maka_runtime::tools::ToolError::OutcomeUnknown(
+                    maka_runtime::tools::ToolError::CleanupUnconfirmed(
                         "shell termination signal outcome unknown".into(),
                     ),
                 ))

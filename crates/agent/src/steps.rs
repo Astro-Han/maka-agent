@@ -226,9 +226,11 @@ pub(super) async fn run(
             })
             .catch_unwind()
             .await
-            .unwrap_or_else(|_| Err(ToolError::OutcomeUnknown("tool panicked".into())));
+            .unwrap_or_else(|_| Err(ToolError::CleanupUnconfirmed("tool panicked".into())));
             match result {
-                Ok(_) | Err(ToolError::Failed(_)) => {}
+                Ok(_)
+                | Err(ToolError::Failed(_) | ToolError::Io { .. } | ToolError::OutcomeUnknown(_)) =>
+                    {}
                 Err(error) => return Err(error.into()),
             }
         }

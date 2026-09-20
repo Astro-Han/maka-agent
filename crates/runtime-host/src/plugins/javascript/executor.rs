@@ -97,7 +97,7 @@ impl Provider for Executor {
             )
             .await;
             let result = result.map_err(|error| match error {
-                maka_runtime::tools::ToolError::OutcomeUnknown(_) => Error::CleanupUnconfirmed,
+                maka_runtime::tools::ToolError::CleanupUnconfirmed(_) => Error::CleanupUnconfirmed,
                 other => Error::Provider(other.to_string()),
             })?;
             serde_json::from_value(result).map_err(|error| Error::Invalid(error.to_string()))

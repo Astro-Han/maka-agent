@@ -106,7 +106,7 @@ pub(super) async fn stop(
             // Startup recovery, never a tool waiter, owns orphan classification.
             record = read_model(log, session, id).await?;
             if record.state.active() {
-                return Err(ToolError::OutcomeUnknown(
+                return Err(ToolError::CleanupUnconfirmed(
                     "active shell has no native owner".into(),
                 ));
             }
@@ -178,7 +178,7 @@ impl super::SessionShell {
                     Err(error) => match error.kind {
                         ControlErrorKind::Rejected => return Err(failed(error)),
                         ControlErrorKind::Unknown => {
-                            return Err(ToolError::OutcomeUnknown(error.to_string()));
+                            return Err(ToolError::CleanupUnconfirmed(error.to_string()));
                         }
                         ControlErrorKind::Closed => {
                             handle.stop();
@@ -202,7 +202,7 @@ impl super::SessionShell {
         } else if record.state.active() {
             record = read_model(&self.log, session, id).await?;
             if record.state.active() {
-                return Err(ToolError::OutcomeUnknown(
+                return Err(ToolError::CleanupUnconfirmed(
                     "active PTY has no native owner".into(),
                 ));
             }

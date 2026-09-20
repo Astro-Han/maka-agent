@@ -218,7 +218,7 @@ async fn check_boundary(boundary: Boundary) {
         match boundary {
             Boundary::ChildDispatch => assert!(matches!(result, Err(ToolError::Persistence(_)))),
             Boundary::ChildSettlement => {
-                assert!(matches!(result, Err(ToolError::OutcomeUnknown(_))))
+                assert!(matches!(result, Err(ToolError::Persistence(_))))
             }
         }
         assert_eq!(sink.faults.load(Ordering::SeqCst), 1);

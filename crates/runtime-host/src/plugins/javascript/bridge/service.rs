@@ -108,7 +108,10 @@ impl Method<Value, Value> for JavaScript {
             };
             drop(stop);
             result.map_err(|error| match error {
-                maka_runtime::tools::ToolError::Failed(message) => method::Error::Failed(message),
+                error @ (maka_runtime::tools::ToolError::Failed(_)
+                | maka_runtime::tools::ToolError::Io { .. }) => {
+                    method::Error::Failed(error.to_string())
+                }
                 error => method::Error::OutcomeUnknown(error.to_string()),
             })
         })

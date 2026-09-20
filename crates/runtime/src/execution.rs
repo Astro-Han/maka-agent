@@ -160,6 +160,31 @@ pub struct WorkspaceProjection {
 #[serde(try_from = "String", into = "String")]
 pub struct WorkspaceIdentity(String);
 
+/// Filesystem-object observation for directory consent, not an execution workspace marker.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct DirectoryIdentity(String);
+
+impl TryFrom<String> for DirectoryIdentity {
+    type Error = &'static str;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.strip_prefix("sha256:").is_none_or(|hex| {
+            hex.len() != 64
+                || !hex
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        }) {
+            return Err("invalid directory identity");
+        }
+        Ok(Self(value))
+    }
+}
+impl From<DirectoryIdentity> for String {
+    fn from(identity: DirectoryIdentity) -> Self {
+        identity.0
+    }
+}
+
 impl WorkspaceIdentity {
     pub fn from_marker_id(id: &str) -> Result<Self, &'static str> {
         let uuid = uuid::Uuid::parse_str(id).map_err(|_| "invalid workspace UUID")?;

@@ -157,7 +157,7 @@ impl ShellExecutor {
                 Some(observer),
             ))
             .await
-            .map_err(|e| ToolError::OutcomeUnknown(format!("Shell worker lost: {e}")))?
+            .map_err(|e| ToolError::CleanupUnconfirmed(format!("Shell worker lost: {e}")))?
         });
         Ok(ObservedProcess { events, completion })
     }
@@ -195,7 +195,7 @@ impl ToolExecutor for ShellExecutor {
                 None,
             ))
             .await
-            .map_err(|e| ToolError::OutcomeUnknown(format!("Bash worker lost: {e}")))??;
+            .map_err(|e| ToolError::CleanupUnconfirmed(format!("Bash worker lost: {e}")))??;
             Ok(output::render(cwd, input, captured))
         })
     }

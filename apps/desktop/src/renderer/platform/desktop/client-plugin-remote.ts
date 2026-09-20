@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { createPluginRemote } from '@maka/runtime-host/client';
+import { createPluginRemote } from '@maka/runtime-host/client/plugin-remote';
 import type { ClientRemoteFactory } from '@maka/ui/client-plugins';
 import type { MakaBridge } from '../../../preload/bridge-contract.js';
 import type { ClientHostRef } from '../../features/client-plugins/index.js';

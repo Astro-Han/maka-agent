@@ -152,25 +152,40 @@ impl ToolJournal {
                     EventWrite::tool_success(id, recorded_at, invocation, operation_id, value)
                         .map(|(write, output)| (write, Ok(output)))
                 }
-                Err(ToolError::Failed(message)) => EventWrite::plain(RuntimeEvent {
-                    id,
-                    recorded_at,
-                    invocation,
-                    fact: Fact::ToolSettled {
-                        operation_id,
-                        outcome: ToolOutcome::Failed {
+                Err(
+                    error @ (ToolError::Failed(_)
+                    | ToolError::Io { .. }
+                    | ToolError::OutcomeUnknown(_)),
+                ) => {
+                    let outcome = match &error {
+                        ToolError::OutcomeUnknown(message) => ToolOutcome::Unknown {
                             message: message.clone(),
                         },
-                    },
-                })
-                .map(|write| (write, Err(ToolError::Failed(message)))),
+                        ToolError::Failed(message) => ToolOutcome::Failed {
+                            message: message.clone(),
+                        },
+                        _ => ToolOutcome::Failed {
+                            message: error.to_string(),
+                        },
+                    };
+                    EventWrite::plain(RuntimeEvent {
+                        id,
+                        recorded_at,
+                        invocation,
+                        fact: Fact::ToolSettled {
+                            operation_id,
+                            outcome,
+                        },
+                    })
+                    .map(|write| (write, Err(error)))
+                }
                 // Missing durable outcome remains uncertain on reconstruction.
                 Err(error) => return Err(error),
             }
-            .map_err(|error| ToolError::OutcomeUnknown(error.to_string()))?;
+            .map_err(|error| ToolError::Persistence(error.to_string()))?;
             sink.commit(write)
                 .await
-                .map_err(|error| ToolError::OutcomeUnknown(error.to_string()))?;
+                .map_err(|error| ToolError::Persistence(error.to_string()))?;
             drop(effect);
             result
         })

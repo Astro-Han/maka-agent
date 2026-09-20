@@ -27,6 +27,67 @@ use sha2::{Digest, Sha256};
 mod workspace;
 
 impl BoundCommands {
+    fn child_identity(&self, request: &CreateChild) -> Result<(String, String), Error> {
+        let identity = serde_json::to_vec(&(
+            "plugin-child-v1",
+            self.namespace.package(),
+            String::from(self.namespace.scope().clone()),
+            &request.operation_id,
+        ))
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+        let id = format!("plugin-{:x}", Sha256::digest(identity));
+        let fingerprint = format!(
+            "sha256:{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&request).map_err(|e| Error::Invalid(e.to_string()))?
+            )
+        );
+        Ok((id, fingerprint))
+    }
+
+    pub(super) async fn restore_child(
+        &self,
+        request: CreateChild,
+    ) -> Result<Option<ChildSession>, Error> {
+        request
+            .validate()
+            .map_err(|error| Error::Invalid(error.to_string()))?;
+        let host = self.executions()?;
+        let _gate = host.lock_admission().await;
+        let _lease = self.context.admit().map_err(|_| Error::Revoked)?;
+        self.authorize(&host, &request.parent_session_id).await?;
+        let (id, fingerprint) = self.child_identity(&request)?;
+        let Some(current) = host
+            .log
+            .probe_session_create::<SessionConfiguration>(&id, &fingerprint)
+            .await
+            .map_err(storage)?
+        else {
+            return Ok(None);
+        };
+        let parent = host
+            .log
+            .get_session::<SessionConfiguration>(&request.parent_session_id)
+            .await
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        validate_child(
+            &current.configuration,
+            &parent.configuration,
+            request.workspace,
+            current.archived,
+        )?;
+        self.grants.lock().unwrap().insert(
+            id.clone(),
+            Grant {
+                boundary_revision: current.configuration.boundary_revision,
+                permission_mode: current.configuration.permission_mode,
+                cwd: current.configuration.workspace.host_cwd,
+            },
+        );
+        Ok(Some(ChildSession { session_id: id }))
+    }
+
     pub(super) async fn child(&self, request: CreateChild) -> Result<ChildSession, Error> {
         request
             .validate()
@@ -44,20 +105,7 @@ impl BoundCommands {
             .await
             .map_err(storage)?
             .ok_or(Error::NotFound)?;
-        let identity = serde_json::to_vec(&(
-            "plugin-child-v1",
-            self.namespace.package(),
-            String::from(self.namespace.scope().clone()),
-            &request.operation_id,
-        ))
-        .map_err(|e| Error::Invalid(e.to_string()))?;
-        let id = format!("plugin-{:x}", Sha256::digest(identity));
-        let fingerprint = format!(
-            "sha256:{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&request).map_err(|e| Error::Invalid(e.to_string()))?
-            )
-        );
+        let (id, fingerprint) = self.child_identity(&request)?;
         // File/status work must not hold the Host-wide admission gate.
         drop(gate);
         let worktree = self
@@ -186,28 +234,12 @@ impl BoundCommands {
                 };
                 // Replaying creation does not overwrite subsequently edited data
                 // or restore authority wider than the currently granted parent.
-                if current.archived
-                    || !workspace::matches_parent(
-                        &current.configuration,
-                        &parent.configuration,
-                        request.workspace,
-                    )
-                    || permission_rank(current.configuration.permission_mode)
-                        > permission_rank(parent.configuration.permission_mode)
-                    || parent
-                        .configuration
-                        .bound_tools
-                        .as_ref()
-                        .is_some_and(|parent| {
-                            current
-                                .configuration
-                                .bound_tools
-                                .as_ref()
-                                .is_none_or(|child| !child.is_subset(parent))
-                        })
-                {
-                    return Err(Error::Denied);
-                }
+                validate_child(
+                    &current.configuration,
+                    &parent.configuration,
+                    request.workspace,
+                    current.archived,
+                )?;
                 grants.lock().unwrap().insert(
                     id.clone(),
                     Grant {
@@ -238,4 +270,26 @@ fn permission_rank(mode: PermissionMode) -> u8 {
         PermissionMode::Ask => 1,
         PermissionMode::Bypass => 2,
     }
+}
+
+fn validate_child(
+    child: &SessionConfiguration,
+    parent: &SessionConfiguration,
+    workspace: Option<maka_plugins::execution::ChildWorkspace>,
+    archived: bool,
+) -> Result<(), Error> {
+    if archived
+        || !workspace::matches_parent(child, parent, workspace)
+        || permission_rank(child.permission_mode) > permission_rank(parent.permission_mode)
+        || parent.bound_tools.as_ref().is_some_and(|parent| {
+            child
+                .bound_tools
+                .as_ref()
+                .is_none_or(|child| !child.is_subset(parent))
+        })
+    {
+        return Err(Error::Denied);
+    }
+
+    Ok(())
 }

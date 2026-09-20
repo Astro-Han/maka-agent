@@ -11,14 +11,17 @@
   },
   "include": [
     "../../crates/runtime-host/tests/fixtures/host-plugin.mjs",
+    "../../crates/runtime-host/tests/fixtures/workflow/host.mjs",
+    "../../crates/runtime-host/tests/fixtures/workflow/client.tsx",
     "../../crates/runtime-host/tests/fixtures/background-plugin.mjs",
     "../../crates/runtime-host/tests/fixtures/http-plugin.mjs",
     "../../crates/runtime-host/tests/fixtures/files-plugin.mjs",
     "../../crates/runtime-host/tests/fixtures/clients-plugin.mjs",
     "../../crates/runtime-host/tests/fixtures/remote-plugin.mjs",
-    "../../crates/runtime-host/src/plugins/graph/client.tsx",
+    "../../crates/graph/src/client.tsx",
     "../workhub/src/client.tsx",
     "../workhub/src/styles.d.ts",
-    "../../crates/skills/src/client.tsx"
+    "../../crates/skills/src/client.tsx",
+    "../../crates/scheduler/src/client.tsx"
   ]
 }

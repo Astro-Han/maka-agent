@@ -35,7 +35,6 @@ impl Executions {
     pub(crate) async fn retire_owner(
         &self,
         owner: &Invocation,
-        cause: maka_agent::CancellationCause,
     ) -> Result<Option<tokio_util::sync::CancellationToken>> {
         let stored = |error: maka_event_log::StoreError| {
             if matches!(
@@ -58,7 +57,7 @@ impl Executions {
             }
         ) {
             self.log
-                .cancel_handoff(&boundary.invocation, cause.clone())
+                .cancel_handoff(&boundary.invocation)
                 .await
                 .map_err(stored)?
         } else {
@@ -76,7 +75,7 @@ impl Executions {
             return Ok(None);
         };
         let stopped = self.interactions.stop_run(owner).await;
-        active.cancellation.cancel_with(cause);
+        active.cancellation.cancel();
         stopped?;
         Ok(Some(active.completed))
     }

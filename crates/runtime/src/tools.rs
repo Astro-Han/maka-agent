@@ -51,10 +51,20 @@ pub enum ToolError {
     /// An ordinary tool failure with a known outcome.
     #[error("tool failed: {0}")]
     Failed(String),
+    /// A completed filesystem operation that failed before making its effect.
+    #[error("tool I/O failed: {message}")]
+    Io {
+        kind: std::io::ErrorKind,
+        message: String,
+    },
     #[error("tool persistence failed: {0}")]
     Persistence(String),
+    /// The worker has stopped; its external effect cannot be confirmed.
     #[error("tool effect outcome unknown: {0}")]
     OutcomeUnknown(String),
+    /// The worker or its resources may still be active. Do not admit more work.
+    #[error("tool cleanup unconfirmed: {0}")]
+    CleanupUnconfirmed(String),
 }
 
 pub type ToolFuture<T = Value> = Pin<Box<dyn Future<Output = Result<T, ToolError>> + Send>>;

@@ -17,14 +17,21 @@
  * under the License.
  */
 
+mod attachment;
 mod authority;
 mod children;
 mod client;
+mod configure;
 mod effects;
 mod filesystem;
+mod interactions;
 mod llm;
+mod messages;
+mod resume;
 mod root;
+mod submit;
 use root::RootGrant;
+mod catalog;
 mod scopes;
 pub(crate) use scopes::ResourceTarget;
 mod workspace;
@@ -60,6 +67,7 @@ struct Grant {
 
 /// Only Host can construct this capability; the caller supplies an explicit
 /// Session allowlist. Empty grants confer no execution authority.
+#[derive(Clone)]
 struct BoundCommands {
     executions: Weak<Executions>,
     context: Context,
@@ -233,6 +241,21 @@ impl Executions {
     }
 }
 
+fn protocol(error: maka_protocol::OperationError) -> Error {
+    use maka_protocol::OperationErrorCode as Code;
+    match error.code {
+        Code::SessionBusy => Error::Busy,
+        Code::OperationConflict | Code::AlreadyResolved => Error::Conflict,
+        Code::CommitOutcomeUnknown | Code::OutcomeUnknown => Error::OutcomeUnknown(error.message),
+        Code::HostDraining => Error::Draining,
+        Code::NotFound => Error::NotFound,
+        Code::Unauthorized => Error::Denied,
+        Code::InvalidRequest => Error::Invalid(error.message),
+        Code::OperationUnavailable => Error::Unavailable(error.message),
+        _ => Error::Host(error.message),
+    }
+}
+
 impl BoundCommands {
     fn executions(&self) -> Result<Arc<Executions>, Error> {
         self.executions
@@ -288,10 +311,145 @@ impl BoundCommands {
 }
 
 impl Commands for BoundCommands {
+    fn copy_attachment(
+        &self,
+        source: Arc<dyn Commands>,
+        request: maka_plugins::execution::CopyAttachment,
+    ) -> BoxFuture<'_, Result<maka_runtime::attachment::AttachmentRef, Error>> {
+        Box::pin(self.copy_attachment_from(source, request))
+    }
+
+    fn input(
+        &self,
+        invocation: maka_runtime::event::Invocation,
+    ) -> BoxFuture<'_, Result<Option<maka_runtime::input::MessageInput>, Error>> {
+        Box::pin(async move {
+            let host = self.executions()?;
+            let _lease = self.context.admit().map_err(|_| Error::Revoked)?;
+            self.authorize(&host, &invocation.session_id).await?;
+            let boundary = host
+                .log
+                .run_boundary(&invocation.session_id, &invocation.run_id)
+                .await
+                .map_err(storage)?
+                .ok_or(Error::NotFound)?;
+            if boundary.invocation != invocation {
+                return Err(Error::NotFound);
+            }
+            Ok(match boundary.root_input() {
+                maka_runtime::input::InvocationInput::Message { content, .. } => {
+                    Some(content.clone())
+                }
+                _ => None,
+            })
+        })
+    }
+
+    fn resume(
+        &self,
+        request: maka_plugins::execution::Resume,
+    ) -> BoxFuture<'_, Result<maka_runtime::event::Invocation, Error>> {
+        Box::pin(async move {
+            request
+                .validate()
+                .map_err(|error| Error::Invalid(error.to_string()))?;
+            let host = self.executions()?;
+            let lease = self.context.admit().map_err(|_| Error::Revoked)?;
+            let commands = self.clone();
+            let (send, receive) = tokio::sync::oneshot::channel();
+            host.workers.spawn(async move {
+                let result = commands.resume_owned(request).await;
+                drop(lease);
+                let _ = send.send(result);
+            });
+            receive
+                .await
+                .map_err(|_| Error::OutcomeUnknown("continuation owner disappeared".into()))?
+        })
+    }
+
+    fn configure(
+        &self,
+        input: maka_plugins::execution::Configure,
+    ) -> BoxFuture<'_, Result<maka_plugins::execution::Configured, Error>> {
+        Box::pin(BoundCommands::configure(self, input))
+    }
+
+    fn read_message(
+        &self,
+        message: maka_plugins::execution::SessionMessage,
+    ) -> BoxFuture<'_, Result<Option<maka_plugins::execution::MessageState>, Error>> {
+        Box::pin(BoundCommands::read_message(self, message))
+    }
+
+    fn enqueue(
+        &self,
+        request: maka_plugins::execution::Enqueue,
+    ) -> BoxFuture<'_, Result<maka_plugins::execution::MessageReceipt, Error>> {
+        Box::pin(self.enqueue_message(request))
+    }
+    fn message(
+        &self,
+        operation_id: String,
+    ) -> BoxFuture<'_, maka_plugins::execution::MessageResult> {
+        Box::pin(self.observe_message(operation_id))
+    }
+    fn retract(
+        &self,
+        operation_id: String,
+    ) -> BoxFuture<'_, maka_plugins::execution::MessageResult> {
+        Box::pin(self.retract_message(operation_id))
+    }
+
+    fn offer_interaction(
+        &self,
+        request: maka_plugins::execution::OfferInteraction,
+    ) -> BoxFuture<'_, Result<maka_runtime::interaction::InteractionRecord, Error>> {
+        Box::pin(self.offer(request))
+    }
+    fn interaction(
+        &self,
+        operation_id: String,
+    ) -> BoxFuture<'_, Result<Option<maka_runtime::interaction::InteractionRecord>, Error>> {
+        Box::pin(self.read_interaction(operation_id))
+    }
+    fn wait_interaction(
+        &self,
+        operation_id: String,
+    ) -> BoxFuture<'_, Result<maka_runtime::interaction::InteractionOutcome, Error>> {
+        Box::pin(self.wait_for_interaction(operation_id))
+    }
+    fn close_interaction(
+        &self,
+        operation_id: String,
+    ) -> BoxFuture<'_, Result<maka_runtime::interaction::InteractionRecord, Error>> {
+        Box::pin(self.withdraw_interaction(operation_id))
+    }
+
     fn session(
         &self,
         session_id: String,
     ) -> BoxFuture<'_, Result<maka_plugins::session::View, Error>> {
+        Box::pin(async move {
+            let host = self.executions()?;
+            let _lease = self.context.admit().map_err(|_| Error::Revoked)?;
+            // Observation grants no execution authority. Binding providers may
+            // query it while the Host is admitting an already prepared run.
+            // Mutating operations revalidate authorization under admission.
+            self.authorize(&host, &session_id).await?;
+            let record = host
+                .log
+                .get_session::<SessionConfiguration>(&session_id)
+                .await
+                .map_err(storage)?
+                .ok_or(Error::NotFound)?;
+            Ok(record.configuration.plugin_view(record.id, record.revision))
+        })
+    }
+    fn capabilities(
+        &self,
+        session_id: String,
+    ) -> BoxFuture<'_, Result<maka_plugins::execution::SessionCapabilities, Error>> {
         Box::pin(async move {
             let host = self.executions()?;
             let _lease = self.context.admit().map_err(|_| Error::Revoked)?;
@@ -303,33 +461,133 @@ impl Commands for BoundCommands {
                 .await
                 .map_err(storage)?
                 .ok_or(Error::NotFound)?;
-            let configuration = record.configuration;
-            let target = match configuration.target {
-                crate::session::SessionTarget::Model { model } => {
-                    maka_plugins::execution::Target::Model {
-                        model,
-                        thinking_level: configuration.thinking_level,
-                    }
-                }
-                crate::session::SessionTarget::Executor { executor_id } => {
-                    maka_plugins::execution::Target::Executor { executor_id }
-                }
+            let scope = maka_plugins::composition::Scope::Session(session_id);
+            let tools = host
+                .plugin_catalog
+                .snapshot::<maka_tools::plugins::PluginTool>(&scope)
+                .entries
+                .into_keys()
+                .filter(|name| {
+                    record
+                        .configuration
+                        .bound_tools
+                        .as_ref()
+                        .is_none_or(|ceiling| ceiling.contains(name))
+                })
+                .collect();
+            let executors = if record.configuration.bound_tools.is_none()
+                && record.configuration.tool_profile.is_none()
+            {
+                host.plugin_catalog
+                    .snapshot::<maka_plugins::executor::Executor>(&scope)
+                    .entries
+                    .into_keys()
+                    .map(|name| {
+                        name.try_into()
+                            .map_err(|error: &'static str| Error::Invalid(error.to_string()))
+                    })
+                    .collect::<Result<_, _>>()?
+            } else {
+                Default::default()
             };
-            Ok(maka_plugins::session::View {
-                session_id: record.id,
-                revision: record.revision,
-                name: configuration.name,
-                boundary_revision: configuration.boundary_revision,
-                workspace: configuration.workspace,
-                target,
-                permission_mode: configuration.permission_mode,
-                collaboration_mode: configuration.collaboration_mode,
-                behavior: configuration.orchestration_mode,
-                tool_mode: configuration.tool_mode,
-                bound_tools: configuration.bound_tools,
+            Ok(maka_plugins::execution::SessionCapabilities { tools, executors })
+        })
+    }
+
+    fn activity(
+        &self,
+        session_id: String,
+    ) -> BoxFuture<'_, Result<maka_plugins::execution::Activity, Error>> {
+        Box::pin(async move {
+            let host = self.executions()?;
+            let _lease = self.context.admit().map_err(|_| Error::Revoked)?;
+            let _gate = host.lock_admission().await;
+            self.authorize(&host, &session_id).await?;
+            let boundary = match host.active_session_owner(&session_id) {
+                Some(owner) => host
+                    .log
+                    .run_boundary(&session_id, &owner.run_id)
+                    .await
+                    .map_err(storage)?,
+                None => host
+                    .log
+                    .latest_turn_boundary(&session_id)
+                    .await
+                    .map_err(storage)?,
+            };
+            let execution = match boundary {
+                Some(boundary) => {
+                    use maka_event_log::turns::InvocationState;
+                    use maka_plugins::execution::{CurrentExecution, Progress};
+                    let behavior = host
+                        .log
+                        .invocation_configuration(&boundary.invocation)
+                        .await
+                        .map_err(storage)?
+                        .map(|configuration| configuration.orchestration_mode);
+                    let progress = match boundary.state {
+                        InvocationState::Admitted => Progress::Pending,
+                        InvocationState::Running => Progress::Running,
+                        InvocationState::WaitingForUser => Progress::WaitingForUser,
+                        InvocationState::Ended {
+                            outcome: InvocationOutcome::HandoffPaused { .. },
+                            ..
+                        } => Progress::Paused,
+                        InvocationState::Ended { outcome, .. } => Progress::Ended { outcome },
+                    };
+                    Some(CurrentExecution {
+                        invocation: boundary.invocation,
+                        behavior,
+                        progress,
+                    })
+                }
+                None => None,
+            };
+            Ok(maka_plugins::execution::Activity {
+                execution,
+                busy: host.has_session_work(&session_id).await.map_err(storage)?,
             })
         })
     }
+
+    fn stop(
+        &self,
+        invocation: maka_runtime::event::Invocation,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            let host = self.executions()?;
+            let gate = host.interactions.own_admission().await;
+            let lease = self.context.admit().map_err(|_| Error::Revoked)?;
+            self.authorize(&host, &invocation.session_id).await?;
+            if !host.accepting() {
+                return Err(Error::Draining);
+            }
+            let (send, receive) = tokio::sync::oneshot::channel();
+            let worker = host.clone();
+            // Retirement cannot detach an admitted control from its settlement.
+            host.workers.spawn(async move {
+                let result = worker
+                    .retire_owner(&invocation)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| match error.code {
+                        maka_protocol::OperationErrorCode::CommitOutcomeUnknown => {
+                            Error::OutcomeUnknown(error.message)
+                        }
+                        maka_protocol::OperationErrorCode::NotFound => Error::NotFound,
+                        maka_protocol::OperationErrorCode::OperationConflict => Error::Conflict,
+                        _ => Error::Host(error.message),
+                    });
+                drop(gate);
+                drop(lease);
+                let _ = send.send(result);
+            });
+            receive
+                .await
+                .map_err(|_| Error::OutcomeUnknown("execution control owner disappeared".into()))?
+        })
+    }
+
     fn validate_authority(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             let host = self.executions()?;
@@ -374,6 +632,33 @@ impl Commands for BoundCommands {
         operation_id: String,
     ) -> BoxFuture<'_, Result<Option<maka_plugins::execution::WorkspacePatch>, Error>> {
         Box::pin(self.export_workspace(operation_id))
+    }
+    fn artifact(
+        &self,
+        request: maka_plugins::execution::ReadArtifact,
+    ) -> BoxFuture<'_, Result<Option<maka_plugins::execution::ArtifactChunk>, Error>> {
+        Box::pin(async move {
+            request
+                .validate()
+                .map_err(|e| Error::Invalid(e.to_string()))?;
+            let host = self.executions()?;
+            let _lease = self.context.admit().map_err(|_| Error::Revoked)?;
+            let receipt = self.receipt(&host, &request.operation_id).await?;
+            Ok(host
+                .log
+                .execution_artifact(
+                    &receipt.invocation,
+                    &request.artifact_id,
+                    request.offset,
+                    request.limit,
+                )
+                .await
+                .map_err(storage)?
+                .map(|chunk| maka_plugins::execution::ArtifactChunk {
+                    bytes: chunk.bytes,
+                    total_bytes: chunk.total_bytes,
+                }))
+        })
     }
     fn event(
         &self,
@@ -434,97 +719,19 @@ impl Commands for BoundCommands {
         })
     }
 
+    fn restore_child(
+        &self,
+        request: CreateChild,
+    ) -> BoxFuture<'_, Result<Option<ChildSession>, Error>> {
+        Box::pin(BoundCommands::restore_child(self, request))
+    }
+
     fn create_child(&self, request: CreateChild) -> BoxFuture<'_, Result<ChildSession, Error>> {
         Box::pin(self.child(request))
     }
 
     fn submit(&self, request: Submit) -> BoxFuture<'_, Result<Receipt, Error>> {
-        Box::pin(async move {
-            request
-                .validate()
-                .map_err(|e| Error::Invalid(e.to_string()))?;
-            let host = self.executions()?;
-            let gate = host.interactions.own_admission().await;
-            self.authorize(&host, &request.session_id).await?;
-            if !host.accepting() {
-                return Err(Error::Draining);
-            }
-            // Even receipt lookups require a currently admitted instance.
-            let lease = self.context.admit().map_err(|_| Error::Revoked)?;
-            if let Some(receipt) = host
-                .log
-                .plugin_execution_receipt(&self.namespace, &request.operation_id)
-                .await
-                .map_err(storage)?
-            {
-                if receipt.content_digest
-                    != request
-                        .digest()
-                        .map_err(|e| Error::Invalid(e.to_string()))?
-                {
-                    return Err(Error::Conflict);
-                }
-                return Ok(receipt);
-            }
-            if self.submission_stop.is_cancelled() {
-                return Err(Error::Revoked);
-            }
-            if host
-                .has_session_work(&request.session_id)
-                .await
-                .map_err(storage)?
-            {
-                return Err(Error::Busy);
-            }
-            host.validate_message_content(
-                &request.session_id,
-                &request.content.clone().into(),
-                &self.root_id,
-            )
-            .await
-            .map_err(|e| Error::Invalid(e.message))?;
-            let namespace = self.namespace.clone();
-            let (send, receive) = tokio::sync::oneshot::channel();
-            // Ownership transfers before the first accepted SQL write. Losing the
-            // plugin future cannot release its lease ahead of commit settlement.
-            let worker = host.clone();
-            host.workers.spawn(async move {
-                let result = async {
-                    if !worker.accepting() {
-                        return Err(Error::Draining);
-                    }
-                    worker
-                        .log
-                        .admit_plugin_execution(&namespace, request)
-                        .await
-                        .map_err(|e| {
-                            if matches!(
-                                e,
-                                StoreError::CommitUnknown(_) | StoreError::OperationUnknown
-                            ) {
-                                worker.begin_drain();
-                            }
-                            storage(e)
-                        })
-                }
-                .await;
-                drop(gate);
-                drop(lease);
-                let receipt = result.as_ref().ok().cloned();
-                let _ = send.send(result);
-                let mut gate = Some(worker.lock_admission().await);
-                if let Some(receipt) = receipt
-                    && let Err(error) = worker
-                        .dispatch_pending(&receipt.invocation.session_id, &mut gate)
-                        .await
-                {
-                    eprintln!("plugin execution dispatch failed: {}", error.message);
-                }
-            });
-            receive
-                .await
-                .map_err(|_| Error::OutcomeUnknown("Host command owner disappeared".into()))?
-        })
+        Box::pin(self.submit_message(request))
     }
 
     fn query(&self, operation_id: String) -> BoxFuture<'_, Result<Observation, Error>> {

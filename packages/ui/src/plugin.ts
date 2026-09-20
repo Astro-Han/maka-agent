@@ -19,6 +19,7 @@
 
 /** Shared Renderer components supported for trusted Client bundles. */
 export { Button } from '@astryxdesign/core/Button';
+export { ScheduledTasksPage } from './module-pages.js';
 export { IconButton, Link, List, ListItem, StatusDot, Text } from '@astryxdesign/core';
 export {
   ChatSurfaceLayout, ChatView, Composer, type ComposerHandle, type ComposerProps,

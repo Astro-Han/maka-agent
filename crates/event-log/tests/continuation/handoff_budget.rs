@@ -112,9 +112,7 @@ async fn handoff_reserves_successor_and_cancellation_before_sealing_a_near_capac
             reserved_bytes += serde_json::to_vec(&future).unwrap().len();
             let mut cancelled = future.clone();
             cancelled["fact"] = serde_json::json!({"kind":"invocation_ended", "outcome":{
-                "kind":"cancelled", "source": maka_runtime::event::CancellationCause::WorkhubCorrection {
-                    action_id: pause.intent.claim_id.parse().unwrap(),
-                }.source(),
+                "kind":"cancelled", "source": "runtime_cancellation",
             }});
             reserved_bytes += serde_json::to_vec(&cancelled).unwrap().len();
         }

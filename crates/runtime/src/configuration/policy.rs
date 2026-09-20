@@ -22,12 +22,10 @@ mod codec;
 pub mod network_test;
 pub mod network_update;
 mod settings;
-mod subagents;
 use crate::execution::ThinkingLevel;
 pub use codec::{decode_canonical_snapshot, normalize_mutation};
 use serde::{Deserialize, Serialize};
 pub use settings::*;
-pub use subagents::{SubagentPreset, SubagentProfile, SubagentSettings};
 
 pub const MAX_POLICY_SNAPSHOT_BYTES: usize = 48 * 1024;
 
@@ -63,7 +61,6 @@ pub struct RuntimePolicy {
     pub privacy: PrivacyPolicy,
     pub chat_defaults: ChatDefaults,
     pub web_search: WebSearchPolicy,
-    pub subagents: SubagentSettings,
     pub shell: ShellPolicy,
     pub external_agents: ExternalAgents,
 }
@@ -119,7 +116,6 @@ impl Default for RuntimePolicy {
                 enabled: false,
                 default_provider: WebSearchProvider::Model,
             },
-            subagents: SubagentSettings::default(),
             shell: ShellPolicy {
                 preference: ShellPreference::Auto,
                 executable: String::new(),
@@ -152,7 +148,6 @@ pub enum RuntimePolicyMutation {
     SetPrivacy { value: PrivacyPolicy },
     SetChatDefaults { value: ChatDefaults },
     SetWebSearch { value: WebSearchPolicy },
-    SetSubagents { value: SubagentSettings },
     SetShell { value: ShellPolicy },
     SetExternalAgents { value: ExternalAgents },
     PatchAgentSettings { value: AgentSettingsPatch },

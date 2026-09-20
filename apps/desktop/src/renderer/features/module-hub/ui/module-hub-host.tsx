@@ -20,24 +20,28 @@
 import {
   DailyReviewPage,
   ModuleHubSelector,
-  ScheduledTasksPage,
   getSharedUiCopy,
   useUiLocale,
+  useToast,
   type ModuleHubHeader,
 } from '@maka/ui';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { McpPage } from '../../../mcp-page.js';
 import type { ModuleHubHostModel } from '../controller/use-module-hub-controller.js';
 import { resolveModuleHubHostRoute } from '../controller/module-hub-route.js';
 import { useModuleHubHostModel } from './module-hub-provider.js';
 
 /** Selects and mounts exactly one Module Hub leaf for the Shell selection. */
-export function ModuleHubHost({ extensionContent }: { extensionContent?: ReactNode }) {
-  return <ModuleHubHostView model={useModuleHubHostModel()} extensionContent={extensionContent} />;
+interface Content {
+  extensionContent?: ReactNode;
+  applicationContent?: (section: string, action?: ModuleHubHostModel['action']) => ReactNode;
+}
+export function ModuleHubHost(props: Content) {
+  return <ModuleHubHostView model={useModuleHubHostModel()} {...props} />;
 }
 
 /** Environment-free view seam for focused tests and Storybook. */
-export function ModuleHubHostView({ model, extensionContent }: { model: ModuleHubHostModel; extensionContent?: ReactNode }) {
+export function ModuleHubHostView({ model, extensionContent, applicationContent }: Content & { model: ModuleHubHostModel }) {
   const copy = getSharedUiCopy(useUiLocale()).moduleHubs;
   const selection = model.selection;
   const route = resolveModuleHubHostRoute(selection);
@@ -84,29 +88,12 @@ export function ModuleHubHostView({ model, extensionContent }: { model: ModuleHu
       ),
     };
     if (route === 'scheduled-tasks') {
-      const keepAwake = model.keepSystemAwake;
-      const tasks = model.scheduledTasks;
       return (
-        <ScheduledTasksPage
-          hubHeader={header}
-          tasks={tasks.scheduledTasks}
-          createRequestNonce={tasks.createRequestNonce}
-          onCreateRequestHandled={tasks.handleCreateRequest}
-          keepSystemAwake={
-            keepAwake.supported ? keepAwake.keepSystemAwake : undefined
-          }
-          onKeepSystemAwakeChange={
-            keepAwake.supported ? keepAwake.setKeepSystemAwake : undefined
-          }
-          onRefresh={tasks.refreshSurface}
-          onCreate={tasks.create}
-          onUpdate={tasks.update}
-          onToggle={tasks.toggle}
-          onTriggerNow={tasks.triggerNow}
-          onSnooze={tasks.snooze}
-          onClearRunHistory={tasks.clearRunHistory}
-          onDelete={tasks.delete}
-        />
+        <section className="maka-main detailPane maka-module-main agents-chat-panel" data-page-shell="layout" data-module={route} aria-label={header.title}>
+          <header><h1>{header.title}</h1>{header.badge}</header>
+          <PowerSetting value={model.keepSystemAwake} />
+          {applicationContent?.(route, model.action)}
+        </section>
       );
     }
     const dailyReview = model.dailyReview;
@@ -123,4 +110,23 @@ export function ModuleHubHostView({ model, extensionContent }: { model: ModuleHu
   }
 
   return null;
+}
+
+/** Desktop power policy belongs to the application, not to any scheduler. */
+function PowerSetting({ value }: { value: ModuleHubHostModel['keepSystemAwake'] }) {
+  const locale = useUiLocale();
+  const toast = useToast();
+  const [pending, setPending] = useState(false);
+  if (!value.supported) return null;
+  return <label>
+    <input type="checkbox" checked={value.keepSystemAwake ?? false}
+      disabled={pending || value.keepSystemAwake === undefined}
+      onChange={(event) => {
+        setPending(true);
+        void value.setKeepSystemAwake(event.target.checked)
+          .catch((error: unknown) => toast.error(error instanceof Error ? error.message : String(error)))
+          .finally(() => setPending(false));
+      }} />
+    {locale === 'en' ? 'Keep this computer awake' : '保持此电脑唤醒'}
+  </label>;
 }

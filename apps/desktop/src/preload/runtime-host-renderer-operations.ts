@@ -27,12 +27,10 @@ export const RENDERER_RUNTIME_HOST_QUERY_OPERATIONS = [
   'context.diagnostics.query',
   'daily-review.query',
   'execution.inspect.query',
-  'scheduled-task.query',
 ] as const satisfies readonly (keyof OperationSpecMap)[];
 
 export const RENDERER_RUNTIME_HOST_COMMAND_OPERATIONS = [
   'daily-review.mutate',
-  'scheduled-task.mutate',
   'web-search.execute',
 ] as const satisfies readonly (keyof OperationSpecMap)[];
 

@@ -19,7 +19,7 @@
 
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDefaultSettings } from '@maka/core/settings';
+import type { SubagentPreset } from '@maka/core/subagent-settings';
 import { type LlmConnection } from '@maka/core/llm-connections';
 import { createConfiguredSubagentCatalog } from '../configured-subagent-catalog.js';
 
@@ -36,7 +36,7 @@ const connection: LlmConnection = {
 
 describe('configured subagent catalog', () => {
   test('lists availability and resolves only enabled user-approved targets', async () => {
-    const settings = createDefaultSettings();
+    const settings = { subagents: { presets: [] as SubagentPreset[] } };
     settings.subagents.presets = [
       {
         id: 'fast-reader',
@@ -99,7 +99,7 @@ describe('configured subagent catalog', () => {
       defaultModel: 'claude-opus-5',
       enabledModelIds: ['claude-opus-5'],
     };
-    const settings = createDefaultSettings();
+    const settings = { subagents: { presets: [] as SubagentPreset[] } };
     settings.subagents.presets = [
       {
         id: 'retired-worker',

@@ -103,6 +103,12 @@ mod tests {
     struct RetiringStore(AtomicBool);
 
     impl Store for RetiringStore {
+        fn scan(
+            &self,
+            _: maka_plugins::storage::Scan,
+        ) -> BoxFuture<'_, Result<maka_plugins::storage::Page, StoreError>> {
+            unreachable!("preferences read exact keys")
+        }
         fn read(&self, _: String) -> BoxFuture<'_, Result<Option<Record>, StoreError>> {
             Box::pin(async {
                 if self.0.load(Ordering::SeqCst) {

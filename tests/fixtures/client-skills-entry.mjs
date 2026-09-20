@@ -146,6 +146,31 @@ try {
       '@maka-agent/plugin-sdk/client': ClientSdk,
     },
     report: ({ error }) => errors.push(error),
+    authorization: (client, signal) => {
+      const invoke = async (scope, command) => {
+        signal.throwIfAborted();
+        return connection.request('plugin.authorization', { client, scope, command });
+      };
+      return {
+        async approve(scope, request) {
+          assert.equal(scope, 'profile');
+          assert.deepEqual(request.capabilities, ['read_files', 'write_files']);
+          assert.equal(request.target.kind, 'directory');
+          const result = await invoke(scope, { kind: 'approve', request });
+          assert.equal(result.kind, 'grant');
+          return result.grant;
+        },
+        async query(scope, id) {
+          const result = await invoke(scope, { kind: 'query', id });
+          assert.equal(result.kind, 'grant');
+          return result.grant;
+        },
+        async revoke(scope, id) {
+          const result = await invoke(scope, { kind: 'revoke', id });
+          assert.equal(result.kind, 'revoked');
+        },
+      };
+    },
     localFiles: () => ({
       pick: async () => join(values['skills-client-workspace'], 'import-client.md'),
       open: async (path) => {

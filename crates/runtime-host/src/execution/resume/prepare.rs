@@ -24,18 +24,18 @@ use maka_protocol::OperationErrorCode as Code;
 use maka_runtime::{continuation::RunBoundary, event::Invocation};
 use uuid::Uuid;
 
-pub(super) enum Mode {
+pub(in crate::execution) enum Mode<'a> {
     Observe(Uuid),
-    Prepared(Box<super::super::prepare::Environment>),
+    Prepared(&'a super::super::prepare::Environment),
 }
 impl Executions {
-    pub(super) async fn prepare_resume(
+    pub(in crate::execution) async fn prepare_resume(
         &self,
         session: &SessionConfiguration,
         source: RunBoundary,
         turn_id: String,
         fingerprint: Option<String>,
-        mode: Mode,
+        mode: Mode<'_>,
     ) -> Result<RunInput> {
         let cwd = std::path::PathBuf::from(&session.workspace.host_cwd);
         let workspace =
@@ -61,14 +61,14 @@ impl Executions {
         }
         let (tools, system_prompt) = match mode {
             Mode::Prepared(environment) => {
-                let super::super::prepare::Backend::Model(model) = environment.backend else {
+                let super::super::prepare::Backend::Model(model) = &environment.backend else {
                     return Err(super::failure(
                         maka_protocol::OperationErrorCode::OperationUnavailable,
                         "Executor has no native model continuation",
                     ));
                 };
-                configuration.tool_composition = Some(environment.composition);
-                (model.tools, environment.prompt)
+                configuration.tool_composition = Some(environment.composition.clone());
+                (model.tools.clone(), environment.prompt.clone())
             }
             Mode::Observe(connection) => {
                 let system_prompt = session.initial_prompt("").map_err(internal)?;
@@ -94,7 +94,7 @@ impl Executions {
             },
             work: RunWork::Continuation {
                 source,
-                workhub_resume: None,
+
                 tools,
                 max_steps: 64,
             },

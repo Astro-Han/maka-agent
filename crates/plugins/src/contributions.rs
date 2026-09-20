@@ -78,6 +78,9 @@ impl Publisher {
     pub fn withdraw<T: Send + Sync + 'static>(&self, name: &str) -> Result<(), Error> {
         self.catalog.withdraw::<T>(&self.owner, name)
     }
+    pub fn withdraw_many<T: Send + Sync + 'static>(&self, names: &[String]) -> Result<(), Error> {
+        self.catalog.withdraw_many::<T>(&self.owner, names)
+    }
 }
 
 impl Default for Catalog {
@@ -212,18 +215,41 @@ impl Catalog {
         owner: &Context,
         name: &str,
     ) -> Result<(), Error> {
+        self.withdraw_many::<T>(owner, &[name.to_owned()])
+    }
+
+    fn withdraw_many<T: Send + Sync + 'static>(
+        &self,
+        owner: &Context,
+        names: &[String],
+    ) -> Result<(), Error> {
         let _admission = owner.admit()?;
         let identity = owner.identity()?;
-        let key = (TypeId::of::<T>(), identity.scope, name.to_owned());
+        let keys: Vec<_> = names
+            .iter()
+            .map(|name| (TypeId::of::<T>(), identity.scope.clone(), name.clone()))
+            .collect();
         let mut state = self.0.state.lock().unwrap();
-        if let Some(record) = state.records.get(&key) {
-            if record.owner.identity()?.activation != identity.activation {
-                return Err(Error::ContributionConflict(name.into()));
+        for key in &keys {
+            if let Some(record) = state.records.get(key)
+                && record.owner.identity()?.activation != identity.activation
+            {
+                return Err(Error::ContributionConflict(key.2.clone()));
             }
-            record.retired.cancel();
-            state.records.remove(&key);
+        }
+        let mut removed = Vec::new();
+        for key in keys {
+            if let Some(record) = state.records.remove(&key) {
+                record.retired.cancel();
+                removed.push(record);
+            }
+        }
+        if !removed.is_empty() {
             changed(&self.0, &mut state);
         }
+        drop(state);
+        // A native contribution's destructor may call the public registry.
+        drop(removed);
         Ok(())
     }
 
@@ -237,18 +263,19 @@ impl Catalog {
             move || {
                 if let Some(registry) = registry.upgrade() {
                     let mut state = registry.state.lock().unwrap();
-                    let before = state.records.len();
-                    state.records.retain(|_, record| {
-                        if record.batch == batch {
+                    let removed: Vec<_> = state
+                        .records
+                        .extract_if(|_, record| record.batch == batch)
+                        .map(|(_, record)| {
                             record.retired.cancel();
-                            false
-                        } else {
-                            true
-                        }
-                    });
-                    if before != state.records.len() {
+                            record
+                        })
+                        .collect();
+                    if !removed.is_empty() {
                         changed(&registry, &mut state);
                     }
+                    drop(state);
+                    drop(removed);
                 }
             },
             || async { Ok(()) },
@@ -282,7 +309,12 @@ impl Catalog {
             );
         }
         if let Err(error) = owner.publish() {
-            state.records.retain(|_, record| record.batch != batch);
+            let removed: Vec<_> = state
+                .records
+                .extract_if(|_, record| record.batch == batch)
+                .collect();
+            drop(state);
+            drop(removed);
             return Err(error);
         }
         changed(&self.0, &mut state);
@@ -443,4 +475,56 @@ fn changed(registry: &Inner, state: &mut State) {
         .checked_add(1)
         .expect("catalog revision exhausted");
     registry.changed.send_replace(state.revision);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Reentrant(Catalog);
+    impl Drop for Reentrant {
+        fn drop(&mut self) {
+            let _ = self.0.snapshot::<Reentrant>(&Scope::Profile);
+        }
+    }
+
+    #[test]
+    fn group_withdrawal_and_registration_drop_release_payloads_outside_the_registry_lock() {
+        let (finished, result) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let _entered = runtime.enter();
+            let catalog = Catalog::default();
+            let owner = Fiber::new("example", "group", Scope::Profile).unwrap();
+            owner.begin_loading().unwrap();
+            owner.ready().unwrap();
+            owner.publish().unwrap();
+            for explicit in [true, false] {
+                let mut staged = Staged::default();
+                for name in ["first", "second"] {
+                    staged.insert(name, Reentrant(catalog.clone())).unwrap();
+                }
+                let registration = catalog.register(&owner.context(), staged).unwrap();
+                let before = catalog.capture(&Scope::Profile).revision;
+                if explicit {
+                    catalog
+                        .publisher(owner.context())
+                        .withdraw_many::<Reentrant>(&["first".into(), "second".into()])
+                        .unwrap();
+                }
+                drop(registration);
+                let after = catalog.snapshot::<Reentrant>(&Scope::Profile);
+                assert!(after.entries.is_empty());
+                assert_eq!(after.revision, before + 1);
+            }
+            finished.send(()).unwrap();
+        });
+        result
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("registry deadlocked during payload cleanup");
+        worker.join().unwrap();
+    }
 }

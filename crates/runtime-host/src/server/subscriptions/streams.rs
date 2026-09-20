@@ -143,7 +143,6 @@ impl Streams {
                 self.finish_matching(|_| true, interrupted, &mut deltas);
             }
             StreamFact::InvocationOpened
-            | StreamFact::WorkhubDelegated
             | StreamFact::MessageSteered
             | StreamFact::ToolDispatched { .. }
             | StreamFact::ToolRejected { .. }

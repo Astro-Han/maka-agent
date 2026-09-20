@@ -22,7 +22,7 @@ use crate::{OriginStatus, SourceCatalog, api::*, publication::Publisher};
 use maka_runtime::artifact::content_digest;
 use tokio_util::sync::CancellationToken;
 
-pub(super) fn apply(
+pub(super) async fn apply(
     publisher: &Publisher,
     sources: &SourceCatalog,
     update: &ManagedUpdate,
@@ -47,7 +47,8 @@ pub(super) fn apply(
     let source = source_content(sources, source_id, cancellation)?;
     let source_hash = content_digest(&source);
     let expected = publisher
-        .capture(id, cancellation)?
+        .capture(id, cancellation)
+        .await?
         .ok_or(Failure::Rejected(MutationRejection::NotFound))?;
     let current = expected
         .get("SKILL.md")
@@ -103,7 +104,9 @@ pub(super) fn apply(
     }
     let mut next = expected.clone();
     artifacts(&mut next, id, source_id, InstallSource::Managed, source)?;
-    publisher.publish(id, Some(&expected), Some(&next), cancellation)?;
+    publisher
+        .publish(id, Some(&expected), Some(&next), cancellation)
+        .await?;
     Ok(Change {
         changed: true,
         reference: Some(update.reference.clone()),

@@ -100,12 +100,6 @@ export function buildCommandList(args: {
    */
   onCopyTodayDailyReview?(): Promise<void> | void;
   /**
-   * PR-CMD-PALETTE-OPEN-MEMORY-0: open the local MEMORY.md file in
-   * the OS default editor from anywhere via ⌘K. The renderer wires
-   * this to `window.maka.memory.openFile()`.
-   */
-  onOpenLocalMemoryFile?(): Promise<void> | void;
-  /**
    * PR-CMD-PALETTE-PERMISSION-MODE-0: switch the active session's
    * permission mode from anywhere via ⌘K. Only registers when both
    * a callback and an active session id are wired. Mirrors the
@@ -390,16 +384,6 @@ export function buildCommandList(args: {
       Icon: Wifi,
       keywords: [...copy.staticKeywords['diag:test-network-proxy']],
       run: () => args.onTestNetworkProxy!(),
-    });
-  }
-  if (args.onOpenLocalMemoryFile) {
-    cmds.push({
-      id: 'diag:open-local-memory',
-      kind: 'action',
-      ...staticCopy('diag:open-local-memory'),
-      Icon: FolderOpen,
-      keywords: [...copy.staticKeywords['diag:open-local-memory']],
-      run: () => args.onOpenLocalMemoryFile!(),
     });
   }
   if (args.onSetPermissionMode && args.activeSessionId) {

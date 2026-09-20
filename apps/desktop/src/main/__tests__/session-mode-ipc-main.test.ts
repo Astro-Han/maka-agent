@@ -158,7 +158,7 @@ test('a Plan Session keeps the orchestration default it was carrying', async () 
   assert.equal('orchestrationMode' in (patches[1] ?? {}), false);
 });
 
-test('an unknown mode is refused rather than persisted', async () => {
+test('invalid mode syntax is refused rather than persisted', async () => {
   const patches: DesktopSessionConfigurationPatch[] = [];
   const ipc = harness(patches);
 
@@ -167,7 +167,7 @@ test('an unknown mode is refused rather than persisted', async () => {
     /Invalid collaboration mode/,
   );
   await assert.rejects(
-    ipc.invoke('sessions:setOrchestrationMode', 'session-1', 'plan') as Promise<unknown>,
+    ipc.invoke('sessions:setOrchestrationMode', 'session-1', 'invalid behavior') as Promise<unknown>,
     /Invalid orchestration mode/,
   );
   assert.deepEqual(patches, [], 'nothing reached the Host');

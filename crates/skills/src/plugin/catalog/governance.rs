@@ -32,12 +32,14 @@ pub(in crate::plugin) fn items(
     let snapshot = &catalog.publication;
     let managed: BTreeMap<_, _> = catalog
         .managed
+        .discovery
         .inventory
         .iter()
         .map(|s| (s.location.id.as_str(), s.content_sha256.as_str()))
         .chain(
             catalog
                 .managed
+                .discovery
                 .rejected
                 .iter()
                 .map(|s| (s.location.id.as_str(), s.content_sha256.as_str())),

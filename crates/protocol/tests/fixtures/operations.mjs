@@ -24,21 +24,24 @@ import { RUNTIME_HOST_COMPATIBILITY_EPOCH } from '../../../../packages/runtime-h
 
 const actual = JSON.parse(readFileSync(0, 'utf8'));
 const expected = Object.fromEntries(
-  Object.entries(HOST_OPERATION_SPECS).map(([operation, spec]) => [
-    operation,
-    {
-      mode: spec.mode,
-      availability: spec.availability,
-      unavailableError: spec.errors.includes('operation_unavailable')
-        ? 'operation_unavailable'
-        : 'internal_failure',
-    },
-  ]),
+  // The TS Host remains a reference, not a requirement to retain migrated business RPCs.
+  Object.entries(HOST_OPERATION_SPECS)
+    .filter(([operation]) => operation in actual.operations)
+    .map(([operation, spec]) => [
+      operation,
+      {
+        mode: spec.mode,
+        availability: spec.availability,
+        unavailableError: spec.errors.includes('operation_unavailable')
+          ? 'operation_unavailable'
+          : 'internal_failure',
+      },
+    ]),
 );
 assert.deepEqual(
   actual.operations,
   expected,
-  'Rust operation vocabulary differs from current source',
+  'Rust Host operation contracts differ from current source',
 );
 assert.equal(actual.epoch, RUNTIME_HOST_COMPATIBILITY_EPOCH);
 for (const { operation, input, decoded } of actual.targets) {

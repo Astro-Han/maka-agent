@@ -21,7 +21,16 @@ use crate::{Error, name};
 use maka_runtime::{event::Invocation, input::MessageInput};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+mod attachment;
+pub use attachment::CopyAttachment;
+mod interaction;
+mod message;
+pub use message::{
+    Enqueue, Excerpt, MessageObservation, MessageReceipt, MessageResult, MessageState,
+    SessionMessage,
+};
 mod root;
+pub use interaction::{OfferInteraction, Prompt};
 pub use root::{CreateRoot, RootApproval, RootTemplate, Settings as RootSettings};
 
 /// Persisted constraints, not a bearer capability. Only an explicit Host grant
@@ -75,6 +84,29 @@ impl Submit {
         self.validate()?;
         let bytes = serde_json::to_vec(self).map_err(|error| Error::Invalid(error.to_string()))?;
         Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+    }
+}
+
+/// Resume one sealed physical Run. The operation identity is package/scope-local;
+/// an exact retry returns the same continuation, never the Session's new tip.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Resume {
+    pub operation_id: String,
+    pub source: Invocation,
+}
+impl Resume {
+    pub fn validate(&self) -> Result<(), Error> {
+        for value in [
+            &self.operation_id,
+            &self.source.session_id,
+            &self.source.turn_id,
+            &self.source.run_id,
+            &self.source.invocation_id,
+        ] {
+            name(value)?;
+        }
+        Ok(())
     }
 }
 
@@ -225,6 +257,60 @@ pub struct EventPage {
     pub next_after: Option<u64>,
 }
 
+/// Registered extension names visible to this Session, narrowed by its tool ceiling.
+/// An advertisement is neither a frozen model request nor permission to call it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionCapabilities {
+    pub tools: std::collections::BTreeSet<String>,
+    pub executors: Vec<maka_runtime::executor::ExecutorId>,
+}
+
+/// The latest logical execution is an observation, not a durable business identity. Capture
+/// the invocation when recording a control intent; never retarget a retry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Activity {
+    pub execution: Option<CurrentExecution>,
+    /// Includes queued work and cleanup, not just a live model request.
+    pub busy: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CurrentExecution {
+    /// May already be terminal; it remains a safe identity for exact control.
+    pub invocation: Invocation,
+    /// Frozen behavior, not the current Session default.
+    pub behavior: Option<maka_runtime::execution::BehaviorId>,
+    pub progress: Progress,
+}
+
+/// A bounded read of an artifact belonging to the accepted operation's Turn.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadArtifact {
+    pub operation_id: String,
+    pub artifact_id: String,
+    pub offset: u64,
+    pub limit: usize,
+}
+impl ReadArtifact {
+    pub fn validate(&self) -> Result<(), Error> {
+        name(&self.operation_id)?;
+        name(&self.artifact_id)?;
+        if self.offset >= (1 << 53) || !(1..=64 * 1024).contains(&self.limit) {
+            return Err(Error::Invalid("invalid execution artifact window".into()));
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactChunk {
+    pub bytes: Vec<u8>,
+    pub total_bytes: u64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
     #[error("plugin execution authority is retired or revoked")]
@@ -243,8 +329,43 @@ pub enum CommandError {
     OutcomeUnknown(String),
     #[error("invalid execution request: {0}")]
     Invalid(String),
+    #[error("execution capability is unavailable: {0}")]
+    Unavailable(String),
     #[error("Host execution failed: {0}")]
     Host(String),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Configure {
+    pub session_id: String,
+    pub expected_revision: u64,
+    pub target: Target,
+}
+impl Configure {
+    pub fn validate(&self) -> Result<(), Error> {
+        name(&self.session_id)?;
+        if self.expected_revision >= 1 << 53 {
+            return Err(Error::Invalid("invalid Session revision".into()));
+        }
+        self.target.validate()
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum Configured {
+    Committed {
+        session: Box<crate::session::View>,
+    },
+    RevisionConflict {
+        expected_revision: u64,
+        actual_revision: u64,
+    },
 }
 
 /// A Host-authorized, instance-bound interface. Plugins cannot supply another
@@ -264,13 +385,102 @@ pub trait Access: Send + Sync {
 }
 
 /// An acquired execution capability retains its captured permission ceiling.
-pub trait Commands: Send + Sync {
+pub trait Commands: Send + Sync + std::any::Any {
+    /// Copy an immutable attachment between two Host-issued capabilities. Both
+    /// endpoints are reauthorized; a source Session ID alone grants nothing.
+    fn copy_attachment(
+        &self,
+        source: std::sync::Arc<dyn Commands>,
+        request: CopyAttachment,
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<maka_runtime::attachment::AttachmentRef, CommandError>,
+    >;
+
+    /// Immutable user input that opened this logical execution. Handoff successors
+    /// resolve the same root; unrelated Runs are never substituted. Non-message
+    /// inputs return None. This is a read, not authority to forward attachments.
+    fn input(
+        &self,
+        invocation: Invocation,
+    ) -> futures_util::future::BoxFuture<'_, Result<Option<MessageInput>, CommandError>>;
+
+    fn resume(
+        &self,
+        request: Resume,
+    ) -> futures_util::future::BoxFuture<'_, Result<Invocation, CommandError>>;
+    /// Replace an idle Session's model/Executor selection without changing its
+    /// workspace, behavior or permission ceiling. Revision mismatch is explicit.
+    fn configure(
+        &self,
+        input: Configure,
+    ) -> futures_util::future::BoxFuture<'_, Result<Configured, CommandError>>;
+    /// Inspect an exact message in an authorized Session, including non-plugin input.
+    /// Absence is not proof of cancellation or delivery.
+    fn read_message(
+        &self,
+        message: SessionMessage,
+    ) -> futures_util::future::BoxFuture<'_, Result<Option<MessageState>, CommandError>>;
+    fn enqueue(
+        &self,
+        request: Enqueue,
+    ) -> futures_util::future::BoxFuture<'_, Result<MessageReceipt, CommandError>>;
+    fn message(&self, operation_id: String) -> futures_util::future::BoxFuture<'_, MessageResult>;
+    fn retract(&self, operation_id: String) -> futures_util::future::BoxFuture<'_, MessageResult>;
+    /// Exact retries reuse the canonical offer, including its outcome after the Run ended.
+    fn offer_interaction(
+        &self,
+        request: OfferInteraction,
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<maka_runtime::interaction::InteractionRecord, CommandError>,
+    >;
+    /// Only this package/scope's offers, within currently authorized Sessions.
+    fn interaction(
+        &self,
+        operation_id: String,
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<Option<maka_runtime::interaction::InteractionRecord>, CommandError>,
+    >;
+    /// Cancellation stops observation, never withdraws an accepted offer.
+    fn wait_interaction(
+        &self,
+        operation_id: String,
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<maka_runtime::interaction::InteractionOutcome, CommandError>,
+    >;
+    /// Withdraw an offer without replacing an answer or other canonical terminal outcome.
+    fn close_interaction(
+        &self,
+        operation_id: String,
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<maka_runtime::interaction::InteractionRecord, CommandError>,
+    >;
+
     /// Current configuration of an authorized Session; not a grant or an
     /// unrestricted catalog. Returns no plugin-owned domain state.
     fn session(
         &self,
         session_id: String,
     ) -> futures_util::future::BoxFuture<'_, Result<crate::session::View, CommandError>>;
+    fn capabilities(
+        &self,
+        session_id: String,
+    ) -> futures_util::future::BoxFuture<'_, Result<SessionCapabilities, CommandError>>;
+    fn activity(
+        &self,
+        session_id: String,
+    ) -> futures_util::future::BoxFuture<'_, Result<Activity, CommandError>>;
+    /// Stop the captured logical execution, including its handoff successors.
+    /// Completion confirms the stop request, not that all cleanup has finished.
+    /// Repeating it never stops a later Turn in the same Session.
+    fn stop(
+        &self,
+        invocation: Invocation,
+    ) -> futures_util::future::BoxFuture<'_, Result<(), CommandError>>;
     /// Check current instance and Session boundaries without submitting work.
     fn validate_authority(&self) -> futures_util::future::BoxFuture<'_, Result<(), CommandError>>;
     fn create_root(
@@ -284,6 +494,11 @@ pub trait Commands: Send + Sync {
         &self,
         operation_id: String,
     ) -> futures_util::future::BoxFuture<'_, Result<Option<WorkspacePatch>, CommandError>>;
+    /// Missing artifacts and artifacts from another Turn are both absent.
+    fn artifact(
+        &self,
+        request: ReadArtifact,
+    ) -> futures_util::future::BoxFuture<'_, Result<Option<ArtifactChunk>, CommandError>>;
     fn event(
         &self,
         operation_id: String,
@@ -301,6 +516,12 @@ pub trait Commands: Send + Sync {
         after: u64,
         through: u64,
     ) -> futures_util::future::BoxFuture<'_, Result<EventPage, CommandError>>;
+    /// Recover access to an existing child using its original creation request.
+    /// Never creates a Session or workspace; current parent/child ceilings still apply.
+    fn restore_child(
+        &self,
+        request: CreateChild,
+    ) -> futures_util::future::BoxFuture<'_, Result<Option<ChildSession>, CommandError>>;
     fn create_child(
         &self,
         request: CreateChild,

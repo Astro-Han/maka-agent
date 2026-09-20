@@ -78,7 +78,7 @@ impl BoundCommands {
                         return Err(Error::Denied);
                     }
                 }
-                Boundary::Profile => return Err(Error::Denied),
+                Boundary::Profile | Boundary::Directory { .. } => return Err(Error::Denied),
             }
         }
         if let Some(id) = self.consent {
@@ -203,6 +203,7 @@ impl BoundCommands {
         let approval = approval.clone();
         let worker = host.clone();
         let grants = self.grants.clone();
+        let namespace = self.namespace.clone();
         let submission_stop = self.submission_stop.clone();
         let (send, receive) = tokio::sync::oneshot::channel();
         host.workers.spawn(async move {
@@ -223,23 +224,45 @@ impl BoundCommands {
                         if submission_stop.is_cancelled() {
                             return Err(Error::Revoked);
                         }
-                        worker
-                            .log
-                            .create_session(&id, &fingerprint, &expected, now()?)
-                            .await
-                            .map_err(storage)?
+                        let record = if request.managed {
+                            worker
+                                .log
+                                .create_managed_session(
+                                    &maka_event_log::sessions::ManagedSession {
+                                        session_id: id.clone(),
+                                        manager: namespace.clone(),
+                                        fingerprint: fingerprint.clone(),
+                                    },
+                                    &expected,
+                                    now()?,
+                                )
+                                .await
+                        } else {
+                            worker
+                                .log
+                                .create_session(&id, &fingerprint, &expected, now()?)
+                                .await
+                        }
+                        .map_err(storage)?;
+                        if worker.catalog.publish_session(&id).await.is_err() {
+                            worker.begin_drain();
+                        }
+                        record
                     }
                 };
+                let manager = worker.log.session_manager(&id).await.map_err(storage)?;
+                if manager.as_ref() != request.managed.then_some(&namespace) {
+                    return Err(Error::Denied);
+                }
                 let current = &record.configuration;
                 if record.archived
                     || current.boundary_revision != 0
                     || current.workspace != expected.workspace
                     || current.permission_mode != expected.permission_mode
-                    || current.target != expected.target
-                    || current.thinking_level != expected.thinking_level
                     || current.tool_mode != expected.tool_mode
                     || current.collaboration_mode != expected.collaboration_mode
                     || current.orchestration_mode != expected.orchestration_mode
+                    || current.instructions != expected.instructions
                     || current.tool_profile != expected.tool_profile
                     || current.bound_tools != expected.bound_tools
                 {

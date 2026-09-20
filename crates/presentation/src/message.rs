@@ -93,10 +93,6 @@ pub struct Message {
     rename_all_fields = "camelCase"
 )]
 pub enum Content {
-    WorkhubCoordination {
-        #[serde(flatten)]
-        record: crate::workhub::CoordinationRecord,
-    },
     User {
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,7 +189,7 @@ impl ToolContent {
                     },
                 },
             ),
-            ToolOutcome::Failed { message } => (
+            ToolOutcome::Failed { message } | ToolOutcome::Unknown { message } => (
                 true,
                 Self::Text {
                     text: message.clone(),

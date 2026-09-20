@@ -17,10 +17,11 @@
  * under the License.
  */
 
-use super::{DiscoveryFailure, DiscoverySnapshot, OriginStatus, QuerySnapshot, ScanError, Source};
+use super::{DiscoveryFailure, OriginStatus, QuerySnapshot, ScanError, Source};
 use crate::SkillDocument;
+use maka_plugins::filesystem::ReadDirectory;
 use maka_runtime::skills::{SkillScope, SkillSource};
-use std::{collections::BTreeSet, path::Path};
+use std::collections::BTreeSet;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug)]
@@ -33,7 +34,7 @@ pub struct BundledSource {
 #[derive(Debug)]
 pub struct SourceCatalog {
     pub bundled: Vec<BundledSource>,
-    pub managed: DiscoverySnapshot,
+    pub managed: QuerySnapshot,
     pub publication: QuerySnapshot,
 }
 impl SourceCatalog {
@@ -89,9 +90,9 @@ pub(super) fn trusted_bundled_hash(id: &str, hash: &str) -> bool {
     id == "computer-use" && hash == maka_runtime::artifact::content_digest(COMPUTER_USE.as_bytes())
 }
 
-pub fn source_catalog(
-    root: &Path,
-    home: Option<&Path>,
+pub async fn source_catalog(
+    root: &ReadDirectory,
+    home: Option<&ReadDirectory>,
     cancellation: &CancellationToken,
 ) -> Result<SourceCatalog, SourceCatalogError> {
     let publication = Source::at(
@@ -101,35 +102,37 @@ pub fn source_catalog(
         SkillSource::Legacy,
         "workspace:legacy",
     );
-    let publication =
-        super::scan_with_origins(&[publication], cancellation).map_err(SourceCatalogError::Scan)?;
+    let publication = super::scan_with_origins(&[publication], cancellation)
+        .await
+        .map_err(SourceCatalogError::Scan)?;
     if let Some(error) = publication
         .discovery
         .diagnostics
         .iter()
-        .find(|d| d.path == root.join("skills"))
+        .find(|d| d.path == root.location().join("skills"))
     {
         return Err(SourceCatalogError::Read(error.reason));
     }
-    catalog(publication, home, cancellation)
+    catalog(publication, home, cancellation).await
 }
 
 /// Governance uses the runtime's discovery precedence, reading workspace body
 /// and installation origin from the same captured directory. No baseline I/O.
-pub fn governance_catalog(
-    cwd: &Path,
-    root: &Path,
-    home: Option<&Path>,
+pub async fn governance_catalog(
+    cwd: &ReadDirectory,
+    root: &ReadDirectory,
+    home: Option<&ReadDirectory>,
     cancellation: &CancellationToken,
 ) -> Result<SourceCatalog, SourceCatalogError> {
     let publication = super::scan_with_origins(&Source::standard(cwd, root, home), cancellation)
+        .await
         .map_err(SourceCatalogError::Scan)?;
-    catalog(publication, home, cancellation)
+    catalog(publication, home, cancellation).await
 }
 
-fn catalog(
+async fn catalog(
     publication: QuerySnapshot,
-    home: Option<&Path>,
+    home: Option<&ReadDirectory>,
     cancellation: &CancellationToken,
 ) -> Result<SourceCatalog, SourceCatalogError> {
     let bundled = vec![BundledSource {
@@ -142,16 +145,18 @@ fn catalog(
     let managed = if let Some(home) = home {
         // The library is its own containment root; aliases may not reach other
         // home content. SKILL.md retains the ordinary nofollow/regular-file gate.
-        let root = home.join(".maka/skill-sources");
+        let root = home.location().join(".maka/skill-sources");
         let source = Source::at(
-            &root,
-            "",
+            home,
+            ".maka/skill-sources",
             SkillScope::Custom,
             SkillSource::Custom,
             "managed",
         );
-        let snapshot = super::scan(&[source], cancellation).map_err(SourceCatalogError::Scan)?;
-        if let Some(error) = snapshot.diagnostics.iter().find(|d| {
+        let snapshot = super::scan_with_origins(&[source], cancellation)
+            .await
+            .map_err(SourceCatalogError::Scan)?;
+        if let Some(error) = snapshot.discovery.diagnostics.iter().find(|d| {
             d.path == root
                 || matches!(
                     d.reason,
@@ -162,7 +167,7 @@ fn catalog(
         }
         snapshot
     } else {
-        DiscoverySnapshot::default()
+        QuerySnapshot::default()
     };
     super::check_cancelled(cancellation).map_err(SourceCatalogError::Scan)?;
     Ok(SourceCatalog {

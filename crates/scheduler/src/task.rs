@@ -86,6 +86,7 @@ pub struct ExecutionTemplate {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<ThinkingLevel>,
+    pub tool_mode: maka_runtime::execution::ToolMode,
     pub permission_mode: PermissionMode,
     pub collaboration_mode: CollaborationMode,
     pub orchestration_mode: BehaviorId,

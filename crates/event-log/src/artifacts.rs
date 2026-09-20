@@ -19,7 +19,6 @@
 
 mod copy;
 mod read;
-pub(crate) use copy::copy_in_transaction;
 mod records;
 use crate::{EventLog, StoreError};
 use maka_runtime::{

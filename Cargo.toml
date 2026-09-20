@@ -18,7 +18,7 @@
 [workspace]
 default-members = ["crates/cli"]
 exclude = ["native/gitoxide-helper", "native/runtime-host-peer", "native/runtime-host-windows-task-launcher", "experiments/windows-sandbox/launcher"]
-members = ["crates/scheduler", "crates/graph", "crates/plugins", "crates/skills", "crates/apply-patch", "crates/cli", "crates/runtime", "crates/event-log", "crates/js-runtime", "crates/runtime-host", "crates/protocol", "crates/model", "crates/transport", "crates/agent", "crates/config", "crates/presentation", "crates/tools", "crates/tool-catalog", "crates/fs-tools", "crates/process", "crates/client-capability", "crates/network"]
+members = ["crates/workhub", "crates/assistant", "crates/scheduler", "crates/graph", "crates/plugins", "crates/skills", "crates/apply-patch", "crates/cli", "crates/runtime", "crates/event-log", "crates/js-runtime", "crates/runtime-host", "crates/protocol", "crates/model", "crates/transport", "crates/agent", "crates/config", "crates/presentation", "crates/tools", "crates/tool-catalog", "crates/fs-tools", "crates/process", "crates/client-capability", "crates/network"]
 resolver = "3"
 
 [workspace.package]
@@ -29,8 +29,10 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+maka-assistant = { path = "crates/assistant" }
 maka-scheduler = { path = "crates/scheduler" }
 maka-graph = { path = "crates/graph" }
+maka-workhub = { path = "crates/workhub" }
 maka-plugins = { path = "crates/plugins" }
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 maka-network = { path = "crates/network" }
@@ -45,6 +47,7 @@ maka-tools = { path = "crates/tools" }
 maka-tool-catalog = { path = "crates/tool-catalog" }
 maka-fs-tools = { path = "crates/fs-tools" }
 cap-std = "4.0.3"
+cap-fs-ext = "4.0.3"
 gix = { version = "=0.87.1", default-features = false, features = ["sha1", "sha256"] }
 imagesize = { version = "=0.15.0", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 maka-runtime = { path = "crates/runtime" }

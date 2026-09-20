@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { importSource, openSource } from './files.js';
+import { importSource, openSource, recoverUser } from './files.js';
 import { UpdatePreview } from './preview.js';
 import type { ClientContext } from '@maka-agent/plugin-sdk/client';
 import {
@@ -216,6 +216,24 @@ export function Manage({ context, call, t }: { context: ClientContext; call: Cal
         </button>
       </nav>
       {failure ? <p role="alert">{failure}</p> : null}
+      {page?.userRecovery ? (
+        <div role="alert">
+          <p>{page.userRecovery}</p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                await recoverUser(context);
+                const result = await call({ kind: 'catalog', view, page: null });
+                return () => accept(result);
+              })
+            }
+          >
+            {t.recover}
+          </button>
+        </div>
+      ) : null}
       {page?.items.length === 0 ? <p>{t.empty}</p> : null}
       <ul>
         {page?.items.map((item) => (

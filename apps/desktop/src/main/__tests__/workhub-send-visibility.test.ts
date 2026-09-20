@@ -22,6 +22,7 @@ import { afterEach, test } from 'node:test';
 import { act, createElement } from 'react';
 import { LocaleProvider } from '@maka/ui';
 import { deferred } from '@maka/core/test-only/async-primitives';
+import { RemoteError } from '@maka-agent/plugin-sdk/client';
 import { RuntimeHostRequestInterruptedError } from '@maka/runtime-host/client';
 import { registerRuntimeHostSessionExecutionIpc, type RuntimeHostSessionExecutionIpcDeps } from '../runtime-host-session-execution-ipc-main.js';
 import type { IpcHandler } from '../ipc-reconnect-policy.js';
@@ -34,7 +35,6 @@ import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 afterEach(cleanupFakeDom);
 
 async function mountController(failFirstRead = false, overrides: Partial<WorkHubServices> = {}, continuation?: WorkHubContinuation) {
-  let hostEpoch = 'host-epoch-1';
   let openCount = 0;
   let onPhase!: (phase: 'pending' | 'ready') => void;
   const { root } = installReactRenderer();
@@ -45,6 +45,8 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
   let earlierLoads = 0;
   let admission = deferred<{ turnId: string }>();
   const requests: Array<Parameters<WorkHubServices['answer']>[1]> = [];
+  const accepted = new Map<string, import('@maka-agent/plugin-sdk/host').ExecutionReceipt>();
+  const cancellations: string[] = [];
   let rootTurn: { turnId: string; runId: string; status: 'running' | 'cancelled' | 'completed' } | undefined;
   const queueMutations: unknown[][] = [];
   const steers: Array<Parameters<WorkHubServices['enqueueMessage']>> = [];
@@ -66,21 +68,35 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
     } },
   } as unknown as RuntimeHostSessionExecutionIpcDeps, ipc);
   const commands = coordinationCommands({
-    get hostEpoch() { return hostEpoch; },
     signal: new AbortController().signal,
     remote: {
       method: (name: string) => async (input: Parameters<WorkHubServices['answer']>[1]) => {
-        if (name === 'answer-receipt') return { ok: true, result: rootTurn?.turnId === input.turnId ? rootTurn : null };
+        const receipt = accepted.get(input.operationId);
+        if (name === 'answer-receipt') return receipt ? {
+          receipt, progress: rootTurn?.turnId === receipt.invocation.turn_id && rootTurn.status !== 'running'
+            ? { state: 'ended', outcome: { kind: 'completed' } } : { state: 'running' },
+        } : null;
+        if (name === 'answer-cancel') {
+          assert.ok(receipt);
+          cancellations.push(input.operationId);
+          if (rootTurn?.turnId === receipt.invocation.turn_id) { rootTurn.status = 'cancelled'; projectExecution(); }
+          return { receipt, progress: { state: 'ended', outcome: { kind: 'cancelled', source: 'test' } } };
+        }
         assert.equal(name, 'answer');
         requests.push(input);
-        try { return { ok: true, result: await admission.promise }; }
+        try {
+          const { turnId } = await admission.promise;
+          const receipt = { invocation: { session_id: 'workhub:coordination', turn_id: turnId, run_id: 'run:' + turnId, invocation_id: 'inv:' + turnId }, messageId: 'user:' + turnId, contentDigest: 'digest' };
+          accepted.set(input.operationId, receipt);
+          return receipt;
+        }
         catch (error) {
           if (error instanceof RuntimeHostRequestInterruptedError) throw error;
-          return { ok: false, error: { code: 'operation_conflict', message: String((error as Error).message) } };
+          throw new RemoteError('invalid_request', String((error as Error).message));
         }
       },
     } as unknown as Parameters<typeof coordinationCommands>[0]['remote'],
-  }, (_sessionId, refs) => [...refs]);
+  }, (_sessionId, refs) => [...refs], 'workhub:coordination');
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!({} as Parameters<IpcHandler>[0], ...args);
 
   const sessionId = JSON.stringify(['host-1', 'workhub-coordination']);
@@ -90,7 +106,6 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
         ...(rootTurn.status === 'running' ? { status: 'running' as const } : { status: rootTurn.status, terminalEventId: 'terminal', abortSource: 'user_stop' }) } : null });
   }
   const services = {
-    get hostEpoch() { return hostEpoch; },
     getSession: async () => ({ id: sessionId, runningTurnIds: [] }),
     listSessions: async () => [],
     modelChoices: async () => [],
@@ -118,6 +133,7 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
     respondToUserForm: async () => {},
     respondToUserQuestion: async () => {},
     answer: commands.answer,
+    cancelAnswer: commands.cancelAnswer,
     stop: async (target: string, turnId: string) => {
       const result = await invoke('sessions:stop', target, { source: 'stop_button', expectedTurnId: turnId }) as DesktopSessionStopResult;
       return result?.kind === 'interrupted' ? result.retractedMessageIds : undefined;
@@ -135,12 +151,12 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
   return {
     get submissions() { return submissions; },
     get controller() { return controller; }, get openCount() { return openCount; },
-    reconnect(epoch = hostEpoch) { hostEpoch = epoch; onPhase('pending'); onPhase('ready'); },
+    reconnect() { onPhase('pending'); onPhase('ready'); },
     complete(turnId: string) { rootTurn = { turnId, runId: `run:${turnId}`, status: 'completed' }; projectExecution(); },
     onSteer(handler: typeof onSteer) { onSteer = handler; },
     queueMutations, steers, setSteerResult(value: typeof steerResult) { steerResult = value; },
     setStopRetractions(ids: string[]) { stopRetractions = ids; },
-    sessionId, requests, get admission() { return admission; }, interrupts,
+    sessionId, requests, accepted, cancellations, get admission() { return admission; }, interrupts,
     resetAdmission() { admission = deferred<{ turnId: string }>(); },
     admit(turnId: string) { rootTurn = { turnId, runId: `run:${turnId}`, status: 'running' }; projectExecution(); },
     loseObservation() { projectExecution(false); },
@@ -179,7 +195,7 @@ test('WorkHub model and thinking selection share versioned saves and reject stal
     configureModel: async (_id, input) => {
       requests.push(input);
       if (failSave) throw new Error('configuration failed');
-      snapshot = { ...snapshot, model: input.modelTarget.model, thinkingLevel: input.thinkingLevel ?? undefined, revision: snapshot.revision + 1 };
+      snapshot = { ...snapshot, model: input.target.model.model, thinkingLevel: input.target.thinkingLevel ?? undefined, revision: snapshot.revision + 1 };
       return { kind: 'committed', session: snapshot } as unknown as Awaited<ReturnType<WorkHubServices['configureModel']>>;
     },
   });
@@ -220,7 +236,7 @@ test('WorkHub model and thinking selection share versioned saves and reject stal
   await act(async () => { await h.controller.changeThinkingLevel('high'); });
   assert.equal(h.controller.session?.thinkingLevel, 'high');
   assert.equal(requests.at(-1)?.expectedRevision, 3);
-  assert.equal(requests.at(-1)?.modelTarget.model, 'C', 'thinking changes preserve model identity');
+  assert.equal(requests.at(-1)?.target.model.model, 'C', 'thinking changes preserve model identity');
   failSave = true;
   await act(async () => { await h.controller.changeThinkingLevel('low'); });
   assert.equal(h.controller.session?.thinkingLevel, 'high', 'failed writes retain the saved level');
@@ -228,7 +244,7 @@ test('WorkHub model and thinking selection share versioned saves and reject stal
   assert.equal(h.controller.configuringModel, false);
   failSave = false;
   await act(async () => { await h.controller.changeThinkingLevel(undefined); });
-  assert.equal(requests.at(-1)?.thinkingLevel, null, 'default explicitly clears the stored override');
+  assert.equal(requests.at(-1)?.target.thinkingLevel, undefined, 'default explicitly clears the stored override');
   assert.equal(h.controller.session?.thinkingLevel, undefined);
   await act(async () => { await h.controller.changeThinkingLevel('high'); });
   await act(async () => { await h.controller.changeModel({ llmConnectionId: 'connection', llmConnectionSlug: 'provider', model: 'D' }); });
@@ -250,304 +266,100 @@ test('WorkHub stops presenting execution on observation loss while retaining the
   assert.deepEqual(h.interrupts, [{ sessionId: h.sessionId, turnId: 'running-turn', runId: 'run:running-turn' }]);
 });
 
-test('WorkHub shows the submitted prompt before admission and keeps it until its durable user record arrives', async () => {
-  const h = await mountController();
-  await act(() => {
-    h.emit({ type: 'text_delta', id: 'previous-output', turnId: 'previous-turn', messageId: 'previous-answer', ts: 1, text: 'Earlier answer' });
-    h.emit({ type: 'abort', id: 'previous-abort', turnId: 'previous-turn', ts: 2, reason: 'user_stop' });
-  });
-  assert.ok(h.controller.liveTurn?.terminal);
-  const text = '给我改成浅色主题';
-  const attachments: AttachmentRef[] = [{ kind: 'doc', name: 'brief.txt', mimeType: 'text/plain', bytes: 4, ref: { kind: 'workspace_file', relativePath: 'brief.txt' } }];
-  const followed: string[] = [];
-  const unsubscribe = h.controller.viewportNavigation.subscribe((id) => followed.push(id));
-  let sent!: Promise<boolean>;
-  await act(async () => { sent = h.controller.send(text, attachments); });
-  assert.deepEqual(h.controller.transientMessages.map((message) => message.text), [text]);
-  assert.deepEqual(h.controller.transientMessages[0]!.attachments, attachments);
-  assert.equal(h.requests.length, 1);
-  assert.deepEqual(followed, [h.sessionId]);
-  const turnId = h.requests[0]!.turnId;
-  assert.equal(h.controller.liveTurn?.turnId, turnId, 'waiting feedback starts before admission');
-  assert.equal(h.controller.busy, true);
-  await act(async () => { h.admission.resolve({ turnId }); assert.equal(await sent, true); });
-  assert.equal(h.controller.transientMessages.length, 1, 'an acknowledgement is not a durable message');
-  await act(async () => {
-    h.publish([{ type: 'assistant', id: 'reply', turnId, text: 'Working on it', ts: 2, modelId: 'fixture' }]);
-  });
-  assert.equal(h.controller.transientMessages.length, 1, 'assistant delivery cannot erase the user prompt');
-  await act(async () => {
-    h.publish([{ type: 'user', id: 'canonical-user-id', turnId, text, attachments, ts: 1 }]);
-  });
-  assert.equal(h.controller.transientMessages.length, 0);
-  assert.deepEqual(h.controller.transcript.messages.map((message) => message.id), ['canonical-user-id']);
-  unsubscribe();
-});
 
-test('WorkHub hands transcript and live content off together when publication commits', async () => {
-  const h = await mountController();
-  let sent!: Promise<boolean>;
-  await act(() => { sent = h.controller.send('handoff prompt', []); });
-  const turnId = h.requests[0]!.turnId;
-  await act(async () => { h.admission.resolve({ turnId }); await sent; });
-  await act(() => h.emit({ type: 'text_delta', id: 'delta', turnId, messageId: 'answer', ts: 1, text: 'Answer' }));
-  const messages: StoredMessage[] = [
-    { type: 'user', id: 'user', turnId, text: 'handoff prompt', ts: 1 },
-    { type: 'assistant', id: 'answer', turnId, text: 'Answer', ts: 2, modelId: 'fixture' },
-  ];
-  await act(() => h.publish(messages));
-  await act(() => h.emit({ type: 'complete', id: 'done', turnId, ts: 3, stopReason: 'end_turn' }));
-  await act(() => h.controller.streamingSettled('answer'));
-  assert.deepEqual(h.controller.transcript.messages, messages);
-  assert.equal(h.controller.transientMessages.length, 0);
-  assert.ok(!h.controller.liveTurn?.steps.some((step) => step.stepId === 'answer'));
-});
-
-test('WorkHub marks a failed submission and preserves its retry identity', async () => {
-  const h = await mountController();
-  let sent!: Promise<boolean>;
-  await act(async () => { sent = h.controller.send('retry this prompt', []); });
-  const turnId = h.requests[0]!.turnId;
-  await act(async () => { h.admission.reject(new Error('admission rejected')); assert.equal(await sent, false); });
-  assert.equal(h.controller.transientMessages.length, 1);
-  assert.equal(h.controller.turnStates[turnId], 'failed');
-  assert.equal(h.controller.error, 'admission rejected');
-  assert.equal(h.controller.liveTurn, undefined, 'rejected admission retires the waiting feedback');
-  assert.equal(h.controller.busy, false);
-  await act(async () => { assert.equal(await h.controller.send('retry this prompt', []), false); });
-  assert.equal(h.requests[1]!.turnId, turnId);
-  assert.equal(h.controller.transientMessages.length, 1);
-});
-
-test('a lost admission response cannot erase confirmed WorkHub activity', async () => {
-  const h = await mountController();
-  let sent!: Promise<boolean>;
-  await act(async () => { sent = h.controller.send('keep the real activity', []); });
-  const turnId = h.requests[0]!.turnId;
-  await act(() => { h.admit(turnId); h.emit({ type: 'text_delta', id: 'first-output', turnId, messageId: 'answer', ts: 1, text: 'Working' }); });
-  await act(async () => { h.admission.reject(new Error('response lost')); assert.equal(await sent, false); });
-  assert.equal(h.controller.liveTurn?.turnId, turnId);
-  assert.equal(h.controller.liveTurn?.unconfirmed, undefined);
-  assert.equal(h.controller.busy, true);
-});
-
-
-test('WorkHub carries Stop through deferred or uncertain admission for the original Turn', async () => {
-  for (const order of ['stop-before-response', 'stop-after-response', 'response-before-observation', 'lost-response', 'observation-during-stop', 'rejected', 'terminal'] as const) {
+test('Host receipts replace optimistic identities without duplicating already-published messages', async () => {
+  for (const publicationFirst of [false, true]) {
     const h = await mountController();
-    let sent!: Promise<boolean>;
-    await act(async () => { sent = h.controller.send('stop this attempt', []); });
-    const turnId = h.requests[0]!.turnId;
-    if (order === 'stop-after-response') {
-      await act(async () => h.admit(turnId));
-      await act(async () => { h.admission.resolve({ turnId }); await sent; });
-    } else if (order === 'lost-response') {
-      await act(async () => {
-        h.admission.reject(new RuntimeHostRequestInterruptedError('workhub.coordination.answer', 'control', 'dispatched', 'connection_lost'));
-        assert.equal(await sent, true);
-      });
-      assert.equal(h.controller.busy, true, 'an unknown outcome still exposes Stop');
+    let sending!: Promise<boolean>;
+    await act(async () => { sending = h.controller.send('original payload', []); });
+    const input = h.requests[0]!;
+    assert.equal(h.controller.liveTurn?.turnId, input.operationId);
+    assert.equal(h.controller.transientMessages[0]?.id, input.operationId);
+    assert.equal(h.controller.pendingTurnId, undefined, 'a local operation is not a Host Turn');
+    const turnId = 'host-assigned';
+    const publish = () => h.publish([{ type: 'user', id: 'user:' + turnId, turnId, text: input.text, ts: 1 }]);
+    if (publicationFirst) await act(publish);
+    await act(async () => { h.admit(turnId); h.admission.resolve({ turnId }); await sending; });
+    assert.equal(h.controller.pendingTurnId, turnId);
+    assert.equal(h.controller.liveTurn?.turnId, turnId);
+    if (!publicationFirst) {
+      assert.equal(h.controller.transientMessages[0]?.id, 'user:' + turnId);
+      await act(publish);
     }
-    await act(async () => {
-      const stopped = h.controller.stop();
-      if (order === 'observation-during-stop') {
-        h.admit(turnId);
-        h.emit({ type: 'text_delta', id: 'first-output', turnId, messageId: 'answer', ts: 1, text: 'Working' });
-      }
-      await stopped;
-    });
-    if (order === 'rejected') {
-      await act(async () => { h.admission.reject(new Error('admission rejected')); assert.equal(await sent, false); });
-      assert.equal(h.controller.stopPending, false);
-      assert.equal(h.controller.busy, false);
-      assert.deepEqual(h.interrupts, []);
-      // Retrying a rejected send keeps identity but must not inherit its Stop.
-      h.resetAdmission();
-      let retried!: Promise<boolean>;
-      await act(async () => { retried = h.controller.send('stop this attempt', []); });
-      assert.equal(h.requests[1]!.turnId, turnId);
-      await act(async () => h.admit(turnId));
-      await act(async () => {
-        h.emit({ type: 'text_delta', id: 'retry-output', turnId, messageId: 'retry-answer', ts: 2, text: 'Retrying' });
-        h.admission.resolve({ turnId });
-        assert.equal(await retried, true);
-      });
-      assert.deepEqual(h.interrupts, [], 'a successful retry cannot inherit a rejected attempt’s Stop');
-    } else if (order === 'terminal') {
-      await act(async () => h.emit({ type: 'complete', id: 'done', turnId, ts: 1, stopReason: 'end_turn' }));
-      await act(async () => { h.admission.resolve({ turnId }); await sent; });
-      assert.equal(h.controller.stopPending, false);
-      assert.equal(h.controller.busy, false);
-      assert.deepEqual(h.interrupts, []);
-    } else {
-      if (order === 'response-before-observation') {
-        await act(async () => { h.admission.resolve({ turnId }); await sent; });
-        assert.deepEqual(h.interrupts, [], 'the response can precede the observer root');
-      }
-      if (order === 'stop-before-response' || order === 'lost-response' || order === 'response-before-observation') {
-        assert.deepEqual(h.interrupts, []);
-        await act(async () => h.admit('different-turn'));
-        await act(async () => h.emit({ type: 'text_delta', id: 'other', turnId: 'different-turn', messageId: 'other-answer', ts: 1, text: 'Other work' }));
-        assert.deepEqual(h.interrupts, []);
-        await act(async () => h.admit(turnId));
-        if (order !== 'stop-before-response')
-          await act(async () => h.emit({ type: 'text_delta', id: 'first-output', turnId, messageId: 'answer', ts: 2, text: 'Working' }));
-      }
-      if (order === 'stop-before-response' || order === 'observation-during-stop') {
-        await act(async () => { h.admission.resolve({ turnId }); await sent; });
-      }
-      assert.deepEqual(h.interrupts, [{ sessionId: h.sessionId, turnId, runId: `run:${turnId}` }], order);
-      assert.equal(h.controller.stopPending, false);
-      await act(async () => h.admit('later-turn'));
-      await act(async () => h.emit({ type: 'text_delta', id: 'later', turnId: 'later-turn', messageId: 'later-answer', ts: 3, text: 'Later work' }));
-      assert.equal(h.interrupts.length, 1, 'the intent cannot transfer to a later Turn');
-    }
+    assert.deepEqual(h.controller.transientMessages, []);
     cleanupFakeDom();
   }
 });
 
-
-test('an unknown WorkHub submission converges through the original Host admission and payload', async () => {
-  for (const outcome of ['not_admitted', 'running', 'completed', 'replay'] as const) {
-    const h = await mountController();
-    const attachments: AttachmentRef[] = [{ kind: 'doc', name: 'brief.txt', mimeType: 'text/plain', bytes: 4, ref: { kind: 'workspace_file', relativePath: 'brief.txt' } }];
-    let sent!: Promise<boolean>;
-    await act(async () => { sent = h.controller.send('original payload', attachments); });
-    const original = h.requests[0]!;
-    await act(async () => {
-      h.admission.reject(new RuntimeHostRequestInterruptedError('workhub.coordination.answer', 'command', 'dispatched', 'connection_lost'));
-      assert.equal(await sent, true);
-      await h.controller.stop();
-      h.publish([]);
-    });
-    assert.equal(h.controller.busy, true, 'absence in the same Host is not rejection');
-    await act(async () => {
-      h.emit({ type: 'text_delta', id: 'other-output', turnId: 'other-turn', messageId: 'other-answer', ts: 1, text: 'Other work' });
-      h.emit({ type: 'complete', id: 'other-completed', turnId: 'other-turn', ts: 2, stopReason: 'end_turn' });
-    });
-    assert.equal(h.controller.busy, true, 'another Turn finishing cannot settle the original unknown submission');
-    assert.equal(h.controller.stopPending, true);
-    assert.equal(h.controller.canRetry, true);
-    const submitted = h.requests.length;
-    const submissions = h.submissions;
-    await act(async () => {
-      if (outcome === 'running') h.admit(original.turnId);
-      if (outcome === 'completed') h.complete(original.turnId);
-    });
-    if (outcome === 'replay') h.resetAdmission();
-    await act(async () => h.reconnect(outcome === 'replay' ? undefined : 'host-epoch-2'));
-    if (outcome === 'replay') {
-      assert.deepEqual(h.requests.at(-1), original, 'replay keeps the original Turn, text and attachments');
-      assert.equal(h.requests.length, submitted + 1);
-      await act(async () => {
-        h.admit(original.turnId);
-        h.admission.resolve({ turnId: original.turnId });
-      });
-    } else assert.equal(h.requests.length, submitted, 'admission lookup must not send a new request after Host replacement');
-    assert.equal(h.submissions, submissions, 'unknown-admission recovery is not a new submission');
-    assert.equal(h.controller.stopPending, false);
-    if (outcome === 'not_admitted' || outcome === 'completed') {
-      assert.equal(h.controller.busy, false);
-      assert.equal(h.interrupts.length, 0);
-    } else {
-      assert.deepEqual(h.interrupts.map(({ turnId }) => turnId), [original.turnId]);
-    }
-    if (outcome === 'not_admitted') {
-      h.resetAdmission();
-      await act(async () => h.controller.retry());
-      assert.equal(h.submissions, submissions + 1, 'explicit rejected Retry crosses the shared submission boundary');
-      assert.deepEqual(h.requests.at(-1), original, 'explicit Retry retains the text, attachments and unadmitted Turn identity');
-      await act(async () => {
-        h.admit(original.turnId);
-        h.admission.resolve({ turnId: original.turnId });
-      });
-      assert.equal(h.interrupts.length, 0, 'explicit Retry cannot inherit the retired Stop intent');
-      await act(async () => { h.complete(original.turnId); h.emit({ type: 'complete', id: 'retry-completed', turnId: original.turnId, ts: 2, stopReason: 'end_turn' }); });
-      h.resetAdmission();
-      let next!: Promise<boolean>;
-      await act(async () => { next = h.controller.send('a different message', []); });
-      const nextTurn = h.requests.at(-1)!.turnId;
-      assert.notEqual(nextTurn, original.turnId);
-      await act(async () => { h.admit(nextTurn); h.admission.resolve({ turnId: nextTurn }); await next; });
-      assert.equal(h.interrupts.length, 0, 'an unadmitted attempt cannot leave Stop on a later Turn');
-    }
-    cleanupFakeDom();
-  }
-});
-
-test('Client replacement retains uncertain identities and cannot clear a newer submission with a late reply', async () => {
+test('uncertain admission keeps its operation across replacement and Stop waits for the exact receipt', async () => {
   const continuation: WorkHubContinuation = {};
   const first = await mountController(false, {}, continuation);
   let sending!: Promise<boolean>;
-  await act(async () => { sending = first.controller.send('original', []); });
+  await act(async () => { sending = first.controller.send('original payload', []); });
   const original = first.requests[0]!;
-  assert.equal(continuation.answer?.input.turnId, original.turnId);
-  assert.equal(continuation.answer?.input.originHostEpoch, 'host-epoch-1');
+  await act(async () => { await first.controller.stop(); });
+  assert.deepEqual(first.interrupts, []);
+  assert.deepEqual(first.cancellations, [], 'there is no accepted operation to control yet');
   cleanupFakeDom();
-
   const next = await mountController(false, {}, continuation);
-  assert.equal(next.controller.busy, true);
-  await act(async () => next.reconnect('host-epoch-2'));
-  assert.equal(next.controller.busy, false);
-  assert.equal(next.requests.length, 0, 'an absent cross-epoch receipt cannot dispatch');
-  let newer!: Promise<boolean>;
-  await act(async () => { newer = next.controller.send('new request', []); });
-  const fresh = next.requests[0]!;
-  await act(async () => { first.admission.resolve({ turnId: original.turnId }); await sending; });
-  assert.equal(continuation.answer?.input.turnId, fresh.turnId, 'retired completion cannot erase a newer identity');
-  await act(async () => { next.admission.resolve({ turnId: fresh.turnId }); await newer; });
-  assert.equal(continuation.answer, undefined);
-  await act(async () => { next.admit(fresh.turnId); });
+  await act(async () => { next.reconnect(); });
+  assert.deepEqual(next.requests, [original], 'an absent receipt retries the same operation, including after restart');
   await act(async () => {
-    next.setSteerResult('unknown');
-    assert.equal(await next.controller.send('queued', []), false);
+    first.admission.resolve({ turnId: 'host-assigned' });
+    await sending;
   });
-  const queued = next.steers[0]!;
-  assert.equal(continuation.queued?.messageId, queued[1]);
-  cleanupFakeDom();
-
-  const last = await mountController(false, {}, continuation);
-  assert.equal(last.controller.canRetry, true);
-  assert.equal(last.controller.transientMessages[0]?.text, 'queued');
-  await act(async () => { last.reconnect('host-epoch-3'); last.controller.retry(); });
-  assert.deepEqual(last.steers[0], queued, 'queue retries retain the original Turn, message, payload and Host epoch');
-  assert.equal(last.requests.length, 0);
-  assert.equal(continuation.queued, undefined);
+  assert.equal(continuation.answer?.stop, true, 'a retired Client cannot clear its successor intent');
+  await act(async () => {
+    next.admit('unrelated');
+    next.admission.resolve({ turnId: 'host-assigned' });
+  });
+  assert.deepEqual(next.cancellations, [original.operationId]);
+  assert.deepEqual(next.interrupts, [], 'Stop cannot transfer to whichever Turn is now visible');
+  assert.equal(continuation.answer, undefined);
+  assert.equal(next.controller.stopPending, false);
 });
 
-test('Retry reopens a failed initial WorkHub read after Session resolution', async () => {
-  const h = await mountController(true);
-  assert.ok(h.controller.sessionId);
-  assert.equal(h.controller.transcript.ready, false);
-  assert.equal(h.controller.canRetry, true);
-  let sent!: Promise<boolean>;
-  await act(async () => { sent = h.controller.send('retain this in-flight message', []); });
-  const turnId = h.requests[0]!.turnId;
-  await act(async () => h.controller.retry());
-  assert.equal(h.openCount, 2);
-  assert.equal(h.submissions, 1, 'read recovery does not resubmit');
-  assert.equal(h.controller.liveTurn?.turnId, turnId);
-  assert.equal(h.controller.transientMessages[0]?.text, 'retain this in-flight message');
-  assert.equal(h.controller.transcript.ready, true);
-  assert.equal(h.controller.error, undefined);
-  await act(async () => { h.admission.resolve({ turnId }); await sent; });
+test('rejected input keeps retry identity, while lost replies recover without another user submission', async () => {
+  const h = await mountController();
+  let sending!: Promise<boolean>;
+  await act(async () => { sending = h.controller.send('original', []); });
+  const original = h.requests[0]!;
+  await act(async () => { h.admission.reject(new Error('rejected')); assert.equal(await sending, false); });
+  assert.equal(h.controller.busy, false);
+  assert.equal(h.controller.turnStates[original.operationId], 'failed');
+  h.resetAdmission();
+  await act(async () => { sending = h.controller.send('original', []); });
+  assert.deepEqual(h.requests.at(-1), original);
+  await act(async () => {
+    h.admission.reject(new RuntimeHostRequestInterruptedError('plugin.remote', 'command', 'dispatched', 'connection_lost'));
+    assert.equal(await sending, true);
+  });
+  assert.equal(h.controller.busy, true);
+  assert.equal(await h.controller.send('different', []), false, 'unknown acceptance blocks a new submission');
+  const accepted = { invocation: { session_id: 'workhub:coordination', turn_id: 'canonical', run_id: 'run', invocation_id: 'inv' }, messageId: 'user:canonical', contentDigest: 'digest' };
+  h.accepted.set(original.operationId, accepted);
+  const submissions = h.submissions;
+  await act(async () => { h.complete('canonical'); h.reconnect(); });
+  assert.equal(h.submissions, submissions);
+  assert.equal(h.controller.busy, false);
+  assert.equal(h.controller.pendingTurnId, 'canonical');
+  assert.deepEqual(h.cancellations, []);
 });
-
 
 test('WorkHub steering keeps the current Turn and Stop authority and reconciles only its own durable message', async () => {
   const h = await mountController();
   let sent!: Promise<boolean>;
   await act(async () => { sent = h.controller.send('original request', []); });
-  const turnId = h.requests[0]!.turnId;
+  const turnId = 'host-assigned';
   await act(async () => h.admit(turnId));
   await act(async () => { h.admission.resolve({ turnId }); await sent; });
   const attachments: AttachmentRef[] = [{ kind: 'doc', name: 'brief.txt', mimeType: 'text/plain', bytes: 4, ref: { kind: 'workspace_file', relativePath: 'brief.txt' } }];
   await act(async () => { assert.equal(await h.controller.send('change direction', attachments, 'steer'), true); });
   assert.equal(h.requests.length, 1, 'steering must not start or queue another answer');
   assert.equal(h.controller.liveTurn?.turnId, turnId);
-  assert.deepEqual(h.steers[0]!.slice(2), ['change direction', attachments, 'current_turn', turnId, 'host-epoch-1']);
+  assert.deepEqual(h.steers[0]!.slice(2), ['change direction', attachments, 'current_turn', turnId]);
   const messageId = h.steers[0]![1];
-  const original: StoredMessage = { type: 'user', id: 'original-canonical-id', turnId, text: 'original request', ts: 1 };
+  const original: StoredMessage = { type: 'user', id: 'user:' + turnId, turnId, text: 'original request', ts: 1 };
   await act(() => h.publish([original]));
   assert.deepEqual(h.controller.transientMessages.map((message) => message.id), [messageId],
     'an admitted response and unrelated transcript evidence must keep the submission visible');
@@ -670,7 +482,7 @@ test('WorkHub defaults to follow-up and moves each message into its admitted suc
     assert.equal(await h.controller.send('second follow-up', []), true);
   });
   assert.deepEqual(h.steers.map((input) => input.slice(2)), [
-    ['first follow-up', attachments, 'next_turn', 'active-turn', 'host-epoch-1'], ['second follow-up', [], 'next_turn', 'active-turn', 'host-epoch-1'],
+    ['first follow-up', attachments, 'next_turn', 'active-turn'], ['second follow-up', [], 'next_turn', 'active-turn'],
   ]);
   assert.equal(h.requests.length, 0);
   assert.equal(h.controller.liveTurn?.turnId, 'active-turn');
@@ -776,7 +588,7 @@ test('Stop retires only Host-confirmed queued messages even without retraction e
     if (origin === 'local') {
       let sent!: Promise<boolean>;
       await act(async () => { sent = h.controller.send('original request', []); });
-      turnId = h.requests[0]!.turnId;
+      turnId = 'host-assigned';
       await act(async () => h.admit(turnId));
       await act(async () => { h.admission.resolve({ turnId }); await sent; });
     } else {
@@ -794,7 +606,7 @@ test('Stop retires only Host-confirmed queued messages even without retraction e
     h.setStopRetractions(['steering', 'followup']);
     await act(async () => { await h.controller.stop(); });
     assert.deepEqual(h.controller.messageQueue.entries.map((entry) => entry.messageId), ['retained']);
-    assert.deepEqual(h.controller.transientMessages.filter((message) => message.id !== turnId), []);
+    assert.deepEqual(h.controller.transientMessages.filter((message) => message.id !== 'user:' + turnId), []);
     assert.equal(h.controller.stopPending, false);
     cleanupFakeDom();
   }

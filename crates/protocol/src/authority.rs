@@ -105,8 +105,6 @@ impl Operation {
                 | Self::RuntimeResourceQuery
                 | Self::RuntimeResourceStart
                 | Self::RuntimeResourceStop
-                | Self::ScheduledTaskMutate
-                | Self::ScheduledTaskQuery
                 | Self::SessionBranchCreate
                 | Self::SessionCatalogQuery
                 | Self::SessionConfigurationUpdate
@@ -142,13 +140,6 @@ impl Operation {
                 | Self::TurnStop
                 | Self::UsageQuery
                 | Self::WebSearchExecute
-                | Self::WorkhubCoordinationAnswer
-                | Self::WorkhubCoordinationActFromTurn
-                | Self::WorkhubCoordinationCandidates
-                | Self::WorkhubCoordinationConfigureModel
-                | Self::WorkhubCoordinationQuery
-                | Self::WorkhubCoordinationResolve
-                | Self::WorkhubCoordinationSelectAndDelegate
         )
     }
 }

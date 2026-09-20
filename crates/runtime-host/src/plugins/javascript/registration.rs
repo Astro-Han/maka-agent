@@ -61,14 +61,13 @@ pub(super) enum Registration {
     },
     #[serde(rename_all = "camelCase")]
     Tool {
-        name: String,
-        description: String,
-        input_schema: Value,
+        #[serde(flatten)]
+        definition: Tool,
         callback: u32,
-        #[serde(default)]
-        direct_only: bool,
-        #[serde(default)]
-        semantics: Semantics,
+    },
+    ToolGroup {
+        tools: Vec<Tool>,
+        callback: u32,
     },
     Section {
         #[serde(default)]
@@ -100,6 +99,51 @@ pub(super) enum Semantics {
     Parallel,
     ExclusiveStep,
     FinishTurn,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct Tool {
+    pub name: String,
+    description: String,
+    input_schema: Value,
+    #[serde(default)]
+    direct_only: bool,
+    #[serde(default)]
+    semantics: Semantics,
+    #[serde(default)]
+    always_visible: bool,
+}
+impl Tool {
+    fn registration(
+        self,
+        handler: Arc<dyn maka_runtime::tools::ToolPreparer>,
+    ) -> Result<PluginTool, String> {
+        let tool = PluginTool::new(ToolRegistration {
+            definition: ToolDefinition {
+                name: self.name,
+                description: self.description,
+                input_schema: self.input_schema,
+            },
+            nesting: if self.direct_only {
+                ToolNesting::DirectOnly
+            } else {
+                ToolNesting::Nestable
+            },
+            semantics: match self.semantics {
+                Semantics::Parallel => ToolSemantics::Parallel,
+                Semantics::ExclusiveStep => ToolSemantics::ExclusiveStep,
+                Semantics::FinishTurn => ToolSemantics::FinishTurn,
+            },
+            handler: ToolHandler::Prepared(handler),
+        })
+        .map_err(super::message)?;
+        Ok(if self.always_visible {
+            tool.always_visible()
+        } else {
+            tool
+        })
+    }
 }
 
 pub(super) fn stage(
@@ -218,41 +262,44 @@ pub(super) fn stage_entries(
                     .map_err(super::message)?;
             }
             Registration::Tool {
-                name,
-                description,
-                input_schema,
+                definition,
                 callback,
-                direct_only,
-                semantics,
             } => {
                 validate_callback(callback)?;
-                let tool = PluginTool::new(ToolRegistration {
-                    definition: ToolDefinition {
-                        name: name.clone(),
-                        description,
-                        input_schema,
-                    },
-                    nesting: if direct_only {
-                        ToolNesting::DirectOnly
-                    } else {
-                        ToolNesting::Nestable
-                    },
-                    semantics: match semantics {
-                        Semantics::Parallel => ToolSemantics::Parallel,
-                        Semantics::ExclusiveStep => ToolSemantics::ExclusiveStep,
-                        Semantics::FinishTurn => ToolSemantics::FinishTurn,
-                    },
-                    handler: ToolHandler::Prepared(Arc::new(callbacks::Tool {
-                        callback: Arc::new(callbacks::Callback {
-                            module: module.clone(),
-                            id: callback,
-                            calls: calls.clone(),
-                        }),
-                        name: name.clone(),
-                    })),
-                })
-                .map_err(super::message)?;
-                staged.insert(name, tool).map_err(super::message)?;
+                let name = definition.name.clone();
+                let handler = Arc::new(callbacks::Tool {
+                    callback: Arc::new(callbacks::Callback {
+                        module: module.clone(),
+                        id: callback,
+                        calls: calls.clone(),
+                    }),
+                    name: name.clone(),
+                });
+                staged
+                    .insert(name, definition.registration(handler)?)
+                    .map_err(super::message)?;
+            }
+            Registration::ToolGroup { tools, callback } => {
+                validate_callback(callback)?;
+                if tools.is_empty() || tools.len() > 128 {
+                    return Err("invalid tool binding group size".into());
+                }
+                let names = tools.iter().map(|tool| tool.name.clone()).collect();
+                let provider = Arc::new(super::binding::Provider {
+                    callback: Arc::new(callbacks::Callback {
+                        module: module.clone(),
+                        id: callback,
+                        calls: calls.clone(),
+                    }),
+                    names,
+                });
+                for definition in tools {
+                    let name = definition.name.clone();
+                    let tool = definition
+                        .registration(provider.clone())?
+                        .with_binding(provider.clone());
+                    staged.insert(name, tool).map_err(super::message)?;
+                }
             }
             Registration::Section {
                 format,
@@ -322,22 +369,27 @@ pub(super) fn withdraw(
     publisher: &maka_plugins::contributions::Publisher,
     context: &maka_plugins::fiber::Context,
     kind: Kind,
-    name: &str,
+    names: &[String],
 ) -> Result<(), maka_plugins::Error> {
     match kind {
-        Kind::Behavior => publisher.withdraw::<maka_plugins::session::SessionBehavior>(name),
-        Kind::InputPreparation => publisher.withdraw::<maka_plugins::input::InputPreparation>(name),
+        Kind::Behavior => publisher.withdraw_many::<maka_plugins::session::SessionBehavior>(names),
+        Kind::InputPreparation => {
+            publisher.withdraw_many::<maka_plugins::input::InputPreparation>(names)
+        }
         Kind::RemoteMethod | Kind::RemoteStream => {
             let package = context.identity()?.package_id;
-            publisher.withdraw::<maka_plugins::remote::Endpoint>(&maka_plugins::remote::key(
-                &package, name,
-            )?)
+            publisher.withdraw_many::<maka_plugins::remote::Endpoint>(
+                &names
+                    .iter()
+                    .map(|name| maka_plugins::remote::key(&package, name))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
         }
-        Kind::Executor => publisher.withdraw::<maka_plugins::executor::Executor>(name),
-        Kind::Tool => publisher.withdraw::<PluginTool>(name),
-        Kind::Section => publisher.withdraw::<prompt::Section>(name),
-        Kind::Variable => publisher.withdraw::<prompt::Variable>(name),
-        Kind::Context => publisher.withdraw::<prompt::DynamicContext>(name),
+        Kind::Executor => publisher.withdraw_many::<maka_plugins::executor::Executor>(names),
+        Kind::Tool => publisher.withdraw_many::<PluginTool>(names),
+        Kind::Section => publisher.withdraw_many::<prompt::Section>(names),
+        Kind::Variable => publisher.withdraw_many::<prompt::Variable>(names),
+        Kind::Context => publisher.withdraw_many::<prompt::DynamicContext>(names),
     }
 }
 fn provider(

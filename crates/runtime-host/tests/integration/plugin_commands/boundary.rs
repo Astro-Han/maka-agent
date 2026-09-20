@@ -106,6 +106,7 @@ pub(super) async fn verify(
         boundaries[0].boundary_revision
     );
     let request = CreateRoot {
+        managed: true,
         operation_id: "frozen-root".into(),
         name: "Scheduled run".into(),
         settings: maka_plugins::execution::RootSettings {
@@ -154,6 +155,32 @@ pub(super) async fn verify(
         .unwrap();
     let root = roots.create_root(request.clone()).await.unwrap();
     assert_eq!(roots.create_root(request.clone()).await.unwrap(), root);
+    let current = roots.session(root.session_id.clone()).await.unwrap();
+    let configured = roots
+        .configure(maka_plugins::execution::Configure {
+            session_id: root.session_id.clone(),
+            expected_revision: current.revision,
+            target: current.target.clone(),
+        })
+        .await
+        .unwrap();
+    let maka_plugins::execution::Configured::Committed { session } = configured else {
+        panic!("configuration CAS rejected the current revision");
+    };
+    assert!(session.revision >= current.revision);
+    // Creation's immutable receipt identifies the original intent; it must not
+    // forbid a later authorized model selection from restoring the same root.
+    assert_eq!(roots.create_root(request.clone()).await.unwrap(), root);
+    assert!(matches!(
+        roots
+            .configure(maka_plugins::execution::Configure {
+                session_id: "foreign".into(),
+                expected_revision: session.revision,
+                target: current.target,
+            })
+            .await,
+        Err(CommandError::Denied)
+    ));
     assert!(matches!(
         roots
             .create_root(CreateRoot {
@@ -191,6 +218,30 @@ pub(super) async fn verify(
         "{queried}"
     );
     assert_eq!(roots.boundaries().unwrap().len(), 1);
+    let changed = peer.rpc("session.configuration.update", json!({
+        "sessionId": root.session_id, "expectedRevision": queried["result"]["session"]["revision"],
+        "patch": { "permissionMode": "bypass" }
+    })).await;
+    assert_eq!(
+        changed["ok"], false,
+        "managed root must reject ordinary mutation: {changed}"
+    );
+    let foreign = Fiber::new("other-package", "other-entry", Scope::Profile).unwrap();
+    foreign.begin_loading().unwrap();
+    foreign.ready().unwrap();
+    foreign.publish().unwrap();
+    let commands = host
+        .authorize_plugin_execution(foreign.context(), std::slice::from_ref(&root.session_id))
+        .await
+        .unwrap();
+    assert!(matches!(
+        commands.session(root.session_id).await,
+        Err(CommandError::Denied)
+    ));
+    foreign
+        .shutdown(tokio::time::Instant::now() + Duration::from_secs(1))
+        .await
+        .unwrap();
     fiber
         .shutdown(tokio::time::Instant::now() + Duration::from_secs(1))
         .await

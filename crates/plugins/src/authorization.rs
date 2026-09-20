@@ -41,6 +41,7 @@ pub enum Capability {
     ClientCapabilities,
     Executions,
     Notifications,
+    ReadSessions,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +53,13 @@ pub enum Capability {
 )]
 pub enum Target {
     Profile,
+    /// Host-created scratch workspace for this package/scope, never arbitrary state files.
+    PluginWorkspace {
+        permission_mode: PermissionMode,
+    },
+    Directory {
+        path: String,
+    },
     Session {
         session_id: String,
     },
@@ -84,16 +92,32 @@ impl Request {
         }
         match &self.target {
             Target::Profile
-                if self
-                    .capabilities
-                    .iter()
-                    .all(|capability| *capability == Capability::Notifications) => {}
+                if self.capabilities.iter().all(|capability| {
+                    matches!(
+                        capability,
+                        Capability::Notifications | Capability::ReadSessions
+                    )
+                }) => {}
             Target::Profile => {
                 return Err(crate::Error::Invalid(
                     "profile authorization has no workspace or execution target".into(),
                 ));
             }
             Target::Session { session_id } => crate::name(session_id)?,
+            Target::PluginWorkspace { permission_mode } => self.validate_mode(*permission_mode)?,
+            Target::Directory { path } => {
+                if path.is_empty()
+                    || path.len() > 32 * 1024
+                    || path.contains('\0')
+                    || self.capabilities.iter().any(|capability| {
+                        !matches!(capability, Capability::ReadFiles | Capability::WriteFiles)
+                    })
+                {
+                    return Err(crate::Error::Invalid(
+                        "directory consent only authorizes file access".into(),
+                    ));
+                }
+            }
             Target::Workspace {
                 workspace,
                 permission_mode,
@@ -143,16 +167,22 @@ pub struct Grant {
     pub revoked: bool,
 }
 
+pub struct Authorized {
+    /// Observation of the consent being used, not a second source of authority.
+    pub grant: Grant,
+    /// Host-resolved observation: aliases in the proposal are not canonical paths.
+    /// This value cannot be used to mint or widen authority.
+    pub boundary: Boundary,
+    pub call: crate::call::Owned,
+}
+
 pub trait Access: Send + Sync {
     /// Restore current authority, not a serialized in-memory capability. Each
     /// resource operation must still check revocation and current policy.
     fn open(
         &self,
         id: Id,
-    ) -> futures_util::future::BoxFuture<
-        '_,
-        Result<crate::call::Owned, crate::execution::CommandError>,
-    >;
+    ) -> futures_util::future::BoxFuture<'_, Result<Authorized, crate::execution::CommandError>>;
 }
 
 /// Frozen observation, not a capability. Only a Host-issued Scope can use it.
@@ -165,6 +195,10 @@ pub trait Access: Send + Sync {
 )]
 pub enum Boundary {
     Profile,
+    Directory {
+        path: String,
+        identity: maka_runtime::execution::DirectoryIdentity,
+    },
     Session {
         boundary: crate::execution::SessionBoundary,
         workspace_identity: maka_runtime::execution::WorkspaceIdentity,
@@ -181,6 +215,24 @@ impl Boundary {
             || crate::Error::Invalid("authorization boundary does not match proposal".into());
         let mode = match (self, &request.target) {
             (Self::Profile, Target::Profile) => PermissionMode::Explore,
+            (Self::Directory { path, .. }, Target::Directory { .. }) if !path.is_empty() => {
+                PermissionMode::Bypass
+            }
+            (
+                Self::Workspace {
+                    workspace,
+                    permission_mode,
+                    ..
+                },
+                Target::PluginWorkspace {
+                    permission_mode: proposed,
+                },
+            ) if permission_mode == proposed
+                && !workspace.host_cwd.is_empty()
+                && matches!(&workspace.target, WorkspaceTarget::HostPath { path } if path == &workspace.host_cwd) =>
+            {
+                *permission_mode
+            }
             (Self::Session { boundary, .. }, Target::Session { session_id })
                 if &boundary.session_id == session_id =>
             {

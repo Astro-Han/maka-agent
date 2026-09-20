@@ -78,6 +78,57 @@ impl InvocationState {
 }
 
 impl EventLog {
+    /// Compact canonical receipt keyed by the globally unique opening identity.
+    /// No plugin ledger or current Session tip is used to reconstruct acceptance.
+    pub async fn continuation_receipt(
+        &self,
+        invocation_id: &str,
+    ) -> Result<Option<(Invocation, maka_runtime::continuation::RunBoundary, String)>, StoreError>
+    {
+        self.validate_root()?;
+        sessions::validate_id(invocation_id)?;
+        let invocation_id = invocation_id.to_owned();
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+                        "SELECT json_extract(event_json, '$.invocation'),
+                    json_extract(event_json, '$.fact.input.claim.source'),
+                    json_extract(event_json, '$.fact.input.request_fingerprint')
+                 FROM runtime_events WHERE invocation_id = ? AND kind = 'invocation_opened'",
+                    )
+                    .bind(invocation_id)
+                    .fetch_optional(connection)
+                    .await?;
+                    row.map(|(invocation, source, fingerprint)| {
+                        Ok((
+                            serde_json::from_str(&invocation)?,
+                            serde_json::from_str(&source.ok_or(StoreError::EventConflict)?)?,
+                            fingerprint.ok_or(StoreError::EventConflict)?,
+                        ))
+                    })
+                    .transpose()
+                })
+            })
+            .await
+    }
+    pub async fn latest_turn_boundary(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<TurnBoundary>, StoreError> {
+        self.validate_root()?;
+        sessions::validate_id(session_id)?;
+        let session = session_id.to_owned();
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    read(&mut tx, &session, None).await
+                })
+            })
+            .await
+    }
+
     /// Read the frozen execution boundary without loading message or model bodies.
     pub async fn invocation_configuration(
         &self,

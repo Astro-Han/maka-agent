@@ -155,31 +155,6 @@ export function projectDesktopStoredMessage(
       return message.parentSessionId
         ? { ...message, parentSessionId: projectSessionId(host, message.parentSessionId) }
         : message;
-    case 'workhub_coordination':
-      if (message.kind === 'delegation_superseded') return message;
-      if (message.kind === 'action_receipt') {
-        const result = message.receipt.result;
-        if (!('targetSessionId' in result)) return message;
-        return {
-          ...message,
-          receipt: {
-            ...message.receipt,
-            result: { ...result, targetSessionId: projectSessionId(host, result.targetSessionId) },
-          },
-        };
-      }
-      return {
-        ...message,
-        targetSessionId: projectSessionId(host, message.targetSessionId),
-        ...(message.kind === 'delegation_replacement_requested'
-          ? {
-              replacedTargetSessionId: projectSessionId(
-                host,
-                message.replacedTargetSessionId,
-              ),
-            }
-          : {}),
-      };
     default:
       return message;
   }

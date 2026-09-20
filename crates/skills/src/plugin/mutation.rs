@@ -27,6 +27,7 @@ impl Skills {
         &self,
         input: MutateInput,
         workspace: WorkspaceProjection,
+        workspace_files: maka_plugins::filesystem::ReadDirectory,
     ) -> Result<MutationResult, Error> {
         let admitted = self.basis.owner.admit().map_err(|_| Error::Retired)?;
         let skills = self.clone();
@@ -38,7 +39,9 @@ impl Skills {
                 let _serial = skills.mutations.write().await;
                 let _invalidation = skills.input_revision.invalidate().await;
                 let _notice = skills.notify_on_exit();
-                Ok(skills.mutate_inner(&input, workspace).await)
+                Ok(skills
+                    .mutate_inner(&input, workspace, workspace_files)
+                    .await)
             })
             .map_err(|_| Error::Retired)?;
         receiver
@@ -51,8 +54,9 @@ impl Skills {
         &self,
         input: &MutateInput,
         workspace: WorkspaceProjection,
+        workspace_files: maka_plugins::filesystem::ReadDirectory,
     ) -> Result<MutationResult, Error> {
-        let (sources, preferences) = self.governance(&workspace.host_cwd).await?;
+        let (sources, preferences) = self.governance(&workspace_files).await?;
         let revision =
             catalog::revision(&input.context, &workspace, &sources, preferences.as_ref())?;
         let result = |outcome| {
@@ -71,7 +75,9 @@ impl Skills {
             input.mutation,
             Mutation::SetEnabled { .. } | Mutation::SetPinned { .. }
         ) {
-            return self.mutate_files(input, workspace, sources, revision).await;
+            return self
+                .mutate_files(input, workspace, workspace_files, sources, revision)
+                .await;
         }
         let Some(preferences) = preferences else {
             return result(MutationOutcome::Rejected {
@@ -150,57 +156,53 @@ impl Skills {
         &self,
         input: &MutateInput,
         workspace: WorkspaceProjection,
+        workspace_files: maka_plugins::filesystem::ReadDirectory,
         sources: crate::SourceCatalog,
         current_revision: String,
     ) -> Result<MutationResult, Error> {
-        let root = self.state_root.clone();
-        let home = self.home.clone();
-        let cwd = workspace.host_cwd.clone();
+        let user = match (&input.mutation, input.grant) {
+            (Mutation::Delete { reference }, Some(grant)) if reference.starts_with("user:") => {
+                Some(self.user_files(grant).await?)
+            }
+            _ => None,
+        };
         let mutation = input.mutation.clone();
         let cancellation = self.basis.owner.stopping().map_err(|_| Error::Retired)?;
-        let operation = self
+        let publisher = self
             .data
-            .run(move |data| {
-                let change = super::files::apply(
-                    &root,
-                    data,
-                    home.as_deref(),
-                    &sources,
-                    &mutation,
-                    &cancellation,
-                )?;
-                let sources = if change.changed {
-                    crate::governance_catalog(
-                        std::path::Path::new(&cwd),
-                        &root,
-                        home.as_deref(),
-                        &tokio_util::sync::CancellationToken::new(),
-                    )
-                    .map_err(|error| {
-                        super::files::Failure::Fatal(Error::OutcomeUnknown(error.to_string()))
-                    })?
-                } else {
-                    sources
-                };
-                Ok::<_, super::files::Failure>((change, sources))
-            })
+            .run(crate::publication::Publisher::open)
             .await
-            .map_err(|error| match error {
-                maka_plugins::storage::StoreError::Retired => Error::Retired,
-                maka_plugins::storage::StoreError::OutcomeUnknown(message) => {
-                    Error::OutcomeUnknown(message)
-                }
-                error => Error::Source(error.to_string()),
-            })?;
+            .map_err(|error| Error::Source(error.to_string()))?
+            .map_err(|error| Error::Source(error.to_string()))?;
+        let operation =
+            super::files::apply(publisher, user.as_ref(), &sources, &mutation, &cancellation)
+                .await
+                .map(|change| (change, sources));
+        if let Some(user) = user {
+            let settled = user
+                .finish()
+                .await
+                .map_err(|e| Error::Source(e.to_string()));
+            *self.user_recovery.lock().unwrap() = operation
+                .as_ref()
+                .err()
+                .map(|_| "User Skill publication requires recovery".into());
+            settled?;
+        }
         let outcome = match operation {
             Err(super::files::Failure::Rejected(reason)) => MutationOutcome::Rejected { reason },
             Err(super::files::Failure::Fatal(error)) => {
-                if matches!(error, Error::OutcomeUnknown(_)) {
-                    self.basis.owner.cleanup_failed(error.to_string());
-                }
                 return Err(error);
             }
             Ok((change, sources)) => {
+                let sources = if change.changed {
+                    self.governance(&workspace_files)
+                        .await
+                        .map_err(|error| Error::OutcomeUnknown(error.to_string()))?
+                        .0
+                } else {
+                    sources
+                };
                 let preferences = self.basis.preferences.read().await.map_err(|error| {
                     if change.changed {
                         Error::OutcomeUnknown(error.to_string())

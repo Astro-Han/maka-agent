@@ -34,23 +34,24 @@ import { getWorkHubRailCopy } from '@maka/workhub/locales';
 import { renderTranscriptMarkup } from './transcript-test-dom.js';
 import type { ToolCallMessage, ToolResultMessage } from '@maka/core/session';
 
-test('durable task results restore Host-scoped work links without treating failed or unrelated tools as delegations', () => {
-  const target = JSON.stringify(['host-a', 'task-a']);
-  const call: ToolCallMessage = { type: 'tool_call', id: 'task-call', turnId: 'turn', ts: 1, toolName: 'mcp__desktop_workhub__tasks', args: {} };
-  const result: ToolResultMessage = { type: 'tool_result', id: 'task-result', turnId: 'turn', ts: 2, toolUseId: call.id, isError: false, content: { kind: 'json', value: { disposition: 'create_new', targetSessionKey: target } } };
-  const expected = [{ id: result.id, coordinationTurnId: call.turnId, targetSessionId: target, targetSessionName: 'Renamed task', workspaceName: undefined }];
-  assert.deepEqual(workHubLinkedWork([call, result], [{ id: target, name: 'Renamed task' }], 'Work'), expected);
-  for (const cwd of ['/projects/payments/', 'C:\\projects\\payments\\']) {
-    assert.deepEqual(workHubLinkedWork([call, result], [{ id: target, name: 'Renamed task', cwd }], 'Work'), [{ ...expected[0], workspaceName: 'payments' }]);
+test('durable public receipts restore Host-scoped links without interpreting unrelated or failed tool output', () => {
+  const project = (id: string) => JSON.stringify(['host-a', id]);
+  const target = project('task-a');
+  const call: ToolCallMessage = { type: 'tool_call', id: 'task-call', turnId: 'turn', ts: 1, toolName: 'workhub_tasks', args: {} };
+  const delivery = { kind: 'submitted', receipt: { invocation: { session_id: 'task-a', turn_id: 'work-turn' }, messageId: 'work-message' } };
+  const result: ToolResultMessage = { type: 'tool_result', id: 'task-result', turnId: 'turn', ts: 2, toolUseId: call.id, isError: false, content: { kind: 'json', value: { operationId: 'assignment', result: delivery } } };
+  const expected = [{ id: 'assignment', coordinationTurnId: 'turn', targetSessionId: target, targetSessionName: 'Renamed task', workspaceName: undefined, targetMessageId: 'work-message', targetTurnId: 'work-turn', state: 'accepted' }];
+  assert.deepEqual(workHubLinkedWork([call, result], [{ id: target, name: 'Renamed task' }], 'Work', project), expected);
+  for (const cwd of ['/projects/payments/', 'C:\\\\projects\\\\payments\\\\']) {
+    assert.deepEqual(workHubLinkedWork([call, result], [{ id: target, name: 'Renamed task', cwd }], 'Work', project), [{ ...expected[0], workspaceName: 'payments' }]);
   }
-  assert.deepEqual(workHubLinkedWork([call, { ...result, content: { kind: 'json', value: { content: [], structuredContent: { disposition: 'create_new', targetSessionKey: target } } } }], [{ id: target, name: 'Renamed task' }], 'Work'), expected);
-  assert.deepEqual(workHubLinkedWork([call, { ...result, content: { kind: 'text', text: JSON.stringify({ disposition: 'delegate_existing', targetSessionKey: target }) } }], [], 'Work'), [{ ...expected[0], targetSessionName: 'Work' }]);
-  assert.deepEqual(workHubLinkedWork([
-    call,
-    { ...result, isError: true },
-    { ...result, toolUseId: 'other-tool' },
-    { ...result, content: { kind: 'json', value: { disposition: 'stop_work', targetSessionKey: target } } },
-  ], [], 'Work'), []);
+  const corrected = { operationId: 'control', result: { kind: 'corrected', replacementId: 'replacement', replacement: delivery } };
+  assert.deepEqual(workHubLinkedWork([call, { ...result, content: { kind: 'text', text: JSON.stringify(corrected) } }], [], 'Work', project),
+    [{ ...expected[0], id: 'replacement', targetSessionName: 'Work' }]);
+  assert.deepEqual(workHubLinkedWork([call,
+    { ...result, isError: true }, { ...result, toolUseId: 'another-tool' },
+    { ...result, content: { kind: 'json', value: { operationId: 'stop', result: { kind: 'stopped' } } } },
+  ], [], 'Work', project), []);
 });
 
 test('a completed delegation renders only its status beside the prompt timestamp', () => {

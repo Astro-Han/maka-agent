@@ -23,7 +23,6 @@ import {
   useLayoutEffect,
   type ReactNode,
 } from 'react';
-import type { ScheduledTask } from '@maka/core/scheduled-task';
 import {
   useModuleHubController,
   type ModuleHubCommands,
@@ -32,9 +31,6 @@ import {
 } from '../controller/use-module-hub-controller.js';
 
 const ModuleHubHostContext = createContext<ModuleHubHostModel | null>(null);
-const ModuleHubScheduledTasksContext = createContext<
-  readonly ScheduledTask[] | null
->(null);
 
 export interface ModuleHubCommandPort extends ModuleHubCommands {
   connect(target: ModuleHubCommands): () => void;
@@ -65,7 +61,7 @@ export function createModuleHubCommandPort(): ModuleHubCommandPort {
         if (target === next) target = null;
       };
     },
-    openScheduledTaskCreate: () => target?.openScheduledTaskCreate(),
+    openAction: (selection, name) => target?.openAction(selection, name),
     copyTodayDailyReview: () =>
       target?.copyTodayDailyReview() ?? Promise.resolve(),
     pasteTodayDailyReview: () =>
@@ -97,11 +93,7 @@ export function ModuleHubProvider({
 
   return (
     <ModuleHubHostContext.Provider value={controller.host}>
-      <ModuleHubScheduledTasksContext.Provider
-        value={controller.selectors.scheduledTasks}
-      >
-        {children}
-      </ModuleHubScheduledTasksContext.Provider>
+      {children}
     </ModuleHubHostContext.Provider>
   );
 }
@@ -110,26 +102,6 @@ export function useModuleHubHostModel(): ModuleHubHostModel {
   const model = useContext(ModuleHubHostContext);
   if (!model) throw new Error('ModuleHubProvider is missing');
   return model;
-}
-
-/**
- * Hands the rail's read-only Scheduled Tasks projection to its reader.
- *
- * `render` receives the projection together with the element AppShell already
- * built, so the reader's prop stays required and typed at the call site, and a
- * Scheduled Tasks change re-renders only this boundary and the element
- * `render` returns — the children it forwards keep their identity.
- */
-export function ModuleHubScheduledTasksBoundary(props: {
-  readonly render: (
-    scheduledTasks: readonly ScheduledTask[],
-    children: ReactNode,
-  ) => ReactNode;
-  readonly children?: ReactNode;
-}): ReactNode {
-  const scheduledTasks = useContext(ModuleHubScheduledTasksContext);
-  if (!scheduledTasks) throw new Error('ModuleHubProvider is missing');
-  return props.render(scheduledTasks, props.children);
 }
 
 export type { ModuleHubCommands } from '../controller/use-module-hub-controller.js';

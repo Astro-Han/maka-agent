@@ -156,7 +156,6 @@ export function useAppShellBootstrapSubscriptions(options: {
   projectPickerPendingRef: RefBox<boolean>;
   projectPickerRequestRef: RefBox<number>;
   refreshConnections: () => Promise<void>;
-  refreshMemoryActive: (failureContext?: 'load') => Promise<void>;
   refreshMessages: (sessionId: string) => Promise<boolean>;
   refreshProjects: () => Promise<unknown>;
   refreshShellSettings: () => Promise<void>;
@@ -182,7 +181,6 @@ export function useAppShellBootstrapSubscriptions(options: {
     if (!event.isDefault) return;
     void options.refreshProjects();
     void options.refreshConnections();
-    void options.refreshMemoryActive('load');
   });
   // PR-2088: the macOS application menu routes New Task / Settings / Keyboard
   // Shortcuts here through one channel. The renderer already owns these

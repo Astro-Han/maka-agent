@@ -16,35 +16,20 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-mod prompt;
-
 use super::Setup;
-use futures_util::future::BoxFuture;
+use maka_assistant::{Builtin, ID};
 use maka_plugins::{
     composition::{Entry, Operation, Scope},
-    contributions::{Catalog, Staged},
-    fiber::Context,
-    kernel::{Definition, Plugin, PluginContext},
-    preferences::Preferences,
-    prompt::{Provider, Request, Section, SectionMode, Text, TextFuture},
-    session::{Behavior, Preparation, SessionBehavior},
+    kernel::Definition,
 };
-use serde_json::Value;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
-const ID: &str = "maka.assistant";
-
-pub(crate) fn install(
-    setup: &mut Setup,
-    global: Option<PathBuf>,
-    catalog: &Catalog,
-) -> Result<(), maka_plugins::Error> {
+pub(crate) fn install(setup: &mut Setup) -> Result<(), maka_plugins::Error> {
     if setup.builtins.contains_key(ID) || setup.layers.contains_key(ID) {
         return Err(maka_plugins::Error::Invalid(
             "built-in assistant identity is reserved".into(),
         ));
     }
-    catalog.host_only::<SessionBehavior>()?;
     setup.builtins.insert(
         ID.into(),
         Arc::new(Definition {
@@ -52,7 +37,7 @@ pub(crate) fn install(
             revision: env!("CARGO_PKG_VERSION").into(),
             dependencies: vec![],
             inject: vec![],
-            plugin: Arc::new(Builtin { global }),
+            plugin: Arc::new(Builtin),
         }),
     );
     let mut entry = Entry::new(ID)?;
@@ -67,81 +52,4 @@ pub(crate) fn install(
         }],
     );
     Ok(())
-}
-struct Builtin {
-    global: Option<PathBuf>,
-}
-impl Plugin for Builtin {
-    fn validate(&self, _: &Scope, config: &Value) -> Result<(), maka_plugins::Error> {
-        if config.is_null() || config.as_object().is_some_and(|value| value.is_empty()) {
-            Ok(())
-        } else {
-            Err(maka_plugins::Error::Invalid(
-                "assistant has no instance configuration".into(),
-            ))
-        }
-    }
-    fn supports_scope(&self, scope: &Scope) -> bool {
-        *scope == Scope::Profile
-    }
-    fn activate(
-        &self,
-        context: PluginContext,
-        _: Value,
-    ) -> BoxFuture<'static, Result<Staged, String>> {
-        let Some(host) = context.host else {
-            return Box::pin(async { Err("Assistant requires Host preferences".into()) });
-        };
-        let assistant = Arc::new(Assistant {
-            preferences: host.preferences,
-            global: self.global.clone(),
-            owner: context.lifecycle,
-        });
-        Box::pin(async move {
-            let mut staged = Staged::default();
-            staged
-                .insert("default", SessionBehavior(assistant.clone()))
-                .map_err(|e| e.to_string())?;
-            staged
-                .insert(
-                    ID,
-                    Section {
-                        format: maka_plugins::prompt::Format::Plain,
-                        order: i32::MIN,
-                        mode: SectionMode::Append,
-                        text: Text::Dynamic(assistant),
-                    },
-                )
-                .map_err(|e| e.to_string())?;
-            Ok(staged)
-        })
-    }
-}
-struct Assistant {
-    preferences: Arc<dyn Preferences>,
-    global: Option<PathBuf>,
-    owner: Context,
-}
-impl Behavior for Assistant {
-    fn prepare(&self, _: String) -> BoxFuture<'_, Result<Preparation, String>> {
-        Box::pin(async { Ok(Preparation::default()) })
-    }
-}
-impl Provider for Assistant {
-    fn evaluate(&self, request: Request) -> TextFuture {
-        let preferences = self.preferences.clone();
-        let global = self.global.clone();
-        let owner = self.owner.clone();
-        Box::pin(async move {
-            let guard = owner.admit()?;
-            let snapshot = preferences.read().await?;
-            let prompt = prompt::resolve(snapshot, request.target.cwd().into(), global, guard)
-                .await
-                .map_err(|e| maka_plugins::Error::Invalid(e.to_string()))?;
-            prompt
-                .validate()
-                .map_err(|e| maka_plugins::Error::Invalid(e.into()))?;
-            Ok(Some(prompt.text))
-        })
-    }
 }

@@ -150,7 +150,6 @@ export {
   type RuntimeHostConnectionCatalogEntry,
   type RuntimeHostConnectionCatalogSnapshot,
 } from './catalog-reader.js';
-export { createPluginRemote } from './plugin-remote.js';
 export {
   IDLE_GRACE_MS_ENV_VAR,
   connectOrSpawnRuntimeHost,

@@ -34,6 +34,7 @@ use std::{sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 mod capacity;
+mod storage;
 mod swarm;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
@@ -52,6 +53,7 @@ async fn scenario(implementation: bool) {
         "多行结果\n\"quoted\"\\path\n".repeat(2000)
     );
     let mut original_result = Value::Null;
+    let mut graph_grant = Value::Null;
     let fixture = ClientFixture::new("maka-graph-plugin-");
     if implementation {
         for args in [
@@ -99,19 +101,21 @@ async fn scenario(implementation: bool) {
         let mut peer = Peer::new(host.clone(), "graph-plugin").await;
         ready(&mut peer).await;
         if reopened {
-            loop {
-                let tools = peer
-                    .rpc(
-                        "plugin.platform.query",
-                        json!({"view":"tools","rootId":"session:graph-root"}),
-                    )
-                    .await;
-                assert_eq!(tools["ok"], true, "{tools}");
-                if tools["result"]["items"].as_array().unwrap().len() == 4 {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
+            let tools = peer
+                .rpc(
+                    "plugin.platform.query",
+                    json!({"view":"tools","rootId":"profile"}),
+                )
+                .await;
+            assert_eq!(tools["ok"], true, "{tools}");
+            assert!(
+                tools["result"]["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["toolName"] == "update_agent_graph"),
+                "{tools}"
+            );
             assert!(
                 tokio::time::timeout(Duration::from_millis(250), requests.recv())
                     .await
@@ -266,6 +270,24 @@ async fn scenario(implementation: bool) {
                 .is_err(),
                 "unrelated commits must not refresh Graph history"
             );
+            let (grant_binding, _, grant_document) = bind_remote(&mut peer, "authorize").await;
+            let revoked = peer
+                .rpc(
+                    "plugin.authorization",
+                    json!({
+                        "client":grant_binding["client"], "scope":"profile",
+                        "command":{"kind":"revoke", "id":graph_grant}
+                    }),
+                )
+                .await;
+            assert_eq!(revoked["ok"], true, "{revoked}");
+            let closed = peer
+                .rpc(
+                    "plugin.remote",
+                    json!({"kind":"close_document","document":grant_document}),
+                )
+                .await;
+            assert_eq!(closed["ok"], true, "{closed}");
             let stale = remote(&mut peer, "stop", json!({"graphId":previous})).await;
             assert_eq!(stale["ok"], false, "{stale}");
             assert!(matches!(
@@ -309,6 +331,7 @@ async fn scenario(implementation: bool) {
                 "orchestrationMode":"default"
             })).await;
             assert_eq!(created["ok"], true, "{created}");
+            graph_grant = approve(&mut peer, "graph-root").await;
             let driver =
                 Fiber::new("driver", "driver", Scope::Session("graph-root".into())).unwrap();
             driver.begin_loading().unwrap();
@@ -441,6 +464,8 @@ async fn scenario(implementation: bool) {
                     _ = tokio::time::sleep(Duration::from_millis(10)) => {}
                 }
             }
+            // Recovery uses the reserved definition even after its preset is removed.
+            presets(&mut peer, json!([])).await;
             toggle(&mut peer, true).await;
             ready(&mut peer).await;
             let mut child = child.unwrap();
@@ -469,9 +494,6 @@ async fn scenario(implementation: bool) {
                     .is_err(),
                 "disabled Graph must not submit a supervisor wake"
             );
-            // Recovery must use the reserved definition, not reinterpret old work
-            // using a mutable preset which no longer exists.
-            presets(&mut peer, json!([])).await;
             toggle(&mut peer, false).await;
             ready(&mut peer).await;
             let wake = next(&mut requests, "reactivated supervisor wake").await;
@@ -594,43 +616,72 @@ async fn scenario(implementation: bool) {
         );
         assert_eq!(recorded.len(), if implementation { 15 } else { 12 });
     }
-    let log = maka_event_log::EventLog::for_root(Arc::new(fixture.owner()))
-        .await
-        .unwrap();
-    let control = log
-        .graph_control("graph-root", None)
-        .await
-        .unwrap()
-        .unwrap();
+    let log = Arc::new(
+        maka_event_log::EventLog::for_root(Arc::new(fixture.owner()))
+            .await
+            .unwrap(),
+    );
+    let repository = storage::repository(log.clone());
+    use maka_graph::store::Store as _;
+    let control = repository.current("graph-root").await.unwrap().unwrap();
     assert!(control.stop_requested);
     assert_eq!(control.epoch.epoch, 2);
-    let epochs = log.graph_epochs("graph-root", Some(2)).await.unwrap();
-    let previous = log
-        .graph_control("graph-root", Some(&epochs.epochs[0].graph_id))
+    let epochs = repository.epochs("graph-root", Some(2)).await.unwrap();
+    let previous = repository
+        .control("graph-root", &epochs.epochs[0].graph_id)
         .await
-        .unwrap()
         .unwrap();
     assert!(previous.finished);
-    log.close().await.unwrap();
+    drop(repository);
+    Arc::try_unwrap(log).ok().unwrap().close().await.unwrap();
 }
 
 async fn presets(peer: &mut Peer, presets: Value) {
-    let current = peer.rpc("runtime.policy.query", json!({})).await;
+    let current = remote(peer, "settings", json!({"kind":"read"})).await;
     assert_eq!(current["ok"], true, "{current}");
-    let changed = peer
-        .rpc(
-            "runtime.policy.mutate",
-            json!({
-                "expectedRevision":current["result"]["revision"],
-                "operation":{"kind":"set_subagents","value":{"presets":presets}}
-            }),
-        )
-        .await;
-    assert_eq!(changed["result"]["kind"], "committed", "{changed}");
+    let changed = remote(
+        peer,
+        "settings",
+        json!({
+            "kind":"replace",
+            "snapshot":{"revision":current["result"]["value"]["revision"],"presets":presets}
+        }),
+    )
+    .await;
+    assert_eq!(changed["ok"], true, "{changed}");
+    let stale = remote(
+        peer,
+        "settings",
+        json!({
+            "kind":"replace",
+            "snapshot":{"revision":current["result"]["value"]["revision"],"presets":[]}
+        }),
+    )
+    .await;
+    assert_eq!(
+        stale["ok"], false,
+        "stale preset writes must not overwrite newer data"
+    );
 }
 
 // Every call crosses the same document, identity and registration checks as a Client SDK handle.
 async fn bind_remote(peer: &mut Peer, method: &str) -> (Value, Value, Value) {
+    bind_remote_session(
+        peer,
+        method,
+        if method == "settings" {
+            None
+        } else {
+            Some("graph-root")
+        },
+    )
+    .await
+}
+async fn bind_remote_session(
+    peer: &mut Peer,
+    method: &str,
+    session: Option<&str>,
+) -> (Value, Value, Value) {
     let catalog = peer
         .rpc("plugin.client.query", json!({"kind":"snapshot"}))
         .await;
@@ -643,7 +694,7 @@ async fn bind_remote(peer: &mut Peer, method: &str) -> (Value, Value, Value) {
         .unwrap();
     let client = json!({"entryId":entry["entryId"],"extensionId":entry["extensionId"],
         "activation":entry["activation"],"contentDigest":entry["contentDigest"],"clientDigest":entry["clientDigest"]});
-    let binding = json!({"client":client,"method":method,"sessionId":"graph-root"});
+    let binding = json!({"client":client,"method":method,"sessionId":session});
     let bound = peer
         .rpc("plugin.remote", json!({"kind":"bind","binding":binding}))
         .await;
@@ -712,4 +763,34 @@ fn tool(id: &str, name: &str, arguments: Value) -> Value {
 }
 fn answer(text: &str) -> Value {
     json!({"index":0,"delta":{"content":text},"finish_reason":"stop"})
+}
+
+async fn approve(peer: &mut Peer, session: &str) -> Value {
+    let (binding, target, document) = bind_remote_session(peer, "authorize", Some(session)).await;
+    let consent = peer.rpc("plugin.authorization", json!({
+        "client": binding["client"], "scope": "profile", "command": {
+            "kind": "approve", "request": {
+                "operationId": uuid::Uuid::new_v4(), "title": "Agent Graph background execution",
+                "target": {"kind":"session", "sessionId":session}, "capabilities": ["executions"]
+            }
+        }
+    })).await;
+    assert_eq!(consent["ok"], true, "{consent}");
+    let reply = peer
+        .rpc(
+            "plugin.remote",
+            json!({"kind":"call", "binding":binding,
+        "target":target, "document":document,
+        "input":{"kind":"remember","id":consent["result"]["grant"]["id"]}}),
+        )
+        .await;
+    assert_eq!(reply["ok"], true, "{reply}");
+    let closed = peer
+        .rpc(
+            "plugin.remote",
+            json!({"kind":"close_document","document":document}),
+        )
+        .await;
+    assert_eq!(closed["ok"], true, "{closed}");
+    consent["result"]["grant"]["id"].clone()
 }

@@ -43,6 +43,7 @@ pub trait BindingProvider: Send + Sync {
     fn bind(
         &self,
         request: BindingRequest,
+        workspace: maka_plugins::filesystem::ReadDirectory,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Binding>, ToolError>> + Send>>;
 }
 
@@ -55,6 +56,7 @@ impl ToolCatalog {
         let mut groups: Vec<(Arc<dyn BindingProvider>, String, Option<Binding>)> = Vec::new();
         let mut context = Resolved::default();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let mut workspace = None;
         for (name, contribution) in captured.typed::<PluginTool>().entries {
             let Some(entry) = self.entries.get(&name).cloned() else {
                 continue;
@@ -71,11 +73,22 @@ impl ToolCatalog {
             } else {
                 let _lease = contribution.admit().map_err(failed)?;
                 let stopping = contribution.owner.stopping().map_err(failed)?;
+                let root = match &workspace {
+                    Some(root) => root,
+                    None => workspace.insert(
+                        maka_plugins::filesystem::ReadRoot::open(&request.cwd)
+                            .await
+                            .map_err(failed)?,
+                    ),
+                };
+                let cancellation = request.cancellation.child_token();
+                let _closed = cancellation.clone().drop_guard();
+                let files = root.bind(contribution.owner.clone(), cancellation);
                 let binding = tokio::select! {
                     biased;
                     _ = request.cancellation.cancelled() => return Err(failed("request cancelled")),
                     _ = stopping.cancelled() => return Err(failed("tool contribution retired")),
-                    result = tokio::time::timeout_at(deadline, provider.bind(request.clone())) => result.map_err(failed)??,
+                    result = tokio::time::timeout_at(deadline, provider.bind(request.clone(), files)) => result.map_err(failed)??,
                 };
                 if let Some(text) = binding
                     .as_ref()

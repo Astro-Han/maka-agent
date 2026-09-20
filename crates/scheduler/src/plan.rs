@@ -85,9 +85,6 @@ impl Plan {
             return Err(invalid("invalid task identity"));
         }
         TimeZone::get(&self.timezone)?;
-        if let Some(authorization) = &self.authorization {
-            authorization.validate(&self.task.effect)?;
-        }
         Create {
             title: self.task.title.clone(),
             intent_body: self.task.intent.body().into(),
@@ -107,9 +104,6 @@ impl Plan {
         if let Some(fire) = &self.pending {
             crate::task::text(&fire.id, 256)?;
             fire.effect.validate()?;
-            if let Some(authorization) = &fire.authorization {
-                authorization.validate(&fire.effect)?;
-            }
             if fire.task_id != self.task.id
                 || fire.scheduled_at < self.task.created_at
                 || fire.intent.body().chars().count() > 8000
@@ -213,7 +207,7 @@ impl Plan {
             intent: self.task.intent.clone(),
             effect: self.task.effect.clone(),
             delivery_started: false,
-            authorization: self.authorization.clone(),
+            authorization: self.authorization,
         });
         self.task.updated_at = now;
         Ok(self.pending.as_ref())

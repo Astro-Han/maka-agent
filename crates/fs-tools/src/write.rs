@@ -61,6 +61,18 @@ enum Request {
 }
 
 impl MutationExecutor {
+    /// Write permission is supplied by the caller; the directory cannot be
+    /// replaced between the embedding's identity check and capture.
+    pub fn from_directory(
+        path: std::path::PathBuf,
+        directory: cap_std::fs::Dir,
+        coordinator: Arc<WriteCoordinator>,
+    ) -> Result<Self, ToolError> {
+        Ok(Self {
+            authority: Some(Arc::new(Authority::from_directory(path, directory)?)),
+            coordinator,
+        })
+    }
     pub fn new(
         cwd: impl AsRef<Path>,
         scope: WriteScope,

@@ -298,7 +298,7 @@ function runRendererEntryBundleContract(directImports) {
   );
 }
 
-function canonicalRendererEntryHtml(extraBody = '', policy = "script-src 'self'") {
+function canonicalRendererEntryHtml(extraBody = '', policy = "script-src 'self' blob:") {
   return `
     <!doctype html>
     <html>

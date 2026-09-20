@@ -188,7 +188,7 @@ pub(super) async fn execute(
                                 .prepare_message_input(
                                     observation.session,
                                     source.message.content.clone(),
-                                    connection_id,
+                                    Some(connection_id),
                                     active_tools,
                                 )
                                 .await;

@@ -48,6 +48,15 @@ export interface ClientDescriptor extends ClientIdentity {
 
 /** Augment this interface for slots agreed upon by a product and its plugins. */
 export interface ClientSlots {
+  'application.manage': {
+    readonly section: string;
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly action?: { readonly id: number; readonly name: string; readonly handled: () => void };
+  };
+  'navigation.status': {
+    readonly section: string;
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+  };
   /** Resolve a plugin-owned Session for an explicitly selected workspace provider. */
   'session.resolve': {
     readonly contextRevision?: number;
@@ -78,6 +87,30 @@ export interface ClientSlots {
     readonly appendText?: (text: string) => void;
     readonly publishSuggestions?: (items: readonly ComposerSuggestion[]) => ComposerPublication;
   };
+}
+
+/** A Host-reported failure; its code distinguishes rejection from uncertain outcomes. */
+export type RemoteErrorCode =
+  | 'host_not_ready'
+  | 'host_draining'
+  | 'invalid_request'
+  | 'operation_unavailable'
+  | 'operation_conflict'
+  | 'outcome_unknown'
+  | 'internal_failure';
+export interface RemoteFailure {
+  readonly kind: 'remote_error';
+  readonly code: RemoteErrorCode;
+  readonly message: string;
+}
+export class RemoteError extends Error {
+  constructor(
+    readonly code: RemoteErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'RemoteError';
+  }
 }
 
 /** A proposed workspace, not a resolved path or execution permission. */

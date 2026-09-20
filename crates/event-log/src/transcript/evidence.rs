@@ -56,19 +56,6 @@ pub(super) async fn selected(
         .bind(invocation)
         .fetch_one(&mut *tx)
         .await?;
-        if kind == "workhub_delegated" {
-            return read(
-                tx,
-                sqlx::query(
-                    "SELECT sequence, length(CAST(event_json AS BLOB)) FROM runtime_events
-                 WHERE invocation_id = ?1 AND sequence <= ?2
-                   AND (kind = 'invocation_opened' OR sequence = ?2) ORDER BY sequence",
-                )
-                .bind(invocation)
-                .bind(through),
-            )
-            .await;
-        }
         if matches!(
             kind.as_str(),
             "tool_dispatched" | "tool_rejected" | "tool_settled"

@@ -22,12 +22,8 @@ mod admission;
 mod archive;
 mod compact;
 mod control;
-mod graph;
-pub(crate) use graph::GraphSessions;
 mod handoff;
 pub(crate) use handoff::CooperativeRun;
-mod creation;
-pub(crate) use creation::Creation;
 pub(crate) mod input;
 mod interrupt;
 mod launch;
@@ -39,14 +35,10 @@ mod provider;
 mod read;
 mod recovery;
 mod resume;
-mod scheduler;
-pub(crate) use scheduler::SchedulerServices;
 mod shell;
 pub(crate) mod snapshot;
 mod successor;
 mod tools;
-mod workhub;
-pub(crate) use workhub::WorkHubCommands;
 mod workspaces;
 
 use crate::server::capabilities::Capabilities;
@@ -70,6 +62,7 @@ pub(crate) struct Executions {
     pub(crate) plugin_calls: maka_plugins::call::Issuer,
     pub(crate) shells: Arc<crate::shell::ShellResources>,
     pub(crate) controllers: crate::controllers::Controllers,
+    catalog: Arc<crate::server::CatalogFeed>,
     engine: Engine,
     models: ModelExecutor,
     log: Arc<EventLog>,
@@ -93,7 +86,7 @@ pub(crate) struct Executions {
 struct ActiveRun {
     invocation: maka_runtime::event::Invocation,
     tool_names: Arc<std::collections::HashSet<String>>,
-    cancellation: maka_agent::RunCancellation,
+    cancellation: CancellationToken,
     completed: CancellationToken,
     handoff: Option<maka_agent::HandoffGate>,
 }
@@ -137,6 +130,7 @@ impl Executions {
             configuration,
             paths,
             capabilities,
+            catalog: interactions.catalog.clone(),
             interactions,
             writes: Arc::new(maka_fs_tools::WriteCoordinator::default()),
             active: Mutex::new(HashMap::new()),
@@ -243,7 +237,7 @@ impl Executions {
         );
         let boundary = if paused {
             self.log
-                .cancel_handoff(&boundary.invocation, maka_agent::CancellationCause::Runtime)
+                .cancel_handoff(&boundary.invocation)
                 .await
                 .map_err(|error| match error {
                     StoreError::CommitUnknown(_) | StoreError::OperationUnknown => {
@@ -288,7 +282,7 @@ fn requires_drain(error: &RunError) -> bool {
         error,
         RunError::Commit(_)
             | RunError::Store(StoreError::CommitUnknown(_) | StoreError::OperationUnknown)
-            | RunError::Tool(ToolError::Persistence(_) | ToolError::OutcomeUnknown(_))
+            | RunError::Tool(ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_))
     )
 }
 
@@ -296,7 +290,7 @@ fn execution_error(error: RunError) -> OperationError {
     let code = match &error {
         RunError::Commit(maka_runtime::event::CommitError::OutcomeUnknown(_))
         | RunError::Store(StoreError::CommitUnknown(_) | StoreError::OperationUnknown)
-        | RunError::Tool(ToolError::Persistence(_) | ToolError::OutcomeUnknown(_)) => {
+        | RunError::Tool(ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_)) => {
             Code::OutcomeUnknown
         }
         RunError::Busy => Code::SessionBusy,

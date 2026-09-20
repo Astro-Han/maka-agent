@@ -20,8 +20,17 @@
 import type { Json } from './host.js';
 
 export interface ClientCapabilities {
+  /** Requires an explicit notifications grant. An uncertain result must not be blindly retried. */
+  notify(input: Notification): Promise<void>;
   /** Only capabilities captured at invocation admission, within its tool ceiling. */
   tools(): Promise<ReadonlyArray<{ name: string; description: string; inputSchema: Json }>>;
   /** Uses Host permission checks, approval/forms and durable tool settlement. */
   call(input: { name: string; input: Record<string, Json> }): Promise<Json>;
+}
+
+export interface Notification {
+  id: string;
+  title: string;
+  body: string;
+  destination: { kind: 'local' } | { kind: 'channel'; channel: string; recipient: string };
 }

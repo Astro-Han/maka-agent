@@ -35,9 +35,6 @@ export function SessionSidebarNav() {
   const extensionsActive = props.selection.section === 'extensions';
   const automationsActive = props.selection.section === 'automations';
   const moduleMemory = props.moduleMemory ?? { extensions: 'skills', automations: 'scheduled-tasks' };
-  const activeScheduledTaskCount = (props.scheduledTasks ?? []).filter(
-    (task) => task.status === 'active',
-  ).length;
 
   // Always SideNavItem — expanded and collapsed. Astryx collapse context turns
   // these into icon-only slots without remounting a different control recipe
@@ -93,9 +90,8 @@ export function SessionSidebarNav() {
       />
       <SideNavItem
         data-maka-assistant-target="app.automations"
-        label={activeScheduledTaskCount > 0
-          ? copy.pendingTasks(activeScheduledTaskCount)
-          : copy.automations}
+        label={copy.automations}
+        endContent={props.navigationStatus}
         icon={Timer}
         size="md"
         isSelected={automationsActive}

@@ -76,7 +76,6 @@ export function hasRuntimeHostSettingsPatch(
       patch.privacy ||
       patch.chatDefaults ||
       patch.webSearch ||
-      patch.subagents ||
       patch.personalization?.displayName !== undefined ||
       patch.personalization?.assistantTone !== undefined,
   );

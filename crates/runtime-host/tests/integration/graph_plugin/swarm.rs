@@ -51,6 +51,7 @@ async fn scenario() {
         "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model},
         "orchestrationMode":"default"
     })).await["ok"],true);
+    approve(&mut peer, "graph-root").await;
     assert_eq!(
         peer.rpc(
             "turn.start",
@@ -305,12 +306,9 @@ async fn scenario() {
     server.await.unwrap().unwrap();
     cleanup.disarm();
     drop(host);
-    let log = fixture.log().await;
-    let control = log
-        .graph_control("graph-root", None)
-        .await
-        .unwrap()
-        .unwrap();
+    let log = std::sync::Arc::new(fixture.log().await);
+    let repository = super::storage::repository(log.clone());
+    let control = repository.current("graph-root").await.unwrap().unwrap();
     assert_eq!(control.epoch.mode, maka_graph::Mode::Swarm);
     assert!(control.finished);
     assert_eq!(
@@ -340,7 +338,13 @@ async fn scenario() {
             );
         }
     }
-    log.close().await.unwrap();
+    drop(repository);
+    std::sync::Arc::try_unwrap(log)
+        .ok()
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
 }
 async fn completed(peer: &mut Peer, turn: &str) {
     loop {

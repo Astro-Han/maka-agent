@@ -52,8 +52,26 @@ async fn create_replay_conflict_reopen_and_anchored_catalog_pages() {
         Err(StoreError::SessionConflict)
     ));
     for id in ["b", "c"] {
-        log.create_session(id, id, &json!({}), 10).await.unwrap();
+        log.create_session(id, id, &json!({"workspace":{"hostCwd":"/chosen"}}), 10)
+            .await
+            .unwrap();
     }
+    let scoped = log
+        .scoped_sessions::<Value>(
+            maka_event_log::sessions::CatalogScope::Workspace("/chosen".into()),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped
+            .sessions
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["b", "c"]
+    );
     let page = log.list_sessions::<Value>(None, None, 2).await.unwrap();
     assert_eq!(
         page.sessions
@@ -86,6 +104,18 @@ async fn create_replay_conflict_reopen_and_anchored_catalog_pages() {
     assert_eq!(
         (archived.revision, archived.created_at, archived.updated_at),
         (2, 10, 40)
+    );
+    assert!(
+        log.scoped_sessions::<Value>(
+            maka_event_log::sessions::CatalogScope::Session("a".into()),
+            None,
+            None,
+        )
+        .await
+        .unwrap()
+        .sessions
+        .is_empty(),
+        "read grants do not expose archived Sessions"
     );
     let before = log
         .list_sessions::<Value>(None, None, 32)

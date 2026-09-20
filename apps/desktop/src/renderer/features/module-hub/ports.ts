@@ -24,11 +24,6 @@ import type {
   DailyReviewSummary,
 } from '@maka/core/daily-review';
 import type { Result } from '@maka/core/result';
-import type {
-  CreateScheduledTaskInput,
-  ScheduledTask,
-  UpdateScheduledTaskInput,
-} from '@maka/core/scheduled-task';
 
 export type ModuleHubUnsubscribe = () => void;
 
@@ -49,41 +44,6 @@ export interface ModuleHubRuntimeHostsService {
   getDefault(): Promise<ModuleHubRuntimeHostRef>;
   subscribeChanges(
     handler: (event: ModuleHubRuntimeHostChangedEvent) => void,
-  ): ModuleHubUnsubscribe;
-}
-
-export type ScheduledTaskCreateInput = Omit<CreateScheduledTaskInput, 'createdBy'>;
-
-export interface ModuleHubScheduledTasksService {
-  list(host: ModuleHubRuntimeHostRef): Promise<ScheduledTask[]>;
-  create(
-    input: ScheduledTaskCreateInput,
-    host: ModuleHubRuntimeHostRef,
-  ): Promise<ScheduledTask>;
-  update(
-    id: string,
-    patch: UpdateScheduledTaskInput,
-    host: ModuleHubRuntimeHostRef,
-  ): Promise<ScheduledTask>;
-  setEnabled(
-    id: string,
-    enabled: boolean,
-    host: ModuleHubRuntimeHostRef,
-  ): Promise<ScheduledTask>;
-  triggerNow(id: string, host: ModuleHubRuntimeHostRef): Promise<ScheduledTask>;
-  snooze(id: string, host: ModuleHubRuntimeHostRef): Promise<ScheduledTask>;
-  clearRunHistory(id: string, host: ModuleHubRuntimeHostRef): Promise<ScheduledTask>;
-  delete(id: string, host: ModuleHubRuntimeHostRef): Promise<void>;
-  subscribeChanges(
-    handler: (event: {
-      type: 'scheduled_tasks_changed';
-      reason: string;
-      taskId?: string;
-      ts: number;
-    }) => void,
-  ): ModuleHubUnsubscribe;
-  subscribeDue(
-    handler: (task: Pick<ScheduledTask, 'id' | 'title'>) => void,
   ): ModuleHubUnsubscribe;
 }
 
@@ -123,7 +83,6 @@ export interface ModuleHubClipboardService {
 /** Environment capabilities owned by the Module Hub feature slice. */
 export interface ModuleHubServices {
   runtimeHosts: ModuleHubRuntimeHostsService;
-  scheduledTasks: ModuleHubScheduledTasksService;
   clientSettings: ModuleHubClientSettingsService;
   dailyReview: ModuleHubDailyReviewService;
   clipboard: ModuleHubClipboardService;

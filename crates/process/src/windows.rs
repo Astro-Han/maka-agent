@@ -146,7 +146,7 @@ async fn settle(
         Ok::<_, io::Error>(())
     })
     .await
-    .map_err(|_| ToolError::OutcomeUnknown("Shell Job exit not confirmed".into()))?
+    .map_err(|_| ToolError::CleanupUnconfirmed("Shell Job exit not confirmed".into()))?
     .map_err(unknown)?;
     Ok(Outcome::Interrupted {
         reason,
@@ -155,7 +155,7 @@ async fn settle(
 }
 
 fn unknown(error: io::Error) -> ToolError {
-    ToolError::OutcomeUnknown(format!("Shell process tree exit not confirmed: {error}"))
+    ToolError::CleanupUnconfirmed(format!("Shell process tree exit not confirmed: {error}"))
 }
 
 pub(crate) fn checked(success: i32) -> io::Result<()> {

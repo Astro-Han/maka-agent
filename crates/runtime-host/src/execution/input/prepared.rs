@@ -45,13 +45,13 @@ impl Executions {
         &self,
         session: SessionRecord<SessionConfiguration>,
         content: MessageInput,
-        connection: uuid::Uuid,
+        connection: Option<uuid::Uuid>,
         active_tools: Option<Arc<HashSet<String>>>,
     ) -> Result<PreparedMessageInput> {
         let Some(tools) = active_tools else {
             let digest = session.configuration_digest.clone();
             let (environment, content, selection) = self
-                .prepare_environment_for(session, Some(connection), BindingMode::Strict, None)
+                .prepare_environment_for(session, connection, BindingMode::Strict, None)
                 .await?
                 .expand(content, Default::default())
                 .await?;

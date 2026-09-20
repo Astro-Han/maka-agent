@@ -37,6 +37,12 @@ struct PausedRead {
     proceed: Arc<Notify>,
 }
 impl Store for PausedRead {
+    fn scan(
+        &self,
+        query: maka_plugins::storage::Scan,
+    ) -> BoxFuture<'_, Result<maka_plugins::storage::Page, StoreError>> {
+        self.inner.scan(query)
+    }
     fn read(&self, key: String) -> BoxFuture<'_, Result<Option<Record>, StoreError>> {
         Box::pin(async move {
             if key == "scheduled-tasks:4:main:task:task-one" {

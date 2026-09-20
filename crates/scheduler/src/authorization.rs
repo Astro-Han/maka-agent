@@ -17,80 +17,42 @@
  * under the License.
  */
 
-use crate::{
-    Error, invalid,
-    task::{Creator, Effect},
-};
-use maka_plugins::execution::{RootApproval, SessionBoundary};
+use crate::{Error, task::Creator};
+use maka_plugins::{authorization::Id, call::Scope};
 use maka_runtime::event::Invocation;
 use serde::{Deserialize, Serialize};
 
-/// Supplied by the Host entrypoint, never decoded from a client payload.
+/// The plugin constructs provenance from the admitted public callback. It is
+/// never decoded as an execution capability from a management payload.
 #[derive(Clone)]
 pub enum Origin {
-    User,
-    Agent(Invocation),
+    User { grant: Option<Id> },
+    Agent(Scope),
 }
 impl Origin {
-    pub fn creator(&self) -> Creator {
+    pub fn agent(&self) -> Result<Option<&Invocation>, Error> {
         match self {
-            Self::User => Creator::User,
-            Self::Agent(invocation) => Creator::Agent {
+            Self::User { .. } => Ok(None),
+            Self::Agent(call) => call
+                .identity
+                .agent()
+                .map(Some)
+                .ok_or_else(|| Error::Invalid("expected an admitted Agent call".into())),
+        }
+    }
+    pub fn creator(&self) -> Result<Creator, Error> {
+        Ok(match self.agent()? {
+            Some(invocation) => Creator::Agent {
                 session_id: invocation.session_id.clone(),
             },
-        }
+            None => Creator::User,
+        })
     }
 }
 
-/// Internal approval data is stored with the plan, outside its public wire Task.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Authorization {
-    Notification { source: Option<SessionBoundary> },
-    Session { boundary: SessionBoundary },
-    Root { approval: Box<RootApproval> },
-}
-impl Authorization {
-    pub fn validate(&self, effect: &Effect) -> Result<(), Error> {
-        match (self, effect) {
-            (Self::Notification { source }, Effect::Notify(_)) => {
-                if let Some(source) = source {
-                    source
-                        .validate()
-                        .map_err(|error| invalid(error.to_string()))?;
-                }
-                Ok(())
-            }
-            (Self::Session { boundary }, Effect::SessionResume { session_id })
-                if &boundary.session_id == session_id =>
-            {
-                boundary
-                    .validate()
-                    .map_err(|error| invalid(error.to_string()))
-            }
-            (Self::Root { approval }, Effect::AgentRun { execution }) => {
-                let template = &approval.template;
-                template
-                    .validate()
-                    .map_err(|error| invalid(error.to_string()))?;
-                if let Some(source) = &approval.source {
-                    source
-                        .validate()
-                        .map_err(|error| invalid(error.to_string()))?;
-                }
-                if template.model.connection_id != execution.llm_connection_id
-                    || template.model.connection_slug != execution.llm_connection_slug
-                    || template.model.model != execution.model
-                    || template.permission_mode != execution.permission_mode
-                    || template.thinking_level != execution.thinking_level
-                    || template.collaboration_mode != execution.collaboration_mode
-                    || template.orchestration_mode != execution.orchestration_mode
-                {
-                    return Err(invalid("execution approval does not match task effect"));
-                }
-                Ok(())
-            }
-            _ => Err(invalid("authorization does not match task effect")),
-        }
-    }
+/// A durable reference, never a plugin-supplied copy of Host authorization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Authorization {
+    pub grant: Id,
 }

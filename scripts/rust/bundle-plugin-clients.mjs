@@ -30,8 +30,9 @@ const lock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 'utf8')
 if (require('esbuild/package.json').version !== lock.packages['node_modules/esbuild'].version)
   throw new Error('Client compiler does not match the repository lockfile');
 for (const [name, entryPoint] of [
-  ['agent-graph', 'crates/runtime-host/src/plugins/graph/client.tsx'],
+  ['agent-graph', 'crates/graph/src/client.tsx'],
   ['skills', 'crates/skills/src/client.tsx'],
+  ['scheduler', 'crates/scheduler/src/client.tsx'],
   ['workhub', 'packages/workhub/src/client.tsx'],
 ]) {
   const source = await buildClient(

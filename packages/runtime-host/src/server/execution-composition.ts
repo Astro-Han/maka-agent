@@ -54,7 +54,6 @@ import { buildRecallTools } from '@maka/runtime/recall-tools';
 import { RECALL_SYNTHETIC_TEXT_PATTERNS } from '@maka/runtime/recall-candidates';
 import { buildBuiltinTools } from '@maka/runtime/builtin-tools';
 import { createLocalContinuationSafetyInspector } from '@maka/runtime/continuation-safety';
-import { createConfiguredSubagentCatalog } from '@maka/runtime/configured-subagent-catalog';
 import { buildHostCapabilitiesFromBinding } from '@maka/runtime/skills';
 import {
   createBuiltinSandboxManager,
@@ -1303,21 +1302,12 @@ export async function createExecutionRuntimeHostComposition(
       });
       return { tools: surface.childTools ?? [], shell };
     };
-    const subagentCatalog = createConfiguredSubagentCatalog({
-      getPresets: async () =>
-        (await runtimePolicyStores.runtimePolicy.getSnapshot()).policy.subagents.presets,
-      getConnection: async (slug) =>
-        (await runtimePolicyStores.connectionCatalog.getSnapshot()).connections.find(
-          (connection) => connection.slug === slug,
-        ) ?? null,
-    });
     manager = new SessionManager({
       store: stores.sessionStore,
       runStore: stores.agentRunStore,
       runtimeEventStore: stores.runtimeEventStore,
       toolBoundaryProtocol: stores.runtimeEventStore.toolBoundaryProtocol,
       backends,
-      subagentCatalog,
       assertChildExecutorAvailable: (parentSessionId, executorId) => {
         const identity = pluginExecutors.identity(parentSessionId, executorId);
         if (identity.scopeId !== 'profile') {

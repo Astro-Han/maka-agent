@@ -23,21 +23,14 @@ use maka_plugins::{
     kernel::Definition,
 };
 use maka_skills::plugin::{Builtin, ID};
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
-pub(crate) fn install(
-    setup: &mut Setup,
-    state_root: PathBuf,
-    home: Option<PathBuf>,
-    executions: &Arc<crate::execution::Executions>,
-) -> Result<(), maka_plugins::Error> {
-    let catalog = &executions.plugin_catalog;
+pub(crate) fn install(setup: &mut Setup) -> Result<(), maka_plugins::Error> {
     if setup.builtins.contains_key(ID) || setup.layers.contains_key(ID) {
         return Err(maka_plugins::Error::Invalid(
             "built-in Skills identity is reserved".into(),
         ));
     }
-    catalog.host_only::<maka_plugins::input::InputPreparation>()?;
     setup.builtins.insert(
         ID.into(),
         Arc::new(Definition {
@@ -46,8 +39,6 @@ pub(crate) fn install(
             dependencies: vec![],
             inject: vec![],
             plugin: Arc::new(Builtin {
-                state_root,
-                home,
                 client: Some(maka_plugins::client::Bundle::builtin(
                     ID,
                     env!("CARGO_PKG_VERSION"),

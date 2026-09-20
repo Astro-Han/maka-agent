@@ -35,6 +35,7 @@ import { buildManagedArtifactPreviewTools } from '../managed-artifact-preview-to
 import { browserOriginAdmission } from '../browser/browser-origin-admission.js';
 import type { SessionToolContext } from '@maka/runtime/tool-runtime';
 import { buildRiveWorkflowTool } from '../rive-workflow-tool.js';
+import { pluginNotifications } from '../plugin-notifications.js';
 import { createDesktopNativeCapabilityProvider } from '../runtime-host-native-capabilities.js';
 
 function jsonSchema(schema: Record<string, unknown>): {
@@ -573,39 +574,27 @@ test('publishes every production Desktop-owned tool schema through the protocol'
   );
 });
 
-test('publishes and admits additional Desktop native-effect services', async () => {
-  let admitted = false;
-  const provider = createDesktopNativeCapabilityProvider(
-    {
-      browserTools: [],
-      resolveBrowserUrl: () => 'https://example.com/',
-      releaseBrowserSession() {},
-      computerUseTools: computerTools(),
-      releaseDesktopInteractionSession() {},
-      additionalServices: (scope) => [
-        {
-          serviceId: 'maka_scheduled_task_native_effect',
-          version: '1',
-          async call(method, input) {
-            return { method, id: input.id, hostId: scope.hostId };
-          },
-        },
-      ],
-    },
-    { targetScope: { hostId: 'host-1', targetEpoch: 'epoch-1' } },
-  );
-  assert.deepEqual(provider.services?.(), [
-    { serviceId: 'maka_scheduled_task_native_effect', version: '1' },
-  ]);
+test('plugin notifications require native admission and preserve the package identity', async () => {
+  const delivered: unknown[] = [];
+  const provider = createDesktopNativeCapabilityProvider({
+    browserTools: [], resolveBrowserUrl: () => 'https://example.com/',
+    releaseBrowserSession() {}, computerUseTools: computerTools(),
+    releaseDesktopInteractionSession() {},
+    additionalServices: () => [pluginNotifications({
+      local: (...input) => { delivered.push(input); },
+      channel: async (...input) => { delivered.push(input); },
+    })],
+  }, { targetScope: { hostId: 'host-1', targetEpoch: 'epoch-1' } });
+  assert.deepEqual(provider.services?.(), [{ serviceId: 'maka_notifications', version: '1' }]);
   assert.ok(provider.callService);
-  const result = await provider.callService(serviceFrame(), {
-    signal: new AbortController().signal,
-    accept: async () => {
-      admitted = true;
-    },
-  });
-  assert.equal(admitted, true);
-  assert.deepEqual(result, { method: 'notify_local', id: 'task-1', hostId: 'host-1' });
+  const signal = new AbortController().signal;
+  await assert.rejects(provider.callService(serviceFrame(), {
+    signal, accept: async () => { throw new Error('revoked'); },
+  }), /revoked/);
+  assert.deepEqual(delivered, []);
+  const result = await provider.callService(serviceFrame(), { signal, accept: async () => {} });
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(delivered, [['example.reminder', 'Reminder', 'Public contract']]);
 });
 
 test('validates before admission and invokes the exact offered tool with Host context', async () => {
@@ -1321,10 +1310,12 @@ function serviceFrame(): ClientCapabilityServiceCallFrame {
     kind: 'client.capability.service_call',
     invocationId: 'invocation-service-1',
     registrationId: 'registration-1',
-    serviceId: 'maka_scheduled_task_native_effect',
+    serviceId: 'maka_notifications',
     version: '1',
-    method: 'notify_local',
-    input: { id: 'task-1' },
+    method: 'send',
+    input: { packageId: 'example.reminder', notification: {
+      id: 'notice-1', title: 'Reminder', body: 'Public contract', destination: { kind: 'local' },
+    } },
   };
 }
 

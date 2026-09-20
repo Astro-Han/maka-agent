@@ -30,12 +30,6 @@ pub fn normalize_mutation(mut input: Value) -> Result<RuntimePolicyMutationInput
     {
         integer_field(value, "port");
     }
-    if let Some(operation) = input.get_mut("operation")
-        && operation.get("kind").and_then(Value::as_str) == Some("set_subagents")
-        && let Some(value) = operation.get_mut("value")
-    {
-        *value = serde_json::to_value(subagents::normalize(value)).map_err(|e| e.to_string())?;
-    }
     let mut input: RuntimePolicyMutationInput =
         serde_json::from_value(input).map_err(|e| e.to_string())?;
     revision(input.expected_revision, false)?;
@@ -55,15 +49,8 @@ pub fn decode_canonical_snapshot(mut input: Value) -> Result<RuntimePolicySnapsh
     {
         integer_field(value, "port");
     }
-    let mut normalized = input.clone();
-    if let Some(value) = normalized
-        .get_mut("policy")
-        .and_then(|p| p.get_mut("subagents"))
-    {
-        *value = serde_json::to_value(subagents::normalize(value)).map_err(|e| e.to_string())?;
-    }
     let mut snapshot: RuntimePolicySnapshot =
-        serde_json::from_value(normalized).map_err(|e| e.to_string())?;
+        serde_json::from_value(input.clone()).map_err(|e| e.to_string())?;
     revision(snapshot.revision, false)?;
     normalize_policy(&mut snapshot.policy)?;
     // Object key order is not semantic, including with serde_json/preserve_order.
@@ -115,8 +102,7 @@ fn normalize_operation(operation: &mut RuntimePolicyMutation) -> Result<(), Stri
         | RuntimePolicyMutation::SetWorkspaceInstructions { .. }
         | RuntimePolicyMutation::SetPrivacy { .. }
         | RuntimePolicyMutation::SetChatDefaults { .. }
-        | RuntimePolicyMutation::SetWebSearch { .. }
-        | RuntimePolicyMutation::SetSubagents { .. } => Ok(()),
+        | RuntimePolicyMutation::SetWebSearch { .. } => Ok(()),
     }
 }
 fn personalization(value: &Personalization) -> Result<(), String> {
@@ -204,7 +190,7 @@ mod tests {
             decode_canonical_snapshot(reordered.clone()).unwrap(),
             snapshot
         );
-        reordered["policy"]["subagents"]["ignored"] = json!(true);
+        reordered["policy"]["personalization"]["ignored"] = json!(true);
         assert!(decode_canonical_snapshot(reordered).is_err());
         let mut value = serde_json::to_value(snapshot).unwrap();
         value["policy"]["networkProxy"]["host"] = json!("\u{feff} Example ");

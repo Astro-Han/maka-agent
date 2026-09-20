@@ -59,7 +59,7 @@ describe('composer first-send cleanup', () => {
       sessions: {
         submitMessage: async () => {
           sends += 1;
-          return { ok: true, attachments: [], skillInvocation: { loaded: [], failed: [] } };
+          return { ok: true, attachments: [], preparation: [] };
         },
       },
     });
@@ -179,7 +179,7 @@ describe('composer first-send cleanup', () => {
         submitMessage: async () => ({
           ok: true,
           attachments: [],
-          skillInvocation: { loaded: [], failed: [] },
+          preparation: [],
         }),
       },
     });
@@ -230,7 +230,7 @@ describe('composer first-send cleanup', () => {
         submitMessage: async () => ({
           ok: true,
           attachments: [],
-          skillInvocation: { loaded: [], failed: [] },
+          preparation: [],
         }),
       },
     });
@@ -267,10 +267,10 @@ describe('composer first-send cleanup', () => {
         remove: async (id: string) => { removed.push(id); },
         submitMessage: async () => {
           if (createInputs.length === 1) {
-            return { ok: false, reason: 'skill_invocation_failed', skillInvocation: { loaded: [], failed: [] } };
+            return { ok: false, reason: 'input_preparation_failed', preparation: [] };
           }
           if (createInputs.length === 2) throw new Error('First submission failed');
-          return { ok: true, attachments: [], skillInvocation: { loaded: [], failed: [] } };
+          return { ok: true, attachments: [], preparation: [] };
         },
       },
     });
@@ -320,7 +320,7 @@ describe('composer first-send cleanup', () => {
         submitMessage: async () => ({
           ok: true,
           attachments: [],
-          skillInvocation: { loaded: [], failed: [] },
+          preparation: [],
         }),
       },
     });
@@ -378,7 +378,7 @@ describe('composer first-send cleanup', () => {
         submitMessage: async () => ({
           ok: true,
           attachments: [],
-          skillInvocation: { loaded: [], failed: [] },
+          preparation: [],
         }),
         // A successful send must never reach this — refreshMessagesUntilTurn
         // and the rest of the happy path run after the cleanup window closes.
@@ -460,7 +460,7 @@ describe('composer first-send cleanup', () => {
       sessions: {
         submitMessage: async () => {
           order.push('submit');
-          return { ok: true, attachments: [], skillInvocation: { loaded: [], failed: [] } };
+          return { ok: true, attachments: [], preparation: [] };
         },
       },
     });
@@ -500,7 +500,7 @@ describe('composer first-send cleanup', () => {
       sessions: {
         submitMessage: async () => {
           submissions += 1;
-          return { ok: true, attachments: [], skillInvocation: { loaded: [], failed: [] } };
+          return { ok: true, attachments: [], preparation: [] };
         },
         remove: async (sessionId: string) => {
           removed.push(sessionId);
@@ -578,7 +578,7 @@ describe('composer first-send cleanup', () => {
         submitMessage: async () => ({
           ok: true,
           attachments: [],
-          skillInvocation: { loaded: [], failed: [] },
+          preparation: [],
         }),
       },
     });
@@ -648,7 +648,7 @@ describe('composer first-send cleanup', () => {
       sessions: {
         submitMessage: async () => {
           order.push('send');
-          return { ok: true, attachments: [], skillInvocation: { loaded: [], failed: [] } };
+          return { ok: true, attachments: [], preparation: [] };
         },
       },
     });

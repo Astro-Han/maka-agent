@@ -73,7 +73,7 @@ export type ScheduledTaskEffect =
   | { kind: 'agent_run'; execution: ScheduledTaskExecutionTemplate };
 
 /** Frozen at create time so later settings changes do not rewrite past jobs. */
-export interface ScheduledTaskExecutionTemplate {
+export type ScheduledTaskExecutionTemplate = {
   /** Omitted legacy templates use direct tools. */
   readonly toolMode?: ToolMode;
   readonly cwd: string;
@@ -86,24 +86,24 @@ export interface ScheduledTaskExecutionTemplate {
   readonly permissionMode: PermissionMode;
   readonly collaborationMode: CollaborationMode;
   readonly orchestrationMode: OrchestrationMode;
-}
+};
 
-export interface ScheduledTaskRun {
+export type ScheduledTaskRun = {
   id: string;
   at: number;
   outcome: ScheduledTaskRunOutcome;
   message: string;
   sessionId?: string;
   runId?: string;
-}
+};
 
-export interface ScheduledTaskCreatedBy {
+export type ScheduledTaskCreatedBy = {
   kind: ScheduledTaskCreatedByKind;
   /** Session that created this task when kind is agent. */
   sessionId?: string;
-}
+};
 
-export interface ScheduledTask {
+export type ScheduledTask = {
   id: string;
   title: string;
   intent: { kind: 'text'; body: string };
@@ -120,9 +120,9 @@ export interface ScheduledTask {
   updatedAt: number;
   runs: ScheduledTaskRun[];
   lastError: string | null;
-}
+};
 
-export interface CreateScheduledTaskInput {
+export type CreateScheduledTaskInput = {
   title: string;
   intentBody: string;
   schedule: ScheduledTaskSchedule;
@@ -130,16 +130,16 @@ export interface CreateScheduledTaskInput {
   createdBy: ScheduledTaskCreatedBy;
   maxFires?: number | null;
   expiresAt?: number | null;
-}
+};
 
-export interface UpdateScheduledTaskInput {
+export type UpdateScheduledTaskInput = {
   title?: string;
   intentBody?: string;
   schedule?: ScheduledTaskSchedule;
   effect?: ScheduledTaskEffect;
   maxFires?: number | null;
   expiresAt?: number | null;
-}
+};
 
 export type ScheduledTaskNormalizeResult<T> =
   | { ok: true; value: T }

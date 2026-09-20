@@ -19,7 +19,6 @@
 
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import type { DesktopRuntimeHostProfileChangedEvent } from '../../preload/bridge-contract.js';
 import type { ModuleHubRuntimeHostRef } from '../../renderer/features/module-hub/testing.js';
 import {
   createDesktopModuleHubServices,
@@ -44,7 +43,7 @@ function methodRecorder(calls: Call[], prefix: string) {
 }
 
 describe('createDesktopModuleHubServices', () => {
-  it('maps host-scoped Scheduled Tasks, Daily Review, and clipboard operations', async () => {
+  it('maps host-scoped Daily Review, and clipboard operations', async () => {
     const calls: Call[] = [];
     const host: ModuleHubRuntimeHostRef = {
       profileId: 'remote-a',
@@ -55,7 +54,6 @@ describe('createDesktopModuleHubServices', () => {
         getDefaultHost: async () => host,
         subscribeChanges: () => () => undefined,
       },
-      scheduledTasks: methodRecorder(calls, 'scheduledTasks'),
       dailyReview: methodRecorder(calls, 'dailyReview'),
     } as unknown as DesktopModuleHubBridge;
     const clipboard = {
@@ -66,21 +64,6 @@ describe('createDesktopModuleHubServices', () => {
     const services = createDesktopModuleHubServices(bridge, { clipboard });
 
     assert.deepEqual(await services.runtimeHosts.getDefault(), host);
-
-    const createInput = { title: 'Task' } as Parameters<
-      typeof services.scheduledTasks.create
-    >[0];
-    const updateInput = { title: 'Renamed' } as Parameters<
-      typeof services.scheduledTasks.update
-    >[1];
-    await services.scheduledTasks.list(host);
-    await services.scheduledTasks.create(createInput, host);
-    await services.scheduledTasks.update('task', updateInput, host);
-    await services.scheduledTasks.setEnabled('task', true, host);
-    await services.scheduledTasks.triggerNow('task', host);
-    await services.scheduledTasks.snooze('task', host);
-    await services.scheduledTasks.clearRunHistory('task', host);
-    await services.scheduledTasks.delete('task', host);
 
     await services.dailyReview.day(0, 7, host);
     await services.dailyReview.runOnce({ range: 7, offsetDays: -1 });
@@ -93,14 +76,6 @@ describe('createDesktopModuleHubServices', () => {
     await services.clipboard.writeText('review');
 
     assert.deepEqual(calls, [
-      { name: 'scheduledTasks.list', args: [host] },
-      { name: 'scheduledTasks.create', args: [createInput, host] },
-      { name: 'scheduledTasks.update', args: ['task', updateInput, host] },
-      { name: 'scheduledTasks.setEnabled', args: ['task', true, host] },
-      { name: 'scheduledTasks.triggerNow', args: ['task', host] },
-      { name: 'scheduledTasks.snooze', args: ['task', host] },
-      { name: 'scheduledTasks.clearRunHistory', args: ['task', host] },
-      { name: 'scheduledTasks.delete', args: ['task', host] },
       { name: 'dailyReview.day', args: [0, 7, host] },
       { name: 'dailyReview.runOnce', args: [{ range: 7, offsetDays: -1 }] },
       { name: 'dailyReview.listArchives', args: [] },
@@ -113,87 +88,7 @@ describe('createDesktopModuleHubServices', () => {
     ]);
   });
 
-  it('forwards subscriptions, narrows Runtime Host events, and preserves disposers', () => {
-    let hostHandler:
-      | ((event: DesktopRuntimeHostProfileChangedEvent) => void)
-      | undefined;
-    let scheduledChangeHandler: ((event: never) => void) | undefined;
-    let scheduledDueHandler: ((task: never) => void) | undefined;
-    let disposed = 0;
-    const subscribe = <T>(assign: (handler: (value: T) => void) => void) =>
-      (handler: (value: T) => void) => {
-        assign(handler);
-        return () => {
-          disposed += 1;
-        };
-      };
-    const bridge = {
-      runtimeHostProfiles: {
-        getDefaultHost: async () => ({ profileId: 'local', hostId: 'local' }),
-        subscribeChanges: subscribe<DesktopRuntimeHostProfileChangedEvent>(
-          (handler) => {
-            hostHandler = handler;
-          },
-        ),
-      },
-      scheduledTasks: Object.assign(methodRecorder([], 'scheduledTasks'), {
-        subscribeChanges: subscribe((handler) => {
-          scheduledChangeHandler = handler;
-        }),
-        subscribeDue: subscribe((handler) => {
-          scheduledDueHandler = handler;
-        }),
-      }),
-      dailyReview: methodRecorder([], 'dailyReview'),
-    } as unknown as DesktopModuleHubBridge;
-    const services = createDesktopModuleHubServices(bridge, {
-      clipboard: { writeText: async () => undefined },
-    });
-    const hostEvents: unknown[] = [];
-    const taskEvents: unknown[] = [];
-    const dueEvents: unknown[] = [];
-    const unsubscribers = [
-      services.runtimeHosts.subscribeChanges((event) => hostEvents.push(event)),
-      services.scheduledTasks.subscribeChanges((event) => taskEvents.push(event)),
-      services.scheduledTasks.subscribeDue((event) => dueEvents.push(event)),
-    ];
-    const hostEvent: DesktopRuntimeHostProfileChangedEvent = {
-      epoch: '2',
-      profileId: 'remote-a',
-      profileName: 'Remote',
-      profileKind: 'remote',
-      profileAccess: 'owner',
-      readiness: 'ready',
-      hostId: 'host-a',
-      isDefault: true,
-    };
-    const changeEvent = {
-      type: 'scheduled_tasks_changed' as const,
-      reason: 'updated',
-      taskId: 'task',
-      ts: 2,
-    };
-    const dueEvent = { id: 'task', title: 'Task' };
-    hostHandler?.(hostEvent);
-    scheduledChangeHandler?.(changeEvent as never);
-    scheduledDueHandler?.(dueEvent as never);
-    for (const unsubscribe of unsubscribers) unsubscribe();
-
-    assert.deepEqual(hostEvents, [
-      {
-        profileId: 'remote-a',
-        readiness: 'ready',
-        hostId: 'host-a',
-        isDefault: true,
-        removed: undefined,
-      },
-    ]);
-    assert.deepEqual(taskEvents, [changeEvent]);
-    assert.deepEqual(dueEvents, [dueEvent]);
-    assert.equal(disposed, 3);
-  });
-
-  it('maps keep-awake settings and safely gates an older preload', async () => {
+  it('persists keep-awake policy and releases its change subscription', async () => {
     let changed: (() => void) | undefined;
     let disposed = 0;
     const updates: unknown[] = [];
@@ -202,7 +97,6 @@ describe('createDesktopModuleHubServices', () => {
         getDefaultHost: async () => ({ profileId: 'local', hostId: 'local' }),
         subscribeChanges: () => () => undefined,
       },
-      scheduledTasks: methodRecorder([], 'scheduledTasks'),
       dailyReview: methodRecorder([], 'dailyReview'),
     };
     const services = createDesktopModuleHubServices(
@@ -239,19 +133,6 @@ describe('createDesktopModuleHubServices', () => {
     assert.equal(notifications, 1);
     assert.equal(disposed, 1);
 
-    const oldPreload = createDesktopModuleHubServices(
-      base as unknown as DesktopModuleHubBridge,
-      { clipboard: { writeText: async () => undefined } },
-    );
-    assert.equal(oldPreload.clientSettings.supported, false);
-    oldPreload.clientSettings.subscribeChanges(() => undefined)();
-    await assert.rejects(
-      oldPreload.clientSettings.getKeepSystemAwake(),
-      /Client settings are unavailable/,
-    );
-    await assert.rejects(
-      oldPreload.clientSettings.setKeepSystemAwake(true),
-      /Client settings are unavailable/,
-    );
+
   });
 });

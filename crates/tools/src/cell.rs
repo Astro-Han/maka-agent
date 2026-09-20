@@ -108,7 +108,7 @@ impl ToolExecutor for CellTool {
                 Err(CellAbort::Cancelled) => {
                     Err(ToolError::Failed("code execution cancelled".into()))
                 }
-                Err(CellAbort::Internal(message)) => Err(ToolError::OutcomeUnknown(message)),
+                Err(CellAbort::Internal(message)) => Err(ToolError::CleanupUnconfirmed(message)),
             }
         })
     }

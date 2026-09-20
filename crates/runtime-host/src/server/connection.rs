@@ -199,7 +199,7 @@ impl Host {
                     // Keep this future alive across select iterations: refresh
                     // awaits must not suspend reading or cancel a partial cut.
                     refresh = Some(Box::pin(async move {
-                        let catalog_pending = host.session_catalog.publish_commits(&host.log, &host.changes, through).await?;
+                        let catalog_pending = host.session_catalog.publish_commits(&host.log, through).await?;
                         let mut subscriptions = subscriptions.lock().await;
                         let (frames, subscription_pending) = subscriptions.poll(host).await?;
                         // Delivery state and queue order have one owner. Open,

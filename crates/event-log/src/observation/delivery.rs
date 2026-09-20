@@ -57,7 +57,6 @@ pub enum StreamFact {
         is_error: bool,
     },
     InvocationOpened,
-    WorkhubDelegated,
     MessageSteered,
     PartStarted {
         step_id: String,
@@ -108,8 +107,7 @@ pub enum ToolSettlement {
 #[derive(Debug)]
 pub struct StreamEventPage {
     pub events: Vec<StoreStreamEvent>,
-    /// Latest Session-owned transcript boundary in this page's consumed range.
-    pub session_boundary: Option<u64>,
+    /// Stable log fence against which this page was read.
     pub through_sequence: u64,
     /// Continue strictly after this sequence; None means the fence is exhausted.
     pub next_after: Option<u64>,
@@ -211,23 +209,9 @@ impl EventLog {
                         bytes += size;
                         enriched.push(event);
                     }
-                    let consumed = next_after.unwrap_or(through);
-                    let session_boundary: Option<i64> = sqlx::query_scalar(
-                        "SELECT MAX(sequence) FROM session_events
-                         WHERE json_extract(event_json, '$.session_id') = ?1
-                           AND sequence > ?2 AND sequence <= ?3",
-                    )
-                    .bind(&session_id)
-                    .bind(after)
-                    .bind(i64::try_from(consumed).map_err(|_| invalid("invalid stream boundary"))?)
-                    .fetch_one(&mut *transaction)
-                    .await?;
-                    let session_boundary =
-                        session_boundary.map(crate::sequence_number).transpose()?;
                     transaction.commit().await?;
                     Ok(StreamEventPage {
                         events: enriched,
-                        session_boundary,
                         through_sequence: through,
                         next_after,
                     })
@@ -268,7 +252,7 @@ SELECT json_object(
         WHEN kind = 'tool_settled' THEN
             json_object('kind', kind, 'operation_id', operation_id,
                 'outcome', json_extract(event_json, '$.fact.outcome.kind'))
-        WHEN kind IN ('invocation_opened', 'message_steered', 'workhub_delegated') THEN json_object('kind', kind)
+        WHEN kind IN ('invocation_opened', 'message_steered') THEN json_object('kind', kind)
         WHEN kind = 'invocation_ended' THEN json_object('kind', kind,
             'failed', json(CASE WHEN json_extract(event_json, '$.fact.outcome.kind') = 'failed'
                 OR (json_extract(event_json, '$.fact.outcome.kind') = 'cancelled' AND EXISTS (
@@ -309,7 +293,7 @@ AND (kind NOT IN ('model_observed', 'model_completed', 'model_interrupted') OR
              AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
              AND json_extract(request.event_json, '$.fact.purpose') = 'main'))
 AND (kind IN ('invocation_opened', 'message_steered', 'invocation_ended', 'model_completed', 'model_interrupted',
-             'tool_dispatched', 'tool_rejected', 'tool_settled', 'workhub_delegated', 'executor_started', 'executor_observed', 'executor_completed')
+             'tool_dispatched', 'tool_rejected', 'tool_settled', 'executor_started', 'executor_observed', 'executor_completed')
      OR (kind = 'model_observed'
          AND json_extract(event_json, '$.fact.event.kind') IN
              ('part_started', 'part_delta', 'part_finished')))

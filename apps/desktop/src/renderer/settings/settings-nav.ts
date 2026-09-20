@@ -22,7 +22,6 @@ import {
   Activity,
   BarChart3,
   Bot,
-  Brain,
   CalendarDays,
   Cpu,
   Database,
@@ -76,9 +75,6 @@ type AccountSecretProbeResult =
 // node:test without a DOM / React.
 export type { SettingsNavGroup };
 
-// PR-SETTINGS-IA-CONSOLIDATE-0 + PR-SETTINGS-REVIEW-0: WAWQAQ msg
-// `886f6406` rolled back the 记忆+回顾 merge — the combined page was
-// too dense. 记忆 and 每日回顾 are separate nav items again.
 export const SETTINGS_NAV: SettingsNavItem[] = [
   { id: 'general', Icon: SettingsIcon, enabled: true, group: 'preferences' },
   { id: 'appearance', Icon: Palette, enabled: true, group: 'preferences' },
@@ -86,7 +82,6 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
   { id: 'models', Icon: Cpu, enabled: true, group: 'capabilities' },
   { id: 'external-agents', Icon: Bot, enabled: true, group: 'capabilities' },
   { id: 'subagents', Icon: Workflow, enabled: true, group: 'capabilities' },
-  { id: 'memory', Icon: Brain, enabled: true, group: 'capabilities' },
   { id: 'bot-chat', Icon: Bot, enabled: true, group: 'capabilities' },
   { id: 'search', Icon: Search, enabled: true, group: 'capabilities', badge: 'Beta' },
   { id: 'usage', Icon: BarChart3, enabled: true, group: 'activity' },

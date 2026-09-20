@@ -20,7 +20,46 @@
 pub use maka_runtime::model::ModelGeneration;
 use serde::{Deserialize, Serialize};
 
+/// A user-selected model name, not provider configuration or execution authority.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum Selection {
+    Default,
+    Named {
+        connection_slug: String,
+        model: String,
+    },
+}
+impl Selection {
+    pub fn validate(&self) -> Result<(), crate::Error> {
+        if let Self::Named {
+            connection_slug,
+            model,
+        } = self
+        {
+            crate::name(connection_slug)?;
+            crate::name(model)?;
+        }
+        Ok(())
+    }
+}
+
 pub trait Models: Send + Sync {
+    /// Resolve an enabled model without exposing credentials, endpoints, or overlays.
+    /// Admission still validates the selected binding and its current permissions.
+    fn resolve(
+        &self,
+        selection: Selection,
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<Option<maka_runtime::execution::ModelBinding>, crate::Error>,
+    >;
+
     fn generate(
         &self,
         call: crate::call::Scope,

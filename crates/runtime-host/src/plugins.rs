@@ -61,8 +61,6 @@ pub struct Setup {
     pub builtins: Definitions,
     pub layers: BTreeMap<String, Vec<Operation>>,
     pub loader: Option<Arc<dyn PackageLoader>>,
-    /// Persistent Session ownership declared by linked plugins before admission.
-    pub managed_sessions: Vec<maka_event_log::sessions::ManagedSession>,
 }
 
 pub(crate) struct ExternalLoader(pub Option<Arc<dyn PackageLoader>>);

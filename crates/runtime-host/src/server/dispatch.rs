@@ -40,9 +40,6 @@ impl Host {
         authority: &super::authority::Authority,
         client_instance_id: &str,
     ) -> Result<Outcome, HostError> {
-        if super::scheduler::supports(operation) {
-            return super::scheduler::execute(self, operation, &input).await;
-        }
         if maka_protocol::plugin::supports(operation) {
             let input = maka_protocol::plugin::decode_input(operation, &input)?;
             if let maka_protocol::plugin::Input::Authorization(input) = input {
@@ -96,9 +93,6 @@ impl Host {
                 Ok(result) => Ok(Outcome::success(serde_json::to_value(result)?)),
                 Err(error) => Ok(Outcome::failure(error)),
             };
-        }
-        if maka_protocol::workhub::supports(operation) {
-            return super::workhub::execute(self, operation, &input, connection_id).await;
         }
         if maka_protocol::oauth::supports(operation) {
             return super::oauth::execute(self, connection_id, operation, &input).await;
@@ -249,9 +243,7 @@ impl Host {
                 match change {
                     Change::Session => {
                         if let Some(session_id) = session_id {
-                            self.session_catalog
-                                .publish_session(&self.changes, &session_id)
-                                .await?;
+                            self.session_catalog.publish_session(&session_id).await?;
                         }
                     }
                     Change::Configuration => {

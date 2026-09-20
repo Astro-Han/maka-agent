@@ -52,6 +52,61 @@ fn opening() -> RuntimeEvent {
 }
 
 #[tokio::test]
+async fn settled_uncertainty_survives_reopen_without_abandoning_the_invocation() {
+    use maka_runtime::{event::ToolOutcome, tool_call::ToolCallIdentity, tools::ToolJournal};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("events.sqlite");
+    let log = Arc::new(EventLog::open(&path).await.unwrap());
+    log.append(&EventWrite::plain(opening()).unwrap())
+        .await
+        .unwrap();
+    let journal = ToolJournal::new(log.clone(), invocation());
+    for (operation, uncertain) in [("publish", true), ("inspect", false)] {
+        let result = journal
+            .invoke_call_with::<Value>(
+                operation.into(),
+                ToolCallIdentity::standalone(operation.into()),
+                operation.into(),
+                Value::Null,
+                CancellationToken::new(),
+                move |_| {
+                    Box::pin(async move {
+                        if uncertain {
+                            Err(ToolError::OutcomeUnknown(
+                                "rename finished; directory sync failed".into(),
+                            ))
+                        } else {
+                            Ok(json!({"published": true}))
+                        }
+                    })
+                },
+            )
+            .await;
+        if uncertain {
+            assert!(matches!(result, Err(ToolError::OutcomeUnknown(_))));
+        } else {
+            assert_eq!(result.unwrap(), json!({"published":true}));
+        }
+    }
+    drop(journal);
+    Arc::try_unwrap(log).ok().unwrap().close().await.unwrap();
+    let reopened = EventLog::open(&path).await.unwrap();
+    let prefix = reopened.prefix(10, 16_384).await.unwrap();
+    assert!(
+        prefix
+            .project_invocation("invocation-1")
+            .uncertain_operations
+            .is_empty(),
+        "settled uncertainty is a recorded result, not a missing worker"
+    );
+    assert!(prefix.events.iter().any(|row| matches!(&row.event.fact,
+        Fact::ToolSettled { operation_id, outcome: ToolOutcome::Unknown { message } }
+            if operation_id == "publish" && message.contains("directory sync failed")
+    )));
+    reopened.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn committed_prefix_survives_reopen_with_exact_replay_and_terminal_sealing() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("events.sqlite");
@@ -304,7 +359,7 @@ async fn ambiguous_commits_do_not_trigger_effect_retries_or_false_success() {
                 assert!(matches!(result, Err(ToolError::Persistence(_))));
                 assert_eq!(count.load(Ordering::SeqCst), 0);
             } else {
-                assert!(matches!(result, Err(ToolError::OutcomeUnknown(_))));
+                assert!(matches!(result, Err(ToolError::Persistence(_))));
                 assert_eq!(count.load(Ordering::SeqCst), 1);
             }
             let pending = log

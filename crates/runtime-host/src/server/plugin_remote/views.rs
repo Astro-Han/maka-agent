@@ -23,9 +23,12 @@ use maka_plugins::remote::{Access, Error, SessionView, Views, WorkspaceViewInput
 use std::sync::{Arc, Weak};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+mod read;
+use read::ReadGrant;
 
 /// Captures transport authority once; plugin-visible caller metadata is never
 /// used as proof. Current credentials are checked before each read.
+#[derive(Clone)]
 pub(super) struct SessionViews {
     pub host: Weak<Host>,
     pub owner: maka_plugins::fiber::Context,
@@ -38,6 +41,26 @@ pub(super) struct SessionViews {
     pub resources: Arc<maka_plugins::call::Resources>,
 }
 impl SessionViews {
+    async fn files(
+        &self,
+        workspace: &maka_runtime::execution::WorkspaceProjection,
+        session: bool,
+    ) -> Result<maka_plugins::filesystem::ReadDirectory, Error> {
+        let grant = ReadGrant {
+            views: self.clone(),
+            workspace: workspace.clone(),
+            session,
+        };
+        grant.validate().await?;
+        let root = maka_plugins::filesystem::ReadRoot::open(&workspace.host_cwd)
+            .await
+            .map_err(|error| Error::Provider(error.to_string()))?;
+        Ok(root.bind_authorized(
+            self.owner.clone(),
+            self.cancellation.clone(),
+            Arc::new(grant),
+        ))
+    }
     async fn host(&self) -> Result<Arc<Host>, Error> {
         let host = self.host.upgrade().ok_or(Error::Retired)?;
         if let Some(captured) = self.authority.credential() {
@@ -90,7 +113,10 @@ impl Views for SessionViews {
                 Target::Workspace {
                     workspace: maka_runtime::execution::WorkspaceTarget::HostPath { .. },
                     ..
-                } if self.access != Access::HostPaths => {
+                }
+                | Target::Directory { .. }
+                    if self.access != Access::HostPaths =>
+                {
                     return Err(Error::Invalid(
                         "Remote endpoint does not allow Host paths".into(),
                     ));
@@ -111,6 +137,7 @@ impl Views for SessionViews {
                     self.owner.clone(),
                     principal,
                     request,
+                    self.connection_id,
                     self.cancellation.clone(),
                     self.resources.clone(),
                 )
@@ -161,6 +188,7 @@ impl Views for SessionViews {
                     Default::default()
                 };
                 Ok(SessionView {
+                    files: self.files(&session.workspace, true).await?,
                     workspace: session.workspace,
                     tools,
                 })
@@ -219,7 +247,12 @@ impl Views for SessionViews {
                 } else {
                     Default::default()
                 };
-                Ok(SessionView { workspace, tools })
+                let files = self.files(&workspace, false).await?;
+                Ok(SessionView {
+                    workspace,
+                    tools,
+                    files,
+                })
             };
             tokio::select! {
                 biased;

@@ -117,37 +117,4 @@ describe('Workbar feature boundary', () => {
     );
   });
 
-  it('keeps Quote Companion catalog state and localized scroll copy at the seam', () => {
-    const quotePanel = readFileSync(
-      join(
-        featureRoot,
-        'tools',
-        'side-chat',
-        'quote-companion-panel.tsx',
-      ),
-      'utf8',
-    );
-    assert.equal(
-      quotePanel.includes(
-        'scrollToBottomLabel={copy.scrollToBottom}',
-      ),
-      true,
-    );
-    // The catalog reaches the panel through ComposerMentionsProvider rather
-    // than through props (#4109), so what this guards is the context read, not
-    // the prop names. Both facets still have to arrive together: a panel that
-    // showed the skills without their loading verdict would advertise a
-    // catalog it cannot honour.
-    assert.equal(quotePanel.includes('useComposerMentionsContext()'), true);
-    assert.equal(
-      quotePanel.includes(
-        'mentionSkillsUnavailable={mentions?.mentionSkillsUnavailable}',
-      ),
-      true,
-    );
-    assert.equal(
-      quotePanel.includes('mentionSkillsLoading={mentions?.mentionSkillsLoading}'),
-      true,
-    );
-  });
 });

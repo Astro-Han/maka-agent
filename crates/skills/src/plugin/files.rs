@@ -21,11 +21,9 @@ use super::Error;
 use crate::{
     SourceCatalog,
     api::*,
-    discovery::artifact,
     publication::{Publisher, Tree},
 };
 use maka_runtime::artifact::content_digest;
-use std::path::Path;
 use tokio_util::sync::CancellationToken;
 
 mod update;
@@ -58,22 +56,22 @@ impl From<serde_json::Error> for Failure {
         Self::Fatal(Error::Encoding(error))
     }
 }
-pub(super) fn apply(
-    root: &Path,
-    data: &cap_std::fs::Dir,
-    home: Option<&Path>,
+pub(super) async fn apply(
+    publisher: Publisher,
+    user: Option<&crate::publication::UserFiles>,
     sources: &SourceCatalog,
     mutation: &Mutation,
     cancellation: &CancellationToken,
 ) -> Result<Change, Failure> {
-    let publisher = Publisher::open(root, data)?;
     match mutation {
-        Mutation::CreateStarter => starter(&publisher, sources, cancellation),
+        Mutation::CreateStarter => starter(&publisher, sources, cancellation).await,
         Mutation::Install {
             source_type,
             source_id,
-        } => install(&publisher, sources, *source_type, source_id, cancellation),
-        Mutation::UpdateManaged(update) => update::apply(&publisher, sources, update, cancellation),
+        } => install(&publisher, sources, *source_type, source_id, cancellation).await,
+        Mutation::UpdateManaged(update) => {
+            update::apply(&publisher, sources, update, cancellation).await
+        }
         Mutation::Delete { reference } => {
             let discovery = &sources.publication.discovery;
             if !discovery
@@ -86,11 +84,14 @@ pub(super) fn apply(
             {
                 return Err(Failure::Rejected(MutationRejection::NotFound));
             }
-            let (publisher, id) = deletion_target(publisher, home, reference)?;
+            let (publisher, id) = deletion_target(publisher, user, reference).await?;
             let expected = publisher
-                .capture(id, cancellation)?
+                .capture(id, cancellation)
+                .await?
                 .ok_or(Failure::Rejected(MutationRejection::NotFound))?;
-            publisher.publish(id, Some(&expected), None, cancellation)?;
+            publisher
+                .publish(id, Some(&expected), None, cancellation)
+                .await?;
             Ok(Change {
                 changed: true,
                 reference: None,
@@ -99,9 +100,9 @@ pub(super) fn apply(
         _ => unreachable!("file mutation"),
     }
 }
-fn deletion_target<'a>(
+async fn deletion_target<'a>(
     workspace: Publisher,
-    home: Option<&Path>,
+    user: Option<&crate::publication::UserFiles>,
     reference: &'a str,
 ) -> Result<(Publisher, &'a str), Failure> {
     use crate::publication::UserStore;
@@ -118,8 +119,12 @@ fn deletion_target<'a>(
     if !crate::safe_source_id(id) {
         return Err(Failure::Rejected(MutationRejection::BlockedPath));
     }
-    let home = home.ok_or(Failure::Rejected(MutationRejection::BlockedScope))?;
-    Ok((store.open(home)?, id))
+    let user = user.ok_or(Failure::Rejected(MutationRejection::BlockedScope))?;
+    let publisher = user
+        .open(store, workspace, true)
+        .await?
+        .ok_or(Failure::Rejected(MutationRejection::NotFound))?;
+    Ok((publisher, id))
 }
 fn workspace_id(reference: &str) -> Result<&str, Failure> {
     let id = reference
@@ -130,7 +135,7 @@ fn workspace_id(reference: &str) -> Result<&str, Failure> {
     }
     Ok(id)
 }
-fn starter(
+async fn starter(
     publisher: &Publisher,
     sources: &SourceCatalog,
     cancellation: &CancellationToken,
@@ -174,7 +179,9 @@ fn starter(
             "---\nname: {name}\ndescription: 把常用工作流写成可复用的本地指令。\nallowed-tools:\n  - Read\n---\n\n# {name}\n\n先确认目标、输入和交付格式，再阅读必要的上下文并完成任务。\n声明的工具只是需求提示，不会自动获得权限。\n可以编辑或删除 {id} 来替换这个模板。\n"
         );
         tree.insert("SKILL.md", content.into_bytes())?;
-        publisher.publish(&id, None, Some(&tree), cancellation)?;
+        publisher
+            .publish(&id, None, Some(&tree), cancellation)
+            .await?;
         return Ok(Change {
             changed: true,
             reference: Some(format!("workspace:legacy:{id}")),
@@ -182,7 +189,7 @@ fn starter(
     }
     Err(Failure::Rejected(MutationRejection::AlreadyExists))
 }
-fn install(
+async fn install(
     publisher: &Publisher,
     sources: &SourceCatalog,
     kind: InstallSource,
@@ -208,7 +215,9 @@ fn install(
     };
     let mut tree = Tree::empty();
     artifacts(&mut tree, id, id, kind, content)?;
-    publisher.publish(id, None, Some(&tree), cancellation)?;
+    publisher
+        .publish(id, None, Some(&tree), cancellation)
+        .await?;
     Ok(Change {
         changed: true,
         reference: Some(format!("workspace:legacy:{id}")),
@@ -221,12 +230,14 @@ fn source_content(
 ) -> Result<Vec<u8>, Failure> {
     let source = sources
         .managed
+        .discovery
         .inventory
         .iter()
         .find(|source| source.location.id == id)
         .ok_or(Failure::Rejected(
             if sources
                 .managed
+                .discovery
                 .rejected
                 .iter()
                 .any(|source| source.location.id == id)
@@ -236,12 +247,15 @@ fn source_content(
                 MutationRejection::SourceMissing
             },
         ))?;
-    let bytes = artifact::read(&source.location, false, cancellation)?
-        .content
-        .ok_or(Failure::Rejected(MutationRejection::SourceMissing))?;
-    if content_digest(&bytes) != source.content_sha256 {
-        return Err(Failure::Rejected(MutationRejection::SourceChanged));
+    if cancellation.is_cancelled() {
+        return Err(Failure::Fatal(Error::Retired));
     }
+    let bytes = sources
+        .managed
+        .contents
+        .get(&source.location.reference)
+        .ok_or(Failure::Rejected(MutationRejection::SourceMissing))?
+        .to_vec();
     let content = std::str::from_utf8(&bytes)
         .map_err(|_| Failure::Rejected(MutationRejection::SourceInvalid))?;
     if crate::parse(content).is_err() {

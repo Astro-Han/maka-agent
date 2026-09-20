@@ -156,8 +156,6 @@ function applyMutation(policy: RuntimePolicy, operation: RuntimePolicyMutation):
       return { ...policy, chatDefaults: operation.value };
     case 'set_web_search':
       return { ...policy, webSearch: operation.value };
-    case 'set_subagents':
-      return { ...policy, subagents: operation.value };
     case 'set_external_agents':
       return { ...policy, externalAgents: operation.value };
     case 'set_shell':

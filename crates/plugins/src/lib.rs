@@ -41,6 +41,7 @@ pub mod process;
 pub mod prompt;
 mod registration;
 pub mod remote;
+pub mod revision;
 pub use registration::Registration;
 pub mod input;
 pub mod services;

@@ -99,7 +99,6 @@ import type {
   AuthorizationUrlPayload,
   SubscriptionActionResult,
 } from '@maka/core/oauth-subscription';
-import type { CreateScheduledTaskInput, ScheduledTask, UpdateScheduledTaskInput } from '@maka/core/scheduled-task';
 import type { ProjectRecord } from '@maka/core/project';
 import type {
   DailyReviewArchive,
@@ -860,7 +859,7 @@ export interface MakaBridge {
     file(host: DesktopRuntimeHostRef, connectionEpoch: string, identity: ClientIdentity, input: ClientFileRequest): Promise<string | null>;
     connection(host: DesktopRuntimeHostRef): Promise<{ epoch: string; hostEpoch: string; localFiles: boolean }>;
     session(host: DesktopRuntimeHostRef, connectionEpoch: string, sessionId: string): Promise<string>;
-    remote(host: DesktopRuntimeHostRef, connectionEpoch: string, input: OperationInput<'plugin.remote'>): Promise<OperationOutput<'plugin.remote'> | { kind: 'connection_retired' }>;
+    remote(host: DesktopRuntimeHostRef, connectionEpoch: string, input: OperationInput<'plugin.remote'>): Promise<OperationOutput<'plugin.remote'> | import('@maka-agent/plugin-sdk/client').RemoteFailure | { kind: 'connection_retired' }>;
     query(host: DesktopRuntimeHostRef, input: OperationInput<'plugin.client.query'>): Promise<OperationOutput<'plugin.client.query'>>;
     subscribeChanges(host: DesktopRuntimeHostRef, handler: (revision: string) => void): () => void;
     subscribeContext(host: DesktopRuntimeHostRef, handler: () => void): () => void;
@@ -1738,24 +1737,6 @@ export interface MakaBridge {
     getEnrollmentState(host?: DesktopRuntimeHostRef): Promise<{ enabled: boolean }>;
     refreshTokens(host: DesktopRuntimeHostRef | undefined, connectionId: string): Promise<SubscriptionActionResult>;
     logout(host: DesktopRuntimeHostRef | undefined, connectionId: string): Promise<SubscriptionActionResult>;
-  };
-  scheduledTasks: {
-    list(host?: DesktopRuntimeHostRef): Promise<ScheduledTask[]>;
-    create(input: Omit<CreateScheduledTaskInput, 'createdBy'>, host?: DesktopRuntimeHostRef): Promise<ScheduledTask>;
-    update(
-      id: string,
-      patch: UpdateScheduledTaskInput,
-      host?: DesktopRuntimeHostRef,
-    ): Promise<ScheduledTask>;
-    setEnabled(id: string, enabled: boolean, host?: DesktopRuntimeHostRef): Promise<ScheduledTask>;
-    triggerNow(id: string, host?: DesktopRuntimeHostRef): Promise<ScheduledTask>;
-    snooze(id: string, host?: DesktopRuntimeHostRef): Promise<ScheduledTask>;
-    clearRunHistory(id: string, host?: DesktopRuntimeHostRef): Promise<ScheduledTask>;
-    delete(id: string, host?: DesktopRuntimeHostRef): Promise<void>;
-    subscribeChanges(
-      handler: (event: { type: 'scheduled_tasks_changed'; reason: string; taskId?: string; ts: number }) => void,
-    ): () => void;
-    subscribeDue(handler: (task: Pick<ScheduledTask, 'id' | 'title'>) => void): () => void;
   };
   inspector: {
     /** Read-only per-session causal trace (#1625). */

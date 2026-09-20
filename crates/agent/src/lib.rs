@@ -28,12 +28,10 @@ mod history;
 mod model_attempt;
 mod request_composition;
 pub use history::project as project_model_history;
-mod cancellation;
 mod prune;
 pub mod recovery;
 mod runner;
 mod running;
-pub use cancellation::{CancellationCause, RunCancellation};
 mod steps;
 pub use running::RunningInvocation;
 
@@ -99,7 +97,6 @@ pub enum RunWork {
     },
     Continuation {
         source: maka_runtime::continuation::RunBoundary,
-        workhub_resume: Option<maka_runtime::workhub::ResumeOrigin>,
         tools: ToolCatalog,
         max_steps: usize,
     },
@@ -125,6 +122,19 @@ struct Inner {
 #[derive(Clone)]
 pub struct Engine(Arc<Inner>);
 
+/// Engine-derived replay proof and its immutable input. Preparation may call
+/// plugin providers; durable admission consumes this without calling them again.
+pub struct PreparedContinuation {
+    engine: std::sync::Weak<Inner>,
+    input: RunInput,
+    claim: maka_runtime::continuation::ContinuationClaim,
+}
+impl PreparedContinuation {
+    pub fn invocation(&self) -> &Invocation {
+        &self.input.invocation
+    }
+}
+
 impl Engine {
     pub fn new(log: Arc<EventLog>, model: ModelExecutor, cells: CodeExecutor) -> Self {
         Self(Arc::new(Inner {
@@ -145,7 +155,7 @@ impl Engine {
     }
 
     /// Observe replay safety without reserving a source or creating a claim.
-    /// Admission always repeats this check against current canonical facts.
+    /// Admission validates the claim against current canonical facts.
     pub async fn check_continuation(
         &self,
         input: &RunInput,
@@ -165,6 +175,42 @@ impl Engine {
             .map(|_| ())
     }
 
+    pub async fn prepare_continuation(
+        &self,
+        input: RunInput,
+        cancellation: &CancellationToken,
+    ) -> Result<PreparedContinuation, RunError> {
+        let (RunWork::Continuation { source, tools, .. } | RunWork::Handoff { source, tools, .. }) =
+            &input.work
+        else {
+            return Err(RunError::InvalidInput("not a continuation request".into()));
+        };
+        self.0
+            .log
+            .prepare_prune_candidates(&input.invocation.session_id, None, 0, 0, None)
+            .await?;
+        let claim = continuation::prepare(&self.0, &input, source, tools, cancellation).await?;
+        Ok(PreparedContinuation {
+            engine: Arc::downgrade(&self.0),
+            input,
+            claim,
+        })
+    }
+
+    pub async fn start_continuation(
+        &self,
+        prepared: PreparedContinuation,
+        cancellation: CancellationToken,
+    ) -> Result<RunningInvocation, RunError> {
+        if !std::sync::Weak::ptr_eq(&prepared.engine, &Arc::downgrade(&self.0)) {
+            return Err(RunError::InvalidInput(
+                "continuation belongs to another Engine".into(),
+            ));
+        }
+        self.start_model(prepared.input, Some(prepared.claim), cancellation)
+            .await
+    }
+
     /// The owner first stops admissions and requests cancellation. This barrier
     /// also covers workers whose admission waiter was dropped before receiving
     /// a RunningInvocation handle.
@@ -178,6 +224,15 @@ impl Engine {
     pub async fn start(
         &self,
         input: RunInput,
+        cancellation: CancellationToken,
+    ) -> Result<RunningInvocation, RunError> {
+        self.start_model(input, None, cancellation).await
+    }
+
+    async fn start_model(
+        &self,
+        input: RunInput,
+        claim: Option<maka_runtime::continuation::ContinuationClaim>,
         cancellation: CancellationToken,
     ) -> Result<RunningInvocation, RunError> {
         if input
@@ -286,7 +341,7 @@ impl Engine {
             handoff,
             cancellation,
             move |cancellation, admitted| {
-                runner::run(inner, input, cancellation, admitted, worker_handoff)
+                runner::run(inner, input, cancellation, admitted, worker_handoff, claim)
             },
         )
         .await
@@ -301,7 +356,7 @@ impl Engine {
         run: F,
     ) -> Result<RunningInvocation, RunError>
     where
-        F: FnOnce(RunCancellation, tokio::sync::oneshot::Sender<()>) -> Fut + Send + 'static,
+        F: FnOnce(CancellationToken, tokio::sync::oneshot::Sender<()>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<Invocation, RunError>> + Send + 'static,
     {
         let session_id = invocation.session_id.clone();
@@ -321,7 +376,6 @@ impl Engine {
         };
         let cancellation = cancellation.child_token();
         let cancel_on_drop = cancellation.clone().drop_guard();
-        let cancellation = RunCancellation::new(cancellation);
         let worker_cancellation = cancellation.clone();
         let (admitted, ready) = tokio::sync::oneshot::channel();
         let worker = self.0.workers.spawn(async move {

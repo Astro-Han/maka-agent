@@ -78,7 +78,7 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         "shell":{"executable":"","preference":"auto"},
         "chatDefaults":{"thinkingLevel":"high","permissionMode":"ask"},
         "webSearch":{"defaultProvider":"model","enabled":false},
-        "privacy":{"incognitoActive":false},"subagents":{"presets":[]},
+        "privacy":{"incognitoActive":false},
         "workspaceInstructions":{"enabled":true},
         "memory":{"agentReadEnabled":false,"enabled":true},
         "personalization":{"assistantTone":"","displayName":""},
@@ -151,11 +151,6 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
             json!("😀".repeat(2049)),
             false,
         ),
-        (
-            "/policy/subagents",
-            json!({"presets":[{"id":"invalid"}]}),
-            false,
-        ),
         ("/policy/memory", json!({"enabled":true}), false),
         (
             "/policy/shell",
@@ -171,14 +166,7 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
     missing["policy"].as_object_mut().unwrap().remove("privacy");
     add("runtime.policy.query", "output", missing, false);
     let mut oversized = snapshot.clone();
-    oversized["policy"]["subagents"]["presets"] = json!(
-        (0..64)
-            .map(|i| json!({
-                "id":format!("p{i}"),"name":"Preset","description":"x".repeat(1000),
-                "profile":"local_read","connectionSlug":"c","model":"m","enabled":true
-            }))
-            .collect::<Vec<_>>()
-    );
+    oversized["policy"]["personalization"]["assistantTone"] = json!("x".repeat(64 * 1024));
     add("runtime.policy.query", "output", oversized, false);
     // Every supported wire kind is decoded even when the Host has no consumer yet.
     for (kind, key) in [
@@ -189,7 +177,6 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         ("set_privacy", "privacy"),
         ("set_chat_defaults", "chatDefaults"),
         ("set_web_search", "webSearch"),
-        ("set_subagents", "subagents"),
         ("set_shell", "shell"),
         ("set_external_agents", "externalAgents"),
     ] {
@@ -269,20 +256,6 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
             "set_shell",
             json!({"preference":"git_bash","executable":" "}),
             false,
-        ),
-        (
-            "set_subagents",
-            json!({"presets":[{"id":"invalid"}],"extra":true}),
-            true,
-        ),
-        ("set_subagents", Value::Null, true),
-        (
-            "set_subagents",
-            json!({"presets":[
-                {"id":"p","name":" Preset ","description":"x".repeat(1001),"profile":"local_read","connectionSlug":" c ","model":" m ","enabled":true},
-                {"id":"p","name":"Duplicate","profile":"local_read","connectionSlug":"c","model":"m","enabled":true}
-            ]}),
-            true,
         ),
         ("set_unknown", json!({}), false),
     ] {
@@ -418,19 +391,4 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         String::from_utf8_lossy(&output.stderr)
     );
     written.unwrap();
-}
-
-#[test]
-fn subagent_description_truncation_preserves_unicode_scalars() {
-    // Deliberate Rust boundary: TS slice(0,1000) leaves an unpaired surrogate
-    // here; Rust preserves valid UTF-8 and stays below the UTF-16 limit.
-    let input = json!({"expectedRevision":0,"operation":{"kind":"set_subagents","value":{
-        "presets":[{"id":"p","name":"Preset","description":format!("{}😀", "x".repeat(999)),
-        "profile":"local_read","connectionSlug":"c","model":"m","enabled":true}]
-    }}});
-    let result = serde_json::to_value(decode_mutation_input(&input).unwrap()).unwrap();
-    assert_eq!(
-        result["operation"]["value"]["presets"][0]["description"],
-        "x".repeat(999)
-    );
 }

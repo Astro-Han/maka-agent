@@ -26,5 +26,4 @@ export { ModuleHubHost, ModuleHubHostView } from './ui/module-hub-host.js';
 export {
   createModuleHubCommandPort,
   ModuleHubProvider,
-  ModuleHubScheduledTasksBoundary,
 } from './ui/module-hub-provider.js';

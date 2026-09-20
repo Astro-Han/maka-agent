@@ -122,7 +122,7 @@ pub(super) async fn run(
                 } => ShellOutcome::TimedOut { message: None },
             }
         }
-        Err(error @ ToolError::OutcomeUnknown(_)) => {
+        Err(error @ ToolError::CleanupUnconfirmed(_)) => {
             drain.cancel();
             return Err(error.into());
         }

@@ -18,7 +18,14 @@
  */
 
 //! Source-scoped filesystem operations. Host supplies authority, not callers.
+mod directory;
+pub mod entries;
+mod read;
 use maka_runtime::read::ReadInput;
+pub use read::{
+    ListInput, ReadAuthorization, ReadDirectory, ReadError, ReadInput as ReadViewInput, ReadInputs,
+    ReadRoot, ReadRoots, Reader, Symlinks,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -37,11 +44,15 @@ pub trait Files: Send + Sync {
 pub enum Output {
     Value(Value),
     Image { bytes: Vec<u8>, mime_type: String },
+    Entries(entries::Output),
 }
 impl Output {
     pub fn into_json(self) -> Value {
         match self {
             Self::Value(value) => value,
+            Self::Entries(value) => {
+                serde_json::to_value(value).expect("filesystem result serialization")
+            }
             Self::Image { bytes, mime_type } => {
                 json!({"kind":"image", "mimeType":mime_type, "bytes":bytes})
             }
@@ -63,6 +74,7 @@ pub enum Operation {
     Glob(Glob),
     Grep(Grep),
     Patch(Patch),
+    Entries(entries::Operation),
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -101,6 +113,19 @@ pub enum Patch {
     DeleteFile { path: String },
 }
 impl Operation {
+    pub fn is_read(&self) -> bool {
+        match self {
+            Self::Read(_) | Self::Glob(_) | Self::Grep(_) => true,
+            Self::Entries(operation) => operation.is_read(),
+            _ => false,
+        }
+    }
+    pub fn required_tool(&self) -> &'static str {
+        match self {
+            Self::Entries(operation) => operation.required_tool(),
+            _ => self.name(),
+        }
+    }
     pub fn name(&self) -> &'static str {
         match self {
             Self::Read(_) => "Read",
@@ -109,6 +134,7 @@ impl Operation {
             Self::Glob(_) => "Glob",
             Self::Grep(_) => "Grep",
             Self::Patch(_) => "apply_patch",
+            Self::Entries(operation) => operation.name(),
         }
     }
     /// Reuse the native tool contract; schema and file-effect semantics have one owner.
@@ -120,6 +146,7 @@ impl Operation {
             Self::Glob(input) => json!(input),
             Self::Grep(input) => json!(input),
             Self::Patch(operation) => json!({"callId":operation_id,"operation":operation}),
+            Self::Entries(operation) => json!(operation),
         }
     }
 }

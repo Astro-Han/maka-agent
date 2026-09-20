@@ -27,11 +27,12 @@ import { act, createElement, Fragment } from 'react';
 import { createRoot } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { buildClient } from '@maka-agent/plugin-sdk/build';
+import { RemoteError } from '@maka-agent/plugin-sdk/client';
 import type { ClientRemote } from '@maka-agent/plugin-sdk/client';
 import { deferred } from '@maka/core/test-only/async-primitives';
 import { desktopSessionKey } from '../../shared/runtime-host-identity.js';
 import { ClientPluginServicesProvider, ClientPluginSlot, usePluginSession, type ClientPluginServices } from '../../renderer/features/client-plugins/index.js';
-import type { DelegationReference, DelegationFeedback } from '@maka/workhub/slots';
+import type { DelegationFeedback } from '@maka/workhub/slots';
 
 test('the WorkHub Client resolves main panels through its origin and withdraws stale or unloaded bindings', { timeout: 10_000 }, async () => {
   const source = await buildClient({
@@ -58,7 +59,7 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
       void fetch(script.src).then((response) => response.text()).then((bytes) => {
         if (!script.isConnected) return;
         Object.defineProperty(document, 'currentScript', { configurable: true, value: script });
-        try { runInNewContext(bytes, { window, AbortController }); script.onload?.(new Event('load')); }
+        try { runInNewContext(bytes, { window, AbortController, crypto: globalThis.crypto }); script.onload?.(new Event('load')); }
         catch { script.onerror?.(new Event('error')); }
         finally { Object.defineProperty(document, 'currentScript', { configurable: true, value: null }); }
       });
@@ -95,6 +96,13 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
     subscribeDefaultHost(listener) { changedHost = listener; return () => {}; },
     connect(host) {
       return {
+        authorization() {
+          return {
+            async approve(_scope, request) { return { id: request.operationId, request, revoked: false }; },
+            async query() { return null; },
+            async revoke() {},
+          };
+        },
         async snapshot() { return { revision: String(revision), connection: host.hostId, entries: enabled ? [entry] : [] }; },
         async source() { return source; },
         async session(id) {
@@ -103,20 +111,21 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
           return host.hostId === first.hostId ? lateProjection.promise : desktopSessionKey({ hostId: host.hostId, sessionId: id });
         },
         remote(_identity, signal) {
-          const method = ((name: string) => async (input: DelegationReference[]) => {
+          const method = ((name: string) => async (input: string[]) => {
             signal.throwIfAborted();
+            if (name === 'consent' || name === 'authorize') return null;
             if (name === 'feedback') {
               assert.equal(host.hostId, 'second');
               feedbackBatches.push(input.length);
-              assert(input.every((reference) => reference.targetSessionId === 'target' && !('targetTurnId' in reference)));
+              assert(input.every((id) => references.some((reference) => reference.id === id)));
               await feedbackRead?.promise;
               if (feedbackError) throw new Error('Temporarily disconnected');
-              return { ok: true, result: input.map(({ id }) => ({ id, state: 'completed', resultPreview: 'Exact delegated result' })) };
+              return input.map((id) => ({ id, state: 'completed', resultPreview: 'Exact delegated result' }));
             }
             calls.push(host.hostId);
-            if (unavailable) return { ok: false, error: { code: 'operation_conflict', message: 'Choose a model' } };
+            if (unavailable) throw new RemoteError('invalid_request', 'Choose a model');
             await refreshing?.promise;
-            return { ok: true, result: { sessionId: 'coordinator' } };
+            return { sessionId: 'coordinator' };
           }) as ClientRemote['method'];
           return {
             api: { method, stream() { throw new Error('Unexpected stream'); } },
@@ -167,7 +176,7 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
     assert.equal(latest!.sessionId, expected, 'a retired observation cannot publish through another Host');
     assert(closed.includes('first'));
     await until(() => feedback.length === 65);
-    assert.deepEqual(feedbackBatches, [64, 1]);
+    assert.deepEqual(feedbackBatches, [32, 32, 1]);
     assert(feedback.every((item) => item.state === 'completed' && item.resultPreview === 'Exact delegated result'));
 
     refreshing = deferred<void>();

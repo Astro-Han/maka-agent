@@ -230,7 +230,7 @@ impl ToolPreparer for ClientTools {
                     let result = accepted.admit_with_interactions(forms).await.map_err(
                         |error| match error {
                             CallError::OutcomeUnknown(_) => {
-                                ToolError::OutcomeUnknown(error.to_string())
+                                ToolError::CleanupUnconfirmed(error.to_string())
                             }
                             _ => ToolError::Failed(error.to_string()),
                         },

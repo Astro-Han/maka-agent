@@ -37,68 +37,68 @@ export interface WorkHubLinkedWork {
   readonly resultPreview?: string;
 }
 
-/** Links come from successful tool results in the same durable conversation. */
+/** Only this plugin's successful, durable tool receipts create work links. */
 export function workHubLinkedWork(
   messages: readonly StoredMessage[],
   sessions: readonly { id: string; name: string; cwd?: string }[],
   fallbackName: string,
+  projectSession: (hostSessionId: string) => string,
 ): WorkHubLinkedWork[] {
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
-  const workspaceName = (id: string) => workspaceNameFromCwd(sessionById.get(id)?.cwd);
   const taskCalls = new Set(
     messages.flatMap((message) =>
-      message.type === 'tool_call' && message.toolName === 'mcp__desktop_workhub__tasks'
-        ? [message.id]
-        : [],
+      message.type === 'tool_call' && message.toolName === 'workhub_tasks' ? [message.id] : [],
     ),
   );
   return messages.flatMap((message): WorkHubLinkedWork[] => {
-    if (message.type === 'workhub_coordination' && message.kind === 'delegation_assigned')
-      return [
-        {
-          id: message.id,
-          coordinationTurnId: message.coordinationTurnId,
-          targetSessionId: message.targetSessionId,
-          targetSessionName:
-            sessionById.get(message.targetSessionId)?.name ?? message.targetSessionName,
-          workspaceName: workspaceName(message.targetSessionId),
-          targetMessageId: message.targetMessageId,
-          targetTurnId: message.targetTurnId,
-          state: 'accepted',
-        },
-      ];
     if (message.type !== 'tool_result' || message.isError || !taskCalls.has(message.toolUseId))
       return [];
-    let result: unknown;
-    if (message.content.kind === 'json') result = message.content.value;
+    let value: unknown;
+    if (message.content.kind === 'json') value = message.content.value;
     else if (message.content.kind === 'text') {
       try {
-        result = JSON.parse(message.content.text);
+        value = JSON.parse(message.content.text);
       } catch {
         return [];
       }
     }
-    if (result && typeof result === 'object' && 'structuredContent' in result)
-      result = result.structuredContent;
+    const envelope = record(value);
+    let id = envelope?.operationId;
+    let result = record(envelope?.result);
+    if (result?.kind === 'corrected') {
+      id = result.replacementId;
+      result = record(result.replacement);
+    }
+    if (typeof id !== 'string' || (result?.kind !== 'submitted' && result?.kind !== 'queued'))
+      return [];
+    const receipt = record(result.receipt);
+    const invocation = record(receipt?.invocation);
     if (
-      !result ||
-      typeof result !== 'object' ||
-      !('disposition' in result) ||
-      !['create_new', 'delegate_existing', 'replace'].includes(String(result.disposition)) ||
-      !('targetSessionKey' in result) ||
-      typeof result.targetSessionKey !== 'string'
+      typeof invocation?.session_id !== 'string' ||
+      typeof invocation.turn_id !== 'string' ||
+      typeof receipt?.messageId !== 'string'
     )
       return [];
+    const target = projectSession(invocation.session_id);
+    const session = sessionById.get(target);
     return [
       {
-        id: message.id,
+        id,
         coordinationTurnId: message.turnId,
-        targetSessionId: result.targetSessionKey,
-        targetSessionName: sessionById.get(result.targetSessionKey)?.name ?? fallbackName,
-        workspaceName: workspaceName(result.targetSessionKey),
+        targetSessionId: target,
+        targetSessionName: session?.name ?? fallbackName,
+        workspaceName: workspaceNameFromCwd(session?.cwd),
+        targetMessageId: receipt.messageId,
+        targetTurnId: invocation.turn_id,
+        state: 'accepted',
       },
     ];
   });
+}
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 export function applyWorkHubDelegationFeedback(

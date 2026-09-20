@@ -19,8 +19,7 @@
 
 use super::{
     DiscoveryFailure,
-    directory::Directory,
-    source::{ReadError, read_file},
+    source::{ReadError, read_view},
 };
 use maka_runtime::artifact::content_digest;
 use serde::{Deserialize, Serialize};
@@ -81,7 +80,8 @@ enum SourceType {
 }
 
 pub(super) fn read(
-    directory: &Directory,
+    reader: &maka_plugins::filesystem::Reader<'_>,
+    directory: &std::path::Path,
     id: &str,
     cancellation: &CancellationToken,
 ) -> Result<(Origin, usize), ReadError> {
@@ -94,16 +94,12 @@ pub(super) fn read(
             0,
         )
     };
-    match directory.dir().symlink_metadata("skill.lock.json") {
-        Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() => {
-            return Ok(invalid(OriginFailure::UnsafePath));
-        }
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            return Ok(invalid(OriginFailure::ReadFailed));
-        }
-        _ => {}
-    }
-    let bytes = match read_file(directory, "skill.lock.json", MAX_LOCK_BYTES, cancellation) {
+    let bytes = match read_view(
+        reader,
+        &directory.join("skill.lock.json"),
+        MAX_LOCK_BYTES as usize,
+        cancellation,
+    ) {
         Ok(Some(bytes)) => bytes,
         Ok(None) => {
             return Ok((

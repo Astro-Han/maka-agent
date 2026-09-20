@@ -35,6 +35,7 @@ use std::{
 use wire::{Error, Request};
 
 struct State {
+    inputs: maka_plugins::filesystem::ReadInputs,
     preferences: Arc<dyn maka_plugins::preferences::Preferences>,
     source: Arc<super::remote::Source>,
     processes: Arc<dyn maka_plugins::process::Processes>,
@@ -51,6 +52,7 @@ struct State {
     storage: Arc<dyn Store>,
     credentials: Arc<dyn maka_plugins::credentials::Credentials>,
     commands: Arc<dyn Access>,
+    sessions: Arc<dyn maka_plugins::session::catalog::Queries>,
     execution_handles: Mutex<BTreeMap<String, Arc<dyn maka_plugins::execution::Commands>>>,
     authorizations: Arc<dyn maka_plugins::authorization::Access>,
     authorized_calls:
@@ -71,6 +73,7 @@ impl HostBridge {
         source: Arc<super::remote::Source>,
     ) -> Self {
         Self(Arc::new(State {
+            inputs: host.inputs,
             preferences: host.preferences,
             source,
             http: host.http,
@@ -87,6 +90,7 @@ impl HostBridge {
             storage: host.storage,
             credentials: host.credentials,
             commands: host.executions,
+            sessions: host.sessions,
             execution_handles: Mutex::default(),
             authorizations: host.authorizations,
             authorized_calls: Mutex::default(),
@@ -135,6 +139,14 @@ impl Bridge for HostBridge {
     }
 }
 impl State {
+    fn session_view(
+        &self,
+        authority: &str,
+        view: maka_plugins::remote::SessionView,
+    ) -> Result<Value, Error> {
+        let files = self.calls.remote_read(authority, view.files)?;
+        Ok(json!({"workspace": view.workspace, "tools": view.tools, "files": files}))
+    }
     fn authorize(&self, owned: maka_plugins::call::Owned) -> Result<Value, Error> {
         let call = self.calls.forward(owned.scope()).map_err(Error::tool)?;
         let mut calls = self.authorized_calls.lock().unwrap();
@@ -198,9 +210,51 @@ impl State {
         // Execution commands independently require effective business admission.
         let _lease = self.context.lifecycle.resource_call()?;
         match request {
+            Request::InputNames => encode(self.inputs.names()?),
+            Request::InputLocation(input) => encode(
+                self.inputs
+                    .open(&input.handle)?
+                    .ok_or_else(|| Error::invalid("unknown input mount"))?
+                    .location(),
+            ),
+            Request::ViewLocation(input) => encode(self.calls.read(&input.handle)?.location()),
+            Request::InputRead(input) => {
+                let view = self
+                    .inputs
+                    .open(&input.handle)?
+                    .ok_or_else(|| Error::invalid("unknown input mount"))?;
+                encode(view.read(input.input).await?)
+            }
+            Request::InputList(input) => {
+                let view = self
+                    .inputs
+                    .open(&input.handle)?
+                    .ok_or_else(|| Error::invalid("unknown input mount"))?;
+                encode(view.list(input.input).await?)
+            }
+            Request::ViewRead(input) => {
+                encode(self.calls.read(&input.handle)?.read(input.input).await?)
+            }
+            Request::ViewList(input) => {
+                encode(self.calls.read(&input.handle)?.list(input.input).await?)
+            }
+            Request::Sessions(input) => {
+                let call = self.calls.get(&input.authority)?;
+                encode(self.sessions.list(call, input.input).await?)
+            }
+            Request::ResolveModel(input) => encode(self.models.resolve(input).await?),
+            Request::Revision(input) => {
+                let _lease = self.context.lifecycle.resource_call()?;
+                Ok(self.calls.revisions.call(input).await?)
+            }
             Request::Preferences => encode(self.preferences.read().await?),
             Request::OpenAuthorization(input) => {
-                self.authorize(self.authorizations.open(input.id).await?)
+                let authorized = self.authorizations.open(input.id).await?;
+                let mut output = self.authorize(authorized.call)?;
+                output["grant"] = serde_json::to_value(authorized.grant).map_err(Error::invalid)?;
+                output["boundary"] =
+                    serde_json::to_value(authorized.boundary).map_err(Error::invalid)?;
+                Ok(output)
             }
             Request::AuthorizeRemote(input) => {
                 let caller = self.calls.remote(&input.authority)?;
@@ -221,11 +275,11 @@ impl State {
             }
             Request::SessionView(input) => {
                 let caller = self.calls.remote(&input.authority)?;
-                encode(caller.views.session().await?)
+                self.session_view(&input.authority, caller.views.session().await?)
             }
             Request::WorkspaceView(input) => {
                 let caller = self.calls.remote(&input.authority)?;
-                encode(caller.views.workspace(input.input).await?)
+                self.session_view(&input.authority, caller.views.workspace(input.input).await?)
             }
             Request::CredentialRead(input) => encode(self.credentials.read(input.key).await?),
             Request::CredentialWrite(input) => encode(self.credentials.write(input).await?),
@@ -270,6 +324,14 @@ impl State {
             Request::ClientCatalog(input) => {
                 let authority = self.calls.get(&input.authority)?;
                 encode(self.clients.tools(authority).await.map_err(Error::tool)?)
+            }
+            Request::ClientNotify(input) => {
+                let authority = self.calls.get(&input.authority)?;
+                self.clients
+                    .notify(authority, input.input)
+                    .await
+                    .map_err(Error::tool)?;
+                Ok(Value::Null)
             }
             Request::ClientCall(input) => {
                 let authority = self.calls.get(&input.authority)?;
@@ -380,20 +442,20 @@ impl State {
                     &self.context.contributions,
                     &self.context.lifecycle,
                     input.kind,
-                    &input.name,
+                    &input.names,
                 )?;
                 Ok(Value::Null)
             }
             Request::Read(input) => encode(self.storage.read(input.key).await?),
+            Request::Scan(input) => encode(self.storage.scan(input).await?),
             Request::Batch(input) => encode(self.storage.batch(input.mutations).await?),
-            Request::DataRead(input) => encode(self.data()?.read(input).await?),
-            Request::DataWrite(input) => encode(self.data()?.write(input).await?),
-            Request::DataList(input) => encode(self.data()?.list(input).await?),
-            Request::DataCreateDirectory(input) => {
-                encode(self.data()?.create_directory(input.path).await?)
-            }
-            Request::DataRemove(input) => encode(self.data()?.remove(input.path).await?),
-            Request::DataRename(input) => encode(self.data()?.rename(input.from, input.to).await?),
+            Request::Data(operation) => encode(
+                self.data()?
+                    .run(move |root, cancellation| {
+                        maka_plugins::filesystem::entries::execute(root, operation, cancellation)
+                    })
+                    .await??,
+            ),
             Request::RestoreExecution(input) => {
                 let commands = self.commands.restore(input.id).await?;
                 self.execution_handle(commands)
@@ -406,13 +468,95 @@ impl State {
                 self.execution_handles.lock().unwrap().remove(&input.handle);
                 Ok(Value::Null)
             }
+            Request::OfferInteraction(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.offer_interaction(input).await?)
+            }
+            Request::Interaction(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.interaction(input.operation_id).await?)
+            }
+            Request::WaitInteraction(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.wait_interaction(input.operation_id).await?)
+            }
+            Request::CloseInteraction(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.close_interaction(input.operation_id).await?)
+            }
+            Request::CopyAttachment(input) => {
+                let (commands, input) = self.execution(input)?;
+                let source = self
+                    .execution_handles
+                    .lock()
+                    .unwrap()
+                    .get(&input.source_handle)
+                    .cloned()
+                    .ok_or_else(|| Error::invalid("execution capability is closed"))?;
+                encode(
+                    commands
+                        .copy_attachment(
+                            source,
+                            maka_plugins::execution::CopyAttachment {
+                                target_session_id: input.target_session_id,
+                                attachment: input.attachment,
+                            },
+                        )
+                        .await?,
+                )
+            }
+            Request::ExecutionInput(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.input(input).await?)
+            }
+            Request::ResumeExecution(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.resume(input).await?)
+            }
+            Request::ConfigureExecution(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.configure(input).await?)
+            }
+            Request::ReadMessage(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.read_message(input).await?)
+            }
+            Request::Enqueue(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.enqueue(input).await?)
+            }
+            Request::Message(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.message(input.operation_id).await?)
+            }
+            Request::Retract(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.retract(input.operation_id).await?)
+            }
             Request::Submit(input) => {
                 let (commands, input) = self.execution(input)?;
                 encode(commands.submit(input).await?)
             }
+            Request::ExecutionCapabilities(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.capabilities(input.session_id).await?)
+            }
+            Request::Activity(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.activity(input.session_id).await?)
+            }
+            Request::Stop(input) => {
+                let (commands, input) = self.execution(input)?;
+                commands.stop(input).await?;
+                Ok(Value::Null)
+            }
             Request::ExecutionSession(input) => {
                 let (commands, input) = self.execution(input)?;
                 encode(commands.session(input.session_id).await?)
+            }
+            Request::RestoreChild(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.restore_child(input).await?)
             }
             Request::CreateChild(input) => {
                 let (commands, input) = self.execution(input)?;
@@ -441,6 +585,10 @@ impl State {
                         .events(input.operation_id, input.after, input.through)
                         .await?,
                 )
+            }
+            Request::Artifact(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.artifact(input).await?)
             }
             Request::Event(input) => {
                 let (commands, input) = self.execution(input)?;

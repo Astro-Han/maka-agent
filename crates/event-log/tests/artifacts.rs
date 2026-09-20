@@ -91,6 +91,39 @@ async fn immutable_uploads_are_scoped_bounded_and_reopen_with_atomic_catalog_cha
         .unwrap();
     assert_eq!(read.total_bytes, bytes.len() as u64);
     assert_eq!(read.bytes, bytes[123..123 + 32_768]);
+    let mut invocation = maka_runtime::event::Invocation {
+        session_id: "session".into(),
+        turn_id: "upload".into(),
+        run_id: "run".into(),
+        invocation_id: "invocation".into(),
+    };
+    let scoped = log
+        .execution_artifact(&invocation, "first", 123, 32_768)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(scoped.bytes, read.bytes);
+    assert_eq!(scoped.total_bytes, read.total_bytes);
+    invocation.turn_id = "different-turn".into();
+    assert!(
+        log.execution_artifact(&invocation, "first", 0, 4096)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    invocation.turn_id = "upload".into();
+    invocation.session_id = "other".into();
+    assert!(
+        log.execution_artifact(&invocation, "first", 0, 4096)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        log.execution_artifact(&invocation, "first", 0, 65_537)
+            .await
+            .is_err()
+    );
     assert!(
         log.read_artifact_chunk("session", "first", bytes.len() as u64, 1)
             .await

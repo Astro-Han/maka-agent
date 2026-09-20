@@ -45,6 +45,7 @@ try {
   await once(socket, 'connect');
   const result = await connectRuntimeHostMessageTransport({
     transport,
+    clientInstanceId: 'scheduler-fixture',
     expectedRootId: values['root-id'],
     compositionId: INTERACTIVE_RUNTIME_HOST_COMPOSITION_ID,
     protocol: { min: RUNTIME_HOST_PROTOCOL_VERSION, max: RUNTIME_HOST_PROTOCOL_VERSION },
@@ -55,15 +56,37 @@ try {
   connection = result.connection;
   const request = (operation, input) => connection.request(operation, input, 3000);
   assert.deepEqual(await request('host.wake', {}), {});
+  let client, document;
+  const remote = async (input) => {
+    const binding = { client, method: 'request', sessionId: null };
+    const { target } = await request('plugin.remote', { kind: 'bind', binding });
+    return (await request('plugin.remote', { kind: 'call', binding, target, document, input }))
+      .value;
+  };
+  const query = (query) => remote({ kind: 'query', query });
+  const mutate = (mutation) => remote({ kind: 'mutate', mutation });
   const ready = async () => {
     for (let attempt = 0; attempt < 300; attempt++) {
       const status = await request('plugin.platform.query', { view: 'status' });
       if (status.convergence === 'converged') {
+        const page = await request('plugin.client.query', { kind: 'snapshot' });
+        const entry = page.entries.find((entry) => entry.entryId === 'maka.scheduler.ui');
+        if (!entry) {
+          await delay(10);
+          continue;
+        }
+        client = Object.fromEntries(
+          ['entryId', 'extensionId', 'activation', 'contentDigest', 'clientDigest'].map((key) => [
+            key,
+            entry[key],
+          ]),
+        );
+        ({ document } = await request('plugin.remote', { kind: 'open_document' }));
         try {
-          await request('scheduled-task.query', { kind: 'list' });
+          await query({ kind: 'list' });
           return;
         } catch (error) {
-          if (error.code !== 'operation_unavailable') throw error;
+          if (!error.message.includes('recovering')) throw error;
         }
       }
       await delay(10);
@@ -71,8 +94,6 @@ try {
     assert.fail('Scheduler did not become ready');
   };
   await ready();
-  const notices = [];
-  connection.subscribeScheduledTaskChanges((frame) => notices.push(frame));
   const calls = [];
   let delayedAcceptance;
   let admitted;
@@ -84,15 +105,17 @@ try {
   });
   const provider = {
     offers: () => [],
-    services: () => [{ serviceId: 'maka_scheduled_task_native_effect', version: '1' }],
+    services: () => [{ serviceId: 'maka_notifications', version: '1' }],
     async call() {
       assert.fail('notification must use service admission');
     },
     async callService(frame, { accept }) {
-      assert.equal(frame.method, 'notify_local');
+      assert.equal(frame.method, 'send');
+      assert.equal(frame.input.packageId, 'maka.scheduler');
+      assert.equal(frame.input.notification.destination.kind, 'local');
       if (delayedAcceptance) return delayedAcceptance(frame, accept);
       await accept({ kind: 'none' });
-      calls.push(frame.input);
+      calls.push(frame.input.notification);
       admitted();
       await held;
       return { ok: true };
@@ -100,12 +123,26 @@ try {
     close() {},
   };
   await connection.replaceClientCapabilities(provider, 3000);
-  let page = await request('scheduled-task.query', { kind: 'list' });
+  const { grant } = await request('plugin.authorization', {
+    client,
+    scope: 'profile',
+    command: {
+      kind: 'approve',
+      request: {
+        operationId: '68982832-159c-4ef8-8a30-8ca152519a43',
+        title: 'Scheduled notifications',
+        target: { kind: 'profile' },
+        capabilities: ['notifications'],
+      },
+    },
+  });
+  await remote({ kind: 'remember_grant', id: grant.id });
+  let page = await query({ kind: 'list' });
   if (!values.reopened) {
     assert.deepEqual(page.tasks, []);
     const ids = [];
     for (let index = 0; index < 65; index++) {
-      const created = await request('scheduled-task.mutate', {
+      const created = await mutate({
         kind: 'create',
         input: {
           title: 'Reminder ' + index,
@@ -116,10 +153,10 @@ try {
       });
       ids.push(created.task.id);
     }
-    page = await request('scheduled-task.query', { kind: 'list' });
+    page = await query({ kind: 'list' });
     assert.equal(page.tasks.length, 64);
     assert.match(page.nextCursor, /^\d+$/);
-    const tail = await request('scheduled-task.query', {
+    const tail = await query({
       kind: 'list',
       cursor: page.nextCursor,
       expectedRevision: page.revision,
@@ -128,11 +165,11 @@ try {
     assert.equal(tail.nextCursor, null);
     assert.equal(new Set([...page.tasks, ...tail.tasks].map((task) => task.id)).size, 65);
     const id = ids[0];
-    await request('scheduled-task.mutate', { kind: 'trigger_now', taskId: id });
+    await mutate({ kind: 'trigger_now', taskId: id });
     await started;
-    const paused = await request('scheduled-task.mutate', { kind: 'pause', taskId: id });
+    const paused = await mutate({ kind: 'pause', taskId: id });
     assert.equal(paused.task.status, 'paused', 'slow native delivery must not block mutations');
-    const stale = await request('scheduled-task.query', {
+    const stale = await query({
       kind: 'list',
       cursor: page.nextCursor,
       expectedRevision: page.revision,
@@ -141,7 +178,7 @@ try {
     release();
     let task;
     for (let attempt = 0; attempt < 300; attempt++) {
-      task = (await request('scheduled-task.query', { kind: 'get', taskId: id })).task;
+      task = (await query({ kind: 'get', taskId: id })).task;
       if (task.fireCount === 1) break;
       await delay(10);
     }
@@ -149,27 +186,28 @@ try {
     assert.equal(task.status, 'paused');
     assert.equal(task.runs[0].outcome, 'ok');
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0], { taskId: id, title: 'Reminder 0' });
-    assert.ok(notices.some((frame) => frame.taskId === id));
+    assert.equal(calls[0].title, 'Reminder 0');
+    assert.equal(calls[0].body, 'Keep this reminder');
+    assert.ok(calls[0].id);
     // Pause after a provider receives the request, but before it accepts.
     // Scheduler withdraws the attempt without Host reading plugin task state.
     const offered = Promise.withResolvers();
     const allowAcceptance = Promise.withResolvers();
     const refused = Promise.withResolvers();
     delayedAcceptance = async (frame, accept) => {
-      offered.resolve(frame.input.taskId);
+      offered.resolve(frame.input.notification.title);
       await allowAcceptance.promise;
       const denied = await accept({ kind: 'none' }).then(
         () => false,
         () => true,
       );
-      if (!denied) calls.push(frame.input);
+      if (!denied) calls.push(frame.input.notification);
       refused.resolve(denied);
       return { ok: true };
     };
-    await request('scheduled-task.mutate', { kind: 'trigger_now', taskId: ids[4] });
-    assert.equal(await offered.promise, ids[4]);
-    await request('scheduled-task.mutate', { kind: 'pause', taskId: ids[4] });
+    await mutate({ kind: 'trigger_now', taskId: ids[4] });
+    assert.equal(await offered.promise, 'Reminder 4');
+    await mutate({ kind: 'pause', taskId: ids[4] });
     allowAcceptance.resolve();
     assert.equal(
       await refused.promise,
@@ -177,23 +215,22 @@ try {
       'paused notification must not reach native admission',
     );
     delayedAcceptance = undefined;
-    const withdrawn = (await request('scheduled-task.query', { kind: 'get', taskId: ids[4] })).task;
+    const withdrawn = (await query({ kind: 'get', taskId: ids[4] })).task;
     assert.equal(withdrawn.status, 'paused');
     assert.equal(withdrawn.fireCount, 0);
     assert.equal(calls.length, 1);
     await connection.unregisterClientCapabilities(3000);
     for (const waitingId of ids.slice(1, 4)) {
-      await request('scheduled-task.mutate', { kind: 'trigger_now', taskId: waitingId });
+      await mutate({ kind: 'trigger_now', taskId: waitingId });
       for (let attempt = 0; attempt < 300; attempt++) {
-        const waiting = (await request('scheduled-task.query', { kind: 'get', taskId: waitingId }))
-          .task;
-        if (waiting.lastError === 'Waiting for a notification provider') break;
+        const waiting = (await query({ kind: 'get', taskId: waitingId })).task;
+        if (waiting.lastError?.includes('notification')) break;
         await delay(10);
       }
     }
-    await request('scheduled-task.mutate', { kind: 'pause', taskId: ids[1] });
-    await request('scheduled-task.mutate', { kind: 'snooze', taskId: ids[2], delayMs: 3600000 });
-    await request('scheduled-task.mutate', { kind: 'delete', taskId: ids[3] });
+    await mutate({ kind: 'pause', taskId: ids[1] });
+    await mutate({ kind: 'snooze', taskId: ids[2], delayMs: 3600000 });
+    await mutate({ kind: 'delete', taskId: ids[3] });
     await connection.replaceClientCapabilities(provider, 3000);
     await delay(350);
     assert.equal(calls.length, 1, 'cancelled waiting notifications must not be admitted');
@@ -206,10 +243,7 @@ try {
         },
       ],
     });
-    await assert.rejects(
-      request('scheduled-task.query', { kind: 'list' }),
-      (error) => error.code === 'operation_unavailable',
-    );
+    await assert.rejects(query({ kind: 'list' }), (error) => error.code === 'operation_conflict');
     await request('plugin.composition.apply', {
       operations: [
         {
@@ -223,7 +257,7 @@ try {
   } else {
     const all = [...page.tasks];
     if (page.nextCursor !== null) {
-      const tail = await request('scheduled-task.query', {
+      const tail = await query({
         kind: 'list',
         cursor: page.nextCursor,
         expectedRevision: page.revision,
@@ -236,11 +270,8 @@ try {
     assert.equal(task.status, 'paused');
     assert.equal(task.runs[0].outcome, 'ok');
     assert.equal(calls.length, 0, 'settled native effects must not replay after restart');
-    await request('scheduled-task.mutate', { kind: 'delete', taskId: task.id });
-    assert.equal(
-      (await request('scheduled-task.query', { kind: 'get', taskId: task.id })).task,
-      null,
-    );
+    await mutate({ kind: 'delete', taskId: task.id });
+    assert.equal((await query({ kind: 'get', taskId: task.id })).task, null);
   }
   console.log('original-client-scheduler');
 } finally {

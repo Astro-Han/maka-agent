@@ -19,7 +19,6 @@
 
 import { isThinkingLevel } from '../model-thinking.js';
 import { CHAT_DEFAULT_PERMISSION_MODES } from '../settings.js';
-import { normalizeSubagentSettings } from '../subagent-settings.js';
 import type {
   AgentRuntimeSettingsPatch,
   MutateRuntimePolicyInput,
@@ -61,13 +60,8 @@ export function decodeRuntimePolicyV2(value: unknown): RuntimePolicy {
     'privacy',
     'chatDefaults',
     'webSearch',
-    'subagents',
   ]);
-  const decoded = normalizeRuntimePolicyFields(
-    policy,
-    normalizeSubagentSettings(policy.subagents),
-    { preference: 'auto', executable: '' },
-  );
+  const decoded = normalizeRuntimePolicyFields(policy, { preference: 'auto', executable: '' });
   assertCanonicalValue(value, withoutExternalAgents(withoutShell(decoded)), 'runtime policy v2');
   return decoded;
 }
@@ -183,13 +177,11 @@ function normalizeRuntimePolicy(value: unknown): RuntimePolicy {
     'privacy',
     'chatDefaults',
     'webSearch',
-    'subagents',
     'shell',
     'externalAgents',
   ]);
   return normalizeRuntimePolicyFields(
     policy,
-    normalizeSubagentSettings(policy.subagents),
     normalizeShell(policy.shell),
     normalizeExternalAgents(policy.externalAgents),
   );
@@ -197,7 +189,6 @@ function normalizeRuntimePolicy(value: unknown): RuntimePolicy {
 
 function normalizeRuntimePolicyFields(
   policy: Record<string, unknown>,
-  subagents: RuntimePolicy['subagents'],
   shell: RuntimePolicy['shell'],
   externalAgents: RuntimePolicy['externalAgents'] = { antigravity: { executable: '' } },
 ): RuntimePolicy {
@@ -209,7 +200,6 @@ function normalizeRuntimePolicyFields(
     privacy: normalizePrivacy(policy.privacy),
     chatDefaults: normalizeChatDefaults(policy.chatDefaults),
     webSearch: normalizeWebSearch(policy.webSearch),
-    subagents,
     shell,
     externalAgents,
   };
@@ -236,8 +226,6 @@ function normalizeMutationOperation(operation: Record<string, unknown>): Runtime
       return { kind: operation.kind, value: normalizeChatDefaults(operation.value) };
     case 'set_web_search':
       return { kind: operation.kind, value: normalizeWebSearch(operation.value) };
-    case 'set_subagents':
-      return { kind: operation.kind, value: normalizeSubagentSettings(operation.value) };
     case 'set_external_agents':
       return { kind: operation.kind, value: normalizeExternalAgents(operation.value) };
     case 'set_shell':
@@ -448,7 +436,6 @@ export function decodeRuntimePolicyV3(value: unknown): RuntimePolicy {
     'privacy',
     'chatDefaults',
     'webSearch',
-    'subagents',
     'shell',
   ]);
   return decodeCanonicalRuntimePolicy({

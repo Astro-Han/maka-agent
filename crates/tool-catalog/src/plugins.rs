@@ -221,7 +221,7 @@ impl ToolPreparer for Guarded {
                 Some(issuer) => prepared.map_future(move |operation, stop| {
                     Box::pin(async move {
                         let result = issuer.run(identity, stop, operation).await;
-                        if let Err(ToolError::OutcomeUnknown(reason)) = &result {
+                        if let Err(ToolError::CleanupUnconfirmed(reason)) = &result {
                             scope_owner.cleanup_failed(reason.clone());
                         }
                         result

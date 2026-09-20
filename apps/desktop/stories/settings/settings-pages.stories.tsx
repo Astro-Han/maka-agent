@@ -1735,63 +1735,6 @@ const withUsageLongTailBridge = withUsageStoryBridge(usageStats, {
   activeTab: 'requests',
 });
 
-const subagentStorySettings = mergeSettings(createDefaultSettings(), {
-  subagents: {
-    presets: [
-      {
-        id: 'fast-reader',
-        name: '快速代码阅读',
-        description: '适合快速、低成本地搜索并理解大型仓库。',
-        profile: 'local_read',
-        connectionSlug: 'zai-live',
-        model: 'glm-4.7',
-        enabled: true,
-      },
-      {
-        id: 'implementation-review',
-        name: '实现与验证',
-        description: '需要修改代码、运行测试并产出可合并补丁时使用。',
-        profile: 'implementation',
-        connectionSlug: 'openai-review',
-        model: 'gpt-5',
-        thinkingLevel: 'high',
-        enabled: true,
-      },
-      {
-        id: 'orphaned-route',
-        name: '外部资料检索',
-        description: '连接被删除后仍处于启用状态，用于展示失效路由。',
-        profile: 'web_research',
-        connectionSlug: 'removed-connection',
-        model: 'legacy-search-model',
-        enabled: true,
-      },
-      {
-        id: 'retired-researcher',
-        name: '旧研究配置',
-        description: '保留用于展示已停用配置。',
-        profile: 'web_research',
-        connectionSlug: 'removed-connection',
-        model: 'legacy-search-model',
-        enabled: false,
-      },
-    ],
-  },
-});
-
-const withSubagentSettingsBridge = withScopedMakaBridge({
-  ...makaBridge,
-  settings: {
-    ...makaBridge.settings,
-    get: async () => subagentStorySettings,
-    update: async (
-      patch: Parameters<typeof window.maka.settings.update>[0],
-    ): Promise<UpdateAppSettingsResult> => ({
-      settings: mergeSettings(subagentStorySettings, patch),
-    }),
-  },
-} satisfies Record<string, unknown>);
-
 type StoryBotStatuses = Awaited<ReturnType<typeof window.maka.settings.bots.listStatuses>>;
 
 const botAttentionError =
@@ -2102,31 +2045,6 @@ export const ModelsDefaultBadgeTypography: Story = {
     await expect(getComputedStyle(defaultBadge).fontSize).toBe(actionFontSize);
   },
 };
-// Real path: sidebar footer 设置 → 子 Agent, with multiple approved model routes.
-export const Subagents: Story = {
-  decorators: [withSubagentSettingsBridge],
-  render: () => <SettingsStory section="subagents" />,
-};
-
-// Real path: 设置 → 子 Agent → 配置“实现与验证”. A second story because the
-// editor is a route level, not a disclosure: it replaces the list, shares no
-// content with it, and is where this page's pixel work happens. Landed on the
-// implementation preset because it renders the most of the level at once — the
-// settled read-only subagent_id, the capability warning, the degraded model
-// option, and the delete section. It renders them; what they must be is pinned
-// in the e2e journeys, not here.
-export const SubagentEditor: Story = {
-  decorators: [withSubagentSettingsBridge],
-  render: () => <SettingsStory section="subagents" />,
-  play: async ({ canvasElement }) => {
-    const button = await waitForStoryButton(
-      canvasElement,
-      (candidate) => candidate.getAttribute('aria-label') === '配置“实现与验证”',
-    );
-    await userEvent.click(button);
-  },
-};
-
 // Real path: 设置 → 通用.
 export const General: Story = {
   decorators: [withSettingsBridge],

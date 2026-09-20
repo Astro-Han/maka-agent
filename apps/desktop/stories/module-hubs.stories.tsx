@@ -600,10 +600,6 @@ function ModuleHubHostSurface(props: {
   const base = createFakeModuleHubHostModel(props.selection);
   const model = {
     ...base,
-    scheduledTasks: {
-      ...base.scheduledTasks,
-      scheduledTasks: CONFIGURED_TASKS,
-    },
     dailyReview: {
       ...base.dailyReview,
       bridge: {

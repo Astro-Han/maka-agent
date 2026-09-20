@@ -18,6 +18,7 @@
  */
 
 import type { ClientContext, ClientWorkspace } from '@maka-agent/plugin-sdk/client';
+import { authorizeUser } from './files.js';
 
 export type Page = { revision: string; cursor: string };
 export type View = 'governance' | 'bundled' | 'managed_sources';
@@ -42,6 +43,7 @@ export type Source = {
   installed: boolean;
 };
 export type Catalog = {
+  userRecovery: string | null;
   kind: 'page';
   view: View;
   revision: string;
@@ -87,7 +89,7 @@ export type Request =
   | { kind: 'resolve_path'; ref: string; target: 'file' | 'directory' }
   | { kind: 'invocable'; page: Page | null }
   | { kind: 'catalog'; view: View; page: Page | null }
-  | { kind: 'mutate'; expectedRevision: string; mutation: Mutation }
+  | { kind: 'mutate'; expectedRevision: string; mutation: Mutation; grant?: string }
   | { kind: 'preview'; expectedRevision: string; ref: string };
 export type Reply =
   | { kind: 'resolved'; path: string; target: 'file' | 'directory' }
@@ -102,6 +104,30 @@ export type Target =
   | ({ kind: 'workspace' } & ClientWorkspace);
 export type Call = (input: Request) => Promise<Reply>;
 export function request(context: ClientContext, target: Target): Call {
+  const ordinary = workspaceRequest(context, target);
+  return async (request) => {
+    if (
+      request.kind !== 'mutate' ||
+      request.mutation.kind !== 'delete' ||
+      !request.mutation.ref.startsWith('user:')
+    )
+      return ordinary(request);
+    const grant = await authorizeUser(context);
+    const workspace =
+      target.kind === 'workspace'
+        ? {
+            workspace: target.workspace,
+            permissionMode: target.permissionMode,
+            collaborationMode: target.collaborationMode,
+          }
+        : null;
+    return context.remote.method<{ workspace: typeof workspace; request: Request }, Reply>(
+      'user-request',
+      target.kind === 'session' ? target.sessionId : undefined,
+    )({ workspace, request: { ...request, grant } });
+  };
+}
+function workspaceRequest(context: ClientContext, target: Target): Call {
   if (target.kind === 'session')
     return context.remote.method<Request, Reply>('request', target.sessionId);
   const { workspace, permissionMode, collaborationMode } = target;
@@ -141,6 +167,7 @@ export const copy = {
     bundled: 'Bundled',
     sources: 'Local sources',
     refresh: 'Refresh',
+    recover: 'Recover user library',
     next: 'Next page',
     add: 'Create starter',
     install: 'Install',
@@ -172,6 +199,7 @@ export const copy = {
     bundled: '内置来源',
     sources: '本地来源',
     refresh: '刷新',
+    recover: '恢复用户技能目录',
     next: '下一页',
     add: '创建入门技能',
     install: '安装',

@@ -85,7 +85,7 @@ impl Effects {
                     result = &mut operation => result,
                 };
                 let settled = match &result {
-                    Err(ToolError::Persistence(error) | ToolError::OutcomeUnknown(error)) => {
+                    Err(ToolError::Persistence(error) | ToolError::CleanupUnconfirmed(error)) => {
                         Err(error.clone())
                     }
                     _ => Ok(()),
@@ -98,7 +98,7 @@ impl Effects {
             .map_err(failed)?;
         receive
             .await
-            .map_err(|_| ToolError::OutcomeUnknown("SDK effect worker disappeared".into()))?
+            .map_err(|_| ToolError::CleanupUnconfirmed("SDK effect worker disappeared".into()))?
     }
 }
 impl maka_plugins::filesystem::Files for Effects {
@@ -110,17 +110,25 @@ impl maka_plugins::filesystem::Files for Effects {
         Box::pin(self.owned(call, move |host, owner, call, cancellation| {
             Box::pin(async move {
                 if let Some(invocation) = call.identity.agent() {
-                    host.plugin_file(
-                        owner,
-                        invocation.clone(),
-                        call.identity.operation_id().map(str::to_owned),
-                        operation,
-                        cancellation,
-                    )
-                    .await
-                    .map_err(failed)?
-                    .await
-                    .map(Output::Value)
+                    let entries = matches!(&operation, Operation::Entries(_));
+                    let output = host
+                        .plugin_file(
+                            owner,
+                            invocation.clone(),
+                            call.identity.operation_id().map(str::to_owned),
+                            operation,
+                            cancellation,
+                        )
+                        .await
+                        .map_err(failed)?
+                        .await?;
+                    if entries {
+                        serde_json::from_value(output)
+                            .map(Output::Entries)
+                            .map_err(failed)
+                    } else {
+                        Ok(Output::Value(output))
+                    }
                 } else {
                     host.plugin_resource_file(owner, call, operation, cancellation)
                         .await
@@ -130,6 +138,19 @@ impl maka_plugins::filesystem::Files for Effects {
     }
 }
 impl maka_plugins::llm::Models for Effects {
+    fn resolve(
+        &self,
+        selection: maka_plugins::llm::Selection,
+    ) -> BoxFuture<'_, Result<Option<maka_runtime::execution::ModelBinding>, maka_plugins::Error>>
+    {
+        Box::pin(async move {
+            selection.validate()?;
+            let _lease = self.owner.resource_call()?;
+            let host = self.host.upgrade().ok_or(maka_plugins::Error::Retired)?;
+            host.resolve_plugin_model(selection).await
+        })
+    }
+
     fn generate(
         &self,
         call: Authority,
@@ -157,6 +178,18 @@ impl maka_plugins::llm::Models for Effects {
     }
 }
 impl maka_plugins::client_capability::Clients for Effects {
+    fn notify(
+        &self,
+        call: Authority,
+        input: maka_plugins::client_capability::Notification,
+    ) -> BoxFuture<'_, Result<(), ToolError>> {
+        Box::pin(self.owned(call, move |host, owner, call, cancellation| {
+            Box::pin(async move {
+                host.plugin_notification(owner, call, input, cancellation)
+                    .await
+            })
+        }))
+    }
     fn tools(
         &self,
         call: Authority,
@@ -191,4 +224,27 @@ impl maka_plugins::client_capability::Clients for Effects {
 }
 fn failed(error: impl ToString) -> ToolError {
     ToolError::Failed(error.to_string())
+}
+
+impl maka_plugins::session::catalog::Queries for Effects {
+    fn list(
+        &self,
+        call: Authority,
+        input: maka_plugins::session::catalog::List,
+    ) -> BoxFuture<
+        '_,
+        Result<maka_plugins::session::catalog::Page, maka_plugins::execution::CommandError>,
+    > {
+        Box::pin(async move {
+            let host = self
+                .host
+                .upgrade()
+                .ok_or(maka_plugins::execution::CommandError::Draining)?;
+            let _lease = self
+                .owner
+                .admit()
+                .map_err(|_| maka_plugins::execution::CommandError::Revoked)?;
+            host.plugin_session_catalog(call, input).await
+        })
+    }
 }

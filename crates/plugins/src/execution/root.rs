@@ -126,6 +126,10 @@ pub struct RootApproval {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateRoot {
+    /// Only the creating package/scope may admit work or change this Session.
+    /// Canonical execution facts and already accepted work remain Host-owned.
+    #[serde(default)]
+    pub managed: bool,
     pub operation_id: String,
     pub name: String,
     pub settings: Settings,

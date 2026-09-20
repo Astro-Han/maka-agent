@@ -17,121 +17,107 @@
  * under the License.
  */
 
-import type { ClientContext } from '@maka-agent/plugin-sdk/client';
-import type { OperationInput, OperationOutput } from '@maka/runtime-host/protocol';
-import type { HostAttachments } from './slots.js';
+import { RemoteError, type ClientContext } from '@maka-agent/plugin-sdk/client';
 import type {
-  CoordinationCommands,
-  WorkHubAnswerInput,
-  WorkHubAnswerResult,
-} from './controller/ports.js';
+  MessageReceipt,
+  Configured,
+  ExecutionTarget,
+  ExecutionReceipt,
+  ExecutionObservation,
+} from '@maka-agent/plugin-sdk/host';
+import type { OperationInput } from '@maka/runtime-host/protocol';
+import type { HostAttachments } from './slots.js';
+import type { CoordinationCommands, WorkHubAnswerInput } from './controller/ports.js';
 
 type Wire<T> = T extends readonly (infer Item)[]
   ? Wire<Item>[]
   : T extends object
     ? { [Key in keyof T]: Wire<T[Key]> }
     : T;
-type Outcome<T> = { ok: true; result: T } | { ok: false; error: { code: string; message: string } };
-type Answer = Wire<OperationInput<'workhub.coordination.answer'>>;
-type Receipt = Wire<OperationOutput<'workhub.coordination.answer'>>;
-type ModelInput = Wire<OperationInput<'workhub.coordination.configureModel'>>;
-type ModelResult = Wire<OperationOutput<'workhub.coordination.configureModel'>>;
+type Answer = Wire<WorkHubAnswerInput>;
+type ModelInput = {
+  sessionId: string;
+  expectedRevision: number;
+  target: Extract<ExecutionTarget, { kind: 'model' }>;
+};
 type Enqueue = Pick<
   Wire<OperationInput<'turn.message.submit'>>,
-  'originHostEpoch' | 'messageId' | 'content' | 'placement'
-> & { expectedTurnId: string };
-type Queued = Wire<OperationOutput<'turn.message.submit'>>;
+  'messageId' | 'content' | 'placement'
+> & {
+  expectedTurnId: string;
+};
 
 export function coordinationCommands(
-  context: Pick<ClientContext, 'remote' | 'hostEpoch' | 'signal'>,
+  context: Pick<ClientContext, 'remote' | 'signal'>,
   toHost: HostAttachments,
+  hostSessionId: string | undefined,
 ): CoordinationCommands {
-  const submit = context.remote.method<Answer, Outcome<Receipt>>('answer');
-  const receipt = context.remote.method<
-    Answer,
-    Outcome<Wire<OperationOutput<'turn.query'>> | null>
-  >('answer-receipt');
-  const configure = context.remote.method<ModelInput, Outcome<ModelResult>>('configure-model');
-  const enqueue = context.remote.method<Enqueue, Outcome<Queued>>('enqueue');
+  const submit = context.remote.method<Answer, Wire<ExecutionReceipt>>('answer', hostSessionId);
+  const receipt = context.remote.method<Answer, Wire<ExecutionObservation> | null>(
+    'answer-receipt',
+    hostSessionId,
+  );
+  const requireSession = () => {
+    context.signal.throwIfAborted();
+    if (!hostSessionId) throw new Error('WorkHub Session is not resolved');
+    return hostSessionId;
+  };
+  const request = (sessionId: string, input: WorkHubAnswerInput): Answer => ({
+    ...input,
+    ...(input.attachments ? { attachments: toHost(sessionId, input.attachments) } : {}),
+  });
   return {
-    hostEpoch: context.hostEpoch,
-    async enqueueMessage(
-      sessionId,
-      messageId,
-      text,
-      attachments,
-      placement,
-      expectedTurnId,
-      originHostEpoch,
-    ) {
-      context.signal.throwIfAborted();
-      if (!context.hostEpoch) throw new Error('WorkHub has no originating Host epoch');
+    async enqueueMessage(sessionId, messageId, text, attachments, placement, expectedTurnId) {
+      requireSession();
       const content = { text, attachments: toHost(sessionId, attachments) };
       try {
-        const outcome = await enqueue({
-          originHostEpoch: originHostEpoch ?? context.hostEpoch,
+        await context.remote.method<Enqueue, Wire<MessageReceipt>>(
+          'enqueue',
+          hostSessionId,
+        )({
           expectedTurnId,
           messageId,
           content,
           placement,
         });
-        if (!outcome.ok) return uncertain(outcome.error.code) ? 'unknown' : 'rejected';
-        // Accepted delivery can move from steering to its successor during a
-        // lost-response retry. Neither receipt permits another submission.
-        return outcome.result.disposition === 'blocked' ? 'rejected' : 'admitted';
-      } catch {
-        return 'unknown';
+        return 'admitted';
+      } catch (error) {
+        return rejected(error) ? 'rejected' : 'unknown';
       }
     },
-    async answer(sessionId, input: WorkHubAnswerInput): Promise<WorkHubAnswerResult> {
-      context.signal.throwIfAborted();
-      const epoch = input.originHostEpoch ?? context.hostEpoch;
-      if (!epoch || !context.hostEpoch) throw new Error('WorkHub has no originating Host epoch');
-      const { originHostEpoch: _origin, ...original } = input;
-      const request = {
-        ...original,
-        ...(input.attachments ? { attachments: toHost(sessionId, input.attachments) } : {}),
-      };
-      const unknown = (): WorkHubAnswerResult => ({ kind: 'unknown', originHostEpoch: epoch });
-      let outcome: Outcome<Receipt>;
+    async answer(sessionId, input) {
+      requireSession();
+      const content = request(sessionId, input);
       try {
-        if (input.originHostEpoch) {
-          const proof = await receipt(request);
-          if (!proof.ok) {
-            if (proof.error.code === 'operation_conflict') throw new DomainError(proof.error);
-            return unknown();
-          }
-          if (proof.result)
-            return { kind: 'admitted', turnId: proof.result.turnId, status: proof.result.status };
-          if (epoch !== context.hostEpoch) return { kind: 'not_admitted' };
-        }
+        const proof = await receipt(content);
+        if (proof) return { kind: 'admitted', receipt: proof.receipt, progress: proof.progress };
         context.signal.throwIfAborted();
-        outcome = await submit(request);
+        return { kind: 'admitted', receipt: await submit(content) };
       } catch (error) {
-        if (error instanceof DomainError) throw error;
-        // Remote failure cannot prove that an already-dispatched mutation rolled back.
-        return unknown();
+        if (rejected(error)) throw error;
+        // A lost reply is not permission to choose a new operation identity.
+        return { kind: 'unknown' };
       }
-      if (outcome.ok) return { kind: 'admitted', ...outcome.result };
-      if (uncertain(outcome.error.code) || input.originHostEpoch) return unknown();
-      throw new DomainError(outcome.error);
+    },
+    async cancelAnswer(sessionId, input) {
+      requireSession();
+      await context.remote.method<Answer, Wire<ExecutionObservation>>(
+        'answer-cancel',
+        hostSessionId,
+      )(request(sessionId, input));
     },
     async configureModel(_sessionId, input) {
-      context.signal.throwIfAborted();
-      const outcome = await configure(input);
-      if (!outcome.ok) throw new DomainError(outcome.error);
-      return outcome.result;
+      const sessionId = requireSession();
+      return context.remote.method<ModelInput, Wire<Configured>>(
+        'configure-model',
+        hostSessionId,
+      )({
+        ...input,
+        sessionId,
+      });
     },
   };
 }
-
-function uncertain(code: string): boolean {
-  return code === 'outcome_unknown' || code === 'commit_outcome_unknown';
-}
-
-class DomainError extends Error {
-  constructor(readonly detail: { code: string; message: string }) {
-    super(detail.message);
-    this.name = 'WorkHubError';
-  }
+function rejected(error: unknown): boolean {
+  return error instanceof RemoteError && error.code === 'invalid_request';
 }

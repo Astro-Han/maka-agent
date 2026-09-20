@@ -84,8 +84,6 @@ fn operation_inventory_and_execution_targets_match_current_typescript() {
 }
 
 fn execution_targets() -> Vec<Value> {
-    let model =
-        json!({"llmConnectionId":"connection", "llmConnectionSlug":"fixture", "model":"fixture"});
     let mut cases = Vec::new();
     for target in [
         json!({"modelTarget":{"kind":"default"}}),
@@ -108,23 +106,6 @@ fn execution_targets() -> Vec<Value> {
             .ok()
             .map(|value| serde_json::to_value(value).unwrap());
         cases.push(json!({"operation":Operation::SessionCreate, "input":input, "decoded":decoded}));
-    }
-    for defaults in [
-        json!({}),
-        json!({"model":model}),
-        json!({"executorId":"Agent.v1:fixture", "permissionMode":"bypass"}),
-        json!({"executorId":"Agent", "model":model}),
-        json!({"executorId":"Agent/invalid"}),
-        json!({"executorId":null}),
-        json!({"model":null}),
-        json!({"executorId":"Agent", "unexpected":true}),
-    ] {
-        let input = json!({"turnId":"turn", "actionId":"action", "proposal":{"disposition":"create_new", "title":"Task"},
-            "create":{"workspace":{"kind":"host_path", "path":"/work"}}, "newWorkDefaults":defaults});
-        let decoded = maka_protocol::workhub::decode_act(&input)
-            .ok()
-            .map(|value| serde_json::to_value(value).unwrap());
-        cases.push(json!({"operation":Operation::WorkhubCoordinationActFromTurn, "input":input, "decoded":decoded}));
     }
     cases
 }

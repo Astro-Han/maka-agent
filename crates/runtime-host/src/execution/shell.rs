@@ -292,6 +292,6 @@ fn worker_error(error: Arc<ShellError>) -> ToolError {
         ShellError::CancelledBeforeAdmission => failed(error),
         ShellError::Store(error) => persistence(error),
         ShellError::Process(error) => error.clone(),
-        _ => ToolError::OutcomeUnknown(error.to_string()),
+        _ => ToolError::CleanupUnconfirmed(error.to_string()),
     }
 }

@@ -76,7 +76,7 @@ export function SessionRail(props: SessionRailStoryProps) {
     viewMode: props.viewMode ?? 'conversation',
     onViewModeChange: props.onViewModeChange,
     selection: props.selection,
-    scheduledTasks: props.scheduledTasks,
+    navigationStatus: props.navigationStatus,
     moduleMemory: props.moduleMemory,
     onSelect: props.onSelect ?? (() => undefined),
     onNew: props.onNew ?? (() => undefined),

@@ -19,30 +19,18 @@
 
 //! Recoverable publication of complete Skill directories. Callers serialize this
 //! domain store and run its bounded filesystem work off the async executor.
-use cap_fs_ext::DirExt;
-use cap_std::{ambient_authority, fs::Dir};
+use cap_std::fs::Dir;
 use maka_runtime::artifact::content_digest;
-use std::path::Path;
 use tokio_util::sync::CancellationToken;
 
+mod directory;
 mod io;
+use directory::Directory;
 mod journal;
 mod tree;
 mod user;
 pub use tree::Tree;
-pub(crate) use user::UserStore;
-
-pub(crate) fn read_import(path: &Path) -> Result<Vec<u8>, Error> {
-    let parent = path
-        .parent()
-        .filter(|_| path.is_absolute())
-        .ok_or_else(|| Error::Invalid("Import requires an absolute file path".into()))?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| Error::Invalid("Missing import filename".into()))?;
-    let directory = Dir::open_ambient_dir(parent, ambient_authority())?;
-    io::read(&directory, Path::new(name), 1024 * 1024).map(|(bytes, _)| bytes)
-}
+pub(crate) use user::{UserFiles, UserStore};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -61,39 +49,41 @@ pub enum Error {
 }
 
 pub struct Publisher {
-    skills: Dir,
-    transactions: Dir,
+    skills: Directory,
+    transactions: Directory,
     _lock: std::sync::Arc<io::PublicationLock>,
 }
 impl Publisher {
-    pub fn open(root: &Path, data: &Dir) -> Result<Self, Error> {
-        if !root.is_absolute() {
-            return Err(Error::Invalid("Publication root must be absolute".into()));
-        }
-        let root = Dir::open_ambient_dir(root, ambient_authority())?;
+    pub fn open(
+        data: &Dir,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<Self, Error> {
         let lock = std::sync::Arc::new(io::lock(data)?);
+        io::child(data, "skills")?;
+        io::child(data, "transactions")?;
+        let root = Directory::private(data.try_clone()?, cancellation.clone());
         Ok(Self {
-            skills: io::child(&root, "skills")?,
-            transactions: io::child(data, "transactions")?,
+            skills: root.at("skills"),
+            transactions: root.at("transactions"),
             _lock: lock,
         })
     }
-    pub fn capture(
+    pub async fn capture(
         &self,
         id: &str,
         cancellation: &CancellationToken,
     ) -> Result<Option<Tree>, Error> {
         validate_id(id)?;
-        match self.skills.open_dir_nofollow(id) {
-            Ok(directory) => Ok(Some(Tree::read(&directory, cancellation)?)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error.into()),
+        match self.skills.open(id).await {
+            Ok(directory) => Ok(Some(Tree::read(&directory, cancellation).await?)),
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
         }
     }
 
     /// Once intent is durable, cancellation cannot discard the publication.
     /// A failure after that cut is recoverable; Conflict proves no source edit was lost.
-    pub fn publish(
+    pub async fn publish(
         &self,
         id: &str,
         expected: Option<&Tree>,
@@ -104,14 +94,19 @@ impl Publisher {
         if expected.is_none() && next.is_none() {
             return Err(Error::Invalid("Empty publication".into()));
         }
-        self.recover()?;
+        self.recover().await?;
         let intent = journal::Intent {
             schema: 1,
             id: id.into(),
             expected: expected.map(Tree::manifest),
             next: next.map(Tree::manifest),
         };
-        if self.capture(id, cancellation)?.map(|tree| tree.manifest()) != intent.expected {
+        if self
+            .capture(id, cancellation)
+            .await?
+            .map(|tree| tree.manifest())
+            != intent.expected
+        {
             return Err(Error::Conflict);
         }
         let bytes = serde_json::to_vec(&intent)?;
@@ -120,45 +115,51 @@ impl Publisher {
         }
         let hash = content_digest(&bytes);
         let name = format!("tx-{}-{}", uuid::Uuid::new_v4(), &hash[7..]);
-        self.transactions.create_dir(&name)?;
-        io::sync(&self.transactions)?;
-        let transaction = self.transactions.open_dir_nofollow(&name)?;
+        self.transactions.create_dir(&name).await?;
+        self.transactions.sync().await?;
+        let transaction = self.transactions.open(&name).await?;
         if let Some(next) = next {
-            let directory = io::child(&transaction, "next")?;
-            next.write(&directory)?;
+            let directory = transaction.child("next").await?;
+            next.write(&directory).await?;
         }
         if cancellation.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        io::write_new(&transaction, Path::new("intent.pending"), &bytes, 0o600)?;
+        transaction
+            .write_new("intent.pending", &bytes, 0o600)
+            .await?;
         // Rename can have happened even when synchronizing its directory fails.
-        let result = (|| {
-            io::rename(&transaction, "intent.pending", &transaction, "intent.json")?;
-            journal::replay(&self.skills, &transaction, &intent, &hash)
-        })();
+        let result = async {
+            transaction
+                .rename("intent.pending", &transaction, "intent.json")
+                .await?;
+            journal::replay(&self.skills, &transaction, &intent, &hash).await
+        }
+        .await;
         drop(transaction);
         if matches!(result, Err(Error::Conflict)) {
             self.collect(&name)
+                .await
                 .map_err(|error| Error::OutcomeUnknown(error.to_string()))?;
             return Err(Error::Conflict);
         }
         result.map_err(|error: Error| Error::OutcomeUnknown(error.to_string()))?;
         self.collect(&name)
+            .await
             .map_err(|error| Error::OutcomeUnknown(error.to_string()))
     }
 
-    pub fn recover(&self) -> Result<(), Error> {
+    pub async fn recover(&self) -> Result<(), Error> {
         let mut names = Vec::new();
-        for entry in self.transactions.entries()? {
-            let entry = entry?;
+        for entry in self.transactions.entries().await? {
             if names.len() == 128 {
                 return Err(Error::Invalid("Too many pending Skill publications".into()));
             }
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| Error::Invalid("Non-UTF8 publication identity".into()))?;
-            if !entry.file_type()?.is_dir() || entry.file_type()?.is_symlink() {
+            let name = entry.name;
+            if !matches!(
+                entry.kind,
+                maka_plugins::filesystem::entries::Kind::Directory
+            ) {
                 return Err(Error::Invalid("Unsafe publication entry".into()));
             }
             validate_transaction(&name)?;
@@ -167,12 +168,12 @@ impl Publisher {
         names.sort();
         for name in names {
             if name.starts_with("gc-") {
-                self.transactions.remove_dir_all(&name)?;
-                io::sync(&self.transactions)?;
+                self.transactions.remove_tree(&name).await?;
+                self.transactions.sync().await?;
                 continue;
             }
-            let transaction = self.transactions.open_dir_nofollow(&name)?;
-            match io::read(&transaction, Path::new("intent.json"), 64 * 1024) {
+            let transaction = self.transactions.open(&name).await?;
+            match transaction.read("intent.json", 64 * 1024).await {
                 Ok((bytes, _)) => {
                     let hash = content_digest(&bytes);
                     if !name.ends_with(&hash[7..]) {
@@ -180,15 +181,14 @@ impl Publisher {
                     }
                     let intent: journal::Intent = serde_json::from_slice(&bytes)?;
                     intent.validate()?;
-                    match journal::replay(&self.skills, &transaction, &intent, &hash) {
+                    match journal::replay(&self.skills, &transaction, &intent, &hash).await {
                         Ok(()) | Err(Error::Conflict) => {}
                         Err(error) => return Err(error),
                     }
                 }
                 Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                    for entry in transaction.entries()? {
-                        let entry = entry?;
-                        if !matches!(entry.file_name().to_str(), Some("next" | "intent.pending")) {
+                    for entry in transaction.entries().await? {
+                        if !matches!(entry.name.as_str(), "next" | "intent.pending") {
                             return Err(Error::Invalid(
                                 "Publication lost its intent after acquiring source data".into(),
                             ));
@@ -198,16 +198,18 @@ impl Publisher {
                 Err(error) => return Err(error),
             }
             drop(transaction);
-            self.collect(&name)?;
+            self.collect(&name).await?;
         }
         Ok(())
     }
-    fn collect(&self, name: &str) -> Result<(), Error> {
+    async fn collect(&self, name: &str) -> Result<(), Error> {
         let gc = format!("gc-{}", &name[3..]);
-        io::rename(&self.transactions, name, &self.transactions, &gc)?;
+        self.transactions
+            .rename(name, &self.transactions, &gc)
+            .await?;
         // This directory is exclusively owned staging/retired data, not a source path.
-        self.transactions.remove_dir_all(&gc)?;
-        io::sync(&self.transactions)?;
+        self.transactions.remove_tree(&gc).await?;
+        self.transactions.sync().await?;
         Ok(())
     }
 }

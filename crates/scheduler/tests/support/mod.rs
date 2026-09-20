@@ -27,6 +27,17 @@ use std::sync::Arc;
 
 pub struct SqlStore(pub Arc<EventLog>);
 impl Store for SqlStore {
+    fn scan(
+        &self,
+        query: maka_plugins::storage::Scan,
+    ) -> BoxFuture<'_, Result<maka_plugins::storage::Page, StoreError>> {
+        Box::pin(async move {
+            self.0
+                .plugin_data_scan(&namespace(), query)
+                .await
+                .map_err(storage)
+        })
+    }
     fn read(&self, key: String) -> BoxFuture<'_, Result<Option<Record>, StoreError>> {
         Box::pin(async move {
             self.0

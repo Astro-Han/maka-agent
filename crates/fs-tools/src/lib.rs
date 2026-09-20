@@ -20,7 +20,7 @@
 mod edit_index;
 mod edit_match;
 pub use edit_match::EditMatchStrategy;
-pub mod instructions;
+pub mod directory;
 mod search;
 pub mod workspace;
 pub mod worktree;
@@ -95,6 +95,20 @@ pub struct ReadExecutor {
 }
 
 impl ReadExecutor {
+    /// Use the exact directory already validated by an embedding's file grant.
+    pub fn from_directory(
+        path: PathBuf,
+        directory: cap_std::fs::Dir,
+        limits: ReadLimits,
+    ) -> Result<Self, ToolError> {
+        if limits.max_source_bytes == 0 || limits.max_source_bytes.checked_add(1).is_none() {
+            return Err(failed("Read byte limits must be positive and bounded"));
+        }
+        Ok(Self {
+            authority: Arc::new(scoped::Authority::from_directory(path, directory)?),
+            limits,
+        })
+    }
     pub fn new(
         cwd: impl AsRef<Path>,
         scope: ReadScope,

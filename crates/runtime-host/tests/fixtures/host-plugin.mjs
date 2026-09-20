@@ -19,7 +19,33 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function (ctx) {
-  await ctx.input.prepare('example.review', (request) => {
+  const model = await ctx.models.resolve({
+    kind: 'named',
+    connectionSlug: 'recovery',
+    model: 'fixture-model',
+  });
+  if (
+    !model ||
+    model.connection_slug !== 'recovery' ||
+    Object.keys(model).sort().join(',') !== 'connection_id,connection_slug,model'
+  )
+    throw new Error('model lookup leaked configuration or lost its binding');
+  if ((await ctx.models.resolve({ kind: 'default' })) !== null)
+    throw new Error('model lookup invented an unconfigured default');
+  if (await ctx.models.resolve({ kind: 'named', connectionSlug: 'recovery', model: 'not-enabled' }))
+    throw new Error('disabled model is selectable');
+
+  /** @type {import('../../../../packages/plugin-sdk/src/host.js').ReadDirectory | undefined} */
+  let preparedFiles;
+  const revision = await ctx.revision();
+  const behaviorRevision = await ctx.revision();
+  let invalidated = false;
+  await ctx.input.prepare('example.review', async (request) => {
+    const basis = await revision.capture();
+    preparedFiles = request.workspace;
+    const proof = await request.workspace.read({ path: 'native-proof.txt', limit: 6 });
+    if (new TextDecoder().decode(proof.bytes) !== 'native' || proof.nextOffset !== 6)
+      throw new Error('preparation lost bounded workspace access');
     const selections = request.selections['example.review'];
     if (!selections) return { kind: 'unchanged' };
     if (selections[0] === 'missing')
@@ -28,7 +54,12 @@ export default async function (ctx) {
         message: 'Review document is unavailable',
         receipt: { document: selections[0] },
       };
+    if (!invalidated)
+      await revision.invalidate(() => {
+        invalidated = true;
+      });
     return {
+      basis,
       kind: 'ready',
       content: {
         ...request.content,
@@ -71,9 +102,18 @@ export default async function (ctx) {
       if (error.code !== 'invalid') throw error;
     }
   }
-  await ctx.behaviors.register('example.behavior', ({ sessionId }) => {
-    if (sessionId !== 'js-session') throw new Error('wrong behavior Session');
-    return { instructions: 'External behavior instructions', toolMode: 'direct' };
+  await ctx.behaviors.register('example.behavior', async ({ session }) => {
+    if (
+      session.sessionId !== 'js-session' ||
+      session.behavior !== 'example.behavior' ||
+      session.revision < 1
+    )
+      throw new Error('wrong behavior Session');
+    return {
+      instructions: 'External behavior instructions',
+      toolMode: 'direct',
+      basis: await behaviorRevision.capture(),
+    };
   });
   let credential = await ctx.credentials.read('test-token');
   if (credential === null) {
@@ -221,110 +261,175 @@ export default async function (ctx) {
   ctx.prompt.section({
     name: 'example.prompt',
     complete: true,
-    async text() {
+    async text(_request, call) {
+      if (preparedFiles) {
+        try {
+          await preparedFiles.read({ path: 'native-proof.txt' });
+          throw new Error('preparation view survived its callback');
+        } catch (error) {
+          if (error.code !== 'revoked') throw error;
+        }
+      }
+      const proof = await call.workspace.read({ path: 'native-proof.txt' });
+      if (!new TextDecoder().decode(proof.bytes).includes('native and JS'))
+        throw new Error('prompt workspace access failed');
+      try {
+        await call.workspace.read({ path: '../outside.txt' });
+        throw new Error('prompt escaped its workspace');
+      } catch (error) {
+        if (error.code !== 'invalid') throw error;
+      }
+      const names = await ctx.inputs.names();
+      if (!names.includes('public-notes')) throw new Error('missing public input mount');
+      const mountName = (await ctx.inputs.at('public-notes').location()).split(/[\\/]/).at(-1);
+      const workspaceName = (await call.workspace.location()).split(/[\\/]/).at(-1);
+      if (!mountName || mountName !== workspaceName)
+        throw new Error('input location does not identify the mounted workspace');
+      const mounted = await ctx.inputs.at('public-notes').read({ path: 'native-proof.txt' });
+      if (new TextDecoder().decode(mounted.bytes) !== new TextDecoder().decode(proof.bytes))
+        throw new Error('native and JS see different input mounts');
+      try {
+        await ctx.inputs.at('public-notes').read({ path: 'unshared.txt' });
+        throw new Error('input mount ignored its file selection');
+      } catch (error) {
+        if (error.code !== 'invalid') throw error;
+      }
       const preferences = await ctx.preferences.read();
       if (
         Object.keys(preferences).sort().join(',') !==
-        'personalization,revision,workspaceInstructions'
+        'personalization,revision,toolMode,workspaceInstructions'
       )
         throw new Error('preferences exposed unrelated Host configuration');
       return `JavaScript plugin acceptance: ${JSON.stringify(preferences)}`;
     },
   });
-  ctx.tools.register(
-    {
-      name: 'PluginEcho',
-      description: 'Call the plugin service and persist its result.',
-      inputSchema: {
-        type: 'object',
-        properties: { wait: { type: 'boolean' } },
-        additionalProperties: false,
-      },
-      directOnly: true,
-      semantics: 'finish_turn',
-    },
-    async (/** @type {{wait?:boolean}} */ input, call) => {
-      try {
-        const denied = await call.terminals.spawn(command);
-        await denied.close();
-        throw new Error('Ask Session gained unrestricted terminal access');
-      } catch (error) {
-        if (error.code !== 'revoked') throw error;
-      }
-      try {
-        const denied = await call.processes.spawn(command);
-        await denied.close();
-        throw new Error('Ask Session gained unrestricted process access');
-      } catch (error) {
-        if (error.code !== 'revoked') throw error;
-      }
-      if (previousCall) {
-        try {
-          await previousCall.call({ inspect: true });
-          throw new Error('old invocation still authorized');
-        } catch (error) {
-          if (error.code !== 'revoked') throw error;
-        }
-        await previousCall.close();
-      }
-      previousCall = await call.services.get('example.echo');
-      if (!previousCall) throw new Error('service retired');
-      const caller = await previousCall.call({ inspect: true });
-      if (
-        caller.invocation.invocation_id !== call.invocation.invocation_id ||
-        caller.operationId !== call.operationId
-      )
-        throw new Error('tool authority lost across VMs');
-      if (input.wait) {
-        // Abandon the Promise deliberately; retirement must still drain and settle it.
-        void call.llm.generate({ prompt: 'cancel this' }).catch(() => {});
-        await ctx.storage.batch([
-          { key: 'waiting', expectedRevision: null, data: { kind: 'present', value: true } },
-        ]);
-        await call.signal.wait();
-        return { interrupted: true };
-      }
-      const generated = await call.llm.generate({
-        prompt: 'nested prompt',
-        system: 'Auxiliary only',
-      });
-      if (
-        generated.text !== 'nested answer' ||
-        generated.finishReason !== 'stop' ||
-        generated.usage.input_tokens !== 3 ||
-        generated.usage.output_tokens !== 5
-      )
-        throw new Error('nested model result or usage was lost');
-      for (let generation = 0; generation < 300; generation++) {
-        const dynamic = await ctx.prompt.variable('temporary', () => String(generation));
-        await dynamic.close();
-      }
-      const registration = await ctx.services.provide('temporary.echo', (value) => value);
-      const temporary = await ctx.services.get('temporary.echo');
-      if (!temporary) throw new Error('missing temporary service');
-      if ((await temporary.call('live')) !== 'live') throw new Error('service not callable');
-      await registration.close();
-      try {
-        await temporary.call('stale');
-        throw new Error('retired service accepted a stale call');
-      } catch (error) {
-        if (error.code !== 'revoked') throw error;
-      }
-      await temporary.close();
-      const before = await ctx.storage.read('count');
-      const count =
-        before?.data.kind === 'present' && typeof before.data.value === 'number'
-          ? before.data.value + 1
-          : 1;
-      const value = await echo.call({ count });
-      await ctx.storage.batch([
-        {
-          key: 'count',
-          expectedRevision: before?.revision ?? null,
-          data: { kind: 'present', value: count },
+  ctx.tools.bind(
+    [
+      {
+        name: 'PluginEcho',
+        description: 'Call the plugin service and persist its result.',
+        inputSchema: {
+          type: 'object',
+          properties: { wait: { type: 'boolean' } },
+          additionalProperties: false,
         },
-      ]);
-      return value;
+        directOnly: true,
+        semantics: 'finish_turn',
+      },
+    ],
+    async (_request, preparation) => {
+      const page = await preparation.workspace.read({ path: 'binding-proof.txt' });
+      const frozen = new TextDecoder().decode(page.bytes);
+      return {
+        context: `binding proof: ${frozen}`,
+        async invoke(_name, /** @type {{wait?:boolean}} */ input, call) {
+          try {
+            await preparation.workspace.read({ path: 'binding-proof.txt' });
+            throw new Error('tool binding retained its preparation authority');
+          } catch (error) {
+            if (error.code !== 'revoked') throw error;
+          }
+
+          try {
+            const denied = await call.terminals.spawn(command);
+            await denied.close();
+            throw new Error('Ask Session gained unrestricted terminal access');
+          } catch (error) {
+            if (error.code !== 'revoked') throw error;
+          }
+          try {
+            const denied = await call.processes.spawn(command);
+            await denied.close();
+            throw new Error('Ask Session gained unrestricted process access');
+          } catch (error) {
+            if (error.code !== 'revoked') throw error;
+          }
+          if (previousCall) {
+            try {
+              await previousCall.call({ inspect: true });
+              throw new Error('old invocation still authorized');
+            } catch (error) {
+              if (error.code !== 'revoked') throw error;
+            }
+            await previousCall.close();
+          }
+          previousCall = await call.services.get('example.echo');
+          if (!previousCall) throw new Error('service retired');
+          const caller = await previousCall.call({ inspect: true });
+          if (
+            caller.invocation.invocation_id !== call.invocation.invocation_id ||
+            caller.operationId !== call.operationId
+          )
+            throw new Error('tool authority lost across VMs');
+          if (input.wait) {
+            // Abandon the Promise deliberately; retirement must still drain and settle it.
+            void call.llm.generate({ prompt: 'cancel this' }).catch(() => {});
+            await ctx.storage.batch([
+              { key: 'waiting', expectedRevision: null, data: { kind: 'present', value: true } },
+            ]);
+            await call.signal.wait();
+            return { interrupted: true };
+          }
+          const generated = await call.llm.generate({
+            prompt: 'nested prompt',
+            system: 'Auxiliary only',
+          });
+          if (
+            generated.text !== 'nested answer' ||
+            generated.finishReason !== 'stop' ||
+            generated.usage.input_tokens !== 3 ||
+            generated.usage.output_tokens !== 5
+          )
+            throw new Error('nested model result or usage was lost');
+          for (let generation = 0; generation < 300; generation++) {
+            const dynamic = await ctx.prompt.variable('temporary', () => String(generation));
+            await dynamic.close();
+          }
+          const registration = await ctx.services.provide('temporary.echo', (value) => value);
+          const temporary = await ctx.services.get('temporary.echo');
+          if (!temporary) throw new Error('missing temporary service');
+          if ((await temporary.call('live')) !== 'live') throw new Error('service not callable');
+          await registration.close();
+          try {
+            await temporary.call('stale');
+            throw new Error('retired service accepted a stale call');
+          } catch (error) {
+            if (error.code !== 'revoked') throw error;
+          }
+          await temporary.close();
+          const before = await ctx.storage.read('count');
+          const count =
+            before?.data.kind === 'present' && typeof before.data.value === 'number'
+              ? before.data.value + 1
+              : 1;
+          const value = await echo.call({ count });
+          const priorProof = await ctx.storage.read('bound-proof');
+          await ctx.storage.batch([
+            {
+              key: 'bound-proof',
+              expectedRevision: priorProof?.revision ?? null,
+              data: { kind: 'present', value: frozen },
+            },
+          ]);
+          await ctx.storage.batch([
+            {
+              key: 'count',
+              expectedRevision: before?.revision ?? null,
+              data: { kind: 'present', value: count },
+            },
+          ]);
+          const page = await ctx.storage.scan({ prefix: 'count' });
+          if (
+            page.nextAfter !== null ||
+            page.entries.length !== 1 ||
+            page.entries[0].key !== 'count' ||
+            page.entries[0].record.data.kind !== 'present' ||
+            page.entries[0].record.data.value !== count
+          )
+            throw new Error('public storage enumeration lost its namespace or record');
+          return value;
+        },
+      };
     },
   );
   ctx.run(async () => {

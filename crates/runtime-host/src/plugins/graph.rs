@@ -17,44 +17,16 @@
  * under the License.
  */
 
-mod definitions;
-pub(crate) mod host;
-mod operators;
-mod read;
-mod remote;
-mod session;
-mod tools;
-
 use super::Setup;
-use futures_util::future::BoxFuture;
-use maka_event_log::EventLog;
-use maka_graph::{Mode, owner::Handle};
+use maka_graph::plugin::{Builtin, ID};
 use maka_plugins::{
-    client::{Bundle, Client},
+    client::Bundle,
     composition::{Entry, Operation, Scope},
-    contributions::{Catalog, Staged},
-    fiber::Context,
-    kernel::{Definition, Plugin, PluginContext},
-    session::SessionBehavior,
+    kernel::Definition,
 };
-use serde_json::Value;
-use std::{
-    collections::BTreeMap,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
+use std::sync::Arc;
 
-pub(crate) const ID: &str = "maka.agent-graph";
-
-pub(crate) fn install(
-    setup: &mut Setup,
-    log: Arc<EventLog>,
-    sessions: Arc<dyn host::Sessions>,
-    catalog: Catalog,
-) -> Result<(), maka_plugins::Error> {
+pub(crate) fn install(setup: &mut Setup) -> Result<(), maka_plugins::Error> {
     if setup.builtins.contains_key(ID) || setup.layers.contains_key(ID) {
         return Err(maka_plugins::Error::Invalid(
             "built-in Agent Graph identity is reserved".into(),
@@ -72,12 +44,7 @@ pub(crate) fn install(
             revision: env!("CARGO_PKG_VERSION").into(),
             dependencies: vec![],
             inject: vec![],
-            plugin: Arc::new(GraphPlugin {
-                bundle,
-                log,
-                sessions,
-                catalog,
-            }),
+            plugin: Arc::new(Builtin { bundle }),
         }),
     );
     let mut entry = Entry::new(ID)?;
@@ -102,155 +69,4 @@ pub(crate) fn install(
         ],
     );
     Ok(())
-}
-
-struct GraphPlugin {
-    bundle: Arc<Bundle>,
-    log: Arc<EventLog>,
-    sessions: Arc<dyn host::Sessions>,
-    catalog: Catalog,
-}
-impl Plugin for GraphPlugin {
-    fn supports_scope(&self, scope: &Scope) -> bool {
-        matches!(scope, Scope::Profile | Scope::DesktopUi)
-    }
-    fn validate(&self, _: &Scope, config: &Value) -> Result<(), maka_plugins::Error> {
-        if config.is_null() || config.as_object().is_some_and(|object| object.is_empty()) {
-            Ok(())
-        } else {
-            Err(maka_plugins::Error::Invalid(
-                "Agent Graph currently takes no instance configuration".into(),
-            ))
-        }
-    }
-    fn activate(
-        &self,
-        context: PluginContext,
-        config: Value,
-    ) -> BoxFuture<'static, Result<Staged, String>> {
-        let bundle = self.bundle.clone();
-        if context
-            .lifecycle
-            .identity()
-            .is_ok_and(|identity| identity.scope == Scope::DesktopUi)
-        {
-            return Box::pin(async move {
-                let identity = context.lifecycle.identity().map_err(error)?;
-                let mut staged = Staged::default();
-                staged
-                    .insert(identity.entry_id, Client { bundle, config })
-                    .map_err(error)?;
-                Ok(staged)
-            });
-        }
-        let manager = Arc::new(Manager {
-            parent: context.lifecycle,
-            log: self.log.clone(),
-            sessions: self.sessions.clone(),
-            catalog: self.catalog.clone(),
-            roots: Mutex::default(),
-            recovering: AtomicBool::new(true),
-        });
-        Box::pin(async move {
-            let recovery = manager.clone();
-            manager
-                .parent
-                .spawn("recover Agent Graph Sessions", async move {
-                    let mut delay = Duration::from_millis(250);
-                    loop {
-                        if recovery.restore().await.is_ok() {
-                            recovery.recovering.store(false, Ordering::Release);
-                            return Ok(());
-                        }
-                        tokio::time::sleep(delay).await;
-                        delay = (delay * 2).min(Duration::from_secs(30));
-                    }
-                })
-                .map_err(error)?;
-            let mut staged = Staged::default();
-            remote::register(
-                &mut staged,
-                manager.log.clone(),
-                manager.sessions.clone(),
-                manager.catalog.clone(),
-                &bundle.content_digest,
-            )?;
-            staged
-                .insert(
-                    "agent-graph",
-                    manager.clone() as Arc<dyn maka_plugins::background::BackgroundWork>,
-                )
-                .map_err(error)?;
-            for (id, mode) in [("graph", Mode::Graph), ("swarm", Mode::Swarm)] {
-                staged
-                    .insert(
-                        id,
-                        SessionBehavior(Arc::new(session::GraphBehavior {
-                            manager: manager.clone(),
-                            mode,
-                        })),
-                    )
-                    .map_err(error)?;
-            }
-            Ok(staged)
-        })
-    }
-}
-
-type Slot = Arc<tokio::sync::Mutex<Option<Root>>>;
-struct Manager {
-    parent: Context,
-    log: Arc<EventLog>,
-    sessions: Arc<dyn host::Sessions>,
-    catalog: Catalog,
-    roots: Mutex<BTreeMap<String, Slot>>,
-    recovering: AtomicBool,
-}
-impl maka_plugins::background::BackgroundWork for Manager {
-    fn is_pending(&self) -> bool {
-        if self.recovering.load(Ordering::Acquire) {
-            return true;
-        }
-        self.roots.lock().unwrap().values().any(|slot| {
-            let Ok(slot) = slot.try_lock() else {
-                return true;
-            };
-            slot.as_ref().is_some_and(|root| {
-                let view = root.handle.snapshot();
-                !view.initialized || view.pending_work
-            })
-        })
-    }
-}
-pub(crate) struct Root {
-    pub(crate) lifecycle: Context,
-    pub(crate) handle: Handle,
-    pub(crate) mode: Mode,
-}
-
-/// Closing submission does not revoke reads or cancellation of already-owned work.
-pub(crate) struct Submission {
-    pub(crate) graph_id: maka_graph::GraphId,
-    pub(crate) stop: tokio_util::sync::CancellationToken,
-}
-
-struct NativeOperators {
-    commands: Arc<dyn maka_plugins::execution::Commands>,
-    log: Arc<EventLog>,
-    context: Context,
-    root: String,
-    graph_id: maka_graph::GraphId,
-    definitions: definitions::Definitions,
-    storage: Arc<dyn maka_plugins::storage::Store>,
-}
-fn error(error: impl ToString) -> String {
-    error.to_string()
-}
-pub(crate) fn now() -> Result<u64, String> {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(error)?
-        .as_millis()
-        .try_into()
-        .map_err(|_| "system clock overflow".into())
 }
