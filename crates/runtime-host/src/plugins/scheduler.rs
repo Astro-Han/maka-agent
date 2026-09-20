@@ -17,14 +17,11 @@
  * under the License.
  */
 
-mod authorization;
 mod changes;
-mod delivery;
-mod notification;
+pub(crate) mod host;
 mod tools;
 
 use super::Setup;
-use crate::{execution::Executions, server::capabilities::Capabilities};
 use futures_util::future::BoxFuture;
 use maka_plugins::{
     composition::{Entry, Operation, Scope},
@@ -43,17 +40,13 @@ use maka_scheduler::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 pub(crate) const ID: &str = "maka.scheduler";
 
 pub(crate) fn install(
     setup: &mut Setup,
-    log: Arc<maka_event_log::EventLog>,
-    configuration: Arc<maka_config::ConfigurationStore>,
-    executions: &Arc<Executions>,
-    capabilities: Arc<Capabilities>,
-    root_id: String,
+    services: Arc<dyn host::Services>,
     changes: tokio::sync::broadcast::Sender<Value>,
 ) -> Result<(), maka_plugins::Error> {
     if setup.builtins.contains_key(ID) || setup.layers.contains_key(ID) {
@@ -68,14 +61,7 @@ pub(crate) fn install(
             revision: env!("CARGO_PKG_VERSION").into(),
             dependencies: vec![],
             inject: vec![],
-            plugin: Arc::new(Scheduler {
-                log,
-                configuration,
-                executions: Arc::downgrade(executions),
-                capabilities,
-                root_id,
-                changes,
-            }),
+            plugin: Arc::new(Scheduler { services, changes }),
         }),
     );
     let mut entry = Entry::new(ID)?;
@@ -118,11 +104,7 @@ impl Config {
     }
 }
 struct Scheduler {
-    log: Arc<maka_event_log::EventLog>,
-    configuration: Arc<maka_config::ConfigurationStore>,
-    executions: Weak<Executions>,
-    capabilities: Arc<Capabilities>,
-    root_id: String,
+    services: Arc<dyn host::Services>,
     changes: tokio::sync::broadcast::Sender<Value>,
 }
 impl Plugin for Scheduler {
@@ -141,24 +123,15 @@ impl Plugin for Scheduler {
         config: Value,
     ) -> BoxFuture<'static, Result<Staged, String>> {
         let changes = self.changes.clone();
-        let backend = Arc::new(Backend {
-            context: context.lifecycle.clone(),
-            log: self.log.clone(),
-            configuration: self.configuration.clone(),
-            executions: self.executions.clone(),
-            capabilities: self.capabilities.clone(),
-            root_id: self.root_id.clone(),
-        });
+        let opened = self.services.open(context.lifecycle.clone());
         Box::pin(async move {
             let config = Config::parse(config)?;
             let identity = context.lifecycle.identity().map_err(display)?;
-            let host = backend.host().map_err(display)?;
-            let repository = Repository::new(
-                host.plugin_store(context.lifecycle.clone())
-                    .map_err(display)?,
-                &identity.entry_id,
-            )
-            .map_err(display)?;
+            let host::Opened {
+                storage,
+                operations,
+            } = opened?;
+            let repository = Repository::new(storage, &identity.entry_id).map_err(display)?;
             let controller = Controller::open(
                 repository,
                 config.timezone()?,
@@ -169,7 +142,7 @@ impl Plugin for Scheduler {
             .with_misfire(config.misfire);
             let (handle, owner) = maka_scheduler::owner::start(
                 controller,
-                backend.clone(),
+                operations.clone(),
                 Arc::new(SystemClock),
                 context.lifecycle.stopping().map_err(display)?,
             );
@@ -196,7 +169,10 @@ impl Plugin for Scheduler {
                 handle,
             });
             staged
-                .insert("ScheduledTask", tools::register(service.clone(), backend)?)
+                .insert(
+                    "ScheduledTask",
+                    tools::register(service.clone(), operations)?,
+                )
                 .map_err(display)?;
             staged
                 .insert(identity.entry_id, (*service).clone())
@@ -228,29 +204,6 @@ impl Service {
             .admit()
             .map_err(|_| maka_scheduler::Error::Closed)?;
         self.handle.mutate(mutation, origin).await
-    }
-}
-struct Backend {
-    context: Context,
-    log: Arc<maka_event_log::EventLog>,
-    configuration: Arc<maka_config::ConfigurationStore>,
-    executions: Weak<Executions>,
-    capabilities: Arc<Capabilities>,
-    root_id: String,
-}
-impl Backend {
-    fn host(&self) -> Result<Arc<Executions>, maka_plugins::execution::CommandError> {
-        self.executions
-            .upgrade()
-            .filter(|host| host.accepting())
-            .ok_or(maka_plugins::execution::CommandError::Draining)
-    }
-    async fn privacy_allows(&self) -> Result<bool, maka_scheduler::Error> {
-        self.configuration
-            .runtime_policy()
-            .await
-            .map(|policy| !policy.policy.privacy.incognito_active)
-            .map_err(|error| maka_scheduler::Error::Unavailable(error.to_string()))
     }
 }
 fn display(error: impl ToString) -> String {

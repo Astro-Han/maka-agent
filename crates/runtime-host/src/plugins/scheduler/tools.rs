@@ -19,7 +19,7 @@
 
 mod input;
 
-use super::{Backend, Service};
+use super::{Service, host::Operations};
 use input::Input;
 use maka_runtime::{
     tool_call::ToolRejection,
@@ -33,7 +33,10 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 const NAME: &str = "ScheduledTask";
-pub(super) fn register(service: Arc<Service>, backend: Arc<Backend>) -> Result<PluginTool, String> {
+pub(super) fn register(
+    service: Arc<Service>,
+    operations: Arc<dyn Operations>,
+) -> Result<PluginTool, String> {
     PluginTool::new(ToolRegistration {
         definition: ToolDefinition {
             name: NAME.into(),
@@ -42,12 +45,12 @@ pub(super) fn register(service: Arc<Service>, backend: Arc<Backend>) -> Result<P
         },
         nesting: ToolNesting::DirectOnly,
         semantics: ToolSemantics::ExclusiveStep,
-        handler: ToolHandler::Prepared(Arc::new(Tools { service, backend })),
+        handler: ToolHandler::Prepared(Arc::new(Tools { service, operations })),
     }).map_err(|error| error.to_string())
 }
 struct Tools {
     service: Arc<Service>,
-    backend: Arc<Backend>,
+    operations: Arc<dyn Operations>,
 }
 impl ToolPreparer for Tools {
     fn names(&self) -> Vec<String> {
@@ -61,7 +64,7 @@ impl ToolPreparer for Tools {
         _: CancellationToken,
     ) -> PreparationFuture {
         let service = self.service.clone();
-        let backend = self.backend.clone();
+        let operations = self.operations.clone();
         Box::pin(async move {
             if name != NAME {
                 return Err(ToolRejection::Unavailable);
@@ -75,7 +78,7 @@ impl ToolPreparer for Tools {
                     if cancel.is_cancelled() {
                         return Err(ToolError::Failed("call cancelled before execution".into()));
                     }
-                    let _lease = backend.context.admit().map_err(failed)?;
+                    let _lease = service.context.admit().map_err(failed)?;
                     if matches!(input, Input::List {}) {
                         let view = service.handle.snapshot();
                         if !view.ready {
@@ -90,7 +93,7 @@ impl ToolPreparer for Tools {
                         return Ok(json!({"tasks":tasks}).into());
                     }
                     let mutation = input
-                        .mutation(&backend, &context.invocation)
+                        .mutation(operations.as_ref(), &context.invocation)
                         .await
                         .map_err(failed)?;
                     let result = service

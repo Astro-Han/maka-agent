@@ -278,11 +278,7 @@ impl Host {
         )?;
         crate::plugins::scheduler::install(
             &mut setup,
-            log.clone(),
-            configuration.clone(),
-            &executions,
-            capabilities.clone(),
-            root.root_id().into(),
+            crate::execution::SchedulerServices::new(&executions, root.root_id().into()),
             changes.clone(),
         )?;
         if setup.loader.is_none() {

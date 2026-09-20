@@ -52,7 +52,7 @@ impl Owner {
             if self.jobs.len() >= 8 {
                 break;
             }
-            if self.active.contains(&id)
+            if self.active.contains_key(&id)
                 || self
                     .retries
                     .get(&id)
@@ -90,12 +90,15 @@ impl Owner {
                 self.save(plan).await?;
             }
             let dispatcher = self.dispatcher.clone();
-            self.active.insert(id.clone());
+            let stop = tokio_util::sync::CancellationToken::new();
+            self.active.insert(id.clone(), stop.clone());
             self.jobs.push(Box::pin(async move {
+                let _cancel_on_drop = stop.clone().drop_guard();
                 let fire_id = fire.id.clone();
                 let notification = matches!(fire.effect, Effect::Notify(_));
                 let result =
-                    tokio::time::timeout(Duration::from_secs(30), dispatcher.dispatch(fire)).await;
+                    tokio::time::timeout(Duration::from_secs(30), dispatcher.dispatch(fire, stop))
+                        .await;
                 let delivery = match result {
                     Ok(Delivery::Retry(_)) | Err(_) if notification => {
                         Delivery::Blocked("Notification outcome unknown; not replayed".into())

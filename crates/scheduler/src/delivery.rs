@@ -24,6 +24,7 @@ use crate::{
     task::Effect,
 };
 use futures_util::future::BoxFuture;
+use tokio_util::sync::CancellationToken;
 
 /// A Host adapter checks the persisted authorization and current admission on
 /// every attempt. Retry never changes the Fire's operation ID or payload.
@@ -33,7 +34,10 @@ pub trait Dispatcher: Send + Sync {
         origin: Origin,
         effect: Effect,
     ) -> BoxFuture<'_, Result<Authorization, Error>>;
-    fn dispatch(&self, fire: Fire) -> BoxFuture<'_, Delivery>;
+    /// Scheduler can withdraw a notification before native admission. This
+    /// signal never cancels an already accepted execution or proves rollback.
+    fn dispatch(&self, fire: Fire, notification_stop: CancellationToken)
+    -> BoxFuture<'_, Delivery>;
 }
 
 pub enum Delivery {

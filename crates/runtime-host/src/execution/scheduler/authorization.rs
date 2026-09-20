@@ -42,7 +42,7 @@ impl Backend {
         let host = self.host().map_err(failure)?;
         let (source, tool_mode) = match origin {
             Origin::User => {
-                let policy = self.configuration.runtime_policy().await.map_err(failure)?;
+                let policy = host.configuration.runtime_policy().await.map_err(failure)?;
                 (
                     None,
                     if policy.policy.chat_defaults.code_mode_enabled {
@@ -53,7 +53,7 @@ impl Backend {
                 )
             }
             Origin::Agent(invocation) => {
-                let frozen = self
+                let frozen = host
                     .log
                     .invocation_configuration(&invocation)
                     .await
@@ -113,7 +113,7 @@ impl Backend {
                         "scheduling invocation authority changed".into(),
                     ));
                 }
-                let session = self
+                let session = host
                     .log
                     .get_session::<SessionConfiguration>(&boundary.session_id)
                     .await
@@ -129,7 +129,7 @@ impl Backend {
             Effect::AgentRun { execution } => {
                 let workspace = match execution.project_id {
                     Some(project_id) => {
-                        let record = self
+                        let record = host
                             .log
                             .get_project(&project_id)
                             .await
@@ -176,7 +176,7 @@ impl Backend {
                     model: execution.model,
                 };
                 crate::session::model::resolve(
-                    &self.configuration,
+                    &host.configuration,
                     &maka_protocol::session::SessionModelTarget::Explicit {
                         connection_id: model.connection_id.clone(),
                         connection_slug: model.connection_slug.clone(),

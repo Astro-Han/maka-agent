@@ -104,7 +104,7 @@ impl When {
 impl Input {
     pub(super) async fn mutation(
         self,
-        backend: &super::super::Backend,
+        operations: &dyn super::super::host::Operations,
         invocation: &maka_runtime::event::Invocation,
     ) -> Result<maka_scheduler::command::Mutation, maka_scheduler::Error> {
         use maka_scheduler::command::Mutation;
@@ -121,36 +121,9 @@ impl Input {
                         session_id: invocation.session_id.clone(),
                     },
                     Target::NotifyLocal => Effect::Notify(Notification::Local),
-                    Target::AgentRun => {
-                        let frozen = backend
-                            .log
-                            .invocation_configuration(invocation)
-                            .await
-                            .map_err(|error| maka_scheduler::Error::Unavailable(error.to_string()))?
-                            .ok_or_else(|| {
-                                maka_scheduler::Error::Invalid(
-                                    "unknown scheduling invocation".into(),
-                                )
-                            })?;
-                        let model = frozen.model.ok_or_else(|| {
-                            maka_scheduler::Error::Invalid(
-                                "agent_run requires a model target".into(),
-                            )
-                        })?;
-                        Effect::AgentRun {
-                            execution: maka_scheduler::task::ExecutionTemplate {
-                                cwd: frozen.cwd,
-                                project_id: None,
-                                llm_connection_id: model.connection_id,
-                                llm_connection_slug: model.connection_slug,
-                                model: model.model,
-                                thinking_level: frozen.thinking_level,
-                                permission_mode: frozen.permission_mode,
-                                collaboration_mode: frozen.collaboration_mode,
-                                orchestration_mode: frozen.orchestration_mode,
-                            },
-                        }
-                    }
+                    Target::AgentRun => Effect::AgentRun {
+                        execution: operations.template(invocation.clone()).await?,
+                    },
                 };
                 Mutation::Create {
                     input: Create {

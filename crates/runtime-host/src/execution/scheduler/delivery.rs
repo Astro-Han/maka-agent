@@ -36,7 +36,11 @@ impl Dispatcher for Backend {
     ) -> BoxFuture<'_, Result<Authorization, Error>> {
         Box::pin(Backend::authorize(self, origin, effect))
     }
-    fn dispatch(&self, fire: Fire) -> BoxFuture<'_, Delivery> {
+    fn dispatch(
+        &self,
+        fire: Fire,
+        notification_stop: tokio_util::sync::CancellationToken,
+    ) -> BoxFuture<'_, Delivery> {
         Box::pin(async move {
             match self.privacy_allows().await {
                 Ok(true) => {}
@@ -59,7 +63,7 @@ impl Dispatcher for Backend {
                 if let Err(error) = self.check_source(source).await {
                     return classify(error);
                 }
-                return self.notify(&fire, source).await;
+                return self.notify(&fire, source, notification_stop).await;
             }
             match self.execute(&fire).await {
                 Ok(receipt) => Delivery::Accepted {

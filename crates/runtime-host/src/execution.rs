@@ -40,6 +40,8 @@ mod provider;
 mod read;
 mod recovery;
 mod resume;
+mod scheduler;
+pub(crate) use scheduler::SchedulerServices;
 mod shell;
 pub(crate) mod skills;
 pub(crate) mod snapshot;

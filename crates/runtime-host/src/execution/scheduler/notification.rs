@@ -27,15 +27,25 @@ use maka_scheduler::{
 };
 use serde_json::json;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 const SERVICE: &str = "maka_scheduled_task_native_effect";
 impl Backend {
-    pub(super) async fn notify(&self, fire: &Fire, source: &Option<SessionBoundary>) -> Delivery {
+    pub(super) async fn notify(
+        &self,
+        fire: &Fire,
+        source: &Option<SessionBoundary>,
+        notification_stop: CancellationToken,
+    ) -> Delivery {
         let Effect::Notify(notification) = &fire.effect else {
             return Delivery::Failed("invalid notification effect".into());
         };
+        let host = match self.host() {
+            Ok(host) => host,
+            Err(error) => return Delivery::Deferred(error.to_string()),
+        };
         let registration = {
-            let registry = self
+            let registry = host
                 .capabilities
                 .registry
                 .lock()
@@ -77,7 +87,7 @@ impl Backend {
             Ok(stop) => stop,
             Err(error) => return Delivery::Deferred(error.to_string()),
         };
-        let pending = match self.capabilities.broker.prepare_service(
+        let pending = match host.capabilities.broker.prepare_service(
             registration,
             ServiceCall {
                 service_id: SERVICE.into(),
@@ -91,12 +101,12 @@ impl Backend {
             Ok(pending) => pending,
             Err(error) => return Delivery::Deferred(error.to_string()),
         };
-        let accepted = match pending.accepted().await {
+        let accepted = match tokio::select! {
+            biased;
+            _ = notification_stop.cancelled() => return Delivery::Deferred("Notification withdrawn before admission".into()),
+            accepted = pending.accepted() => accepted,
+        } {
             Ok(accepted) => accepted,
-            Err(error) => return Delivery::Deferred(error.to_string()),
-        };
-        let host = match self.host() {
-            Ok(host) => host,
             Err(error) => return Delivery::Deferred(error.to_string()),
         };
         let gate = host.lock_admission().await;
@@ -114,34 +124,8 @@ impl Backend {
             }
             Err(error) => return Delivery::Deferred(error.to_string()),
         }
-        let identity = match self.context.identity() {
-            Ok(identity) => identity,
-            Err(error) => return Delivery::Deferred(error.to_string()),
-        };
-        let catalog = host
-            .plugin_catalog
-            .snapshot::<super::Service>(&maka_plugins::composition::Scope::Profile);
-        let active = catalog
-            .entries
-            .get(&identity.entry_id)
-            .filter(|entry| {
-                entry
-                    .owner
-                    .identity()
-                    .is_ok_and(|owner| owner.activation == identity.activation)
-            })
-            .and_then(|entry| {
-                entry
-                    .value
-                    .handle
-                    .snapshot()
-                    .tasks
-                    .get(&fire.task_id)
-                    .cloned()
-            })
-            .is_some_and(|task| task.status == maka_scheduler::task::Status::Active);
-        if !active {
-            return Delivery::Deferred("Notification was paused before admission".into());
+        if notification_stop.is_cancelled() {
+            return Delivery::Deferred("Notification withdrawn before admission".into());
         }
         let result = accepted.start();
         drop(gate);

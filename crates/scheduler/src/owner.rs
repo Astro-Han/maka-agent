@@ -28,11 +28,7 @@ use crate::{
     view::View,
 };
 use futures_util::{StreamExt, stream::FuturesUnordered};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use tokio::{
     sync::{Notify, mpsc, oneshot, watch},
     time::Instant,
@@ -107,7 +103,7 @@ struct Owner {
     clock: Arc<dyn Clock>,
     updates: watch::Sender<Arc<View>>,
     jobs: FuturesUnordered<dispatch::Job>,
-    active: BTreeSet<String>,
+    active: BTreeMap<String, CancellationToken>,
     retries: BTreeMap<String, dispatch::Retry>,
 }
 
@@ -136,7 +132,7 @@ pub fn start(
         clock,
         updates,
         jobs: FuturesUnordered::new(),
-        active: BTreeSet::new(),
+        active: BTreeMap::new(),
         retries: BTreeMap::new(),
     };
     let future = async move {
@@ -152,7 +148,7 @@ pub fn start(
                     Ok(()) => {
                         // A lost settlement acknowledgement can leave a retry in
                         // memory after its Fire has already committed as complete.
-                        owner.prune_retries();
+                        owner.reconcile_attempts();
                         reload = false;
                     }
                     Err(error) => {
@@ -210,7 +206,7 @@ pub fn start(
                         owner.failed(result.as_ref().err().unwrap());
                         reload = true;
                     } else if result.is_ok() {
-                        owner.prune_retries();
+                        owner.reconcile_attempts();
                         owner.publish();
                     }
                     let _ = command.reply.send(result);
@@ -223,7 +219,18 @@ pub fn start(
     (handle, future)
 }
 impl Owner {
-    fn prune_retries(&mut self) {
+    fn reconcile_attempts(&mut self) {
+        // Domain state owns withdrawal. Host only observes the attempt's
+        // cancellation signal, never the task catalog or plugin publication.
+        for (id, stop) in &self.active {
+            let active = self.controller.catalog.plans.get(id).is_some_and(|saved| {
+                saved.plan.task.status == crate::task::Status::Active
+                    && saved.plan.pending.is_some()
+            });
+            if !active {
+                stop.cancel();
+            }
+        }
         self.retries.retain(|id, retry| {
             self.controller
                 .catalog
@@ -241,6 +248,11 @@ impl Owner {
         }
     }
     fn failed(&self, error: impl ToString) {
+        // A lost mutation acknowledgement may hide a committed pause. Fence
+        // unadmitted notifications until durable state has been reloaded.
+        for stop in self.active.values() {
+            stop.cancel();
+        }
         let previous = self.updates.borrow().clone();
         self.updates.send_replace(Arc::new(View {
             revision: previous.revision,
@@ -257,7 +269,7 @@ impl Owner {
             return delay;
         }
         for (id, saved) in &self.controller.catalog.plans {
-            if self.active.contains(id) {
+            if self.active.contains_key(id) {
                 continue;
             }
             if let Some(retry) = self.retries.get(id).filter(|retry| {

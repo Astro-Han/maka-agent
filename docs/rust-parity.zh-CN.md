@@ -52,7 +52,8 @@
 | **Skills：**`maka.skills` 拥有发现、输入准备、每步工具／上下文快照、治理、偏好 CAS、预览、导入及 workspace／user 发布；已发布的 Client Contribution 拥有 Session／新工作区选择器、管理页与草稿建议。 | Desktop 提供目标绑定的 Slot、通用 Remote 传输及授权的原生文件操作；旧扫描、导入、控制器和 Skills IPC／preload 门面已删除。Host 仅保留薄外部协议适配、准入与不可变回执，不再解析 Skill。 |
 | **WorkHub：**`maka.workhub` 拥有协调会话配置、回答组合、原生 `workhub_tasks`、路由／选择／纠正／Stop／Resume、steering／followup 及恢复策略。Session behavior 为初始及后续 Turn 一致冻结工具与 Direct／Code Mode。 | 发布的 Client 在 `packages/workhub` 中拥有完整主窗口／浮动界面，通过 Remote 及原 Host 绑定的 Session／附件端口工作。Desktop 负责原生呈现，不编排任务；Host 负责受管 Session 保留、精确准入、规范回执和结算。Client 换代按原身份协调待确认提交，不跨 Host epoch 重投。 |
 | **默认助手行为：**`maka.assistant` 发布默认 behavior、persona、个性化和工作区指令。 | 每逻辑模型步骤冻结来源；停用后不保留隐藏 persona。显式 Session／子任务指令独立于可替换的提示词 Contribution；执行／压缩不变量仍由 Host 维护。 |
-| **Graph／Swarm 与 Scheduler：**已经是内置插件，behavior 按开放的类型化身份选择。Graph 使用原子激活／停止／空闲退休命令及只读偏好，不接收 `Executions`、配置写入器或 Host 锁。 | 保持已有编排与唤醒行为；语义相同时复用这些窄命令，按同一归属规则复核 Scheduler。类型化领域 repository 可以保留。 |
+| **Graph／Swarm：**已经是内置插件，behavior 按开放的类型化身份选择。Graph 使用原子激活／停止／空闲退休命令及只读偏好，不接收 `Executions`、配置写入器或 Host 锁。 | 保持已有编排与唤醒行为；语义相同时复用窄命令，类型化领域 repository 可以保留。 |
+| **Scheduler：**插件拥有计划、冻结触发、漏触发／重试策略和通知撤销；激活只接收作用域存储与类型化调度操作，不接收 Host 对象或能力注册表。 | Host 解析授权并准入执行／原生投递。暂停撤销尚未准入的通知，包括 provider 的迟到接受；已接受执行仍归 Host。恢复复用精确 Fire 身份，不重放结果不确定的通知。现有 Desktop 操作保留为插件的薄适配。 |
 | **Code Mode：**模式选择、嵌套派发及历史投影跨越多个 crate。 | 首批领域迁移后，在有实际 Contribution 边界收益时迁移面向用户的工具和模式策略；V8 所有权、嵌套调用权限、派发／结算及规范历史保留 runtime。不为搬迁 `exec` 发明万能执行 hook。 |
 | **文件与 Shell 工具：**Host 基于现有文件／进程 owner 装配注册。 | 工具定义与装配可以成为内置 Contribution；资源所有权、写入协调和 PTY 取消仍归 Host。结构迁移等能消除具体耦合时再做，不为每个工具建插件。 |
 | **Client Capability／MCP、provider 与传输** | 保持当前资源与权威边界；Desktop MCP 不搬进 Host，模型厂商不强制逐个插件化。功能缺口独立于结构迁移完成。 |
@@ -121,7 +122,7 @@ TS 的 LLM adapter 注册服务于插件模型调用，本身不等于主 Sessio
 
 1. **Skills：**迁移已有发现／调用，同领域补齐治理／发布，贯通输入准备、保留名注册、领域 Service、Prompt 和真实 Desktop 消费端。
 2. **WorkHub（已迁移）：**编排、纠正、附件、停止／resume、恢复及完整 Client 界面归插件；精确 Host 命令保留原子性。
-3. **默认行为与既有插件收敛：**迁移 persona／工作区策略，以 Graph 和 Scheduler 验证提取出的 API，删除不必要的 Host 私有捷径。
+3. **默认行为与既有插件收敛：**persona／工作区策略已归 Contribution；Graph 使用窄执行命令，Scheduler 使用绑定激活实例的调度服务。新增消费者沿用这些边界。
 4. **缺失业务领域：**完整实现 Web、Recall、todo，再做 Plan／Goal 和研究／复盘；完成外部 adapter、Insights／健康。复用领域边界，不先在 Host 写新业务再搬一次。
 5. **其余核心等价：**完成 Session 生命周期／谱系／迁入迁出、policy、接入／协作、Peer Mesh、provider 和诊断。前面消费者所需的核心命令前置到对应阶段，核心工作不等待全部插件或商店。首批领域验证边界后评估 Code Mode／工具装配迁移，不将其作为功能等价的前提。
 

@@ -106,7 +106,7 @@ impl Dispatcher for DeliveryHost {
             })
         })
     }
-    fn dispatch(&self, fire: Fire) -> BoxFuture<'_, Delivery> {
+    fn dispatch(&self, fire: Fire, _: CancellationToken) -> BoxFuture<'_, Delivery> {
         Box::pin(async move {
             let previous = {
                 let mut calls = self.calls.lock().unwrap();

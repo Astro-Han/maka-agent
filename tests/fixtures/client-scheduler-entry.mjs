@@ -74,6 +74,7 @@ try {
   const notices = [];
   connection.subscribeScheduledTaskChanges((frame) => notices.push(frame));
   const calls = [];
+  let delayedAcceptance;
   let admitted;
   const started = new Promise((resolve) => {
     admitted = resolve;
@@ -89,6 +90,7 @@ try {
     },
     async callService(frame, { accept }) {
       assert.equal(frame.method, 'notify_local');
+      if (delayedAcceptance) return delayedAcceptance(frame, accept);
       await accept({ kind: 'none' });
       calls.push(frame.input);
       admitted();
@@ -149,6 +151,36 @@ try {
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0], { taskId: id, title: 'Reminder 0' });
     assert.ok(notices.some((frame) => frame.taskId === id));
+    // Pause after a provider receives the request, but before it accepts.
+    // Scheduler withdraws the attempt without Host reading plugin task state.
+    const offered = Promise.withResolvers();
+    const allowAcceptance = Promise.withResolvers();
+    const refused = Promise.withResolvers();
+    delayedAcceptance = async (frame, accept) => {
+      offered.resolve(frame.input.taskId);
+      await allowAcceptance.promise;
+      const denied = await accept({ kind: 'none' }).then(
+        () => false,
+        () => true,
+      );
+      if (!denied) calls.push(frame.input);
+      refused.resolve(denied);
+      return { ok: true };
+    };
+    await request('scheduled-task.mutate', { kind: 'trigger_now', taskId: ids[4] });
+    assert.equal(await offered.promise, ids[4]);
+    await request('scheduled-task.mutate', { kind: 'pause', taskId: ids[4] });
+    allowAcceptance.resolve();
+    assert.equal(
+      await refused.promise,
+      true,
+      'paused notification must not reach native admission',
+    );
+    delayedAcceptance = undefined;
+    const withdrawn = (await request('scheduled-task.query', { kind: 'get', taskId: ids[4] })).task;
+    assert.equal(withdrawn.status, 'paused');
+    assert.equal(withdrawn.fireCount, 0);
+    assert.equal(calls.length, 1);
     await connection.unregisterClientCapabilities(3000);
     for (const waitingId of ids.slice(1, 4)) {
       await request('scheduled-task.mutate', { kind: 'trigger_now', taskId: waitingId });
