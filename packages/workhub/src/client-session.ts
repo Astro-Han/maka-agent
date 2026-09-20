@@ -75,7 +75,7 @@ export function coordinationCommands(
           content,
           placement,
         });
-        if (!outcome.ok) return outcome.error.code === 'outcome_unknown' ? 'unknown' : 'rejected';
+        if (!outcome.ok) return uncertain(outcome.error.code) ? 'unknown' : 'rejected';
         // Accepted delivery can move from steering to its successor during a
         // lost-response retry. Neither receipt permits another submission.
         return outcome.result.disposition === 'blocked' ? 'rejected' : 'admitted';
@@ -113,7 +113,7 @@ export function coordinationCommands(
         return unknown();
       }
       if (outcome.ok) return { kind: 'admitted', ...outcome.result };
-      if (outcome.error.code === 'outcome_unknown' || input.originHostEpoch) return unknown();
+      if (uncertain(outcome.error.code) || input.originHostEpoch) return unknown();
       throw new DomainError(outcome.error);
     },
     async configureModel(_sessionId, input) {
@@ -123,6 +123,10 @@ export function coordinationCommands(
       return outcome.result;
     },
   };
+}
+
+function uncertain(code: string): boolean {
+  return code === 'outcome_unknown' || code === 'commit_outcome_unknown';
 }
 
 class DomainError extends Error {

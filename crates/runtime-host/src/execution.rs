@@ -291,6 +291,11 @@ fn requires_drain(error: &RunError) -> bool {
 
 fn execution_error(error: RunError) -> OperationError {
     let code = match &error {
+        RunError::Commit(maka_runtime::event::CommitError::OutcomeUnknown(_))
+        | RunError::Store(StoreError::CommitUnknown(_) | StoreError::OperationUnknown)
+        | RunError::Tool(ToolError::Persistence(_) | ToolError::OutcomeUnknown(_)) => {
+            Code::OutcomeUnknown
+        }
         RunError::Busy => Code::SessionBusy,
         RunError::ReconciliationRequired(_) => Code::OperationUnavailable,
         RunError::InvalidInput(_) => Code::OperationUnavailable,

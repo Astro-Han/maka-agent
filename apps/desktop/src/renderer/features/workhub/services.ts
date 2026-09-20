@@ -17,8 +17,32 @@
  * under the License.
  */
 
+import type { WorkHubContinuation } from '@maka/workhub/controller';
+import { createElement, type ReactNode, useMemo, useState } from 'react';
 import { createServicesContext } from '../../application/contracts/feature-services.js';
 import type { WorkHubServices } from './ports.js';
-const context = createServicesContext<WorkHubServices>('WorkHubServicesProvider');
-export const WorkHubServicesProvider = context.Provider;
-export const useWorkHubServices = context.useServices;
+
+const context = createServicesContext<{
+  services: WorkHubServices;
+  continuations: Map<string, WorkHubContinuation>;
+}>('WorkHubServicesProvider');
+
+/** Document-owned submission identities outlive resolver and Client remounts. */
+export function WorkHubServicesProvider(props: { services: WorkHubServices; children?: ReactNode }) {
+  const [continuations] = useState(() => new Map<string, WorkHubContinuation>());
+  const value = useMemo(() => ({ services: props.services, continuations }), [props.services, continuations]);
+  return createElement(context.Provider, { services: value }, props.children);
+}
+export const useWorkHubServices = () => context.useServices().services;
+
+export function useWorkHubContinuation(hostId: string, sessionId: string | undefined) {
+  const { continuations } = context.useServices();
+  if (!sessionId) return undefined;
+  const key = JSON.stringify([hostId, sessionId]);
+  let continuation = continuations.get(key);
+  if (!continuation) {
+    continuation = {};
+    continuations.set(key, continuation);
+  }
+  return continuation;
+}

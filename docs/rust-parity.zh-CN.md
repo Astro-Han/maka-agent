@@ -114,6 +114,9 @@ TS 的 LLM adapter 注册服务于插件模型调用，本身不等于主 Sessio
 新增跨语言能力契约有实际消费者时同步补公开 JS 绑定，不要求 Rust 领域 repository 一并暴露为 JS API。
 不能以给内置插件无限 Host 访问权来推迟必要的 API 工作。
 
+待确认提交由 Desktop document 按原 Host 和 Session 持有；解析器撤下界面或 Client 换代不会丢失原输入和 Stop 意图。
+已接受纠正的执行配置写入规范日志，结算不重新加载插件策略或当前默认值。缺少冻结配置的历史未结算意图明确终止，不重新解释请求。
+
 ## 实现顺序
 
 1. **Skills：**迁移已有发现／调用，同领域补齐治理／发布，贯通输入准备、保留名注册、领域 Service、Prompt 和真实 Desktop 消费端。

@@ -419,13 +419,13 @@ async fn workhub_handoff_keeps_user_authority_and_recovers_correction_after_coor
     let mut wrong = request.clone();
     wrong.source_message_event_id = coordinator.id.clone();
     assert!(
-        log.request_workhub_correction(wrong, Some(1), None)
+        log.request_workhub_correction(wrong, Some(1), None, None::<&()>)
             .await
             .is_err(),
         "a handoff opening is not a new user decision"
     );
     let intent = log
-        .request_workhub_correction(request.clone(), Some(1), None)
+        .request_workhub_correction(request.clone(), Some(1), None, None::<&()>)
         .await
         .unwrap();
     assert_eq!(intent.intent.owner.as_ref(), Some(&target.invocation));

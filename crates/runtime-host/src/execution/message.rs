@@ -369,13 +369,7 @@ impl Executions {
             run.message(content, None)?;
             // Opening and original source identity commit together before any model
             // or tool effect. There is no separately accepted, unstarted idle row.
-            let turn = self.launch(run).await.map_err(|error| {
-                if error.code == Code::InternalFailure && self.shutdown.is_cancelled() {
-                    failure(Code::OutcomeUnknown, &error.message)
-                } else {
-                    error
-                }
-            })?;
+            let turn = self.launch(run).await?;
             return Ok(SubmitResult::TurnStarted {
                 turn_id: turn.turn_id,
                 skill_invocation,

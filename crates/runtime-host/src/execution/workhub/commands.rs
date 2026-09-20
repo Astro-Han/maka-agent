@@ -45,7 +45,7 @@ impl WorkHubCommands {
     }
 
     pub(crate) async fn recover(&self) -> Result<()> {
-        super::correction::recover(self, &self.executions()?).await
+        super::correction::recover(&self.executions()?).await
     }
 
     pub(super) async fn validate_target(
@@ -299,9 +299,7 @@ impl Commands for WorkHubCommands {
         &self,
         identity: crate::plugins::workhub::control::Identity,
     ) -> BoxFuture<'_, Result<maka_event_log::workhub::correction::CorrectionRecord>> {
-        Box::pin(
-            async move { super::correction::settle(self, &self.executions()?, identity).await },
-        )
+        Box::pin(async move { super::correction::settle(&self.executions()?, identity).await })
     }
     fn delegation(
         &self,

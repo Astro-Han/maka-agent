@@ -40,6 +40,39 @@ use uuid::Uuid;
 mod settlement;
 pub(super) use settlement::{recover, settle};
 
+/// The Host freezes execution data, not a recipe that resamples plugin policy.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum Preparation {
+    Existing {
+        configuration_digest: String,
+    },
+    Created {
+        configuration: Box<crate::session::SessionConfiguration>,
+        project_identity: Option<String>,
+    },
+}
+
+impl Preparation {
+    fn capture(target: &Target) -> Self {
+        match target {
+            Target::Existing {
+                configuration_digest,
+                ..
+            } => Self::Existing {
+                configuration_digest: configuration_digest.clone(),
+            },
+            Target::Created { creation, .. } => Self::Created {
+                configuration: Box::new(creation.configuration.clone()),
+                project_identity: creation
+                    .project
+                    .as_ref()
+                    .map(|project| project.identity.clone()),
+            },
+        }
+    }
+}
+
 pub(super) async fn probe(
     executions: &Arc<Executions>,
     caller: Context,
@@ -141,7 +174,7 @@ pub(super) async fn execute(
                 target: request.target.correction(),
                 delegation_text: request.text.unwrap_or_else(|| content.text.clone()),
             };
-            delegation(executions, &request.target, &intent)
+            delegation(executions, &intent, request.target.revision(), None)
                 .message(content)
                 .map_err(|reason| failure(Code::OperationConflict, reason))?;
             executions
@@ -151,42 +184,42 @@ pub(super) async fn execute(
                     matches!(&request.target, Target::Existing { .. })
                         .then(|| request.target.revision()),
                     executions.active_session_owner(request.target.id()),
+                    Some(&Preparation::capture(&request.target)),
                 )
                 .await
                 .map_err(|error| stored(executions, error))?;
         }
     }
-    settle(commands, executions, request.identity).await
+    settle(executions, request.identity).await
 }
 
-fn delegation(executions: &Executions, target: &Target, request: &CorrectionRequest) -> Delegation {
-    let owner = executions.active_session_owner(target.id());
-    let delivery = match (&owner, target) {
-        (
-            Some(_),
-            Target::Existing {
-                configuration_digest,
-                ..
-            },
-        ) => DelegationDelivery::Steering {
-            configuration_digest: configuration_digest.clone(),
+fn delegation(
+    executions: &Executions,
+    request: &CorrectionRequest,
+    revision: u64,
+    digest: Option<String>,
+) -> Delegation {
+    let owner = executions.active_session_owner(request.target.session_id());
+    let delivery = match (&owner, digest) {
+        (Some(_), Some(configuration_digest)) => DelegationDelivery::Steering {
+            configuration_digest,
         },
         _ => DelegationDelivery::NewTurn,
     };
     Delegation {
         action_id: request.action_id.clone(),
-        kind: target.kind(),
-        description: Some(target.description()),
+        kind: request.target.kind(),
+        description: Some(request.target.description()),
         delivery,
         request_fingerprint: request.request_fingerprint.clone(),
         source_message_event_id: request.source_message_event_id.clone(),
         target: owner.unwrap_or_else(|| Invocation {
-            session_id: target.id().into(),
+            session_id: request.target.session_id().into(),
             turn_id: Uuid::new_v4().to_string(),
             run_id: Uuid::new_v4().to_string(),
             invocation_id: Uuid::new_v4().to_string(),
         }),
-        target_revision: target.revision(),
+        target_revision: revision,
         delegation_text: request.delegation_text.clone(),
     }
 }

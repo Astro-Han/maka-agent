@@ -52,6 +52,8 @@ impl Executions {
             turn_id: invocation.turn_id,
         })
         .await
+        // Startup is already durable. A failed observation cannot reject it.
+        .map_err(|error| failure(Code::OutcomeUnknown, &error.message))
     }
 
     pub(super) async fn start_run(

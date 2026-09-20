@@ -53,6 +53,13 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
     kind: 'unknown',
     originHostEpoch: 'new',
   });
+  for (const code of ['outcome_unknown', 'commit_outcome_unknown']) {
+    replies.set('answer', { ok: false, error: { code, message: 'commit not confirmed' } });
+    assert.deepEqual(await commands.answer('session', request), {
+      kind: 'unknown',
+      originHostEpoch: 'new',
+    });
+  }
   replies.set('answer-receipt', { ok: true, result: null });
   replies.set('answer', { ok: true, result: { turnId: 'turn' } });
   calls.length = 0;

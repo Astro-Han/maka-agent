@@ -140,5 +140,9 @@ pub(super) async fn apply(
             ));
         }
     };
-    Ok(CorrectionIntent { request, owner })
+    Ok(CorrectionIntent {
+        request,
+        owner,
+        preparation: None,
+    })
 }

@@ -34,7 +34,13 @@ async fn managed_coordination_queue_preserves_turns_policy_and_exact_receipts() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn correction_recovery_aborts_unresolvable_creation_without_blocking_host_startup() {
+async fn correction_recovery_uses_frozen_creation_without_plugin_or_current_defaults() {
+    for frozen in [false, true] {
+        recover_correction(frozen).await;
+    }
+}
+
+async fn recover_correction(frozen: bool) {
     use maka_runtime::{
         artifact::content_digest,
         event::{EventWrite, Fact, Invocation, InvocationOutcome, RuntimeEvent},
@@ -117,7 +123,31 @@ async fn correction_recovery_aborts_unresolvable_creation_without_blocking_host_
         },
         delegation_text: "replacement task".into(),
     };
-    log.request_workhub_correction(request.clone(), None, None)
+    let cwd = fixture.workspace.to_string_lossy().into_owned();
+    let configuration = maka_runtime_host::session::PreparedSession::new(
+        serde_json::from_value(serde_json::json!({
+            "sessionId": request.target.session_id(),
+            "workspace": { "kind": "host_path", "path": cwd },
+            "modelTarget": { "kind": "default" }, "name": "replacement"
+        }))
+        .unwrap(),
+    )
+    .unwrap()
+    .bind(
+        maka_protocol::session::WorkspaceProjection {
+            target: maka_protocol::session::WorkspaceTarget::HostPath { path: cwd.clone() },
+            host_cwd: cwd,
+        },
+        maka_runtime_host::session::SessionModel {
+            connection_id: "original-connection".into(),
+            connection_slug: "original".into(),
+            model: "original-model".into(),
+        },
+        maka_protocol::session::PermissionMode::Explore,
+        ToolMode::CodeMode,
+    );
+    let preparation = serde_json::json!({ "kind": "created", "configuration": configuration, "project_identity": null });
+    log.request_workhub_correction(request.clone(), None, None, frozen.then_some(&preparation))
         .await
         .unwrap();
     log.append(
@@ -172,21 +202,37 @@ async fn correction_recovery_aborts_unresolvable_creation_without_blocking_host_
             .unwrap();
         let log = fixture.log().await;
         let record = log.workhub_correction(&action_id).await.unwrap().unwrap();
-        assert!(matches!(
-            record.resolution,
-            Some(
-                maka_event_log::workhub::correction::CorrectionResolution::Aborted(
-                    maka_runtime::workhub::CorrectionAbort::TargetUnavailable
-                )
-            )
-        ));
-        assert!(log.workhub_assignment(&action_id).await.unwrap().is_none());
-        assert!(
-            log.get_session::<serde_json::Value>(request.target.session_id())
+        if frozen {
+            assert!(matches!(
+                record.resolution,
+                Some(maka_event_log::workhub::correction::CorrectionResolution::Assigned(_))
+            ));
+            let stored = log
+                .get_session::<SessionConfiguration>(request.target.session_id())
                 .await
                 .unwrap()
-                .is_none()
-        );
+                .unwrap();
+            assert_eq!(
+                stored.configuration, configuration,
+                "recovery must not resolve defaults again"
+            );
+        } else {
+            assert!(matches!(
+                record.resolution,
+                Some(
+                    maka_event_log::workhub::correction::CorrectionResolution::Aborted(
+                        maka_runtime::workhub::CorrectionAbort::TargetUnavailable
+                    )
+                )
+            ));
+            assert!(log.workhub_assignment(&action_id).await.unwrap().is_none());
+            assert!(
+                log.get_session::<serde_json::Value>(request.target.session_id())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
         assert!(log.pending_messages("old").await.unwrap().is_empty());
         log.close().await.unwrap();
     }

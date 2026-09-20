@@ -27,9 +27,39 @@ import {
   WorkHubSurfaceSwitch,
   type WorkHubServices,
 } from '../../renderer/features/workhub/index.js';
+import { useWorkHubContinuation } from '../../renderer/features/workhub/services.js';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 
 afterEach(cleanupFakeDom);
+
+test('resolver withdrawal does not discard submission identities or mix originating Hosts', async () => {
+  const { root } = installReactRenderer();
+  const services = { surface: 'workhub' } as WorkHubServices;
+  let current!: NonNullable<ReturnType<typeof useWorkHubContinuation>>;
+  function Surface({ host }: { host: string }) {
+    current = useWorkHubContinuation(host, 'coordinator')!;
+    return null;
+  }
+  const render = (host?: string) => act(async () => root.render(createElement(WorkHubServicesProvider, {
+    services,
+    children: host ? createElement(Surface, { host }) : null,
+  })));
+  await render('original');
+  const retained = current;
+  const submission = {
+    sessionId: 'coordinator',
+    input: { turnId: 'pending', text: 'original', originHostEpoch: 'old' },
+    stop: true,
+  };
+  current.answer = submission;
+  await render(); // The real resolver removes the entire surface during replacement.
+  await render('another');
+  assert.equal(current.answer, undefined);
+  await render('original');
+  assert.equal(current, retained);
+  assert.equal(current.answer, submission);
+  await act(async () => root.unmount());
+});
 
 test('the main surface does not mount WorkHub or start its lifecycle', async () => {
   const { root, container } = installReactRenderer();

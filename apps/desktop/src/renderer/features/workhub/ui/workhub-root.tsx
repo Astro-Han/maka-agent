@@ -25,14 +25,14 @@ import { useUiLocale } from '@maka/ui';
 import { ClientPluginSlot, type ClientHostRef } from '../../client-plugins/index.js';
 import { getDesktopConversationCopy } from '../../../locales/conversation-copy.js';
 import { localizedShellErrorMessage } from '../../../locales/shell-copy.js';
-import { useWorkHubServices } from '../services.js';
+import { useWorkHubServices, useWorkHubContinuation } from '../services.js';
 import { hostAttachmentRefs } from '../../../../shared/desktop-session-projection.js';
 import { parseDesktopSessionKey } from '../../../../shared/runtime-host-identity.js';
 
 export function WorkHubRoot({ host, ...props }: Pick<WorkHubRootProps, 'sessionId' | 'feedback'> & { host: ClientHostRef }) {
   const locale = useUiLocale();
   const services = useWorkHubServices();
-  const continuation = useMemo<NonNullable<WorkHubRootProps['continuation']>>(() => ({}), [host.hostId]);
+  const continuation = useWorkHubContinuation(host.hostId, props.sessionId);
   const sessionKey = useCallback((id: string) => {
     if (parseDesktopSessionKey(id).hostId !== host.hostId) throw new Error('WorkHub Session belongs to another Host');
     return id;

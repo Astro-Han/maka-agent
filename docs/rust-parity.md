@@ -125,6 +125,12 @@ capability semantics, authorization and retirement guarantees; public JS binding
 new cross-language capability contracts with a real consumer. A Rust-only domain repository need
 not become a JS API. Do not postpone necessary API work by granting a built-in unrestricted Host access.
 
+Pending submissions belong to the Desktop document, scoped to the originating Host and Session;
+resolver withdrawal and Client replacement preserve their exact inputs and Stop intent.
+Accepted corrections persist prepared execution settings in the canonical log and settle without
+reloading plugin policy or current defaults. Legacy unresolved intents without preparation abort
+explicitly rather than reinterpret the request.
+
 ## Delivery order
 
 1. **Skills:** migrate existing discovery/invocation and finish governance/publication in one domain.

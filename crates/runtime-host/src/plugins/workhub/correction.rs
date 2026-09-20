@@ -33,8 +33,6 @@ use maka_runtime::{
     workhub::{ActionId, CorrectionTarget, CreateSpec, DelegationKind},
 };
 
-pub(crate) mod recovery;
-
 pub(crate) struct Request {
     pub identity: Identity,
     pub replaces_action_id: ActionId,

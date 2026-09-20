@@ -192,7 +192,8 @@ async fn foreground_background_and_closure_commit_failures_drain_host() {
             );
         };
         if failed_kind == "invocation_opened" {
-            assert_eq!(response["error"]["code"], "internal_failure");
+            // A failed COMMIT cannot prove rejection to a submitting Client.
+            assert_eq!(response["error"]["code"], "outcome_unknown");
         } else {
             assert_eq!(response["result"]["kind"], "started", "{response}");
         }
