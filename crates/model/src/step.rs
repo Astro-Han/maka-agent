@@ -65,6 +65,7 @@ impl StepBuilder {
             return Err(invalid("event after failed or finished step"));
         }
         match event {
+            ModelEvent::Source(source) => self.parts.push(ModelPart::Source { source }),
             ModelEvent::PartStarted {
                 id,
                 text_kind,

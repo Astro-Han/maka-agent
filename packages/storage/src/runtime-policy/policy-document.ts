@@ -154,8 +154,6 @@ function applyMutation(policy: RuntimePolicy, operation: RuntimePolicyMutation):
       return { ...policy, privacy: operation.value };
     case 'set_chat_defaults':
       return { ...policy, chatDefaults: operation.value };
-    case 'set_web_search':
-      return { ...policy, webSearch: operation.value };
     case 'set_external_agents':
       return { ...policy, externalAgents: operation.value };
     case 'set_shell':
@@ -179,9 +177,6 @@ function applyMutation(policy: RuntimePolicy, operation: RuntimePolicyMutation):
           : {}),
         ...(operation.value.privacy
           ? { privacy: { ...policy.privacy, ...operation.value.privacy } }
-          : {}),
-        ...(operation.value.webSearch
-          ? { webSearch: { ...policy.webSearch, ...operation.value.webSearch } }
           : {}),
       };
   }

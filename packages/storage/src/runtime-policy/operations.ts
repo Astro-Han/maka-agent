@@ -66,33 +66,6 @@ export interface RuntimePolicyOperationSecretMaterial {
   readonly networkProxy?: RuntimePolicyCredentialMaterial;
 }
 
-export type ResolveWebSearchExecutionResult =
-  | { readonly kind: 'privacy_mode' }
-  | {
-      readonly kind: 'disabled';
-      readonly provider: RuntimePolicy['webSearch']['defaultProvider'];
-    }
-  | {
-      readonly kind: 'model_native_only';
-      readonly provider: 'model';
-    }
-  | { readonly kind: 'credential_not_configured'; readonly status: CredentialStatus }
-  | {
-      readonly kind: 'ready';
-      readonly provider: 'tavily';
-      readonly secretMaterial: {
-        readonly webSearch: RuntimePolicyCredentialMaterial;
-        readonly networkProxy?: RuntimePolicyCredentialMaterial;
-      };
-      readonly networkProxy: RuntimePolicy['networkProxy'];
-    };
-
-export interface ResolveWebSearchExecutionInput {
-  readonly provider?: 'tavily';
-  readonly secretOverride?: string;
-  readonly bypassFeatureGate?: boolean;
-}
-
 export interface ResolveNetworkProxyExecutionInput {
   readonly networkProxy?: RuntimePolicy['networkProxy'];
   readonly secretOverride?: string;
@@ -405,9 +378,6 @@ export interface RuntimePolicyOperationCoordinator {
   resolveExecutionConnection(
     ref: ExecutionConnectionRef,
   ): Promise<ResolveExecutionConnectionResult>;
-  resolveWebSearchExecution(
-    input?: ResolveWebSearchExecutionInput,
-  ): Promise<ResolveWebSearchExecutionResult>;
   resolveHostOutboundExecution(): Promise<ResolveHostOutboundExecutionResult>;
   resolveNetworkProxyExecution(
     input?: ResolveNetworkProxyExecutionInput,

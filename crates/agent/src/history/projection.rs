@@ -170,6 +170,9 @@ pub(super) fn build<'a>(
                 let mut content = Vec::new();
                 for (index, part) in output.parts.iter().enumerate() {
                     let value = match part {
+                        // Citations are preserved in the canonical result/UI, not
+                        // fabricated as additional model-authored prompt text.
+                        ModelPart::Source { .. } => continue,
                         ModelPart::Text {
                             text_kind,
                             text,

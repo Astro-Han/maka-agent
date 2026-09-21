@@ -34,13 +34,6 @@ import {
   type ShellSettings,
 } from './settings.js';
 import type { JsonObject } from './request-customization.js';
-import {
-  WEB_SEARCH_PROVIDERS,
-  type WebSearchCredentialProvider,
-  type WebSearchProvider,
-} from './web-search.js';
-
-export { WEB_SEARCH_PROVIDERS };
 export { networkProxyCredentialTarget };
 export type { NetworkProxyCredentialTarget };
 export type { ConnectionTestErrorClass, ModelDiscoverySource } from './llm-connections.js';
@@ -156,10 +149,6 @@ export interface RuntimePolicy {
     readonly thinkingLevel?: ThinkingLevel;
     readonly codeModeEnabled?: boolean;
   };
-  readonly webSearch: {
-    readonly enabled: boolean;
-    readonly defaultProvider: WebSearchProvider;
-  };
   readonly shell: ShellSettings;
   readonly externalAgents: { readonly antigravity: { readonly executable: string } };
 }
@@ -174,7 +163,6 @@ export interface AgentRuntimeSettingsPatch {
   readonly memory?: Partial<RuntimePolicy['memory']>;
   readonly workspaceInstructions?: Partial<RuntimePolicy['workspaceInstructions']>;
   readonly privacy?: Partial<RuntimePolicy['privacy']>;
-  readonly webSearch?: Pick<Partial<RuntimePolicy['webSearch']>, 'enabled'>;
 }
 
 export type RuntimePolicyMutation =
@@ -187,7 +175,6 @@ export type RuntimePolicyMutation =
     }
   | { readonly kind: 'set_privacy'; readonly value: RuntimePolicy['privacy'] }
   | { readonly kind: 'set_chat_defaults'; readonly value: RuntimePolicy['chatDefaults'] }
-  | { readonly kind: 'set_web_search'; readonly value: RuntimePolicy['webSearch'] }
   | { readonly kind: 'set_external_agents'; readonly value: RuntimePolicy['externalAgents'] }
   | { readonly kind: 'set_shell'; readonly value: RuntimePolicy['shell'] }
   | { readonly kind: 'patch_agent_settings'; readonly value: AgentRuntimeSettingsPatch };
@@ -256,7 +243,6 @@ export function createDefaultRuntimePolicy(): RuntimePolicy {
     workspaceInstructions: { enabled: true },
     privacy: { incognitoActive: false },
     chatDefaults: { permissionMode: 'bypass' },
-    webSearch: { enabled: false, defaultProvider: 'model' },
     shell: { preference: 'auto', executable: '' },
     externalAgents: { antigravity: { executable: '' } },
   };
@@ -412,11 +398,6 @@ export type CredentialLocator =
       readonly scope: 'connection';
       readonly connectionId: EntityId;
       readonly kind: 'api_key' | 'oauth_token' | 'request_headers';
-    }
-  | {
-      readonly scope: 'web_search';
-      readonly provider: WebSearchCredentialProvider;
-      readonly kind: 'api_key';
     }
   | { readonly scope: 'network_proxy'; readonly kind: 'password' };
 

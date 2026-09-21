@@ -197,17 +197,10 @@ import type {
   DailyReviewRange,
   DailyReviewSummary,
 } from '@maka/core/daily-review';
-import type { WebSearchProvider, WebSearchResponse } from '@maka/core/web-search';
 import type { BrowserState, BrowserViewRect } from '@maka/core/browser';
 import { createBrowserSelectionCoordinator } from './browser-selection.js';
 import type { SessionTodoItem } from '@maka/core/session-todo';
 import type { DeepResearchChangedEvent, DeepResearchClientProgress } from '@maka/core/deep-research-run';
-import {
-  isWebSearchProvider,
-  MASKED_TOKEN_SENTINEL,
-  normalizeWebSearchLimit,
-  normalizeWebSearchQuery,
-} from '@maka/core/web-search';
 import {
   isSessionTrace,
 } from '@maka/core/session-trace';
@@ -1226,80 +1219,6 @@ async function listDailyReviewArchives(): Promise<DailyReviewArchiveSummary[]> {
     beforeArchiveId = result.nextBeforeArchiveId;
   } while (beforeArchiveId !== null);
   return archives;
-}
-
-function executeWebSearchQuery(input: {
-  query: string;
-  limit?: number;
-  provider?: WebSearchProvider;
-  apiKey?: string;
-}, host?: DesktopRuntimeHostRef): Promise<WebSearchResponse> {
-  if (input.provider !== undefined && !isWebSearchProvider(input.provider)) {
-    return Promise.resolve(unsupportedWebSearchProvider());
-  }
-  if (input.provider === 'model') {
-    return Promise.resolve({
-      ok: false,
-      reason: 'unsupported_provider',
-      message: 'web search runs through the primary model inside tasks',
-    });
-  }
-  const query = normalizeWebSearchQuery(input.query);
-  if (!query) {
-    return Promise.resolve({
-      ok: false,
-      reason: 'invalid_query',
-      message: 'the query is empty after normalization',
-    });
-  }
-  const apiKey = webSearchCredentialOverride(input.apiKey);
-  return selectedRuntimeHostScope(host).then((scope) =>
-    scopedRuntimeHost(scope).command('web-search.execute', {
-      kind: 'query',
-      query,
-      limit: normalizeWebSearchLimit(input.limit),
-      ...(apiKey ? { apiKey } : {}),
-    }));
-}
-
-function executeWebSearchTest(input: {
-  provider?: WebSearchProvider;
-  apiKey?: string;
-}, host?: DesktopRuntimeHostRef): Promise<WebSearchResponse> {
-  if (input.provider !== undefined && !isWebSearchProvider(input.provider)) {
-    return Promise.resolve(unsupportedWebSearchProvider());
-  }
-  if (input.provider === 'model') {
-    return Promise.resolve({
-      ok: false,
-      reason: 'unsupported_provider',
-      message: 'web search runs through the primary model inside tasks',
-    });
-  }
-  const apiKey = webSearchCredentialOverride(input.apiKey);
-  return selectedRuntimeHostScope(host).then((scope) =>
-    scopedRuntimeHost(scope).command('web-search.execute', {
-      kind: 'test',
-      provider: 'tavily',
-      ...(apiKey ? { apiKey } : {}),
-    }));
-}
-
-function unsupportedWebSearchProvider(): WebSearchResponse {
-  return {
-    ok: false,
-    reason: 'unsupported_provider',
-    message: 'no web search provider is configured',
-  };
-}
-
-function webSearchCredentialOverride(value: unknown): string | undefined {
-  return typeof value === 'string' &&
-    value.length > 0 &&
-    value !== MASKED_TOKEN_SENTINEL &&
-    value !== SENSITIVE_PLACEHOLDER
-    ? value
-    : undefined;
 }
 
 function integer(value: unknown, fallback: number): number {
@@ -3494,19 +3413,6 @@ const makaBridge = {
       { ok: true; path: string } | { ok: false; reason: 'canceled' | 'write_failed' | 'invalid_input' }
     > {
       return ipcRenderer.invoke('daily-review:saveMarkdownToFile', input);
-    },
-  },
-  webSearch: {
-    query(input: {
-      query: string;
-      limit?: number;
-      provider?: WebSearchProvider;
-      apiKey?: string;
-    }, host?: DesktopRuntimeHostRef): Promise<WebSearchResponse> {
-      return executeWebSearchQuery(input, host);
-    },
-    test(input: { provider?: WebSearchProvider; apiKey?: string }, host?: DesktopRuntimeHostRef): Promise<WebSearchResponse> {
-      return executeWebSearchTest(input, host);
     },
   },
   appWindow: {

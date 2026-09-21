@@ -48,6 +48,7 @@ export default async function(ctx) {
 "#;
 const CONSUMER: &str = include_str!("../fixtures/host-plugin.mjs");
 mod metering;
+mod provider_tools;
 mod services;
 pub(super) fn package(
     root: &Path,

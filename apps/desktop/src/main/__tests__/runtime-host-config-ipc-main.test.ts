@@ -79,7 +79,7 @@ test('Runtime Host config export omits settings secrets unless credentials are s
   assert.equal('passwordConfigured' in settings.network.proxy, false);
   assert.equal('token' in settings.botChat.channels.telegram, false);
   assert.equal('appSecret' in settings.botChat.channels.telegram, false);
-  assert.equal('apiKey' in settings.webSearch.providers.tavily, false);
+  assert.equal('webSearch' in settings, false);
   assert.equal(settings.network.proxy.host, '127.0.0.1');
 });
 
@@ -117,7 +117,7 @@ test('Runtime Host config export reads selected credentials from Host authority'
     },
   ]);
   assert.equal(settings.network.proxy.password, 'proxy-host');
-  assert.equal(settings.webSearch.providers.tavily.apiKey, 'tavily-host');
+  assert.equal('webSearch' in settings, false);
   assert.equal(settings.botChat.channels.telegram.token, 'bot-secret');
 });
 
@@ -229,7 +229,6 @@ test('Runtime Host credentials-only export includes only schema-v1 credential fi
         },
       },
     },
-    webSearch: { providers: { tavily: { apiKey: 'tavily-host' } } },
   });
   assert.deepEqual(bundle.data.credentials, [
     {
@@ -339,12 +338,6 @@ test('Runtime Host settings export retries when the proxy changes after its secr
 
 test('Runtime Host credentials-only export omits each absent settings-carried secret', async () => {
   const cases = [
-    {
-      presentScope: 'web_search',
-      expected: {
-        webSearch: { providers: { tavily: { apiKey: 'tavily-host' } } },
-      },
-    },
     {
       presentScope: 'network_proxy',
       expected: {
@@ -503,8 +496,6 @@ function settingsWithSecrets(): RuntimeHostAppSettings {
   const settings = createDefaultSettings();
   settings.botChat.channels.telegram.token = 'bot-secret';
   settings.botChat.channels.telegram.appSecret = 'app-secret';
-  (settings.webSearch.providers.tavily as { apiKey: string }).apiKey =
-    'local-tavily-secret';
   return {
     ...settings,
     network: {
@@ -540,7 +531,6 @@ function importBundle(
 
 function secretFor(locator: CredentialLocator): string | null {
   if (locator.scope === 'network_proxy') return 'proxy-host';
-  if (locator.scope === 'web_search') return 'tavily-host';
   if (locator.scope === 'connection' && locator.kind === 'api_key') {
     return 'sk-host';
   }

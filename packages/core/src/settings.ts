@@ -20,7 +20,6 @@
 import { isThinkingLevel, type ThinkingLevel } from './model-thinking.js';
 import type { OnboardingMilestone } from './onboarding.js';
 import { sanitizeOnboardingMilestones } from './onboarding.js';
-import type { WebSearchSettingsPatch, WebSearchSettings } from './web-search.js';
 import type { BotChatSettings, BotChatSettingsPatch } from './bot-chat-settings.js';
 import {
   createDefaultBotChatSettings,
@@ -28,11 +27,6 @@ import {
   normalizeBotChatSettings,
 } from './bot-chat-settings.js';
 import type { LocalMemorySettings } from './local-memory.js';
-import {
-  defaultWebSearchSettings,
-  mergeWebSearchSettings,
-  normalizeWebSearchSettings,
-} from './web-search.js';
 import { defaultLocalMemorySettings, normalizeLocalMemorySettings } from './local-memory.js';
 import type { PermissionMode } from './permission.js';
 import { decodePersistedPermissionMode } from './permission.js';
@@ -577,7 +571,6 @@ export interface AppSettings {
   appearance: AppearanceSettings;
   personalization: PersonalizationSettings;
   onboarding: OnboardingSettings;
-  webSearch: WebSearchSettings;
   localMemory: LocalMemorySettings;
   workspaceInstructions: WorkspaceInstructionsSettings;
   privacy: PrivacySettings;
@@ -777,7 +770,6 @@ export type UpdateAppSettingsInput = Partial<{
   system: Partial<SystemSettings>;
   externalAgents: AppSettings['externalAgents'];
   shell: Partial<ShellSettings>;
-  webSearch: WebSearchSettingsPatch;
 }>;
 
 /** Preconditions for a Host-owned Settings write that must not be retried past a semantic change. */
@@ -847,7 +839,6 @@ export function createDefaultSettings(): AppSettings {
     onboarding: {
       milestones: [],
     },
-    webSearch: defaultWebSearchSettings(),
     localMemory: defaultLocalMemorySettings(),
     workspaceInstructions: {
       enabled: true,
@@ -959,7 +950,6 @@ export function mergeSettings(current: AppSettings, patch: UpdateAppSettingsInpu
       ...current.shell,
       ...(patch.shell ?? {}),
     },
-    webSearch: mergeWebSearchSettings(current.webSearch, patch.webSearch),
   };
 }
 
@@ -973,7 +963,6 @@ export function normalizeSettings(input: unknown): AppSettings {
     usage: value.usage,
     appearance: value.appearance,
     personalization: value.personalization,
-    webSearch: value.webSearch,
     localMemory: value.localMemory,
     workspaceInstructions: value.workspaceInstructions,
     privacy: value.privacy,
@@ -1058,7 +1047,6 @@ export function normalizeSettings(input: unknown): AppSettings {
     onboarding: {
       milestones: sanitizeOnboardingMilestones(rawMilestones),
     },
-    webSearch: normalizeWebSearchSettings(base.webSearch),
     localMemory: normalizeLocalMemorySettings(base.localMemory),
     workspaceInstructions: normalizeWorkspaceInstructionsSettings(base.workspaceInstructions),
     privacy: normalizePrivacySettings(base.privacy),

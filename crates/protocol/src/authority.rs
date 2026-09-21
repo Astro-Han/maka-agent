@@ -139,7 +139,6 @@ impl Operation {
                 | Self::TurnStart
                 | Self::TurnStop
                 | Self::UsageQuery
-                | Self::WebSearchExecute
         )
     }
 }

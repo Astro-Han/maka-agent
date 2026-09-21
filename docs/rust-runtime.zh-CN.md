@@ -21,7 +21,7 @@
 
 [English](./rust-runtime.md)
 
-Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 163。
+Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 165。
 重写尚未完成；未实现的操作明确返回错误。
 
 ## 构建与运行
@@ -206,6 +206,18 @@ Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返�
   错误、尚未分类的网络故障与空闲超时不重试。
   模型活动刷新 120 秒空闲预算，持续输出不受两分钟总时限限制；用户取消仍关闭请求并等待收尾。
   真实 provider finish 到达后释放流，不等待传输 EOF；残缺流合成的 finish 不算成功完成。
+
+## Web
+
+`maka.web` 插件发布 WebFetch 与 WebSearch。设置 → 联网搜索选择模型原生搜索或 Tavily，
+密钥保存在插件命名空间凭据中。OpenAI／Codex 默认具备原生搜索能力，模型的显式声明优先；
+协议兼容服务必须声明支持。当前支持 Responses 和 Anthropic Messages 的供应商工具，
+明文 OpenResponses 适配器不支持。不自动切换搜索来源。
+
+WebFetch 通过获准的 Host HTTP 抓取，不启动浏览器或执行网页 JavaScript；
+优先 Markdown，HTML 提取保留链接和代码。响应上限 5 MiB、正文上限 50 KiB、
+重定向最多十次，截断明确标记。Tavily 查询限 1–200 字符，最多返回十条结果，
+标明省略结果和片段截断。隐私模式撤下两种工具。
 
 ## 代码组织
 

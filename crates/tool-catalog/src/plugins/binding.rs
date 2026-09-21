@@ -26,6 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct BindingRequest {
+    pub model: Option<maka_runtime::tools::ModelToolContext>,
     pub invocation: Invocation,
     pub cwd: String,
     /// Effective catalog, already restricted by the Host's tool ceiling.
@@ -36,7 +37,9 @@ pub struct BindingRequest {
 /// Handler and supporting context are one immutable request snapshot.
 #[derive(Clone)]
 pub struct Binding {
-    pub handler: Arc<dyn ToolPreparer>,
+    /// Provider-executed descriptors for names owned by this binding.
+    pub provider_tools: std::collections::BTreeMap<String, maka_runtime::tools::ProviderTool>,
+    pub handler: Option<Arc<dyn ToolPreparer>>,
     pub context: Option<String>,
 }
 pub trait BindingProvider: Send + Sync {
@@ -57,7 +60,8 @@ impl ToolCatalog {
         let mut context = Resolved::default();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         let mut workspace = None;
-        for (name, contribution) in captured.typed::<PluginTool>().entries {
+        let contributions = captured.typed::<PluginTool>().entries;
+        for (name, contribution) in contributions.clone() {
             let Some(entry) = self.entries.get(&name).cloned() else {
                 continue;
             };
@@ -90,6 +94,24 @@ impl ToolCatalog {
                     _ = stopping.cancelled() => return Err(failed("tool contribution retired")),
                     result = tokio::time::timeout_at(deadline, provider.bind(request.clone(), files)) => result.map_err(failed)??,
                 };
+                if let Some(binding) = &binding {
+                    for name in binding.provider_tools.keys() {
+                        let owned = contributions.get(name).is_some_and(|candidate| {
+                            candidate
+                                .owner
+                                .identity()
+                                .is_ok_and(|owner| owner.activation == activation)
+                                && candidate
+                                    .value
+                                    .binding
+                                    .as_ref()
+                                    .is_some_and(|binding| Arc::ptr_eq(binding, provider))
+                        });
+                        if !owned {
+                            return Err(failed("provider tool is not owned by this binding"));
+                        }
+                    }
+                }
                 if let Some(text) = binding
                     .as_ref()
                     .and_then(|binding| binding.context.as_ref())
@@ -119,15 +141,30 @@ impl ToolCatalog {
                 entries.remove(&name);
                 continue;
             };
-            if !binding.handler.names().contains(&name) {
+            if !binding.provider_tools.contains_key(&name)
+                && binding
+                    .handler
+                    .as_ref()
+                    .is_none_or(|handler| !handler.names().contains(&name))
+            {
                 return Err(failed("bound handler does not implement its declared tool"));
             }
             let mut registration = entry.registration.clone();
-            registration.handler = ToolHandler::Prepared(Arc::new(Guarded {
-                handler: ToolHandler::Prepared(binding.handler),
-                owner: contribution,
-                calls: captured.call_issuer(),
-            }));
+            if let Some(provider) = binding.provider_tools.get(&name) {
+                provider.validate().map_err(failed)?;
+                if registration.semantics != maka_runtime::tools::ToolSemantics::Parallel {
+                    return Err(failed("provider tools cannot control Host turn settlement"));
+                }
+                registration.definition.provider = Some(provider.clone());
+                registration.nesting = maka_runtime::tools::ToolNesting::DirectOnly;
+            }
+            if let Some(handler) = binding.handler {
+                registration.handler = ToolHandler::Prepared(Arc::new(Guarded {
+                    handler: ToolHandler::Prepared(handler),
+                    owner: contribution,
+                    calls: captured.call_issuer(),
+                }));
+            }
             entries.insert(
                 name,
                 Arc::new(RegisteredTool {
@@ -137,6 +174,10 @@ impl ToolCatalog {
                     bytes: entry.bytes,
                 }),
             );
+        }
+        let bytes = serde_json::to_vec(&self.definitions().collect::<Vec<_>>()).map_err(failed)?;
+        if bytes.len() > 1024 * 1024 {
+            return Err(failed("bound tool catalog exceeds 1 MiB"));
         }
         Ok(context)
     }

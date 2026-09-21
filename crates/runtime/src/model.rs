@@ -122,6 +122,9 @@ pub struct ModelToolCall {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelPart {
+    Source {
+        source: ModelSource,
+    },
     Text {
         text_kind: TextKind,
         text: String,
@@ -143,6 +146,7 @@ pub enum ModelPart {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ModelEvent {
+    Source(ModelSource),
     PartStarted {
         id: String,
         text_kind: TextKind,
@@ -186,6 +190,25 @@ pub struct ModelStep {
     pub response_id: Option<String>,
     pub model: Option<String>,
     pub timestamp: Option<String>,
+}
+
+/// Citation evidence, distinct from model prose and replayable tool results.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelSource {
+    Url {
+        id: String,
+        url: String,
+        title: Option<String>,
+        provider_options: Option<Value>,
+    },
+    Document {
+        id: String,
+        media_type: String,
+        title: String,
+        filename: Option<String>,
+        provider_options: Option<Value>,
+    },
 }
 
 impl ModelStep {

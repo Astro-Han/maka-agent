@@ -297,7 +297,7 @@ export default async function (ctx) {
       const preferences = await ctx.preferences.read();
       if (
         Object.keys(preferences).sort().join(',') !==
-        'personalization,revision,toolMode,workspaceInstructions'
+        'personalization,privacy,revision,toolMode,workspaceInstructions'
       )
         throw new Error('preferences exposed unrelated Host configuration');
       return `JavaScript plugin acceptance: ${JSON.stringify(preferences)}`;

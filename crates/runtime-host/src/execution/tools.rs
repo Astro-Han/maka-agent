@@ -104,6 +104,7 @@ fn registrations(
     if native.set == maka_runtime::execution::NativeToolSet::Attachments {
         return Ok(vec![ToolRegistration {
             definition: ToolDefinition {
+                provider: None,
                 name: READ_NAME.into(),
                 description: "Read a supplied user attachment from this conversation. Filesystem paths and archives are unavailable. Follow next to continue a bounded page.".into(),
                 input_schema: read::schema(),
@@ -147,6 +148,7 @@ fn registrations(
         ReadExecutor::new(&cwd, read_scope, ReadLimits::default()).map_err(unavailable)?;
     let mut registrations = vec![ToolRegistration {
         definition: ToolDefinition {
+            provider: None,
             name: READ_NAME.into(),
             description: read::DESCRIPTION.into(),
             input_schema: read::schema(),
@@ -165,6 +167,7 @@ fn registrations(
     ] {
         registrations.push(ToolRegistration {
             definition: ToolDefinition {
+                provider: None,
                 name: name.into(),
                 description: description.into(),
                 input_schema,
@@ -185,6 +188,7 @@ fn registrations(
         ] {
             registrations.push(ToolRegistration {
                 definition: ToolDefinition {
+                    provider: None,
                     name: name.into(),
                     description: description.into(),
                     input_schema,
@@ -211,6 +215,7 @@ fn registrations(
         ));
         registrations.push(ToolRegistration {
             definition: ToolDefinition {
+                provider: None,
                 name: SHELL_NAME.into(),
                 description,
                 input_schema: shell::schema(),
@@ -221,6 +226,7 @@ fn registrations(
         });
         registrations.push(ToolRegistration {
             definition: ToolDefinition {
+                provider: None,
                 name: shell::STOP_NAME.into(),
                 description:
                     "Stop a background shell task by its runtime ref and wait for native cleanup."
@@ -233,6 +239,7 @@ fn registrations(
         });
         registrations.push(ToolRegistration {
             definition: ToolDefinition {
+                provider: None,
                 name: shell::WRITE_STDIN_NAME.into(),
                 description: "Send raw input or ordered terminal actions to a background PTY, optionally with resize. Actions: {type:'text',text}, {type:'key',key,modifiers?}, {type:'mouse',event,x,y,button?,direction?,modifiers?}. Text has no terminal controls; use key enter, named navigation keys, or ctrl/alt chords. Mouse requires application-enabled SGR tracking. Returns the committed terminal cut, not output attributed to this input; use Read for later output. A connected Client controller takes precedence.".into(),
                 input_schema: shell::write_stdin_schema(),

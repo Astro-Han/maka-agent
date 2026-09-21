@@ -51,6 +51,7 @@ impl ToolExecutor for Effect {
 pub fn catalog(effect: Arc<Effect>) -> ToolCatalog {
     ToolCatalog::new(["echo", "direct"].map(|name| ToolRegistration {
         definition: ToolDefinition {
+            provider: None,
             name: name.into(),
             description: "fixture".into(),
             input_schema: json!({"type":"object","properties":{"n":{"type":"integer"}},

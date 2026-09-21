@@ -28,6 +28,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelCatalogEntry {
+    /// Effective facts for execution; the catalog's metadata remains the wire authority.
+    #[serde(skip)]
+    pub capabilities: maka_runtime::configuration::ModelCapabilities,
     pub id: String,
     pub can_use_as_chat_default: bool,
     pub is_default: bool,
@@ -159,6 +162,25 @@ pub(super) fn resolve(
         result.knowledge_cutoff = Some(text.clone());
     }
     let capabilities = model.capabilities.unwrap_or_default();
+    result.capabilities = maka_runtime::configuration::ModelCapabilities {
+        chat: capabilities.chat.or(fallback.chat),
+        vision: capabilities.vision.or(fallback.vision),
+        reasoning: capabilities.reasoning.or(fallback.reasoning),
+        function_calling: capabilities.function_calling.or(fallback.function_calling),
+        parallel_tool_calls: capabilities
+            .parallel_tool_calls
+            .or(fallback.parallel_tool_calls),
+        image_generation: capabilities.image_generation.or(fallback.image_generation),
+        web_search: capabilities.web_search.or(fallback.web_search).or_else(|| {
+            // Native provider defaults are independent of model generations.
+            // Protocol-compatible endpoints must declare their own capability.
+            match row.provider_type.as_str() {
+                "openai" | "openai-codex" => Some(true),
+                "anthropic" if known.is_some() => Some(true),
+                _ => None,
+            }
+        }),
+    };
     if let Some(threshold) = profile.and_then(|p| p.compaction_threshold) {
         result.compaction_threshold = Some(threshold);
     }

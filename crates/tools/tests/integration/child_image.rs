@@ -121,6 +121,7 @@ async fn nested_image_is_committed_before_js_and_parent_stays_json() {
     let tools = Arc::new(ImageTools(log.clone()));
     let catalog = ToolCatalog::new(["read", "verify"].map(|name| ToolRegistration {
         definition: ToolDefinition {
+            provider: None,
             name: name.into(),
             description: "image fixture".into(),
             input_schema: json!({"type":"object"}),

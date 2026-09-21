@@ -26,16 +26,6 @@ pub enum ConnectionCredentialKind {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WebSearchProvider {
-    Tavily,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ApiKeyKind {
-    ApiKey,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum PasswordKind {
     Password,
 }
@@ -50,10 +40,6 @@ pub enum CredentialLocator {
     Connection {
         connection_id: String,
         kind: ConnectionCredentialKind,
-    },
-    WebSearch {
-        provider: WebSearchProvider,
-        kind: ApiKeyKind,
     },
     NetworkProxy {
         kind: PasswordKind,

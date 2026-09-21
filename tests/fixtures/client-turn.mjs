@@ -160,7 +160,7 @@ export async function verifyTurns(connection, sessionId, fixture, connectSibling
   assertReferencedModel(fixture.requests[0], connection.rootId);
   assert.deepEqual(
     fixture.requests[0].tools.map((tool) => tool.function.name),
-    ['AskUserQuestion', 'Glob', 'Grep', 'Read', 'tool_search'],
+    ['AskUserQuestion', 'Glob', 'Grep', 'Read', 'WebFetch', 'tool_search'],
     'next real turn uses Explore tool permissions',
   );
   assert(
@@ -199,6 +199,7 @@ export async function verifyTurns(connection, sessionId, fixture, connectSibling
       'Glob',
       'Grep',
       'Read',
+      'WebFetch',
       'Write',
       'apply_patch',
       'tool_search',

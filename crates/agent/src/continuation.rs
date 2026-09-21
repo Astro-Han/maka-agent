@@ -162,7 +162,8 @@ pub(super) async fn inspect(
         catalog.clone(),
         input.configuration.tool_mode,
         inner.cells.clone(),
-    );
+    )
+    .with_model(input.provider.tool_context());
     if let crate::RunWork::Handoff { pause, .. } = &input.work {
         tools.restore(&pause.execution.tools)?;
     }

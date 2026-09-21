@@ -31,7 +31,6 @@ export const RENDERER_RUNTIME_HOST_QUERY_OPERATIONS = [
 
 export const RENDERER_RUNTIME_HOST_COMMAND_OPERATIONS = [
   'daily-review.mutate',
-  'web-search.execute',
 ] as const satisfies readonly (keyof OperationSpecMap)[];
 
 /** Runtime Host operations that the sandboxed renderer may invoke directly. */

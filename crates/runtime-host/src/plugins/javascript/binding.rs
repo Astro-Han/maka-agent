@@ -36,6 +36,8 @@ pub(super) struct Provider {
 #[serde(deny_unknown_fields)]
 struct Captured {
     callback: u32,
+    #[serde(default, rename = "providerTools")]
+    provider_tools: std::collections::BTreeMap<String, maka_runtime::tools::ProviderTool>,
     context: Option<String>,
 }
 impl BindingProvider for Provider {
@@ -54,7 +56,7 @@ impl BindingProvider for Provider {
             let value = callbacks::invoke(
                 &callback.module,
                 callback.id,
-                json!({"invocation":request.invocation, "cwd":request.cwd, "tools":request.tools}),
+                json!({"invocation":request.invocation, "cwd":request.cwd, "tools":request.tools, "model":request.model}),
                 json!({"readView":view.id}),
                 request.cancellation,
             )
@@ -64,17 +66,20 @@ impl BindingProvider for Provider {
             let Some(captured) = captured else {
                 return Ok(None);
             };
-            if captured.callback == 0 {
+            if captured.callback == 0 && captured.provider_tools.is_empty() {
                 return Err(ToolError::Failed("invalid bound callback identity".into()));
             }
             Ok(Some(Binding {
-                handler: Arc::new(Bound {
-                    names,
-                    callback: Arc::new(Callback {
-                        module: callback.module.clone(),
-                        id: captured.callback,
-                        calls: callback.calls.clone(),
-                    }),
+                provider_tools: captured.provider_tools,
+                handler: (captured.callback != 0).then(|| {
+                    Arc::new(Bound {
+                        names,
+                        callback: Arc::new(Callback {
+                            module: callback.module.clone(),
+                            id: captured.callback,
+                            calls: callback.calls.clone(),
+                        }),
+                    }) as Arc<dyn ToolPreparer>
                 }),
                 context: captured.context,
             }))

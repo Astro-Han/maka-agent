@@ -57,7 +57,18 @@ impl ToolCatalog {
     ) -> Result<Self, CatalogError> {
         let mut entries = BTreeMap::new();
         let mut bytes = 0usize;
-        for registration in registrations {
+        for mut registration in registrations {
+            if let Some(provider) = &registration.definition.provider {
+                provider
+                    .validate()
+                    .map_err(|error| CatalogError::Invalid(error.into()))?;
+                if registration.semantics != ToolSemantics::Parallel {
+                    return Err(CatalogError::Invalid(
+                        "provider tools cannot control Host turn settlement".into(),
+                    ));
+                }
+                registration.nesting = ToolNesting::DirectOnly;
+            }
             if registration.semantics == ToolSemantics::FinishTurn
                 && registration.nesting != ToolNesting::DirectOnly
             {
@@ -80,15 +91,9 @@ impl ToolCatalog {
                     "duplicate, reserved, absent or excessive tool name".into(),
                 ));
             }
-            let definition_bytes = definition
-                .name
-                .len()
-                .saturating_add(definition.description.len())
-                .saturating_add(
-                    serde_json::to_vec(&definition.input_schema)
-                        .map_err(|e| CatalogError::Schema(e.to_string()))?
-                        .len(),
-                );
+            let definition_bytes = serde_json::to_vec(definition)
+                .map_err(|e| CatalogError::Schema(e.to_string()))?
+                .len();
             bytes = bytes.saturating_add(definition_bytes);
             if bytes > 1024 * 1024 {
                 return Err(CatalogError::Invalid("definition budget exceeded".into()));
@@ -208,6 +213,9 @@ impl ToolCatalog {
 
     pub fn validate(&self, name: &str, input: &Value) -> Result<(), ToolRejection> {
         let entry = self.entries.get(name).ok_or(ToolRejection::Unavailable)?;
+        if entry.registration.definition.provider.is_some() {
+            return Err(ToolRejection::Unavailable);
+        }
         if !entry.validator.is_valid(input) {
             return Err(ToolRejection::InvalidInput {
                 message: "arguments do not match the declared schema".into(),

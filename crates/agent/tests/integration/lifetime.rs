@@ -80,6 +80,7 @@ fn input(base: &str, suffix: &str, effect: Arc<Effect>) -> RunInput {
         },
         request_fingerprint: None,
         provider: ProviderConfig {
+            capabilities: Default::default(),
             kind: ProviderKind::OpenaiChat,
             model: "test".into(),
             base_url: base.into(),
@@ -96,6 +97,7 @@ fn input(base: &str, suffix: &str, effect: Arc<Effect>) -> RunInput {
             message: format!("question {suffix}").into(),
             tools: ToolCatalog::new([ToolRegistration {
                 definition: ToolDefinition {
+                    provider: None,
                     name: "echo".into(),
                     description: "echo".into(),
                     input_schema: json!({"type":"object"}),

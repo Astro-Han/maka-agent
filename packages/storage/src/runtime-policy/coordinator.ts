@@ -136,8 +136,6 @@ import {
   type ResolveNetworkProxyExecutionInput,
   type ResolveNetworkProxyExecutionResult,
   type ResolveHostOutboundExecutionResult,
-  type ResolveWebSearchExecutionInput,
-  type ResolveWebSearchExecutionResult,
   type ReplaceConnectionRequestHeadersResult,
 } from './operations.js';
 import {
@@ -1038,73 +1036,6 @@ export class RuntimePolicyCoordinator {
         throw error;
       }
       return deepFreeze({ kind: 'committed' as const, names });
-    });
-  }
-
-  resolveWebSearchExecution(
-    input: ResolveWebSearchExecutionInput = {},
-  ): Promise<ResolveWebSearchExecutionResult> {
-    return this.inLane(async (root) => {
-      const policy = (await this.policy.read(root)).policy;
-      if (!input.bypassFeatureGate && policy.privacy.incognitoActive) {
-        return deepFreeze({ kind: 'privacy_mode' as const });
-      }
-
-      const provider = input.provider ?? policy.webSearch.defaultProvider;
-      if (!input.bypassFeatureGate && !policy.webSearch.enabled) {
-        return deepFreeze({ kind: 'disabled' as const, provider });
-      }
-
-      if (provider === 'model') {
-        return deepFreeze({ kind: 'model_native_only' as const, provider });
-      }
-
-      const vault = await this.vault.read(root);
-      const locator = { scope: 'web_search', provider, kind: 'api_key' } as const;
-      const webSearchCredential = findCredential(vault, locator);
-      const secretOverride =
-        input.secretOverride === undefined
-          ? undefined
-          : decodeCredentialInput(() => normalizeCredentialSecret(input.secretOverride));
-      if (!webSearchCredential && secretOverride === undefined) {
-        return deepFreeze({
-          kind: 'credential_not_configured' as const,
-          status: credentialStatus(vault, locator),
-        });
-      }
-
-      const proxyLocator = requiresNetworkProxyCredential(policy.networkProxy)
-        ? networkProxyCredentialLocator()
-        : null;
-      let proxyCredential: RuntimePolicyCredentialMaterial | undefined;
-      if (proxyLocator) {
-        const entry = findCredential(vault, proxyLocator);
-        if (!entry) {
-          return deepFreeze({
-            kind: 'credential_not_configured' as const,
-            status: credentialStatus(vault, proxyLocator),
-          });
-        }
-        proxyCredential = credentialMaterial(entry);
-      }
-
-      return deepFreeze({
-        kind: 'ready' as const,
-        provider,
-        secretMaterial: {
-          webSearch:
-            secretOverride === undefined
-              ? credentialMaterial(webSearchCredential!)
-              : {
-                  locator,
-                  credentialId: 'ephemeral-web-search-override',
-                  revision: 0,
-                  secret: secretOverride,
-                },
-          ...(proxyCredential ? { networkProxy: proxyCredential } : {}),
-        },
-        networkProxy: structuredClone(policy.networkProxy),
-      });
     });
   }
 

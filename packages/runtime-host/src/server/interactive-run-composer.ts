@@ -59,7 +59,6 @@ import { isDeepResearchToolAllowed } from '@maka/runtime/deep-research-tools';
 import { listRunnableBuiltinAgentDefinitions } from '@maka/runtime/agent-catalog';
 import { renderPlanModePrompt, selectCollaborationTools } from '@maka/runtime/plan-mode';
 import { routeWebFetchTools } from '@maka/runtime/web-fetch-tool';
-import { routeWebSearchTools } from '@maka/runtime/native-web-search-tool';
 import { type MakaTool } from '@maka/runtime/tool-runtime';
 import type { PluginSkillService } from '@maka/runtime/plugin-skill-service';
 import type { ScannedSkill } from '@maka/runtime/skills';
@@ -83,7 +82,6 @@ import {
   hostedExecutionRunProfile,
   projectHostedExecutionTools,
 } from './hosted-execution-tool-profile.js';
-import { shouldResolveHostTavilyWebSearchReadiness } from './web-search-tool.js';
 
 const INTERACTIVE_RUN_COMPOSER_ID = 'maka.interactive';
 const INTERACTIVE_RUN_COMPOSER_REVISION = '1';
@@ -328,7 +326,6 @@ export interface InteractiveRunComposerFactoryInput
     'runtimePolicy' | 'boundTools' | 'clientCapabilities' | 'plan'
   > {
   readonly clientCapabilities: HostClientCapabilityCoordinator;
-  readonly resolveTavilyWebSearchReadiness: () => Promise<boolean>;
   readonly resolveRootTools?: (sessionId: string) => Promise<readonly MakaTool[]>;
   readonly resolvePluginTools?: (
     sessionId: string,
@@ -358,7 +355,6 @@ export interface InteractiveRunToolSurfaceInput {
   readonly childTools?: readonly MakaTool[];
   readonly parentAgentTools?: readonly MakaTool[];
   readonly worktreePatchWriteBackAvailable?: boolean;
-  readonly tavilyReady: boolean;
 }
 
 /** Routes every model-visible tool surface through the same policy and readiness snapshot. */
@@ -368,20 +364,8 @@ export function routeInteractiveRunToolSurface(input: InteractiveRunToolSurfaceI
   readonly childTools?: readonly MakaTool[];
   readonly parentAgentTools?: readonly MakaTool[];
 } {
-  const route = (tools: readonly MakaTool[]): MakaTool[] => {
-    const webFetchTools = routeWebFetchTools(tools, input.runtimePolicy.policy.privacy);
-    if (!input.connection) {
-      return webFetchTools.filter((tool) => tool.name !== 'WebSearch');
-    }
-    return routeWebSearchTools({
-      tools: webFetchTools,
-      settings: input.runtimePolicy.policy.webSearch,
-      connection: input.connection,
-      model: input.modelId,
-      tavilyReady: input.tavilyReady,
-      privacy: input.runtimePolicy.policy.privacy,
-    });
-  };
+  const route = (tools: readonly MakaTool[]): MakaTool[] =>
+    routeWebFetchTools(tools, input.runtimePolicy.policy.privacy);
   const childTools = input.childTools ? route(input.childTools) : undefined;
   return {
     hostTools: route(input.hostTools),
@@ -430,12 +414,6 @@ export function createInteractiveRunComposerFactory(
               backendContext.abortSignal,
             )
           : [];
-      const tavilyReady = shouldResolveHostTavilyWebSearchReadiness(runtimePolicy.policy)
-        ? await readDuringBackendCreation(
-            input.resolveTavilyWebSearchReadiness,
-            backendContext.abortSignal,
-          )
-        : false;
       const candidateHostTools = [...(input.hostTools ?? []), ...rootTools];
       const toolSurface = routeInteractiveRunToolSurface({
         runtimePolicy,
@@ -446,7 +424,6 @@ export function createInteractiveRunComposerFactory(
         ...(input.childTools ? { childTools: input.childTools } : {}),
         ...(input.parentAgentTools ? { parentAgentTools: input.parentAgentTools } : {}),
         worktreePatchWriteBackAvailable: input.worktreePatchWriteBackAvailable,
-        tavilyReady,
       });
       const { hostTools, boundTools, parentAgentTools } = toolSurface;
       const composer = createInteractiveRunComposer({
@@ -475,7 +452,6 @@ export function createInteractiveRunComposerFactory(
                   modelId,
                   hostTools: input.resolvePluginTools!(backendContext.sessionId, hostTools).tools,
                   worktreePatchWriteBackAvailable: input.worktreePatchWriteBackAvailable,
-                  tavilyReady,
                 }).hostTools;
               },
             }

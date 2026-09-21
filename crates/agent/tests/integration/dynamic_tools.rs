@@ -63,6 +63,7 @@ fn visible(request: &Value, mode: ToolMode) -> Vec<ToolDefinition> {
     } else {
         wire.iter()
             .map(|t| ToolDefinition {
+                provider: None,
                 name: t["function"]["name"].as_str().unwrap().into(),
                 description: t["function"]["description"].as_str().unwrap().into(),
                 input_schema: t["function"]["parameters"].clone(),
@@ -139,7 +140,7 @@ async fn search_activates_next_step_and_only_committed_compaction_unloads_direct
                     fixture::respond(&mut socket, "done", "stop").await;
                 });
                 let catalog = ToolCatalog::new([ToolRegistration {
-                    definition: ToolDefinition { name: "echo".into(), description: "Echo an integer".into(),
+                    definition: ToolDefinition { provider: None, name: "echo".into(), description: "Echo an integer".into(),
                         input_schema: json!({"type":"object","properties":{"n":{"type":"integer"}},"required":["n"],"additionalProperties":false}) },
                     nesting: ToolNesting::Nestable, semantics: ToolSemantics::Parallel,
                     handler: ToolHandler::Immediate(Arc::new(Echo(effects.clone()))),

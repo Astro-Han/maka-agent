@@ -107,7 +107,6 @@ import type {
   DailyReviewRange,
   DailyReviewSummary,
 } from '@maka/core/daily-review';
-import type { WebSearchProvider, WebSearchResponse } from '@maka/core/web-search';
 import type { BrowserState, BrowserViewRect } from '@maka/core/browser';
 import type { SessionTodoItem } from '@maka/core/session-todo';
 import type { DeepResearchChangedEvent, DeepResearchClientProgress } from '@maka/core/deep-research-run';
@@ -1746,15 +1745,6 @@ export interface MakaBridge {
     subscribeUsageChanges(sessionId: string, handler: () => void): () => void;
     /** What the session's context is made of right now (#2323). */
     context(sessionId: string): Promise<Result<ContextDiagnosticsResult>>;
-  };
-  webSearch: {
-    query(input: {
-      query: string;
-      limit?: number;
-      provider?: WebSearchProvider;
-      apiKey?: string;
-    }, host?: DesktopRuntimeHostRef): Promise<WebSearchResponse>;
-    test(input: { provider?: WebSearchProvider; apiKey?: string }, host?: DesktopRuntimeHostRef): Promise<WebSearchResponse>;
   };
   dailyReview: {
     day(offsetDays: number, daySpan?: number, host?: DesktopRuntimeHostRef): Promise<Result<DailyReviewSummary>>;

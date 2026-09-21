@@ -145,7 +145,6 @@ test('normalizes only the bounded agent settings patch surface', () => {
         value: {
           personalization: { assistantTone: 'Be direct.' },
           memory: { agentReadEnabled: true },
-          webSearch: { enabled: true },
         },
       },
     }),
@@ -156,7 +155,6 @@ test('normalizes only the bounded agent settings patch surface', () => {
         value: {
           personalization: { assistantTone: 'Be direct.' },
           memory: { agentReadEnabled: true },
-          webSearch: { enabled: true },
         },
       },
     },

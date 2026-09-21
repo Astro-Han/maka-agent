@@ -60,7 +60,6 @@ pub struct RuntimePolicy {
     pub workspace_instructions: EnabledPolicy,
     pub privacy: PrivacyPolicy,
     pub chat_defaults: ChatDefaults,
-    pub web_search: WebSearchPolicy,
     pub shell: ShellPolicy,
     pub external_agents: ExternalAgents,
 }
@@ -112,10 +111,6 @@ impl Default for RuntimePolicy {
                 incognito_active: false,
             },
             chat_defaults: ChatDefaults::default(),
-            web_search: WebSearchPolicy {
-                enabled: false,
-                default_provider: WebSearchProvider::Model,
-            },
             shell: ShellPolicy {
                 preference: ShellPreference::Auto,
                 executable: String::new(),
@@ -147,7 +142,6 @@ pub enum RuntimePolicyMutation {
     SetWorkspaceInstructions { value: EnabledPolicy },
     SetPrivacy { value: PrivacyPolicy },
     SetChatDefaults { value: ChatDefaults },
-    SetWebSearch { value: WebSearchPolicy },
     SetShell { value: ShellPolicy },
     SetExternalAgents { value: ExternalAgents },
     PatchAgentSettings { value: AgentSettingsPatch },

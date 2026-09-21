@@ -19,7 +19,7 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { createDefaultSettings, mergeSettings } from "@maka/core/settings";
+import { createDefaultSettings } from "@maka/core/settings";
 import { SENSITIVE_PLACEHOLDER } from "@maka/core/settings/network-settings";
 import {
   buildSettingsUpdateResult,
@@ -50,21 +50,6 @@ describe("settings IPC helpers", () => {
     assert.equal(masked.botChat.channels.telegram.token, "");
   });
 
-  test("marks Tavily environment credentials as renderer-safe source without returning the key", () => {
-    const previous = process.env.TAVILY_API_KEY;
-    process.env.TAVILY_API_KEY = "tvly-env-secret";
-    try {
-      const settings = createDefaultSettings();
-      const masked = maskAppSettings(settings);
-
-      assert.equal(masked.webSearch.providers.tavily.apiKey, "");
-      assert.equal(masked.webSearch.providers.tavily.credentialSource, "env");
-    } finally {
-      if (previous === undefined) delete process.env.TAVILY_API_KEY;
-      else process.env.TAVILY_API_KEY = previous;
-    }
-  });
-
   test("reveals sensitive fields only when the current patch explicitly changes them", () => {
     const settings = createDefaultSettings();
     settings.botChat.channels.telegram.token = "new-bot-token";
@@ -79,22 +64,6 @@ describe("settings IPC helpers", () => {
       masked.botChat.channels.feishu.appSecret,
       SENSITIVE_PLACEHOLDER,
     );
-  });
-
-  test("never reveals Tavily API key back to renderer, even on the save response", () => {
-    const settings = mergeSettings(createDefaultSettings(), {
-      webSearch: { providers: { tavily: { apiKey: "tvly-new-secret" } } },
-    });
-
-    const masked = maskAppSettings(settings, {
-      webSearch: { providers: { tavily: { apiKey: "tvly-new-secret" } } },
-    });
-
-    assert.equal(
-      masked.webSearch.providers.tavily.apiKey,
-      SENSITIVE_PLACEHOLDER,
-    );
-    assert.equal(masked.webSearch.providers.tavily.credentialSource, "saved");
   });
 
   test("maps runtime bot test results as credential checks, not operational readiness", () => {

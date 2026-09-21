@@ -101,8 +101,7 @@ fn normalize_operation(operation: &mut RuntimePolicyMutation) -> Result<(), Stri
         RuntimePolicyMutation::SetMemory { .. }
         | RuntimePolicyMutation::SetWorkspaceInstructions { .. }
         | RuntimePolicyMutation::SetPrivacy { .. }
-        | RuntimePolicyMutation::SetChatDefaults { .. }
-        | RuntimePolicyMutation::SetWebSearch { .. } => Ok(()),
+        | RuntimePolicyMutation::SetChatDefaults { .. } => Ok(()),
     }
 }
 fn personalization(value: &Personalization) -> Result<(), String> {

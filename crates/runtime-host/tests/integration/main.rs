@@ -83,6 +83,7 @@ mod skills_plugin;
 mod system_prompt;
 mod transcript_limits;
 mod transcript_pager;
+mod web_plugin;
 mod workhub_public;
 mod workspace_images;
 

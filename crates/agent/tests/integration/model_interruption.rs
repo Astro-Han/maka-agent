@@ -49,6 +49,7 @@ fn input(base: &str, suffix: &str) -> RunInput {
         },
         request_fingerprint: None,
         provider: ProviderConfig {
+            capabilities: Default::default(),
             kind: ProviderKind::OpenaiChat,
             model: "test".into(),
             base_url: base.into(),

@@ -22,6 +22,68 @@ use maka_runtime::configuration::{ConnectionCatalogEntry, validation::provider_a
 use serde_json::{Value, json};
 
 #[test]
+fn search_capability_uses_provider_defaults_not_model_name_guesses() {
+    for (provider, model, declared, overridden, expected) in [
+        ("openai", "future-model", None, None, Some(true)),
+        ("openai-codex", "future-model", None, None, Some(true)),
+        ("openai", "future-model", Some(false), None, Some(false)),
+        (
+            "openai",
+            "future-model",
+            Some(true),
+            Some(false),
+            Some(false),
+        ),
+        (
+            "openai-responses-compatible",
+            "gpt-5.6-luna",
+            None,
+            None,
+            None,
+        ),
+        (
+            "anthropic-compatible",
+            "claude-sonnet-4-6",
+            None,
+            None,
+            None,
+        ),
+        (
+            "openai-responses-compatible",
+            "local-model",
+            Some(true),
+            None,
+            Some(true),
+        ),
+        (
+            "anthropic-compatible",
+            "local-model",
+            None,
+            Some(true),
+            Some(true),
+        ),
+    ] {
+        let mut wire = json!({
+            "connectionId":"test", "revision":1, "slug":"test", "name":"Test",
+            "providerType":provider, "enabled":true, "enabledModelIds":[model],
+            "modelSource":"fetched", "models":[{"id":model}]
+        });
+        if let Some(value) = declared {
+            wire["models"][0]["capabilities"] = json!({"webSearch":value});
+        }
+        if let Some(value) = overridden {
+            wire["modelOverrides"] = json!({model:{"capabilities":{"webSearch":value}}});
+        }
+        let row = serde_json::from_value(wire).unwrap();
+        let catalog = resolve(&row, Some(model)).unwrap();
+        assert_eq!(
+            catalog[0].capabilities.web_search, expected,
+            "{provider}/{model}"
+        );
+    }
+}
+
+#[test]
 fn source_catalog_differential() {
     let facts: Value = serde_json::from_str(include_str!(concat!(
         env!("OUT_DIR"),

@@ -343,13 +343,17 @@
             register('tool_group', { tools }, async (request, call) => {
               const bound = await capture(request, call);
               if (bound === null || bound === undefined) return null;
-              if (typeof bound.invoke !== 'function')
-                throw new Error('Tool binding requires an invoke function');
+              const invokes = typeof bound.invoke === 'function';
+              if (!invokes && !Object.keys(bound.providerTools ?? {}).length)
+                throw new Error('Tool binding requires an invoke function or provider tools');
               return {
-                callback: callback((input, invocation) =>
-                  bound.invoke(input.name, input.input, invocation),
-                ),
+                callback: invokes
+                  ? callback((input, invocation) =>
+                      bound.invoke(input.name, input.input, invocation),
+                    )
+                  : 0,
                 context: bound.context ?? null,
+                providerTools: bound.providerTools ?? {},
               };
             }),
         }),

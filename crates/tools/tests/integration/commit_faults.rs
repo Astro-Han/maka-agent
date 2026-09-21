@@ -109,6 +109,7 @@ impl ToolExecutor for Effect {
 fn catalog(log: Arc<EventLog>, calls: Arc<AtomicUsize>) -> ToolCatalog {
     ToolCatalog::new([ToolRegistration {
         definition: ToolDefinition {
+            provider: None,
             name: "effect".into(),
             description: "count one effect".into(),
             input_schema: json!({"type":"object"}),

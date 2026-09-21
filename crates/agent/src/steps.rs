@@ -40,7 +40,8 @@ pub(super) async fn run(
         catalog.clone(),
         input.configuration.tool_mode,
         inner.cells.clone(),
-    );
+    )
+    .with_model(input.provider.tool_context());
     use maka_runtime::handoff::CompactionBudget;
     let mut compaction = CompactionBudget::Available;
     // This tracks work after this physical opening, not after the logical root.

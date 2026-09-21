@@ -65,6 +65,7 @@ async fn child_output_limit_after_t2_preserves_raw_and_remains_catchable() {
     });
     let catalog = ToolCatalog::new([ToolRegistration {
         definition: ToolDefinition {
+            provider: None,
             name: "read".into(),
             description: "return a large child result".into(),
             input_schema: json!({"type":"object"}),

@@ -63,18 +63,6 @@ pub struct PrivacyPolicy {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WebSearchProvider {
-    Model,
-    Tavily,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WebSearchPolicy {
-    pub enabled: bool,
-    pub default_provider: WebSearchProvider,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum ShellPreference {
     Auto,
     GitBash,
@@ -113,12 +101,6 @@ pub struct AgentSettingsPatch {
         deserialize_with = "present"
     )]
     pub privacy: Option<PrivacyPatch>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "present"
-    )]
-    pub web_search: Option<EnabledPatch>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

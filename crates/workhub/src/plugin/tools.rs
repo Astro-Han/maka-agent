@@ -38,6 +38,7 @@ pub(super) fn publish(staged: &mut Staged, manager: Arc<Manager>) -> Result<(), 
     let tools = Arc::new(Tasks(manager));
     let tool = PluginTool::new(ToolRegistration {
         definition: ToolDefinition {
+            provider: None,
             name: NAME.into(),
             description: "Coordinate approved work. Discover candidates before choosing an existing task; visibility does not grant execution access. Route preserves original user input and attachments. Returned operationId identifies this exact assignment; use it to inspect, stop, resume or correct it. Never infer completion from admission. Stop and correction cannot stop unrelated or shared execution.".into(),
             input_schema: schema(),
@@ -68,7 +69,8 @@ impl BindingProvider for Tasks {
                 return Ok(None);
             }
             Ok(Some(Binding {
-                handler: Arc::new(Tasks(manager)),
+                provider_tools: Default::default(),
+                handler: Some(Arc::new(Tasks(manager))),
                 context: None,
             }))
         })

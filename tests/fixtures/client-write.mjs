@@ -73,11 +73,12 @@ async function fixture(writeResult) {
               'Glob',
               'Grep',
               'Read',
+              'WebFetch',
               'Write',
               'apply_patch',
               'tool_search',
             ]
-          : ['AskUserQuestion', 'Glob', 'Grep', 'Read', 'tool_search'],
+          : ['AskUserQuestion', 'Glob', 'Grep', 'Read', 'WebFetch', 'tool_search'],
       );
       if (Object.hasOwn(action, 'expected')) {
         const result = input.messages.at(-1);

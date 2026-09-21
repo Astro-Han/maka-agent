@@ -626,8 +626,6 @@ function sameLocator(left: CredentialLocator, right: CredentialLocator): boolean
   switch (left.scope) {
     case 'connection':
       return right.scope === 'connection' && left.connectionId === right.connectionId;
-    case 'web_search':
-      return right.scope === 'web_search' && left.provider === right.provider;
     case 'network_proxy':
       return right.scope === 'network_proxy';
   }

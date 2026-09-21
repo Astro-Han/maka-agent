@@ -117,6 +117,7 @@ impl maka_plugins::preferences::Preferences for Preferences {
                 .map_err(|error| maka_plugins::Error::Invalid(error.to_string()))?;
             Ok(maka_plugins::preferences::Snapshot {
                 revision: snapshot.revision,
+                privacy: snapshot.policy.privacy,
                 personalization: snapshot.policy.personalization,
                 workspace_instructions: snapshot.policy.workspace_instructions.enabled,
                 tool_mode: if snapshot.policy.chat_defaults.code_mode_enabled {

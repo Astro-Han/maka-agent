@@ -44,7 +44,6 @@ const agentSettingsPatchSchema = z
     memory: memoryPatchSchema.optional(),
     workspaceInstructions: enabledPatchSchema.optional(),
     privacy: privacyPatchSchema.optional(),
-    webSearch: enabledPatchSchema.optional(),
   })
   .strict();
 
@@ -67,7 +66,6 @@ export interface AgentSettingsSnapshot {
   readonly memory: RuntimePolicy['memory'];
   readonly workspaceInstructions: RuntimePolicy['workspaceInstructions'];
   readonly privacy: RuntimePolicy['privacy'];
-  readonly webSearch: Pick<RuntimePolicy['webSearch'], 'enabled'>;
 }
 
 type AgentSettingsUpdateResult =
@@ -188,7 +186,6 @@ function projectSettings(policy: RuntimePolicy): AgentSettingsSnapshot {
     memory: { ...policy.memory },
     workspaceInstructions: { ...policy.workspaceInstructions },
     privacy: { ...policy.privacy },
-    webSearch: { enabled: policy.webSearch.enabled },
   };
 }
 
@@ -225,7 +222,6 @@ function describeChanges(policy: RuntimePolicy, patch: AgentRuntimeSettingsPatch
     policy.privacy.incognitoActive,
     patch.privacy?.incognitoActive,
   );
-  compare(changes, 'Web search', policy.webSearch.enabled, patch.webSearch?.enabled);
   return changes;
 }
 

@@ -42,6 +42,7 @@ mod failures;
 fn request(base_url: &str, text: &str) -> ModelRequest {
     ModelRequest {
         provider: ProviderConfig {
+            capabilities: Default::default(),
             kind: ProviderKind::OpenaiResponses,
             model: "test-responses".into(),
             base_url: base_url.into(),

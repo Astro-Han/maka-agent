@@ -169,7 +169,9 @@ impl TextSummary {
                     text_kind: TextKind::Thinking,
                     ..
                 } => {}
-                ModelPart::ToolCall { .. } | ModelPart::ToolResult { .. } => {
+                ModelPart::ToolCall { .. }
+                | ModelPart::ToolResult { .. }
+                | ModelPart::Source { .. } => {
                     return Err(SummaryDefect::ToolContent);
                 }
             }

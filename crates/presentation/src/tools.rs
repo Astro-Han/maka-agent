@@ -44,6 +44,28 @@ impl Tools {
         let mut rows = Vec::new();
         for (index, part) in output.parts.iter().enumerate() {
             match part {
+                ModelPart::Source { source } => {
+                    let text = match source {
+                        maka_runtime::model::ModelSource::Url { url, title, .. } => {
+                            format!("Source: {}\n{}", title.as_deref().unwrap_or(""), url)
+                        }
+                        maka_runtime::model::ModelSource::Document {
+                            title, filename, ..
+                        } => format!("Source: {}\n{}", title, filename.as_deref().unwrap_or("")),
+                    };
+                    rows.push(message(
+                        event,
+                        ts,
+                        format!("{}:source:{index}", event.id),
+                        Content::Assistant {
+                            text,
+                            model_id: output.model.clone().unwrap_or_default(),
+                            interrupted: false,
+                            thinking: None,
+                            provider_options: None,
+                        },
+                    ));
+                }
                 ModelPart::Text { .. } => rows.push(
                     text.next()
                         .ok_or(ProjectionError::Invalid("missing accepted text"))?,

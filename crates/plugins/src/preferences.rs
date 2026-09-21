@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Snapshot {
     pub revision: u64,
+    pub privacy: maka_runtime::configuration::policy::PrivacyPolicy,
     pub personalization: Personalization,
     pub workspace_instructions: bool,
     pub tool_mode: maka_runtime::execution::ToolMode,

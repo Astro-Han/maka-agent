@@ -22,7 +22,7 @@
 [简体中文](./rust-runtime.zh-CN.md)
 
 The Rust workspace replaces Maka's runtime and host while preserving the
-TypeScript client protocol and interactions. Both use protocol epoch 163. The rewrite is incomplete;
+TypeScript client protocol and interactions. Both use protocol epoch 165. The rewrite is incomplete;
 unsupported operations return explicit errors.
 
 ## Build and run
@@ -272,6 +272,21 @@ user/project content paths stay separate from private journals.
   two-minute duration limit. User cancellation still closes and drains the request.
   A real provider finish releases the stream without waiting for transport EOF;
   synthetic finishes from truncated streams are not successful completions.
+
+## Web
+
+The `maka.web` plugin publishes WebFetch and WebSearch. Settings → Web search
+selects model-native search or Tavily and stores its key in plugin-scoped credentials.
+OpenAI/Codex default to native search capability; explicit model declarations win.
+Compatible endpoints must declare support. The selected wire must support provider
+tools: Responses and Anthropic Messages are implemented; the plaintext
+OpenResponses adapter does not support them. No automatic source fallback occurs.
+
+WebFetch uses authorized Host HTTP without a browser or page JavaScript. It prefers
+Markdown and extracts readable HTML, retaining links and code. Responses are limited
+to 5 MiB, extracted text to 50 KiB and redirects to ten; clipped output is explicit.
+Tavily queries accept 1–200 characters and return at most ten results, with omitted
+results and clipped snippets marked. Incognito mode withdraws both tools.
 
 ## Code layout
 

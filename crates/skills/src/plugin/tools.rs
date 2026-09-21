@@ -58,7 +58,8 @@ impl BindingProvider for Skills {
             }
             let context = snapshot.catalog().prompt(32 * 1024);
             Ok(Some(Binding {
-                handler: Arc::new(snapshot),
+                provider_tools: Default::default(),
+                handler: Some(Arc::new(snapshot)),
                 context: (!context.is_empty()).then_some(context),
             }))
         })

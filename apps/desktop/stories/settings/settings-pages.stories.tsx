@@ -931,10 +931,6 @@ const makaBridge = {
     checkForUpdates: async () => ({ state: 'not-available' as const, currentVersion: '0.9.0-dev' }),
   },
   ...makeMemoryBridgeChannels(emptyMemoryState),
-  webSearch: {
-    test: async () => ({ ok: true as const, results: [] }),
-    query: async () => ({ ok: true as const, results: [] }),
-  },
   health: {
     getSnapshot: async () => healthSnapshot,
   },

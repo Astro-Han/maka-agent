@@ -134,6 +134,9 @@ impl Step {
                 part.state = PartState::Closed;
                 merge_provider_options(&mut part.options, provider_options.clone());
             }
+            ModelEvent::Source(source) => self.tool(ModelPart::Source {
+                source: source.clone(),
+            })?,
             ModelEvent::ToolCall(call) => self.tool(ModelPart::ToolCall { call: call.clone() })?,
             ModelEvent::ProviderToolResult {
                 id,

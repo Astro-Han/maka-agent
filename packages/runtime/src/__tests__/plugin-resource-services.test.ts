@@ -48,10 +48,6 @@ test('resource services preserve the current Session and cancellation context', 
     },
   });
   web.bindRuntime({
-    search: async (input) => {
-      calls.push(`search:${input.query}:${input.sessionId}`);
-      return { ok: true, provider: 'tavily', results: [] };
-    },
     fetch: async (input) => {
       calls.push(`fetch:${input.url}:${input.sessionId}`);
       return 'body';
@@ -86,7 +82,6 @@ test('resource services preserve the current Session and cancellation context', 
   await agents.withInvocation(context, async () => {
     await plugin.fs.read('README.md');
     await plugin.shell.run({ command: 'pwd' });
-    await plugin.web.search('  maka  ');
     assert.equal(await plugin.web.fetch('https://example.com'), 'body');
     await plugin.attachments.create({ name: 'a.txt', mimeType: 'text/plain', content: 'a' });
   });
@@ -94,7 +89,6 @@ test('resource services preserve the current Session and cancellation context', 
   assert.deepEqual(calls, [
     'fs:read:session-a',
     'shell:pwd:turn-a',
-    'search:maka:session-a',
     'fetch:https://example.com/:session-a',
     'attachment:a.txt:turn-a',
   ]);
@@ -109,10 +103,6 @@ test('Web custom cancellation cannot replace Host invocation cancellation', asyn
   const pluginAbort = new AbortController();
   const signals: AbortSignal[] = [];
   web.bindRuntime({
-    search: async (input) => {
-      if (input.abortSignal) signals.push(input.abortSignal);
-      return { ok: true, provider: 'tavily', results: [] };
-    },
     fetch: async (input) => {
       if (input.abortSignal) signals.push(input.abortSignal);
       return 'body';
@@ -128,17 +118,16 @@ test('Web custom cancellation cannot replace Host invocation cancellation', asyn
   };
 
   await agents.withInvocation(context, async () => {
-    await web.search('maka', { signal: pluginAbort.signal });
     await web.fetch('https://example.com', { signal: pluginAbort.signal });
   });
   assert.deepEqual(
     signals.map((signal) => signal.aborted),
-    [false, false],
+    [false],
   );
   hostAbort.abort(new Error('Host stopped'));
   assert.deepEqual(
     signals.map((signal) => signal.aborted),
-    [true, true],
+    [true],
   );
   assert.equal(pluginAbort.signal.aborted, false);
   await root.fiber.dispose();

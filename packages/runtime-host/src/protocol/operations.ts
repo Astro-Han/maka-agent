@@ -68,7 +68,6 @@ import { SESSION_RETIREMENT_OPERATION_SPECS } from './session-retirement.js';
 import { SESSION_EFFECT_OPERATION_SPECS } from './session-effects.js';
 import { TURN_OPERATION_SPECS } from './turn.js';
 import { USAGE_PRICING_OPERATION_SPECS } from './usage-pricing.js';
-import { WEB_SEARCH_OPERATION_SPECS } from './web-search.js';
 import { WORKHUB_COORDINATION_OPERATION_SPECS } from './workhub-coordination.js';
 
 export type {
@@ -193,7 +192,6 @@ export * from './session-todo.js';
 export * from './session-effects.js';
 export * from './skill-catalog.js';
 export * from './usage-pricing.js';
-export * from './web-search.js';
 export * from './workspace.js';
 
 export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
@@ -234,7 +232,6 @@ export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
   OAUTH_OPERATION_SPECS,
   EXTERNAL_AGENT_SETUP_OPERATION_SPECS,
   CLIENT_CAPABILITY_OPERATION_SPECS,
-  WEB_SEARCH_OPERATION_SPECS,
   NETWORK_PROXY_OPERATION_SPECS,
   CONFIGURATION_OPERATION_SPECS,
   WORKHUB_COORDINATION_OPERATION_SPECS,
@@ -366,7 +363,6 @@ export const REMOTE_OWNER_OPERATION_GRANTS = Object.freeze([
   'turn.start',
   'turn.stop',
   'usage.query',
-  'web-search.execute',
   'workhub.coordination.answer',
   'workhub.coordination.actFromTurn',
   'workhub.coordination.selectAndDelegate',

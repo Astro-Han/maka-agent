@@ -80,6 +80,7 @@ async function fixture(workspace) {
         'Glob',
         'Grep',
         'Read',
+        'WebFetch',
         'Write',
         'apply_patch',
         'tool_search',

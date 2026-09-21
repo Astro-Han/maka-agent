@@ -35,6 +35,7 @@ use crate::{
 
 /// Run-scoped authority. Cell capacity is shared across runs, not recreated here.
 pub struct RunTools {
+    model: Option<maka_runtime::tools::ModelToolContext>,
     journal: ToolJournal,
     availability: Availability,
     mode: ToolMode,
@@ -50,6 +51,7 @@ impl RunTools {
         cells: CodeExecutor,
     ) -> Self {
         Self {
+            model: None,
             journal: ToolJournal::new(sink, invocation),
             availability: Availability::new(catalog),
             mode,
@@ -59,6 +61,11 @@ impl RunTools {
 
     pub fn clear_loaded(&self) {
         self.availability.clear();
+    }
+
+    pub fn with_model(mut self, model: maka_runtime::tools::ModelToolContext) -> Self {
+        self.model = Some(model);
+        self
     }
 
     pub fn checkpoint(&self) -> maka_runtime::handoff::HandoffTools {
@@ -80,7 +87,12 @@ impl RunTools {
     ) -> Result<RequestTools<'_>, ToolError> {
         let (current, captured, context) = self
             .availability
-            .capture(self.journal.invocation().clone(), cwd.into(), cancellation)
+            .capture(
+                self.model.clone(),
+                self.journal.invocation().clone(),
+                cwd.into(),
+                cancellation,
+            )
             .await?;
         let mut request = self.request(current, captured, context);
         request.cwd = cwd.into();

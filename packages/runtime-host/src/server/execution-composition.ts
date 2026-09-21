@@ -234,7 +234,6 @@ import { HostSessionTodoCoordinator } from './session-todo-coordinator.js';
 import { HostTurnControlCoordinator } from './turn-control-coordinator.js';
 import type { TurnOperationHandlerMap } from './operation-dispatcher.js';
 import { HostUsagePricingCoordinator } from './usage-pricing-coordinator.js';
-import { HostWebSearchCoordinator } from './web-search-coordinator.js';
 import { HostWorkHubCoordinationCoordinator } from './workhub-coordination-coordinator.js';
 import {
   WorkHubActionEffectFailure,
@@ -244,12 +243,6 @@ import {
 type ExecutionConnectionRef = Parameters<
   RuntimePolicyStoresWriter['operations']['resolveExecutionConnection']
 >[0];
-import {
-  createHostWebSearchService,
-  createHostWebSearchToolFromService,
-  resolveHostTavilyWebSearchReadiness,
-  shouldResolveHostTavilyWebSearchReadiness,
-} from './web-search-tool.js';
 import { createHostWebFetchService, createHostWebFetchToolFromService } from './web-fetch-tool.js';
 import { buildBackgroundTaskHealthTool } from '@maka/runtime/background-task-health-tool';
 import { createHostExecutionArtifactServices } from './execution-artifacts.js';
@@ -660,9 +653,6 @@ export async function createExecutionRuntimeHostComposition(
           pluginAttachmentRef,
         ),
     });
-    const webSearchService = createHostWebSearchService({
-      policy: runtimePolicyStores.operations,
-    });
     const webFetchService = createHostWebFetchService({
       policy: runtimePolicyStores.operations,
     });
@@ -671,8 +661,6 @@ export async function createExecutionRuntimeHostComposition(
       webFetchService,
     );
     pluginWeb.bindRuntime({
-      search: ({ query, limit, abortSignal }) =>
-        webSearchService.search({ query, limit, ...(abortSignal ? { abortSignal } : {}) }),
       fetch: (input) => webFetchService.fetch(input),
     });
     const recallTools = buildRecallTools({
@@ -726,7 +714,6 @@ export async function createExecutionRuntimeHostComposition(
       }),
     });
     const childHostTools = [
-      createHostWebSearchToolFromService(webSearchService),
       createHostWebFetchToolFromService(webFetchService),
       backgroundTaskHealthTool,
       ...runtimePolicy.modelTools,
@@ -987,8 +974,6 @@ export async function createExecutionRuntimeHostComposition(
         memory: requireMemory(memory),
         sessionTodo,
         clientCapabilities: requireClientCapabilities(clientCapabilities),
-        resolveTavilyWebSearchReadiness: () =>
-          resolveHostTavilyWebSearchReadiness(runtimePolicyStores.operations),
         ...(scheduledTaskTool ? { scheduledTaskTool } : {}),
         planStore,
         deepResearchTools: requireDeepResearch(deepResearch).toolsForSession(
@@ -1103,10 +1088,6 @@ export async function createExecutionRuntimeHostComposition(
           ...(models ? { models: [...models] } : {}),
         };
       }
-      const tavilyReady =
-        connection && shouldResolveHostTavilyWebSearchReadiness(runtimePolicy.policy)
-          ? await resolveHostTavilyWebSearchReadiness(runtimePolicyStores.operations)
-          : false;
       return {
         runtimePolicy,
         surface: routeInteractiveRunToolSurface({
@@ -1118,7 +1099,6 @@ export async function createExecutionRuntimeHostComposition(
           ...(input.childTools ? { childTools: input.childTools } : {}),
           ...(input.parentAgentTools ? { parentAgentTools: input.parentAgentTools } : {}),
           worktreePatchWriteBackAvailable: true,
-          tavilyReady,
         }),
       };
     };
@@ -1497,7 +1477,6 @@ export async function createExecutionRuntimeHostComposition(
       // coordination, and legacy sessions the filtered catalog omits.
       async (sessionId) => (await stores.sessionStore.readHeaderSnapshot(sessionId)).name,
     );
-    const webSearch = new HostWebSearchCoordinator(webSearchService);
     const networkProxy = new HostNetworkProxyCoordinator(runtimePolicyStores.operations);
     const configuration = new HostConfigurationCoordinator(runtimePolicyStores.operations);
     const artifacts = new HostArtifactCoordinator(
@@ -2545,7 +2524,6 @@ export async function createExecutionRuntimeHostComposition(
           usagePricing.handlers,
           oauth.handlers,
           externalAgentSetup.handlers,
-          webSearch.handlers,
           networkProxy.handlers,
           configuration.handlers,
         ],

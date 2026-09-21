@@ -17,10 +17,10 @@
  * under the License.
  */
 
-import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAI, openai } from '@ai-sdk/openai';
 import { createOpenResponses } from '@ai-sdk/open-responses';
 import { plaintextResponsesStream, responsesCompatibilityFetch } from './open-responses.js';
-import { createAnthropic } from '@ai-sdk/anthropic';
+import { createAnthropic, anthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { compatibleFetch, compatibleEvents } from './compatible-transport.js';
 import { forwardProviderStream } from './provider-errors.js';
@@ -29,8 +29,22 @@ import { responsesFetch } from './responses-transport.js';
 import { networkFetch } from './network-fetch.js';
 import { codexHeaders } from './codex-auth.js';
 
+// SDK metadata distinguishes server execution from provider-defined local tools.
+// Derive this from the installed SDK, not a parallel list of vendor tool names.
+const providerExecutedTools = new Set(
+  [...Object.values(openai.tools), ...Object.values(anthropic.tools)]
+    .map((factory) => factory({}))
+    .filter((tool) => tool.isProviderExecuted === true)
+    .map((tool) => tool.id),
+);
+
 // SDKs own one model request only. Rust owns turns, history and effect execution.
 export async function stream(request, emit, signal, requestId) {
+  for (const tool of request.tools ?? []) {
+    if (tool.type === 'provider' && !providerExecutedTools.has(tool.id)) {
+      throw new Error(`Unsupported provider-executed tool: ${tool.id}`);
+    }
+  }
   const { kind, model, baseUrl, apiKey, codex, headers, bodyOverlay } = request.provider;
   const fetch = networkFetch(requestId);
   const scopedFetch = (input, init) => boundedFetch(input, init, fetch);

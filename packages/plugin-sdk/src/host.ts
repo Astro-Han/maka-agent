@@ -151,10 +151,29 @@ export type ServiceContext = { readonly configuration: readonly Json[] } & (
     })
   | { readonly signal: Cancellation; readonly invocation?: undefined; readonly source?: undefined }
 );
+/** Provider-executed SDK contract; no local invoke function or implicit permission. */
+export interface ProviderTool {
+  readonly id: string;
+  readonly args: { readonly [key: string]: Json };
+}
+export interface ModelToolContext {
+  readonly model: string;
+  readonly providerTools: 'openai_responses' | 'anthropic_messages' | null;
+  readonly capabilities: {
+    readonly chat?: boolean;
+    readonly vision?: boolean;
+    readonly reasoning?: boolean;
+    readonly functionCalling?: boolean;
+    readonly parallelToolCalls?: boolean;
+    readonly imageGeneration?: boolean;
+    readonly webSearch?: boolean;
+  };
+}
 export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: Json;
+  provider?: ProviderTool;
   directOnly?: boolean;
   alwaysVisible?: boolean;
   semantics?: 'parallel' | 'exclusive_step' | 'finish_turn';
@@ -295,12 +314,14 @@ export interface HostContext {
           readonly invocation: Invocation;
           readonly cwd: string;
           readonly tools: readonly string[];
+          readonly model: ModelToolContext | null;
         },
         call: { readonly signal: Cancellation; readonly workspace: ReadDirectory },
       ) => Awaitable<
         | {
             readonly context?: string;
-            invoke(name: string, input: Input, call: CallContext): Awaitable<Json>;
+            readonly providerTools?: Readonly<Record<string, ProviderTool>>;
+            invoke?(name: string, input: Input, call: CallContext): Awaitable<Json>;
           }
         | null
         | undefined
@@ -353,6 +374,7 @@ export interface HostContext {
       revision: number;
       personalization: { displayName: string; assistantTone: string };
       workspaceInstructions: boolean;
+      privacy: { incognitoActive: boolean };
       toolMode: 'direct' | 'code_mode';
     }>;
   };

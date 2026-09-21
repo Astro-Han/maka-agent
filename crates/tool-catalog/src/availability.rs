@@ -69,6 +69,7 @@ enum BlockReason {
 impl Availability {
     pub async fn capture(
         &self,
+        model: Option<maka_runtime::tools::ModelToolContext>,
         invocation: maka_runtime::event::Invocation,
         cwd: String,
         cancellation: tokio_util::sync::CancellationToken,
@@ -88,6 +89,7 @@ impl Availability {
         .map_err(|error| ToolError::Failed(error.to_string()))?;
         let context = if let Some(captured) = &captured {
             let request = crate::plugins::BindingRequest {
+                model,
                 invocation,
                 cwd,
                 tools: catalog.names().into_iter().collect(),
@@ -188,6 +190,7 @@ impl Availability {
             .map(|d| d.name.as_str())
             .collect::<Vec<_>>();
         Some(ToolDefinition {
+            provider: None,
             name: SEARCH.into(),
             description: format!(
                 "Search available capabilities by name or description. Activated tools become callable on the next model step, never in the same batch or JavaScript cell. A successful context compaction unloads them. Inventory: {}.",
@@ -312,7 +315,6 @@ fn direct(name: &str) -> bool {
             | "Edit"
             | "Glob"
             | "Grep"
-            | "WebFetch"
             | "AskUserQuestion"
             | "StopBackgroundTask"
             | "WriteStdin"

@@ -102,7 +102,9 @@ crypto-bigint@0.7.5		X								X
 crypto-common@0.1.7		X								X					
 crypto-common@0.2.2		X								X					
 cssparser@0.36.0												X			
+cssparser@0.37.0												X			
 cssparser-macros@0.6.1												X			
+cssparser-macros@0.7.1												X			
 ctr@0.9.2		X								X					
 ctutils@0.4.2		X								X					
 curve25519-dalek@4.1.3					X										
@@ -142,6 +144,8 @@ der-parser@8.2.0		X								X
 deranged@0.5.8		X								X					
 derive-io@0.4.1		X								X					
 derive-io-macros@0.4.1		X								X					
+derive_more@2.1.1										X					
+derive_more-impl@2.1.1										X					
 digest@0.10.7		X								X					
 digest@0.11.3		X								X					
 diplomat@0.16.1		X								X					
@@ -150,6 +154,8 @@ diplomat_core@0.16.1		X								X
 displaydoc@0.2.7		X								X					
 dlopen2@0.7.0										X					
 dlopen2_derive@0.4.3										X					
+dom_query@0.28.0										X					
+dom_smoothie@0.18.1										X					
 dotenvy@0.15.7										X					
 dtoa@1.0.11		X								X					
 dtoa-short@0.3.5												X			
@@ -180,6 +186,7 @@ filetime@0.2.29		X								X
 find-msvc-tools@0.1.12		X								X					
 fips203@0.4.3		X								X					
 fips205@0.4.1		X								X					
+flagset@0.4.7		X													
 flate2@1.1.10		X								X					
 fluent-uri@0.4.1										X					
 flume@0.12.0		X								X					
@@ -258,6 +265,7 @@ gix-validate@0.11.4		X								X
 gix-worktree@0.56.0		X								X					
 gix-worktree-state@0.34.1		X								X					
 gix-zlib@0.1.0		X								X					
+gjson@0.8.1										X					
 glob@0.3.4		X								X					
 globset@0.4.20										X				X	
 grep-matcher@0.1.9										X				X	
@@ -282,6 +290,8 @@ hickory-resolver@0.25.2		X								X
 hkdf@0.12.4		X								X					
 hmac@0.12.1		X								X					
 home@0.5.12		X								X					
+html-escape@0.2.15										X					
+html5ever@0.39.0		X								X					
 http@1.5.0		X								X					
 http-body@1.1.0										X					
 http-body-util@0.1.5										X					
@@ -342,6 +352,7 @@ lock_api@0.4.14		X								X
 log@0.4.34		X								X					
 lru-slab@0.1.2		X								X					X
 maka-agent@0.2.0		X													
+maka-assistant@0.2.0		X													
 maka-cli@0.2.0		X													
 maka-client-capability@0.2.0		X													
 maka-config@0.2.0		X													
@@ -359,8 +370,12 @@ maka-runtime@0.2.0		X
 maka-runtime-host@0.2.0		X													
 maka-scheduler@0.2.0		X													
 maka-skills@0.2.0		X													
+maka-tool-catalog@0.2.0		X													
 maka-tools@0.2.0		X													
 maka-transport@0.2.0		X													
+maka-web@0.2.0		X													
+maka-workhub@0.2.0		X													
+markup5ever@0.39.0		X								X					
 maybe-owned@0.3.4		X								X					
 memchr@2.8.3										X				X	
 memmap2@0.9.11		X								X					
@@ -371,9 +386,11 @@ miniz_oxide@0.8.9		X								X					X
 miniz_oxide@0.9.1		X								X					X
 mio@1.2.3										X					
 moka@0.12.16		X								X					
+new_debug_unreachable@1.0.6										X					
 nix@0.30.1										X					
 nix@0.31.3										X					
 nom@7.1.3										X					
+nom@8.0.0										X					
 nonempty@0.12.0										X					
 num@0.4.3		X								X					
 num-bigint@0.4.8		X								X					
@@ -409,6 +426,7 @@ paste@1.0.15		X								X
 pem-rfc7468@0.7.0		X								X					
 percent-encoding@2.3.2		X								X					
 phf@0.13.1										X					
+phf_codegen@0.13.1										X					
 phf_generator@0.13.1										X					
 phf_macros@0.13.1										X					
 phf_shared@0.13.1										X					
@@ -424,6 +442,7 @@ portable-atomic@1.15.0		X								X
 potential_utf@0.1.6													X		
 powerfmt@0.2.0		X								X					
 ppv-lite86@0.2.21		X								X					
+precomputed-hash@0.1.1										X					
 prettyplease@0.2.37		X								X					
 primeorder@0.13.6		X								X					
 proc-macro2@1.0.107		X								X					
@@ -484,6 +503,7 @@ sec1@0.8.1		X								X
 security-framework@2.11.1		X								X					
 security-framework@3.7.0		X								X					
 security-framework-sys@2.17.0		X								X					
+selectors@0.38.0												X			
 semver@1.0.28		X								X					
 serde@1.0.229		X								X					
 serde_bytes@0.11.19		X								X					
@@ -493,6 +513,7 @@ serde_json@1.0.151		X								X
 serde_urlencoded@0.7.1		X								X					
 serde_v8@0.320.0										X					
 serdect@0.2.0		X								X					
+servo_arc@0.4.3		X								X					
 sha1@0.10.7		X								X					
 sha1-checked@0.10.0		X								X					
 sha2@0.10.9		X								X					
@@ -524,6 +545,8 @@ sqlx-sqlite@0.9.0		X								X
 stable_deref_trait@1.2.1		X								X					
 static_assertions@1.1.0		X								X					
 strck@1.0.0										X					
+string_cache@0.9.0		X								X					
+string_cache_codegen@0.6.1		X								X					
 stringcase@0.4.0										X					
 strum@0.27.2										X					
 strum@0.28.0										X					
@@ -545,6 +568,7 @@ tar@0.4.46		X								X
 tempfile@3.27.0		X								X					
 temporal_capi@0.2.6		X								X					
 temporal_rs@0.2.6		X								X					
+tendril@0.5.1		X								X					
 termcolor@1.4.1										X				X	
 thiserror@1.0.69		X								X					
 thiserror@2.0.20		X								X					
@@ -581,6 +605,7 @@ unicode-general-category@1.1.0		X
 unicode-id-start@1.4.0		X								X			X		
 unicode-ident@1.0.24		X								X			X		
 unicode-normalization@0.1.25		X								X					
+unicode-segmentation@1.13.3		X								X					
 unicode-xid@0.2.6		X								X					
 universal-hash@0.5.1		X								X					
 untrusted@0.7.1									X						
@@ -599,6 +624,7 @@ walkdir@2.5.0										X				X
 want@0.3.1										X					
 wasm_dep_analyzer@0.4.0										X					
 web-transport-proto@0.2.8		X								X					
+web_atoms@0.2.6		X								X					
 webpki-roots@0.26.11								X							
 webpki-roots@1.0.9								X							
 which@6.0.3										X					

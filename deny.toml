@@ -50,8 +50,11 @@ confidence-threshold = 0.8
 exceptions = [
   { crate = "cooked-waker@5.0.0", allow = ["MPL-2.0"] },
   { crate = "cssparser@0.36.0", allow = ["MPL-2.0"] },
+  { crate = "cssparser@0.37.0", allow = ["MPL-2.0"] },
   { crate = "cssparser-macros@0.6.1", allow = ["MPL-2.0"] },
+  { crate = "cssparser-macros@0.7.1", allow = ["MPL-2.0"] },
   { crate = "dtoa-short@0.3.5", allow = ["MPL-2.0"] },
+  { crate = "selectors@0.38.0", allow = ["MPL-2.0"] },
 ]
 
 [sources]

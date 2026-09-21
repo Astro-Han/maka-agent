@@ -96,7 +96,6 @@ import { SessionBundleTasks } from '../features/session-bundle';
 import { ImportTasksSettingsPage } from './import-tasks-settings-page';
 import { TasksSettingsPage, type ArchivedTasksBridge } from './tasks-settings-page';
 import { UsageScopeMount, UsageSettingsPage, type UsageScopeHandle } from './usage-settings-page';
-import { WebSearchSettingsPage } from './web-search-settings-page';
 import type { UiLocaleUpdateGate } from './ui-locale-update-gate';
 import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
 import {
@@ -1249,12 +1248,7 @@ function SettingsPageBody(props: {
     case 'daily-review':
       return <DailyReviewSettingsPage connections={props.connections} />;
     case 'search':
-      return (
-        <WebSearchSettingsPage
-          settings={props.settings}
-          onUpdate={props.onUpdateSettings}
-        />
-      );
+      return props.runtimeHost ? <ClientPluginSlot host={props.runtimeHost} name="application.manage" input={{section: 'search', locale}} /> : null;
     default:
       return (
         <div className="settingsRows">

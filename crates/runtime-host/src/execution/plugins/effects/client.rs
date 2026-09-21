@@ -92,6 +92,7 @@ impl Executions {
                         offer: offer_index,
                         tool: tool_index,
                         definition: ToolDefinition {
+                            provider: None,
                             name: name.clone(),
                             description: tool.description.clone().unwrap_or_else(|| {
                                 format!("Client tool {} provided by {}", tool.name, tool.server_id)

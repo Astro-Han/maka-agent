@@ -138,11 +138,19 @@ impl Provider {
 }
 
 pub async fn configure(fixture: &ClientFixture, base_url: &str) -> SessionModel {
+    configure_provider(fixture, base_url, "openai-compatible").await
+}
+
+pub async fn configure_provider(
+    fixture: &ClientFixture,
+    base_url: &str,
+    provider_type: &str,
+) -> SessionModel {
     let owner = Arc::new(fixture.owner());
     let config = ConfigurationStore::for_root(owner).await.unwrap();
     let created = config.create_connection(serde_json::from_value(json!({
         "expectedCatalogRevision":0,
-        "connection":{"slug":"recovery", "name":"Recovery fixture","providerType":"openai-compatible",
+        "connection":{"slug":"recovery", "name":"Recovery fixture","providerType":provider_type,
             "baseUrl":base_url,"enabled":true,"enabledModelIds":["fixture-model"]}
     })).unwrap()).await.unwrap();
     let CatalogMutationResult::Committed {
@@ -164,7 +172,7 @@ pub async fn configure(fixture: &ClientFixture, base_url: &str) -> SessionModel 
                     connection_id: connection.connection_id.clone(),
                     revision: 1,
                     slug: "recovery".into(),
-                    provider_type: "openai-compatible".into(),
+                    provider_type: provider_type.into(),
                     effective_base_url: base_url.into(),
                 }),
                 secret: "local-recovery-fixture".into(),

@@ -3161,108 +3161,10 @@ describe('runtime policy stores', () => {
           expected: null,
           secret: 'api-key-input',
         },
-        {
-          locator: {
-            scope: 'web_search' as const,
-            provider: 'tavily' as const,
-            kind: 'api_key' as const,
-          },
-          expected: null,
-          secret: 'web-search-input',
-        },
         { locator: proxyCredential(), expected: null, secret: 'proxy-input' },
       ]) {
         assert.equal((await stores.credentialVault.set(input)).kind, 'committed');
       }
-    });
-  });
-
-  test('resolves one atomic WebSearch policy, credential, and proxy execution snapshot', async () => {
-    await withInteractiveOwner(async ({ stores }) => {
-      assert.deepEqual(await stores.operations.resolveWebSearchExecution(), {
-        kind: 'disabled',
-        provider: 'model',
-      });
-
-      const enabled = await stores.runtimePolicy.mutate({
-        expectedRevision: 0,
-        operation: {
-          kind: 'set_web_search',
-          value: { enabled: true, defaultProvider: 'tavily' },
-        },
-      });
-      assert.equal(enabled.kind, 'committed');
-      const missingSearchCredential = await stores.operations.resolveWebSearchExecution();
-      assert.equal(missingSearchCredential.kind, 'credential_not_configured');
-      if (missingSearchCredential.kind !== 'credential_not_configured') return;
-      assert.deepEqual(missingSearchCredential.status.locator, {
-        scope: 'web_search',
-        provider: 'tavily',
-        kind: 'api_key',
-      });
-
-      assert.equal(
-        (
-          await stores.credentialVault.set({
-            locator: missingSearchCredential.status.locator,
-            expected: null,
-            secret: 'tavily-execution-secret',
-          })
-        ).kind,
-        'committed',
-      );
-      const direct = await stores.operations.resolveWebSearchExecution();
-      assert.equal(direct.kind, 'ready');
-      if (direct.kind !== 'ready' || direct.provider !== 'tavily') return;
-      assert.equal(direct.secretMaterial.webSearch.secret, 'tavily-execution-secret');
-      assert.equal(direct.secretMaterial.networkProxy, undefined);
-      assert.equal(direct.networkProxy.enabled, false);
-
-      const proxied = await stores.runtimePolicy.mutate({
-        expectedRevision: 1,
-        operation: {
-          kind: 'set_network_proxy',
-          value: {
-            ...direct.networkProxy,
-            enabled: true,
-            host: 'proxy.example',
-            port: 8443,
-            authEnabled: true,
-            username: 'proxy-user',
-          },
-        },
-      });
-      assert.equal(proxied.kind, 'committed');
-      const missingProxyCredential = await stores.operations.resolveWebSearchExecution();
-      assert.equal(missingProxyCredential.kind, 'credential_not_configured');
-      if (missingProxyCredential.kind !== 'credential_not_configured') return;
-      assert.deepEqual(missingProxyCredential.status.locator, proxyCredential());
-
-      assert.equal(
-        (
-          await stores.credentialVault.set({
-            locator: proxyCredential(),
-            expected: null,
-            secret: 'proxy-execution-secret',
-          })
-        ).kind,
-        'committed',
-      );
-      const ready = await stores.operations.resolveWebSearchExecution();
-      assert.equal(ready.kind, 'ready');
-      if (ready.kind !== 'ready' || ready.provider !== 'tavily') return;
-      assert.equal(ready.secretMaterial.webSearch.secret, 'tavily-execution-secret');
-      assert.equal(ready.secretMaterial.networkProxy?.secret, 'proxy-execution-secret');
-      assert.equal(ready.networkProxy.host, 'proxy.example');
-
-      const privatePolicy = await stores.runtimePolicy.mutate({
-        expectedRevision: 2,
-        operation: { kind: 'set_privacy', value: { incognitoActive: true } },
-      });
-      assert.equal(privatePolicy.kind, 'committed');
-      assert.deepEqual(await stores.operations.resolveWebSearchExecution(), {
-        kind: 'privacy_mode',
-      });
     });
   });
 
@@ -3653,23 +3555,6 @@ describe('runtime policy stores', () => {
 
       assert.deepEqual(await stores.operations.resolveHostOutboundExecution(), {
         kind: 'privacy_mode',
-      });
-    });
-  });
-
-  test('keeps provider-native WebSearch outside the client search credential resolver', async () => {
-    await withInteractiveOwner(async ({ stores }) => {
-      const policy = await stores.runtimePolicy.mutate({
-        expectedRevision: 0,
-        operation: {
-          kind: 'set_web_search',
-          value: { enabled: true, defaultProvider: 'model' },
-        },
-      });
-      assert.equal(policy.kind, 'committed');
-      assert.deepEqual(await stores.operations.resolveWebSearchExecution(), {
-        kind: 'model_native_only',
-        provider: 'model',
       });
     });
   });

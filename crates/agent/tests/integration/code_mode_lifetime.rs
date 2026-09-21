@@ -53,6 +53,7 @@ fn input(base: &str, suffix: &str, effect: Arc<SlowEffect>) -> RunInput {
         },
         request_fingerprint: None,
         provider: ProviderConfig {
+            capabilities: Default::default(),
             kind: ProviderKind::OpenaiChat,
             model: "test".into(),
             base_url: base.into(),
@@ -69,6 +70,7 @@ fn input(base: &str, suffix: &str, effect: Arc<SlowEffect>) -> RunInput {
             message: format!("question {suffix}").into(),
             tools: ToolCatalog::new([ToolRegistration {
                 definition: ToolDefinition {
+                    provider: None,
                     name: "slow".into(),
                     description: "fixture effect draining after cancellation".into(),
                     input_schema: json!({"type":"object"}),

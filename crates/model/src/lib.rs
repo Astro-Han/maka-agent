@@ -60,6 +60,8 @@ pub enum ProviderKind {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfig {
     #[serde(skip)]
+    pub capabilities: maka_runtime::configuration::ModelCapabilities,
+    #[serde(skip)]
     pub network: maka_network::Policy,
     pub kind: ProviderKind,
     pub model: String,
@@ -94,11 +96,38 @@ fn serialize_tools<S: serde::Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     #[derive(Serialize)]
-    #[serde(tag = "type", rename_all = "snake_case")]
+    #[serde(tag = "type", rename_all = "kebab-case")]
     enum SdkTool<'a> {
         Function(&'a ToolDefinition),
+        Provider {
+            id: &'a str,
+            name: &'a str,
+            args: &'a Value,
+        },
     }
-    serializer.collect_seq(tools.iter().map(SdkTool::Function))
+    serializer.collect_seq(tools.iter().map(|tool| match &tool.provider {
+        Some(provider) => SdkTool::Provider {
+            id: &provider.id,
+            name: &tool.name,
+            args: &provider.args,
+        },
+        None => SdkTool::Function(tool),
+    }))
+}
+
+impl ProviderConfig {
+    pub fn tool_context(&self) -> maka_runtime::tools::ModelToolContext {
+        use maka_runtime::tools::ProviderToolProtocol;
+        maka_runtime::tools::ModelToolContext {
+            model: self.model.clone(),
+            capabilities: self.capabilities,
+            provider_tools: match self.kind {
+                ProviderKind::OpenaiResponses => Some(ProviderToolProtocol::OpenaiResponses),
+                ProviderKind::Anthropic => Some(ProviderToolProtocol::AnthropicMessages),
+                _ => None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -227,6 +256,28 @@ impl ModelExecutor {
         cancellation: CancellationToken,
         lane: Option<ResponsesLane>,
     ) -> Result<ModelStream, ModelError> {
+        for tool in &request.tools {
+            if let Some(provider) = &tool.provider {
+                provider
+                    .validate()
+                    .map_err(|error| ModelError::Adapter(error.into()))?;
+                let protocol = request.provider.tool_context().provider_tools;
+                let compatible = match protocol {
+                    Some(maka_runtime::tools::ProviderToolProtocol::OpenaiResponses) => {
+                        provider.id.starts_with("openai.")
+                    }
+                    Some(maka_runtime::tools::ProviderToolProtocol::AnthropicMessages) => {
+                        provider.id.starts_with("anthropic.")
+                    }
+                    None => false,
+                };
+                if !compatible {
+                    return Err(ModelError::Adapter(
+                        "provider tool does not match the selected adapter".into(),
+                    ));
+                }
+            }
+        }
         // This request crosses JSON.parse into the SDK. Root pins impose their
         // own narrower policy; the generic boundary must not round JS numbers.
         if request

@@ -94,6 +94,7 @@ impl ToolExecutor for Effects {
 pub fn input(base: &str, suffix: &str, effects: Arc<Effects>) -> RunInput {
     let tools = ToolCatalog::new(["left", "right"].map(|name| ToolRegistration {
         definition: ToolDefinition {
+            provider: None,
             name: name.into(),
             description: format!("fixture {name}"),
             input_schema: json!({"type":"object","properties":{"value":{"type":"integer"}},"required":["value"],"additionalProperties":false}),
@@ -113,6 +114,7 @@ pub fn input(base: &str, suffix: &str, effects: Arc<Effects>) -> RunInput {
         },
         request_fingerprint: None,
         provider: ProviderConfig {
+            capabilities: Default::default(),
             kind: ProviderKind::OpenaiChat,
             model: "test".into(),
             base_url: base.into(),

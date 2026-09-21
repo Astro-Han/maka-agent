@@ -21,21 +21,15 @@ import assert from 'node:assert/strict';
 import { createDefaultRuntimePolicy } from '../../packages/core/src/runtime-policy.ts';
 
 export const proxyLocator = { scope: 'network_proxy', kind: 'password' };
-export const webLocator = { scope: 'web_search', provider: 'tavily', kind: 'api_key' };
 export const requestFor = (connection) => (operation, input) =>
   connection.request(operation, input, 5000);
 
 export async function settingsSnapshot(request) {
-  // The same three remote reads required by the original Desktop Settings load.
-  const [policy, proxy, web] = await Promise.all([
+  const [policy, proxy] = await Promise.all([
     request('runtime.policy.query', {}),
     request('credential.vault.query', { locator: proxyLocator }),
-    request('credential.vault.query', { locator: webLocator }),
   ]);
-  for (const [result, locator] of [
-    [proxy, proxyLocator],
-    [web, webLocator],
-  ]) {
+  for (const [result, locator] of [[proxy, proxyLocator]]) {
     assert.equal(result.kind, 'status');
     assert.deepEqual(result.status.locator, locator);
     assert(!Object.hasOwn(result.status, 'secret'));
@@ -55,7 +49,7 @@ export async function settingsSnapshot(request) {
     ...createDefaultRuntimePolicy(),
     chatDefaults: policy.policy.chatDefaults,
   });
-  return { policy, proxy, web };
+  return { policy, proxy };
 }
 
 export async function configureModel(request, baseUrl = 'http://127.0.0.1:9/v1') {

@@ -42,6 +42,7 @@ impl ToolExecutor for Fixture {
 fn registration(name: &str, schema: Value, executor: Arc<Fixture>) -> ToolRegistration {
     ToolRegistration {
         definition: ToolDefinition {
+            provider: None,
             name: name.into(),
             description: "fixture".into(),
             input_schema: schema,

@@ -71,6 +71,7 @@ fn registration(
 ) -> PluginTool {
     PluginTool::new(ToolRegistration {
         definition: ToolDefinition {
+            provider: None,
             name: "echo".into(),
             description: "plugin echo".into(),
             input_schema: schema,

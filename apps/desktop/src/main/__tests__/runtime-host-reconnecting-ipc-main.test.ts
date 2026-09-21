@@ -133,7 +133,7 @@ test("classifies only dispatched control connection loss for reconciliation", ()
       "connection_lost",
     ),
     new RuntimeHostRequestInterruptedError(
-      "web-search.execute",
+      "plugin.remote",
       "command",
       "dispatched",
       "connection_lost",

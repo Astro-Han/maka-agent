@@ -27,7 +27,6 @@ import type {
 } from '@maka/core/settings';
 import type {
   CredentialLocator,
-  CredentialStatus,
   RuntimePolicy,
 } from "@maka/core/runtime-policy";
 import { SENSITIVE_PLACEHOLDER } from "@maka/core/settings/network-settings";
@@ -53,10 +52,8 @@ import {
 
 type RuntimeHostSettingsClient = Pick<
   DesktopRuntimeHostClient,
-  | "deleteCredential"
   | "queryCredential"
   | "queryRuntimePolicy"
-  | "setCredential"
   | "testNetworkProxy"
   | "updateNetworkProxy"
   | "updateRuntimePolicy"
@@ -66,11 +63,6 @@ type RuntimeHostSettingsClient = Pick<
 const PROXY_CREDENTIAL: CredentialLocator = {
   scope: "network_proxy",
   kind: "password",
-};
-const WEB_SEARCH_CREDENTIAL: CredentialLocator = {
-  scope: "web_search",
-  provider: "tavily",
-  kind: "api_key",
 };
 
 export interface RuntimeHostSettingsIpcDeps {
@@ -262,12 +254,11 @@ async function testNetworkProxyWithoutLane(
 async function loadRuntimeHostSettingsWithoutLane(
   deps: RuntimeHostSettingsModuleDeps,
 ): Promise<RuntimeHostAppSettings> {
-  const [local, runtimePolicy, proxyCredential, webSearchCredential] =
+  const [local, runtimePolicy, proxyCredential] =
     await Promise.all([
       deps.settingsStore.get(),
       deps.client.queryRuntimePolicy(),
       deps.client.queryCredential(PROXY_CREDENTIAL),
-      deps.client.queryCredential(WEB_SEARCH_CREDENTIAL),
     ]);
   const policy = runtimePolicy.policy;
   return {
@@ -290,13 +281,6 @@ async function loadRuntimeHostSettingsWithoutLane(
     chatDefaults: policy.chatDefaults,
     externalAgents: policy.externalAgents,
     shell: policy.shell,
-    webSearch: {
-      ...local.webSearch,
-      ...policy.webSearch,
-      providers: {
-        tavily: projectWebSearchCredential(local, webSearchCredential),
-      },
-    },
   };
 }
 
@@ -315,28 +299,6 @@ async function updateRuntimeHostSettingsForImportWithoutLane(
   return {
     settings: await loadRuntimeHostSettingsWithoutLane(deps),
     skippedCredentials,
-  };
-}
-
-function projectWebSearchCredential(
-  local: AppSettings,
-  credential: CredentialStatus | null,
-): AppSettings["webSearch"]["providers"]["tavily"] {
-  if (!credential?.configured) {
-    return {
-      ...local.webSearch.providers.tavily,
-      apiKey: "",
-      credentialSource: "none",
-      credentialStatus: "not_configured",
-    };
-  }
-  return {
-    ...local.webSearch.providers.tavily,
-    apiKey: SENSITIVE_PLACEHOLDER,
-    credentialSource: "saved",
-    credentialVersion: credential.revision,
-    credentialStatus: "untested",
-    credentialCheckedAt: new Date(credential.updatedAt).toISOString(),
   };
 }
 
@@ -407,27 +369,6 @@ async function applyHostPatchWithoutLane(
   if (patch.shell) {
     await mergePolicy(client, "shell", patch.shell, "set_shell");
   }
-  if (patch.webSearch) {
-    const webSearch = patch.webSearch;
-    await client.updateRuntimePolicy((policy) => ({
-      kind: "set_web_search",
-      value: {
-        ...policy.webSearch,
-        ...(webSearch.enabled === undefined
-          ? {}
-          : { enabled: webSearch.enabled }),
-        ...(webSearch.defaultProvider === undefined
-          ? {}
-          : { defaultProvider: webSearch.defaultProvider }),
-      },
-    }));
-    const apiKey = webSearch.providers?.tavily?.apiKey;
-    if (apiKey !== undefined && apiKey !== SENSITIVE_PLACEHOLDER) {
-      if (apiKey.length === 0)
-        await deleteCredential(client, WEB_SEARCH_CREDENTIAL);
-      else await setCredential(client, WEB_SEARCH_CREDENTIAL, apiKey);
-    }
-  }
   return skippedCredentials;
 }
 
@@ -488,50 +429,6 @@ async function mergePolicy<
       value: { ...policy[key], ...patch },
     })) as Parameters<DesktopRuntimeHostClient["updateRuntimePolicy"]>[0],
   );
-}
-
-async function setCredential(
-  client: RuntimeHostSettingsClient,
-  locator: CredentialLocator,
-  secret: string,
-): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const current = await client.queryCredential(locator);
-    const result = await client.setCredential({
-      locator,
-      expected: current?.configured
-        ? { credentialId: current.credentialId, revision: current.revision }
-        : null,
-      secret,
-    });
-    if (result.kind === "committed") return;
-    if (result.kind !== "credential_stale") {
-      throw new Error("Runtime Host rejected the credential update");
-    }
-  }
-  throw new Error("Credential kept changing while Desktop updated it");
-}
-
-async function deleteCredential(
-  client: RuntimeHostSettingsClient,
-  locator: CredentialLocator,
-): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const current = await client.queryCredential(locator);
-    if (!current?.configured) return;
-    const result = await client.deleteCredential({
-      expected: {
-        locator,
-        credentialId: current.credentialId,
-        revision: current.revision,
-      },
-    });
-    if (result.kind === "committed") return;
-    if (result.kind !== "credential_stale") {
-      throw new Error("Runtime Host rejected the credential removal");
-    }
-  }
-  throw new Error("Credential kept changing while Desktop removed it");
 }
 
 function withoutCredential(

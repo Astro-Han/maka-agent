@@ -140,6 +140,26 @@ impl Normalizer {
                     provider_executed,
                 })
             }
+            "source" => {
+                use maka_runtime::model::ModelSource;
+                let source = match string(&value, "sourceType")?.as_str() {
+                    "url" => ModelSource::Url {
+                        id: string(&value, "id")?,
+                        url: string(&value, "url")?,
+                        title: value["title"].as_str().map(str::to_owned),
+                        provider_options: options,
+                    },
+                    "document" => ModelSource::Document {
+                        id: string(&value, "id")?,
+                        media_type: string(&value, "mediaType")?,
+                        title: string(&value, "title")?,
+                        filename: value["filename"].as_str().map(str::to_owned),
+                        provider_options: options,
+                    },
+                    _ => return Err(invalid("unsupported model source kind")),
+                };
+                ModelEvent::Source(source)
+            }
             "tool-result" => {
                 if optional_bool(&value, "preliminary")? {
                     return Err(invalid("unsupported preliminary provider tool-result"));

@@ -31,6 +31,7 @@ use tokio_util::sync::CancellationToken;
 pub(super) fn request(kind: ProviderKind, base_url: String) -> ModelRequest {
     ModelRequest {
         provider: ProviderConfig {
+            capabilities: Default::default(),
             kind,
             model: "test-model".into(),
             base_url,
@@ -41,6 +42,7 @@ pub(super) fn request(kind: ProviderKind, base_url: String) -> ModelRequest {
         },
         prompt: vec![maka_model::prompt::Message::user("hello")],
         tools: vec![maka_model::ToolDefinition {
+            provider: None,
             name: "echo".into(),
             description: "echo".into(),
             input_schema: json!({"type":"object","properties":{}}),

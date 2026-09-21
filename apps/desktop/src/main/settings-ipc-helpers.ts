@@ -35,7 +35,6 @@ import {
 } from "@maka/core/settings/network-settings";
 import type { BotTestErrorCode, BotTestResult } from '@maka/runtime/bots';
 import { collectPersonalizationWarnings } from '@maka/runtime/system-prompt/personalization-prompt';
-import { getTavilyCredentialSource } from "./web-search/credentials.js";
 
 export function proxyTestFailure(result: TestProxyResult): {
   code: SettingsTestResultCode;
@@ -106,21 +105,6 @@ export function maskAppSettings(
         ]),
       ) as AppSettings["botChat"]["channels"],
     },
-    // PR-WEB-SEARCH-TAVILY-0: Tavily API key is masked at the IPC
-    // store boundary. Renderer never sees the cleartext value;
-    // re-submitting the masked sentinel is treated as "keep current"
-    // in `mergeWebSearchSettings`.
-    webSearch: {
-      ...settings.webSearch,
-      providers: {
-        tavily: {
-          ...settings.webSearch.providers.tavily,
-          apiKey:
-            maskSensitive(settings.webSearch.providers.tavily.apiKey) ?? "",
-          credentialSource: getTavilyCredentialSource(settings),
-        },
-      },
-    },
   };
 }
 
@@ -147,20 +131,10 @@ export function stripSettingsSecretsForExport(
     channels[provider] = next;
   }
 
-  const tavily = { ...settings.webSearch.providers.tavily } as Record<
-    string,
-    unknown
-  >;
-  delete tavily.apiKey;
-
   return {
     ...settings,
     network: { ...settings.network, proxy },
     botChat: { ...settings.botChat, channels },
-    webSearch: {
-      ...settings.webSearch,
-      providers: { ...settings.webSearch.providers, tavily },
-    },
   };
 }
 

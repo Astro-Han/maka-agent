@@ -24,6 +24,7 @@ fn main() {
         "../../packages/workhub/src",
         "../skills/src/client",
         "../skills/src/client.tsx",
+        "../web/src/client.tsx",
         "../scheduler/src/client",
         "../scheduler/src/client.tsx",
         "../../packages/plugin-sdk/src",

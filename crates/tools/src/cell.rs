@@ -34,6 +34,7 @@ use uuid::Uuid;
 
 pub(super) fn definition() -> ToolDefinition {
     ToolDefinition {
+        provider: None,
         name: "exec".into(),
         description: "Run bounded JavaScript in a fresh runtime. Call available tools with tools.<name>(args), use await or Promise.all, and return a JSON value.".into(),
         input_schema: json!({

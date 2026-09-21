@@ -82,6 +82,7 @@ async fn live_luna_subscription_streams_and_confirms_canonical_ws_continuation()
         .and_then(|entry| entry["secret"].as_str());
     let network = maka_network::Policy::from_settings(&proxy, password).unwrap();
     let provider = ProviderConfig {
+        capabilities: Default::default(),
         kind: ProviderKind::OpenaiResponses,
         model: "gpt-5.6-luna".into(),
         base_url: "https://chatgpt.com/backend-api/codex".into(),

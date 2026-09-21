@@ -236,5 +236,4 @@ operations! {
     TurnStart => ("turn.start", Command, Ready),
     TurnStop => ("turn.stop", Control, Ready),
     UsageQuery => ("usage.query", Query, Ready),
-    WebSearchExecute => ("web-search.execute", Command, Ready),
 }

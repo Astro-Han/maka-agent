@@ -331,10 +331,6 @@ test('a real package reaches every scoped ctx service through one Agent Tool inv
       },
     });
     web.bindRuntime({
-      search: async (input) => {
-        calls.push(`web.search:${input.query}:${input.sessionId}`);
-        return { ok: true, provider: 'tavily', results: [] };
-      },
       fetch: async (input) => {
         calls.push(`web.fetch:${input.url}:${input.sessionId}`);
         return 'fixture body';
@@ -509,7 +505,6 @@ test('a real package reaches every scoped ctx service through one Agent Tool inv
       'shell.read:pty-e2e:session-e2e',
       'shell.write:pty-e2e:ping:session-e2e',
       'shell.stop:pty-e2e:session-e2e',
-      'web.search:maka:session-e2e',
       'web.fetch:https://example.test/resource:session-e2e',
       'attachments.create:probe.txt:turn-e2e',
       'attachments.read:session-e2e',
@@ -2473,7 +2468,6 @@ async function writeContextServicesFixturePackage(root: string): Promise<string>
             await ctx.shell.write(ref, 'ping');
             await ctx.shell.stop(ref);
 
-            await ctx.web.search('  maka  ', { limit: 3 });
             await ctx.web.fetch('https://example.test/resource');
 
             const attachment = await ctx.attachments.create({

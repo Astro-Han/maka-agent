@@ -75,6 +75,7 @@ pub(super) fn register(staged: &mut Staged, manager: Arc<super::Manager>) -> Res
     ] {
         let tool = PluginTool::new(ToolRegistration {
             definition: ToolDefinition {
+                provider: None,
                 name: name.into(),
                 description: description.into(),
                 input_schema,
@@ -132,7 +133,11 @@ impl BindingProvider for GraphBinding {
                 .await
                 .map_err(|error| ToolError::Failed(error.to_string()))?;
             Ok(Some(Binding {
-                handler: Arc::new(GraphTools(root.handle.clone(), root.operators.clone())),
+                provider_tools: Default::default(),
+                handler: Some(Arc::new(GraphTools(
+                    root.handle.clone(),
+                    root.operators.clone(),
+                ))),
                 context: None,
             }))
         })

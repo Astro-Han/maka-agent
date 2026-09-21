@@ -105,6 +105,8 @@ pub(super) enum Semantics {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Tool {
     pub name: String,
+    #[serde(default)]
+    provider: Option<maka_runtime::tools::ProviderTool>,
     description: String,
     input_schema: Value,
     #[serde(default)]
@@ -121,6 +123,7 @@ impl Tool {
     ) -> Result<PluginTool, String> {
         let tool = PluginTool::new(ToolRegistration {
             definition: ToolDefinition {
+                provider: self.provider,
                 name: self.name,
                 description: self.description,
                 input_schema: self.input_schema,

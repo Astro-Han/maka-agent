@@ -17,12 +17,6 @@
  * under the License.
  */
 
-import type { WebSearchResponse } from '@maka/core/web-search';
-import {
-  WEB_SEARCH_DEFAULT_LIMIT,
-  normalizeWebSearchLimit,
-  normalizeWebSearchQuery,
-} from '@maka/core/web-search';
 import { Service, type Context, type Disposable } from './plugin-kernel.js';
 import type { PluginAgentService } from './plugin-agent-service.js';
 import { pluginInvocationSignal } from './plugin-invocation-signal.js';
@@ -34,12 +28,6 @@ declare module './plugin-kernel.js' {
 }
 
 export interface PluginWebRuntime {
-  search(input: {
-    readonly query: string;
-    readonly limit: number;
-    readonly sessionId: string;
-    readonly abortSignal?: AbortSignal;
-  }): Promise<WebSearchResponse>;
   fetch(input: {
     readonly url: string;
     readonly sessionId: string;
@@ -47,7 +35,7 @@ export interface PluginWebRuntime {
   }): Promise<string>;
 }
 
-/** Provider-policy-aware web search and fetch surface. */
+/** Authorized web fetching. Search is a Web plugin contribution. */
 export class PluginWebService extends Service {
   private webRuntime?: PluginWebRuntime;
 
@@ -68,18 +56,6 @@ export class PluginWebService extends Service {
       },
       'web.bindRuntime()',
     );
-  }
-
-  search(query: string, options: { readonly limit?: number; readonly signal?: AbortSignal } = {}) {
-    const invocation = this.agents.requireInvocation();
-    const normalized = normalizeWebSearchQuery(query);
-    if (!normalized) throw new TypeError('Web search query is invalid');
-    return this.runtime().search({
-      query: normalized,
-      limit: normalizeWebSearchLimit(options.limit ?? WEB_SEARCH_DEFAULT_LIMIT),
-      sessionId: invocation.sessionId,
-      abortSignal: pluginInvocationSignal(invocation.abortSignal, options.signal),
-    });
   }
 
   fetch(url: string, options: { readonly signal?: AbortSignal } = {}) {

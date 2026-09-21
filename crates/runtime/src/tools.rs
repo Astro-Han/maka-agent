@@ -30,17 +30,21 @@ use crate::event::{EventSink, Invocation};
 
 mod journal;
 mod preparation;
+mod provider;
 use crate::tool_call::ToolCallIdentity;
 pub use journal::ToolJournal;
 pub use preparation::{
     PreparationFuture, PreparedEffect, ToolCallContext, ToolHandler, ToolNesting, ToolPreparer,
     ToolRegistration, ToolSemantics,
 };
+pub use provider::{ModelToolContext, ProviderTool, ProviderToolProtocol};
 
 /// A callable function's closed contract; only its JSON Schema is open-ended.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolDefinition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<ProviderTool>,
     pub name: String,
     pub description: String,
     pub input_schema: Value,

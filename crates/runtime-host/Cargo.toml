@@ -35,6 +35,7 @@ maka-graph.workspace = true
 maka-scheduler.workspace = true
 jiff = "0.2.37"
 maka-skills.workspace = true
+maka-web.workspace = true
 maka-event-log.workspace = true
 maka-config.workspace = true
 maka-js-runtime.workspace = true

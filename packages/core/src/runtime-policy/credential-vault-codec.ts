@@ -25,7 +25,6 @@ import type {
   SetCredentialInput,
 } from '../runtime-policy.js';
 import { decodeConnectionCredentialTarget } from './connection-catalog-codec.js';
-import { WEB_SEARCH_CREDENTIAL_PROVIDERS } from '../web-search.js';
 import {
   parseRequestHeaders,
   RequestCustomizationValidationError,
@@ -43,7 +42,7 @@ export function decodeCredentialLocator(value: unknown): CredentialLocator {
   const base = exactRecord(
     value,
     'credential locator',
-    ['scope', 'connectionId', 'provider', 'kind'],
+    ['scope', 'connectionId', 'kind'],
     ['scope', 'kind'],
   );
   if (base.scope === 'connection') {
@@ -59,20 +58,6 @@ export function decodeCredentialLocator(value: unknown): CredentialLocator {
       scope: 'connection',
       connectionId: entityIdValue(item.connectionId, 'connection id'),
       kind: item.kind,
-    };
-  }
-  if (base.scope === 'web_search') {
-    const item = exactRecord(value, 'web search credential locator', ['scope', 'provider', 'kind']);
-    if (
-      item.kind !== 'api_key' ||
-      !(WEB_SEARCH_CREDENTIAL_PROVIDERS as readonly unknown[]).includes(item.provider)
-    ) {
-      throw domainError('web search credential locator is invalid');
-    }
-    return {
-      scope: 'web_search',
-      provider: item.provider as Extract<CredentialLocator, { scope: 'web_search' }>['provider'],
-      kind: 'api_key',
     };
   }
   if (base.scope === 'network_proxy') {

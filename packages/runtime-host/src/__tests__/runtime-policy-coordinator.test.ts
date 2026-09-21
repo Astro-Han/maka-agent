@@ -85,7 +85,6 @@ test('model settings tool confirms and atomically updates canonical Runtime Poli
       {
         personalization: { assistantTone: 'Be direct.' },
         memory: { agentReadEnabled: true },
-        webSearch: { enabled: true },
       },
       toolContext,
     );
@@ -96,7 +95,6 @@ test('model settings tool confirms and atomically updates canonical Runtime Poli
     assert.equal(snapshot.revision, 1);
     assert.equal(snapshot.policy.personalization.assistantTone, 'Be direct.');
     assert.equal(snapshot.policy.memory.agentReadEnabled, true);
-    assert.equal(snapshot.policy.webSearch.enabled, true);
   });
 });
 

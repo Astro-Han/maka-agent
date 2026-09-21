@@ -75,14 +75,12 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
     assert.equal(initialSettings.policy.revision, 0);
     assert.deepEqual(initialSettings.policy.policy.chatDefaults, { permissionMode: 'bypass' });
     assert.equal(initialSettings.proxy.status.configured, false);
-    assert.equal(initialSettings.web.status.configured, false);
     await barrier();
     assert.deepEqual(notices, []);
     const configured = await configureModel(request);
     const configuredSettings = await settingsSnapshot(request);
     assert.deepEqual(configuredSettings.proxy.status, configured.proxy);
     assert.equal(configuredSettings.proxy.status.configured, true);
-    assert.equal(configuredSettings.web.status.configured, false);
     assert.deepEqual(configuredSettings.policy, initialSettings.policy);
     await barrier();
     assert(

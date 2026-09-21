@@ -83,8 +83,6 @@ export type {
   ReplaceConnectionRequestHeadersResult,
   ResolveNetworkProxyExecutionInput,
   ResolveNetworkProxyExecutionResult,
-  ResolveWebSearchExecutionInput,
-  ResolveWebSearchExecutionResult,
   ResolveHostOutboundExecutionResult,
 } from './runtime-policy/operations.js';
 
@@ -252,7 +250,6 @@ function createWriterFacade(coordinator: RuntimePolicyCoordinator): RuntimePolic
       replaceConnectionRequestHeaders: (connectionId, updates) =>
         coordinator.replaceConnectionRequestHeaders(connectionId, updates),
       resolveExecutionConnection: (ref) => coordinator.resolveExecutionConnection(ref),
-      resolveWebSearchExecution: (input) => coordinator.resolveWebSearchExecution(input),
       resolveHostOutboundExecution: () => coordinator.resolveHostOutboundExecution(),
       resolveNetworkProxyExecution: (input) => coordinator.resolveNetworkProxyExecution(input),
       compareAndSetOAuthCredential: (input) => coordinator.compareAndSetOAuthCredential(input),

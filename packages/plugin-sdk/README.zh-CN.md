@@ -58,6 +58,10 @@ Remote 的 Session／工作区视图通过 `files` 提供相同接口。读取�
 
 `ctx.tools.bind(definitions, capture)` 在每个逻辑模型步骤为一组工具冻结实现及可选上下文。capture 回调获得工作区只读视图，返回 `null` 表示本步不提供该组工具。模型返回的调用使用已冻结的闭包，不重新采样实现；关闭注册会一起撤下整组工具。`alwaysVisible` 可让工具无需搜索即对模型可见。
 
+capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可用的 provider-tool 协议。绑定可为自己注册的名称返回 `providerTools: { Research: { id: 'openai.web_search', args: {} } }`，工具直接由主模型请求执行，不调用本地处理器；仅含此类工具的绑定无需 `invoke`。描述、闭包和上下文一起冻结，物理重试不重新采样。供应商工具不能结束 Host Turn，也不能嵌入 Code Mode。
+
+当前 SDK 必须明确将描述识别为供应商执行的工具。未知 ID 或要求本地执行的供应商工具在网络请求前拒绝，不会被静默省略。
+
 - 激活阶段暂存注册；通过 `ctx.run` 在发布生效后启动业务循环。用 `ctx.effect` 注册清理，观察 `ctx.signal`。
 - Tool 和 Executor 回调获得绑定调用身份的服务与进程能力。旧调用句柄会失效；实例级进程需通过下一次调用的 `processes.open(id)` 重新绑定，卸载时由 Host 清理。
 - 启动进程要求当前调用仍有 Bypass 权限，使用冻结的工作目录，以及绝对可执行路径和 argv。默认随调用结束。stdin 字符串按 UTF-8 编码；输出用 `TextDecoder` 增量解码。
@@ -81,7 +85,7 @@ Remote 的 Session／工作区视图通过 `files` 提供相同接口。读取�
 
 `npm --workspace @maka-agent/plugin-sdk run typecheck` 同时检查 Rust Host 集成测试实际执行的插件 fixture。
 
-`ctx.preferences.read()` 返回带 revision 的个性化设置及工作区指令开关，不暴露凭据或完整 Host 配置。激活期间即可读取，随插件退休失效；它不授予资源或执行权限。
+`ctx.preferences.read()` 返回带 revision 的个性化、隐私、工具模式及工作区指令开关，不暴露凭据或完整 Host 配置。激活期间即可读取，随插件退休失效；它不授予资源或执行权限。
 
 `commands.createChild({ ..., workspace: 'isolated_git' })` 为子 Session 绑定 Host 管理的 linked worktree。父会话必须允许写入，且工作目录是干净仓库的根目录。重试与 Host 重启保留子任务改动。执行及工作区写入者结束后，`workspacePatch(operationId)` 发布相对于初始提交的不可变 Git patch artifact，包含已提交与未提交改动，不自动合并到父目录。需在子会话进入下一 Turn 前导出。工作区保留用于恢复，不随插件禁用而删除。稀疏检出、子模块、外部 Git filter 和超过 50 MiB 的补丁会明确报错。Host 的 Git 操作使用 gix，不依赖系统 Git 可执行文件。
 

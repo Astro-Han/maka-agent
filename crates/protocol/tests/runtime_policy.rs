@@ -77,7 +77,6 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         "externalAgents":{"antigravity":{"executable":""}},
         "shell":{"executable":"","preference":"auto"},
         "chatDefaults":{"thinkingLevel":"high","permissionMode":"ask"},
-        "webSearch":{"defaultProvider":"model","enabled":false},
         "privacy":{"incognitoActive":false},
         "workspaceInstructions":{"enabled":true},
         "memory":{"agentReadEnabled":false,"enabled":true},
@@ -176,7 +175,6 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         ("set_workspace_instructions", "workspaceInstructions"),
         ("set_privacy", "privacy"),
         ("set_chat_defaults", "chatDefaults"),
-        ("set_web_search", "webSearch"),
         ("set_shell", "shell"),
         ("set_external_agents", "externalAgents"),
     ] {

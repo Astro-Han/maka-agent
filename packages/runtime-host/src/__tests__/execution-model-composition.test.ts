@@ -2749,15 +2749,6 @@ test('production Host executes a canonical ai-sdk Session against a real provide
       },
     });
     assert.equal(memoryEnabled.kind, 'committed');
-    policySnapshot = await policy.runtimePolicy.getSnapshot();
-    const webSearchEnabled = await policy.runtimePolicy.mutate({
-      expectedRevision: policySnapshot.revision,
-      operation: {
-        kind: 'set_web_search',
-        value: { enabled: true, defaultProvider: 'tavily' },
-      },
-    });
-    assert.equal(webSearchEnabled.kind, 'committed');
 
     const execution = await openInteractiveExecutionStoresForWrite(owner.lease);
     const usageStores = await openInteractiveUsageStoresForWrite(owner.lease);
@@ -2878,9 +2869,7 @@ test('production Host executes a canonical ai-sdk Session against a real provide
     assert.match(requestText, /HOSTED_PERSONALIZATION_SENTINEL/);
     assert.match(requestText, /HOSTED_MEMORY_SENTINEL/);
     assert.match(JSON.stringify(mainRequests[1]?.body), /HOSTED_SKILL_BODY_MUST_STAY_LAZY/);
-    // Tavily is selected but no web-search credential exists, so the provider
-    // must never see WebSearch in the effective root tool surface. Non-direct
-    // bound tools stay deferred behind tool_search until activated.
+    // Non-direct bound tools stay deferred until activated by tool_search.
     assert.deepEqual(toolNames(request?.body), [
       'AskUserQuestion',
       'Bash',
@@ -3321,15 +3310,6 @@ test('production Host executes a durable runnable child with an exact tool ceili
       'committed',
     );
     await publishConnectionModel(policy, connection.connectionId, MODEL_ID, 32_768);
-    const policySnapshot = await policy.runtimePolicy.getSnapshot();
-    const webSearchEnabled = await policy.runtimePolicy.mutate({
-      expectedRevision: policySnapshot.revision,
-      operation: {
-        kind: 'set_web_search',
-        value: { enabled: true, defaultProvider: 'tavily' },
-      },
-    });
-    assert.equal(webSearchEnabled.kind, 'committed');
 
     const execution = await openInteractiveExecutionStoresForWrite(owner.lease);
     const parent = await execution.sessionStore.create({
@@ -4586,7 +4566,6 @@ test('backend composition survives a moved saved Git Bash executable while Bash 
     clientCapabilities: {
       snapshotForSession: () => undefined,
     } as unknown as HostClientCapabilityCoordinator,
-    resolveTavilyWebSearchReadiness: async () => false,
     builtinTools: {},
     resolveTurnShellPlan: (settings) => {
       shellPolicyResolutions += 1;
@@ -5123,7 +5102,6 @@ function backendCreationFixture(input: {
       clientCapabilities: {
         snapshotForSession: input.snapshotClientCapabilities ?? (() => undefined),
       } as unknown as HostClientCapabilityCoordinator,
-      resolveTavilyWebSearchReadiness: async () => false,
     });
   return {
     context: {
