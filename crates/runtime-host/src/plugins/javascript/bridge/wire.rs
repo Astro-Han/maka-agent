@@ -73,6 +73,10 @@ pub(super) enum Request {
     Files(FileRequest),
     #[serde(rename = "sessions.list")]
     Sessions(SessionList),
+    #[serde(rename = "history.list")]
+    HistoryList(SessionList),
+    #[serde(rename = "history.read")]
+    HistoryRead(HistoryRead),
     #[serde(rename = "models.resolve")]
     ResolveModel(maka_plugins::llm::Selection),
     #[serde(rename = "llm.generate")]
@@ -516,6 +520,13 @@ impl From<maka_plugins::execution::CommandError> for Error {
 pub(super) struct SessionList {
     pub authority: String,
     pub input: maka_plugins::session::catalog::List,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HistoryRead {
+    pub authority: String,
+    pub input: maka_plugins::session::history::Read,
 }
 
 #[derive(Deserialize)]

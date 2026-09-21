@@ -55,6 +55,7 @@ const capabilities: readonly AuthorizationCapability[] = [
   'executions',
   'notifications',
   'read_sessions',
+  'read_history',
 ];
 
 export const PLUGIN_AUTHORIZATION_OPERATION_SPECS = {
@@ -195,7 +196,10 @@ function proposal(value: unknown): AuthorizationRequest {
       requireExactRecord(target, 'Profile authorization', ['kind']);
       if (
         requested.some(
-          (capability) => capability !== 'notifications' && capability !== 'read_sessions',
+          (capability) =>
+            capability !== 'notifications' &&
+            capability !== 'read_sessions' &&
+            capability !== 'read_history',
         )
       )
         throw invalidProtocolFrame('Profile has no workspace authority');

@@ -19,6 +19,32 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function (ctx) {
+  await ctx.remote.method('history', async (_input, caller) =>
+    caller.views.authorize(
+      {
+        operationId: '12d11b66-69c2-42f9-a7ab-cc023092215f',
+        title: 'Read profile history',
+        target: { kind: 'profile' },
+        capabilities: ['read_history'],
+      },
+      async (call) => {
+        const catalog = await call.history.list({ includeArchived: true });
+        if (!catalog.entries.some((entry) => entry.session.sessionId === 'background-session'))
+          throw new Error('History catalog omitted its source');
+        /** @type {Parameters<typeof call.history.read>[0]} */
+        const input = { sessionId: 'background-session' };
+        let text = '';
+        for (;;) {
+          const page = await call.history.read(input);
+          input.through = page.through;
+          if (page.kind === 'preparing') continue;
+          text += page.chunks.map((chunk) => chunk.text).join('\n');
+          if (!page.next) return text;
+          input.cursor = page.next;
+        }
+      },
+    ),
+  );
   await ctx.remote.method('notify', async (input) => {
     const intent = parseIntent(input);
     return ctx.withAuthorization(intent.grant, async (call, grant, boundary) => {
@@ -28,6 +54,12 @@ export default async function (ctx) {
       const catalog = await call.sessions.list();
       if (!catalog.entries.some((entry) => entry.session.sessionId === 'background-session'))
         throw new Error('Profile catalog did not include authorized Session metadata');
+      try {
+        await call.history.read({ sessionId: 'background-session' });
+        throw new Error('metadata-only consent became history authority');
+      } catch (error) {
+        if (error.code !== 'revoked') throw error;
+      }
       try {
         await call.executions.open();
         throw new Error('metadata consent became execution authority');

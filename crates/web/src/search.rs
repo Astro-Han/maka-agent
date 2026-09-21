@@ -22,11 +22,13 @@ use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use url::Url;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Query {
+    #[schemars(length(min = 1, max = 200))]
     pub query: String,
     #[serde(default = "default_limit")]
+    #[schemars(range(min = 1, max = 10))]
     pub limit: usize,
 }
 fn default_limit() -> usize {

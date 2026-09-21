@@ -31,6 +31,8 @@ use sha2::{Digest, Sha256};
 
 #[path = "transcript_index/fixtures.rs"]
 mod fixtures;
+#[path = "transcript_index/history.rs"]
+mod history;
 use fixtures::*;
 
 #[tokio::test]

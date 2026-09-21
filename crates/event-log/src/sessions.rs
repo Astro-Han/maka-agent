@@ -203,19 +203,26 @@ impl EventLog {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<SessionPage<T>, StoreError> {
-        self.session_page(None, expected_revision, cursor, limit)
+        self.session_page(None, expected_revision, cursor, limit, true)
             .await
     }
 
-    /// Active metadata within a Host-authorized scope; never plugin-defined SQL.
+    /// Metadata within a Host-authorized scope; never plugin-defined SQL.
     pub async fn scoped_sessions<T: DeserializeOwned + Send + 'static>(
         &self,
         scope: CatalogScope,
         expected_revision: Option<&str>,
         cursor: Option<&str>,
+        include_archived: bool,
     ) -> Result<SessionPage<T>, StoreError> {
-        self.session_page(Some(scope), expected_revision, cursor, MAX_SESSION_PAGE)
-            .await
+        self.session_page(
+            Some(scope),
+            expected_revision,
+            cursor,
+            MAX_SESSION_PAGE,
+            include_archived,
+        )
+        .await
     }
 
     async fn session_page<T: DeserializeOwned + Send + 'static>(
@@ -224,6 +231,7 @@ impl EventLog {
         expected_revision: Option<&str>,
         cursor: Option<&str>,
         limit: usize,
+        include_archived: bool,
     ) -> Result<SessionPage<T>, StoreError> {
         self.validate_root()?;
         if limit == 0 || limit > MAX_SESSION_PAGE {
@@ -235,7 +243,7 @@ impl EventLog {
                 return Err(invalid("session continuation requires catalog revision"));
             }
         }
-        let active_only = scope.is_some();
+        let active_only = !include_archived;
         let (session, cwd) = match scope {
             Some(CatalogScope::Session(id)) => {
                 validate_id(&id)?;

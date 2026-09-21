@@ -252,6 +252,11 @@ async fn scenario() {
             }),
         )
         .await;
+        let history = remote(&mut peer, &client, &document, "history", Value::Null).await;
+        assert!(
+            history.as_str().unwrap().contains("Run authorized work"),
+            "{history}"
+        );
         let managed = success(
             peer.rpc(
                 "session.catalog.query",

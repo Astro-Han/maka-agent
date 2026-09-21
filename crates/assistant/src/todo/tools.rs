@@ -30,7 +30,7 @@ use maka_runtime::{
 };
 use maka_tool_catalog::plugins::PluginTool;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -57,11 +57,11 @@ pub(super) fn publish(repository: Arc<Repository>, staged: &mut Staged) -> Resul
         let (description, input_schema) = match action {
             Action::Read => (
                 "Read the complete current Session checklist. Completed items are model-reported progress, not verified execution evidence.",
-                json!({"type":"object","properties":{},"additionalProperties":false}),
+                schemars::schema_for!(Read).into(),
             ),
             Action::Write => (
                 "Atomically replace the complete current Session checklist; include every item to keep. At most 200 items, each 1–200 characters. Completed is model-reported progress, not verified execution evidence.",
-                json!({"type":"object","required":["todos"],"properties":{"todos":{"type":"array","maxItems":200,"items":{"type":"object","required":["content","status"],"properties":{"content":{"type":"string","minLength":1,"maxLength":200},"status":{"type":"string","enum":["pending","in_progress","completed"]}},"additionalProperties":false}}},"additionalProperties":false}),
+                schemars::schema_for!(Write).into(),
             ),
         };
         staged
@@ -87,12 +87,13 @@ pub(super) fn publish(repository: Arc<Repository>, staged: &mut Staged) -> Resul
     }
     Ok(())
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Write {
+    #[schemars(length(max = super::MAX_ITEMS))]
     todos: Vec<Item>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Read {}
 

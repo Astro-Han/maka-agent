@@ -33,6 +33,7 @@ export type * from './http.js';
 export type * from './filesystem.js';
 export type * from './llm.js';
 export type * from './clients.js';
+export type * from './history.js';
 
 /** Independent API version, used by runtime.sdkVersion in maka.extension.json. */
 export const HOST_SDK_VERSION = 1;
@@ -124,16 +125,12 @@ export interface ResourceContext {
   readonly http: Http;
   /** Metadata only; Agent scopes see their own Session, independent scopes require read_sessions. */
   readonly sessions: {
-    list(input?: { revision?: string; cursor?: string }): Promise<{
-      revision: string;
-      entries: readonly {
-        session: import('./execution.js').SessionConfiguration;
-        labels: readonly string[];
-        updatedAt: number;
-      }[];
-      nextCursor: string | null;
-    }>;
+    list(
+      input?: import('./history.js').SessionCatalogInput,
+    ): Promise<import('./history.js').SessionCatalogPage>;
   };
+  /** Trusted Agent recall reads the Host profile; independent scopes use read_history. */
+  readonly history: import('./history.js').History;
   readonly files: Files;
   readonly llm: import('./llm.js').Llm;
   readonly clients: import('./clients.js').ClientCapabilities;

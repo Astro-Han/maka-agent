@@ -297,6 +297,19 @@ Each Session holds up to 200 items of 200 characters each. Completion is reporte
 by the model, not verified execution evidence. Disabling the plugin withdraws its
 tools and UI without deleting the checklist; re-enabling or restarting restores it.
 
+## Conversation recall
+
+`maka.recall` publishes lazy `Recall` and `RecallMore` tools through public history
+capabilities. Recall searches complete text in the 200 Sessions with the most recent
+messages, including archives, using Unicode-normalized literal terms and BM25 ranking.
+It excludes the current Turn and reports unread sources and clipped passages.
+RecallMore expands neighboring messages or resumes a long anchor by UTF-8 offset.
+Incognito mode withdraws both tools. Historical statements are not verified facts.
+
+Host supplies bounded text pages under a fixed log fence; sorting and passage assembly
+belong to the plugin. A SQLx-managed, rebuildable text projection avoids repeatedly
+parsing large JSON results. The same Rust/JS history API is available to other plugins.
+
 ## Code layout
 
 All crates are in `crates/`; directory names describe their responsibilities.

@@ -31,6 +31,7 @@ pub struct Services {
     pub credentials: Arc<dyn Credentials>,
     pub executions: Arc<dyn Access>,
     pub sessions: Arc<dyn crate::session::catalog::Queries>,
+    pub history: Arc<dyn crate::session::history::Queries>,
     pub authorizations: Arc<dyn crate::authorization::Access>,
     pub files: Arc<dyn crate::filesystem::Files>,
     pub models: Arc<dyn crate::llm::Models>,

@@ -72,6 +72,7 @@ pub async fn discover(
                 break;
             }
             input = List {
+                include_archived: false,
                 revision: Some(page.revision),
                 cursor: page.next_cursor,
             };

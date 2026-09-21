@@ -160,6 +160,7 @@ dotenvy@0.15.7										X
 dtoa@1.0.11		X								X					
 dtoa-short@0.3.5												X			
 dunce@1.0.5		X					X				X				
+dyn-clone@1.0.20		X								X					
 ecdsa@0.16.9		X								X					
 ed448@0.5.0		X								X					
 ed448-goldilocks@0.14.0-pre.15		X								X					
@@ -497,6 +498,8 @@ ryu@1.0.23		X				X
 ryu-js@1.0.3		X				X									
 same-file@1.0.6										X				X	
 schannel@0.1.29										X					
+schemars@1.2.2										X					
+schemars_derive@1.2.2										X					
 scopeguard@1.2.0		X								X					
 sec1@0.7.3		X								X					
 sec1@0.8.1		X								X					
@@ -509,6 +512,7 @@ serde@1.0.229		X								X
 serde_bytes@0.11.19		X								X					
 serde_core@1.0.229		X								X					
 serde_derive@1.0.229		X								X					
+serde_derive_internals@0.30.0		X								X					
 serde_json@1.0.151		X								X					
 serde_urlencoded@0.7.1		X								X					
 serde_v8@0.320.0										X					

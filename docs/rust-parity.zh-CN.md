@@ -56,6 +56,7 @@
 | **Graph／Swarm：**已经是内置插件，behavior 按开放的类型化身份选择。Graph 使用公共授权 Session／执行命令、作用域数据和只读偏好，不接收 Host 私有句柄。 | 保持已有编排与唤醒行为；语义相同时复用窄命令，类型化领域 repository 可以保留。 |
 | **Scheduler：**插件拥有计划、冻结触发、漏触发／重试策略和通知撤销；激活只接收公共存储、授权、执行与通知能力，不使用调度专用 Host 服务。 | Host 解析授权并准入执行／原生投递。暂停撤销尚未准入的通知，包括 provider 的迟到接受；已接受执行仍归 Host。恢复复用精确 Fire 身份，不重放结果不确定的通知。现有 Desktop 操作保留为插件的薄适配。 |
 | **Web：**`maka.web` 拥有无浏览器 WebFetch、Tavily 搜索、来源选择、凭据验证与设置 Client；原生搜索通过公共 provider-tool 契约在每个模型步骤绑定。 | Host 负责授权 HTTP、代理、资源结算与命名空间凭据；Rust／JS 共用绑定，供应商结果和引用保留为规范事实。旧 Web RPC、全局设置和 Tavily 专用凭据槽已删除。 |
+| **Recall：**`maka.recall` 拥有 Unicode 字面词匹配、BM25 排序、Session 多样性及 RecallMore 片段扩展。 | 公共 Rust／JS 历史 API 提供固定水位 UTF-8 分页和归档元数据；Host 拥有访问检查及 SQLx 文本投影，不提供 Recall 专用服务，不需要 V8。隐私模式撤下工具，来源缺失和片段截断明确报告。 |
 | **Code Mode：**模式选择、嵌套派发及历史投影跨越多个 crate。 | 首批领域迁移后，在有实际 Contribution 边界收益时迁移面向用户的工具和模式策略；V8 所有权、嵌套调用权限、派发／结算及规范历史保留 runtime。不为搬迁 `exec` 发明万能执行 hook。 |
 | **文件与 Shell 工具：**Host 基于现有文件／进程 owner 装配注册。 | 工具定义与装配可以成为内置 Contribution；资源所有权、写入协调和 PTY 取消仍归 Host。结构迁移等能消除具体耦合时再做，不为每个工具建插件。 |
 | **Client Capability／MCP、provider 与传输** | 保持当前资源与权威边界；Desktop MCP 不搬进 Host，模型厂商不强制逐个插件化。功能缺口独立于结构迁移完成。 |
@@ -78,7 +79,6 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | Goal | 查询、arm、控制、续跑、终止、预算与恢复语义。 | **插件 + Host。** Goal 决定后续提交；Host 执行已准入的硬限制并记录用量。插件退休后不能继续提交。 |
 | Deep research | 研究流程、进度查询、结果与恢复。 | **插件。** 复用 Graph／Swarm、Web、有界模型调用及可靠提交，不新增通用编排引擎。 |
 | Daily review／recap | daily-review 查询／修改、定时复盘、`session.recap.generate`。 | **插件 + Host。** 选择、总结及输出由插件负责，复用 Scheduler 和授权历史／模型服务；规范 Session 元数据的提交仍归 Host。 |
-| Recall | 跨 Session 片段排序检索及 RecallMore 扩展。 | **插件 + Host。** Recall 拥有排序及可重建索引；Host 提供受限历史／引用，并检查当前访问和删除状态。现有按 operation 读事件不是跨会话历史 API。Recall 不属于 Memory。 |
 | 外部 agent | setup start/query/cancel；具体执行适配、配置、鉴权、对话身份，以及附件／交互／resume／fork；Command Code GO 执行。 | **插件 + Host。** CLI／ACP 适配作为 Executor 插件，使用受管理进程／HTTP。已有 Executor 框架不等于已有具体 adapter。Host 负责授权、取消和外部事件落盘。 |
 | Usage／Pricing | Usage 查询、一致版本视图及活动分页，Pricing 查询／修改和估价。 | **插件 + Host。** 报表、价格策略和可重建投影可归 Insights 领域；Host 不依赖插件存活来记录用量，并提供一致快照。缺失用量不能视为零。 |
 | 后台健康 | BackgroundTaskHealth 的进程和端点检查。 | **插件 + Host。** 插件解释健康状态并提供工具；Host 提供授权资源观察和有界探测。保存 PID 不等于拥有进程。 |
@@ -102,7 +102,7 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | Skills：工具发布 | Skill／SkillSearch 是普通 Contribution，不享有包名特权。每步绑定在工具上限内共同捕获 handler 和支持上下文，物理重试保持原快照。 |
 | WorkHub：精确执行命令 | 类型化命令携带稳定操作 ID、精确目标及预期 revision。纠正先冻结插件意图，再精确控制／提交 Host 工作，最后原子记录业务回执；已接受工作不依赖插件可用性继续结算。队列编辑保留原提交凭证。插件不获得 SQL 事务回调或无限制执行句柄。 |
 | WorkHub／Graph／Plan：可选择的 behavior | 已用开放的 `BehaviorId` 选择类型化 Contribution，Graph／Swarm 独立注册；非内置业务已通过 Host 验收。保留 Session 默认值和持久单 Turn 选择；请求的 behavior 不可用时明确失败。behavior 准备与输入准备是独立契约，不合并为 hook 总线。 |
-| Skills／Web／Recall／Insights：授权服务 | Execution SDK 只读自己提交的 operation。用户／后台资源能力和有界 Session 元数据查询已公开，跨 Session 历史／用量仍需按消费者补契约；invocation、Remote、后台调用仍各自授权，不能用宽泛的 `Executions`／Host handle 代替。领域目录／修改接口可作为类型化插件 Service，不必成为内核方法。 |
+| Skills／Web／Recall／Insights：授权服务 | Rust／JS 公共历史 API 提供固定水位文本分页及归档 Session 元数据。已准入 Agent 可读受信任 profile，Remote／后台调用保留相应范围的历史授权。用量查询仍需按消费者补契约。领域目录／修改接口可作为类型化插件 Service，不必成为内核方法。 |
 | Skills／WorkHub／默认行为：业务 UI 与 Prompt 上下文 | 发布的 Client 通过 Slot 和 Remote 拥有真实 Skills 选择器／管理页及 WorkHub 界面。原生适配验证原 Host 与 document；连接换代撤销旧 Remote 租约，不重放调用。Prompt Contribution 拥有业务指令。功能停用明确显示不可用，不阻塞普通聊天。 |
 | 其余 TS 扩展服务 | 新 SDK 尚缺等价的公开 LSP 路由、Commands、Skills／Goals 查询、shell 环境变量 Contribution、Settings 定义、授权流程及 LLM adapter 注册；问题／表单、源输入与附件复制已有公共契约；权限审批仍归 Host。能由插件服务实现的领域注册放在插件侧，敏感行为权威仍归 Host。`llm.generate` 不等于 adapter 注册。 |
 
@@ -121,7 +121,7 @@ TS 的 LLM adapter 注册服务于插件模型调用，本身不等于主 Sessio
 
 1. **公共 API 消费者已迁移：**Skills、默认助手、Scheduler、Graph、WorkHub 与外部插件使用同等受限契约；新增消费者时维持 Rust／JS 对等。
 2. **外部验收：**JS workflow fixture 覆盖 UI 授权、持久后台工作、精确回执、停用／恢复以及跨 Host 重启的授权撤销。
-3. **缺失业务领域：**完整实现 Recall，再做 Plan／Goal 和研究／复盘；完成外部 adapter、Insights／健康。复用领域边界，不先在 Host 写新业务再搬一次。
+3. **缺失业务领域：**完成 Plan／Goal 和研究／复盘；完成外部 adapter、Insights／健康。复用领域边界，不先在 Host 写新业务再搬一次。
 4. **其余核心等价：**完成 Session 生命周期／谱系／迁入迁出、policy、接入／协作、Peer Mesh、provider 和诊断。前面消费者所需的核心命令前置到对应阶段，核心工作不等待全部插件或商店。首批领域验证边界后评估 Code Mode／工具装配迁移，不将其作为功能等价的前提。
 
 每个领域按“真实消费者及不变量 → 最小类型化 API 与消费者一起实现 → 验证生命周期和失败行为 → 删除旧 Host 业务路径”推进。

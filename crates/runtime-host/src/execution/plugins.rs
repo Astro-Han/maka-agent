@@ -32,6 +32,7 @@ mod root;
 mod submit;
 use root::RootGrant;
 mod catalog;
+mod history;
 mod scopes;
 pub(crate) use scopes::ResourceTarget;
 mod workspace;

@@ -53,6 +53,7 @@ struct State {
     credentials: Arc<dyn maka_plugins::credentials::Credentials>,
     commands: Arc<dyn Access>,
     sessions: Arc<dyn maka_plugins::session::catalog::Queries>,
+    history: Arc<dyn maka_plugins::session::history::Queries>,
     execution_handles: Mutex<BTreeMap<String, Arc<dyn maka_plugins::execution::Commands>>>,
     authorizations: Arc<dyn maka_plugins::authorization::Access>,
     authorized_calls:
@@ -91,6 +92,7 @@ impl HostBridge {
             credentials: host.credentials,
             commands: host.executions,
             sessions: host.sessions,
+            history: host.history,
             execution_handles: Mutex::default(),
             authorizations: host.authorizations,
             authorized_calls: Mutex::default(),
@@ -241,6 +243,14 @@ impl State {
             Request::Sessions(input) => {
                 let call = self.calls.get(&input.authority)?;
                 encode(self.sessions.list(call, input.input).await?)
+            }
+            Request::HistoryList(input) => {
+                let call = self.calls.get(&input.authority)?;
+                encode(self.history.list(call, input.input).await?)
+            }
+            Request::HistoryRead(input) => {
+                let call = self.calls.get(&input.authority)?;
+                encode(self.history.read(call, input.input).await?)
             }
             Request::ResolveModel(input) => encode(self.models.resolve(input).await?),
             Request::Revision(input) => {

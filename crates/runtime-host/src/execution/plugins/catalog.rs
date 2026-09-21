@@ -38,6 +38,14 @@ impl Executions {
             self.plugin_resource_boundary(&call, Capability::ReadSessions)
                 .await?
         };
+        self.plugin_catalog_page(boundary, input).await
+    }
+
+    pub(super) async fn plugin_catalog_page(
+        &self,
+        boundary: Boundary,
+        input: List,
+    ) -> Result<Page, Error> {
         let scope = match boundary {
             Boundary::Profile => CatalogScope::Profile,
             Boundary::Session { boundary, .. } => CatalogScope::Session(boundary.session_id),
@@ -50,6 +58,7 @@ impl Executions {
                 scope,
                 input.revision.as_deref(),
                 input.cursor.as_deref(),
+                input.include_archived,
             )
             .await
             .map_err(|error| match error {
@@ -65,9 +74,14 @@ impl Executions {
                 .map(|record| {
                     let session = record.configuration.plugin_view(record.id, record.revision);
                     Summary {
+                        archived: record.archived,
                         session,
                         labels: record.configuration.labels,
                         updated_at: record.updated_at,
+                        last_message_at: record
+                            .execution
+                            .and_then(|execution| execution.last_message)
+                            .map(|message| message.recorded_at),
                     }
                 })
                 .collect(),

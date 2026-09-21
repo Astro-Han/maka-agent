@@ -26,6 +26,8 @@ use serde::{Deserialize, Serialize};
 pub struct List {
     pub revision: Option<String>,
     pub cursor: Option<String>,
+    #[serde(default)]
+    pub include_archived: bool,
 }
 impl List {
     pub fn validate(&self) -> Result<(), crate::execution::CommandError> {
@@ -51,8 +53,10 @@ impl List {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Summary {
     pub session: super::View,
+    pub archived: bool,
     pub labels: Vec<String>,
     pub updated_at: u64,
+    pub last_message_at: Option<u64>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

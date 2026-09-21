@@ -42,6 +42,7 @@ pub enum Capability {
     Executions,
     Notifications,
     ReadSessions,
+    ReadHistory,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,7 +96,9 @@ impl Request {
                 if self.capabilities.iter().all(|capability| {
                     matches!(
                         capability,
-                        Capability::Notifications | Capability::ReadSessions
+                        Capability::Notifications
+                            | Capability::ReadSessions
+                            | Capability::ReadHistory
                     )
                 }) => {}
             Target::Profile => {

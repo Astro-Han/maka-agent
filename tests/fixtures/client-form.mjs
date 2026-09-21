@@ -23,7 +23,10 @@ import { access, readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { RuntimeHostRequestInterruptedError } from '../../packages/runtime-host/src/client/connection.ts';
+import {
+  RuntimeHostOperationError,
+  RuntimeHostRequestInterruptedError,
+} from '../../packages/runtime-host/src/client/connection.ts';
 import { discover, events } from './client-capability-model-fixture.mjs';
 import { watchSession } from './client-subscription.mjs';
 const sessionId = 'provider-forms';
@@ -304,13 +307,16 @@ export async function verifyForms(connection, workspace, reopened, openClient, d
       if (
         result.status === 'rejected' &&
         !/connection closed|transport.*(closed|ended)/i.test(result.reason.message) &&
-        // The verified T1-without-T2 shutdown can interrupt the close reply.
-        // A timeout or any other operation failure remains a test failure.
+        // Verified T1-without-T2 shutdown may reject close before disconnecting,
+        // or disconnect before its reply. Neither outcome reopens the subscription.
+        // Timeouts and all unrelated operation failures remain test failures.
         !(
           verifiedRootDrain &&
-          result.reason instanceof RuntimeHostRequestInterruptedError &&
           result.reason.operation === 'subscription.close' &&
-          result.reason.reason === 'connection_lost'
+          ((result.reason instanceof RuntimeHostRequestInterruptedError &&
+            result.reason.reason === 'connection_lost') ||
+            (result.reason instanceof RuntimeHostOperationError &&
+              result.reason.code === 'host_draining'))
         )
       )
         throw result.reason;

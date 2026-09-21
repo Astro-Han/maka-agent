@@ -292,6 +292,10 @@ fn allow(authority: &Authority, request: &Request) -> Result<(), OperationError>
             | Capability::ClientCapabilities => &[Operation::TurnStart],
             Capability::Notifications => &[],
             Capability::ReadSessions => &[Operation::SessionCatalogQuery],
+            Capability::ReadHistory => &[
+                Operation::SessionCatalogQuery,
+                Operation::SessionTranscriptPage,
+            ],
         };
         if required
             .iter()

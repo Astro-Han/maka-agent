@@ -293,6 +293,10 @@
   const text = (value) => (typeof value === 'function' ? value : () => value);
   const resources = (authority) => ({
     sessions: Object.freeze({ list: (input = {}) => host('sessions.list', { authority, input }) }),
+    history: Object.freeze({
+      list: (input = {}) => host('history.list', { authority, input }),
+      read: (input) => host('history.read', { authority, input }),
+    }),
     executions: Object.freeze({
       open: async () => executions(await host('execution.acquire', { authority })),
     }),

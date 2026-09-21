@@ -248,3 +248,46 @@ impl maka_plugins::session::catalog::Queries for Effects {
         })
     }
 }
+
+impl maka_plugins::session::history::Queries for Effects {
+    fn list(
+        &self,
+        call: Authority,
+        input: maka_plugins::session::catalog::List,
+    ) -> BoxFuture<
+        '_,
+        Result<maka_plugins::session::catalog::Page, maka_plugins::execution::CommandError>,
+    > {
+        Box::pin(async move {
+            let host = self
+                .host
+                .upgrade()
+                .ok_or(maka_plugins::execution::CommandError::Draining)?;
+            let _lease = self
+                .owner
+                .admit()
+                .map_err(|_| maka_plugins::execution::CommandError::Revoked)?;
+            host.plugin_history_catalog(call, input).await
+        })
+    }
+    fn read(
+        &self,
+        call: Authority,
+        input: maka_plugins::session::history::Read,
+    ) -> BoxFuture<
+        '_,
+        Result<maka_plugins::session::history::Page, maka_plugins::execution::CommandError>,
+    > {
+        Box::pin(async move {
+            let host = self
+                .host
+                .upgrade()
+                .ok_or(maka_plugins::execution::CommandError::Draining)?;
+            let _lease = self
+                .owner
+                .admit()
+                .map_err(|_| maka_plugins::execution::CommandError::Revoked)?;
+            host.plugin_history_read(call, input).await
+        })
+    }
+}

@@ -18,6 +18,7 @@
  */
 mod instructions;
 mod prompt;
+pub mod recall;
 pub mod todo;
 
 use futures_util::future::BoxFuture;

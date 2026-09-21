@@ -73,7 +73,8 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 - `submit` 在接受工作前冻结输入准备。被阻止的输入不创建回执；接受的内容和稳定回执原子提交。Remote 提交使用真实认证连接，不接受插件指定的连接 ID。
 - `enqueue({ operationId, messageId, invocation, content, placement })` 向精确的活动 Run 排队，回执跨插件替换和 Host 重启保留。`message(operationId)` 返回待投递、已取消或真实投递归属，并说明是否独占 Turn；`retract(operationId)` 不停止已投递或共享的执行。
 - `offerInteraction({ operationId, invocation, prompt })` 发布包范围的问题／表单，Host 标记请求者身份。`waitInteraction` 取消不撤回请求，`closeInteraction` 不能覆盖已提交的回答；该接口不提供权限审批。
-- `call.sessions.list({ revision?, cursor? })` 返回有界元数据分页。Agent 只看到当前 Session；独立调用需要相应范围的 `read_sessions` 授权，目录读取不授予执行权。
+- `call.sessions.list({ revision?, cursor?, includeArchived? })` 返回有界元数据分页。Agent 只看到当前 Session；独立调用需要相应范围的 `read_sessions` 授权，目录读取不授予执行权。
+- `call.history.list` 使用相同目录格式，包含归档状态和最近消息时间。已准入 Agent 调用可跨 Session 读取受信任 Host profile；Remote／后台调用需要相应范围的 `read_history` 授权。`read({ sessionId, through?, cursor? })` 返回准备进度或固定日志水位下的 UTF-8 文本分块，沿返回的水位和游标读取至 `next` 为 null。每次读取检查当前访问权和来源是否存在，不授予执行权。排序与片段组装属于消费插件。
 - Session 范围的执行命令使用稳定 operation ID：相同内容重试返回原收据，内容变化则冲突。profile Entry 不会自动获得 Session 权限。
 - `executions.submit({ orchestrationMode })` 仅选择该次执行的模式，不改变 Session 默认值。`query()` 的 `attentionId` 标识当前阻塞交互集合或交接暂停，不随无关日志写入变化。
 - `call.clients.tools()` 仅列出调用准入时冻结的客户端工具；`call.clients.call({ name, input })` 复用 Host 权限、审批／表单、取消和持久化结算。Model 与 Executor 遵守同一边界，后续发布能力或放宽权限不会扩张它。

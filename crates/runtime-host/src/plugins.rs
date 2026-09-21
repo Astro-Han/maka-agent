@@ -28,6 +28,7 @@ mod http;
 pub(crate) mod javascript;
 mod owner;
 mod process;
+pub(crate) mod recall;
 pub(crate) mod remote;
 pub(crate) mod scheduler;
 pub(crate) mod skills;

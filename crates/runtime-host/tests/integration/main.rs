@@ -72,6 +72,7 @@ mod projects;
 mod pruning;
 mod question_boundary;
 mod read_pages;
+mod recall_plugin;
 mod relay_options;
 mod remote_capacity;
 mod resume;
