@@ -52,6 +52,7 @@
 | **Skills：**`maka.skills` 拥有发现、输入准备、每步工具／上下文快照、治理、偏好 CAS、预览、导入及 workspace／user 发布；已发布的 Client Contribution 拥有 Session／新工作区选择器、管理页与草稿建议。 | Desktop 提供目标绑定的 Slot、通用 Remote 传输及授权的原生文件操作；旧扫描、导入、控制器和 Skills IPC／preload 门面已删除。Host 仅保留薄外部协议适配、准入与不可变回执，不再解析 Skill。 |
 | **WorkHub：**`maka.workhub` 拥有协调会话配置、回答组合、原生 `workhub_tasks`、路由／选择／纠正／Stop／Resume、steering／followup 及恢复策略。Session behavior 为初始及后续 Turn 一致冻结工具与 Direct／Code Mode。 | 发布的 Client 在 `packages/workhub` 中拥有完整主窗口／浮动界面，通过 Remote 及原 Host 绑定的 Session／附件端口工作。Desktop 负责原生呈现，不编排任务；Host 负责受管 Session 原子创建、精确准入、规范回执和结算。Client 换代按原身份协调待确认提交，不跨 Host epoch 重投。 |
 | **默认助手行为：**`maka.assistant` 发布默认 behavior、persona、个性化和工作区指令。 | 每逻辑模型步骤冻结来源；停用后不保留隐藏 persona。显式 Session／子任务指令独立于可替换的提示词 Contribution；执行／压缩不变量仍由 Host 维护。 |
+| **Session 待办：**`maka.todo` 拥有 `todo_read`／`todo_write`、类型化文档和输入框实时 Client。 | 公共命名空间存储提供修订检查；Remote 按调用者 Session 分页推送完整快照。停用／重启保留数据，不保留 Todo 专用 Host 服务或 Desktop IPC。 |
 | **Graph／Swarm：**已经是内置插件，behavior 按开放的类型化身份选择。Graph 使用公共授权 Session／执行命令、作用域数据和只读偏好，不接收 Host 私有句柄。 | 保持已有编排与唤醒行为；语义相同时复用窄命令，类型化领域 repository 可以保留。 |
 | **Scheduler：**插件拥有计划、冻结触发、漏触发／重试策略和通知撤销；激活只接收公共存储、授权、执行与通知能力，不使用调度专用 Host 服务。 | Host 解析授权并准入执行／原生投递。暂停撤销尚未准入的通知，包括 provider 的迟到接受；已接受执行仍归 Host。恢复复用精确 Fire 身份，不重放结果不确定的通知。现有 Desktop 操作保留为插件的薄适配。 |
 | **Web：**`maka.web` 拥有无浏览器 WebFetch、Tavily 搜索、来源选择、凭据验证与设置 Client；原生搜索通过公共 provider-tool 契约在每个模型步骤绑定。 | Host 负责授权 HTTP、代理、资源结算与命名空间凭据；Rust／JS 共用绑定，供应商结果和引用保留为规范事实。旧 Web RPC、全局设置和 Tavily 专用凭据槽已删除。 |
@@ -75,7 +76,6 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | --- | --- | --- |
 | Plan | 查询、控制、启动，规划产物、审批及转入执行；目前非 Agent collaboration mode 会被拒绝。 | **插件 + Host。** 插件拥有流程与记录，Host 拥有审批证据、授权和 Turn 准入。使用公共 Behavior 注册，不为每种流程重建执行引擎。 |
 | Goal | 查询、arm、控制、续跑、终止、预算与恢复语义。 | **插件 + Host。** Goal 决定后续提交；Host 执行已准入的硬限制并记录用量。插件退休后不能继续提交。 |
-| Session todo | `todo_read`／`todo_write` 和 `session.todo.query`。 | **插件。** 工具和 UI 使用同一份类型化 todo 状态及持久修订，不再造执行队列。 |
 | Deep research | 研究流程、进度查询、结果与恢复。 | **插件。** 复用 Graph／Swarm、Web、有界模型调用及可靠提交，不新增通用编排引擎。 |
 | Daily review／recap | daily-review 查询／修改、定时复盘、`session.recap.generate`。 | **插件 + Host。** 选择、总结及输出由插件负责，复用 Scheduler 和授权历史／模型服务；规范 Session 元数据的提交仍归 Host。 |
 | Recall | 跨 Session 片段排序检索及 RecallMore 扩展。 | **插件 + Host。** Recall 拥有排序及可重建索引；Host 提供受限历史／引用，并检查当前访问和删除状态。现有按 operation 读事件不是跨会话历史 API。Recall 不属于 Memory。 |
@@ -121,7 +121,7 @@ TS 的 LLM adapter 注册服务于插件模型调用，本身不等于主 Sessio
 
 1. **公共 API 消费者已迁移：**Skills、默认助手、Scheduler、Graph、WorkHub 与外部插件使用同等受限契约；新增消费者时维持 Rust／JS 对等。
 2. **外部验收：**JS workflow fixture 覆盖 UI 授权、持久后台工作、精确回执、停用／恢复以及跨 Host 重启的授权撤销。
-3. **缺失业务领域：**完整实现 Recall、todo，再做 Plan／Goal 和研究／复盘；完成外部 adapter、Insights／健康。复用领域边界，不先在 Host 写新业务再搬一次。
+3. **缺失业务领域：**完整实现 Recall，再做 Plan／Goal 和研究／复盘；完成外部 adapter、Insights／健康。复用领域边界，不先在 Host 写新业务再搬一次。
 4. **其余核心等价：**完成 Session 生命周期／谱系／迁入迁出、policy、接入／协作、Peer Mesh、provider 和诊断。前面消费者所需的核心命令前置到对应阶段，核心工作不等待全部插件或商店。首批领域验证边界后评估 Code Mode／工具装配迁移，不将其作为功能等价的前提。
 
 每个领域按“真实消费者及不变量 → 最小类型化 API 与消费者一起实现 → 验证生命周期和失败行为 → 删除旧 Host 业务路径”推进。

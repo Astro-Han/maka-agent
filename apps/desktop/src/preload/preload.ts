@@ -199,7 +199,6 @@ import type {
 } from '@maka/core/daily-review';
 import type { BrowserState, BrowserViewRect } from '@maka/core/browser';
 import { createBrowserSelectionCoordinator } from './browser-selection.js';
-import type { SessionTodoItem } from '@maka/core/session-todo';
 import type { DeepResearchChangedEvent, DeepResearchClientProgress } from '@maka/core/deep-research-run';
 import {
   isSessionTrace,
@@ -1869,19 +1868,6 @@ const makaBridge = {
         handler(payload);
       ipcRenderer.on('workBoard:changed', listener);
       return () => ipcRenderer.off('workBoard:changed', listener);
-    },
-  },
-  todo: {
-    read(sessionId: string): Promise<SessionTodoItem[]> {
-      return invokeProjectedSessionRuntimeHost('todo:read', sessionId);
-    },
-    subscribeChanges(handler: (event: { sessionId: string; at: number }) => void): () => void {
-      return subscribeEveryRuntimeHostEvent('todo:changed', (scope, event: { sessionId: string; at: number }) =>
-        handler({
-          ...event,
-          sessionId: recordRuntimeHostSessionScope(scope, event.sessionId),
-        }),
-      );
     },
   },
   deepResearch: {

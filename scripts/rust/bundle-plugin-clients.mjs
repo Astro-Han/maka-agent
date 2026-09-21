@@ -33,6 +33,7 @@ for (const [name, entryPoint] of [
   ['agent-graph', 'crates/graph/src/client.tsx'],
   ['skills', 'crates/skills/src/client.tsx'],
   ['web', 'crates/web/src/client.tsx'],
+  ['todo', 'crates/assistant/src/todo/client.tsx'],
   ['scheduler', 'crates/scheduler/src/client.tsx'],
   ['workhub', 'packages/workhub/src/client.tsx'],
 ]) {

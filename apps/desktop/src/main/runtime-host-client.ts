@@ -26,10 +26,6 @@ import {
   type TurnRecord,
 } from "@maka/core/session";
 import { markPersisted } from "@maka/core/persisted-value";
-import {
-  projectSessionTodoItemsForDisplay,
-  type SessionTodoItem,
-} from "@maka/core/session-todo";
 
 import type {
   ConnectionVersionBasis,
@@ -1310,12 +1306,6 @@ export class DesktopRuntimeHostClient {
     input: OperationInput<"context.compact">,
   ): Promise<OperationOutput<"context.compact">> {
     return this.request("context.compact", input);
-  }
-
-  async querySessionTodo(sessionId: string): Promise<SessionTodoItem[]> {
-    const result = await this.request("session.todo.query", { sessionId });
-    if (result.sessionId !== sessionId) throw invalidProjection("SessionTodo");
-    return projectSessionTodoItemsForDisplay(result.items);
   }
 
   queryUsage(

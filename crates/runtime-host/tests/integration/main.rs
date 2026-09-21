@@ -81,6 +81,7 @@ mod scheduler_plugin;
 mod skills_management;
 mod skills_plugin;
 mod system_prompt;
+mod todo_plugin;
 mod transcript_limits;
 mod transcript_pager;
 mod web_plugin;

@@ -33,6 +33,7 @@ pub(crate) mod scheduler;
 pub(crate) mod skills;
 pub(crate) mod storage;
 mod terminal;
+pub(crate) mod todo;
 pub(crate) mod web;
 pub mod wire;
 pub(crate) mod workhub;

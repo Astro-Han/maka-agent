@@ -455,7 +455,6 @@ test('goal:arm takes the Session from the scoped channel and refuses any other k
 test('adapts Host Goal, Task, Deep Research, and Resource projections', async () => {
   const controls: unknown[] = [];
   const client = domainClient({
-    querySessionTodo: async () => [{ content: 'todo-1', status: 'pending' }] as never,
     listRuntimeResources: async () => [{ sessionId: 'session-1', result: { ref: 'shell:1' } }] as never,
     queryGoal: async () => ({
       sessionId: 'session-1',
@@ -472,7 +471,6 @@ test('adapts Host Goal, Task, Deep Research, and Resource projections', async ()
   const ipc = ipcHarness();
   registerDomainsIpc({ client, emitModeChanged() {} }, ipc);
 
-  assert.equal(((await ipc.invoke('todo:read', 'session-1')) as Array<{ content: string }>)[0]?.content, 'todo-1');
   assert.equal(
     ((await ipc.invoke('shell-runs:list', 'session-1')) as Array<{ result: { ref: string } }>)[0]
       ?.result.ref,
@@ -1072,10 +1070,6 @@ test('publishes typed invalidations and refreshes only changed Runtime Resources
   assert.deepEqual(gets, [{ sessionId: 'session-1', ref: update.result.ref }]);
   assert.deepEqual(sent, [
     {
-      channel: 'todo:changed',
-      payload: { sessionId: 'session-1', at: 12 },
-    },
-    {
       channel: 'deepResearch:changed',
       payload: { sessionId: 'session-1', ts: 12 },
     },
@@ -1114,10 +1108,6 @@ test('publishes typed invalidations and refreshes only changed Runtime Resources
   sent.length = 0;
   handle.sessionSubscriptionRecovered('session-1');
   assert.deepEqual(sent, [
-    {
-      channel: 'todo:changed',
-      payload: { sessionId: 'session-1', at: 12 },
-    },
     {
       channel: 'deepResearch:changed',
       payload: { sessionId: 'session-1', ts: 12 },
@@ -1223,7 +1213,6 @@ function domainClient(overrides: Partial<DomainClient>): DomainClient {
     listRuntimeResources: unavailable,
     listAgentGraphEpochs: unavailable,
     listCurrentAgentGraphEpochs: unavailable,
-    querySessionTodo: unavailable,
     queryAgentGraph: unavailable,
     queryAgentGraphOperator: unavailable,
     queryDeepResearch: unavailable,

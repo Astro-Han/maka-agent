@@ -23,6 +23,7 @@
     "../workhub/src/styles.d.ts",
     "../../crates/skills/src/client.tsx",
     "../../crates/web/src/client.tsx",
+    "../../crates/assistant/src/todo/client.tsx",
     "../../crates/scheduler/src/client.tsx"
   ]
 }

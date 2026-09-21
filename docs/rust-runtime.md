@@ -288,6 +288,15 @@ to 5 MiB, extracted text to 50 KiB and redirects to ten; clipped output is expli
 Tavily queries accept 1–200 characters and return at most ten results, with omitted
 results and clipped snippets marked. Incognito mode withdraws both tools.
 
+## Session checklist
+
+The `maka.todo` plugin publishes `todo_read` and `todo_write`, discovered through
+tool search. Tools and the composer checklist share plugin-scoped storage.
+Writes replace the whole list using revision checks; concurrent changes are rejected.
+Each Session holds up to 200 items of 200 characters each. Completion is reported
+by the model, not verified execution evidence. Disabling the plugin withdraws its
+tools and UI without deleting the checklist; re-enabling or restarting restores it.
+
 ## Code layout
 
 All crates are in `crates/`; directory names describe their responsibilities.

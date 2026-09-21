@@ -216,7 +216,6 @@ operations! {
     SessionRevisionAbandon => ("session.revision.abandon", Command, Ready),
     SessionRevisionCreate => ("session.revision.create", Command, Ready),
     SessionSharedQuery => ("session.shared.query", Query, Ready),
-    SessionTodoQuery => ("session.todo.query", Query, Ready),
     SubscriptionReady => ("subscription.ready", Control, Ready),
     SessionTranscriptPage => ("session.transcript.page", Query, Ready),
     SessionTurnLandmarksQuery => ("session.turn_landmarks.query", Query, Ready),

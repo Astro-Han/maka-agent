@@ -468,15 +468,6 @@ test('drives bounded Session domain projections through real UDS framing', async
       idleGraceMs: 10_000,
       composition: defineInteractiveRuntimeHostComposition(async () => ({
         handlers: handlers({
-          'session.todo.query': async (input) => ({
-            ok: true,
-            result: {
-              sessionId: input.sessionId,
-              items: [
-                { content: 'Verify the Desktop adapter', status: 'in_progress' },
-              ],
-            },
-          }),
           'plan.query': async (input) => ({
             ok: true,
             result: {
@@ -530,10 +521,6 @@ test('drives bounded Session domain projections through real UDS framing', async
       ipc,
     );
 
-    assert.equal(
-      ((await ipc.invoke('todo:read', 'session-1')) as Array<{ content: string }>)[0]?.content,
-      'Verify the Desktop adapter',
-    );
     assert.deepEqual(await ipc.invoke('plan-mode:getState', 'session-1'), {
       schemaVersion: 1,
       sessionId: 'session-1',

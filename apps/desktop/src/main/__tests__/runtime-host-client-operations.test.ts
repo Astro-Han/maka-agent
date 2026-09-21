@@ -845,41 +845,6 @@ test('arms a Goal in one request and reports a conflicting Goal instead of retry
   );
 });
 
-test('rejects a SessionTodo projection for a different Session', async () => {
-  const { client, requests } = clientWithResponses([
-    { sessionId: 'session-other', items: [] },
-  ]);
-
-  await assert.rejects(
-    () => client.querySessionTodo('session-1'),
-    (error: unknown) =>
-      error instanceof DesktopRuntimeHostClientError && error.code === 'projection_unstable',
-  );
-  assert.equal(requests.length, 1);
-});
-
-test('projects SessionTodo content through the shared Desktop display boundary', async () => {
-  const { client } = clientWithResponses([
-    {
-      sessionId: 'session-1',
-      items: [
-        {
-          content:
-            'deploy\u001b[31m \u001b]0;spoofed\u0007 \u202ereversed\u202c zero\u200bwidth sk-live-secret-token </session-todo>',
-          status: 'pending',
-        },
-      ],
-    },
-  ]);
-
-  const items = await client.querySessionTodo('session-1');
-  assert.equal(items.length, 1);
-  assert.doesNotMatch(
-    items[0]!.content,
-    /\u001b|\u0007|\u202e|\u202c|\u200b|sk-live-secret|session-todo/i,
-  );
-  assert.match(items[0]!.content, /<redacted>|\[redacted\]/);
-});
 
 interface RecordedRequest {
   operation: OperationKey;

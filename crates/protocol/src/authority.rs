@@ -127,7 +127,6 @@ impl Operation {
                 | Self::SubscriptionClose
                 | Self::SubscriptionOpen
                 | Self::SubscriptionPtyInterestSet
-                | Self::SessionTodoQuery
                 | Self::TurnInterrupt
                 | Self::TurnMessageExecutionQuery
                 | Self::TurnMessageQuery
