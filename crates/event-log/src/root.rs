@@ -19,7 +19,6 @@
 
 //! Disposable Rust roots only. The discovery marker and both owner leases match TypeScript.
 
-#[path = "root_lock.rs"]
 mod lock;
 pub use lock::{FileLease, private_directory};
 

@@ -20,13 +20,9 @@
 //! Session catalog and retirement wire contracts.
 //! Use the decode functions at the JSON boundary; they enforce semantic limits
 //! in addition to the owned serde representations.
-#[path = "session_configuration.rs"]
 mod configuration;
-#[path = "session_mutation.rs"]
 mod mutation;
-#[path = "session_types.rs"]
 mod types;
-#[path = "session_validation.rs"]
 mod validation;
 use crate::{ProtocolError, Result};
 pub use configuration::*;

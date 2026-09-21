@@ -25,7 +25,7 @@ use maka_runtime::event::Fact;
 use serde::{Deserialize, Serialize};
 use text::{TextPage, Window};
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(in crate::plugin) enum Part {
     #[default]

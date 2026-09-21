@@ -23,8 +23,6 @@ mod events;
 mod failure;
 pub use failure::{ProviderFailure, ProviderFailureReason};
 pub mod oauth;
-#[cfg(test)]
-mod overflow_tests;
 pub mod prompt;
 pub mod reasoning;
 mod responses;

@@ -33,9 +33,10 @@ pub const DESCRIPTION: &str = "Read a file or a Maka resource using path. PNG, J
 const PREFIX: &str = "maka://read/";
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
+    #[schemars(length(min = 1))]
     #[serde(deserialize_with = "nonempty_path")]
     pub path: String,
     #[serde(
@@ -43,12 +44,14 @@ pub struct ReadInput {
         deserialize_with = "present_offset",
         skip_serializing_if = "Option::is_none"
     )]
+    #[schemars(with = "usize", range(max = MAX_SAFE_INTEGER))]
     pub offset: Option<usize>,
     #[serde(
         default,
         deserialize_with = "present_limit",
         skip_serializing_if = "Option::is_none"
     )]
+    #[schemars(with = "NonZeroUsize", range(max = MAX_SAFE_INTEGER))]
     pub limit: Option<NonZeroUsize>,
 }
 

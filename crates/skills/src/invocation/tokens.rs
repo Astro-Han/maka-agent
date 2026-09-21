@@ -17,11 +17,8 @@
  * under the License.
  */
 
-use crate::fields;
-use maka_runtime::{
-    input::{InlineReference, InlineReferenceKind},
-    skills::SkillInvocationReceipt,
-};
+use crate::{SkillInvocationReceipt, fields};
+use maka_runtime::input::{InlineReference, InlineReferenceKind};
 use std::{collections::HashMap, ops::Range};
 
 pub(super) struct Token<'a> {
@@ -97,7 +94,7 @@ pub fn inline_references(
     let mut by_name = HashMap::new();
     for receipt in receipts {
         if let SkillInvocationReceipt::Loaded(receipt) = receipt
-            && receipt.invocation == maka_runtime::skills::SkillInvocationMode::Explicit
+            && receipt.invocation == crate::SkillInvocationMode::Explicit
         {
             by_name.insert(receipt.request.to_lowercase(), receipt);
             by_name.insert(receipt.id.to_lowercase(), receipt);

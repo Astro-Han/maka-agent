@@ -120,8 +120,6 @@ pub struct ToolComposition {
     pub private_clients: std::collections::BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bound_tools: Option<std::collections::BTreeSet<String>>,
-    /// None for fixed profiles without Skill / SkillSearch handlers.
-    pub skills_digest: Option<String>,
 }
 
 /// Host-owned handlers retain their access boundary across recovery. A plugin

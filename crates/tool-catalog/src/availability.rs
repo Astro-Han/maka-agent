@@ -20,7 +20,7 @@
 use crate::{PreparedEffect, ToolCatalog, ToolDefinition};
 use maka_runtime::{tool_call::ToolRejection, tools::ToolError};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     collections::BTreeSet,
     sync::{Arc, Mutex},
@@ -34,11 +34,13 @@ pub struct Availability {
     active: Arc<Mutex<BTreeSet<String>>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SearchInput {
+    #[schemars(length(min = 1))]
     query: String,
     #[serde(default = "default_limit")]
+    #[schemars(range(min = 1, max = 20))]
     limit: usize,
 }
 fn default_limit() -> usize {
@@ -196,7 +198,7 @@ impl Availability {
                 "Search available capabilities by name or description. Activated tools become callable on the next model step, never in the same batch or JavaScript cell. A successful context compaction unloads them. Inventory: {}.",
                 names.join(", ")
             ),
-            input_schema: json!({"type":"object","properties":{"query":{"type":"string","minLength":1},"limit":{"type":"integer","minimum":1,"maximum":20}},"required":["query"],"additionalProperties":false}),
+            input_schema: schemars::schema_for!(SearchInput).into(),
         })
     }
     pub fn prepare_search(&self, input: &Value) -> Result<PreparedEffect, ToolRejection> {

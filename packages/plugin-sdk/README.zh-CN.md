@@ -48,6 +48,8 @@ export default activate;
 
 Prompt 回调接收类型化的 Session 或模型步骤上下文，不伪造工具调用权限。section 和动态 context 默认解析模板；已解析内容或用户文本使用 `format: 'plain'`。一个 `complete` section 替换其它提示词 Contribution，不删除显式 Session／子任务指令。物理重试复用同一份冻结组合。
 
+`ctx.background.pending(name, wake)` 在插件仍有工作时阻止 Host 空闲退出。空闲后关闭注册；重新激活时恢复持久意图并重新注册。它不授予权限，也不阻止显式关闭或升级。系统唤醒回调串行执行、合并重复通知，接收取消信号，并可关闭自己的注册。Rust 插件发布同一 `BackgroundWork` Contribution，以同步投影报告待办状态；仅使用 `ctx.run` 不会让 Host 常驻。
+
 Prompt 回调通过 `call.workspace`、输入准备通过 `request.workspace` 取得有界的目录只读视图。视图随回调结束失效，不能写入、执行命令、越过工作区或保留给后台工作。`ctx.inputs.names()` 列出显式挂载的非敏感输入；`ctx.inputs.at(name)` 提供相同的 read/list 接口，只开放选定文件或子树并随插件退休失效。默认允许边界内的符号链接；`symlinks: 'reject'` 可拒绝末端链接，挂载白名单也约束链接目标。
 
 `call.files.entries` 与 `ctx.data` 共用有界字节／目录操作：read、write、list、stat、createDirectory、sync、remove 和禁止覆盖目标的 rename。路径必须相对根目录，不跟随链接，父目录需已存在；写入支持 `createNew` 和普通权限位。读取／列目录观察退休信号，已准入写入继续结算。事务与崩溃恢复由插件负责。`{ kind: 'directory', path }` 授权只允许文件访问，不创建工作区标记；目录被替换后授权失效。`withAuthorization(id, (call, grant, boundary) => ...)` 同时提供当前授权的观察信息。只读视图的 `location()` 用于展示或提出授权申请，不授予路径访问权限。

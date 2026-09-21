@@ -18,7 +18,7 @@
  */
 
 use crate::{Catalog, LoadedInstructions, fields};
-use maka_runtime::skills::{
+use crate::{
     LoadedSkill, SkillFailedReceipt, SkillFailureReason, SkillInvocationFailure,
     SkillInvocationMode, SkillInvocationReceipt, SkillInvocationResult, SkillLoadedReceipt,
     SkillOverflowFailure, SkillRequestFailure, TooManyRequests,

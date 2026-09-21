@@ -30,6 +30,7 @@ ryu-js = "1"
 sha2.workspace = true
 url = "2"
 serde.workspace = true
+schemars.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

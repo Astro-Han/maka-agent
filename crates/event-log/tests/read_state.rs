@@ -116,7 +116,7 @@ async fn active_ack_finalization_replay_and_rebuild_preserve_durable_control() {
     log.close().await.unwrap();
     let source = rusqlite::Connection::open(&path).unwrap();
     source
-        .execute_batch("DROP TABLE catalog_messages;")
+        .execute_batch("DELETE FROM catalog_messages;")
         .unwrap();
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(

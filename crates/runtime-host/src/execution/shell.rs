@@ -41,20 +41,19 @@ pub(super) use stdin::{NAME as WRITE_STDIN_NAME, schema as write_stdin_schema};
 use tokio_util::sync::CancellationToken;
 
 pub(super) fn schema() -> Value {
-    let mut schema = maka_process::shell_schema();
-    schema["properties"]["timeout_ms"]["maximum"] = json!(86_400_000);
-    schema["properties"]["run_in_background"] = json!({"type":"boolean"});
-    schema["properties"]["pty"] = json!({"type":"boolean","description":"Allocate a terminal; requires run_in_background=true."});
-    schema
+    schemars::schema_for!(Input).into()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Input {
+    #[schemars(length(min = 1, max = 65536))]
     command: String,
+    #[schemars(range(min = 1, max = 86_400_000))]
     timeout_ms: Option<u64>,
     #[serde(default)]
     run_in_background: bool,
+    /// Allocate a terminal; requires run_in_background=true.
     #[serde(default)]
     pty: bool,
 }

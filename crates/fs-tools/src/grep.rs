@@ -36,17 +36,22 @@ pub const GREP_NAME: &str = "Grep";
 pub const GREP_DESCRIPTION: &str = "Search file contents with a ripgrep-compatible regular expression. Optional path selects a file or directory; glob filters files. Returns matches and complete. At most 200 matching lines, 50 per file; complete=false means limits left matches or paths unscanned, so narrow the pattern or path before treating results as exhaustive. Hidden, binary and ignored files are excluded during directory traversal. No fuzzy fallback.";
 
 pub fn grep_schema() -> Value {
-    json!({"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},
-        "glob":{"type":"string"}},"required":["pattern"],"additionalProperties":false})
+    schemars::schema_for!(Input).into()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Input {
+    #[schemars(length(max = 8192))]
     pattern: String,
     #[serde(default = "default_path")]
     path: String,
-    #[serde(default, deserialize_with = "present")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "String", length(max = 4096))]
     glob: Option<String>,
 }
 fn default_path() -> String {

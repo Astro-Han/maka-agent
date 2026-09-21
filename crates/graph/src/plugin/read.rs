@@ -34,13 +34,14 @@ use maka_runtime::event::InvocationOutcome;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Cursor {
+    #[schemars(range(min = 1))]
     revision: u64,
     work_id: WorkId,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -64,6 +65,7 @@ pub(super) enum Query {
         offset: usize,
     },
     Epochs {
+        #[schemars(range(min = 1))]
         before: Option<u64>,
     },
     Snapshot {

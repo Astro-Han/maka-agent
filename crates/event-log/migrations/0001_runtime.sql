@@ -316,6 +316,87 @@ CREATE TABLE host_effects (
 
 CREATE INDEX host_effects_namespace ON host_effects(package_id, scope_id);
 
+-- Query-independent text projection; canonical events remain authoritative.
+CREATE TABLE transcript_text (
+    sequence INTEGER PRIMARY KEY,
+    timestamp INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    body BLOB NOT NULL
+);
+
+CREATE TABLE message_sources (
+    session_id TEXT NOT NULL, message_id TEXT NOT NULL, event_id TEXT NOT NULL,
+    PRIMARY KEY(session_id, message_id)
+);
+
+CREATE TABLE transcript_rows (
+    sequence INTEGER PRIMARY KEY CHECK(sequence >= 0),
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    digest TEXT NOT NULL,
+    total_bytes INTEGER NOT NULL CHECK(total_bytes > 0),
+    UNIQUE(session_id, message_id)
+);
+
+CREATE INDEX transcript_session_sequence
+    ON transcript_rows(session_id, sequence);
+
+CREATE INDEX transcript_session_turn
+    ON transcript_rows(session_id, turn_id, sequence);
+
+CREATE TABLE transcript_progress (
+    session_id TEXT PRIMARY KEY,
+    through_sequence INTEGER NOT NULL CHECK(through_sequence >= 0)
+);
+
+CREATE INDEX catalog_message_facts ON event_log(
+    json_extract(event_json, '$.invocation.session_id'), kind, sequence
+) WHERE kind IN ('invocation_opened', 'model_completed');
+
+CREATE INDEX catalog_part_starts ON event_log(
+    json_extract(event_json, '$.invocation.session_id'), invocation_id,
+    json_extract(event_json, '$.fact.step_id'), sequence
+) WHERE kind = 'model_observed'
+    AND json_extract(event_json, '$.fact.event.kind') = 'part_started';
+
+CREATE TABLE catalog_messages (
+    sequence INTEGER NOT NULL, ordinal INTEGER NOT NULL, session_id TEXT NOT NULL,
+    message_at INTEGER NOT NULL, preview TEXT, message_id TEXT NOT NULL,
+    PRIMARY KEY (sequence, ordinal)
+);
+
+CREATE INDEX catalog_visible_tail ON catalog_messages(
+    session_id, sequence DESC, ordinal DESC
+);
+
+CREATE INDEX catalog_latest_message ON catalog_messages(
+    session_id, message_at DESC, sequence DESC, ordinal DESC
+);
+
+CREATE INDEX catalog_latest_preview ON catalog_messages(
+    session_id, message_at DESC, sequence DESC, ordinal DESC
+) WHERE preview IS NOT NULL;
+
+CREATE TABLE catalog_message_watermark(
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1), sequence INTEGER NOT NULL
+);
+
+CREATE INDEX catalog_partial_deltas ON event_log(
+    invocation_id, json_extract(event_json, '$.fact.step_id'),
+    json_extract(event_json, '$.fact.event.data.id'), sequence
+) WHERE kind = 'model_observed'
+    AND json_extract(event_json, '$.fact.event.kind') = 'part_delta';
+
+CREATE INDEX catalog_model_boundaries ON event_log(
+    invocation_id, kind, sequence
+) WHERE kind IN ('model_requested', 'model_completed', 'model_interrupted');
+
+CREATE INDEX navigation_boundaries ON event_log(
+    json_extract(event_json, '$.invocation.session_id'), kind, sequence
+) WHERE kind IN ('invocation_opened', 'invocation_ended');
+
 INSERT INTO session_catalog_revision VALUES (1, 0);
 INSERT INTO plugin_composition VALUES (1, '{"generation":0,"packageLayers":[],"overlays":[]}');
 

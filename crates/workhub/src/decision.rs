@@ -38,7 +38,7 @@ pub struct Creation {
     pub settings: RootSettings,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -46,10 +46,18 @@ pub struct Creation {
     deny_unknown_fields
 )]
 pub enum Destination {
-    Existing { revision: String, candidate: String },
-    Create { title: String },
+    Existing {
+        #[schemars(length(min = 1, max = 256))]
+        revision: String,
+        #[schemars(length(min = 1, max = 256))]
+        candidate: String,
+    },
+    Create {
+        #[schemars(length(min = 1, max = 512))]
+        title: String,
+    },
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "operation",
     rename_all = "snake_case",
@@ -58,23 +66,31 @@ pub enum Destination {
 )]
 pub enum Decision {
     Select {
+        #[schemars(length(min = 1, max = 256))]
         revision: String,
+        #[schemars(length(min = 2, max = 16), inner(length(min = 1, max = 256)), extend("uniqueItems" = true))]
         candidates: Vec<String>,
+        #[schemars(length(min = 1, max = 49152))]
         text: String,
     },
     Route {
         target: Destination,
+        #[schemars(length(min = 1, max = 49152))]
         text: String,
     },
     Correct {
+        #[schemars(length(min = 1, max = 256))]
         assignment_id: String,
         target: Destination,
+        #[schemars(length(min = 1, max = 49152))]
         text: String,
     },
     Stop {
+        #[schemars(length(min = 1, max = 256))]
         assignment_id: String,
     },
     Resume {
+        #[schemars(length(min = 1, max = 256))]
         assignment_id: String,
     },
 }

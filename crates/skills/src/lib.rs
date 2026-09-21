@@ -26,7 +26,9 @@ mod fields;
 mod invocation;
 pub mod plugin;
 pub mod publication;
+mod types;
 mod yaml;
+pub use types::*;
 
 pub use catalog::{Catalog, HostCapabilities, LoadedInstructions, Preference, Preferences};
 pub use context::{SearchMatch, SearchResult, SkillMetadata};

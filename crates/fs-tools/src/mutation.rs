@@ -30,32 +30,30 @@ pub(crate) const MAX_CONTENT: usize = 1024 * 1024;
 pub(crate) const MAX_PATH: usize = 4096;
 
 pub fn write_schema() -> Value {
-    json!({"type":"object","properties":{
-        "path":{"type":"string","minLength":1,"maxLength":MAX_PATH},
-        "content":{"type":"string","maxLength":MAX_CONTENT}
-    },"required":["path","content"],"additionalProperties":false})
+    schemars::schema_for!(WriteInput).into()
 }
 
 pub fn edit_schema() -> Value {
-    json!({"type":"object","properties":{
-        "path":{"type":"string","minLength":1,"maxLength":MAX_PATH},
-        "old_string":{"type":"string","minLength":1,"maxLength":MAX_CONTENT},
-        "new_string":{"type":"string","maxLength":MAX_CONTENT}
-    },"required":["path","old_string","new_string"],"additionalProperties":false})
+    schemars::schema_for!(EditInput).into()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteInput {
+    #[schemars(length(min = 1, max = MAX_PATH))]
     path: String,
+    #[schemars(length(max = MAX_CONTENT))]
     content: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EditInput {
+    #[schemars(length(min = 1, max = MAX_PATH))]
     path: String,
+    #[schemars(length(min = 1, max = MAX_CONTENT))]
     old_string: String,
+    #[schemars(length(max = MAX_CONTENT))]
     new_string: String,
 }
 

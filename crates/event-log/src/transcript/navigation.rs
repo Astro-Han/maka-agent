@@ -22,7 +22,7 @@ use maka_presentation::{
     navigation::{RecordedTurnState, TurnContribution, TurnLandmark, TurnStateMessage, truncate},
     watermark,
 };
-use sqlx::{Connection, Row, SqliteConnection};
+use sqlx::{Connection, Row};
 use std::collections::HashMap;
 
 mod queries;
@@ -259,17 +259,6 @@ pub(crate) fn register(connection: &rusqlite::Connection) -> Result<(), StoreErr
     Ok(())
 }
 
-pub(crate) async fn initialize(connection: &mut SqliteConnection) -> Result<(), StoreError> {
-    // Tiny canonical headers support settled queries without scanning token payloads.
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS navigation_boundaries ON event_log(
-        json_extract(event_json, '$.invocation.session_id'), kind, sequence
-    ) WHERE kind IN ('invocation_opened', 'invocation_ended')",
-    )
-    .execute(connection)
-    .await?;
-    Ok(())
-}
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidTransition(message.into())
 }

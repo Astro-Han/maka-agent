@@ -164,7 +164,6 @@ impl Executions {
                     native_tools: Default::default(),
                     private_clients: Default::default(),
                     bound_tools: session.bound_tools.clone(),
-                    skills_digest: None,
                 },
                 bindings: Some(bindings),
                 digest: record.configuration_digest,
@@ -291,7 +290,6 @@ impl Executions {
                 native_tools: behavior.native_tools,
                 private_clients,
                 bound_tools: ceiling,
-                skills_digest: None,
             },
             bindings: Some(bindings),
             backend: Backend::Model(Box::new(ModelEnvironment {

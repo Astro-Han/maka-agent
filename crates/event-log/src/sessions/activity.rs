@@ -22,7 +22,6 @@ use crate::StoreError;
 use sqlx::{Connection, SqliteConnection};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[path = "partial.rs"]
 mod partial;
 
 pub(crate) fn register_functions(connection: &rusqlite::Connection) -> Result<(), StoreError> {
@@ -44,59 +43,26 @@ pub(crate) fn register_functions(connection: &rusqlite::Connection) -> Result<()
 pub(crate) async fn initialize_execution(
     connection: &mut SqliteConnection,
 ) -> Result<(), StoreError> {
-    partial::initialize(connection).await?;
-    sqlx::raw_sql(
-        "CREATE INDEX IF NOT EXISTS catalog_message_facts ON event_log(
-            json_extract(event_json, '$.invocation.session_id'), kind, sequence
-         ) WHERE kind IN ('invocation_opened', 'model_completed');
-         CREATE INDEX IF NOT EXISTS catalog_part_starts ON event_log(
-            json_extract(event_json, '$.invocation.session_id'), invocation_id,
-            json_extract(event_json, '$.fact.step_id'), sequence
-         ) WHERE kind = 'model_observed'
-           AND json_extract(event_json, '$.fact.event.kind') = 'part_started';",
-    )
-    .execute(&mut *connection)
-    .await?;
-
-    // This cache and its watermark are disposable. Rebuild if either is absent;
-    // creation, backfill, and its fence commit atomically before serving readers.
+    // Only data is disposable; SQLx owns the schema. Rebuild a cleared cache
+    // or watermark in the same transaction before exposing catalog readers.
     let mut tx = connection.begin().await?;
     let complete: bool = sqlx::query_scalar(
-        "SELECT count(*) = 2 FROM sqlite_schema WHERE type = 'table'
-         AND name IN ('catalog_messages', 'catalog_message_watermark')",
+        "SELECT EXISTS(SELECT 1 FROM catalog_messages)
+            AND EXISTS(SELECT 1 FROM catalog_message_watermark WHERE singleton = 1)",
     )
     .fetch_one(&mut *tx)
     .await?;
     if !complete {
         sqlx::raw_sql(
-            "DROP TABLE IF EXISTS catalog_messages;
-             DROP TABLE IF EXISTS catalog_message_watermark;",
+            "DELETE FROM catalog_messages;
+             DELETE FROM catalog_message_watermark;",
         )
         .execute(&mut *tx)
         .await?;
     }
-    sqlx::raw_sql(
-        "CREATE TABLE IF NOT EXISTS catalog_messages (
-            sequence INTEGER NOT NULL, ordinal INTEGER NOT NULL, session_id TEXT NOT NULL,
-            message_at INTEGER NOT NULL, preview TEXT, message_id TEXT NOT NULL,
-            PRIMARY KEY (sequence, ordinal)
-         );
-         CREATE INDEX IF NOT EXISTS catalog_visible_tail ON catalog_messages(
-            session_id, sequence DESC, ordinal DESC
-         );
-         CREATE INDEX IF NOT EXISTS catalog_latest_message ON catalog_messages(
-            session_id, message_at DESC, sequence DESC, ordinal DESC
-         );
-         CREATE INDEX IF NOT EXISTS catalog_latest_preview ON catalog_messages(
-            session_id, message_at DESC, sequence DESC, ordinal DESC
-         ) WHERE preview IS NOT NULL;
-         CREATE TABLE IF NOT EXISTS catalog_message_watermark(
-            singleton INTEGER PRIMARY KEY CHECK(singleton = 1), sequence INTEGER NOT NULL
-         );
-         INSERT OR IGNORE INTO catalog_message_watermark VALUES (1, 0);",
-    )
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("INSERT OR IGNORE INTO catalog_message_watermark VALUES (1, 0)")
+        .execute(&mut *tx)
+        .await?;
     let mut through: i64 =
         sqlx::query_scalar("SELECT sequence FROM catalog_message_watermark WHERE singleton = 1")
             .fetch_one(&mut *tx)

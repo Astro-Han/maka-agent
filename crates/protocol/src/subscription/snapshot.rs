@@ -19,9 +19,7 @@
 
 //! Outbound schema-5 observation slice, including ClientCapability interactions.
 //! This is deliberately not a full snapshot decoder.
-#[path = "goal.rs"]
 mod goal;
-#[path = "queue.rs"]
 mod queue;
 use super::{
     SUBSCRIPTION_FRAME_MAX_BYTES, SessionAssistantStreamIdentity, SubscriptionOpenInput,

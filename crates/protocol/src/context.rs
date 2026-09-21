@@ -18,7 +18,6 @@
  */
 
 //! Context compaction and latest completed request diagnostics wire contracts.
-#[path = "context_diagnostics.rs"]
 mod diagnostics;
 use crate::{
     ProtocolError, Result, codec,

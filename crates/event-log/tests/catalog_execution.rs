@@ -245,7 +245,7 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
     // The message cache is disposable even when its watermark survives. A cold
     // rebuild must recover identical facts without rewriting the source log.
     source
-        .execute_batch("DROP TABLE catalog_messages;")
+        .execute_batch("DELETE FROM catalog_messages;")
         .unwrap();
     let log = EventLog::open(&path).await.unwrap();
     let ended = log.get_session::<Value>("a").await.unwrap().unwrap();
@@ -307,7 +307,7 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
     log.close().await.unwrap();
     // Rebuild commit-order guards from canonical facts, not max(time)/latest(text).
     source
-        .execute_batch("DROP TABLE catalog_message_watermark;")
+        .execute_batch("DELETE FROM catalog_message_watermark;")
         .unwrap();
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(

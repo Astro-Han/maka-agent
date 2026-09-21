@@ -233,7 +233,7 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
         }
         db.execute("DELETE FROM transcript_rows", []).unwrap();
         db.execute("DELETE FROM transcript_progress", []).unwrap();
-        db.execute("DROP TABLE catalog_message_watermark", [])
+        db.execute("DELETE FROM catalog_message_watermark", [])
             .unwrap();
         log.close().await.unwrap();
         let reopened = EventLog::open(&path).await.unwrap();

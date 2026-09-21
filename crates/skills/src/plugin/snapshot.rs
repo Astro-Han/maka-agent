@@ -18,11 +18,8 @@
  */
 
 use super::Error;
-use crate::{Catalog, HostCapabilities, Preferences, PreparedInvocation};
-use maka_runtime::{
-    input::{InlineReferenceKind, MessageInput},
-    skills::SkillInvocationResult,
-};
+use crate::{Catalog, HostCapabilities, Preferences, PreparedInvocation, SkillInvocationResult};
+use maka_runtime::input::{InlineReferenceKind, MessageInput};
 use std::collections::BTreeSet;
 
 mod model;

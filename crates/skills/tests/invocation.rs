@@ -17,11 +17,11 @@
  * under the License.
  */
 
-use maka_runtime::skills::{SkillInvocationResult, SkillScope, SkillSource};
 use maka_skills::{
     Catalog, DiscoveredSkill, DiscoverySnapshot, HostCapabilities, Preference, Preferences,
     PreparedInvocation, SkillLocation, inline_references, parse,
 };
+use maka_skills::{SkillInvocationResult, SkillScope, SkillSource};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,

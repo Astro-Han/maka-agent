@@ -37,17 +37,16 @@ pub const GLOB_NAME: &str = "Glob";
 pub const GLOB_DESCRIPTION: &str = "Find paths matching a Unix glob (*, ?, **, character classes), relative to the search directory. Returns files and complete, with at most 200 paths; complete=false means some paths were not scanned. Wildcard matching is case-insensitive on macOS and Windows, case-sensitive on Linux. Hidden names require an explicit dot; recursive wildcards do not follow directory symlinks. cwd is limited to the Session's admitted filesystem roots.";
 
 pub fn glob_schema() -> Value {
-    json!({"type":"object","properties":{
-        "pattern":{"type":"string","minLength":1},
-        "cwd":{"type":"string","minLength":1}
-    },"required":["pattern"],"additionalProperties":false})
+    schemars::schema_for!(Input).into()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Input {
+    #[schemars(length(min = 1))]
     pattern: String,
     #[serde(default = "default_cwd")]
+    #[schemars(length(min = 1))]
     cwd: String,
 }
 fn default_cwd() -> String {

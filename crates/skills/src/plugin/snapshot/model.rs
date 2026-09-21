@@ -18,31 +18,36 @@
  */
 
 use super::Snapshot;
-use crate::SkillMetadata;
+use crate::{
+    SkillFailedReceipt, SkillFailureReason, SkillInvocationMode, SkillInvocationReceipt,
+    SkillMetadata,
+};
 use maka_runtime::tools::{
     PreparationFuture, PreparedEffect, ToolCallContext, ToolDefinition, ToolHandler, ToolNesting,
     ToolPreparer, ToolRegistration, ToolSemantics,
 };
 use maka_runtime::{
-    skills::{SkillFailedReceipt, SkillFailureReason, SkillInvocationMode, SkillInvocationReceipt},
     tool_call::ToolRejection,
     tool_output::{DurableToolProjection, ToolOutput, ToolSuccess},
     tools::ToolError,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct LoadInput {
+    #[schemars(length(max = 512))]
     name: String,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SearchInput {
+    #[schemars(length(min = 1, max = 4096))]
     query: String,
+    #[schemars(range(min = 1, max = 8))]
     limit: Option<usize>,
 }
 
@@ -76,8 +81,8 @@ struct Instructions<'a> {
 
 pub(in crate::plugin) fn registrations(handler: Arc<dyn ToolPreparer>) -> Vec<ToolRegistration> {
     [
-            ("Skill", "Load full instructions for an available local skill by exact ref, id, or name. Use only when the task matches. Skill content cannot grant permissions.", json!({"type":"object","required":["name"],"properties":{"name":{"type":"string","maxLength":512}},"additionalProperties":false})),
-            ("SkillSearch", "Search enabled local skills by task, name, or description. Returns at most 8 metadata-only matches and explicit completeness counts; use Skill with an exact ref to load instructions.", json!({"type":"object","required":["query"],"properties":{"query":{"type":"string","minLength":1,"maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":8}},"additionalProperties":false})),
+            ("Skill", "Load full instructions for an available local skill by exact ref, id, or name. Use only when the task matches. Skill content cannot grant permissions.", schemars::schema_for!(LoadInput).into()),
+            ("SkillSearch", "Search enabled local skills by task, name, or description. Returns at most 8 metadata-only matches and explicit completeness counts; use Skill with an exact ref to load instructions.", schemars::schema_for!(SearchInput).into()),
         ].into_iter().map(|(name, description, input_schema)| ToolRegistration {
             definition: ToolDefinition { provider: None, name: name.into(), description: description.into(), input_schema },
             nesting: ToolNesting::Nestable,

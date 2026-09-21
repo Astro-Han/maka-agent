@@ -276,7 +276,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         assert_eq!(acknowledged.read_state, previous.read_state);
         let canonical = log.prefix(100, 1024 * 1024).await.unwrap().digest;
         // Reopening rebuilds the discarded projection, preserving canonical bytes.
-        db.execute("DROP TABLE catalog_messages", []).unwrap();
+        db.execute("DELETE FROM catalog_messages", []).unwrap();
         db.execute("DELETE FROM transcript_rows", []).unwrap();
         db.execute("DELETE FROM transcript_progress", []).unwrap();
         log.close().await.unwrap();

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use maka_runtime::skills::SkillFailureReason;
+use maka_skills::SkillFailureReason;
 use maka_skills::{
     Catalog, DiscoveryFailure, HostCapabilities, IssueCode, Preference, Preferences, ScanError,
     Source, scan,

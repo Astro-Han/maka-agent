@@ -248,8 +248,8 @@ async fn steering_is_exact_once_session_scoped_and_atomic_with_rebuildable_user_
     log.close().await.unwrap();
     // Both read models are disposable; the log is the only message-delivery proof.
     db.execute_batch(
-        "DROP TABLE transcript_rows; DROP TABLE transcript_progress;
-        DROP TABLE catalog_messages; DROP TABLE catalog_message_watermark;",
+        "DELETE FROM transcript_rows; DELETE FROM transcript_progress;
+        DELETE FROM catalog_messages; DELETE FROM catalog_message_watermark;",
     )
     .unwrap();
     drop(db);

@@ -80,22 +80,6 @@ pub(super) fn register_function(connection: &Connection) -> Result<(), StoreErro
     Ok(())
 }
 
-pub(super) async fn initialize(connection: &mut SqliteConnection) -> Result<(), StoreError> {
-    sqlx::raw_sql(
-        "CREATE INDEX IF NOT EXISTS catalog_partial_deltas ON event_log(
-            invocation_id, json_extract(event_json, '$.fact.step_id'),
-            json_extract(event_json, '$.fact.event.data.id'), sequence
-         ) WHERE kind = 'model_observed'
-           AND json_extract(event_json, '$.fact.event.kind') = 'part_delta';
-         CREATE INDEX IF NOT EXISTS catalog_model_boundaries ON event_log(
-            invocation_id, kind, sequence
-         ) WHERE kind IN ('model_requested', 'model_completed', 'model_interrupted');",
-    )
-    .execute(connection)
-    .await?;
-    Ok(())
-}
-
 /// Only the sealed current step contributes partial messages. Nothing is added
 /// to model_completed, so accepted model history retains its existing authority.
 pub(super) async fn project(

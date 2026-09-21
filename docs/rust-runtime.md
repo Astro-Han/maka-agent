@@ -377,9 +377,11 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 node scripts/asf-license-headers.mjs check
 ```
 
-Unit tests belong at the end of source modules; integration tests belong in
-`tests/`. Prefer structs and enums for domain contracts; reserve JSON values
-for genuinely open payloads and schemas.
+Use `name.rs` with a `name/` directory for child modules. Unit tests belong at
+the end of source modules; integration tests belong in `tests/`.
+Prefer structs and enums for domain contracts; derive their schemas with
+schemars. Reserve JSON values for genuinely open payloads and dynamic schemas.
+SQLx migrations own tables and indexes; startup only rebuilds derived data.
 Shared cross-language fixtures live in root `tests/fixtures` and use
 `tests/support/source.mjs` to load current TypeScript sources, never workspace `dist`.
 Grep differential tests require `rg` on PATH; the runtime itself does not.

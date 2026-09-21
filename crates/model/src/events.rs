@@ -251,6 +251,28 @@ impl Normalizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_error_requires_exact_kind_and_boolean() {
+        use serde_json::json;
+        for value in [
+            json!(null),
+            json!({"kind":"context_overflow"}),
+            json!({"kind":"context_overflow","observedOutput":"false"}),
+            json!({"kind":"unknown","observedOutput":false}),
+            json!({"kind":"context_overflow","observedOutput":false,"extra":true}),
+        ] {
+            assert!(matches!(
+                Normalizer::default().push(json!({"type":"error","error":value})),
+                Err(ModelError::Adapter(_))
+            ));
+        }
+        for observed in [false, true] {
+            assert!(
+                matches!(Normalizer::default().push(json!({"type":"error","error":{"kind":"context_overflow","observedOutput":observed}})),Err(ModelError::ContextOverflow{observed_output}) if observed_output == observed)
+            );
+        }
+    }
     use serde_json::json;
 
     fn tool(kind: &str) -> Value {

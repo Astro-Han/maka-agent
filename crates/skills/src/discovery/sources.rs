@@ -19,8 +19,8 @@
 
 use super::{DiscoveryFailure, OriginStatus, QuerySnapshot, ScanError, Source};
 use crate::SkillDocument;
+use crate::{SkillScope, SkillSource};
 use maka_plugins::filesystem::ReadDirectory;
-use maka_runtime::skills::{SkillScope, SkillSource};
 use std::collections::BTreeSet;
 use tokio_util::sync::CancellationToken;
 

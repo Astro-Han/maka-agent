@@ -62,7 +62,7 @@ fn migration_checksums(connection: &Connection) -> Vec<(i64, Vec<u8>)> {
 }
 
 #[tokio::test]
-async fn initialization_upgrade_and_reopen_preserve_facts_payloads_and_schema_identity() {
+async fn initialization_and_reopen_preserve_facts_payloads_and_schema_identity() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("events.sqlite");
     let log = EventLog::open(&path).await.unwrap();
@@ -104,20 +104,6 @@ async fn initialization_upgrade_and_reopen_preserve_facts_payloads_and_schema_id
             |row| row.get(0),
         )
         .unwrap();
-    // Reconstruct the previous schema without changing canonical facts.
-    connection
-        .execute_batch(
-            "DROP TABLE transcript_text; DELETE FROM _sqlx_migrations WHERE version = 2;",
-        )
-        .unwrap();
-    assert_eq!(
-        migration_checksums(&connection),
-        checksums
-            .iter()
-            .filter(|(version, _)| *version != 2)
-            .cloned()
-            .collect::<Vec<_>>()
-    );
     drop(connection);
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(

@@ -61,7 +61,7 @@ pub enum Severity {
     Error,
 }
 
-pub use maka_runtime::skills::SkillValidationCode as IssueCode;
+pub use crate::SkillValidationCode as IssueCode;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Issue {

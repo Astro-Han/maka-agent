@@ -29,6 +29,7 @@ maka-plugins.workspace = true
 maka-tool-catalog.workspace = true
 jiff = "0.2.37"
 serde.workspace = true
+schemars.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

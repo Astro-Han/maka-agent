@@ -45,31 +45,31 @@ pub(super) fn register(staged: &mut Staged, manager: Arc<super::Manager>) -> Res
         (
             "agent_swarm_status",
             "Read compact Swarm statuses and committed final-result IDs, never child logs or partial output. Counts cover all work; follow nextAfter with after to page items.",
-            json!({"type":"object","properties":{"after":{"type":"string"}},"additionalProperties":false}),
+            schemars::schema_for!(StatusInput).into(),
             ToolSemantics::Parallel,
         ),
         (
             "agent_list",
             "List available agents for new Graph work. Use exact returned IDs.",
-            empty(),
+            schemars::schema_for!(Empty).into(),
             ToolSemantics::Parallel,
         ),
         (
             "view_agent_graph",
             "Inspect Graph work, outcomes, waits and errors. Empty input returns a bounded preview. Use kind: epochs to discover history, then kind: snapshot with graphId and after/nextAfter to enumerate all work and final-result IDs. kind: work reads full instructions. To read a result, pass work_id and record_id; part: patch reads an immutable Git patch without merging. Follow nextOffset as a UTF-8 byte offset; graph_id selects history.",
-            view_schema(),
+            schemars::schema_for!(ViewInput).into(),
             ToolSemantics::Parallel,
         ),
         (
             "update_agent_graph",
             "Commit a Graph decision: add work, stop work/operators, or select final result records. New work runs in independent Host-owned Sessions; input IDs refer to durable records, not work IDs.",
-            update_schema(),
+            schemars::schema_for!(Decision).into(),
             ToolSemantics::ExclusiveStep,
         ),
         (
             "yield_agent_graph",
             "Finish this supervisor turn after its tool result is durable. The Graph will wake you when new results or failures arrive; already accepted work continues.",
-            empty(),
+            schemars::schema_for!(Empty).into(),
             ToolSemantics::FinishTurn,
         ),
     ] {
@@ -155,28 +155,30 @@ enum Action {
     Yield,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 enum ViewInput {
     Query(super::read::Query),
     Result(ResultQuery),
     Snapshot(Empty),
 }
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Empty {}
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StatusInput {
     after: Option<crate::WorkId>,
 }
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ResultQuery {
+    /// Read the answer (default) or the implementation workspace's immutable Git patch.
     #[serde(default)]
     part: super::read::result::Part,
     graph_id: Option<crate::GraphId>,
     work_id: crate::WorkId,
+    #[schemars(length(min = 1, max = 256))]
     record_id: String,
     #[serde(default)]
     offset: usize,
@@ -314,51 +316,6 @@ impl ToolPreparer for GraphTools {
             }))
         })
     }
-}
-
-fn empty() -> Value {
-    json!({"type":"object","properties":{},"additionalProperties":false})
-}
-fn view_schema() -> Value {
-    json!({"oneOf":[empty(),
-    {"type":"object","properties":{"kind":{"const":"epochs"},"before":{"type":"integer","minimum":1}},"required":["kind"],"additionalProperties":false},
-    {"type":"object","properties":{"kind":{"const":"snapshot"},"graphId":{"type":"string"},"after":{
-        "type":"object","properties":{"revision":{"type":"integer","minimum":1},"workId":{"type":"string"}},"required":["revision","workId"],"additionalProperties":false
-    }},"required":["kind","graphId"],"additionalProperties":false},
-    {"type":"object","properties":{"kind":{"const":"work"},"graphId":{"type":"string"},"workId":{"type":"string"},"offset":{"type":"integer","minimum":0}},"required":["kind","graphId","workId"],"additionalProperties":false},
-    {"type":"object","properties":{
-        "graph_id":{"type":"string","maxLength":256},"work_id":{"type":"string","maxLength":256},
-        "record_id":{"type":"string","minLength":1,"maxLength":256},"offset":{"type":"integer","minimum":0},
-        "part":{"enum":["answer","patch"],"description":"Read the answer (default) or the implementation workspace's immutable Git patch."}
-    },"required":["work_id","record_id"],"additionalProperties":false}]})
-}
-fn update_schema() -> Value {
-    let identity = json!({"type":"string","minLength":1,"maxLength":256});
-    let target = json!({"oneOf":[
-        {"type":"object","properties":{"kind":{"const":"agent"},"agentId":identity,"executorId":identity},"required":["kind","agentId"],"additionalProperties":false},
-        {"type":"object","properties":{"kind":{"const":"preset"},"presetId":identity,"executorId":identity},"required":["kind","presetId"],"additionalProperties":false},
-        {"type":"object","properties":{"kind":{"const":"operator"},"operatorId":identity},"required":["kind","operatorId"],"additionalProperties":false}
-    ]});
-    json!({"oneOf":[
-        {"type":"object","properties":{
-            "operation":{"const":"add_work"},
-            "work":{"type":"array","minItems":1,"maxItems":32,"items":{
-                "type":"object","properties":{
-                    "target":target,"instruction":{"type":"string","minLength":1,"maxLength":60000},
-                    "input_ids":{"type":"array","items":identity,"maxItems":64},
-                    "selected_result_inputs":{"type":"array","maxItems":64,"items":{
-                        "type":"object","properties":{"sourceGraphId":identity,"resultId":identity},
-                        "required":["sourceGraphId","resultId"],"additionalProperties":false}},
-                    "replaces":{"type":["string","null"],"maxLength":256}
-                },"required":["target","instruction"],"additionalProperties":false}}
-            },"required":["operation","work"],"additionalProperties":false},
-        {"type":"object","properties":{"operation":{"const":"stop"},"targets":{"type":"array","minItems":1,"maxItems":20,"items":{
-            "type":"object","properties":{"targetId":identity,"reason":{"type":"string","minLength":1,"maxLength":4000}},
-            "required":["targetId","reason"],"additionalProperties":false}}},
-            "required":["operation","targets"],"additionalProperties":false},
-        {"type":"object","properties":{"operation":{"const":"finish"},"result_ids":{"type":"array","items":identity,"minItems":1,"maxItems":64},
-            "reason":{"type":"string","minLength":1,"maxLength":4000}},"required":["operation","result_ids","reason"],"additionalProperties":false}
-    ]})
 }
 
 fn graph_error(error: crate::Error) -> ToolError {

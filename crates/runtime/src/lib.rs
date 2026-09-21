@@ -40,7 +40,6 @@ pub mod oauth;
 pub mod read;
 pub mod shell_result;
 pub mod shell_run;
-pub mod skills;
 pub mod terminal;
 pub mod tool_call;
 pub mod tool_output;

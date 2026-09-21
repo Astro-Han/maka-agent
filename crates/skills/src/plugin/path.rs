@@ -42,7 +42,7 @@ impl Skills {
                 reason: PathRejection::Missing,
             });
         };
-        use maka_runtime::skills::SkillScope;
+        use crate::SkillScope;
         let files = match location.scope {
             SkillScope::Project => workspace_files,
             SkillScope::Workspace => self

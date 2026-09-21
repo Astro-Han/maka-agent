@@ -76,13 +76,13 @@ impl BindingProvider for Tasks {
         })
     }
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 enum Input {
     Read(Read),
     Decision(Decision),
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "operation",
     rename_all = "snake_case",
@@ -91,8 +91,14 @@ enum Input {
 )]
 enum Read {
     Candidates,
-    Assignments { after: Option<String> },
-    Inspect { assignment_id: String },
+    Assignments {
+        #[schemars(length(min = 1, max = 256))]
+        after: Option<String>,
+    },
+    Inspect {
+        #[schemars(length(min = 1, max = 256))]
+        assignment_id: String,
+    },
 }
 impl ToolPreparer for Tasks {
     fn names(&self) -> Vec<String> {
@@ -179,25 +185,5 @@ fn failed(error: impl ToString) -> ToolError {
 }
 
 fn schema() -> Value {
-    let id = json!({"type":"string","minLength":1,"maxLength":256});
-    let text = json!({"type":"string","minLength":1,"maxLength":49152});
-    let target = json!({"oneOf":[
-        {"type":"object","properties":{"kind":{"const":"existing"},"revision":id,"candidate":id},"required":["kind","revision","candidate"],"additionalProperties":false},
-        {"type":"object","properties":{"kind":{"const":"create"},"title":{"type":"string","minLength":1,"maxLength":512}},"required":["kind","title"],"additionalProperties":false}
-    ]});
-    let variants = [
-        ("candidates", json!({}), vec![]),
-        ("assignments", json!({"after":id}), vec![]),
-        ("select", json!({"revision":id,"candidates":{"type":"array","minItems":2,"maxItems":16,"uniqueItems":true,"items":id},"text":text}), vec!["revision","candidates","text"]),
-        ("inspect", json!({"assignmentId":id}), vec!["assignmentId"]),
-        ("route", json!({"target":target,"text":text}), vec!["target","text"]),
-        ("correct", json!({"assignmentId":id,"target":target,"text":text}), vec!["assignmentId","target","text"]),
-        ("stop", json!({"assignmentId":id}), vec!["assignmentId"]),
-        ("resume", json!({"assignmentId":id}), vec!["assignmentId"]),
-    ].into_iter().map(|(operation, mut properties, mut required)| {
-        properties["operation"] = json!({"const":operation});
-        required.push("operation");
-        json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
-    }).collect::<Vec<_>>();
-    json!({"oneOf":variants})
+    schemars::schema_for!(Input).into()
 }

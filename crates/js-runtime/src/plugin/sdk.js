@@ -367,6 +367,20 @@
         behaviors: Object.freeze({
           register: (name, prepare) => register('behavior', { name }, prepare),
         }),
+        background: Object.freeze({
+          pending: async (name, wake) => {
+            let closed = false;
+            const registration = await register('background', { name }, (_input, call) => {
+              if (!closed) return wake(call.signal);
+            });
+            return Object.freeze({
+              close() {
+                closed = true;
+                return registration.close();
+              },
+            });
+          },
+        }),
         remote: Object.freeze({
           method: (name, invoke, options) =>
             register('remote_method', { ...options, name }, (input, call) =>

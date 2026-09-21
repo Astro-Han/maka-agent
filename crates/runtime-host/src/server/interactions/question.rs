@@ -36,6 +36,13 @@ use tokio_util::sync::CancellationToken;
 
 const NAME: &str = "AskUserQuestion";
 
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct QuestionInput {
+    #[schemars(length(min = 1, max = 3))]
+    questions: Vec<InteractionQuestion>,
+}
+
 impl Interactions {
     pub(crate) fn question_tool(self: &Arc<Self>) -> ToolRegistration {
         ToolRegistration {
@@ -43,14 +50,7 @@ impl Interactions {
                 provider: None,
                 name: NAME.into(),
                 description: "Ask 1–3 bounded multiple-choice questions whose answers are required to continue the current turn. Use ordinary assistant text for open-ended follow-up.".into(),
-                input_schema: json!({"type":"object","required":["questions"],"additionalProperties":false,
-                    "properties":{"questions":{"type":"array","minItems":1,"maxItems":3,
-                    "items":{"type":"object","required":["question","options"],"additionalProperties":false,
-                    "properties":{"question":{"type":"string","minLength":1},
-                    "options":{"type":"array","minItems":2,"maxItems":3,
-                    "items":{"type":"object","required":["label"],"additionalProperties":false,
-                    "properties":{"label":{"type":"string","minLength":1},
-                    "description":{"type":"string","minLength":1}}}}}}}}}),
+                input_schema: schemars::schema_for!(QuestionInput).into(),
             },
             nesting: ToolNesting::DirectOnly,
             semantics: ToolSemantics::Parallel,
@@ -82,11 +82,9 @@ impl ToolPreparer for Interactions {
                 })?;
             // Canonical fields are display-projected; the tool result preserves
             // the model's original question text, paired with the canonical answers.
-            let questions: Vec<InteractionQuestion> =
-                serde_json::from_value(input["questions"].clone()).map_err(|error| {
-                    ToolRejection::InvalidInput {
-                        message: error.to_string(),
-                    }
+            let QuestionInput { questions } = serde_json::from_value::<QuestionInput>(input)
+                .map_err(|error| ToolRejection::InvalidInput {
+                    message: error.to_string(),
                 })?;
             let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
                 Box::pin(async move {

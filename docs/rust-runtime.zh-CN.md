@@ -297,8 +297,10 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 node scripts/asf-license-headers.mjs check
 ```
 
-单元测试放源码模块末尾，集成测试放 `tests/`。业务契约优先使用 struct／enum，
-JSON Value 只用于真正开放的载荷和 schema。依赖 V8 的测试在各 crate 内共用一个
+模块采用 `name.rs` 与 `name/` 子目录。单元测试放源码模块末尾，集成测试放
+`tests/`。业务契约使用 struct／enum，通过 schemars 派生 schema；JSON Value
+只用于真正开放的载荷和动态 schema。表与索引归 SQLx migration 管理，启动只重建
+派生数据。依赖 V8 的测试在各 crate 内共用一个
 测试二进制，避免重复链接。普通测试使用本地 fixture；真实服务测试需要显式启用。
 ignored 测试 `original_client_live_provider` 接受 `MAKA_LIVE_PROTOCOL`（`chat`、
 `responses`、`messages`）、`MAKA_LIVE_BASE_URL`、`MAKA_LIVE_MODEL` 和

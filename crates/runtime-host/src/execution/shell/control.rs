@@ -28,19 +28,19 @@ use maka_runtime::{
     tools::ToolError,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 pub const STOP_NAME: &str = "StopBackgroundTask";
 
 pub fn stop_schema() -> Value {
-    json!({"type":"object","additionalProperties":false,"required":["ref"],
-        "properties":{"ref":{"type":"string","description":"Background shell ref returned by Bash."}}})
+    schemars::schema_for!(StopInput).into()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StopInput {
+    /// Background shell ref returned by Shell.
     #[serde(rename = "ref")]
     reference: String,
 }

@@ -18,7 +18,7 @@
  */
 
 use crate::{Catalog, DiscoveredSkill, Preferences, fields};
-use maka_runtime::skills::{SkillScope, SkillSource};
+use crate::{SkillScope, SkillSource};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]

@@ -34,38 +34,38 @@ pub const PATCH_NAME: &str = "apply_patch";
 pub const PATCH_DESCRIPTION: &str = "Apply a create_file, update_file or delete_file operation within the Session's write roots. Updates use contextual patches and preserve existing inode and line endings. Create is exclusive; parent directories must exist. Symlinks, parent (..) components and moves are unsupported. callId is opaque provider metadata, not execution authority.";
 
 pub fn patch_schema() -> Value {
-    let path = json!({"type":"string","minLength":1,"maxLength":MAX_PATH});
-    let diff = json!({"type":"string","maxLength":MAX_CONTENT});
-    let operations: Vec<_> = ["create_file", "update_file", "delete_file"].into_iter().map(|kind| {
-        let mut properties = json!({"type":{"const":kind},"path":path});
-        let mut required = vec!["type","path"];
-        if kind != "delete_file" {
-            properties["diff"] = diff.clone();
-            required.push("diff");
-        }
-        json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
-    }).collect();
-    json!({"type":"object","properties":{
-        "callId":{"type":"string","minLength":1,"maxLength":4096},
-        "operation":{"oneOf":operations}
-    },"required":["callId","operation"],"additionalProperties":false})
+    schemars::schema_for!(NativeInput).into()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct NativeInput {
+    #[schemars(length(min = 1, max = 4096))]
     call_id: String,
     operation: NativeOperation,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum NativeOperation {
     #[serde(rename = "create_file")]
-    Create { path: String, diff: String },
+    Create {
+        #[schemars(length(min = 1, max = MAX_PATH))]
+        path: String,
+        #[schemars(length(max = MAX_CONTENT))]
+        diff: String,
+    },
     #[serde(rename = "update_file")]
-    Update { path: String, diff: String },
+    Update {
+        #[schemars(length(min = 1, max = MAX_PATH))]
+        path: String,
+        #[schemars(length(max = MAX_CONTENT))]
+        diff: String,
+    },
     #[serde(rename = "delete_file")]
-    Delete { path: String },
+    Delete {
+        #[schemars(length(min = 1, max = MAX_PATH))]
+        path: String,
+    },
 }
 enum BatchMode {
     Native,

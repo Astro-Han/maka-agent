@@ -35,45 +35,6 @@ use sqlx::{Connection, Row as SqlRow, SqliteConnection};
 const MAX_BOUNDARIES: usize = 32;
 const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 
-pub(crate) async fn initialize(connection: &mut SqliteConnection) -> Result<(), StoreError> {
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS transcript_rows (
-            sequence INTEGER PRIMARY KEY CHECK(sequence >= 0),
-            session_id TEXT NOT NULL,
-            turn_id TEXT NOT NULL,
-            message_id TEXT NOT NULL,
-            payload BLOB NOT NULL,
-            digest TEXT NOT NULL,
-            total_bytes INTEGER NOT NULL CHECK(total_bytes > 0),
-            UNIQUE(session_id, message_id)
-        )",
-    )
-    .execute(&mut *connection)
-    .await?;
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS transcript_session_sequence
-            ON transcript_rows(session_id, sequence)",
-    )
-    .execute(&mut *connection)
-    .await?;
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS transcript_session_turn
-            ON transcript_rows(session_id, turn_id, sequence)",
-    )
-    .execute(&mut *connection)
-    .await?;
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS transcript_progress (
-            session_id TEXT PRIMARY KEY,
-            through_sequence INTEGER NOT NULL CHECK(through_sequence >= 0)
-        );",
-    )
-    .execute(&mut *connection)
-    .await?;
-    navigation::initialize(connection).await?;
-    Ok(())
-}
-
 impl EventLog {
     /// Prepare at most 32 immutable boundaries through a fixed raw-log fence.
     /// False means another bounded call is needed. Oversize/unsupported evidence

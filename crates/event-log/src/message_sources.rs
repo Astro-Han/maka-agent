@@ -46,19 +46,15 @@ pub(crate) fn identities(event: &RuntimeEvent) -> impl Iterator<Item = &str> {
         })
 }
 pub(crate) async fn initialize(connection: &mut SqliteConnection) -> Result<(), StoreError> {
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'message_sources')"
-    ).fetch_one(&mut *connection).await?;
-    if exists {
+    let populated: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM message_sources)")
+        .fetch_one(&mut *connection)
+        .await?;
+    if populated {
         return Ok(());
     }
     let mut tx = connection.begin().await?;
     sqlx::raw_sql(
-        "CREATE TABLE message_sources (
-            session_id TEXT NOT NULL, message_id TEXT NOT NULL, event_id TEXT NOT NULL,
-            PRIMARY KEY(session_id, message_id)
-         );
-         INSERT INTO message_sources
+        "INSERT INTO message_sources
          SELECT json_extract(event_json, '$.invocation.session_id'),
             json_extract(event_json, '$.fact.message.message_id'), event_id
          FROM runtime_events WHERE kind = 'message_steered';

@@ -39,7 +39,7 @@ use windows as process;
 
 use maka_runtime::tools::{ToolError, ToolExecutor, ToolFuture};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
 
@@ -72,17 +72,16 @@ pub struct ObservedProcess {
 }
 
 pub fn shell_schema() -> Value {
-    json!({"type":"object","properties":{
-        "command":{"type":"string","minLength":1,"maxLength":MAX_COMMAND_BYTES},
-        "timeout_ms":{"type":"integer","minimum":1,"maximum":MAX_TIMEOUT_MS}
-    },"required":["command"],"additionalProperties":false})
+    schemars::schema_for!(Input).into()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Input {
+    #[schemars(length(min = 1, max = MAX_COMMAND_BYTES))]
     command: String,
     #[serde(default = "default_timeout")]
+    #[schemars(range(min = 1, max = MAX_TIMEOUT_MS))]
     timeout_ms: u64,
 }
 fn default_timeout() -> u64 {

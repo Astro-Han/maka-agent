@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod background;
 mod binding;
 mod bridge;
 mod callbacks;
@@ -153,6 +154,7 @@ impl Plugin for JavaScript {
                 bridge.outputs(),
                 bridge.calls(),
                 &remote,
+                &context.lifecycle,
             )?;
             let business = module.clone();
             let owner = context.lifecycle.clone();

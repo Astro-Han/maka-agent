@@ -278,6 +278,14 @@ export interface HostContext {
       ) => Awaitable<BehaviorPreparation>,
     ): Promise<Registration>;
   };
+  readonly background: {
+    /** Prevent idle expiry while durable work remains; grants no execution authority.
+     * Close when idle. Restore intent and register again after activation.
+     * System-resume notifications are coalesced and serial, not a timer or task scheduler.
+     * Close never waits for the active wake callback; it may close its own registration.
+     */
+    pending(name: string, wake: (signal: Cancellation) => Awaitable<void>): Promise<Registration>;
+  };
   readonly input: {
     /** Pure preparation. Close/re-register when its source changes to revoke stale admissions. */
     prepare(

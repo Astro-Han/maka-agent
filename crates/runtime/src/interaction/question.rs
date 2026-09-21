@@ -20,22 +20,26 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InteractionQuestion {
+    #[schemars(length(min = 1, max = 1024))]
     pub question: String,
+    #[schemars(length(min = 2, max = 3))]
     pub options: Vec<QuestionOption>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QuestionOption {
+    #[schemars(length(min = 1, max = 256))]
     pub label: String,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "description"
     )]
+    #[schemars(with = "String", length(min = 1, max = 512))]
     pub description: Option<String>,
 }
 

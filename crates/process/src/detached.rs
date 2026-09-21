@@ -21,12 +21,11 @@
 //! Closing stdin, including on drop, lets the application's protocol request drain.
 
 #[cfg(windows)]
-#[path = "detached/windows.rs"]
-mod platform;
-#[cfg(windows)]
-pub use platform::{Child, spawn};
+mod windows;
 #[cfg(unix)]
 pub use tokio::process::Child;
+#[cfg(windows)]
+pub use windows::{Child, spawn};
 
 #[cfg(unix)]
 pub async fn spawn(executable: &std::path::Path, args: &[&str]) -> std::io::Result<Child> {

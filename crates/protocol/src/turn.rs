@@ -18,11 +18,8 @@
  */
 
 //! Direct hosted execution, epoch 141. Use decode functions at JSON boundaries.
-#[path = "turn_content.rs"]
 mod content;
-#[path = "turn_resume.rs"]
 mod resume;
-#[path = "turn_types.rs"]
 mod types;
 use crate::{ProtocolError, Result, codec};
 pub use content::*;

@@ -22,9 +22,9 @@ use crate::{
     task::{Create, Effect, Notification},
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "mode",
     rename_all = "snake_case",
@@ -33,25 +33,31 @@ use serde_json::{Value, json};
 )]
 pub(super) enum Input {
     Create {
+        #[schemars(length(min = 1, max = 120))]
         title: String,
+        #[schemars(length(min = 1, max = 8000))]
         intent_body: String,
         schedule: When,
         #[serde(default)]
         effect: Target,
+        #[schemars(range(min = 1, max = 10000))]
         max_fires: Option<u32>,
     },
     List {},
     Pause {
+        #[schemars(length(min = 1, max = 128))]
         id: String,
     },
     Resume {
+        #[schemars(length(min = 1, max = 128))]
         id: String,
     },
     Delete {
+        #[schemars(length(min = 1, max = 128))]
         id: String,
     },
 }
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Target {
     #[default]
@@ -59,7 +65,7 @@ pub(super) enum Target {
     AgentRun,
     NotifyLocal,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -68,14 +74,19 @@ pub(super) enum Target {
 )]
 pub(super) enum When {
     Once {
+        #[schemars(range(min = 1, max = 9007199254740991_i64))]
         run_at: i64,
     },
     Interval {
+        #[schemars(range(min = 10, max = 31622400))]
         every_seconds: u32,
+        #[schemars(range(min = 1, max = 9007199254740991_i64))]
         start_at: Option<i64>,
     },
     Cron {
+        #[schemars(length(min = 9, max = 160))]
         expression: String,
+        #[schemars(range(min = 1, max = 9007199254740991_i64))]
         start_at: Option<i64>,
     },
 }
@@ -150,19 +161,5 @@ impl Input {
     }
 }
 pub(super) fn schema() -> Value {
-    let time = json!({"type":"integer","minimum":1,"maximum":9007199254740991_u64});
-    let once = json!({"type":"object","properties":{"kind":{"const":"once"},"runAt":time},"required":["kind","runAt"],"additionalProperties":false});
-    let interval = json!({"type":"object","properties":{"kind":{"const":"interval"},"everySeconds":{"type":"integer","minimum":10,"maximum":31622400},"startAt":time},"required":["kind","everySeconds"],"additionalProperties":false});
-    let cron = json!({"type":"object","properties":{"kind":{"const":"cron"},"expression":{"type":"string","minLength":9,"maxLength":160},"startAt":time},"required":["kind","expression"],"additionalProperties":false});
-    json!({"oneOf":[
-        {"type":"object","properties":{
-            "mode":{"const":"create"},"title":{"type":"string","minLength":1,"maxLength":120},
-            "intentBody":{"type":"string","minLength":1,"maxLength":8000},
-            "schedule":{"oneOf":[once,interval,cron]},
-            "effect":{"enum":["session_resume","agent_run","notify_local"]},
-            "maxFires":{"type":"integer","minimum":1,"maximum":10000}
-        },"required":["mode","title","intentBody","schedule"],"additionalProperties":false},
-        {"type":"object","properties":{"mode":{"const":"list"}},"required":["mode"],"additionalProperties":false},
-        {"type":"object","properties":{"mode":{"enum":["pause","resume","delete"]},"id":{"type":"string","minLength":1,"maxLength":128}},"required":["mode","id"],"additionalProperties":false}
-    ]})
+    schemars::schema_for!(Input).into()
 }

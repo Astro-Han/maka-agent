@@ -17,7 +17,7 @@
  * under the License.
  */
 
-pub use maka_runtime::skills::{SkillScope, SkillSource, SkillValidationCode};
+pub use crate::{SkillScope, SkillSource, SkillValidationCode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

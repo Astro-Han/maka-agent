@@ -31,6 +31,10 @@ use std::sync::Arc;
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Registration {
+    Background {
+        name: String,
+        callback: u32,
+    },
     Behavior {
         name: String,
         callback: u32,
@@ -155,9 +159,10 @@ pub(super) fn stage(
     outputs: &Arc<super::executor::Outputs>,
     calls: &Arc<super::invocation::Calls>,
     source: &super::remote::Source,
+    lifecycle: &maka_plugins::fiber::Context,
 ) -> Result<Staged, String> {
     let registrations: Vec<Registration> = serde_json::from_value(value).map_err(super::message)?;
-    stage_entries(registrations, module, outputs, calls, source)
+    stage_entries(registrations, module, outputs, calls, source, lifecycle)
 }
 pub(super) fn stage_entries(
     registrations: Vec<Registration>,
@@ -165,6 +170,7 @@ pub(super) fn stage_entries(
     outputs: &Arc<super::executor::Outputs>,
     calls: &Arc<super::invocation::Calls>,
     source: &super::remote::Source,
+    lifecycle: &maka_plugins::fiber::Context,
 ) -> Result<Staged, String> {
     if registrations.len() > 128 {
         return Err("plugin contribution limit exceeded".into());
@@ -173,6 +179,22 @@ pub(super) fn stage_entries(
     for registration in registrations {
         let remote_stream = matches!(&registration, Registration::RemoteStream { .. });
         match registration {
+            Registration::Background { name, callback } => {
+                validate_callback(callback)?;
+                staged
+                    .insert(
+                        name,
+                        super::background::pending(
+                            lifecycle,
+                            Arc::new(callbacks::Callback {
+                                module: module.clone(),
+                                id: callback,
+                                calls: calls.clone(),
+                            }),
+                        )?,
+                    )
+                    .map_err(super::message)?;
+            }
             Registration::Behavior { name, callback } => {
                 validate_callback(callback)?;
                 staged
@@ -357,6 +379,7 @@ pub(super) fn stage_entries(
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Kind {
+    Background,
     Behavior,
     InputPreparation,
     RemoteMethod,
@@ -375,6 +398,9 @@ pub(super) fn withdraw(
     names: &[String],
 ) -> Result<(), maka_plugins::Error> {
     match kind {
+        Kind::Background => {
+            publisher.withdraw_many::<Arc<dyn maka_plugins::background::BackgroundWork>>(names)
+        }
         Kind::Behavior => publisher.withdraw_many::<maka_plugins::session::SessionBehavior>(names),
         Kind::InputPreparation => {
             publisher.withdraw_many::<maka_plugins::input::InputPreparation>(names)

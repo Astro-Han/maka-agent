@@ -18,7 +18,7 @@
  */
 
 use crate::{InvalidDocument, SkillDocument};
-use maka_runtime::skills::{SkillScope, SkillSource};
+use crate::{SkillScope, SkillSource};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -32,13 +32,17 @@ use std::collections::{BTreeMap, BTreeSet};
 )]
 pub enum Target {
     Agent {
+        #[schemars(length(min = 1, max = 256))]
         agent_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(length(min = 1, max = 256))]
         executor_id: Option<String>,
     },
     Preset {
+        #[schemars(length(min = 1, max = 256))]
         preset_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(length(min = 1, max = 256))]
         executor_id: Option<String>,
     },
     Operator {
@@ -46,10 +50,11 @@ pub enum Target {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HistoricalInput {
     pub source_graph_id: GraphId,
+    #[schemars(length(min = 1, max = 256))]
     pub result_id: String,
 }
 
@@ -66,10 +71,12 @@ pub struct Work {
     pub replaces: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Stop {
+    #[schemars(length(min = 1, max = 256))]
     pub target_id: String,
+    #[schemars(length(min = 1, max = 4000))]
     pub reason: String,
 }
 

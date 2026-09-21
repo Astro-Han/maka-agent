@@ -23,6 +23,7 @@ mod discovery;
 mod live_search;
 mod oauth;
 mod provider_compatible;
+mod provider_errors;
 mod provider_ingress;
 mod provider_responses;
 mod provider_stream;

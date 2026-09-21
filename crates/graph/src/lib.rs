@@ -67,8 +67,19 @@ pub fn identity(value: &str) -> Result<(), Error> {
 
 macro_rules! id {
     ($ty:ident, $prefix:literal) => {
-        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(
+            Clone,
+            Debug,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Serialize,
+            Deserialize,
+            schemars::JsonSchema,
+        )]
         #[serde(try_from = "String", into = "String")]
+        #[schemars(with = "String", extend("minLength" = 1, "maxLength" = 256))]
         pub struct $ty(String);
 
         impl $ty {

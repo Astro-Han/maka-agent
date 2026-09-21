@@ -43,7 +43,7 @@ use maka_runtime::{
     read::{ReadInput, ReadPage, ReadRequest},
     tools::{ToolError, ToolExecutor, ToolFuture},
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -54,11 +54,7 @@ pub const READ_NAME: &str = "Read";
 pub const READ_DESCRIPTION: &str = "Read a bounded page of UTF-8 text or a PNG/JPEG/GIF/WebP image within the Session's allowed filesystem roots. Offset is zero-based lines; limit is a positive line count. Pass a non-null next object to Read to continue; a changed source invalidates the continuation. Images ignore offset/limit and must be at most 5 MiB with dimensions at most 2000 pixels.";
 
 pub fn read_schema() -> Value {
-    json!({"type":"object","properties":{
-        "path":{"type":"string","minLength":1},
-        "offset":{"type":"integer","minimum":0},
-        "limit":{"type":"integer","minimum":1}
-    },"required":["path"],"additionalProperties":false})
+    schemars::schema_for!(ReadInput).into()
 }
 
 /// Trusted Host authority, never deserialized from tool arguments.
@@ -228,7 +224,7 @@ mod image_tests {
         let error = read
             .invoke(
                 READ_NAME.into(),
-                json!({"path":"mismatch.JpEg"}),
+                serde_json::json!({"path":"mismatch.JpEg"}),
                 CancellationToken::new(),
             )
             .await

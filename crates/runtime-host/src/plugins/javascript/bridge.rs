@@ -432,6 +432,7 @@ impl State {
                     &self.outputs,
                     &self.calls,
                     &self.source,
+                    &self.context.lifecycle,
                 )
                 .map_err(Error::invalid)?;
                 let mut registrations = self.registrations.lock().unwrap();

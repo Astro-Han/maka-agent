@@ -23,7 +23,7 @@ use maka_js_runtime::{CellAbort, CodeExecutor};
 use maka_runtime::tool_call::{ToolCallIdentity, ToolOrigin, ToolRejection};
 use maka_runtime::tools::{ToolError, ToolExecutor, ToolFuture, ToolJournal};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -37,14 +37,11 @@ pub(super) fn definition() -> ToolDefinition {
         provider: None,
         name: "exec".into(),
         description: "Run bounded JavaScript in a fresh runtime. Call available tools with tools.<name>(args), use await or Promise.all, and return a JSON value.".into(),
-        input_schema: json!({
-            "type":"object", "properties":{"code":{"type":"string"}},
-            "required":["code"], "additionalProperties":false,
-        }),
+        input_schema: schemars::schema_for!(CodeInput).into(),
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct CodeInput {
     code: String,

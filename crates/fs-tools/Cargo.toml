@@ -38,6 +38,7 @@ grep-regex = "0.1.14"
 ignore = "0.4.33"
 imagesize.workspace = true
 serde.workspace = true
+schemars.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

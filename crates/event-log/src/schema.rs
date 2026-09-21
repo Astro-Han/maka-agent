@@ -73,7 +73,6 @@ pub(crate) async fn initialize_connection(
         .execute(&mut *connection)
         .await?;
     crate::message_sources::initialize(connection).await?;
-    crate::transcript::initialize(connection).await?;
     crate::sessions::initialize_execution(connection).await?;
     Ok(())
 }

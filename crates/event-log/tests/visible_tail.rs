@@ -274,7 +274,7 @@ async fn visible_ids_match_presentation_for_accepted_and_partial_parts_across_ca
         log.close().await.unwrap();
         // Either half may be discarded; rebuild both from the canonical facts.
         for table in ["catalog_messages", "catalog_message_watermark"] {
-            db.execute_batch(&format!("DROP TABLE {table};")).unwrap();
+            db.execute_batch(&format!("DELETE FROM {table};")).unwrap();
             let reopened = EventLog::open(&path).await.unwrap();
             assert_eq!(projected(&db), ids);
             assert_eq!(canonical(&db), source);

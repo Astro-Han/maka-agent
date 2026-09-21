@@ -292,7 +292,7 @@ async fn interrupted_and_terminal_fallback_catalog_match_committed_presentation_
             ended
         );
         reopened.close().await.unwrap();
-        db.execute_batch("DROP TABLE catalog_messages;").unwrap();
+        db.execute_batch("DELETE FROM catalog_messages;").unwrap();
         let rebuilt = EventLog::open(&path).await.unwrap();
         assert_eq!(
             rebuilt.get_session::<Value>("a").await.unwrap().unwrap(),

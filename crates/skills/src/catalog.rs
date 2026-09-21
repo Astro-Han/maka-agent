@@ -17,8 +17,8 @@
  * under the License.
  */
 
+use crate::SkillFailureReason;
 use crate::{DiscoveredSkill, DiscoverySnapshot, Issue, IssueCode, Severity, fields};
-use maka_runtime::skills::SkillFailureReason;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preference {

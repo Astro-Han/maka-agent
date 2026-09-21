@@ -28,6 +28,7 @@ maka-plugins.workspace = true
 maka-runtime.workspace = true
 jsonschema.workspace = true
 serde.workspace = true
+schemars.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

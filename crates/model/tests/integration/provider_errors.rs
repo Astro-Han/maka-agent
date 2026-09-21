@@ -25,13 +25,13 @@ async fn provider_evidence_is_bounded_and_output_survives_normalization() {
     runtime
         .execute_script(
             "network-fetch",
-            include_str!("../../js-runtime/trusted/network-fetch.js").replace("export ", ""),
+            include_str!("../../../js-runtime/trusted/network-fetch.js").replace("export ", ""),
         )
         .unwrap();
     runtime
         .execute_script(
             "provider-errors",
-            include_str!("../../js-runtime/trusted/provider-errors.js")
+            include_str!("../../../js-runtime/trusted/provider-errors.js")
                 .replace(
                     "import { isTransportFailure } from './network-fetch.js';",
                     "",
@@ -102,27 +102,4 @@ async fn provider_evidence_is_bounded_and_output_survives_normalization() {
         .with_event_loop_promise(resolving, Default::default())
         .await
         .unwrap();
-}
-
-#[test]
-fn typed_error_requires_exact_kind_and_boolean() {
-    use crate::{ModelError, events::Normalizer};
-    use serde_json::json;
-    for value in [
-        json!(null),
-        json!({"kind":"context_overflow"}),
-        json!({"kind":"context_overflow","observedOutput":"false"}),
-        json!({"kind":"unknown","observedOutput":false}),
-        json!({"kind":"context_overflow","observedOutput":false,"extra":true}),
-    ] {
-        assert!(matches!(
-            Normalizer::default().push(json!({"type":"error","error":value})),
-            Err(ModelError::Adapter(_))
-        ));
-    }
-    for observed in [false, true] {
-        assert!(
-            matches!(Normalizer::default().push(json!({"type":"error","error":{"kind":"context_overflow","observedOutput":observed}})),Err(ModelError::ContextOverflow{observed_output}) if observed_output == observed)
-        );
-    }
 }
