@@ -160,6 +160,8 @@ export interface ConversationCopy {
     model: string;
     switchAriaLabel: string;
     switchWarning: string;
+    /** Secondary line on the cache warning row: activating the row dismisses it. */
+    switchWarningDismiss: string;
     newChatAriaLabel: (label: string) => string;
     newChatTitle: (label: string) => string;
     configureAriaLabel: (label: string) => string;
@@ -456,6 +458,7 @@ const CONVERSATION_COPY = {
       level: { off: '关', minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' },
       switching: '切换中', model: '模型', switchAriaLabel: '切换当前任务模型',
       switchWarning: '切换模型可能需要重建服务商提示缓存，使下一次请求更慢或成本更高。',
+      switchWarningDismiss: '选择即可关闭',
       newChatAriaLabel: (label) => `选择新任务模型，当前 ${label}`, newChatTitle: (label) => `新任务使用的模型：${label}`,
       configureAriaLabel: (label) => `配置模型连接，当前 ${label}`, configureTitle: '配置模型连接',
     },
@@ -634,6 +637,7 @@ const CONVERSATION_COPY = {
       level: { off: '關', minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' },
       switching: '切換中', model: '模型', switchAriaLabel: '切換目前任務模型',
       switchWarning: '切換模型可能需要重建服務商提示快取，使下一次請求更慢或成本更高。',
+      switchWarningDismiss: '選擇即可關閉',
       newChatAriaLabel: (label) => `選擇新任務模型，目前 ${label}`, newChatTitle: (label) => `新任務使用的模型：${label}`,
       configureAriaLabel: (label) => `設定模型連線，目前 ${label}`, configureTitle: '設定模型連線',
     },
@@ -809,6 +813,7 @@ const CONVERSATION_COPY = {
       level: { off: 'Off', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Maximum' },
       switching: 'Switching', model: 'Model', switchAriaLabel: 'Switch model for this task',
       switchWarning: 'Switching may rebuild the provider prompt cache, making the next request slower or more expensive.',
+      switchWarningDismiss: 'Select to dismiss',
       newChatAriaLabel: (label) => `Choose a model for the new task, currently ${label}`, newChatTitle: (label) => `Model for the new task: ${label}`,
       configureAriaLabel: (label) => `Configure model connections, currently ${label}`, configureTitle: 'Configure model connections',
     },
