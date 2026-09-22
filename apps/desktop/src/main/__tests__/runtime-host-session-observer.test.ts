@@ -503,15 +503,10 @@ test('restores transcript consumers across Host replacement', async () => {
   await observations.attach(second, bind('second'));
   observations.detach(second);
   await observations.closeTranscript('consumer-1');
-  const pending = observations.openTranscript('session-1', 'consumer-2', target);
-  let pendingSettled = false;
-  void pending.finally(() => {
-    pendingSettled = true;
-  });
-  await Promise.resolve();
-  assert.equal(pendingSettled, false);
+  await assert.rejects(observations.openTranscript('session-1', 'consumer-2', target), /source is unavailable/);
+  assert.deepEqual(observations.trackedSessionIds(), []);
   await observations.attach(source('third'), bind('third'));
-  assert.equal((await pending).generation, 'third');
+  assert.equal((await observations.openTranscript('session-1', 'consumer-2', target)).generation, 'third');
 
   assert.deepEqual(opens, [
     'first:session-1:consumer-1:history',
@@ -524,6 +519,51 @@ test('restores transcript consumers across Host replacement', async () => {
   );
   assert.deepEqual(scopes, ['first', 'second', 'third']);
   await observations.close();
+});
+
+test('detaching a pending first read releases its caller before source cleanup and drops late frames', { timeout: 5_000 }, async () => {
+  const observations = new RuntimeHostSessionObservationRegistry();
+  const started = deferred<RuntimeHostTranscriptTarget>();
+  const completion = deferred<DesktopTranscriptOpenResult>();
+  const destroyed = new Set<() => void>();
+  const batches: DesktopTranscriptBatch[] = [];
+  let closes = 0;
+  const source = {
+    async observe() {},
+    async unobserve() {},
+    async openTranscript(_sessionId: string, _consumerId: string, target: RuntimeHostTranscriptTarget) {
+      started.resolve(target);
+      return completion.promise;
+    },
+    async loadEarlierTranscript() {},
+    async readTranscriptTurn() { return []; },
+    acknowledgeTranscriptTail() {},
+    async closeTranscript() { closes += 1; },
+  };
+  await observations.attach(source);
+  const opening = observations.openTranscript('session-1', 'consumer-1', {
+    id: 18,
+    send(_channel, batch) { batches.push(batch); },
+    once(_event, listener) { destroyed.add(listener); },
+    off(_event, listener) { destroyed.delete(listener); },
+  });
+  const unavailable = assert.rejects(opening, /source is unavailable/);
+  const target = await started.promise;
+  try {
+    observations.detach(source);
+    await unavailable;
+    assert.deepEqual(observations.trackedSessionIds(), []);
+    assert.equal(destroyed.size, 0);
+    target.send('sessions:transcript:consumer-1', {
+      sessionId: 'session-1', generation: 'old', hostEpoch: 'old-host', deliverySequence: 1,
+      durableThrough: null, fragments: [], reset: true, ready: true,
+    });
+    assert.deepEqual(batches, []);
+  } finally {
+    completion.resolve({ sessionId: 'session-1', generation: 'old', hostEpoch: 'old-host', readThroughMessageId: null });
+    await observations.close();
+  }
+  await waitFor(() => closes === 1);
 });
 
 test('does not hold Host observation recovery on transcript replay', async () => {

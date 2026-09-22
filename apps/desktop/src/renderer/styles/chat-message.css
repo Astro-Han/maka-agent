@@ -31,6 +31,17 @@
    and bubble chrome; the remaining selectors are product content and actions.
    ============================================================================ */
 
+/* Reveal the newly ready Session once, without an intermediate cached tail. */
+.maka-chat-session-swap {
+  animation: maka-stream-fade-in var(--duration-emphasized) var(--ease-out-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maka-chat-session-swap {
+    animation: none;
+  }
+}
+
 /* Native anchoring handles ordinary content growth. The scroll authority
    disables it during following and atomic range replacement, when it owns
    the position write itself. */

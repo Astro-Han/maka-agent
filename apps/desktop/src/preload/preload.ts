@@ -2460,7 +2460,7 @@ const makaBridge = {
       const consumerId = crypto.randomUUID();
       const channel = `sessions:transcript:${consumerId}`;
       let identity: DesktopTranscriptIdentity | undefined;
-      let cachedIdentity: DesktopTranscriptIdentity | undefined;
+      let session: Awaited<ReturnType<typeof runtimeHostSessionRef>> | undefined;
       const retiredGenerations = new Set<string>();
       let closed = false;
       let requestClose = () => {};
@@ -2504,22 +2504,15 @@ const makaBridge = {
         }
       };
       ipcRenderer.on(channel, listener);
-      const openDispatch = runtimeHostSessionRef(sessionId).then(async (session) => {
-        consumerScope = session.scope;
-        const cached = await invokeWhenReady(
-          'session-local:transcript', session.scope, session.sessionId,
-        ).catch(() => null) as import('../shared/session-local-contract.js').DesktopCachedTranscript | null;
+      const openDispatch = runtimeHostSessionRef(sessionId).then((ref) => {
+        consumerScope = ref.scope;
+        session = ref;
         if (closed) throw new Error('Desktop transcript open was cancelled');
-        // Local frames do not participate in the live consumer identity or ACK window.
-        for (const [index, batch] of (cached?.batches ?? []).entries()) {
-          handler({ ...batch, deliverySequence: index + 1 });
-          if (batch.ready) cachedIdentity = { generation: batch.generation, hostEpoch: batch.hostEpoch };
-        }
         return {
           completion: invokeWhenReady(
             'sessions:transcript:open',
-            session.scope,
-            session.sessionId,
+            ref.scope,
+            ref.sessionId,
             consumerId,
             mode,
             resumeFrom ?? null,
@@ -2541,19 +2534,37 @@ const makaBridge = {
       try {
         openResult = await openDispatch.then(({ completion }) => completion);
       } catch (error) {
-        const cancelled = closed;
-        closed = true;
         ipcRenderer.off(channel, listener);
-        if (!cancelled && cachedIdentity && !identity) {
-          const unavailable = async () => { throw new Error('Reconnect the Host to load uncached history'); };
-          return {
-            ...cachedIdentity, sessionId, readThroughMessageId: null,
-            acknowledgeTail: unavailable,
-            loadEarlier: unavailable,
-            close: async () => {},
-          };
+        try {
+          // A healthy open publishes only live history. The cache is a read-only
+          // fallback, never a preview or a continuation of a partial live read.
+          if (!closed && !identity && session) {
+            const cached = await invokeWhenReady(
+              'session-local:transcript', session.scope, session.sessionId,
+            ).catch(() => null) as import('../shared/session-local-contract.js').DesktopCachedTranscript | null;
+            let cachedIdentity: DesktopTranscriptIdentity | undefined;
+            // Cache delivery is outside the live ACK window. Cancellation must
+            // still win while the local read or its consumer is running.
+            for (const [index, batch] of (cached?.batches ?? []).entries()) {
+              if (closed) throw new Error('Desktop transcript open was cancelled');
+              handler({ ...batch, deliverySequence: index + 1 });
+              if (batch.ready) cachedIdentity = { generation: batch.generation, hostEpoch: batch.hostEpoch };
+            }
+            if (closed) throw new Error('Desktop transcript open was cancelled');
+            if (cachedIdentity) {
+              const unavailable = async () => { throw new Error('Reconnect the Host to load uncached history'); };
+              return {
+                ...cachedIdentity, sessionId, readThroughMessageId: null,
+                acknowledgeTail: unavailable,
+                loadEarlier: unavailable,
+                close: async () => {},
+              };
+            }
+          }
+          throw error;
+        } finally {
+          closed = true;
         }
-        throw error;
       }
       if (openResult.kind === 'cancelled') {
         closed = true;

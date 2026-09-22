@@ -270,8 +270,12 @@ export class RuntimeHostSessionObservationRegistry {
     if (this.#source === source) {
       this.#source = undefined;
       this.#bindTarget = (target) => target;
-      for (const registration of this.#transcripts.values()) {
-        registration.restore?.resolve();
+      for (const [consumerId, registration] of this.#transcripts) {
+        if (registration.lifecycle === 'pending') {
+          this.#deleteTranscript(consumerId, registration, new Error('Runtime Host transcript source is unavailable'));
+        } else {
+          registration.restore?.resolve();
+        }
       }
     }
   }
@@ -350,6 +354,8 @@ export class RuntimeHostSessionObservationRegistry {
    * A reset replaces what the consumer holds, so it starts the count again.
    */
   #trackDelivered(
+    consumerId: string,
+    source: SessionObservationSource,
     registration: TranscriptRegistration,
     target: RuntimeHostTranscriptTarget,
   ): RuntimeHostTranscriptTarget {
@@ -358,6 +364,7 @@ export class RuntimeHostSessionObservationRegistry {
         return target.id;
       },
       send: (channel, payload) => {
+        if (this.#source !== source || this.#transcripts.get(consumerId) !== registration) return;
         if (payload.reset) registration.deliveredFrom = null;
         for (const { sequence } of payload.fragments) {
           if (registration.deliveredFrom === null || sequence < registration.deliveredFrom) {
@@ -382,6 +389,7 @@ export class RuntimeHostSessionObservationRegistry {
     if (this.#transcripts.has(consumerId)) {
       throw new Error('Desktop transcript consumer identity was reused');
     }
+    const source = requireTranscriptSource(this.#source);
     const destroyedListener = () => {
       void this.closeTranscript(consumerId).catch(this.#onError);
     };
@@ -400,30 +408,30 @@ export class RuntimeHostSessionObservationRegistry {
     };
     this.#transcripts.set(consumerId, registration);
     target.once('destroyed', destroyedListener);
-    const source = this.#source;
-    if (!source) return ready.promise;
-    try {
-      const transcriptSource = requireTranscriptSource(source);
-      const result = await transcriptSource.openTranscript(
-        sessionId,
-        consumerId,
-        this.#trackDelivered(registration, this.#bindTarget(target)),
-        mode,
-        resumeFrom,
-      );
-      if (this.#source === source && this.#transcripts.get(consumerId) === registration) {
-        registration.lifecycle = 'active';
-        registration.ready.resolve(result);
-      } else {
-        await transcriptSource.closeTranscript(consumerId);
+    // First-read availability is not a durable subscription: detach must
+    // release its caller even when the old source has not finished closing.
+    // An already opened consumer still restores across connections below.
+    void (async () => {
+      try {
+        const result = await source.openTranscript(
+          sessionId,
+          consumerId,
+          this.#trackDelivered(consumerId, source, registration, this.#bindTarget(target)),
+          mode,
+          resumeFrom,
+        );
+        if (this.#source === source && this.#transcripts.get(consumerId) === registration) {
+          registration.lifecycle = 'active';
+          registration.ready.resolve(result);
+        } else {
+          await source.closeTranscript(consumerId);
+        }
+      } catch (error) {
+        if (this.#source === source && this.#transcripts.get(consumerId) === registration) {
+          this.#deleteTranscript(consumerId, registration, error instanceof Error ? error : new Error(String(error)));
+        }
       }
-    } catch (error) {
-      if (this.#source === source && this.#transcripts.get(consumerId) === registration) {
-        this.#deleteTranscript(consumerId, registration);
-        throw error;
-      }
-      return registration.ready.promise;
-    }
+    })().catch(this.#onError);
     return registration.ready.promise;
   }
 
@@ -587,7 +595,7 @@ export class RuntimeHostSessionObservationRegistry {
       const result = await transcriptSource.openTranscript(
         registration.sessionId,
         consumerId,
-        this.#trackDelivered(registration, this.#bindTarget(registration.target)),
+        this.#trackDelivered(consumerId, source, registration, this.#bindTarget(registration.target)),
         registration.mode,
         registration.deliveredFrom ?? undefined,
       );
