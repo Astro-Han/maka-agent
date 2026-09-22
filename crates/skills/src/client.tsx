@@ -88,7 +88,7 @@ function Panel({
   if (manageOnly)
     return (
       <section data-maka-skills-plugin data-mode="manage" aria-label={t.title}>
-        <Manage context={context} call={call} t={t} />
+        <Manage context={context} call={call} target={target} t={t} />
       </section>
     );
   return (
@@ -154,7 +154,7 @@ function Panel({
           ) : null}
         </div>
       ) : null}
-      {manage ? <Manage context={context} call={call} t={t} /> : null}
+      {manage ? <Manage context={context} call={call} target={target} t={t} /> : null}
     </section>
   );
 }

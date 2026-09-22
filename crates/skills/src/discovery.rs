@@ -50,52 +50,28 @@ pub struct Source {
 impl Source {
     /// The Host supplies all roots, including home; the library never searches ambient home.
     pub fn standard(
-        cwd: &maka_plugins::filesystem::ReadDirectory,
+        cwd: Option<&maka_plugins::filesystem::ReadDirectory>,
         workspace: &maka_plugins::filesystem::ReadDirectory,
         home: Option<&maka_plugins::filesystem::ReadDirectory>,
     ) -> Vec<Self> {
-        let mut sources = vec![
-            Self::at(
-                cwd,
-                ".maka/skills",
-                SkillScope::Project,
-                SkillSource::Maka,
-                "project:maka",
-            ),
-            Self::at(
-                cwd,
-                ".agents/skills",
-                SkillScope::Project,
-                SkillSource::Agents,
-                "project:agents",
-            ),
-            Self::at(
-                workspace,
-                "skills",
-                SkillScope::Workspace,
-                SkillSource::Legacy,
-                "workspace:legacy",
-            ),
-        ];
-        if let Some(home) = home {
-            sources.extend([
-                Self::at(
-                    home,
-                    ".maka/skills",
-                    SkillScope::User,
-                    SkillSource::Maka,
-                    "user:maka",
-                ),
-                Self::at(
-                    home,
-                    ".agents/skills",
-                    SkillScope::User,
-                    SkillSource::Agents,
-                    "user:agents",
-                ),
-            ]);
-        }
-        sources
+        crate::api::LocationId::ALL
+            .into_iter()
+            .filter_map(|id| {
+                let root = match id.scope() {
+                    SkillScope::Project => cwd?,
+                    SkillScope::User => home?,
+                    SkillScope::Workspace => workspace,
+                    SkillScope::Custom => unreachable!("standard location"),
+                };
+                Some(Self::at(
+                    root,
+                    id.directory(),
+                    id.scope(),
+                    id.source(),
+                    id.reference(),
+                ))
+            })
+            .collect()
     }
 
     fn at(

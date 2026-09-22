@@ -118,6 +118,16 @@ pub(super) fn publish(
         .map_err(message)?;
     staged
         .insert(
+            key(ID, "locations").map_err(message)?,
+            Endpoint::new(
+                support.bundle.content_digest.clone(),
+                Handler::Method(Arc::new(Locations(skills.clone()))),
+            )
+            .requiring_host_paths(),
+        )
+        .map_err(message)?;
+    staged
+        .insert(
             key(ID, "import-source").map_err(message)?,
             Endpoint::new(
                 support.bundle.content_digest.clone(),
@@ -241,6 +251,35 @@ impl Method for Service {
     }
 }
 struct Import(Skills);
+struct Locations(Skills);
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocationsInput {
+    workspace: Option<WorkspaceViewInput>,
+    action: crate::api::LocationAction,
+}
+impl Method for Locations {
+    fn call(&self, input: Value, caller: Caller) -> BoxFuture<'static, Result<Value, Error>> {
+        let skills = self.0.clone();
+        Box::pin(async move {
+            let input: LocationsInput = decode(input)?;
+            let project = match input.workspace {
+                Some(workspace) => caller.views.workspace(workspace).await,
+                None => caller.views.session().await,
+            };
+            // A missing Project must not hide independent private/user locations.
+            let files = match project {
+                Ok(view) => Some((view.files, view.workspace.target)),
+                Err(Error::Cancelled | Error::Retired) => return Err(Error::Cancelled),
+                Err(_) => None,
+            };
+            if caller.cancellation.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            encode(skills.locations(input.action, files, &caller).await?)
+        })
+    }
+}
 struct UserAuthorization(Skills);
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -309,7 +348,7 @@ fn encode(value: impl serde::Serialize) -> Result<Value, Error> {
 fn message(error: impl ToString) -> String {
     error.to_string()
 }
-fn failure(error: super::Error) -> Error {
+pub(super) fn failure(error: super::Error) -> Error {
     match error {
         super::Error::Invalid(message) => Error::Invalid(message),
         super::Error::Retired => Error::Retired,

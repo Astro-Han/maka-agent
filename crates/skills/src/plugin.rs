@@ -35,6 +35,7 @@ mod catalog;
 mod files;
 mod import;
 mod input;
+mod locations;
 mod mutation;
 mod page;
 mod path;
@@ -250,7 +251,7 @@ impl Skills {
             .inputs
             .open("user-skills")
             .map_err(|error| Error::Source(error.to_string()))?;
-        let sources = crate::Source::standard(workspace, &published, user.as_ref());
+        let sources = crate::Source::standard(Some(workspace), &published, user.as_ref());
         let cancellation = self.basis.owner.stopping().map_err(|_| Error::Retired)?;
         let discovery = crate::scan(&sources, &cancellation)
             .await

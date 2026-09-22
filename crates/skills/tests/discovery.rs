@@ -108,7 +108,7 @@ async fn snapshot_precedence_preferences_and_capabilities_preserve_selected_iden
     let project_files = view(&owner, &project).await;
     let workspace_files = view(&owner, &workspace).await;
     let home_files = view(&owner, &home).await;
-    let sources = Source::standard(&project_files, &workspace_files, Some(&home_files));
+    let sources = Source::standard(Some(&project_files), &workspace_files, Some(&home_files));
     let snapshot = scan(&sources, &CancellationToken::new()).await.unwrap();
     assert!(snapshot.diagnostics.is_empty());
     assert_eq!(snapshot.inventory.len(), 7);
@@ -450,7 +450,7 @@ async fn discovery_reads_only_contained_regular_files_and_reports_source_failure
         assert!(status.success());
     }
     let snapshot = scan(
-        &Source::standard(&root_files, &root_files, None),
+        &Source::standard(Some(&root_files), &root_files, None),
         &CancellationToken::new(),
     )
     .await

@@ -22,7 +22,7 @@ import { connect } from 'node:net';
 import { once } from 'node:events';
 import { parseArgs } from 'node:util';
 import { join, basename } from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { runInThisContext } from 'node:vm';
 import { parseHTML } from 'linkedom';
 import * as React from 'react';
@@ -77,6 +77,7 @@ let connection, runtime, root, skills;
 const errors = [];
 const draft = [];
 const openedFiles = [];
+let delayedLocation;
 let suggestions = [];
 const publishSuggestions = (items) => {
   suggestions = items;
@@ -181,7 +182,17 @@ try {
       async (host, epoch, input) => {
         assert.deepEqual(host, origin);
         assert.equal(epoch, 'skills-client');
-        return connection.request('plugin.remote', input);
+        const result = await connection.request('plugin.remote', input);
+        if (
+          delayedLocation &&
+          input.kind === 'call' &&
+          input.binding.method === 'locations' &&
+          input.input.action.kind === 'open'
+        ) {
+          delayedLocation.started = true;
+          await delayedLocation.release.promise;
+        }
+        return result;
       },
       origin,
       'skills-client',
@@ -316,6 +327,64 @@ try {
   mount('workspace.manage', { ...workspace, section: 'skills' });
   await until(() => document.body.textContent.includes('Imported Client Source'));
   assert.ok(document.body.textContent.includes('Review'));
+  click('Discovery directories');
+  const directories = () => document.querySelector('section[aria-label="Discovery directories"]');
+  await until(() => directories()?.querySelectorAll('li').length === 5);
+  const projectAgents = [...directories().querySelectorAll('li')].find(
+    (row) => row.querySelector('strong').textContent === 'Project · Agents',
+  );
+  assert.ok(projectAgents.textContent.includes('Not created'));
+  const openedCount = openedFiles.length;
+  flushSync(() =>
+    projectAgents
+      .querySelector('button')
+      .dispatchEvent(new window.Event('click', { bubbles: true })),
+  );
+  await until(() => openedFiles.length === openedCount + 1);
+  assert.equal(
+    openedFiles.at(-1),
+    await realpath(join(values['skills-client-workspace'], '.agents', 'skills')),
+  );
+  await until(() => directories().textContent.includes('Available · Valid: 0 · Invalid: 0'));
+  const userAgents = [...directories().querySelectorAll('li')].find(
+    (row) => row.querySelector('strong').textContent === 'User · Agents',
+  );
+  await until(() => !userAgents.querySelector('button').disabled);
+  assert.ok(userAgents.textContent.includes('Not created'));
+  flushSync(() =>
+    userAgents.querySelector('button').dispatchEvent(new window.Event('click', { bubbles: true })),
+  );
+  await until(() => openedFiles.length === openedCount + 2);
+  const userRoot = await skills.method('user-authorization')({ kind: 'status' });
+  assert.equal(
+    await realpath(openedFiles.at(-1)),
+    await realpath(join(userRoot.target.path, '.agents', 'skills')),
+  );
+  delayedLocation = { started: false, release: Promise.withResolvers() };
+  const openedBeforeSwitch = openedFiles.length;
+  const openFolder = [...directories().querySelectorAll('li')]
+    .find((row) => row.querySelector('strong').textContent === 'Project · Agents')
+    .querySelector('button');
+  await until(() => !openFolder.disabled);
+  flushSync(() => openFolder.dispatchEvent(new window.Event('click', { bubbles: true })));
+  await until(() => delayedLocation.started);
+  mount('workspace.manage', {
+    ...workspace,
+    section: 'skills',
+    workspace: { kind: 'host_path', path: join(values['skills-client-workspace'], 'gone') },
+  });
+  delayedLocation.release.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  click('Discovery directories');
+  await until(() => directories()?.querySelectorAll('li').length === 5);
+  assert.equal(
+    openedFiles.length,
+    openedBeforeSwitch,
+    'A retired workspace must not open a late path',
+  );
+  assert.ok(directories().textContent.includes('Unavailable'));
+  assert.ok(directories().textContent.includes('This Host · Skills'));
+  delayedLocation = undefined;
   mount('workspace.composer.before', {
     ...workspace,
     publishSuggestions,
@@ -342,6 +411,7 @@ try {
   assert.deepEqual(errors, []);
   console.log('skills-client-bundle-accepted');
 } finally {
+  delayedLocation?.release.resolve();
   await skills?.close();
   if (root) flushSync(() => root.unmount());
   await runtime?.close();

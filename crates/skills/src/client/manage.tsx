@@ -20,6 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { importSource, openSource, recoverUser } from './files.js';
 import { UpdatePreview } from './preview.js';
+import { Locations } from './locations.js';
 import type { ClientContext } from '@maka-agent/plugin-sdk/client';
 import {
   type Call,
@@ -29,10 +30,21 @@ import {
   type Preview,
   type Reply,
   type Skill,
+  type Target,
   type View,
 } from './model.js';
 
-export function Manage({ context, call, t }: { context: ClientContext; call: Call; t: Copy }) {
+export function Manage({
+  context,
+  call,
+  target,
+  t,
+}: {
+  context: ClientContext;
+  call: Call;
+  target: Target;
+  t: Copy;
+}) {
   const [view, setView] = useState<View>('governance');
   const [page, setPage] = useState<Catalog>();
   const [preview, setPreview] = useState<{ ref: string; value: Preview }>();
@@ -174,6 +186,7 @@ export function Manage({ context, call, t }: { context: ClientContext; call: Cal
   );
   return (
     <section aria-label={t.manage}>
+      <Locations context={context} target={target} t={t} />
       <nav>
         {context.localFiles ? (
           <button

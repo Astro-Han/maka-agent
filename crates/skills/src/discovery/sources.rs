@@ -124,9 +124,10 @@ pub async fn governance_catalog(
     home: Option<&ReadDirectory>,
     cancellation: &CancellationToken,
 ) -> Result<SourceCatalog, SourceCatalogError> {
-    let publication = super::scan_with_origins(&Source::standard(cwd, root, home), cancellation)
-        .await
-        .map_err(SourceCatalogError::Scan)?;
+    let publication =
+        super::scan_with_origins(&Source::standard(Some(cwd), root, home), cancellation)
+            .await
+            .map_err(SourceCatalogError::Scan)?;
     catalog(publication, home, cancellation).await
 }
 

@@ -255,6 +255,9 @@ user/project content paths stay separate from private journals.
   Catalog views share a revision; cursors also bind their view. The `maka.skills` built-in
   owns discovery, input expansion, enable/pin CAS, raw-byte update previews and recoverable
   creation/install/delete/update. Its Client bundle supplies management, selectors and draft suggestions.
+  Discovery-directory management uses the same location definitions, public Remote file grants and
+  target-bound native opening. A missing Project does not hide user/private directories; stale paths
+  are rejected without replaying the action. User file management is authorized separately from Agent calls.
   Desktop supplies target-bound Slots and authorized native file actions. Disabling the plugin
   rejects new explicit Skills without blocking ordinary chat or rewriting accepted receipts.
   Plan-mode execution remains outside this domain and is not implemented.

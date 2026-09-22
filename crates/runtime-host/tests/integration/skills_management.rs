@@ -64,6 +64,117 @@ async fn approve_user(peer: &mut Peer) -> Value {
         .clone()
 }
 
+async fn discovery_locations(peer: &mut Peer, workspace: &std::path::Path) {
+    use super::skills_plugin::client::request;
+    let first = workspace.join("location-project-a");
+    let second = workspace.join("location-project-b");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let registered = peer
+        .rpc(
+            "project.catalog.mutate",
+            json!({"kind":"register","path":first}),
+        )
+        .await;
+    assert_eq!(registered["ok"], true, "{registered}");
+    let project = registered["result"]["project"]["id"].clone();
+    let target = json!({"workspace":{"kind":"project","projectId":project},
+        "sandboxMode":"workspace-write","collaborationMode":"agent"});
+    let listed = request(
+        peer,
+        "locations",
+        json!({"workspace":target,"action":{"kind":"list"}}),
+    )
+    .await;
+    let locations = listed["locations"].as_array().unwrap();
+    assert_eq!(locations.len(), 5);
+    let agents = locations
+        .iter()
+        .find(|item| item["id"] == "project:agents")
+        .unwrap();
+    assert_eq!(agents["status"], "missing");
+    assert_eq!(
+        locations
+            .iter()
+            .find(|item| item["id"] == "user:maka")
+            .unwrap()["validCount"],
+        1
+    );
+    let open = json!({"kind":"open","id":"project:agents","expectedPath":agents["path"],"createIfMissing":false});
+    let missing = request(peer, "locations", json!({"workspace":target,"action":open})).await;
+    assert_eq!(missing["reason"], "missing");
+    assert!(!first.join(".agents/skills").exists());
+    let moved = peer
+        .rpc(
+            "project.catalog.mutate",
+            json!({"kind":"relink","projectId":project,"path":second}),
+        )
+        .await;
+    assert_eq!(moved["ok"], true, "{moved}");
+    let mut open = open;
+    open["createIfMissing"] = json!(true);
+    let stale = request(peer, "locations", json!({"workspace":target,"action":open})).await;
+    assert_eq!(stale["reason"], "changed");
+    assert!(!first.join(".agents/skills").exists());
+    assert!(!second.join(".agents/skills").exists());
+    let refreshed = request(
+        peer,
+        "locations",
+        json!({"workspace":target,"action":{"kind":"list"}}),
+    )
+    .await;
+    open["expectedPath"] = refreshed["locations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == "project:agents")
+        .unwrap()["path"]
+        .clone();
+    for _ in 0..2 {
+        let result = request(peer, "locations", json!({"workspace":target,"action":open})).await;
+        assert_eq!(result["kind"], "resolved", "{result}");
+        assert!(second.join(".agents/skills").is_dir());
+    }
+    std::fs::create_dir_all(second.join(".maka")).unwrap();
+    std::fs::write(second.join(".maka/skills"), b"not a directory").unwrap();
+    let blocked = request(
+        peer,
+        "locations",
+        json!({"workspace":target,"action":{"kind":"list"}}),
+    )
+    .await;
+    assert_eq!(
+        blocked["locations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == "project:maka")
+            .unwrap()["status"],
+        "blocked_path"
+    );
+    let removed = peer
+        .rpc(
+            "project.catalog.mutate",
+            json!({"kind":"archive","projectId":project}),
+        )
+        .await;
+    assert_eq!(removed["ok"], true, "{removed}");
+    let missing = request(
+        peer,
+        "locations",
+        json!({"workspace":target,"action":{"kind":"list"}}),
+    )
+    .await;
+    for item in missing["locations"].as_array().unwrap() {
+        if item["id"].as_str().unwrap().starts_with("project:") {
+            assert_eq!(item["status"], "unavailable");
+            assert!(item["path"].is_null());
+        } else {
+            assert_eq!(item["status"], "available", "{item}");
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn skill_publication_and_confirmed_update_work_through_host_without_a_model() {
     let fixture = ClientFixture::new("maka-skill-management-");
@@ -143,6 +254,7 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
             );
         }
         if !reopened {
+            discovery_locations(&mut peer, &fixture.workspace).await;
             approved = approve_user(&mut peer).await;
             let grant = approved.clone();
             let imported = super::skills_plugin::client::request(
