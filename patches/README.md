@@ -219,4 +219,19 @@ alone — no `themeProps`, no `data-*`, no custom property — so the only handl
 is a structural selector that breaks the moment a caller passes
 `scrollButton={null}`. See #3446.
 
+Composer caret helpers now anchor inside editable text nodes, including after
+tokens and at empty ends, so Chromium can start IME composition there.
+The Chat barrel exports `placeCaretAtEnd` for draft restoration without a second
+boundary-walking implementation. These dependency-owned ranges have no public
+call-site hook; remove the patches when the upstream selection API covers them
+(facebook/astryx#6411).
+
+Token insertion accepts an explicit editable suffix. Public plugin suggestions
+use their existing trailing text rather than gaining an extra space when a
+display label is added. Remove when upstream supports exact-text token insertion.
+
+Inserted and displayed tokens share a one-line-height, vertically centred
+wrapper. This avoids a chip moving when a draft becomes a transcript row.
+Remove these geometry patches when upstream aligns both wrappers (#6412).
+
 Delete each hunk when the corresponding behavior ships in Astryx.

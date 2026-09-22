@@ -60,6 +60,10 @@ test('composer publications retire by owner and cannot cross a target switch or 
   const snapshot = observed!.suggestions;
   await act(() => first.update([item('/first ')]));
   assert.equal(observed!.suggestions, snapshot, 'same-content refresh keeps the open menu stable');
+  await act(() => first.update([{...item('/first '), tokenLabel:'First chip'}]));
+  assert.equal(observed!.suggestions[0].tokenLabel, 'First chip');
+  assert.equal(observed!.suggestions[0].id, snapshot[0].id);
+  assert.equal(observed!.suggestions[0].insertText, snapshot[0].insertText);
   await act(() => first.update([item('/revised ')]));
   assert.equal(observed!.suggestions[0].id, snapshot[0].id);
   assert.equal(observed!.suggestions[0].insertText, '/revised ');

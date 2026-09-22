@@ -52,7 +52,8 @@ class Suggestions {
     if (next.length === this.#snapshot.length && next.every((item, index) => {
       const previous = this.#snapshot[index]!;
       return item.id === previous.id && item.name === previous.name
-        && item.description === previous.description && item.insertText === previous.insertText;
+        && item.description === previous.description && item.insertText === previous.insertText
+        && item.tokenLabel === previous.tokenLabel;
     })) return;
     this.#snapshot = next;
     for (const listener of this.#listeners) listener();

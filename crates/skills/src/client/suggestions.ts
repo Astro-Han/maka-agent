@@ -59,6 +59,7 @@ export function useSuggestions(
             name: item.name,
             description: item.description,
             insertText: '/skill:' + item.id + ' ',
+            tokenLabel: item.name,
           })),
         );
         if (items.length > 4096) throw new Error('Skill suggestions exceed the catalog limit');

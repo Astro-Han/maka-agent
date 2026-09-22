@@ -77,6 +77,7 @@ import {
   createTriggerSearchSource,
   fileTransferContainsFiles,
   isChatInputComposing,
+  mentionMatchRank,
   mentionQueryMatches,
   selectedSkillIds,
   slashCommandQuery,
@@ -102,6 +103,7 @@ import {
   ChatComposerInput,
   IconButton,
   Lightbox,
+  placeCaretAtEnd,
   Token,
   Tooltip,
   useChatPasteAsToken,
@@ -144,6 +146,7 @@ export interface ComposerSkillOption {
 export interface ComposerSlashCommandOption {
   /** A completion may insert domain syntax without executing it. */
   insertText?: string;
+  tokenLabel?: string;
   id: string;
   name: string;
   description?: string;
@@ -639,12 +642,7 @@ export const Composer = forwardRef<
       return;
     }
     caretPendingRef.current = false;
-    const selection = document.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(editable);
-    range.collapse(false);
-    selection?.removeAllRanges();
-    selection?.addRange(range);
+    placeCaretAtEnd(editable);
   }
   function focusInput() {
     inputHandleRef.current?.focus();
@@ -991,6 +989,13 @@ export const Composer = forwardRef<
                 `${command.id} ${command.name} ${command.description ?? ''} ${command.insertText ?? ''} ${(command.keywords ?? []).join(' ')}`,
               );
             })
+            .sort((left, right) => {
+              const rank = (command: ComposerSlashCommandOption) => mentionMatchRank(
+                command.insertText === undefined ? commandQuery! : rawQuery,
+                command.id, command.name, command.insertText ?? '', ...(command.keywords ?? []),
+              );
+              return rank(left) - rank(right);
+            })
             .map((command) => ({
               id: `command:${command.id}`,
               label: command.name,
@@ -1004,6 +1009,9 @@ export const Composer = forwardRef<
         .filter((skill) => !selectedSkills.has(skill.id.toLowerCase()))
         .filter((skill) =>
           mentionQueryMatches(query, `${skill.id} ${skill.name} ${skill.description ?? ''}`),
+        )
+        .sort((left, right) =>
+          mentionMatchRank(query, left.id, left.name) - mentionMatchRank(query, right.id, right.name),
         )
         .map((skill) => ({
           id: `skill:${skill.id}`,
@@ -1145,7 +1153,15 @@ export const Composer = forwardRef<
         onSelect: (item): string | ChatComposerToken => {
           const suggestion = item.auxiliaryData as ComposerSlashSuggestion;
           if (suggestion.kind === 'command') {
-            return suggestion.command.insertText ?? `/${suggestion.command.id} `;
+            const { command } = suggestion;
+            const value = command.insertText ?? `/${command.id} `;
+            if (command.tokenLabel === undefined || !value.trimEnd()) return value;
+            const tokenValue = value.trimEnd();
+            return {
+              value: tokenValue,
+              label: command.tokenLabel,
+              trailingText: value.slice(tokenValue.length),
+            };
           }
           return inlineReferenceToken({
             kind: 'skill',

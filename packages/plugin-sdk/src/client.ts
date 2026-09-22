@@ -166,6 +166,8 @@ export interface ComposerSuggestion {
   readonly name: string;
   readonly description?: string;
   readonly insertText: string;
+  /** Optional inline chip label; the draft still serializes to insertText. */
+  readonly tokenLabel?: string;
 }
 
 /** One publisher's draft suggestions. Updating keeps item identities stable. */

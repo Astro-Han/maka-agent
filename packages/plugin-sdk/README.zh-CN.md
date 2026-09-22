@@ -122,6 +122,8 @@ Client SDK API **1** 使用 Desktop 提供的 React。导出来自 `@maka-agent/
 
 Slot 包括 `session.composer.before`、`workspace.composer.before`、`workspace.manage`、`application.manage` 和 `navigation.status`。应用操作携带 ID，并要求显式 `handled()` 确认。工作区参数只是候选目标，不是路径授权。Composer Slot 提供只编辑草稿的 `appendText` 和 `publishSuggestions`。发布对象提供 `update(items)` 和 `dispose()`：刷新时更新同一 owner，effect 清理时销毁。条目身份跨刷新稳定；建议随发布者或目标退出而撤下，不提交消息。每个注册拥有 Entry 内唯一 key 和可选数值排序。包导入需列入 manifest dependencies；React、`react/jsx-runtime` 和 Client SDK 由 Desktop 提供，不要重复打包 React。
 
+建议可设置 `tokenLabel`，将 `insertText` 显示为行内 token。标签只影响外观；提交、编辑与恢复仍使用序列化文本。
+
 可选的 `ctx.localFiles.pick()` / `open(path)` 仅处理 Desktop 本地路径，不用于远程 Host 文件。Desktop 在原生操作前校验 Client 发布身份，导航或退休后返回的文件选择结果会被丢弃。
 
 Desktop 通过 `@maka/ui/plugin` 提供共享 UI 模块（目前为 `Button`）。使用该入口支持的组件，不再打包一份组件库实例；它不暴露内部 UI 包的完整 API。

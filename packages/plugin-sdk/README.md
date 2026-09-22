@@ -114,6 +114,8 @@ Build with `buildClient({ packageId, entryPoint })` from `@maka-agent/plugin-sdk
 
 Slots include `session.composer.before`, `workspace.composer.before`, `workspace.manage`, `application.manage` and `navigation.status`. Application actions carry an ID and an explicit `handled()` acknowledgement. Workspace props describe a candidate, not an authorized filesystem path. Composer Slots offer draft-only `appendText` and `publishSuggestions`. A publication has `update(items)` and `dispose()`; update the same owner on refresh and dispose it on effect cleanup. Item identities survive refresh; publications retire with their owner or target and never submit a message. Each registration has an Entry-local key and optional numeric order. Declare package imports in manifest dependencies; React, `react/jsx-runtime`, and the Client SDK are supplied by Desktop. Do not bundle another React instance.
 
+Suggestions may set `tokenLabel` to display `insertText` as an inline chip. The label is presentation only; submission, editing and recovery still use the serialized text.
+
 Optional `ctx.localFiles.pick()` / `open(path)` use Desktop-local paths only. They are unavailable for remote Host files. Desktop validates the published Client identity before native actions and discards picker results after navigation or retirement.
 
 `application.overlay` mounts on the application's default Host. `session.header.actions` and `turn.footer` mount on the viewed Session's Host with canonical `sessionId`; the footer also receives `turnId`, once per visible Turn even after steering. They add UI without replacing native actions. Session and Turn props identify observations, not execution permission.

@@ -120,6 +120,15 @@ export function mentionQueryMatches(query: string, text: string): boolean {
     .every((token) => haystack.includes(token));
 }
 
+/** Name/keyword prefix, then substring, then description-only; ties keep catalog order. */
+export function mentionMatchRank(query: string, ...primary: string[]): 0 | 1 | 2 {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return 0;
+  const names = primary.map((value) => value.toLowerCase());
+  if (names.some((name) => name.startsWith(normalized))) return 0;
+  return names.some((name) => name.includes(normalized)) ? 1 : 2;
+}
+
 /** Normalize `/skill:<query>` and bare `/<query>` into the same Skill search query. */
 export function skillMentionQuery(query: string): string {
   return query.toLowerCase().startsWith('skill:') ? query.slice('skill:'.length) : query;
