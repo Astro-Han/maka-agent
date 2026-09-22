@@ -162,8 +162,7 @@ impl maka_plugins::llm::Models for Effects {
     fn resolve(
         &self,
         selection: maka_plugins::llm::Selection,
-    ) -> BoxFuture<'_, Result<Option<maka_runtime::execution::ModelBinding>, maka_plugins::Error>>
-    {
+    ) -> BoxFuture<'_, Result<Option<maka_plugins::llm::Choice>, maka_plugins::Error>> {
         Box::pin(async move {
             selection.validate()?;
             let _lease = self.owner.resource_call()?;

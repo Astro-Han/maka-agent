@@ -63,7 +63,8 @@ export interface CreateSessionInput {
   /** Falls back to the connection's defaultModel if omitted. */
   model?: string;
   /** Per-model reasoning-depth variant; `undefined` = model default. */
-  thinkingLevel?: ThinkingLevel;
+  /** Omitted selects the model's configured default; null selects the provider default. */
+  thinkingLevel?: ThinkingLevel | null;
   /** Immutable versioned prompt/tool contract for this Session. */
   toolProfile?: SessionToolProfile;
   /** Internal creation-time choice; not a per-task UI control. */

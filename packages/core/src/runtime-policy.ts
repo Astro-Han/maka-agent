@@ -23,7 +23,6 @@ import type {
   ModelDiscoveryResult,
   ModelInfo,
 } from './llm-connections.js';
-import type { ThinkingLevel } from './model-thinking.js';
 import type { ProviderType } from './provider-registry.js';
 import type { ModelOverride } from './model-thinking.js';
 import {
@@ -147,7 +146,6 @@ export interface RuntimePolicy {
   };
   readonly chatDefaults: {
     readonly sandboxMode: ChatDefaultSandboxMode;
-    readonly thinkingLevel?: ThinkingLevel;
   };
   readonly shell: ShellSettings;
   readonly externalAgents: { readonly antigravity: { readonly executable: string } };

@@ -265,7 +265,7 @@ function taskEntryHost(): Extract<TaskEntryHost, { state: 'available' }> {
       selectNoProject: false,
     },
     selectedProjectId: 'project-A',
-    chatDefaults: { sandboxMode: 'workspace-write', thinkingLevel: 'high' },
+    chatDefaults: { sandboxMode: 'workspace-write' },
   };
 }
 

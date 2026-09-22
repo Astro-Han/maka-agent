@@ -62,7 +62,7 @@ export type TaskEntryHost =
       readonly defaultProjectId?: string;
       readonly chatDefaults: Pick<
         ChatDefaultsSettings,
-        'sandboxMode' | 'thinkingLevel'
+        'sandboxMode'
       >;
       readonly projectPath?: string;
       readonly branch?: string;

@@ -52,7 +52,13 @@ test('catalog transport preserves independent limits and their unmodified defaul
   const [entry] = buildModelCatalogEntries({
     providerType: 'openai-compatible',
     models: [{ id: 'custom', contextWindow: 64000, inputLimit: 32000 }],
-    modelOverrides: { custom: { contextWindow: 200000 } },
+    modelOverrides: {
+      custom: {
+        contextWindow: 200000,
+        thinkingLevels: ['low', 'high'],
+        defaultThinkingLevel: 'high',
+      },
+    },
   });
   assert.ok(entry);
   const decoded = decodeModelCatalogEntry(JSON.parse(JSON.stringify(entry)));
@@ -60,6 +66,17 @@ test('catalog transport preserves independent limits and their unmodified defaul
   assert.equal(decoded.inputLimit, 32000);
   assert.equal(decoded.defaultContextWindow, 64000);
   assert.equal(decoded.defaultInputLimit, 32000);
+  assert.equal(decoded.defaultThinkingLevel, 'high');
+  const [stale] = buildModelCatalogEntries({
+    providerType: 'openai-compatible',
+    models: [{ id: 'custom' }],
+    modelOverrides: { custom: { thinkingLevels: ['low'], defaultThinkingLevel: 'high' } },
+  });
+  assert.ok(stale);
+  assert.equal(
+    decodeModelCatalogEntry(JSON.parse(JSON.stringify(stale))).defaultThinkingLevel,
+    undefined,
+  );
 });
 
 test('a live inventory annotates a model it omits and preserves higher-priority failures', () => {

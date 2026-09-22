@@ -74,6 +74,12 @@ pub struct ModelOverride {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present"
     )]
+    pub default_thinking_level: Option<ThinkingLevel>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub vision: Option<bool>,
     #[serde(
         default,

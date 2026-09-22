@@ -19,10 +19,7 @@
 
 use maka_config::{ConfigError, ConfigurationStore};
 use maka_event_log::root::{RootNamespaces, RootOwner};
-use maka_runtime::{
-    configuration::{policy::*, validation::MAX_SAFE_INTEGER},
-    execution::ThinkingLevel,
-};
+use maka_runtime::configuration::{policy::*, validation::MAX_SAFE_INTEGER};
 use std::{
     future::Future,
     sync::Arc,
@@ -191,7 +188,6 @@ async fn defaults_are_read_only_and_cas_is_durable_even_for_same_value() {
     );
     let value = ChatDefaults {
         sandbox_mode: maka_runtime::execution::SandboxMode::ReadOnly,
-        thinking_level: Some(ThinkingLevel::High),
     };
     let (a, b) = tokio::join!(
         store.set_chat_defaults(0, value.clone()),
@@ -222,10 +218,7 @@ async fn defaults_are_read_only_and_cas_is_durable_even_for_same_value() {
         store.set_chat_defaults(1, value.clone()).await.unwrap(),
         RuntimePolicyMutationResult::Committed { revision: 2 }
     );
-    let clear = ChatDefaults {
-        thinking_level: None,
-        ..value
-    };
+    let clear = ChatDefaults::default();
     assert_eq!(
         store.set_chat_defaults(2, clear.clone()).await.unwrap(),
         RuntimePolicyMutationResult::Committed { revision: 3 }

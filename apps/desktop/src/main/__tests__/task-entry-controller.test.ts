@@ -63,7 +63,7 @@ function readyHost(input: {
       selectNoProject: input.selectNoProject ?? false,
     },
     selectedProjectId: input.selectedProjectId ?? 'project-a',
-    chatDefaults: { sandboxMode: 'workspace-write', thinkingLevel: 'high' },
+    chatDefaults: { sandboxMode: 'workspace-write' },
     branch: 'main',
   };
 }
@@ -152,7 +152,6 @@ describe('useTaskEntryController', () => {
       projectId: 'project-a',
     });
     assert.equal(controller().selectors.projectPath, '/tmp/project-a');
-    assert.equal(controller().selectors.selectedHost?.chatDefaults.thinkingLevel, 'high');
     assert.equal(controller().selectors.usesDefaultHost, true);
     assert.equal(controller().selectors.workspacePicker.label, 'project-a');
     assert.equal(controller().selectors.workspacePicker.branch, 'main');

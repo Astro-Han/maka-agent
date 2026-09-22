@@ -594,7 +594,7 @@ export function registerDesktopSessionLocalIpc(deps: {
         approvalPolicy: creation.approvalPolicy ?? { kind: 'on-request' },
         collaborationMode: creation.collaborationMode,
         orchestrationMode: creation.orchestrationMode,
-        thinkingLevel: creation.thinkingLevel,
+        thinkingLevel: creation.thinkingLevel ?? undefined,
       };
       service.store.saveSession(target.partition, summary, creation);
       deps.changed(target.scope, creation.sessionId);

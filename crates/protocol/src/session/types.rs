@@ -23,6 +23,37 @@ pub use maka_runtime::execution::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Omission uses this model's configured default; null explicitly uses the provider default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "Option<ThinkingLevel>", into = "Option<ThinkingLevel>")]
+pub enum SessionThinkingPreference {
+    #[default]
+    ModelDefault,
+    ProviderDefault,
+    Level(ThinkingLevel),
+}
+impl SessionThinkingPreference {
+    pub fn is_model_default(&self) -> bool {
+        matches!(self, Self::ModelDefault)
+    }
+    pub fn explicit_level(self) -> Option<ThinkingLevel> {
+        match self {
+            Self::Level(level) => Some(level),
+            _ => None,
+        }
+    }
+}
+impl From<Option<ThinkingLevel>> for SessionThinkingPreference {
+    fn from(level: Option<ThinkingLevel>) -> Self {
+        level.map_or(Self::ProviderDefault, Self::Level)
+    }
+}
+impl From<SessionThinkingPreference> for Option<ThinkingLevel> {
+    fn from(preference: SessionThinkingPreference) -> Self {
+        preference.explicit_level()
+    }
+}
+
 macro_rules! wire_enum {
     ($name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

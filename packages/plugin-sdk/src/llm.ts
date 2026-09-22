@@ -24,6 +24,9 @@ export type ModelChoice = {
   thinkingLevels: readonly NonNullable<
     import('./execution.js').ExecutorSettings['thinkingLevel']
   >[];
+  defaultThinkingLevel: NonNullable<
+    import('./execution.js').ExecutorSettings['thinkingLevel']
+  > | null;
   isDefault: boolean;
 };
 export type ModelChoices = {

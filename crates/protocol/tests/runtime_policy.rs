@@ -76,7 +76,7 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
     let reordered = r#"{"policy":{
         "externalAgents":{"antigravity":{"executable":""}},
         "shell":{"executable":"","preference":"auto"},
-        "chatDefaults":{"thinkingLevel":"high","sandboxMode":"workspace-write"},
+        "chatDefaults":{"sandboxMode":"workspace-write"},
         "privacy":{"incognitoActive":false},
         "workspaceInstructions":{"enabled":true},
         "memory":{"agentReadEnabled":false,"enabled":true},
@@ -126,7 +126,7 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         ("/revision", json!(9_007_199_254_740_992u64), false),
         (
             "/policy/chatDefaults",
-            json!({"sandboxMode":"danger-full-access","thinkingLevel":"high"}),
+            json!({"sandboxMode":"danger-full-access"}),
             true,
         ),
         (
@@ -230,7 +230,7 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         ),
         (
             "set_chat_defaults",
-            json!({"sandboxMode":"danger-full-access","thinkingLevel":"off"}),
+            json!({"sandboxMode":"danger-full-access"}),
             true,
         ),
         (

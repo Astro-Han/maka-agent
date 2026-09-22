@@ -61,25 +61,6 @@ test('normalizes policy input while canonical policy decode rejects producer dri
   );
 });
 
-test('preserves a valid default thinking level and rejects unknown levels', () => {
-  const policy = {
-    ...createDefaultRuntimePolicy(),
-    chatDefaults: { sandboxMode: 'workspace-write' as const, thinkingLevel: 'high' as const },
-  };
-  assert.deepEqual(decodeCanonicalRuntimePolicy(policy).chatDefaults, policy.chatDefaults);
-  assert.throws(
-    () =>
-      normalizeRuntimePolicyMutation({
-        expectedRevision: 0,
-        operation: {
-          kind: 'set_chat_defaults',
-          value: { sandboxMode: 'workspace-write', thinkingLevel: 'unbounded' },
-        },
-      }),
-    RuntimePolicyDomainDecodeError,
-  );
-});
-
 test('normalizes the explicit Git Bash preference and rejects arbitrary shell kinds', () => {
   assert.deepEqual(
     normalizeRuntimePolicyMutation({

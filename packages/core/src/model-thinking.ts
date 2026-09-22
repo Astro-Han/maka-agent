@@ -127,6 +127,8 @@ export interface ModelOverride {
   readonly capabilities?: Omit<NonNullable<ModelInfo['capabilities']>, 'vision'>;
   readonly modalities?: ModelInfo['modalities'];
   readonly thinkingLevels?: readonly ThinkingLevel[];
+  /** Thinking level used when a new Session starts on this exact model. */
+  readonly defaultThinkingLevel?: ThinkingLevel;
   readonly vision?: boolean;
   readonly contextWindow?: number;
   readonly compactionThreshold?: number;
@@ -156,6 +158,7 @@ function normalizeModelOverride(entry: unknown): ModelOverride | undefined {
     capabilities?: ModelOverride['capabilities'];
     modalities?: ModelOverride['modalities'];
     thinkingLevels?: readonly ThinkingLevel[];
+    defaultThinkingLevel?: ThinkingLevel;
     vision?: boolean;
     contextWindow?: number;
     compactionThreshold?: number;
@@ -193,6 +196,9 @@ function normalizeModelOverride(entry: unknown): ModelOverride | undefined {
         declaredSet.has(level),
       );
     }
+  }
+  if (isThinkingLevel(entry.defaultThinkingLevel)) {
+    declared.defaultThinkingLevel = entry.defaultThinkingLevel;
   }
   if (typeof entry.vision === 'boolean') declared.vision = entry.vision;
   for (const field of ['codeMode', 'applyPatch'] as const) {
@@ -325,13 +331,19 @@ export function thinkingVariantsForConnection(
   return thinkingVariantsForModel(connection.providerType, modelId);
 }
 
-/**
- * Discard-semantics gate: returns the level when the model offers it,
- * `undefined` otherwise. Callers that must *reject* a bad level (IPC/session
- * boundaries with an error channel) keep their own `includes` branch — the
- * distinction between "silently drop" and "tell the caller" is the policy of
- * the call site, not of this helper.
- */
+/** An obsolete default is not silently coerced to a different supported level. */
+export function defaultThinkingLevelForConnection(
+  connection: ConnectionThinkingContext,
+  modelId: string,
+): ThinkingLevel | undefined {
+  return resolveThinkingLevel(
+    connection,
+    modelId,
+    modelOverride(connection, modelId)?.defaultThinkingLevel,
+  );
+}
+
+/** Return only a supported level; admission boundaries may instead reject invalid input. */
 export function resolveThinkingLevel(
   connection: ConnectionThinkingContext,
   modelId: string,
@@ -379,6 +391,7 @@ export function applyModelOverride(
   if (!override) return model;
   const {
     thinkingLevels: _thinking,
+    defaultThinkingLevel: _defaultThinking,
     serviceTier: _tier,
     compactionThreshold: _threshold,
     maxOutputTokens: _outputBudget,

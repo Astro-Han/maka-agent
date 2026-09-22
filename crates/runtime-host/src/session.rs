@@ -192,7 +192,7 @@ pub struct PreparedSession {
     labels: Vec<String>,
     sandbox_mode: Option<SandboxMode>,
     approval_policy: ApprovalPolicy,
-    thinking_level: Option<ThinkingLevel>,
+    thinking_level: SessionThinkingPreference,
     tool_profile: Option<SessionToolProfile>,
     collaboration_mode: CollaborationMode,
     orchestration_mode: BehaviorId,
@@ -209,7 +209,7 @@ impl PreparedSession {
                 .map_err(ProtocolError::invalid)?;
         }
         if matches!(input.target, SessionCreateTarget::Executor { .. })
-            && (input.thinking_level.is_some()
+            && (!input.thinking_level.is_model_default()
                 || input.tool_profile.is_some()
                 || input.mode.is_some()
                 || input
@@ -307,7 +307,11 @@ impl PreparedSession {
             self.name,
             self.labels,
             model,
-            self.thinking_level,
+            if self.thinking_level.is_model_default() {
+                json!(["model_default"])
+            } else {
+                json!(self.thinking_level)
+            },
             self.tool_profile,
             permission,
             self.approval_policy,
@@ -336,7 +340,7 @@ impl PreparedSession {
             title_is_manual: false,
             target: target.into(),
             connection_locked: false,
-            thinking_level: self.thinking_level,
+            thinking_level: self.thinking_level.explicit_level(),
             tool_profile: self.tool_profile,
             bound_tools: None,
             instructions: None,

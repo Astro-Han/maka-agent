@@ -377,11 +377,7 @@ export interface HostContext {
     search(query?: { query?: string }): Promise<import('./llm.js').ModelChoices>;
     resolve(
       selection: { kind: 'default' } | { kind: 'named'; connectionSlug: string; model: string },
-    ): Promise<{
-      connection_id: string;
-      connection_slug: string;
-      model: string;
-    } | null>;
+    ): Promise<import('./llm.js').ModelChoice | null>;
   };
   /** Non-secret user preferences; no configuration or execution authority. */
   readonly preferences: {

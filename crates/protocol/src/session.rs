@@ -44,8 +44,11 @@ pub struct SessionCreateInput {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub labels: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking_level: Option<ThinkingLevel>,
+    #[serde(
+        default,
+        skip_serializing_if = "SessionThinkingPreference::is_model_default"
+    )]
+    pub thinking_level: SessionThinkingPreference,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_profile: Option<SessionToolProfile>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -157,7 +160,15 @@ macro_rules! decoder {
     };
 }
 pub fn decode_session_create_input(value: &Value) -> Result<SessionCreateInput> {
-    let input: SessionCreateInput = validation::decode(value)?;
+    let provider_default = value.get("thinkingLevel").is_some_and(Value::is_null);
+    let mut normalized = value.clone();
+    if provider_default {
+        normalized.as_object_mut().unwrap().remove("thinkingLevel");
+    }
+    let mut input: SessionCreateInput = validation::decode(&normalized)?;
+    if provider_default {
+        input.thinking_level = SessionThinkingPreference::ProviderDefault;
+    }
     if let SessionCreateTarget::Executor {
         executor_settings, ..
     } = &input.target

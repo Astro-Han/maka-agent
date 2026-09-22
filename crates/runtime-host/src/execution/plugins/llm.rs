@@ -90,6 +90,7 @@ impl Executions {
                         connection_name: row.name.clone(),
                         display_name,
                         thinking_levels: entry.thinking_levels,
+                        default_thinking_level: entry.default_thinking_level,
                         is_default: entry.is_default,
                     });
                 }
@@ -111,13 +112,14 @@ impl Executions {
     pub(crate) async fn resolve_plugin_model(
         &self,
         selection: maka_plugins::llm::Selection,
-    ) -> Result<Option<maka_runtime::execution::ModelBinding>, maka_plugins::Error> {
+    ) -> Result<Option<maka_plugins::llm::Choice>, maka_plugins::Error> {
         let catalog = self
             .configuration
             .catalog()
             .await
             .map_err(|error| maka_plugins::Error::Invalid(error.to_string()))?;
         use maka_plugins::llm::Selection;
+        let default_target = catalog.default_target.clone();
         let (row, model) = match selection {
             Selection::Named {
                 connection_slug,
@@ -153,17 +155,28 @@ impl Executions {
         {
             return Ok(None);
         }
-        if !maka_config::model_catalog::resolve(&row, Some(&model))
+        let default = default_target
+            .as_ref()
+            .filter(|target| target.connection_id == row.connection_id)
+            .map(|target| target.model_id.as_str());
+        let Some(entry) = maka_config::model_catalog::resolve(&row, default)
             .map_err(|error| maka_plugins::Error::Invalid(error.to_string()))?
-            .iter()
-            .any(|entry| entry.id == model && entry.can_use_as_chat_default)
-        {
+            .into_iter()
+            .find(|entry| entry.id == model && entry.can_use_as_chat_default)
+        else {
             return Ok(None);
-        }
-        Ok(Some(maka_runtime::execution::ModelBinding {
-            connection_id: row.connection_id,
-            connection_slug: row.slug,
-            model,
+        };
+        Ok(Some(maka_plugins::llm::Choice {
+            model: maka_runtime::execution::ModelBinding {
+                connection_id: row.connection_id,
+                connection_slug: row.slug,
+                model,
+            },
+            connection_name: row.name,
+            display_name: entry.display_name.unwrap_or(entry.id),
+            thinking_levels: entry.thinking_levels,
+            default_thinking_level: entry.default_thinking_level,
+            is_default: entry.is_default,
         }))
     }
 

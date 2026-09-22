@@ -65,7 +65,7 @@ function remoteHost(): Extract<TaskEntryHost, { state: 'available' }> {
       selectNoProject: false,
     },
     selectedProjectId: 'project-a',
-    chatDefaults: { sandboxMode: 'workspace-write', thinkingLevel: 'high' },
+    chatDefaults: { sandboxMode: 'workspace-write' },
   };
 }
 

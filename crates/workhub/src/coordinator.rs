@@ -72,8 +72,8 @@ impl Coordinator {
                     .map_err(invalid)?
                     .ok_or_else(|| invalid("WorkHub default model is unavailable"))?;
                 let intent = self.intent(Target::Model {
-                    model,
-                    thinking_level: None,
+                    model: model.model,
+                    thinking_level: model.default_thinking_level,
                 });
                 match self.repository.put(KEY, None, &intent).await {
                     Ok(()) => intent,
@@ -141,7 +141,7 @@ impl Coordinator {
             })
             .await
             .map_err(invalid)?;
-        if resolved.as_ref() != Some(model) {
+        if resolved.as_ref().map(|choice| &choice.model) != Some(model) {
             return Err(invalid("The selected model is no longer available"));
         }
         // Consent must precede both durable intent and Host work.

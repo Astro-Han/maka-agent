@@ -1150,7 +1150,7 @@ export class HostSessionCatalogCoordinator {
     // from the same table, so whatever passes here is exactly what the wire
     // can send.
     if (
-      thinkingLevel !== undefined &&
+      thinkingLevel != null &&
       !thinkingVariantsForConnection(
         {
           providerType: connection.providerType,

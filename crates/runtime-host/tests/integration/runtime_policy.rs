@@ -203,6 +203,100 @@ async fn set_model_tools(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn model_thinking_default_is_frozen_at_creation_not_replay() {
+    use super::support::{message_recovery::configure, peer::Peer};
+    use maka_runtime::execution::ThinkingLevel;
+    use maka_runtime_host::server::{Host, local::LocalListener};
+    use serde_json::json;
+    use tokio_util::sync::CancellationToken;
+
+    let fixture = ClientFixture::new("maka-thinking-default-");
+    let endpoint = "http://127.0.0.1:9/v1";
+    let model = configure(&fixture, endpoint).await;
+    for reopened in [false, true] {
+        let host = Host::open(fixture.owner()).await.unwrap();
+        #[cfg(unix)]
+        let endpoint_path = fixture.workspace.parent().unwrap().join("thinking.sock");
+        #[cfg(windows)]
+        let endpoint_path =
+            std::path::PathBuf::from(format!(r"\\.\pipe\maka-thinking-{}", uuid::Uuid::new_v4()));
+        let cancel = CancellationToken::new();
+        let server = tokio::spawn(
+            LocalListener::bind(&endpoint_path)
+                .unwrap()
+                .serve(host.clone(), cancel.clone()),
+        );
+        let mut peer = Peer::new(host.clone(), "thinking-default").await;
+        for (revision, default) in if reopened {
+            vec![(3, "low")]
+        } else {
+            vec![(1, "high"), (2, "low")]
+        } {
+            let updated = peer
+                .rpc(
+                    "connection.catalog.update",
+                    json!({
+                        "expected":{"connectionId":model.connection_id,"revision":revision},
+                        "changes":{"name":"Recovery fixture","baseUrl":endpoint,"enabled":true,
+                            "enabledModelIds":["fixture-model"],"modelOverrides":{"fixture-model":{
+                                "thinkingLevels":["low","high"],"defaultThinkingLevel":default
+                            }}}
+                    }),
+                )
+                .await;
+            assert_eq!(updated["result"]["kind"], "committed", "{updated}");
+            let fresh_id = format!("fresh-{revision}");
+            for (id, explicit, expected) in [
+                ("inherited", None, Some(ThinkingLevel::High)),
+                ("provider", Some(Value::Null), None),
+                ("explicit", Some(json!("low")), Some(ThinkingLevel::Low)),
+                (
+                    fresh_id.as_str(),
+                    None,
+                    Some(if default == "high" {
+                        ThinkingLevel::High
+                    } else {
+                        ThinkingLevel::Low
+                    }),
+                ),
+            ] {
+                let mut input = json!({"sessionId":id,
+                    "workspace":{"kind":"host_path","path":fixture.workspace},
+                    "modelTarget":{"kind":"explicit","connectionId":model.connection_id,
+                        "connectionSlug":model.connection_slug,"model":model.model}});
+                if let Some(level) = explicit {
+                    input["thinkingLevel"] = level;
+                }
+                let created = peer.rpc("session.create", input.clone()).await;
+                assert_eq!(created["ok"], true, "{created}");
+                assert_eq!(
+                    created["result"]["thinkingLevel"],
+                    json!(expected),
+                    "{created}"
+                );
+                if id == "inherited" {
+                    input["thinkingLevel"] = Value::Null;
+                    let conflict = peer.rpc("session.create", input).await;
+                    assert_eq!(conflict["ok"], false, "{conflict}");
+                    assert_eq!(
+                        conflict["error"]["code"], "operation_conflict",
+                        "{conflict}"
+                    );
+                }
+            }
+        }
+        peer.close().await;
+        cancel.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(10), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        drop(host);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn original_client_settings_cas_preserves_session_defaults_and_exact_reopen() {
     let fixture = ClientFixture::new("maka-runtime-policy-");
     fixture

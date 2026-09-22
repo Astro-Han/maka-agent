@@ -164,7 +164,7 @@ export interface SessionCreateInput {
   /** Named black-box executor contributed by a Host plugin. */
   readonly executorId?: string;
   readonly executorSettings?: ExecutorSettings;
-  readonly thinkingLevel?: ThinkingLevel;
+  readonly thinkingLevel?: ThinkingLevel | null;
   readonly toolProfile?: SessionToolProfile;
   readonly sandboxMode?: SandboxMode;
   readonly approvalPolicy?: ApprovalPolicy;
@@ -556,7 +556,7 @@ export function decodeSessionCreateInput(value: unknown): SessionCreateInput {
       ? { executorSettings: executorSettings(input.executorSettings) }
       : {}),
     ...(Object.hasOwn(input, 'thinkingLevel')
-      ? { thinkingLevel: thinkingLevel(input.thinkingLevel) }
+      ? { thinkingLevel: input.thinkingLevel === null ? null : thinkingLevel(input.thinkingLevel) }
       : {}),
     ...(Object.hasOwn(input, 'toolProfile')
       ? { toolProfile: sessionToolProfile(input.toolProfile) }

@@ -69,7 +69,7 @@ export function ModelSelection({
   const level =
     model && thinking?.model === key(model)
       ? model.thinkingLevels.find((level) => level === thinking.level)
-      : undefined;
+      : model?.defaultThinkingLevel;
   return (
     <div className="workhub-model-selection">
       <label>

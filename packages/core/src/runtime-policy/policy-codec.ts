@@ -17,7 +17,6 @@
  * under the License.
  */
 
-import { isThinkingLevel } from '../model-thinking.js';
 import { CHAT_DEFAULT_SANDBOX_MODES } from '../settings.js';
 import type {
   AgentRuntimeSettingsPatch,
@@ -384,21 +383,12 @@ function normalizePrivacy(value: unknown): RuntimePolicy['privacy'] {
 }
 
 function normalizeChatDefaults(value: unknown): RuntimePolicy['chatDefaults'] {
-  const item = exactRecord(
-    value,
-    'chat defaults',
-    ['sandboxMode', 'thinkingLevel'],
-    ['sandboxMode'],
-  );
+  const item = exactRecord(value, 'chat defaults', ['sandboxMode'], ['sandboxMode']);
   if (!(CHAT_DEFAULT_SANDBOX_MODES as readonly unknown[]).includes(item.sandboxMode)) {
     throw domainError('chat default permission mode is invalid');
   }
-  if (item.thinkingLevel !== undefined && !isThinkingLevel(item.thinkingLevel)) {
-    throw domainError('chat default thinking level is invalid');
-  }
   return {
     sandboxMode: item.sandboxMode as RuntimePolicy['chatDefaults']['sandboxMode'],
-    ...(item.thinkingLevel === undefined ? {} : { thinkingLevel: item.thinkingLevel }),
   };
 }
 

@@ -61,10 +61,7 @@ pub trait Models: Send + Sync {
     fn resolve(
         &self,
         selection: Selection,
-    ) -> futures_util::future::BoxFuture<
-        '_,
-        Result<Option<maka_runtime::execution::ModelBinding>, crate::Error>,
-    >;
+    ) -> futures_util::future::BoxFuture<'_, Result<Option<Choice>, crate::Error>>;
 
     fn generate(
         &self,
@@ -95,6 +92,7 @@ pub struct Choice {
     pub connection_name: String,
     pub display_name: String,
     pub thinking_levels: Vec<maka_runtime::execution::ThinkingLevel>,
+    pub default_thinking_level: Option<maka_runtime::execution::ThinkingLevel>,
     pub is_default: bool,
 }
 

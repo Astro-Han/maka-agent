@@ -122,13 +122,6 @@ test('shell settings default, normalize, and merge through their shared boundary
   );
 });
 
-test('a chat-default thinking level the app does not recognize drops to no preference', () => {
-  const normalized = normalizeSettings({
-    chatDefaults: { thinkingLevel: 'ultra' as unknown as undefined },
-  });
-  assert.strictEqual(normalized.chatDefaults.thinkingLevel, undefined);
-});
-
 test('an app icon the build does not ship falls back without disturbing the theme', () => {
   // The fallback is the shipped default, which is no longer the id literally
   // named `default` — that id is now one selectable icon among many (the

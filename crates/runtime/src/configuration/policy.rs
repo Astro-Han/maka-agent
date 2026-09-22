@@ -22,7 +22,7 @@ mod codec;
 pub mod network_test;
 pub mod network_update;
 mod settings;
-use crate::execution::{SandboxMode, ThinkingLevel};
+use crate::execution::SandboxMode;
 pub use codec::{decode_canonical_snapshot, normalize_mutation};
 use serde::{Deserialize, Serialize};
 pub use settings::*;
@@ -33,19 +33,12 @@ pub const MAX_POLICY_SNAPSHOT_BYTES: usize = 48 * 1024;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChatDefaults {
     pub sandbox_mode: SandboxMode,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "super::present"
-    )]
-    pub thinking_level: Option<ThinkingLevel>,
 }
 
 impl Default for ChatDefaults {
     fn default() -> Self {
         Self {
             sandbox_mode: SandboxMode::WorkspaceWrite,
-            thinking_level: None,
         }
     }
 }

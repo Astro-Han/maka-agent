@@ -22,7 +22,7 @@ use crate::session::SessionModel;
 use maka_config::{ConfigurationStore, model_catalog};
 use maka_protocol::{
     OperationErrorCode,
-    session::{SessionModelTarget, ThinkingLevel},
+    session::{SessionModelTarget, SessionThinkingPreference, ThinkingLevel},
 };
 use maka_runtime::configuration::{
     ConnectionCredentialKind, ConnectionCredentialTarget, CredentialLocator, ProviderAuthKind,
@@ -33,6 +33,16 @@ pub(crate) async fn resolve(
     target: &SessionModelTarget,
     thinking: Option<ThinkingLevel>,
 ) -> Result<SessionModel, maka_protocol::OperationError> {
+    resolve_creation(configuration, target, thinking.into())
+        .await
+        .map(|(model, _)| model)
+}
+
+pub(crate) async fn resolve_creation(
+    configuration: &ConfigurationStore,
+    target: &SessionModelTarget,
+    preference: SessionThinkingPreference,
+) -> Result<(SessionModel, Option<ThinkingLevel>), maka_protocol::OperationError> {
     let catalog = configuration.catalog().await.map_err(configuration_error)?;
     let (id, slug, model) = match target {
         SessionModelTarget::Default => {
@@ -96,6 +106,11 @@ pub(crate) async fn resolve(
                 "Selected model cannot be used for chat",
             )
         })?;
+    let thinking = if preference.is_model_default() {
+        entry.default_thinking_level
+    } else {
+        preference.explicit_level()
+    };
     if let Some(level) = thinking
         && !entry.thinking_levels.contains(&level)
     {
@@ -137,11 +152,14 @@ pub(crate) async fn resolve(
             ));
         }
     }
-    Ok(SessionModel {
-        connection_id: row.connection_id.clone(),
-        connection_slug: row.slug.clone(),
-        model: model.into(),
-    })
+    Ok((
+        SessionModel {
+            connection_id: row.connection_id.clone(),
+            connection_slug: row.slug.clone(),
+            model: model.into(),
+        },
+        thinking,
+    ))
 }
 
 fn failure(code: OperationErrorCode, message: &str) -> maka_protocol::OperationError {

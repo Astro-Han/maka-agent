@@ -17,7 +17,6 @@
  * under the License.
  */
 
-import { isThinkingLevel, type ThinkingLevel } from './model-thinking.js';
 import type { OnboardingMilestone } from './onboarding.js';
 import { sanitizeOnboardingMilestones } from './onboarding.js';
 import type { BotChatSettings, BotChatSettingsPatch } from './bot-chat-settings.js';
@@ -495,16 +494,6 @@ export function isChatDefaultSandboxMode(value: unknown): value is ChatDefaultSa
 /** Seeds new sessions' starting permission mode (Settings → 通用 → 默认权限模式). */
 export interface ChatDefaultsSettings {
   sandboxMode: ChatDefaultSandboxMode;
-  /**
-   * Seeds new sessions' thinking level. `undefined` means "whatever the model
-   * does on its own" — the absence of a preference, not a level.
-   *
-   * A chosen level is a wish, not a guarantee: models expose different ladders,
-   * so one that does not offer the chosen rung falls back to its own default
-   * for that session rather than being forced to the nearest neighbour. The
-   * composer already resolves it that way for the per-session picker.
-   */
-  thinkingLevel?: ThinkingLevel;
 }
 
 /**
@@ -1111,7 +1100,6 @@ export function defaultChatDefaultsSettings(): ChatDefaultsSettings {
 
 function normalizeChatDefaultsSettings(settings: ChatDefaultsSettings): ChatDefaultsSettings {
   return {
-    thinkingLevel: isThinkingLevel(settings.thinkingLevel) ? settings.thinkingLevel : undefined,
     sandboxMode: isChatDefaultSandboxMode(settings.sandboxMode)
       ? settings.sandboxMode
       : defaultChatDefaultsSettings().sandboxMode,

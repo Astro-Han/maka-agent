@@ -110,27 +110,33 @@ pub(super) async fn create(
 pub(crate) async fn resolve(
     configuration: &ConfigurationStore,
     prepared: PreparedSession,
-    thinking: Option<ThinkingLevel>,
+    thinking: SessionThinkingPreference,
     workspace: WorkspaceProjection,
 ) -> Result<SessionConfiguration> {
-    let target = match prepared.target() {
-        SessionCreateTarget::Model { model_target } => SessionTarget::Model {
-            model: super::model::resolve(configuration, model_target, thinking).await?,
-        },
+    let (target, thinking) = match prepared.target() {
+        SessionCreateTarget::Model { model_target } => {
+            let (model, thinking) =
+                crate::session::model::resolve_creation(configuration, model_target, thinking)
+                    .await?;
+            (SessionTarget::Model { model }, thinking)
+        }
         SessionCreateTarget::Executor {
             executor_id,
             executor_settings,
-        } => SessionTarget::Executor {
-            executor_id: executor_id.clone(),
-            settings: executor_settings.clone(),
-        },
+        } => (
+            SessionTarget::Executor {
+                executor_id: executor_id.clone(),
+                settings: executor_settings.clone(),
+            },
+            None,
+        ),
     };
     let policy = configuration
         .runtime_policy()
         .await
         .map_err(super::super::configuration::failure)?;
     let default_permission = policy.policy.chat_defaults.sandbox_mode;
-    // Thinking defaults are applied by the client composer. Omission here also
-    // represents its explicit "model default" choice and must remain unchanged.
-    Ok(prepared.bind(workspace, target, default_permission))
+    let mut configuration = prepared.bind(workspace, target, default_permission);
+    configuration.thinking_level = thinking;
+    Ok(configuration)
 }

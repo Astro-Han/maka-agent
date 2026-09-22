@@ -494,7 +494,10 @@ async fn configuration(
         mode: None,
         name: Some(request.name.clone()),
         labels: None,
-        thinking_level,
+        thinking_level: match &settings.target {
+            Target::Model { .. } => thinking_level.into(),
+            Target::Executor { .. } => Default::default(),
+        },
         tool_profile: None,
         // The explicit Host grant supplies the default to bind below. The
         // interactive create codec restricts Explore to UI-specific modes.

@@ -58,6 +58,18 @@ fn create_accepts_wire_options_without_materializing_defaults() {
         }
     }
     let decoded = decode_session_create_input(&create()).unwrap();
+    assert_eq!(
+        decoded.thinking_level,
+        SessionThinkingPreference::ModelDefault
+    );
+    let mut explicit_default = create();
+    explicit_default["thinkingLevel"] = Value::Null;
+    let explicit = decode_session_create_input(&explicit_default).unwrap();
+    assert_eq!(
+        explicit.thinking_level,
+        SessionThinkingPreference::ProviderDefault
+    );
+    assert_eq!(serde_json::to_value(explicit).unwrap(), explicit_default);
     assert_eq!(decoded.name, None);
     assert_eq!(decoded.sandbox_mode, None);
     assert!(
@@ -116,7 +128,6 @@ fn create_rejects_unknown_null_invalid_ids_and_invalid_text() {
         "mode",
         "name",
         "labels",
-        "thinkingLevel",
         "toolProfile",
         "sandboxMode",
         "collaborationMode",
@@ -141,7 +152,7 @@ fn create_rejects_unknown_null_invalid_ids_and_invalid_text() {
         ("labels", json!(vec!["x"; 33])),
         ("mode", json!("chat")),
         ("toolProfile", json!("coding")),
-        ("thinkingLevel", Value::Null),
+        ("thinkingLevel", json!("unknown")),
         ("unexpected", json!(true)),
     ] {
         let mut value = create();

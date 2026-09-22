@@ -37,6 +37,8 @@ pub struct ModelCatalogEntry {
     pub supports_vision: bool,
     pub thinking_levels: Vec<ThinkingLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_thinking_level: Option<ThinkingLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_supports_vision: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_context_window: Option<u64>,
@@ -88,6 +90,14 @@ impl ModelCatalogEntry {
                     "duplicate catalog thinking level".into(),
                 ));
             }
+        }
+        if self
+            .default_thinking_level
+            .is_some_and(|level| !self.thinking_levels.contains(&level))
+        {
+            return Err(ConfigError::Invalid(
+                "unsupported default thinking level".into(),
+            ));
         }
         Ok(())
     }
@@ -198,6 +208,9 @@ pub(super) fn resolve(
             result.thinking_levels = levels;
         }
     }
+    result.default_thinking_level = profile
+        .and_then(|p| p.default_thinking_level)
+        .filter(|level| result.thinking_levels.contains(level));
     let no_text = model
         .modalities
         .as_ref()

@@ -76,7 +76,7 @@ fn configuration_thinking_preserves_clears_and_sets_without_relaxing_other_contr
     }
     let create = json!({"sessionId":"s1","workspace":{"kind":"host_path","path":"/tmp"},
         "modelTarget":{"kind":"default"},"thinkingLevel":null});
-    assert!(decode_session_create_input(&create).is_err());
+    assert!(decode_session_create_input(&create).is_ok());
     assert!(decode_session_metadata_update_input(&update(json!({"thinkingLevel":null}))).is_err());
 }
 

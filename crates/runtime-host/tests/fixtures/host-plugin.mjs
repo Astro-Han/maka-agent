@@ -19,13 +19,17 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function (ctx) {
-  const model = await ctx.models.resolve({
+  const choice = await ctx.models.resolve({
     kind: 'named',
     connectionSlug: 'recovery',
     model: 'fixture-model',
   });
+  const model = choice?.model;
   if (
+    !choice ||
     !model ||
+    Object.keys(choice).sort().join(',') !==
+      'connectionName,defaultThinkingLevel,displayName,isDefault,model,thinkingLevels' ||
     model.connection_slug !== 'recovery' ||
     Object.keys(model).sort().join(',') !== 'connection_id,connection_slug,model'
   )
@@ -39,6 +43,7 @@ export default async function (ctx) {
     !choices.complete ||
     choices.models.length !== 1 ||
     choices.models[0]?.model.connection_id !== model.connection_id ||
+    choices.models[0]?.defaultThinkingLevel !== choice.defaultThinkingLevel ||
     choices.models[0]?.isDefault
   )
     throw new Error('model search disagrees with selection resolution');

@@ -252,6 +252,7 @@ impl Definitions {
             })
             .await
             .map_err(super::error)?
+            .map(|choice| choice.model)
             .ok_or_else(|| "Preset model is missing, disabled or retired".into())
     }
 }

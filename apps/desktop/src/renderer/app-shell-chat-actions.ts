@@ -78,7 +78,7 @@ type PendingNewChatModel = {
   model: string;
 } | null;
 
-type PendingNewChatThinkingLevel = ThinkingLevel | null;
+type PendingNewChatThinkingLevel = ThinkingLevel | null | undefined;
 type DesktopNewTaskTarget = DesktopBridge.DesktopNewTaskTarget;
 type DesktopSessionSummary = DesktopBridge.DesktopSessionSummary;
 type InteractionFormResponse = Parameters<
@@ -387,7 +387,7 @@ export function createAppShellChatActions(deps: {
                 model: newChatModel.model,
               }
             : {}),
-          ...(pendingNewChatThinkingLevel ? { thinkingLevel: pendingNewChatThinkingLevel } : {}),
+          ...(pendingNewChatThinkingLevel === undefined ? {} : { thinkingLevel: pendingNewChatThinkingLevel }),
           ...newChatExecutionChoice,
           collaborationMode: newChatCollaborationMode,
           orchestrationMode: newChatOrchestrationMode,

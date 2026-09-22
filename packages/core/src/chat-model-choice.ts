@@ -38,6 +38,7 @@ export interface ChatModelChoice {
   connectionName?: string;
   isDefault: boolean;
   thinkingLevels: readonly ThinkingLevel[];
+  defaultThinkingLevel?: ThinkingLevel;
   /** Exact capability projection used by model-facing attachment composition. */
   supportsVision?: boolean;
   /** Provider/model metadata shown beside the user-declared context setting. */
@@ -67,6 +68,9 @@ export function buildChatModelChoices(
         ...(provider.authKind === 'oauth_token' ? {} : { connectionName: connection.name }),
         isDefault: entry.isDefault,
         thinkingLevels: entry.thinkingLevels,
+        ...(entry.defaultThinkingLevel === undefined
+          ? {}
+          : { defaultThinkingLevel: entry.defaultThinkingLevel }),
         supportsVision: entry.supportsVision,
         ...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
         ...(declaredWindow !== undefined ? { declaredContextWindow: declaredWindow } : {}),
