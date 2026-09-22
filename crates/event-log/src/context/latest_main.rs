@@ -69,11 +69,21 @@ pub(super) async fn read_selected(
     selection: &Selection,
     through: u64,
 ) -> Result<LatestMainContext, StoreError> {
+    read_selected_at(connection, selection, through, through.saturating_add(1)).await
+}
+
+pub(super) async fn read_selected_at(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    through: u64,
+    archives_before: u64,
+) -> Result<LatestMainContext, StoreError> {
     let session = selection
         .session
         .as_deref()
         .ok_or_else(|| super::invalid("context requires a Session"))?;
     let filter = Selection::predicate("e", "?3");
+    let archive_filter = Selection::predicate("a", "?3");
     // LEFT JOIN deliberately retains a damaged newest completion. Only a proven
     // summary can be skipped; missing trace must not reveal an older main.
     let mut rows = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -91,16 +101,18 @@ pub(super) async fn read_selected(
          json_extract(c.event_json, '$.fact.step_id') AS cs,
          json_extract(r.event_json, '$.fact.step_id') AS rs,
          c.operation_id AS operation_id, r.sequence AS requested, o.sequence AS opened
-         , NOT EXISTS(SELECT 1 FROM runtime_events a LEFT JOIN runtime_events target
+         , NOT EXISTS(SELECT 1 FROM main.runtime_events a LEFT JOIN main.runtime_events target
              ON target.event_id=json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id')
-           WHERE a.kind='tool_result_archived' AND json_extract(a.event_json,'$.invocation.session_id')=json_extract(c.event_json,'$.invocation.session_id')
+           WHERE a.kind='tool_result_archived' AND a.sequence < ?4 AND {archive_filter}
+             AND json_extract(a.event_json,'$.invocation.session_id')=json_extract(c.event_json,'$.invocation.session_id')
              AND a.sequence > r.sequence AND (target.sequence IS NULL OR target.sequence <= json_extract(r.event_json,'$.fact.source_high_water'))) AS projection_current
          FROM runtime_events c LEFT JOIN runtime_events r ON r.invocation_id = c.invocation_id
            AND r.operation_id = c.operation_id AND r.kind = 'model_requested'
          LEFT JOIN runtime_events o ON o.invocation_id = c.invocation_id AND o.kind = 'invocation_opened'
          WHERE c.kind = 'model_completed' AND json_extract(c.event_json, '$.invocation.session_id') = ?1
          ORDER BY c.sequence DESC"
-    ))).bind(session).bind(through as i64).bind(&selection.lineage).fetch(connection);
+    ))).bind(session).bind(through as i64).bind(&selection.lineage)
+        .bind(archives_before.min(i64::MAX as u64) as i64).fetch(connection);
     while let Some(row) = rows.try_next().await? {
         let selected = (|| -> Option<(ModelPurpose, Option<AcceptedMainContext>)> {
             let completion: Invocation =

@@ -1,0 +1,233 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::{SessionCatalogProjection, validation};
+use crate::{Operation, ProtocolError, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Operation-specific choices cannot turn a missing revision boundary into an
+/// empty branch, or attach a side-conversation intent to a revision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Purpose {
+    Branch {
+        turn_id: String,
+        side_conversation: bool,
+    },
+    EmptySideConversation,
+    Revision {
+        turn_id: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Input {
+    pub source_session_id: String,
+    pub target_session_id: String,
+    pub expected_source_revision: u64,
+    pub purpose: Purpose,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum Output {
+    Committed {
+        session: Box<SessionCatalogProjection>,
+    },
+    SourceRevisionConflict {
+        expected_revision: u64,
+        actual_revision: u64,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AbandonInput {
+    pub target_session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum AbandonOutput {
+    Abandoned { session_id: String },
+    Retained { session_id: String },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WireInput {
+    source_session_id: String,
+    target_session_id: String,
+    expected_source_revision: u64,
+    source_turn_id: Option<String>,
+    intent: Option<Intent>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Intent {
+    SideConversation,
+}
+
+pub fn decode_input(operation: Operation, value: &Value) -> Result<Input> {
+    let input: WireInput = validation::decode(value)?;
+    validation::entity(&input.source_session_id)?;
+    validation::entity(&input.target_session_id)?;
+    if input.source_session_id == input.target_session_id || input.expected_source_revision == 0 {
+        return Err(ProtocolError::invalid(
+            "Copy requires distinct Sessions and a positive revision",
+        ));
+    }
+    if let Some(turn) = &input.source_turn_id {
+        validation::entity(turn)?;
+    }
+    let purpose = match (operation, input.source_turn_id, input.intent) {
+        (Operation::SessionBranchCreate, Some(turn_id), intent) => Purpose::Branch {
+            turn_id,
+            side_conversation: intent.is_some(),
+        },
+        (Operation::SessionBranchCreate, None, Some(Intent::SideConversation)) => {
+            Purpose::EmptySideConversation
+        }
+        (Operation::SessionRevisionCreate, Some(turn_id), None) => Purpose::Revision { turn_id },
+        _ => {
+            return Err(ProtocolError::invalid(
+                "Invalid Session copy boundary or intent",
+            ));
+        }
+    };
+    Ok(Input {
+        source_session_id: input.source_session_id,
+        target_session_id: input.target_session_id,
+        expected_source_revision: input.expected_source_revision,
+        purpose,
+    })
+}
+
+pub fn decode_output(input: &Input, value: &Value) -> Result<Output> {
+    let output: Output = validation::decode(value)?;
+    let matches = match &output {
+        Output::Committed { session } => session.id == input.target_session_id,
+        Output::SourceRevisionConflict {
+            expected_revision, ..
+        } => *expected_revision == input.expected_source_revision,
+    };
+    if !matches {
+        return Err(ProtocolError::invalid(
+            "Session copy receipt does not match its request",
+        ));
+    }
+    Ok(output)
+}
+
+pub fn decode_abandon_input(value: &Value) -> Result<AbandonInput> {
+    let input: AbandonInput = validation::decode(value)?;
+    validation::entity(&input.target_session_id)?;
+    Ok(input)
+}
+
+pub fn decode_abandon_output(input: &AbandonInput, value: &Value) -> Result<AbandonOutput> {
+    let output: AbandonOutput = validation::decode(value)?;
+    let (AbandonOutput::Abandoned { session_id } | AbandonOutput::Retained { session_id }) =
+        &output;
+    if session_id != &input.target_session_id {
+        return Err(ProtocolError::invalid(
+            "Abandon receipt does not match its request",
+        ));
+    }
+    Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn copy_intents_keep_exact_boundaries_and_receipt_identity() {
+        let request = json!({
+            "sourceSessionId": "source", "targetSessionId": "target",
+            "expectedSourceRevision": 2.0, "sourceTurnId": "turn",
+        });
+        let revision = decode_input(Operation::SessionRevisionCreate, &request).unwrap();
+        assert_eq!(
+            revision.purpose,
+            Purpose::Revision {
+                turn_id: "turn".into()
+            }
+        );
+        assert!(
+            decode_output(
+                &revision,
+                &json!({
+                    "kind": "source_revision_conflict", "expectedRevision": 3, "actualRevision": 4,
+                })
+            )
+            .is_err()
+        );
+        let mut side = request.clone();
+        side["intent"] = json!("side_conversation");
+        assert!(decode_input(Operation::SessionRevisionCreate, &side).is_err());
+        assert_eq!(
+            decode_input(Operation::SessionBranchCreate, &side)
+                .unwrap()
+                .purpose,
+            Purpose::Branch {
+                turn_id: "turn".into(),
+                side_conversation: true
+            }
+        );
+        side.as_object_mut().unwrap().remove("sourceTurnId");
+        assert_eq!(
+            decode_input(Operation::SessionBranchCreate, &side)
+                .unwrap()
+                .purpose,
+            Purpose::EmptySideConversation
+        );
+        side.as_object_mut().unwrap().remove("intent");
+        assert!(decode_input(Operation::SessionBranchCreate, &side).is_err());
+        for (field, value) in [
+            ("sourceTurnId", Value::Null),
+            ("expectedSourceRevision", json!(0)),
+            ("expectedSourceRevision", json!(2.5)),
+            ("expectedSourceRevision", json!(9_007_199_254_740_992u64)),
+            ("targetSessionId", json!("source")),
+        ] {
+            let mut invalid = request.clone();
+            invalid[field] = value;
+            assert!(decode_input(Operation::SessionBranchCreate, &invalid).is_err());
+        }
+        let abandon = decode_abandon_input(&json!({"targetSessionId": "target"})).unwrap();
+        assert!(
+            decode_abandon_output(&abandon, &json!({"kind":"retained", "sessionId":"another"}))
+                .is_err()
+        );
+    }
+}

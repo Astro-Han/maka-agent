@@ -106,6 +106,54 @@ async fn interleaved_turns_keep_full_extents_and_do_not_create_false_page_bounda
     let child_end = end(&log, "child", "child").await;
     open(&log, "parent-continuation", "parent", "continued").await;
     let last = end(&log, "parent-continuation", "parent").await;
+    // A Session copy must resolve logical history before any UI index exists.
+    let revision = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    use maka_event_log::context::{HistoryCapture, HistoryCut};
+    for cut in [
+        HistoryCut::BeforeTurn("child".into()),
+        HistoryCut::ThroughTurn("child".into()),
+    ] {
+        assert!(matches!(
+            log.capture_session_history("session", revision, cut, 100, 65536).await,
+            Err(StoreError::InvalidTransition(reason)) if reason == "history cut splits a logical Turn"
+        ));
+    }
+    let HistoryCapture::Captured(history) = log
+        .capture_session_history(
+            "session",
+            revision,
+            HistoryCut::ThroughTurn("parent".into()),
+            100,
+            65536,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("unchanged source revision");
+    };
+    assert_eq!(history.context.source_evidence.high_water, last);
+    assert_eq!(history.context.tail.len(), 6);
+    assert_eq!(history.observed_through, last);
+    let HistoryCapture::Captured(empty) = log
+        .capture_session_history(
+            "session",
+            revision,
+            HistoryCut::BeforeTurn("parent".into()),
+            100,
+            65536,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("unchanged source revision");
+    };
+    assert_eq!(empty.context.source_evidence.high_water, 0);
+    assert!(empty.context.tail.is_empty());
     prepare(&log, last).await;
     let fence = maka_presentation::watermark(last).unwrap();
     for cut in [first * 256, child * 256, child_end * 256] {

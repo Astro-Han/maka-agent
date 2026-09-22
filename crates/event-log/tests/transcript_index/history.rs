@@ -167,6 +167,64 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
         chunks.iter().all(|chunk| chunk.role == Role::User),
         "old fence excludes unfinished answer"
     );
+    // Exercise the disposable cache with two owners of identical source positions.
+    // A destination's cache must neither satisfy nor duplicate a source lookup.
+    log.create_session("b", "second-owner", &serde_json::json!({}), 1)
+        .await
+        .unwrap();
+    let cache = rusqlite::Connection::open(&path).unwrap();
+    cache
+        .execute(
+            "INSERT INTO transcript_rows
+         SELECT sequence, 'b', turn_id, message_id, payload, digest, total_bytes
+         FROM transcript_rows WHERE session_id = 'a'",
+            [],
+        )
+        .unwrap();
+    cache
+        .execute(
+            "INSERT INTO transcript_progress SELECT 'b', through_sequence
+         FROM transcript_progress WHERE session_id = 'a'",
+            [],
+        )
+        .unwrap();
+    cache
+        .execute(
+            "INSERT INTO transcript_text
+         SELECT 'b', sequence, timestamp, role, CAST('destination cache' AS BLOB)
+         FROM transcript_text WHERE session_id = 'a'",
+            [],
+        )
+        .unwrap();
+    let Page::Ready {
+        chunks: destination,
+        ..
+    } = log.history_text("b", old, None).await.unwrap()
+    else {
+        panic!("prepared destination");
+    };
+    assert!(!destination.is_empty());
+    assert!(
+        destination
+            .iter()
+            .all(|chunk| chunk.text == "destination cache")
+    );
+    let Page::Ready { chunks: source, .. } = log.history_text("a", old, None).await.unwrap() else {
+        panic!("prepared source");
+    };
+    assert_eq!(
+        serde_json::to_value(source).unwrap(),
+        serde_json::to_value(chunks).unwrap()
+    );
+    cache
+        .execute("DELETE FROM transcript_text WHERE session_id = 'b'", [])
+        .unwrap();
+    let rebuilt = log.history_text("b", old, None).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(rebuilt).unwrap(),
+        serde_json::to_value(log.history_text("a", old, None).await.unwrap()).unwrap(),
+    );
+    drop(cache);
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     let Page::Ready { chunks, .. } = log.history_text("a", through, None).await.unwrap() else {

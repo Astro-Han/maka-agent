@@ -323,10 +323,12 @@ CREATE INDEX host_effects_namespace ON host_effects(package_id, scope_id);
 
 -- Query-independent text projection; canonical events remain authoritative.
 CREATE TABLE transcript_text (
-    sequence INTEGER PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
     timestamp INTEGER NOT NULL,
     role TEXT NOT NULL,
-    body BLOB NOT NULL
+    body BLOB NOT NULL,
+    PRIMARY KEY(session_id, sequence)
 );
 
 CREATE TABLE message_sources (
@@ -335,18 +337,16 @@ CREATE TABLE message_sources (
 );
 
 CREATE TABLE transcript_rows (
-    sequence INTEGER PRIMARY KEY CHECK(sequence >= 0),
+    sequence INTEGER NOT NULL CHECK(sequence >= 0),
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,
     message_id TEXT NOT NULL,
     payload BLOB NOT NULL,
     digest TEXT NOT NULL,
     total_bytes INTEGER NOT NULL CHECK(total_bytes > 0),
+    PRIMARY KEY(session_id, sequence),
     UNIQUE(session_id, message_id)
 );
-
-CREATE INDEX transcript_session_sequence
-    ON transcript_rows(session_id, sequence);
 
 CREATE INDEX transcript_session_turn
     ON transcript_rows(session_id, turn_id, sequence);

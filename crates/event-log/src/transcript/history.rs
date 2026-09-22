@@ -64,10 +64,11 @@ impl EventLog {
                     SELECT sequence,
                         COALESCE(SUM(total_bytes) OVER (ORDER BY sequence ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS preceding_bytes
                     FROM source WHERE NOT EXISTS (
-                        SELECT 1 FROM transcript_text WHERE transcript_text.sequence = source.sequence)
+                        SELECT 1 FROM transcript_text
+                        WHERE transcript_text.session_id = ?1 AND transcript_text.sequence = source.sequence)
                 )
                 INSERT INTO transcript_text
-                    SELECT transcript_rows.sequence,
+                    SELECT transcript_rows.session_id, transcript_rows.sequence,
                         json_extract(payload, '$.ts') AS timestamp,
                         json_extract(payload, '$.type') AS role,
                         CAST(COALESCE(CASE json_extract(payload, '$.type')
@@ -83,7 +84,7 @@ impl EventLog {
                                 ELSE '' END
                             ELSE '' END, '') AS BLOB) AS body
                     FROM missing JOIN transcript_rows USING (sequence)
-                    WHERE preceding_bytes < 1048576"
+                    WHERE transcript_rows.session_id = ?1 AND preceding_bytes < 1048576"
             ).bind(&session).bind(sequence).bind(through_sql)
                 .bind(if offset > 0 { 1 } else { (PAGE_CHUNKS + 1) as i64 })
                 .execute(&mut *tx).await?;
@@ -94,7 +95,7 @@ impl EventLog {
                     substr(body, CASE WHEN sequence = ?2 THEN ?5 + 1 ELSE 1 END, ?6) AS fragment,
                     CASE WHEN role = 'user' AND (sequence != ?2 OR ?5 = 0)
                         THEN json_extract(source.payload, '$.attachments') END AS attachments
-                FROM transcript_rows source LEFT JOIN transcript_text cached USING (sequence)
+                FROM transcript_rows source LEFT JOIN transcript_text cached USING (session_id, sequence)
                 WHERE source.session_id = ?1 AND source.sequence >= ?2 AND source.sequence <= ?3
                 ORDER BY source.sequence LIMIT ?4"
             ).bind(&session).bind(sequence).bind(through_sql)

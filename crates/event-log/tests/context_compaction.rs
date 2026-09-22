@@ -17,7 +17,10 @@
  * under the License.
  */
 
-use maka_event_log::{EventLog, StoreError, context::ModelContextSource};
+use maka_event_log::{
+    EventLog, StoreError,
+    context::{HistoryCapture, HistoryCut, ModelContextSource},
+};
 use maka_runtime::{
     context::{CompactOutcome, ContextCheckpoint, TextSummary},
     event::{
@@ -41,6 +44,9 @@ async fn repeated_checkpoints_cross_old_history_limits_with_bounded_tail_and_exa
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("events.sqlite");
     let log = EventLog::open(&path).await.unwrap();
+    log.create_session("session", "history-source", &json!({}), 1)
+        .await
+        .unwrap();
     let mut last = Vec::new();
     for round in 0..3 {
         closed(&log, &format!("main-{round}"), 3 * 1024 * 1024, 3400).await;
@@ -94,6 +100,41 @@ async fn repeated_checkpoints_cross_old_history_limits_with_bounded_tail_and_exa
         .unwrap();
     assert_eq!(source.baseline.unwrap().event_id, last[0].event().id);
     assert!(source.tail.len() < 10);
+    let revision = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    let HistoryCapture::Captured(copied) = log
+        .capture_session_history("session", revision, HistoryCut::End, 100, 8192)
+        .await
+        .unwrap()
+    else {
+        panic!("unchanged history");
+    };
+    assert_eq!(
+        copied.context.baseline.unwrap().event_id,
+        last[0].event().id
+    );
+    assert_eq!(
+        copied.context.source_evidence.digest,
+        source.source_evidence.digest
+    );
+    assert!(
+        matches!(
+            log.capture_session_history(
+                "session",
+                revision,
+                HistoryCut::ThroughTurn("main-0".into()),
+                100,
+                8192,
+            )
+            .await,
+            Err(StoreError::PrefixTooLarge)
+        ),
+        "an earlier branch cannot borrow a later summary containing excluded Turns"
+    );
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     let commits = log.subscribe_commits();

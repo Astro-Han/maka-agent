@@ -48,6 +48,9 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("continuation.sqlite");
     let log = EventLog::open(&path).await.unwrap();
+    log.create_session("session", "history-source", &serde_json::json!({}), 1)
+        .await
+        .unwrap();
     let prior = opening("prior", None);
     append(&log, &prior).await;
     close(&log, &prior).await;
@@ -194,6 +197,38 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
         },
     );
     let terminal_sequence = append(&log, &terminal).await;
+    let revision = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    use maka_event_log::context::{ContextEvent, HistoryCapture, HistoryCut};
+    for (cut, expected) in [
+        (
+            HistoryCut::BeforeTurn(first.invocation.turn_id.clone()),
+            sequence - 1,
+        ),
+        (
+            HistoryCut::ThroughTurn(first.invocation.turn_id.clone()),
+            terminal_sequence,
+        ),
+    ] {
+        let HistoryCapture::Captured(history) = log
+            .capture_session_history("session", revision, cut, 100, 65536)
+            .await
+            .unwrap()
+        else {
+            panic!("unchanged source");
+        };
+        assert_eq!(history.context.source_evidence.high_water, expected);
+        assert_eq!(
+            history.context.tail.iter().any(|entry| matches!(entry,
+                ContextEvent::Canonical(entry) if entry.event == first
+            )),
+            expected == terminal_sequence
+        );
+    }
     let rows = view
         .push(&StoredEvent {
             sequence: terminal_sequence,

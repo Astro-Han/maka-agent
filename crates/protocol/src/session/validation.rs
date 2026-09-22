@@ -175,7 +175,7 @@ fn validate(value: &mut Value, field: &str) -> Result<()> {
     Ok(())
 }
 
-fn entity(text: &str) -> Result<()> {
+pub(super) fn entity(text: &str) -> Result<()> {
     if text.is_empty()
         || text.len() > 128
         || !text

@@ -19,7 +19,7 @@
 
 use maka_event_log::{
     EventLog, StoreError,
-    context::{ContextEvent, LatestMainContext, ModelContextSource},
+    context::{ContextEvent, HistoryCapture, HistoryCut, LatestMainContext, ModelContextSource},
 };
 use maka_runtime::{
     archive::{ArchivedPlaceholder, outcome_projection},
@@ -43,6 +43,9 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("archive.sqlite");
     let log = EventLog::open(&path).await.unwrap();
+    log.create_session("session", "history-source", &json!({}), 1)
+        .await
+        .unwrap();
     open(&log, "old", false).await;
     let target = tool(&log, "old", "step", "x".repeat(12_000)).await;
     let unpruned = log
@@ -66,6 +69,25 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
         .read_model_context("session", None, 100, 64 * 1024)
         .await
         .unwrap();
+    let initial_revision = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    let HistoryCapture::Captured(before_archive) = log
+        .capture_session_history(
+            "session",
+            initial_revision,
+            HistoryCut::ThroughTurn("old".into()),
+            100,
+            64 * 1024,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("unchanged source");
+    };
     open(&log, "writer", false).await;
     let source = log
         .read_model_context("session", Some("writer"), 100, 64 * 1024)
@@ -190,8 +212,66 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
     );
     assert_eq!(expected, serde_json::to_vec(&"x".repeat(12_000)).unwrap());
     end(&log, "writer").await;
+    let final_revision = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    assert!(matches!(log.capture_session_history(
+        "session", initial_revision, HistoryCut::End, 100, 8192,
+    ).await.unwrap(), HistoryCapture::SourceRevisionConflict { expected, actual }
+        if expected == initial_revision && actual == final_revision));
+    let HistoryCapture::Captured(after_archive) = log
+        .capture_session_history(
+            "session",
+            final_revision,
+            HistoryCut::ThroughTurn("old".into()),
+            100,
+            16 * 1024,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("unchanged source");
+    };
+    // The retained Turn is unchanged, but an already accepted later archive
+    // belongs to the copy's frozen rendering. It is not a copied writer Run.
+    assert_eq!(
+        after_archive.context.source_evidence.digest,
+        before_archive.context.source_evidence.digest
+    );
+    assert_ne!(
+        after_archive.context.effective_source_digest,
+        before_archive.context.effective_source_digest
+    );
+    assert!(after_archive.observed_through > before_archive.observed_through);
+    assert!(after_archive.context.tail.iter().any(
+        |entry| matches!(entry, ContextEvent::Archived(entry) if entry.event_id == target.event().id)
+    ));
+    assert!(after_archive.context.tail.iter().all(|entry| match entry {
+        ContextEvent::Canonical(entry) => entry.event.invocation.invocation_id == "old",
+        ContextEvent::Archived(entry) => entry.invocation.invocation_id == "old",
+    }));
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
+    let HistoryCapture::Captured(reopened) = log
+        .capture_session_history(
+            "session",
+            final_revision,
+            HistoryCut::ThroughTurn("old".into()),
+            100,
+            16 * 1024,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("unchanged source after reopen");
+    };
+    assert_eq!(
+        reopened.context.effective_source_digest,
+        after_archive.context.effective_source_digest
+    );
     log.append(&write).await.unwrap();
     assert_eq!(
         log.read_archive("session", &placeholder.identity)
