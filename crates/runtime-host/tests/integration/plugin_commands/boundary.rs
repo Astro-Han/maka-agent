@@ -171,7 +171,7 @@ pub(super) async fn verify(
         .authorize_plugin_root_execution(
             fiber.context(),
             RootApproval {
-                template,
+                template: template.clone(),
                 source: None,
             },
         )
@@ -208,7 +208,7 @@ pub(super) async fn verify(
         roots
             .create_root(CreateRoot {
                 name: "different".into(),
-                ..request
+                ..request.clone()
             })
             .await,
         Err(CommandError::Conflict)
@@ -261,6 +261,51 @@ pub(super) async fn verify(
         commands.session(root.session_id).await,
         Err(CommandError::Denied)
     ));
+    let ordinary_request = CreateRoot {
+        managed: false,
+        operation_id: "ordinary-root".into(),
+        ..request
+    };
+    let ordinary = if reopened {
+        roots
+            .restore_root(ordinary_request.operation_id.clone())
+            .await
+            .unwrap()
+            .unwrap()
+    } else {
+        roots.create_root(ordinary_request.clone()).await.unwrap()
+    };
+    let ordinary_access = host
+        .authorize_plugin_execution(
+            foreign.context(),
+            std::slice::from_ref(&ordinary.session_id),
+        )
+        .await
+        .unwrap();
+    assert!(
+        ordinary_access
+            .session(ordinary.session_id.clone())
+            .await
+            .is_ok(),
+        "creation provenance must not impose exclusive management"
+    );
+    let fresh = host
+        .authorize_plugin_root_execution(
+            fiber.context(),
+            RootApproval {
+                template,
+                source: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        fresh
+            .restore_root(ordinary_request.operation_id)
+            .await
+            .unwrap(),
+        Some(ordinary)
+    );
+    assert_eq!(fresh.restore_root("absent".into()).await.unwrap(), None);
     foreign
         .shutdown(tokio::time::Instant::now() + Duration::from_secs(1))
         .await

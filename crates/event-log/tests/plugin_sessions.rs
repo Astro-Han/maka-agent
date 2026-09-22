@@ -17,27 +17,28 @@
  * under the License.
  */
 
-use maka_event_log::{EventLog, StoreError, sessions::ManagedSession};
+use maka_event_log::{EventLog, StoreError, sessions::PluginSession};
 use maka_plugins::{composition::Scope, storage::Namespace};
 use serde_json::{Value, json};
 
 #[tokio::test]
-async fn managed_creation_is_atomic_and_cannot_adopt_or_reassign_existing_sessions() {
+async fn plugin_creation_is_atomic_and_cannot_adopt_or_reassign_existing_sessions() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("events.sqlite");
-    let claim = ManagedSession {
+    let claim = PluginSession {
         session_id: "example-inbox".into(),
-        manager: Namespace::new("example.workflow", Scope::Profile).unwrap(),
+        creator: Namespace::new("example.workflow", Scope::Profile).unwrap(),
         fingerprint: "owned-creation".into(),
+        managed: true,
     };
     let log = EventLog::open(&path).await.unwrap();
     let configuration = json!({"name":"inbox"});
     let record = log
-        .create_managed_session(&claim, &configuration, 1)
+        .create_plugin_session(&claim, &configuration, 1)
         .await
         .unwrap();
     assert_eq!(
-        log.create_managed_session(&claim, &configuration, 2)
+        log.create_plugin_session(&claim, &configuration, 2)
             .await
             .unwrap(),
         record
@@ -47,20 +48,20 @@ async fn managed_creation_is_atomic_and_cannot_adopt_or_reassign_existing_sessio
             .await,
         Err(StoreError::SessionConflict)
     ));
-    for manager in [
+    for creator in [
         Namespace::new("other.workflow", Scope::Profile).unwrap(),
         Namespace::new("example.workflow", Scope::Session("other".into())).unwrap(),
     ] {
-        let wrong = ManagedSession {
-            manager,
+        let wrong = PluginSession {
+            creator,
             ..claim.clone()
         };
         assert!(matches!(
-            log.create_managed_session(&wrong, &configuration, 2).await,
+            log.create_plugin_session(&wrong, &configuration, 2).await,
             Err(StoreError::SessionConflict)
         ));
     }
-    let ordinary = ManagedSession {
+    let ordinary = PluginSession {
         session_id: "ordinary".into(),
         ..claim.clone()
     };
@@ -68,16 +69,50 @@ async fn managed_creation_is_atomic_and_cannot_adopt_or_reassign_existing_sessio
         .await
         .unwrap();
     assert!(matches!(
-        log.create_managed_session(&ordinary, &configuration, 2)
+        log.create_plugin_session(&ordinary, &configuration, 2)
             .await,
         Err(StoreError::SessionConflict)
     ));
     assert_eq!(log.session_manager("ordinary").await.unwrap(), None);
+    assert_eq!(log.session_creator("ordinary").await.unwrap(), None);
+    let delegated = PluginSession {
+        session_id: "delegated".into(),
+        managed: false,
+        ..claim.clone()
+    };
+    log.create_plugin_session(&delegated, &configuration, 2)
+        .await
+        .unwrap();
+    for conflicting in [
+        PluginSession {
+            managed: true,
+            ..delegated.clone()
+        },
+        PluginSession {
+            fingerprint: "changed".into(),
+            ..delegated.clone()
+        },
+        PluginSession {
+            creator: Namespace::new("other", Scope::Profile).unwrap(),
+            ..delegated.clone()
+        },
+    ] {
+        assert!(matches!(
+            log.create_plugin_session(&conflicting, &configuration, 3)
+                .await,
+            Err(StoreError::SessionConflict)
+        ));
+    }
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(
         log.session_manager(&claim.session_id).await.unwrap(),
-        Some(claim.manager)
+        Some(claim.creator.clone())
+    );
+    assert_eq!(log.session_manager("delegated").await.unwrap(), None);
+    assert_eq!(
+        log.session_creator("delegated").await.unwrap(),
+        Some(claim.creator)
     );
     assert_eq!(
         log.get_session::<Value>(&claim.session_id).await.unwrap(),

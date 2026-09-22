@@ -231,7 +231,7 @@ export interface Executions {
       instructions?: string | null;
     };
   }): Promise<{ sessionId: string }>;
-  /** Recover this package/scope's managed root under current workspace/source ceilings.
+  /** Recover a root created by this package/scope under current workspace/source ceilings.
    * Never creates or reconfigures it; null does not rule out a concurrent creation.
    */
   restoreRoot(operationId: string): Promise<{ sessionId: string } | null>;

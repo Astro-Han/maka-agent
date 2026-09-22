@@ -239,6 +239,27 @@ export default async function (ctx) {
           throw new Error('managed root recovery lost its identity or configuration');
         if ((await restoredCommands.restoreRoot('uncreated-root')) !== null)
           throw new Error('managed root recovery created a Session');
+        const ordinaryRequest = { ...request, operationId: 'ordinary-root', managed: false };
+        const ordinary = await commands.createRoot(ordinaryRequest);
+        const ordinaryView = await commands.session(ordinary.sessionId);
+        const changed = await commands.configure({
+          sessionId: ordinary.sessionId,
+          expectedRevision: ordinaryView.revision,
+          target: {
+            kind: 'executor',
+            executorId: 'example.background',
+            settings: { model: 'replacement' },
+          },
+        });
+        if (changed.kind !== 'committed') throw new Error('ordinary root configuration failed');
+        const restoredOrdinary = await restoredCommands.restoreRoot('ordinary-root');
+        const restoredTarget = (await restoredCommands.session(ordinary.sessionId)).target;
+        if (
+          restoredOrdinary?.sessionId !== ordinary.sessionId ||
+          restoredTarget.kind !== 'executor' ||
+          restoredTarget.settings?.model !== 'replacement'
+        )
+          throw new Error('ordinary root recovery replayed old settings');
       } finally {
         await restoredCommands.close();
       }

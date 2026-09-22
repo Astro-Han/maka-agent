@@ -510,7 +510,7 @@ pub trait Commands: Send + Sync + std::any::Any {
         &self,
         request: CreateRoot,
     ) -> futures_util::future::BoxFuture<'_, Result<ChildSession, CommandError>>;
-    /// Recover this namespace's managed root without replaying its creation settings.
+    /// Recover a root created by this namespace without replaying its creation settings.
     /// Rechecks the current workspace and source ceilings. Absence is only an
     /// observation: a concurrent creation may still commit with this operation ID.
     fn restore_root(

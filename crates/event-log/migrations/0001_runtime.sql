@@ -301,11 +301,12 @@ CREATE TABLE model_request_compositions (
 
 CREATE INDEX model_request_composition_digest ON model_request_compositions(digest);
 
-CREATE TABLE session_managers (
+CREATE TABLE plugin_sessions (
     session_id TEXT PRIMARY KEY NOT NULL,
     package_id TEXT NOT NULL,
     scope_id TEXT NOT NULL,
-    fingerprint TEXT NOT NULL
+    fingerprint TEXT NOT NULL,
+    managed INTEGER NOT NULL CHECK(managed IN (0, 1))
 );
 
 CREATE TABLE host_effects (

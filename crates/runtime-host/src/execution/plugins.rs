@@ -690,7 +690,7 @@ impl Commands for BoundCommands {
         &self,
         operation_id: String,
     ) -> BoxFuture<'_, Result<Option<ChildSession>, Error>> {
-        Box::pin(self.restore_managed_root(operation_id))
+        Box::pin(self.restore_created_root(operation_id))
     }
     fn boundaries(&self) -> Result<Vec<maka_plugins::execution::SessionBoundary>, Error> {
         let _lease = self.context.resource_call().map_err(|_| Error::Revoked)?;

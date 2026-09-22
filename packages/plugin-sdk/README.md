@@ -124,7 +124,7 @@ Native endpoints accepting caller-supplied Host paths declare `Endpoint::requiri
 
 `ctx.models.search({ query })` returns enabled chat choices with supported and default thinking levels, at most 50 entries / 48 KiB; refine the query when `complete` is false. `ctx.models.resolve({ kind: 'named', connectionSlug, model })` returns the same choice shape for an exact model; `{ kind: 'default' }` resolves the current default. Neither grants execution authority or promises provider readiness.
 
-`restoreRoot(operationId)` recovers this package/scope's managed root under current workspace and source ceilings, independently of its original model. `restoreChild` requires the original child creation request. Neither creates anything; absence does not exclude a concurrent creation. `configure` advances the Session revision on every committed choice, including identical values, fencing older configuration CASes without changing event history.
+`restoreRoot(operationId)` recovers a root created by this package/scope under current workspace and source ceilings, independently of its original model. Creation provenance does not make an ordinary root exclusively managed. `restoreChild` requires the original child creation request. Neither creates anything; absence does not exclude a concurrent creation. `configure` advances the Session revision on every committed choice, including identical values, fencing older configuration CASes without changing event history.
 
 ## Model adapters
 

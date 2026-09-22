@@ -21,9 +21,9 @@
 
 mod activity;
 mod execution;
-mod manager;
 mod metadata;
-pub use manager::ManagedSession;
+mod origin;
+pub use origin::PluginSession;
 pub(crate) mod read_state;
 pub(crate) use activity::{initialize_execution, project_execution, register_functions};
 pub(crate) use execution::advance_revision;
@@ -106,23 +106,23 @@ impl EventLog {
             .await
     }
 
-    /// Manager ownership and Session creation share the same transaction.
+    /// Creator identity, optional management and Session creation share one transaction.
     /// Only Host admission supplies the bound package/scope.
-    pub async fn create_managed_session<T: Serialize + DeserializeOwned + Send + 'static>(
+    pub async fn create_plugin_session<T: Serialize + DeserializeOwned + Send + 'static>(
         &self,
-        claim: &ManagedSession,
+        claim: &PluginSession,
         configuration: &T,
         now: u64,
     ) -> Result<SessionRecord<T>, StoreError> {
-        if claim.manager.scope() == &maka_plugins::composition::Scope::DesktopUi {
-            return Err(invalid("Desktop UI cannot manage Host Sessions"));
+        if claim.creator.scope() == &maka_plugins::composition::Scope::DesktopUi {
+            return Err(invalid("Desktop UI cannot create Host Sessions"));
         }
         self.create_session_owned(
             &claim.session_id,
             &claim.fingerprint,
             configuration,
             now,
-            Some(claim.manager.clone()),
+            Some((claim.creator.clone(), claim.managed)),
         )
         .await
     }
@@ -133,7 +133,7 @@ impl EventLog {
         fingerprint: &str,
         configuration: &T,
         now: u64,
-        manager: Option<maka_plugins::storage::Namespace>,
+        origin: Option<(maka_plugins::storage::Namespace, bool)>,
     ) -> Result<SessionRecord<T>, StoreError> {
         self.validate_root()?;
         validate_id(id)?;
@@ -148,23 +148,24 @@ impl EventLog {
                 Box::pin(async move {
                     let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
                     if let Some(record) = probe(&mut tx, &id, &fingerprint).await? {
-                        let stored: Option<(String, String)> = sqlx::query_as(
-                            "SELECT package_id, scope_id FROM session_managers WHERE session_id = ?",
+                        let stored: Option<(String, String, bool)> = sqlx::query_as(
+                            "SELECT package_id, scope_id, managed FROM plugin_sessions WHERE session_id = ?",
                         ).bind(&id).fetch_optional(&mut *tx).await?;
-                        let requested = manager.as_ref().map(|owner| (
-                            owner.package().to_owned(), String::from(owner.scope().clone()),
+                        let requested = origin.as_ref().map(|(owner, managed)| (
+                            owner.package().to_owned(), String::from(owner.scope().clone()), *managed,
                         ));
                         if stored != requested {
                             return Err(StoreError::SessionConflict);
                         }
                         return Ok(record);
                     }
-                    if let Some(manager) = manager {
-                        sqlx::query("INSERT INTO session_managers VALUES (?, ?, ?, ?)")
+                    if let Some((creator, managed)) = origin {
+                        sqlx::query("INSERT INTO plugin_sessions VALUES (?, ?, ?, ?, ?)")
                             .bind(&id)
-                            .bind(manager.package())
-                            .bind(String::from(manager.scope().clone()))
+                            .bind(creator.package())
+                            .bind(String::from(creator.scope().clone()))
                             .bind(&fingerprint)
+                            .bind(managed)
                             .execute(&mut *tx)
                             .await?;
                     }
@@ -329,7 +330,7 @@ pub(crate) async fn insert(
         return Err(invalid("session configuration exceeds 64 KiB"));
     }
     let reserved: Option<String> =
-        sqlx::query_scalar("SELECT fingerprint FROM session_managers WHERE session_id = ?")
+        sqlx::query_scalar("SELECT fingerprint FROM plugin_sessions WHERE session_id = ?")
             .bind(id)
             .fetch_optional(&mut *tx)
             .await?;

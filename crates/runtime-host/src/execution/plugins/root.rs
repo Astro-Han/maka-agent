@@ -78,7 +78,7 @@ impl BoundCommands {
         Ok(format!("plugin-root-{:x}", Sha256::digest(bytes)))
     }
 
-    pub(super) async fn restore_managed_root(
+    pub(super) async fn restore_created_root(
         &self,
         operation_id: String,
     ) -> Result<Option<ChildSession>, Error> {
@@ -107,7 +107,7 @@ impl BoundCommands {
         };
         if host
             .log
-            .session_manager(&id)
+            .session_creator(&id)
             .await
             .map_err(storage)?
             .as_ref()
@@ -299,26 +299,20 @@ impl BoundCommands {
                         if submission_stop.is_cancelled() {
                             return Err(Error::Revoked);
                         }
-                        let record = if request.managed {
-                            worker
-                                .log
-                                .create_managed_session(
-                                    &maka_event_log::sessions::ManagedSession {
-                                        session_id: id.clone(),
-                                        manager: namespace.clone(),
-                                        fingerprint: fingerprint.clone(),
-                                    },
-                                    &expected,
-                                    now()?,
-                                )
-                                .await
-                        } else {
-                            worker
-                                .log
-                                .create_session(&id, &fingerprint, &expected, now()?)
-                                .await
-                        }
-                        .map_err(storage)?;
+                        let record = worker
+                            .log
+                            .create_plugin_session(
+                                &maka_event_log::sessions::PluginSession {
+                                    session_id: id.clone(),
+                                    creator: namespace.clone(),
+                                    fingerprint: fingerprint.clone(),
+                                    managed: request.managed,
+                                },
+                                &expected,
+                                now()?,
+                            )
+                            .await
+                            .map_err(storage)?;
                         if worker.catalog.publish_session(&id).await.is_err() {
                             worker.begin_drain();
                         }
@@ -326,7 +320,15 @@ impl BoundCommands {
                     }
                 };
                 let manager = worker.log.session_manager(&id).await.map_err(storage)?;
-                if manager.as_ref() != request.managed.then_some(&namespace) {
+                if manager.as_ref() != request.managed.then_some(&namespace)
+                    || worker
+                        .log
+                        .session_creator(&id)
+                        .await
+                        .map_err(storage)?
+                        .as_ref()
+                        != Some(&namespace)
+                {
                     return Err(Error::Denied);
                 }
                 let current = &record.configuration;

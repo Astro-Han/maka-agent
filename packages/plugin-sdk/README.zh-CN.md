@@ -128,7 +128,7 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 
 `ctx.models.search({ query })` 返回已启用的聊天模型、支持的思考程度及默认值，每页最多 50 项／48 KiB；`complete` 为 false 时应缩小搜索范围。`ctx.models.resolve({ kind: 'named', connectionSlug, model })` 返回相同结构的精确模型选择，`{ kind: 'default' }` 解析当前默认模型。两者均不授予执行权限，也不保证提供商当前可用。
 
-`restoreRoot(operationId)` 按当前工作区和来源上限恢复本包／作用域托管的根会话，不依赖原模型。`restoreChild` 要求原始子会话创建请求。两者均不创建资源；不存在的观察不能排除并发创建。`configure` 每次成功选择都会推进 Session revision，包括相同值，以阻止较早的配置 CAS 覆盖它，不修改事件历史。
+`restoreRoot(operationId)` 按当前工作区和来源上限恢复本包／作用域创建的根会话，不依赖原模型；创建记录不会使普通根会话变成独占托管会话。`restoreChild` 要求原始子会话创建请求。两者均不创建资源；不存在的观察不能排除并发创建。`configure` 每次成功选择都会推进 Session revision，包括相同值，以阻止较早的配置 CAS 覆盖它，不修改事件历史。
 
 ## 模型适配器
 
