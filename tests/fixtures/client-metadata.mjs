@@ -67,7 +67,7 @@ export async function verifyMetadata(connection, initial, connectSibling) {
     );
     const changed = await update(connection, initial, {
       name: 'Cafe\u0301  会话',
-      labels: ['mode:bot', 'review', 'mode:deep_research'],
+      labels: ['mode:bot', 'review'],
       isFlagged: true,
     });
     assert.equal(changed.kind, 'committed');

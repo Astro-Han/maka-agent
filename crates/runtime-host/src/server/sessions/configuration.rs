@@ -56,7 +56,7 @@ async fn apply(host: &Host, input: SessionConfigurationUpdateInput) -> Result<Se
             "Archived Session configuration cannot be changed",
         ));
     }
-    let mut next = merge(
+    let next = merge(
         host,
         &input.session_id,
         &current.configuration,
@@ -121,9 +121,6 @@ async fn apply(host: &Host, input: SessionConfigurationUpdateInput) -> Result<Se
                 .stop_session(&input.session_id)
                 .await
                 .map_err(|error| failure(Code::PersistenceFailed, &error.to_string()))?;
-        }
-        if next.sandbox_mode != SandboxMode::ReadOnly {
-            next.labels.retain(|label| label != "mode:deep_research");
         }
     }
     // Even a no-op must recheck CAS after asynchronous model resolution. Every

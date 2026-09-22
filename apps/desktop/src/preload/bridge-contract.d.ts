@@ -108,7 +108,6 @@ import type {
   DailyReviewSummary,
 } from '@maka/core/daily-review';
 import type { BrowserState, BrowserViewRect } from '@maka/core/browser';
-import type { DeepResearchChangedEvent, DeepResearchClientProgress } from '@maka/core/deep-research-run';
 import type {
   DesktopTranscriptBatch,
   DesktopTranscriptHandle,
@@ -1062,10 +1061,6 @@ export interface MakaBridge {
     subscribeChanges(handler: (event: WorkBoardChangedEvent) => void): () => void;
   };
 
-  deepResearch: {
-    get(sessionId: string): Promise<DeepResearchClientProgress | undefined>;
-    subscribeChanges(handler: (event: DeepResearchChangedEvent) => void): () => void;
-  };
   graphs: {
     listEpochs(rootSessionId: string): Promise<AgentGraphEpochDirectory>;
     listCurrentEpochs(rootSessionId: string): Promise<AgentGraphEpochDirectory>;

@@ -58,7 +58,7 @@ async fn managed_shell_approvals_enforce_exact_once_grants_and_never_prompt_poli
             .unwrap().serve(host.clone(), cancel));
         let mut peer = Peer::new(host.clone(), "permissions-client").await;
         let created = peer.rpc("session.create", json!({
-            "sessionId":SESSION,"mode":"deep_research",
+            "sessionId":SESSION,"sandboxMode":"read-only",
             "approvalPolicy":{"kind":"on-request"},
             "workspace":{"kind":"host_path","path":fixture.workspace},
             "modelTarget":{"kind":"explicit","connectionId":model.connection_id,
@@ -151,7 +151,7 @@ async fn scenario() {
                 .rpc(
                     Operation::SessionCreate.as_str(),
                     json!({
-                        "sessionId":SESSION, "mode":"deep_research",
+                        "sessionId":SESSION, "sandboxMode":"read-only",
                         "workspace":{"kind":"host_path","path":fixture.workspace},
                         "modelTarget":{"kind":"explicit","connectionId":model.connection_id,
                             "connectionSlug":model.connection_slug,"model":model.model}
@@ -300,13 +300,6 @@ async fn scenario() {
         SandboxMode::WorkspaceWrite
     );
     assert_eq!(config.configuration.boundary_revision, 2);
-    assert!(
-        !config
-            .configuration
-            .labels
-            .iter()
-            .any(|label| label == "mode:deep_research")
-    );
     let prefix = log.prefix(200, 1024 * 1024).await.unwrap();
     let openings: Vec<_> = prefix
         .events

@@ -472,14 +472,14 @@ describe('SQLite Artifact store', () => {
       await store.create({
         ...input,
         content: 'protected replacement',
-        source: 'deep_research',
+        source: 'subagent_writeback',
       });
 
       assert.equal(
         (await store.deleteUserArtifactInSession(input.sessionId, input.id)).kind,
         'protected',
       );
-      assert.equal((await getArtifact(store, input.id))?.source, 'deep_research');
+      assert.equal((await getArtifact(store, input.id))?.source, 'subagent_writeback');
       assert.deepEqual(await store.readTextInSession(input.sessionId, input.id), {
         ok: true,
         text: 'protected replacement',
@@ -575,52 +575,9 @@ describe('SQLite Artifact store', () => {
     });
   });
 
-  test('persists complete canonical deep-research and archived tool-result records', async () => {
-    await withWorkspace(async (root) => {
-      const store = createArtifactStore(root);
-      const report = await store.create({
-        id: 'research-report',
-        sessionId: 'session-1',
-        turnId: 'turn-report',
-        name: 'report.html',
-        kind: 'html',
-        content: '<h1>Research</h1>',
-        mimeType: 'text/html',
-        source: 'deep_research',
-        summary: 'Canonical research report',
-        deepResearchRole: 'report',
-        now: 100,
-      });
-      const archive = await store.create({
-        id: 'tool-archive',
-        sessionId: 'session-1',
-        turnId: 'turn-tool',
-        name: 'tool-result.json',
-        kind: 'file',
-        content: '{"ok":true}',
-        mimeType: 'application/json',
-        source: 'tool_result_archive',
-        summary: 'Archived tool result',
-        now: 200,
-      });
-
-      const reopened = createArtifactStore(root);
-      assert.deepEqual(await getArtifact(reopened, report.id), report);
-      assert.deepEqual(await getArtifact(reopened, archive.id), archive);
-      assert.deepEqual(await readArtifactText(reopened, report.id), {
-        ok: true,
-        text: '<h1>Research</h1>',
-      });
-      assert.deepEqual(await readArtifactText(reopened, archive.id), {
-        ok: true,
-        text: '{"ok":true}',
-      });
-    });
-  });
-
   test('exact live replay returns the canonical record without rewriting or accepting conflicts', async () => {
     await withWorkspace(async (root) => {
-      const input = deepResearchArtifactInput('stable-replay', '# Durable result');
+      const input = writebackArtifactInput('stable-replay', '# Durable result');
       const first = await createArtifactStore(root).create(input);
       const metadataPath = join(root, 'artifacts', 'metadata.jsonl');
       await assert.rejects(() => stat(metadataPath), { code: 'ENOENT' });
@@ -656,7 +613,7 @@ describe('SQLite Artifact store', () => {
 
   test('a stable id can be created again after physical deletion', async () => {
     await withWorkspace(async (root) => {
-      const input = deepResearchArtifactInput('stable-revive', '# Revivable');
+      const input = writebackArtifactInput('stable-revive', '# Revivable');
       const store = createArtifactStore(root);
       const first = await store.create(input);
       await store.deleteOwnedArtifactInSession(input.sessionId, first.id, input.source);
@@ -1326,14 +1283,6 @@ describe('SQLite Artifact store', () => {
         () => store.create({ ...artifactInput('bad/id', 'no', 1) }),
         /Artifact id must be a canonical entity ID/,
       );
-      await assert.rejects(
-        () =>
-          store.create({
-            ...artifactInput('invalid-role', 'no', 1),
-            deepResearchRole: 'invalid' as never,
-          }),
-        /Invalid Artifact deep-research role/,
-      );
       await assert.rejects(() => stat(join(root, 'artifacts')), { code: 'ENOENT' });
     });
 
@@ -1375,18 +1324,17 @@ function artifactInput(id: string, content: string | Uint8Array, now: number) {
   };
 }
 
-function deepResearchArtifactInput(id: string, content: string) {
+function writebackArtifactInput(id: string, content: string) {
   return {
     id,
     sessionId: 'session-1',
     turnId: 'turn-1',
-    name: 'research.md',
+    name: 'result.md',
     kind: 'file' as const,
     content,
     mimeType: 'text/markdown',
-    source: 'deep_research' as const,
-    summary: 'Stable research artifact',
-    deepResearchRole: 'source' as const,
+    source: 'subagent_writeback' as const,
+    summary: 'Stable writeback artifact',
   };
 }
 

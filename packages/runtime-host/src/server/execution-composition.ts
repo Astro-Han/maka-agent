@@ -35,7 +35,6 @@ import {
   type RuntimeInvocationRecord,
 } from '@maka/core/runtime-invocation';
 import {
-  isDeepResearchSession,
   type SessionHeader,
   WORKHUB_COORDINATION_SESSION_ID,
   WORKHUB_COORDINATION_REPLACEMENT_SCHEMA_VERSION,
@@ -142,7 +141,6 @@ import { HostChangeFeed } from './host-change-feed.js';
 import { HostConfigurationCoordinator } from './configuration-coordinator.js';
 import { HostContextCoordinator } from './context-coordinator.js';
 import { HostClientCapabilityCoordinator } from './client-capability-coordinator.js';
-import { HostDeepResearchCoordinator } from './deep-research-coordinator.js';
 import { HostDailyReviewCoordinator } from './daily-review-coordinator.js';
 import { prepareHostAiSdkBackend } from './execution-model-composition.js';
 import {
@@ -381,7 +379,6 @@ export async function createExecutionRuntimeHostComposition(
     const oauthCredentials = new HostOAuthExecutionAuthority(runtimePolicyStores);
     const openedScheduledTaskStore = storage.scheduledTasks;
     const openedPlanStore = storage.plan;
-    const openedDeepResearchStore = storage.deepResearch;
     const openedDailyReviewStore = storage.dailyReview;
     const openedGoalStore = storage.goal;
     const memoryStore = storage.memoryBundle;
@@ -776,7 +773,6 @@ export async function createExecutionRuntimeHostComposition(
     let scheduledTasks: HostScheduledTaskCoordinator | undefined;
     let scheduledTaskTool: MakaTool | undefined;
     let goal: HostGoalCoordinator | undefined;
-    let deepResearch: HostDeepResearchCoordinator | undefined;
     let dailyReview: HostDailyReviewCoordinator | undefined;
     const rootPort: HostMessageRootPort = {
       readLatestRootTurnLineage: (identity) =>
@@ -856,14 +852,6 @@ export async function createExecutionRuntimeHostComposition(
     unsubscribeUsageChanges = openedUsageStores.subscribeSessionUsageChanges((sessionId) =>
       continuityCoordinator.enqueueSessionDomainChanged(sessionId, 'usage'),
     );
-    deepResearch = new HostDeepResearchCoordinator({
-      store: openedDeepResearchStore,
-      artifacts: openedArtifactStore,
-      sessions: stores.sessionStore,
-      sessionAdmission,
-      onProjectionChanged: (sessionId) =>
-        continuityCoordinator.enqueueSessionDomainChanged(sessionId, 'deep_research'),
-    });
     dailyReview = new HostDailyReviewCoordinator({
       store: openedDailyReviewStore,
       usage: openedUsageStores,
@@ -976,9 +964,6 @@ export async function createExecutionRuntimeHostComposition(
         clientCapabilities: requireClientCapabilities(clientCapabilities),
         ...(scheduledTaskTool ? { scheduledTaskTool } : {}),
         planStore,
-        deepResearchTools: requireDeepResearch(deepResearch).toolsForSession(
-          backendContext.sessionId,
-        ),
         goalTools: requireGoal(goal).tools,
         builtinTools,
         hostTools,
@@ -1162,13 +1147,6 @@ export async function createExecutionRuntimeHostComposition(
             mode: header.collaborationMode ?? 'agent',
             sandboxMode: header.sandboxMode,
           },
-          ...(isDeepResearchSession(header.labels)
-            ? {
-                deepResearch: {
-                  tools: requireDeepResearch(deepResearch).toolsForSession(sessionId),
-                },
-              }
-            : {}),
         }).tools.map((tool) => tool.name);
       } finally {
         capabilitySnapshot?.release();
@@ -2389,7 +2367,6 @@ export async function createExecutionRuntimeHostComposition(
         // writer: publishing a per-Session `plan` invalidation for state that is
         // being removed would only wake subscribers to read nothing.
         await openedPlanStore.purgeSessionState(sessionId);
-        await openedDeepResearchStore.purgeSessionState(sessionId);
       },
       purgeAgentGraphState: async (sessionId) => {
         for (const graphId of await requireGraphCoordinator(graphCoordinator).listGraphIds(
@@ -2593,11 +2570,6 @@ export async function createExecutionRuntimeHostComposition(
         },
         drain: [() => clientCapabilities.beginDrain()],
         close: [() => clientCapabilities.close()],
-      }),
-      createRuntimeHostDomainModule({
-        id: 'deep-research',
-        handlers: [requireDeepResearch(deepResearch).handlers],
-        close: [() => deepResearch?.close()],
       }),
       createRuntimeHostDomainModule({
         id: 'daily-review',
@@ -3060,13 +3032,6 @@ function requireScheduledTasks(
   coordinator: HostScheduledTaskCoordinator | undefined,
 ): HostScheduledTaskCoordinator {
   if (!coordinator) throw new Error('Runtime Host ScheduledTask coordinator is not composed');
-  return coordinator;
-}
-
-function requireDeepResearch(
-  coordinator: HostDeepResearchCoordinator | undefined,
-): HostDeepResearchCoordinator {
-  if (!coordinator) throw new Error('Runtime Host Deep Research coordinator is not composed');
   return coordinator;
 }
 

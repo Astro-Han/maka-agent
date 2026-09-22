@@ -50,10 +50,7 @@ const PROCESS_TIMEOUT_MS = 30_000;
 const BULK_ARTIFACT_COUNT = 24;
 const BULK_ARTIFACT_SUMMARY = 's'.repeat(7 * 1024);
 const MAX_ARTIFACT_ID = 'a'.repeat(ARTIFACT_ENTITY_ID_MAX_CHARS);
-const PROTECTED_ARTIFACTS = [
-  { id: 'deep-research-evidence', source: 'deep_research' },
-  { id: 'tool-result-archive', source: 'tool_result_archive' },
-] as const;
+const PROTECTED_ARTIFACTS = [{ id: 'tool-result-archive', source: 'tool_result_archive' }] as const;
 
 test('production Host ignores Artifact publication residue and preserves deletes across owner death', {
   timeout: 120_000,
@@ -101,7 +98,6 @@ test('production Host ignores Artifact publication residue and preserves deletes
         [
           'small-text',
           'small-binary',
-          'deep-research-evidence',
           'tool-result-archive',
           ...Array.from(
             { length: BULK_ARTIFACT_COUNT },

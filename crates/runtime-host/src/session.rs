@@ -224,23 +224,18 @@ impl PreparedSession {
                 "Executor Sessions do not accept native model or orchestration settings",
             ));
         }
-        if input.labels.as_ref().is_some_and(|labels| {
-            labels
-                .iter()
-                .any(|label| matches!(label.as_str(), "mode:bot" | "mode:deep_research"))
-        }) {
+        if input
+            .labels
+            .as_ref()
+            .is_some_and(|labels| labels.iter().any(|label| label == "mode:bot"))
+        {
             return Err(ProtocolError::invalid(
                 "Session creation cannot set reserved execution labels",
             ));
         }
-        let requested_name = match input.mode {
-            Some(SessionStartMode::DeepResearch) => "Deep Research",
-            _ => input.name.as_deref().unwrap_or("New Chat"),
-        };
-        let name = name::normalize(requested_name)?;
+        let name = name::normalize(input.name.as_deref().unwrap_or("New Chat"))?;
         let mut labels = input.labels.clone().unwrap_or_default();
         match input.mode {
-            Some(SessionStartMode::DeepResearch) => labels.push("mode:deep_research".into()),
             Some(SessionStartMode::Bot) => labels.push("mode:bot".into()),
             None => {}
         }

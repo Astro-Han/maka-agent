@@ -37,7 +37,6 @@ pub enum ArtifactSource {
     ToolResultProjection,
     ToolResultArchive,
     SubagentWriteback,
-    DeepResearch,
     UserUpload,
     SessionEffect,
 }

@@ -28,7 +28,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { DEEP_RESEARCH_SESSION_LABEL, DEEP_RESEARCH_SESSION_NAME } from '@maka/core/deep-research';
 import { openInteractiveArtifactStoreForWrite } from '@maka/storage/artifact-stores';
 import { openInteractiveExecutionStoresForWrite } from '@maka/storage/execution-stores';
 import { seedInvocation } from '@maka/runtime/test-only/invocation-fixture';
@@ -110,7 +109,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
         createInput.sessionId,
       );
       assert.equal(created.id, createInput.sessionId);
-      assert.equal(created.sandboxMode, 'bypass');
+      assert.equal(created.sandboxMode, 'workspace-write');
       assert.equal(created.labelsTruncated, false);
       assert.deepEqual(
         await desktop.request('runtime.resource.query', {
@@ -143,21 +142,6 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
       });
       if ('kind' in planSession) assert.fail('Plan Session must be wire-representable');
       assert.equal(planSession.collaborationMode, 'plan');
-      const researchSession = requireSessionProjection(
-        await desktop.request('session.create', {
-          sessionId: 'deep-research-session',
-          workspace: { kind: 'host_path', path: root },
-          mode: 'deep_research',
-          name: 'Caller override',
-          labels: ['customer-label'],
-          modelTarget: { kind: 'default' },
-          sandboxMode: 'danger-full-access',
-        }),
-      );
-      assert.equal(researchSession.name, DEEP_RESEARCH_SESSION_NAME);
-      assert.deepEqual(researchSession.labels, ['customer-label', DEEP_RESEARCH_SESSION_LABEL]);
-      assert.equal(researchSession.sandboxMode, 'explore');
-
       const sandboxChoice = requireSessionProjection(
         await desktop.request('session.create', {
           ...createInput,
@@ -165,7 +149,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
           sandboxMode: 'workspace-write',
         }),
       );
-      assert.equal(sandboxChoice.sandboxMode, 'ask');
+      assert.equal(sandboxChoice.sandboxMode, 'workspace-write');
 
       const policy = await tui.request('runtime.policy.query', {});
       const changedPolicy = await tui.request('runtime.policy.mutate', {
@@ -184,7 +168,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
           sessionId: 'inherited-sandbox-session',
         }),
       );
-      assert.equal(inheritedSandbox.sandboxMode, 'ask');
+      assert.equal(inheritedSandbox.sandboxMode, 'workspace-write');
 
       const subscription = await tui.openSessionSubscription({
         sessionId: created.id,
@@ -273,7 +257,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
         assert.fail('Runtime Resource authority must permit a quiescent permission narrowing');
       }
       const narrowedSession = requireSessionProjection(narrowedConfiguration.session);
-      assert.equal(narrowedSession.sandboxMode, 'explore');
+      assert.equal(narrowedSession.sandboxMode, 'read-only');
 
       const firstCwd = join(base, 'workspace-first');
       const secondCwd = join(base, 'workspace-second');

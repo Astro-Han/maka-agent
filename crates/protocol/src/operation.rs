@@ -135,7 +135,6 @@ operations! {
     CredentialVaultSet => ("credential.vault.set", Command, Ready),
     DailyReviewMutate => ("daily-review.mutate", Command, Ready),
     DailyReviewQuery => ("daily-review.query", Query, Ready),
-    DeepResearchQuery => ("deep-research.query", Query, Ready),
     ExecutionInspectQuery => ("execution.inspect.query", Query, Ready),
     ExternalSessionCatalogQuery => ("external-session.catalog.query", Query, Ready),
     ExternalAgentsSetupStart => ("external_agents.setup.start", Command, Ready),

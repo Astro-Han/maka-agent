@@ -126,7 +126,6 @@ describe('interactive artifact store authority', () => {
         'tool_result_projection',
         'tool_result_archive',
         'subagent_writeback',
-        'deep_research',
         'user_upload',
         'session_effect',
       ];

@@ -33,11 +33,6 @@ export interface SessionStartModeSpec {
 }
 
 export const SESSION_START_MODE_SPECS = {
-  deep_research: {
-    name: 'Deep Research',
-    labels: ['mode:deep_research'],
-    sandboxMode: 'read-only',
-  },
   bot: {
     labels: ['mode:bot'],
     sandboxMode: 'read-only',

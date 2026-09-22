@@ -65,7 +65,6 @@ impl Operation {
                 | Self::CredentialVaultSet
                 | Self::DailyReviewMutate
                 | Self::DailyReviewQuery
-                | Self::DeepResearchQuery
                 | Self::ExecutionInspectQuery
                 | Self::ExternalSessionCatalogQuery
                 | Self::ExternalSessionImport

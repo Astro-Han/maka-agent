@@ -165,7 +165,6 @@ import {
   createAppShellRevisionActions,
   type TurnRevisionDraft,
 } from './app-shell-revision-actions';
-import { createAppShellSessionStartActions } from './app-shell-session-start-actions';
 import { createAppShellStopAction } from './app-shell-stop-action';
 import { useStableActions } from './use-stable-actions';
 import {
@@ -990,9 +989,6 @@ function AppShellContent({
   // `sessions:changed` + `connections:event`. The hero renders only
   // when sessions.length === 0; any session (including archived /
   // aborted) takes over with the existing chat surface.
-  // Re-entrancy lock only — a ref, not state, because nothing renders
-  // from it (#1433 removed its last reader with the first-run hero).
-  const sessionStartPendingRef = useRef(false);
   useEffect(() => {
     const snapshot = onboarding.snapshot;
     if (snapshot) {
@@ -1126,20 +1122,6 @@ function AppShellContent({
         projectName: currentProject?.name,
         projectPath: projectInfo?.projectPath,
       });
-  const { startModeSession } = useStableActions(createAppShellSessionStartActions, {
-    uiLocale,
-    activeIdRef,
-    captureComposerImportOwner,
-    composerRef,
-    isShellSurfaceOwnerActive,
-    openSessionInChat,
-    newTaskTarget: taskEntry.selectors.target,
-    sessionStartPendingRef,
-    refreshOnboarding: onboarding.refresh,
-    refreshSessions,
-    showModelSetupToast,
-    toastApi,
-  });
   const openNewTaskSurface = useCallback(() => {
     imageNoticeLifecycle.reset(NEW_TASK_PENDING_KEY);
     const ownerToken = startNewSession();
@@ -2071,7 +2053,6 @@ function AppShellContent({
     hiddenSessionIds: selectors.hiddenSessionIds,
     captureComposerImportOwner,
     createSession,
-    startModeSession,
     openHelp,
     openScheduledTaskCreate: () => {
       closePalette();
@@ -2624,16 +2605,6 @@ function AppShellContent({
                       }
                     : undefined
                 }
-                onContinueDeepResearchHandoff={(run) => {
-                  const prompt = run.implementationPrompt;
-                  if (!prompt) return;
-                  void createSession().then(() => {
-                    window.requestAnimationFrame(() => {
-                      composerRef.current?.setText(prompt);
-                      composerRef.current?.focus();
-                    });
-                  });
-                }}
                 sessionHealthNotice={usesPluginExecutor ? undefined : sessionHealthNotice}
                 sessionHealthModelPickerAvailable={
                   activeBoundarySurface.localInteractionAvailable

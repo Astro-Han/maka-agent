@@ -94,9 +94,9 @@ fn create_accepts_wire_options_without_materializing_defaults() {
     value["workspace"] = json!({"kind":"project","projectId":"project_1"});
     value["modelTarget"] =
         json!({"kind":"explicit","connectionId":"c1","connectionSlug":" x ","model":"m"});
-    value["mode"] = json!("deep_research");
+    value["mode"] = json!("bot");
     value["sandboxMode"] = json!("read-only");
-    value["labels"] = json!(["mode:deep_research"]);
+    value["labels"] = json!(["mode:bot"]);
     assert!(decode_session_create_input(&value).is_ok());
 }
 #[test]

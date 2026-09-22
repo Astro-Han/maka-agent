@@ -1453,12 +1453,6 @@ export class DesktopRuntimeHostClient {
     return this.request("agent.graph.stop", input);
   }
 
-  queryDeepResearch(
-    sessionId: string,
-  ): Promise<OperationOutput<"deep-research.query">> {
-    return this.request("deep-research.query", { sessionId });
-  }
-
   async listRuntimeResources(sessionId: string): Promise<ShellRunUpdate[]> {
     this.#assertOpen();
     try {

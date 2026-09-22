@@ -23,7 +23,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { createSqliteDeepResearchStore } from '../deep-research-store.js';
 import {
   createOperationalStateBackup,
   restoreOperationalStateBackup,
@@ -675,38 +674,6 @@ describe('SQLite workflow stores', () => {
     });
   });
 
-  test('persists Deep Research events', async () => {
-    await withRoot(async (root) => {
-      const store = createSqliteDeepResearchStore(root, {
-        newId: () => 'research-1',
-        now: () => 200,
-      });
-      await store.start(SESSION_ID, 'Map the SQLite authority', 'deep');
-      store.close();
-
-      const reopened = createSqliteDeepResearchStore(root);
-      try {
-        assert.equal((await reopened.read(SESSION_ID))?.objective, 'Map the SQLite authority');
-      } finally {
-        reopened.close();
-      }
-    });
-  });
-
-  test('purges Deep Research events for retired Sessions', async () => {
-    await withRoot(async (root) => {
-      const store = createSqliteDeepResearchStore(root);
-      try {
-        await store.start(SESSION_ID, 'Remove the retired research workspace', 'standard');
-        await store.purgeSessionState(SESSION_ID);
-        assert.equal(await store.read(SESSION_ID), undefined);
-        assert.deepEqual(await store.readEvents(SESSION_ID), []);
-      } finally {
-        store.close();
-      }
-    });
-  });
-
   test('persists Scheduled Tasks and admits each fire once', async () => {
     await withRoot(async (root) => {
       const now = Date.now();
@@ -805,7 +772,7 @@ describe('SQLite workflow stores', () => {
     });
   });
 
-  test('folds retired permission modes in tasks and pending fire claims', async () => {
+  test('rejects unknown sandbox modes in tasks and pending fire claims', async () => {
     await withRoot(async (root) => {
       const now = Date.now();
       const { owner, open } = await scheduledTaskStoreRoot(root);
@@ -837,7 +804,7 @@ describe('SQLite workflow stores', () => {
       );
       const task = await store.create(
         {
-          title: 'Decode retired rows',
+          title: 'Reject invalid rows',
           intentBody: 'run',
           schedule: { kind: 'once', runAt: now + 1_000 },
           effect: {
@@ -873,19 +840,10 @@ describe('SQLite workflow stores', () => {
 
       const reopened = await open();
       try {
-        const decodedTask = (await reopened.list())[0];
-        const decodedClaim = (await reopened.listPendingFires())[0];
-        assert.equal(
-          decodedTask?.effect.kind === 'agent_run'
-            ? decodedTask.effect.execution.sandboxMode
-            : undefined,
-          'ask',
-        );
-        assert.equal(
-          decodedClaim?.task.effect.kind === 'agent_run'
-            ? decodedClaim.task.effect.execution.sandboxMode
-            : undefined,
-          'ask',
+        await assert.rejects(reopened.list(), /Invalid persisted ScheduledTask permission mode/);
+        await assert.rejects(
+          reopened.listPendingFires(),
+          /Invalid persisted ScheduledTask permission mode/,
         );
       } finally {
         reopened.close();

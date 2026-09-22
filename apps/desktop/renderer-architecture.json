@@ -16,7 +16,6 @@
     "src/renderer/app-shell-project-actions.ts",
     "src/renderer/app-shell-revision-actions.ts",
     "src/renderer/app-shell-session-events.ts",
-    "src/renderer/app-shell-session-start-actions.ts",
     "src/renderer/app-shell-session-ui-state.ts",
     "src/renderer/app-shell-stop-action.ts",
     "src/renderer/app-shell-turn-actions.ts",
@@ -193,7 +192,6 @@
     "src/renderer/use-app-shell-session-list.ts",
     "src/renderer/use-app-shell-session-ui-reads.ts",
     "src/renderer/use-app-shell-session-workspace.ts",
-    "src/renderer/use-deep-research-run.ts",
     "src/renderer/use-new-task-choice.ts",
     "src/renderer/use-onboarding-snapshot.ts",
     "src/renderer/use-project-context.ts",
@@ -356,7 +354,7 @@
           "react": 1
         },
         "importSpecifiers": 8,
-        "nonTriviaTokens": 2058
+        "nonTriviaTokens": 2013
       },
       "src/renderer/app-shell-context-compaction.ts": {
         "importDeclarations": 0,
@@ -580,27 +578,6 @@
         "importSpecifiers": 7,
         "nonTriviaTokens": 2703
       },
-      "src/renderer/app-shell-session-start-actions.ts": {
-        "importDeclarations": 2,
-        "bridgePaths": {
-          "window.maka.newTasks.create": 1,
-          "window.maka.onboarding.setMilestone": 1
-        },
-        "environmentCapabilities": {},
-        "hookCalls": {},
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [
-          "createAppShellSessionStartActions"
-        ],
-        "dependencyPaths": {
-          "./locales/shell-copy.js": 1,
-          "./model-connection-errors.js": 1,
-          "./session-workspace-errors.js": 1
-        },
-        "importSpecifiers": 5,
-        "nonTriviaTokens": 650
-      },
       "src/renderer/app-shell-session-ui-state.ts": {
         "importDeclarations": 0,
         "bridgePaths": {},
@@ -680,7 +657,7 @@
         "nonTriviaTokens": 1273
       },
       "src/renderer/app-shell.tsx": {
-        "importDeclarations": 65,
+        "importDeclarations": 64,
         "bridgePaths": {
           "window.maka.attachments": 1,
           "window.maka.attachments.readBytes": 1,
@@ -704,7 +681,7 @@
         },
         "environmentCapabilities": {
           "window.clearTimeout": 1,
-          "window.requestAnimationFrame": 2,
+          "window.requestAnimationFrame": 1,
           "window.setTimeout": 1
         },
         "hookCalls": {
@@ -726,7 +703,7 @@
           "useOnboardingSnapshot": 1,
           "usePlanModeState": 1,
           "usePluginSession": 1,
-          "useRef": 15,
+          "useRef": 14,
           "useRuntimeHostAvailability": 1,
           "useSessionCollaborationDialog": 1,
           "useSessionEventHealthPolling": 1,
@@ -738,7 +715,7 @@
           "useShellLiveTurn": 1,
           "useShellResume": 1,
           "useShellRunUpdates": 1,
-          "useStableActions": 6,
+          "useStableActions": 5,
           "useState": 13,
           "useSystemUiLocale": 1,
           "useTaskSubmissionReadiness": 1,
@@ -759,7 +736,6 @@
           "./app-shell-overlays": 1,
           "./app-shell-revision-actions": 1,
           "./app-shell-session-events": 1,
-          "./app-shell-session-start-actions": 1,
           "./app-shell-stop-action": 1,
           "./app-shell-turn-actions": 1,
           "./app-shell-turn-view-model": 1,
@@ -834,8 +810,8 @@
           "@maka/ui/context-usage": 1,
           "react": 1
         },
-        "importSpecifiers": 101,
-        "nonTriviaTokens": 13714
+        "importSpecifiers": 100,
+        "nonTriviaTokens": 13582
       },
       "src/renderer/use-app-shell-composer-quotes.ts": {
         "importDeclarations": 3,
@@ -1032,7 +1008,6 @@
         "bridgePaths": {},
         "environmentCapabilities": {},
         "hookCalls": {
-          "useDeepResearchRun": 1,
           "useExternalStoreSelector": 2,
           "useState": 1,
           "useUiLocale": 1
@@ -1046,8 +1021,6 @@
           "./features/conversation/index.js": 1,
           "./locales/shell-copy": 1,
           "./onboarding-hero": 1,
-          "./use-deep-research-run": 1,
-          "@maka/core/deep-research": 1,
           "@maka/ui": 1,
           "react": 1
         }
@@ -3573,23 +3546,6 @@
           "react": 1
         }
       },
-      "src/renderer/use-deep-research-run.ts": {
-        "bridgePaths": {
-          "window.maka.deepResearch.get": 1,
-          "window.maka.deepResearch.subscribeChanges": 1
-        },
-        "environmentCapabilities": {},
-        "hookCalls": {
-          "useEffect": 1,
-          "useState": 1
-        },
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [],
-        "dependencyPaths": {
-          "react": 1
-        }
-      },
       "src/renderer/use-new-task-choice.ts": {
         "bridgePaths": {},
         "environmentCapabilities": {},
@@ -4101,7 +4057,6 @@
       "targetZone": "features/conversation",
       "legacyPaths": [
         "src/renderer/app-shell-chat-actions.ts",
-        "src/renderer/app-shell-session-start-actions.ts",
         "src/renderer/use-app-shell-composer-quotes.ts"
       ]
     },

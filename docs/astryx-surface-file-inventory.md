@@ -6,7 +6,7 @@ Generated against `@astryxdesign/core@0.6.1` (195 component exports).
 
 Wiki bar: Design Conventions · API Use-the-System · Theming · Container Padding.
 
-**Totals:** 283 files — blocker 4, reimplementation 0, polish 4, aligned 275.
+**Totals:** 282 files — blocker 4, reimplementation 0, polish 4, aligned 274.
 
 ## Exclusions (explicit)
 
@@ -191,7 +191,6 @@ Wiki bar: Design Conventions · API Use-the-System · Theming · Container Paddi
 | `apps/desktop/src/renderer/styles/composer.css` | shell-chrome-or-panel | n/a (css) | aligned — no off-rhythm control heights flagged | aligned |
 | `apps/desktop/src/renderer/styles/custom-pet-companion.css` | styles | n/a (css) | aligned — no off-rhythm control heights flagged | aligned |
 | `apps/desktop/src/renderer/styles/daily-review.css` | module-hub | n/a (css) | aligned — no off-rhythm control heights flagged | aligned |
-| `apps/desktop/src/renderer/styles/deep-research.css` | styles | n/a (css) | aligned — no off-rhythm control heights flagged | aligned |
 | `apps/desktop/src/renderer/styles/desktop-assistant.css` | styles | n/a (css) | off-rhythm control height 30px (Design size) | polish |
 | `apps/desktop/src/renderer/styles/error.css` | styles | n/a (css) | aligned — no off-rhythm control heights flagged | aligned |
 | `apps/desktop/src/renderer/styles/help.css` | styles | n/a (css) | aligned — no off-rhythm control heights flagged | aligned |
@@ -248,7 +247,7 @@ Wiki bar: Design Conventions · API Use-the-System · Theming · Container Paddi
 | `packages/ui/src/attachment-kinds.tsx` | ui-composition | Icon | aligned — uses Astryx (Icon) | aligned |
 | `packages/ui/src/bot-brand-logo.tsx` | ui-composition | none | aligned — no raw controls; no Astryx JSX usage | aligned |
 | `packages/ui/src/capability-audit-strip.tsx` | ui-composition | Banner | aligned — uses Astryx (Banner) | aligned |
-| `packages/ui/src/chat-empty-hero.tsx` | shell-chrome-or-panel | Item | aligned — uses Astryx (Item) | aligned |
+| `packages/ui/src/chat-empty-hero.tsx` | shell-chrome-or-panel | none | aligned — no raw controls; no Astryx JSX usage | aligned |
 | `packages/ui/src/chat-model-switcher.tsx` | shell-chrome-or-panel | Button, Selector | aligned — uses Astryx (Button, Selector) | aligned |
 | `packages/ui/src/chat-surface-layout.tsx` | shell-chrome-or-panel | ChatLayout | aligned — uses Astryx (ChatLayout) | aligned |
 | `packages/ui/src/chat-turn.tsx` | shell-chrome-or-panel | Badge, Banner, Button, ChatMessage, ChatMessageBubble, ChatMessageMetadata, ChatSystemMessage, ChatTokenizedText, HStack, Icon, IconButton, Spinner, Thumbnail, Timestamp, Token, Tooltip | aligned — uses Astryx (Badge, Banner, Button, ChatMessage, ChatMessageBubble, ChatMessageMetadata, ChatSystemMessage, ChatTokenizedText) | aligned |

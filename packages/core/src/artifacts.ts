@@ -91,7 +91,6 @@ export const ARTIFACT_SOURCES = [
   'tool_result_projection',
   'tool_result_archive',
   'subagent_writeback',
-  'deep_research',
   'user_upload',
   'session_effect',
 ] as const;
@@ -137,8 +136,6 @@ export interface ArtifactRecord extends ArtifactDescriptor {
    * filesystem path to renderer code.
    */
   relativePath: string;
-  /** Durable role for artifacts owned by a Deep Research workspace. */
-  deepResearchRole?: import('./deep-research-run.js').DeepResearchArtifactRole;
 }
 
 interface ArtifactSourcePolicy {
@@ -152,7 +149,6 @@ const ARTIFACT_SOURCE_POLICIES = {
   tool_result_projection: { userDeletable: false, userVisible: false, sharedReadable: true },
   tool_result_archive: { userDeletable: false, userVisible: false, sharedReadable: false },
   subagent_writeback: { userDeletable: false, userVisible: true, sharedReadable: false },
-  deep_research: { userDeletable: false, userVisible: true, sharedReadable: false },
   user_upload: { userDeletable: true, userVisible: false, sharedReadable: true },
   session_effect: { userDeletable: false, userVisible: false, sharedReadable: false },
 } as const satisfies Record<ArtifactSource, ArtifactSourcePolicy>;
@@ -161,7 +157,6 @@ const CHILD_RESULT_OUTPUT_SOURCES = new Set<ArtifactSource>([
   'tool_result',
   'tool_result_projection',
   'subagent_writeback',
-  'deep_research',
 ]);
 
 export function isArtifactUserVisible(

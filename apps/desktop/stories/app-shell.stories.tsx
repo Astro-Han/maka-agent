@@ -1634,7 +1634,7 @@ function GoalContextStory(props: { goal: NonNullable<ChatViewProps['goalIndicato
       relatedSessions={LINEAGE_SESSIONS}
       session={{
         name: 'Chat Surface 会话上下文在极窄窗口中的响应式收敛与信息优先级验证',
-        labels: ['mode:deep_research'],
+        labels: ['review-task'],
         parentSessionId: 'session-parent',
         branchOfTurnId: 'turn-1',
         revisionRootSessionId: REVISION_ROOT_ID,
@@ -1655,7 +1655,7 @@ function GoalContextStory(props: { goal: NonNullable<ChatViewProps['goalIndicato
 }
 
 // Real path: open a derived revision that is running an autonomous goal with
-// local memory and Deep Research enabled. Session metadata stays in one context
+// local memory and a legacy research label. Session metadata stays in one context
 // layer above the transcript instead of splitting across header pills and
 // standalone branch/revision rows. The long session name is the point: it is
 // what forces that layer to collapse rather than wrap.
@@ -3606,7 +3606,6 @@ export const WorkbarEdgeRevealAndCollapse: Story = {
     expect(canvas.queryByRole('list', { name: '打开工具' })).toBeNull();
   },
 };
-
 
 const narrowWorkbarShare = fn();
 

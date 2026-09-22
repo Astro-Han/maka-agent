@@ -40,7 +40,7 @@ pub fn apply_metadata_patch(
 }
 
 fn execution_owned(label: &str) -> bool {
-    matches!(label, "mode:bot" | "mode:deep_research")
+    label == "mode:bot"
 }
 
 fn replace_user_owned_labels(current: &[String], requested: Vec<String>) -> Vec<String> {
@@ -116,14 +116,14 @@ mod tests {
         let labels = |values: &[&str]| -> Vec<String> {
             values.iter().map(|value| (*value).into()).collect()
         };
-        let current = labels(&["old", "mode:bot", "old2", "mode:deep_research"]);
+        let current = labels(&["old", "mode:bot", "old2"]);
         assert_eq!(
             replace_user_owned_labels(&current, labels(&["new", "mode:bot", "next", "last"])),
-            labels(&["new", "mode:bot", "next", "mode:deep_research", "last"])
+            labels(&["new", "mode:bot", "next", "last"])
         );
         assert_eq!(
             replace_user_owned_labels(&current, vec![]),
-            labels(&["mode:bot", "mode:deep_research"])
+            labels(&["mode:bot"])
         );
         assert!(replace_user_owned_labels(&[], labels(&["mode:bot"])).is_empty());
     }

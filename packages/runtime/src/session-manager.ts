@@ -97,7 +97,6 @@ import {
   type PlanStore,
 } from '@maka/core/plan';
 import { DEFAULT_SESSION_NAME } from '@maka/core/session-name';
-import { DEEP_RESEARCH_SESSION_LABEL, isDeepResearchSession } from '@maka/core/deep-research';
 import {
   SUBAGENT_SESSION_RUNTIME_SCHEMA_VERSION,
   SUBAGENT_SESSION_SPAWN_SCHEMA_VERSION,
@@ -1221,12 +1220,7 @@ export class SessionManager {
         current.header,
         input.configuration.collaborationMode,
       );
-      const leavingDeepResearch =
-        isDeepResearchSession(current.header.labels) &&
-        input.configuration.sandboxMode !== 'read-only';
-      const labels = leavingDeepResearch
-        ? current.header.labels.filter((label) => label !== DEEP_RESEARCH_SESSION_LABEL)
-        : current.header.labels;
+      const labels = current.header.labels;
       return () =>
         store.updateSessionConfiguration(sessionId, {
           expectedVersion: input.expectedRevision,
@@ -1710,18 +1704,11 @@ export class SessionManager {
   ): Promise<SessionSummary> {
     const previous = await this.deps.store.readHeader(sessionId);
     const boundary = await this.deps.store.readExecutionBoundary(sessionId);
-    const leavingDeepResearch = isDeepResearchSession(previous.labels) && mode !== 'read-only';
-    if (
-      previous.sandboxMode === mode &&
-      executionBoundaryMatchesSandboxMode(boundary, mode) &&
-      !leavingDeepResearch
-    ) {
+    if (previous.sandboxMode === mode && executionBoundaryMatchesSandboxMode(boundary, mode)) {
       return headerToSummary(previous);
     }
 
-    const labels = leavingDeepResearch
-      ? previous.labels.filter((label) => label !== DEEP_RESEARCH_SESSION_LABEL)
-      : previous.labels;
+    const labels = previous.labels;
     const kind = mode === 'danger-full-access' ? 'danger-full-access' : 'managed';
     await this.commitExecutionBoundaryTransition(sessionId, boundary, mode, async () => {
       const current = await this.deps.store.readHeader(sessionId);

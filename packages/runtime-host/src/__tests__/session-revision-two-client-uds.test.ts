@@ -451,7 +451,7 @@ async function verifyConcurrentRevisionAuthority(
     });
     assert.equal(artifactPage.kind, 'page');
     if (artifactPage.kind !== 'page') assert.fail('Branch Artifact query must return a page');
-    assert.equal(artifactPage.artifacts.length, 3);
+    assert.equal(artifactPage.artifacts.length, 4);
     assert.notEqual(artifactPage.artifacts[0]?.id, 'source-artifact');
     const todo = await tui.request('session.todo.query', { sessionId: branch.id });
     assert.deepEqual(todo.items, []);
@@ -1721,7 +1721,7 @@ async function verifyDurableBranch(
     // must rewrite it to a fresh target artifact id, never leave the source id.
     assert.notEqual(ref.relativePath, 'source-artifact');
     const branchArtifacts = await artifacts.listPage(branchSessionId, { offset: 0, limit: 10 });
-    assert.equal(branchArtifacts.total, 3);
+    assert.equal(branchArtifacts.total, 4);
     assert.deepEqual(await artifacts.readTextInSession(branchSessionId, ref.relativePath), {
       ok: true,
       text: 'retained bytes',

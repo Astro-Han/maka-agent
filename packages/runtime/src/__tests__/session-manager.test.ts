@@ -61,7 +61,6 @@ import {
   createWorkspaceWritePermissionProfile,
   isReadOnlyPermissionProfile,
 } from '@maka/core/permission-profile';
-import { DEEP_RESEARCH_SESSION_LABEL } from '@maka/core/deep-research';
 import { RUNTIME_CONTINUATION_AUTHORITY_V1 } from '@maka/core/runtime-event-store';
 import { deriveTurnRecords } from '@maka/core/session';
 import { isTerminalRuntimeEvent } from '@maka/core/runtime-event';
@@ -5705,25 +5704,6 @@ describe('SessionManager permission mode updates', () => {
     );
     const summary = await manager.setSandboxMode(session.id, 'danger-full-access');
     assert.strictEqual(summary.sandboxMode, 'danger-full-access');
-  });
-
-  test('the setSandboxMode wrapper delegates deep research cleanup to configuration authority', async () => {
-    const store = new VersionedConfigurationMemorySessionStore();
-    const backends = new BackendRegistry();
-    backends.register('ai-sdk', (ctx) => new TestBackend(ctx));
-    const manager = new SessionManager({ store, backends, newId: nextId(), now: nextNow(6_000) });
-    const session = await manager.createSession(
-      makeInput({
-        sandboxMode: 'read-only',
-        labels: [DEEP_RESEARCH_SESSION_LABEL, 'kept'],
-      }),
-    );
-
-    const summary = await manager.setSandboxMode(session.id, 'workspace-write');
-
-    assert.strictEqual(summary.sandboxMode, 'workspace-write');
-    assert.deepStrictEqual(summary.labels, ['kept']);
-    assert.deepStrictEqual((await store.readHeader(session.id)).labels, ['kept']);
   });
 
   test('temporarily preserves setSandboxMode for legacy SessionStore implementations', async () => {
