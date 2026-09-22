@@ -21,7 +21,7 @@ import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import type { StoredMessage } from '@maka/core/session';
-import { ProcessingBlock, TurnView } from '../src/chat-turn.js';
+import { TurnStatusBar, TurnView } from '../src/chat-turn.js';
 import { useUiLocale } from '../src/locale-context.js';
 import { applyLiveTurnEvent, armLiveTurn } from '../src/live-turn-projection.js';
 import { materializeTurns, overlayLiveTurn } from '../src/materialize.js';
@@ -163,9 +163,9 @@ export const AdoptsTheRecordedStart: Story = {
 // The same Turn once it settles: the duration is copy, not a clock, and the
 // zh number needs a space before its unit.
 export const SettledDuration: Story = {
-  render: () => <ProcessingBlock entries={[]} running={false} durationMs={RUNNING_FOR_MS} />,
+  render: () => <TurnStatusBar status="completed" durationMs={RUNNING_FOR_MS} />,
   play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelector('.maka-processing-summary')).toHaveTextContent(
+    await expect(canvasElement.querySelector('.maka-turn-statusbar')).toHaveTextContent(
       '用时 3 分 33 秒',
     );
   },

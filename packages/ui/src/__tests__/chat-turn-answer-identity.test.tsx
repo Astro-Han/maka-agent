@@ -87,7 +87,7 @@ function turnWith(timeline: TurnTimelineItem[]): TurnViewModel {
 function renderTurn(
   root: ReturnType<typeof createRoot>,
   turn: TurnViewModel,
-  liveStreaming?: { onStreamingSettled?: (messageId?: string) => void },
+  liveStreaming?: Parameters<typeof TurnView>[0]['liveStreaming'],
 ): Promise<void> {
   return act(() => {
     root.render(
@@ -142,32 +142,32 @@ test('message accessibility labels preserve literal ICU syntax', async () => {
   assert.equal(container.querySelector('article')?.getAttribute('aria-label'), label);
 });
 
-test('renders an aborted turn outcome as an inline system status notice', async () => {
+test('renders an aborted turn outcome in the turn status row', async () => {
   const { container, root } = domRoot();
   await renderTurn(root, {
     ...turnWith([{ ...ANSWER, live: false }]),
     status: 'aborted',
-    abortSource: 'renderer.stop_button',
   });
 
-  const outcome = container.querySelector('.astryx-chat-system-message[role="status"]');
-  assert.ok(outcome, 'the aborted outcome is announced through the Chat status-notice primitive');
-  assert.equal(outcome.getAttribute('data-variant'), 'default');
-  assert.equal(outcome.textContent, 'Interrupted \u00b7 Stop button');
+  const statusbar = container.querySelector('.maka-turn-statusbar');
+  assert.ok(statusbar, 'the aborted outcome is announced in the turn status row');
+  assert.equal(statusbar.getAttribute('data-turn-status'), 'aborted');
+  assert.equal(statusbar.textContent, 'Stopped');
 });
 
-test('places the aborted turn outcome after its timeline content', async () => {
+test('places the turn status row at the top of the assistant content', async () => {
   const { container, root } = domRoot();
   await renderTurn(root, {
     ...turnWith([{ ...ANSWER, live: false }]),
     status: 'aborted',
   });
 
+  const content = container.querySelector('.maka-assistant-answer-content');
+  const statusbar = container.querySelector('.maka-turn-statusbar');
   const answer = container.querySelector('.maka-chat-message-bubble-assistant');
-  const assistantMessage = container.querySelector('.maka-assistant-answer');
-  const outcome = container.querySelector('.astryx-chat-system-message[role="status"]');
-  assert.ok(answer && assistantMessage && outcome);
-  assert.equal(assistantMessage.nextElementSibling?.isSameNode(outcome), true);
+  assert.ok(content && statusbar && answer);
+  // No work log: the standalone status row leads the assistant content.
+  assert.equal(content.firstElementChild?.isSameNode(statusbar), true);
 });
 
 /**
@@ -725,13 +725,14 @@ const COMPLETED_TOOL: TurnTimelineItem = {
 
 test('collapses the whole completed process and leaves the final answer outside', async () => {
   const { container, root } = domRoot();
-  const turn = { ...turnWith([PROCESS_TEXT, COMPLETED_TOOL, { ...ANSWER, live: false }]), status: 'completed' as const, durationMs: 213_000 };
+  const turn = { ...turnWith([PROCESS_TEXT, COMPLETED_TOOL, { ...ANSWER, live: false }]), status: 'completed' as const, durationMs: 213_000, startedAt: Date.UTC(2026, 8, 19, 9, 0) };
   await renderTurn(root, turn);
   const process = container.querySelector('details.maka-processing-sequence');
   const summary = process?.querySelector('summary');
   assert.ok(process && summary);
   assert.equal(process.hasAttribute('open'), false);
-  assert.equal(summary.textContent, 'Worked for 3m 33s');
+  assert.equal(summary.textContent, 'Done · Worked for 3m 33s');
+  assert.ok(container.querySelector('.maka-turn-footer time'));
   assert.match(process.textContent ?? '', /Checking the login state/);
   assert.doesNotMatch(process.textContent ?? '', /the answer/);
   const answer = container.querySelectorAll('.maka-chat-message-bubble-assistant')[1];
@@ -747,7 +748,7 @@ test('collapses the whole completed process and leaves the final answer outside'
 test('automatically folds a running process on completion without remounting the answer', async () => {
   const { container, root } = domRoot();
   const timeline = [PROCESS_TEXT, COMPLETED_TOOL, { ...ANSWER, live: false }];
-  await renderTurn(root, turnWith(timeline));
+  await renderTurn(root, turnWith(timeline), { runningStatus: true });
   const process = container.querySelector('details.maka-processing-sequence');
   assert.ok(process);
   assert.equal(process.hasAttribute('open'), true);
@@ -784,7 +785,7 @@ test('copy uses the visible final reply after completion and disclosure toggles'
 
 test('keeps running work expanded and allows manual disclosure after settlement', async () => {
   const { container, root } = domRoot();
-  await renderTurn(root, turnWith([PROCESS_TEXT, COMPLETED_TOOL]));
+  await renderTurn(root, turnWith([PROCESS_TEXT, COMPLETED_TOOL]), { runningStatus: true });
   const process = container.querySelector('details.maka-processing-sequence');
   const summary = process?.querySelector('summary');
   assert.ok(process && summary);
@@ -792,7 +793,7 @@ test('keeps running work expanded and allows manual disclosure after settlement'
   assert.equal(summary.getAttribute('aria-disabled'), 'true');
   assert.equal(summary.getAttribute('tabindex'), '-1');
   await click(); // pointer activation cannot hide live work
-  await renderTurn(root, turnWith([PROCESS_TEXT, COMPLETED_TOOL, ANSWER]));
+  await renderTurn(root, turnWith([PROCESS_TEXT, COMPLETED_TOOL, ANSWER]), { runningStatus: true });
   assert.equal(process.hasAttribute('open'), true);
   await renderTurn(root, { ...turnWith([PROCESS_TEXT, COMPLETED_TOOL, { ...ANSWER, live: false }]), status: 'completed' });
   assert.equal(process.hasAttribute('open'), false);
@@ -803,9 +804,9 @@ test('keeps running work expanded and allows manual disclosure after settlement'
   assert.equal(process.hasAttribute('open'), true);
 });
 
-test('a newly failed tool reveals the process while turn recovery stays outside', async () => {
+test('failed-tool details remain folded while turn recovery stays outside', async () => {
   const { container, root } = domRoot();
-  await renderTurn(root, turnWith([PROCESS_TEXT, RUNNING_TOOL]));
+  await renderTurn(root, turnWith([PROCESS_TEXT, RUNNING_TOOL]), { runningStatus: true });
   const process = container.querySelector('details.maka-processing-sequence');
   const summary = process?.querySelector('summary');
   assert.ok(process && summary);
@@ -817,7 +818,7 @@ test('a newly failed tool reveals the process while turn recovery stays outside'
   /></LocaleProvider>));
   // A failed tool is an ordinary row: no label, no reveal.
   assert.doesNotMatch(summary.textContent ?? '', /Needs attention/);
-  assert.equal(summary.textContent, 'Execution process');
+  assert.equal(summary.textContent, 'Failed');
   assert.equal(process.hasAttribute('open'), false);
   assert.doesNotMatch(process.textContent ?? '', /Continue this turn/);
   assert.match(container.textContent ?? '', /Continue this turn/);
@@ -826,11 +827,11 @@ test('a newly failed tool reveals the process while turn recovery stays outside'
   assert.equal(container.querySelectorAll('.maka-processing-summary').length, 1);
 });
 
-test('uses a generic process label when no duration is recorded, and localizes known duration', async () => {
+test('states the outcome without inventing duration, and localizes recorded duration', async () => {
   const { container, root } = domRoot();
   const turn = { ...turnWith([PROCESS_TEXT, COMPLETED_TOOL, { ...ANSWER, live: false }]), status: 'completed' as const };
   await renderTurn(root, turn);
-  assert.equal(container.querySelector('.maka-processing-summary')?.textContent, 'Execution process');
+  assert.equal(container.querySelector('.maka-processing-summary')?.textContent, 'Done');
   await act(() => root.render(<LocaleProvider locale="zh-CN"><TurnView turn={{ ...turn, durationMs: 213_000 }} /></LocaleProvider>));
-  assert.equal(container.querySelector('.maka-processing-summary')?.textContent, '用时 3 分 33 秒');
+  assert.equal(container.querySelector('.maka-processing-summary')?.textContent, '完成 · 用时 3 分 33 秒');
 });

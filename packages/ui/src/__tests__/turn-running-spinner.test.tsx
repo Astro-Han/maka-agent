@@ -99,8 +99,13 @@ test('user input and provider retry suppress playful process activity', () => {
       </LocaleProvider>,
     );
     const { document } = parseHTML(markup);
+    // The playful cue is suppressed either way; the status row states what is
+    // actually happening instead — a wait for retry, or an idle in-progress.
     assert.equal(document.querySelector('.maka-turn-processing'), null);
-    assert.equal(document.querySelector('.maka-processing-summary')?.textContent, 'Execution process');
+    assert.equal(
+      document.querySelector('.maka-processing-summary')?.textContent,
+      runningStatus ? 'Waiting to retry (1/3)' : 'Working…',
+    );
     assert.equal(document.querySelectorAll('.maka-turn-provider-retry').length, runningStatus ? 1 : 0);
   }
 });
@@ -139,5 +144,7 @@ test('states the elapsed once, in the process header rather than the footer meta
     </LocaleProvider>,
   ));
   assert.match(document.querySelector('.maka-processing-summary')?.textContent ?? '', /Worked for 3m 33s/);
-  assert.equal(document.querySelector('.maka-turn-footer-meta')?.textContent, 'fixture-model');
+  assert.equal(document.querySelector('.maka-turn-footer-meta-model')?.textContent, 'fixture-model');
+  assert.equal(document.querySelectorAll('.maka-turn-statusbar').length, 1);
+  assert.equal(document.querySelector('.maka-turn-statusbar')?.getAttribute('data-turn-status'), 'completed');
 });

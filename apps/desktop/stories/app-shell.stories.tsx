@@ -3919,7 +3919,7 @@ export const CompletedProcessExpanded: Story = {
     summary.focus();
     summary.click();
     await waitFor(() => expect(process.open).toBe(true));
-    await waitFor(() => expect(process.getBoundingClientRect().height).toBeGreaterThanOrEqual(summary.getBoundingClientRect().height + process.querySelector<HTMLElement>('.maka-processing-content')!.offsetHeight - 1));
+    await waitFor(() => expect(process.getBoundingClientRect().height).toBeGreaterThanOrEqual(summary.getBoundingClientRect().height + process.querySelector<HTMLElement>('.maka-processing-body')!.offsetHeight - 1));
     await expect(summary).toHaveFocus();
     await expect(await within(canvasElement).findByText('我先检查登录状态的存储和恢复逻辑。')).toBeVisible();
     const answer = await within(canvasElement).findByText('已修复登录状态恢复。');
