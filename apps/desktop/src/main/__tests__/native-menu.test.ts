@@ -24,10 +24,14 @@ import test from 'node:test';
 test('native menu returns only the selected action, cancels cleanly, and anchors at renderer zoom', async () => {
   let items: Electron.MenuItemConstructorOptions[] = [];
   let options: Electron.PopupOptions | undefined;
+  let popupFailure: Error | undefined;
   const globals = globalThis as typeof globalThis & { nativeMenuTest?: unknown };
   globals.nativeMenuTest = { buildFromTemplate(template: Electron.MenuItemConstructorOptions[]) {
     items = template;
-    return { popup(input: Electron.PopupOptions) { options = input; } };
+    return { popup(input: Electron.PopupOptions) {
+      if (popupFailure) throw popupFailure;
+      options = input;
+    } };
   } };
   const hooks = registerHooks({ resolve(specifier, context, next) {
     return specifier === 'electron'
@@ -53,6 +57,12 @@ test('native menu returns only the selected action, cancels cleanly, and anchors
     const cancelled = popupNativeMenu(window, request);
     options!.callback!();
     assert.equal(await cancelled, null);
+    popupFailure = new Error('native popup failed');
+    await assert.rejects(popupNativeMenu(window, request), (error) => error === popupFailure);
+    popupFailure = undefined;
+    const recovered = popupNativeMenu(window, request);
+    options!.callback!();
+    assert.equal(await recovered, null);
     assert.throws(() => popupNativeMenu(window, { ...request, x: Infinity }), /Invalid native menu/);
     assert.throws(() => popupNativeMenu(window, { ...request, items: [{ role: 'quit' }] }), /Invalid native menu/);
   } finally { hooks.deregister(); delete globals.nativeMenuTest; }
