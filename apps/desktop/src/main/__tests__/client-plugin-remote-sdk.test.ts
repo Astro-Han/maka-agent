@@ -112,6 +112,7 @@ test('component cancellation closes idle reads and late stream opens without clo
     const entered = deferred<void>();
     const opened = deferred<void>();
     const read = deferred<void>();
+    const drained = deferred<void>();
     const requests: Request[] = [];
     const owner = new AbortController();
     const component = new AbortController();
@@ -124,7 +125,7 @@ test('component cancellation closes idle reads and late stream opens without clo
           if (phase === 'opening') { entered.resolve(); await opened.promise; }
           return { kind: 'opened', stream: 'stream' };
         case 'next': entered.resolve(); await read.promise; return { kind: 'end' };
-        case 'close': read.resolve(); return { kind: 'closed' };
+        case 'close': read.resolve(); drained.resolve(); return { kind: 'closed' };
         case 'close_document': return { kind: 'closed' };
         default: assert.fail('unexpected request');
       }
@@ -133,10 +134,51 @@ test('component cancellation closes idle reads and late stream opens without clo
     const rejected = assert.rejects(iterator.next(), /component unmounted/);
     await entered.promise;
     component.abort(new Error('component unmounted'));
-    opened.resolve();
+    // Cancellation releases the caller even if the provider ignores it.
     await rejected;
+    opened.resolve();
+    await drained.promise;
     assert.equal(requests.filter((r) => r.kind === 'close').length, 1);
     assert.equal(requests.filter((r) => r.kind === 'close_document').length, 0);
     await remote.close();
+  }
+});
+
+test('Remote return and retirement interrupt pending pulls and discard late items', { timeout: 2_000 }, async () => {
+  for (const action of ['return-before-bind', 'return', 'retire', 'close'] as const) {
+    const entered = deferred<void>();
+    const item = deferred<void>();
+    const requests: Request[] = [];
+    const lifetime = new AbortController();
+    const remote = clientPluginRemote(async (_host, _epoch, input) => {
+      requests.push(input);
+      switch (input.kind) {
+        case 'bind':
+          if (action === 'return-before-bind') { entered.resolve(); await item.promise; }
+          return { kind: 'bound', target, handler: 'stream' };
+        case 'open_document': return { kind: 'document', document: 'document' };
+        case 'open': return { kind: 'opened', stream: 'stream' };
+        case 'next': entered.resolve(); await item.promise; return { kind: 'item', item: 'late' };
+        case 'close': case 'close_document': return { kind: 'closed' };
+        default: assert.fail('unexpected request');
+      }
+    }, host, 'connection-one')(identity, lifetime.signal);
+    const iterator = remote.api.stream<null, string>('events')(null)[Symbol.asyncIterator]();
+    const next = iterator.next();
+    const returned = action === 'return' || action === 'return-before-bind';
+    const finished = returned
+      ? next.then((value) => assert.deepEqual(value, { done: true, value: undefined }))
+      : assert.rejects(next, action === 'retire' ? /retired/ : /closed/);
+    await entered.promise;
+    if (returned) await iterator.return!();
+    else if (action === 'retire') lifetime.abort(new Error('retired'));
+    else await remote.close();
+    await finished;
+    item.resolve();
+    await remote.close();
+    assert.equal(requests.filter((request) => request.kind === 'open').length, action === 'return-before-bind' ? 0 : 1);
+    assert.equal(requests.filter((request) => request.kind === 'next').length, action === 'return-before-bind' ? 0 : 1);
+    assert.equal(requests.filter((request) => request.kind === 'close').length, action === 'return' ? 1 : 0);
+    assert.equal(requests.filter((request) => request.kind === 'close_document').length, 1);
   }
 });

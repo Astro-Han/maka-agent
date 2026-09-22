@@ -153,7 +153,8 @@ export interface ClientContext {
       order?: number,
     ): () => void;
   };
-  /** Setup starts only after publication; cleanup runs in reverse order on retirement. */
+  /** Setup waits for publication, or starts immediately when active. Release is idempotent;
+   * retirement drains unreleased effects in reverse order, including pending async cleanup. */
   effect(setup: () => void | (() => Awaitable<void>)): () => void;
   style(css: string): () => void;
 }

@@ -23,7 +23,12 @@ import type { SlotEntry } from './slots.js';
 import { createElement } from 'react';
 
 type Cleanup = () => void | PromiseLike<void>;
-interface Effect { readonly setup: () => void | Cleanup; cancelled: boolean; cleanup?: Cleanup }
+interface Effect {
+  readonly setup: () => void | Cleanup;
+  state: 'staged' | 'starting' | 'active' | 'released';
+  cleanup?: Cleanup;
+  settlement?: Promise<void>;
+}
 export type ClientRemoteFactory = (identity: ClientIdentity, signal: AbortSignal) => {
   readonly api: ClientRemote;
   close(): Promise<void>;
@@ -34,7 +39,7 @@ export type ClientAuthorizationFactory = (identity: ClientIdentity, signal: Abor
 export class ClientInstance {
   readonly lifetime = new AbortController();
   readonly slots: SlotEntry[] = [];
-  readonly #effects: Effect[] = [];
+  readonly #effects = new Set<Effect>();
   readonly #onError: (error: unknown) => void;
   #phase: 'staged' | 'active' | 'retired' = 'staged';
   #shutdown?: Promise<void>;
@@ -106,11 +111,10 @@ export class ClientInstance {
         },
         stream: <I extends Json, O extends Json>(name: string, session?: string) => {
           const open = this.#remote?.api.stream<I, O>(name, session);
-          const assertActive = () => this.#assertActive();
-          return async function* (input: I, signal?: AbortSignal): AsyncGenerator<O> {
-            assertActive();
+          return (input: I, signal?: AbortSignal): AsyncIterable<O> => {
+            this.#assertActive();
             if (!open) throw new Error('Client Remote is unavailable');
-            for await (const item of open(input, signal)) yield item;
+            return open(input, signal);
           };
         },
       },
@@ -132,11 +136,13 @@ export class ClientInstance {
         },
       },
       effect: (setup) => {
-        this.#assertStaged();
-        if (this.#effects.length >= 128) throw new Error('Client effect limit exceeded');
-        const effect: Effect = { setup, cancelled: false };
-        this.#effects.push(effect);
-        return () => { this.#assertStaged(); effect.cancelled = true; };
+        if (this.#phase === 'retired') throw new Error('Client registration is closed');
+        if (typeof setup !== 'function') throw new Error('Client effect must be a function');
+        if (this.#effects.size >= 128) throw new Error('Client effect limit exceeded');
+        const effect: Effect = { setup, state: 'staged' };
+        this.#effects.add(effect);
+        if (this.#phase === 'active') this.#start(effect);
+        return () => { this.#release(effect); };
       },
       style: (css) => {
         if (new TextEncoder().encode(css).length > 256 * 1024)
@@ -151,7 +157,7 @@ export class ClientInstance {
     };
     const cleanup = await plugin.activate(Object.freeze(context), this.descriptor.config);
     if (typeof cleanup === 'function') {
-      this.#effects.push({ setup: () => {}, cancelled: false, cleanup });
+      this.#effects.add({ setup: () => {}, state: 'active', cleanup });
     }
     this.lifetime.signal.throwIfAborted();
   }
@@ -159,10 +165,40 @@ export class ClientInstance {
   publish(): void {
     this.#assertStaged();
     this.#phase = 'active';
-    for (const effect of this.#effects) {
-      if (effect.cancelled || effect.cleanup) continue;
-      effect.cleanup = effect.setup() || undefined;
-    }
+    for (const effect of this.#effects) this.#start(effect);
+  }
+
+  #start(effect: Effect): void {
+    if (effect.state !== 'staged') return;
+    effect.state = 'starting';
+    try { effect.cleanup = effect.setup() || undefined; }
+    catch (error) { this.#effects.delete(effect); throw error; }
+    // Setup can synchronously release itself or retire its owner.
+    if (this.#released(effect)) this.#settle(effect);
+    else effect.state = 'active';
+  }
+
+  #released(effect: Effect): boolean { return effect.state === 'released'; }
+
+  #release(effect: Effect): Promise<void> | undefined {
+    if (this.#released(effect)) return effect.settlement;
+    const starting = effect.state === 'starting';
+    effect.state = 'released';
+    if (!starting) this.#settle(effect);
+    return effect.settlement;
+  }
+
+  #settle(effect: Effect): void {
+    const cleanup = effect.cleanup;
+    effect.cleanup = undefined;
+    if (!cleanup) { this.#effects.delete(effect); return; }
+    effect.settlement = Promise.resolve().then(cleanup);
+    // A released async resource still counts toward the limit and belongs to
+    // shutdown. Keep failed settlements so replacement cannot lose the fence.
+    void effect.settlement.then(
+      () => { this.#effects.delete(effect); },
+      (error) => { this.#onError(error); },
+    );
   }
 
   retire(): void {
@@ -184,10 +220,9 @@ export class ClientInstance {
     const errors: unknown[] = [];
     try { await this.#remote?.close(); } catch (error) { errors.push(error); this.#onError(error); }
     for (const effect of [...this.#effects].reverse()) {
-      if (!effect.cleanup) continue;
-      try { await effect.cleanup(); } catch (error) { errors.push(error); this.#onError(error); }
+      try { await this.#release(effect); } catch (error) { errors.push(error); }
     }
-    this.#effects.length = 0;
+    this.#effects.clear();
     this.slots.length = 0;
     if (errors.length) throw new AggregateError(errors, 'Client plugin cleanup failed');
   }

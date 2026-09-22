@@ -104,7 +104,7 @@ The installed SDK must recognize the descriptor as provider-executed. Unknown ID
 
 ## Client SDK
 
-Client SDK API **1** uses React supplied by Desktop. Export a `ClientPlugin` from `@maka-agent/plugin-sdk/client`; its `activate(ctx, config)` stages keyed Slot registrations and effects. Business setup belongs in `ctx.effect`; return cleanup or observe `ctx.signal`. Registration closes after initialization. Cleanup failure requires reloading the document before that Entry can activate again.
+Client SDK API **1** uses React supplied by Desktop. Export a `ClientPlugin` from `@maka-agent/plugin-sdk/client`; its `activate(ctx, config)` stages keyed Slot registrations and effects. Slot registration closes after initialization. `ctx.effect` and `ctx.style` remain available while active; their disposer is idempotent. Async cleanup stays owned until settlement, including after explicit disposal. Cleanup failure requires reloading the document before that Entry can activate again.
 
 Build with `buildClient({ packageId, entryPoint })` from `@maka-agent/plugin-sdk/build` (requires esbuild in the author's build environment). Save the returned JavaScript and declare `client: { entry: "client.js", sdkVersion: 1 }` in the manifest. The loader checks exact bytes and SDK compatibility before execution. Bundles share the trusted Renderer, not a sandbox; they have no Node compatibility layer.
 
@@ -117,6 +117,8 @@ Desktop supplies `@maka/ui/plugin` as a shared UI module (currently `Button`). I
 Host plugins publish `ctx.remote.method(name, callback)` or `ctx.remote.stream(name, open)`. Client plugins obtain a callable with `ctx.remote.method<Input, Output>(name, sessionId?)` or an async-iterable factory with `ctx.remote.stream<Input, Output>(name, sessionId?)`. Calls start only after UI publication. Handles retain their original Host connection and backend registration; replacement never redirects them. Breaking iteration closes its stream; retiring UI or navigating closes its document. Remote callers are not Agent invocations and receive no implicit process permission.
 
 Remote callbacks may throw an `Error` carrying a `RemoteFailure.code`. `outcome_unknown` preserves an uncertain business result and requires domain recovery, not blind retry. It does not fence an otherwise settled plugin; Host independently fences unconfirmed resource cleanup. Unclassified exceptions become `operation_unavailable`.
+
+Streams allow one outstanding pull. Returning or cancelling interrupts a pending pull without waiting for the producer; late opens are cleaned up and late items are discarded. This ends observation, not Host-owned settlement of accepted work.
 
 Authenticated applications can also bind `plugin.remote` by `{ packageId, method, sessionId }`, without loading a plugin UI. Rust providers without a frontend use `Endpoint::standalone`; JS providers use the same `ctx.remote` registrations. Package bindings pin the backend registration and retain document ownership, cancellation and authorization. They do not acquire a frontend identity or bypass Host grants. Paired client bindings additionally verify package bytes and retire with the UI.
 

@@ -30,6 +30,7 @@ import type {
   PluginRemoteBinding,
   PluginRemoteTarget,
 } from '../protocol/plugin-remote.js';
+import { remoteStream } from './plugin-remote-stream.js';
 
 /** One document per consumer, lazily allocated and never retargeted. */
 export function createPluginRemote(
@@ -46,6 +47,7 @@ export function createPluginRemote(
   };
   let document: Promise<string> | undefined;
   let closing: Promise<void> | undefined;
+  const lifetime = new AbortController();
   const assertLive = () => {
     signal.throwIfAborted();
     if (closing) throw new Error('Client Remote is closed');
@@ -75,6 +77,7 @@ export function createPluginRemote(
       if (result.kind !== 'closed' && result.kind !== 'connection_retired')
         throw new Error('Remote cleanup was not confirmed');
     })();
+    lifetime.abort(signal.aborted ? signal.reason : new Error('Client Remote is closed'));
     return closing;
   };
   const retired = () => {
@@ -107,54 +110,41 @@ export function createPluginRemote(
       const bound = bind(name, sessionId, 'method');
       return async (input: I): Promise<O> => {
         const result = await request({ kind: 'call', ...(await bound()), input });
+        assertLive();
         if (result.kind !== 'value') throw new Error('Unexpected Remote method result');
         return result.value as O;
       };
     },
     stream<I extends Json, O extends Json>(name: string, sessionId?: string) {
       const bound = bind(name, sessionId, 'stream');
-      return async function* (input: I, cancellation?: AbortSignal): AsyncGenerator<O> {
-        cancellation?.throwIfAborted();
-        const origin = await bound();
-        cancellation?.throwIfAborted();
-        const opened = await request({ kind: 'open', ...origin, input });
-        if (opened.kind !== 'opened') throw new Error('Unexpected Remote stream result');
-        const handle = { document: origin.document, stream: opened.stream };
-        let ended = false;
-        let stopping: Promise<void> | undefined;
-        const stop = () => {
-          if (ended || closing) return Promise.resolve();
-          stopping ??= request({ kind: 'close', ...handle }).then((result) => {
-            if (result.kind !== 'closed' && result.kind !== 'connection_retired')
-              throw new Error('Remote stream cleanup was not confirmed');
-          });
-          return stopping;
-        };
-        // A generator return() cannot preempt its own awaited next(). Signal
-        // the Host separately so an idle provider read can actually finish.
-        const abort = () => {
-          void stop().catch(() => {});
-        };
-        cancellation?.addEventListener('abort', abort, { once: true });
-        try {
-          for (;;) {
-            assertLive();
-            cancellation?.throwIfAborted();
-            const result = await request({ kind: 'next', ...handle });
-            cancellation?.throwIfAborted();
-            if (result.kind === 'pending') continue;
-            if (result.kind === 'end') {
-              ended = true;
-              return;
-            }
-            if (result.kind !== 'item') throw new Error('Unexpected Remote stream item');
-            yield result.item as O;
-          }
-        } finally {
-          cancellation?.removeEventListener('abort', abort);
-          await stop();
-        }
-      };
+      return (input: I, cancellation?: AbortSignal): AsyncIterable<O> =>
+        remoteStream(
+          async (pull) => {
+            pull.throwIfAborted();
+            const origin = await bound();
+            pull.throwIfAborted();
+            const opened = await request({ kind: 'open', ...origin, input });
+            if (opened.kind !== 'opened') throw new Error('Unexpected Remote stream result');
+            const handle = { document: origin.document, stream: opened.stream };
+            return {
+              async close() {
+                if (closing) return;
+                const result = await request({ kind: 'close', ...handle });
+                if (result.kind !== 'closed' && result.kind !== 'connection_retired')
+                  throw new Error('Remote stream cleanup was not confirmed');
+              },
+              async next() {
+                assertLive();
+                cancellation?.throwIfAborted();
+                const result = await request({ kind: 'next', ...handle });
+                if (result.kind === 'pending' || result.kind === 'end') return result;
+                if (result.kind !== 'item') throw new Error('Unexpected Remote stream item');
+                return { kind: 'item' as const, item: result.item as O };
+              },
+            };
+          },
+          cancellation ? [signal, lifetime.signal, cancellation] : [signal, lifetime.signal],
+        );
     },
   };
   return { api, close };

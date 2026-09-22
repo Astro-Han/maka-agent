@@ -108,7 +108,7 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 
 ## Client SDK
 
-Client SDK API **1** 使用 Desktop 提供的 React。导出来自 `@maka-agent/plugin-sdk/client` 的 `ClientPlugin`；其 `activate(ctx, config)` 暂存带 key 的 Slot 注册和 Effect。业务启动放在 `ctx.effect`，返回清理函数并观察 `ctx.signal`。初始化结束后关闭注册；清理失败时，该 Entry 必须等待页面重载，不能自动重新激活。
+Client SDK API **1** 使用 Desktop 提供的 React。导出来自 `@maka-agent/plugin-sdk/client` 的 `ClientPlugin`；其 `activate(ctx, config)` 暂存带 key 的 Slot 注册和 Effect。初始化结束后关闭 Slot 注册；`ctx.effect` 和 `ctx.style` 在激活后仍可注册，释放函数幂等。异步清理在结算前始终归原实例所有，即使已主动释放；清理失败时，该 Entry 必须等待页面重载，不能自动重新激活。
 
 用 `@maka-agent/plugin-sdk/build` 的 `buildClient({ packageId, entryPoint })` 构建（作者的构建环境需安装 esbuild）。保存返回的 JavaScript，并在 manifest 中声明 `client: { entry: "client.js", sdkVersion: 1 }`。加载器在执行前校验字节和 SDK 版本。插件共享可信 Renderer，不是沙箱，也不提供 Node 兼容层。
 
@@ -121,6 +121,8 @@ Desktop 通过 `@maka/ui/plugin` 提供共享 UI 模块（目前为 `Button`）�
 Host 插件通过 `ctx.remote.method(name, callback)` 或 `ctx.remote.stream(name, open)` 发布接口。Client 插件通过 `ctx.remote.method<Input, Output>(name, sessionId?)` 获取调用函数，或通过 `ctx.remote.stream<Input, Output>(name, sessionId?)` 获取异步迭代器工厂。UI 发布后才能调用；句柄固定到原 Host 连接和后端注册，不随替换重定向。退出迭代会关闭流，UI 卸载或页面导航会关闭所属文档。Remote 调用不是 Agent 调用，不隐含进程权限。
 
 Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unknown` 保留业务结果不确定的语义，需要领域恢复，不能盲目重试；它不会隔离已正常结算的插件。资源清理未确认时由 Host 独立隔离。未分类异常映射为 `operation_unavailable`。
+
+每条流只允许一个在途读取。返回或取消会立即中断等待，不必等生产者响应；晚到的打开结果会清理，晚到的数据会丢弃。这只结束观察，不取消 Host 对已接受工作的结算。
 
 认证后的应用也可通过 `{ packageId, method, sessionId }` 绑定 `plugin.remote`，无需加载插件 UI。没有前端的 Rust 提供者使用 `Endpoint::standalone`，JS 提供者仍使用 `ctx.remote` 注册。包绑定固定后端注册，保留文档所有权、取消和授权检查，不获得前端身份，也不绕过 Host 授权。配对的 Client 绑定另外校验包内容，并随 UI 退休。
 

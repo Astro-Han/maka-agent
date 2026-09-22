@@ -165,7 +165,7 @@ test('Remote calls require publication and failed cleanup withdraws UI before fe
     fixture.context=ctx;
     try { await ctx.remote.method('echo')(null); } catch { fixture.rejected=true; }
     ctx.slots.register('session.composer.before','panel',()=>null);
-    ctx.effect(()=>()=>{throw new Error('cleanup failed')});
+    fixture.release=ctx.effect(()=>()=>{throw new Error('cleanup failed')});
   `);
   const entry = descriptor(source, 'one');
   const runtime = new ClientRuntime({
@@ -183,6 +183,9 @@ test('Remote calls require publication and failed cleanup withdraws UI before fe
   assert.equal(calls, 0);
   const call = fixture.context.remote.method('echo');
   assert.equal(await call('active'), 'active');
+  fixture.release();
+  fixture.release();
+  await Promise.resolve();
   await assert.rejects(runtime.reconcile({ revision: 'two', entries: [descriptor(source, 'two')] }), /cleanup unconfirmed/);
   assert.deepEqual(runtime.slots.snapshot(), []);
   await assert.rejects(call('retired'), /not effective/);
@@ -190,6 +193,45 @@ test('Remote calls require publication and failed cleanup withdraws UI before fe
   assert.equal(closed, 1);
   await assert.rejects(runtime.reconcile({ revision: 'three', entries: [descriptor(source, 'new')] }), /reload the document/);
   await runtime.close();
+});
+
+test('published effects release independently, reclaim capacity and drain late cleanup exactly once', async () => {
+  const document = documentHarness();
+  const fixture = { context: undefined, events: [], draining: deferred() };
+  const source = bundle(`
+    const fixture=require('fixture');
+    fixture.context=ctx;
+    const cancelled=ctx.effect(()=>{throw new Error('cancelled setup ran')});
+    cancelled(); cancelled();
+    const self=ctx.effect(()=>{self();return ()=>fixture.events.push('self-cleanup')});
+  `);
+  const runtime = new ClientRuntime({ document, modules: { fixture }, source: async () => source, report() {} });
+  await runtime.reconcile({ revision: 'one', entries: [descriptor(source, 'one')] });
+  const context = fixture.context;
+  assert.deepEqual(fixture.events, ['self-cleanup']);
+  // Repeated component mounts release their stylesheet capacity, not just DOM nodes.
+  for (let i = 0; i < 130; i++) {
+    const dispose = context.style('.mounted {}');
+    assert.equal(document.querySelectorAll('style').length, 1);
+    dispose(); dispose();
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(document.querySelectorAll('style').length, 0);
+  }
+  const dispose = context.effect(() => {
+    fixture.events.push('start');
+    return async () => { fixture.events.push('draining'); await fixture.draining.promise; fixture.events.push('done'); };
+  });
+  dispose(); dispose();
+  let closed = false;
+  const closing = runtime.close().then(() => { closed = true; });
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(closed, false);
+  assert.deepEqual(fixture.events, ['self-cleanup', 'start', 'draining']);
+  assert.throws(() => context.effect(() => {}), /closed/);
+  fixture.draining.resolve();
+  await closing;
+  dispose();
+  assert.deepEqual(fixture.events, ['self-cleanup', 'start', 'draining', 'done']);
 });
 
 test('unrelated catalog changes preserve UI state; dependency replacement and connection changes revoke exact modules', async () => {
