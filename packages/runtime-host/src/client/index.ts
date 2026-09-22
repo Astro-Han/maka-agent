@@ -203,3 +203,4 @@ export {
   createOAuthPresentationClientProvider,
   type OAuthPresentationBackend,
 } from './oauth-presentation.js';
+export { createPluginRemote } from './plugin-remote.js';

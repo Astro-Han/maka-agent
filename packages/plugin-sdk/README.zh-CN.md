@@ -120,6 +120,8 @@ Host 插件通过 `ctx.remote.method(name, callback)` 或 `ctx.remote.stream(nam
 
 Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unknown` 保留业务结果不确定的语义，需要领域恢复，不能盲目重试；它不会隔离已正常结算的插件。资源清理未确认时由 Host 独立隔离。未分类异常映射为 `operation_unavailable`。
 
+认证后的应用也可通过 `{ packageId, method, sessionId }` 绑定 `plugin.remote`，无需加载插件 UI。没有前端的 Rust 提供者使用 `Endpoint::standalone`，JS 提供者仍使用 `ctx.remote` 注册。包绑定固定后端注册，保留文档所有权、取消和授权检查，不获得前端身份，也不绕过 Host 授权。配对的 Client 绑定另外校验包内容，并随 UI 退休。
+
 接受调用者 Host 路径的 Rust endpoint 声明 `Endpoint::requiring_host_paths()`。Host 在绑定和调用时都检查路径授权，借用其他连接的注册目标也不能绕过。项目 ID 和已有 Session 查询不要求原始路径权限；插件通过显式注入的只读视图访问它们。
 
 `ctx.models.resolve({ kind: 'named', connectionSlug, model })` 或 `ctx.models.resolve({ kind: 'default' })` 只返回可用模型的非敏感绑定，不授予执行权限。`restoreChild` 用原始创建请求恢复已有子会话的访问权，不创建会话或工作区。

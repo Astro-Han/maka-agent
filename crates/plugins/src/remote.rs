@@ -131,7 +131,8 @@ pub enum Handler {
 
 pub struct Endpoint {
     pub access: Access,
-    pub content_digest: String,
+    /// Present when a plugin frontend may bind this endpoint by package bytes.
+    pub content_digest: Option<String>,
     pub handler: Handler,
     registration: Uuid,
 }
@@ -148,7 +149,16 @@ impl Endpoint {
     pub fn new(content_digest: String, handler: Handler) -> Self {
         Self {
             access: Access::Granted,
-            content_digest,
+            content_digest: Some(content_digest),
+            handler,
+            registration: Uuid::new_v4(),
+        }
+    }
+    /// An application/CLI endpoint does not require a plugin frontend bundle.
+    pub fn standalone(handler: Handler) -> Self {
+        Self {
+            access: Access::Granted,
+            content_digest: None,
             handler,
             registration: Uuid::new_v4(),
         }

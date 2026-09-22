@@ -313,6 +313,10 @@ deletion. Text uses bounded Read pages and continuations; images retain their vi
 Unsupported binary formats fail explicitly. Incognito mode withdraws all three tools.
 Historical statements are not verified facts.
 
+Desktop conversation search calls the plugin's public `search` Remote endpoint instead
+of downloading transcripts. Results retain Host identity and canonical message positions;
+incomplete scans are explicit, and cancellation or renderer exit closes the owned request.
+
 Host supplies bounded text pages under a fixed log fence; sorting and passage assembly
 belong to the plugin. A SQLx-managed, rebuildable text projection avoids repeatedly
 parsing large JSON results. The same Rust/JS history API is available to other plugins.

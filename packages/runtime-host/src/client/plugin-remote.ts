@@ -36,7 +36,7 @@ export function createPluginRemote(
   transport: (
     input: PluginRemoteInput,
   ) => Promise<PluginRemoteResult | RemoteFailure | { kind: 'connection_retired' }>,
-  identity: ClientIdentity,
+  identity: ClientIdentity | { readonly packageId: string },
   signal: AbortSignal,
 ): { api: ClientRemote; close(): Promise<void> } {
   const request = async (input: PluginRemoteInput) => {
@@ -85,7 +85,7 @@ export function createPluginRemote(
 
   const bind = (name: string, sessionId: string | undefined, handler: 'method' | 'stream') => {
     const binding: PluginRemoteBinding = {
-      client: identity,
+      ...('packageId' in identity ? { packageId: identity.packageId } : { client: identity }),
       method: name,
       sessionId: sessionId ?? null,
     };

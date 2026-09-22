@@ -144,8 +144,7 @@ async fn run(
     let opened = tokio::select! {
         biased;
         _ = stop.cancelled() => None,
-        _ = bound.client.retired() => None,
-        _ = bound.endpoint.retired() => None,
+        _ = bound.retired() => None,
         _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => None,
         result = &mut opening => Some(result),
     };
@@ -191,8 +190,7 @@ async fn run(
             let request = tokio::select! {
                 biased;
                 _ = stop.cancelled() => break,
-                _ = bound.client.retired() => break,
-                _ = bound.endpoint.retired() => break,
+                _ = bound.retired() => break,
                 read = reads.recv() => match read { Some(read) => read, None => break },
             };
             if request
@@ -206,8 +204,7 @@ async fn run(
             let result = tokio::select! {
                 biased;
                 _ = stop.cancelled() => Err(Error::Cancelled),
-                _ = bound.client.retired() => Err(Error::Retired),
-                _ = bound.endpoint.retired() => Err(Error::Retired),
+                _ = bound.retired() => Err(Error::Retired),
                 _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => Ok(Item::Pending),
                 result = next => result.and_then(|item| {
                     if let Some(value) = &item { validate_payload(value)?; }

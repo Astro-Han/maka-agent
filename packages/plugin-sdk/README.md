@@ -116,6 +116,8 @@ Host plugins publish `ctx.remote.method(name, callback)` or `ctx.remote.stream(n
 
 Remote callbacks may throw an `Error` carrying a `RemoteFailure.code`. `outcome_unknown` preserves an uncertain business result and requires domain recovery, not blind retry. It does not fence an otherwise settled plugin; Host independently fences unconfirmed resource cleanup. Unclassified exceptions become `operation_unavailable`.
 
+Authenticated applications can also bind `plugin.remote` by `{ packageId, method, sessionId }`, without loading a plugin UI. Rust providers without a frontend use `Endpoint::standalone`; JS providers use the same `ctx.remote` registrations. Package bindings pin the backend registration and retain document ownership, cancellation and authorization. They do not acquire a frontend identity or bypass Host grants. Paired client bindings additionally verify package bytes and retire with the UI.
+
 Native endpoints accepting caller-supplied Host paths declare `Endpoint::requiring_host_paths()`. Host checks that grant at both bind and call, even for a borrowed registration target. Project-ID and existing-Session queries do not require raw-path authority; plugins receive explicitly injected read-only views.
 
 Model selection uses `ctx.models.resolve({ kind: 'named', connectionSlug, model })`; `{ kind: 'default' }` resolves the current default. Its non-secret result grants no execution authority. `restoreChild` reopens access to an existing child using the original creation request, without creating a Session or workspace.

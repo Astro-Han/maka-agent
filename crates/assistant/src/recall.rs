@@ -21,6 +21,7 @@ mod material;
 mod passages;
 mod rank;
 mod reader;
+mod remote;
 mod tools;
 mod types;
 
@@ -77,6 +78,11 @@ impl Plugin for Builtin {
         _: Value,
     ) -> BoxFuture<'static, Result<Staged, String>> {
         Box::pin(async move {
+            let package = context
+                .lifecycle
+                .identity()
+                .map_err(|e| e.to_string())?
+                .package_id;
             let host = context.host.ok_or("Recall requires Host history")?;
             let recall = Arc::new(Recall {
                 history: host.history,
@@ -86,6 +92,7 @@ impl Plugin for Builtin {
                 workers: Arc::new(Semaphore::new(2)),
             });
             let mut staged = Staged::default();
+            remote::publish(&mut staged, &package, recall.clone())?;
             for (name, description, schema) in definitions() {
                 let tool = PluginTool::new(ToolRegistration {
                     definition: ToolDefinition {

@@ -273,6 +273,45 @@ async fn scenario() {
     .await;
     replies.await.unwrap();
     assert_eq!(provider.requests.lock().unwrap().len(), 11);
+    // A native client calls the renamed plugin without a fabricated UI bundle.
+    let binding = json!({"packageId":"z.history","method":"search","sessionId":null});
+    let bound = success(
+        peer.rpc("plugin.remote", json!({"kind":"bind","binding":binding}))
+            .await,
+    );
+    let document = success(
+        peer.rpc("plugin.remote", json!({"kind":"open_document"}))
+            .await,
+    )["document"]
+        .clone();
+    let query = json!({"kind":"call","binding":binding,"target":bound["target"],"document":document,"input":{"terms":["historical-upload"],"limit":4}});
+    let searched = success(peer.rpc("plugin.remote", query.clone()).await)["value"].clone();
+    assert_eq!(searched["complete"], true);
+    assert!(searched["matches"].as_array().unwrap().iter().any(|entry| {
+        entry["sessionId"] == "source"
+            && entry["sequence"]
+                .as_u64()
+                .is_some_and(|sequence| sequence > 0)
+    }));
+    success(
+        peer.rpc(
+            "plugin.composition.apply",
+            json!({"operations":[{"type":"update","entryId":"recall","patch":{"disabled":true}}]}),
+        )
+        .await,
+    );
+    assert_eq!(
+        peer.rpc("plugin.remote", query).await["ok"],
+        false,
+        "a bound native caller cannot cross retirement"
+    );
+    success(
+        peer.rpc(
+            "plugin.remote",
+            json!({"kind":"close_document","document":document}),
+        )
+        .await,
+    );
     for upload in ["text", "image", "binary"] {
         success(peer.rpc("artifact.delete", json!({"sessionId":"source","artifactId":maka_runtime::artifact::upload_artifact_id("source", upload)})).await);
     }

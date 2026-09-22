@@ -17,13 +17,13 @@
  * under the License.
  */
 
-import type { SearchResult } from '@maka/core/search';
-import { runThreadSearch } from '@maka/core/thread-search';
+import type { SearchError, SearchResult } from '@maka/core/search';
+import { normalizeSearchQuery, normalizeSearchLimit } from '@maka/core/search';
+import { createPluginRemote } from '@maka/runtime-host/client';
 import type { DesktopRuntimeHostClient } from './runtime-host-client.js';
 import type { WebContents } from 'electron';
-import { toDesktopHostSessionSummary } from './runtime-host-session-catalog-ipc-main.js';
+import { desktopSessionKey } from '../shared/runtime-host-identity.js';
 import {
-  readWithFallback,
   type ReconnectableReadIpcMain,
 } from './ipc-reconnect-policy.js';
 
@@ -31,7 +31,7 @@ interface RuntimeHostSearchIpcDeps {
   readonly ipcMain: ReconnectableReadIpcMain;
   readonly client: Pick<
     DesktopRuntimeHostClient,
-    'listSessions' | 'openSession' | 'queryRuntimePolicy'
+    'request' | 'hostId' | 'queryRuntimePolicy'
   >;
 }
 
@@ -46,6 +46,11 @@ export function registerRuntimeHostSearchIpc(
       return { ok: false, reason: 'invalid_query', message: 'Invalid search request identity.' };
     }
     const controller = new AbortController();
+    const remote = createPluginRemote(
+      (input) => deps.client.request('plugin.remote', input, 40_000),
+      { packageId: 'maka.recall' },
+      controller.signal,
+    );
     const release = () => {
       event.sender?.removeListener('destroyed', abort);
       event.sender?.removeListener('render-process-gone', abort);
@@ -69,40 +74,24 @@ export function registerRuntimeHostSearchIpc(
     // Crash recovery reloads the same WebContents without destroying it.
     event.sender?.once('render-process-gone', abort);
     try {
-      const result = await runThreadSearch(request, {
-        listSessions: async () =>
-          (await deps.client.listSessions()).map(toDesktopHostSessionSummary),
-        readMessages: (sessionId, signal) =>
-          readWithFallback(async () => {
-            if (signal?.aborted) return null;
-            const session = await deps.client.openSession(sessionId);
-            // This handle belongs only to this search. Closing it immediately
-            // stops the Host client's paginated transcript reader before its
-            // next page, including when a read is currently awaiting a reply.
-            let closeTask: Promise<void> | undefined;
-            const close = () => (closeTask ??= session.close());
-            const cancelRead = () => { void close().catch(() => undefined); };
-            signal?.addEventListener('abort', cancelRead, { once: true });
-            try {
-              if (signal?.aborted) return null;
-              return await session.loadTranscript();
-            } finally {
-              signal?.removeEventListener('abort', cancelRead);
-              await close();
-            }
-          }, null),
-        getPrivacyContext: async () => ({
-          incognitoActive: (await deps.client.queryRuntimePolicy()).policy.privacy
-            .incognitoActive,
-        }),
-      }, { abortSignal: controller.signal });
-      return result.ok ? result.results.map(projectDesktopSearchResult) : result;
+      if (!request || typeof request !== 'object' || Array.isArray(request) || !('source' in request) || request.source !== 'thread')
+        return { ok: false, reason: 'invalid_query', message: 'Expected a conversation search.' };
+      const input = request as Record<string, unknown>;
+      const query = normalizeSearchQuery(input.query);
+      const limit = normalizeSearchLimit(input.limit);
+      if (!query.ok) return query;
+      if (!limit.ok) return limit;
+      if ((await deps.client.queryRuntimePolicy()).policy.privacy.incognitoActive)
+        return { ok: false, reason: 'incognito_active', message: 'History search is disabled in incognito mode.' };
+      const page = await remote.api.method('search')({ terms: [query.value], limit: limit.value });
+      return projectResults(page, deps.client.hostId);
     } catch (error) {
       if (!controller.signal.aborted) throw error;
       return { ok: false, reason: 'aborted', message: 'History search was aborted.' };
     } finally {
       controller.signal.removeEventListener('abort', release);
       release();
+      await remote.close();
     }
   });
   // Register after search so requests waiting for a candidate start before
@@ -112,15 +101,21 @@ export function registerRuntimeHostSearchIpc(
   });
 }
 
-function projectDesktopSearchResult(result: SearchResult): SearchResult {
-  if (!result.target) return result;
-  return {
-    ...result,
-    target: {
-      kind: result.target.kind,
-      sessionId: result.target.sessionId,
-      ...(result.target.turnId !== undefined ? { turnId: result.target.turnId } : {}),
-      ...(result.target.sequence !== undefined ? { sequence: result.target.sequence } : {}),
-    },
-  };
+function projectResults(value: unknown, hostId: string): SearchResult[] | SearchError {
+  if (!value || typeof value !== 'object' || !('matches' in value) || !Array.isArray(value.matches) || !('complete' in value) || typeof value.complete !== 'boolean')
+    throw new Error('Invalid Recall search page');
+  const complete = value.complete;
+  if (!complete && value.matches.length === 0)
+    return { ok: false, reason: 'provider_error', message: 'History search could not read all eligible conversations.' };
+  return value.matches.map((match: unknown): SearchResult => {
+    if (!match || typeof match !== 'object' || !('kind' in match) || !('sessionId' in match) || typeof match.sessionId !== 'string' || !('title' in match) || typeof match.title !== 'string')
+      throw new Error('Invalid Recall match');
+    const sessionId = desktopSessionKey({hostId, sessionId: match.sessionId});
+    if (match.kind === 'title') return {source: 'thread', title: match.title, target: {kind: 'thread', sessionId}, truncated: !complete};
+    if (match.kind !== 'passage' || !('turnId' in match) || typeof match.turnId !== 'string' || !('messageId' in match) || typeof match.messageId !== 'string' || !('sequence' in match) || typeof match.sequence !== 'number' || !Number.isSafeInteger(match.sequence) || match.sequence < 0 || !('text' in match) || typeof match.text !== 'string' || !('truncated' in match) || typeof match.truncated !== 'boolean')
+      throw new Error('Invalid Recall passage');
+    return {source: 'thread', title: match.title, snippet: match.text,
+      target: {kind: 'thread', sessionId, turnId: match.turnId, sequence: match.sequence, messageId: match.messageId},
+      truncated: match.truncated || !complete};
+  });
 }

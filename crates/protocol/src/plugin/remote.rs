@@ -24,11 +24,40 @@ use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RemoteBinding {
-    pub client: ClientIdentity,
-    pub method: String,
-    pub session_id: Option<String>,
+#[serde(untagged, rename_all_fields = "camelCase", deny_unknown_fields)]
+pub enum RemoteBinding {
+    /// Plugin frontend and backend must originate from the same package bytes.
+    Client {
+        client: ClientIdentity,
+        method: String,
+        session_id: Option<String>,
+    },
+    /// An authenticated application/CLI calls a plugin without loading its frontend.
+    Package {
+        package_id: String,
+        method: String,
+        session_id: Option<String>,
+    },
+}
+impl RemoteBinding {
+    pub fn method(&self) -> &str {
+        match self {
+            Self::Client { method, .. } | Self::Package { method, .. } => method,
+        }
+    }
+    pub fn session_id(&self) -> Option<&str> {
+        match self {
+            Self::Client { session_id, .. } | Self::Package { session_id, .. } => {
+                session_id.as_deref()
+            }
+        }
+    }
+    pub fn package_id(&self) -> &str {
+        match self {
+            Self::Client { client, .. } => &client.extension_id,
+            Self::Package { package_id, .. } => package_id,
+        }
+    }
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(
@@ -131,9 +160,12 @@ fn validate_target(target: &Target) -> Result<()> {
     super::client::activation_id(&target.activation)
 }
 pub(super) fn validate_binding(binding: &RemoteBinding) -> Result<()> {
-    validate_client(&binding.client)?;
-    super::client::identity(&binding.method)?;
-    if let Some(session) = &binding.session_id {
+    match binding {
+        RemoteBinding::Client { client, .. } => validate_client(client)?,
+        RemoteBinding::Package { package_id, .. } => super::client::identity(package_id)?,
+    }
+    super::client::identity(binding.method())?;
+    if let Some(session) = binding.session_id() {
         maka_runtime::interaction::entity_id(session).map_err(ProtocolError::invalid)?;
     }
     Ok(())

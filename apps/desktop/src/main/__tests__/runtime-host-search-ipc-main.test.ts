@@ -22,433 +22,152 @@ import { test } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { deferred } from '@maka/core/test-only/async-primitives';
 import { createDefaultRuntimePolicy } from '@maka/core/runtime-policy';
-import type { StoredMessage } from '@maka/core/session';
-import type { SearchError, SearchResult } from '@maka/core/search';
-import type { SessionCatalogProjection } from '@maka/runtime-host/protocol';
+import type { PluginRemoteInput, PluginRemoteResult } from '@maka/runtime-host/protocol';
+import { HOST_OPERATION_SPECS } from '@maka/runtime-host/protocol';
 import type { IpcHandler, ReconnectableReadIpcMain } from '../ipc-reconnect-policy.js';
 import type { DesktopRuntimeHostClient } from '../runtime-host-client.js';
 import { registerRuntimeHostSearchIpc } from '../runtime-host-search-ipc-main.js';
 import { RuntimeHostReconnectingIpcMain } from '../runtime-host-reconnecting-ipc-main.js';
 import { desktopSessionKey } from '../../shared/runtime-host-identity.js';
-import { createThreadSearchClient } from '../../preload/multi-host-thread-search.js';
 
-// The catalog hands search a composed Desktop key, not a bare Runtime Host id.
-// Naming it here is what makes the passthrough in runtime-host-search-ipc-main
-// observable: a hit whose target carried the bare id would open nothing on a
-// second Host.
-const SEARCHABLE_SESSION = desktopSessionKey({
-  hostId: 'host-b',
-  sessionId: 'searchable-session',
+const page = {
+  complete: true,
+  matches: [
+    { kind: 'title', sessionId: 'history', title: 'Search history' },
+    { kind: 'passage', sessionId: 'history', title: 'Search history',
+      turnId: 'turn', messageId: 'message', sequence: 317, text: 'late matching passage', truncated: true },
+  ],
+};
+const document = '00000000-0000-4000-8000-000000000001';
+
+test('public Recall search preserves Host identity and canonical message coordinates', async () => {
+  const fixture = remoteClient(async () => ({ kind: 'value', value: page }));
+  const { handlers, event } = register(fixture.client);
+  const results = await handlers.get('search:thread')!(event, { source: 'thread', query: 'matching', limit: 10 });
+  assert.ok(Array.isArray(results));
+  const sessionId = desktopSessionKey({ hostId: 'host-b', sessionId: 'history' });
+  assert.deepEqual(results[0].target, { kind: 'thread', sessionId });
+  assert.deepEqual(results[1].target, { kind: 'thread', sessionId, turnId: 'turn', sequence: 317, messageId: 'message' });
+  assert.equal(results[1].truncated, true);
+  const call = fixture.requests.find((request) => request.kind === 'call');
+  assert.ok(call?.kind === 'call');
+  assert.deepEqual(call.binding, { packageId: 'maka.recall', method: 'search', sessionId: null });
+  assert.deepEqual(call.input, { terms: ['matching'], limit: 10 });
+  assert.deepEqual(fixture.requests.at(-1), { kind: 'close_document', document });
 });
 
-test('Runtime Host transcripts produce title and content hits with turn ids', async () => {
-  const handlers = new Map<string, IpcHandler>();
-  let closed = 0;
-  registerRuntimeHostSearchIpc({
-    ipcMain: {
-      handle: (channel, listener) => {
-        handlers.set(channel, listener);
-      },
-      handleReconnectableRead: (channel, listener) => {
-        handlers.set(channel, listener);
-      },
-    },
-    client: searchClient({
-      listSessions: async () => [catalogSession(SEARCHABLE_SESSION, '长对话提示词导航示例')],
-      openSession: async () =>
-        ({
-          // Three earlier messages so the hit's `sequence` is its real position
-          // in the transcript. With a single message every projection, correct
-          // or not, reports 0.
-          loadTranscript: async () => [
-            { type: 'user', id: 'host-user-0', turnId: 'turn-host-0', ts: 1, text: '第 0 个问题' },
-            { type: 'assistant', id: 'host-reply-0', turnId: 'turn-host-0', ts: 2, text: '回答 0' },
-            { type: 'user', id: 'host-user-1', turnId: 'turn-host-1', ts: 3, text: '第 1 个问题' },
-            {
-              type: 'user',
-              id: 'host-user',
-              turnId: 'turn-host-3',
-              ts: 4,
-              text: '第 3 个问题：这一段的调用链路是怎样的？',
-            },
-          ],
-          close: async () => {
-            closed += 1;
-          },
-        }) as never,
-    }),
-  });
-
-  const handler = handlers.get('search:thread');
-  assert.ok(handler);
-  const titleHits = expectResults(
-    await handler({} as never, {
-      source: 'thread',
-      query: '长对话',
-      limit: 10,
-    }),
-  );
-  assert.equal(titleHits[0]?.summary, '任务标题');
-  assert.deepEqual(titleHits[0]?.target, {
-    kind: 'thread',
-    sessionId: SEARCHABLE_SESSION,
-  });
-
-  const contentHits = expectResults(
-    await handler({} as never, {
-      source: 'thread',
-      query: '第 3 个问题',
-      limit: 10,
-    }),
-  );
-  assert.equal(contentHits.length, 1);
-  assert.equal(contentHits[0]?.summary, '用户消息');
-  assert.deepEqual(contentHits[0]?.target, {
-    kind: 'thread',
-    sessionId: SEARCHABLE_SESSION,
-    turnId: 'turn-host-3',
-    sequence: 3,
-  });
-  assert.equal(closed, 2);
-});
-
-test('a Runtime Host transcript failure yields no content hit', async () => {
-  const handlers = new Map<string, IpcHandler>();
-  registerRuntimeHostSearchIpc({
-    ipcMain: {
-      handle: (channel, listener) => {
-        handlers.set(channel, listener);
-      },
-      handleReconnectableRead: (channel, listener) => {
-        handlers.set(channel, listener);
-      },
-    },
-    client: searchClient({
-      listSessions: async () => [catalogSession('searchable-session', '长对话提示词导航示例')],
-      openSession: async () => {
-        throw new Error('Host transcript unavailable');
-      },
-    }),
-  });
-
-  const handler = handlers.get('search:thread');
-  assert.ok(handler);
-  assert.deepEqual(
-    await handler({} as never, {
-      source: 'thread',
-      query: '第 3 个问题',
-      limit: 10,
-    }),
-    [],
-  );
-});
-
-test('canceling a search closes its transcript and stops reading further sessions', async () => {
-  const handlers = new Map<string, IpcHandler>();
-  const firstRead = deferred<void>();
-  const transcript = deferred<never[]>();
-  const opened: string[] = [];
-  let closed = 0;
-  registerRuntimeHostSearchIpc({
-    ipcMain: {
-      handle: (channel, listener) => { handlers.set(channel, listener); },
-      handleReconnectableRead: (channel, listener) => { handlers.set(channel, listener); },
-    },
-    client: searchClient({
-      listSessions: async () => [catalogSession('a', 'First'), catalogSession('b', 'Second')],
-      openSession: async (id) => {
-        opened.push(id);
-        return {
-          loadTranscript: () => { firstRead.resolve(); return transcript.promise; },
-          close: async () => { closed += 1; transcript.resolve([]); },
-        } as never;
-      },
-    }),
-  });
-  const sender = new EventEmitter();
-  const event = { sender } as Parameters<IpcHandler>[0];
+test('invalid/private searches do not start Remote work; incomplete empty pages are not false negatives', async () => {
+  const fixture = remoteClient(async () => ({ kind: 'value', value: { complete: false, matches: [] } }));
+  const { handlers, event } = register(fixture.client);
   const search = handlers.get('search:thread')!;
-  const task = search(event, { source: 'thread', query: 'missing', limit: 10 }, 'first');
-  await firstRead.promise;
-  const cancel = handlers.get('search:thread:cancel');
-  assert.ok(cancel, 'Desktop must expose cancellation to the preload');
-  // Another window cannot cancel this window's request, even with its id.
-  await cancel({ sender: new EventEmitter() } as Parameters<IpcHandler>[0], 'first');
-  assert.equal(closed, 0);
-  await cancel(event, 'first');
-  const outcome = await task;
-  assert.equal(outcome.reason, 'aborted');
-  assert.deepEqual(opened, ['a']);
-  assert.equal(closed, 1);
-  assert.equal(sender.listenerCount('destroyed'), 0);
-  assert.equal(sender.listenerCount('render-process-gone'), 0);
+  assert.equal((await search(event, { source: 'thread', query: '' })).reason, 'invalid_query');
+  fixture.setIncognito(true);
+  assert.equal((await search(event, { source: 'thread', query: 'valid' })).reason, 'incognito_active');
+  assert.equal(fixture.requests.length, 0);
+  fixture.setIncognito(false);
+  assert.equal((await search(event, { source: 'thread', query: 'valid' })).reason, 'provider_error');
+  assert.equal(fixture.requests.at(-1)?.kind, 'close_document');
 });
 
-test('a canceled search is not replayed on a replacement Host candidate', async (t) => {
+test('window-scoped cancellation and renderer crashes retire documents while new searches continue', async () => {
+  let started = deferred<void>();
+  let reply = deferred<PluginRemoteResult>();
+  let complete = false;
+  const fixture = remoteClient(async () => {
+    if (complete) return { kind: 'value', value: page };
+    started.resolve();
+    return reply.promise;
+  }, () => reply.reject(new Error('Remote call cancelled')));
+  const { handlers, event, sender } = register(fixture.client);
+  const search = handlers.get('search:thread')!;
+  const cancel = handlers.get('search:thread:cancel')!;
+  for (const reason of ['cancel', 'render-process-gone', 'destroyed']) {
+    started = deferred<void>();
+    reply = deferred<PluginRemoteResult>();
+    const task = search(event, { source: 'thread', query: 'old' }, 'request');
+    await started.promise;
+    const previous = fixture.requests.filter((request) => request.kind === 'close_document').length;
+    await cancel({ sender: new EventEmitter() } as Parameters<IpcHandler>[0], 'request');
+    assert.equal(fixture.requests.filter((request) => request.kind === 'close_document').length, previous);
+    if (reason === 'cancel') await cancel(event, 'request');
+    else sender.emit(reason);
+    assert.equal((await task).reason, 'aborted');
+    assert.equal(fixture.requests.filter((request) => request.kind === 'close_document').length, previous + 1);
+    assert.equal(sender.listenerCount('destroyed'), 0);
+    assert.equal(sender.listenerCount('render-process-gone'), 0);
+  }
+  complete = true;
+  assert.equal((await search(event, { source: 'thread', query: 'latest' }, 'new')).length, 2);
+});
+
+test('canceled search is not replayed on a replacement Host candidate', async (t) => {
   const handlers = new Map<string, IpcHandler>();
   const router = new RuntimeHostReconnectingIpcMain({
     handle: (channel, listener) => { handlers.set(channel, listener); },
     removeHandler: (channel) => { handlers.delete(channel); },
   });
   t.after(() => router.close());
-  const event = { sender: new EventEmitter() } as Parameters<IpcHandler>[0];
-  const scope = { hostId: 'host', targetEpoch: 'epoch' };
   const started = deferred<void>();
-  const transcript = deferred<never[]>();
-  let opened = 0;
-  const client = searchClient({
-    listSessions: async () => [catalogSession('a', 'First')],
-    openSession: async () => {
-      opened += 1;
-      return {
-        loadTranscript: () => { started.resolve(); return transcript.promise; },
-        close: async () => {},
-      } as never;
-    },
-  });
+  const reply = deferred<PluginRemoteResult>();
+  const fixture = remoteClient(async () => { started.resolve(); return reply.promise; });
   const registerCandidate = () => {
     const target = router.createTarget('epoch');
-    const scoped = (listener: IpcHandler): IpcHandler =>
-      (event, _scope, ...args) => listener(event, ...args);
+    const scoped = (listener: IpcHandler): IpcHandler => (event, _scope, ...args) => listener(event, ...args);
     const ipcMain: ReconnectableReadIpcMain = {
       handle: (channel, listener) => target.handle(channel, scoped(listener)),
       handleReconnectableRead: (channel, listener) => target.handleReconnectableRead!(channel, scoped(listener)),
     };
-    registerRuntimeHostSearchIpc({ ipcMain, client });
+    registerRuntimeHostSearchIpc({ ipcMain, client: fixture.client });
     target.completeRegistration();
     return target;
   };
   const first = registerCandidate();
   router.activate('epoch');
-  const task = handlers.get('search:thread')!(event, scope,
-    { source: 'thread', query: 'missing', limit: 10 }, 'old');
+  const event = { sender: new EventEmitter() } as Parameters<IpcHandler>[0];
+  const scope = { hostId: 'host-b', targetEpoch: 'epoch' };
+  const task = handlers.get('search:thread')!(event, scope, { source: 'thread', query: 'old' }, 'old');
   await started.promise;
   await handlers.get('search:thread:cancel')!(event, scope, 'old');
   first.removeHandler('search:thread');
   first.removeHandler('search:thread:cancel');
   registerCandidate();
-  transcript.resolve([]);
-  const outcome = await task;
-  assert.equal(opened, 1, 'reconnecting must not revive a canceled transcript scan');
-  assert.equal(outcome.reason, 'aborted');
+  reply.reject(new Error('retired candidate'));
+  assert.equal((await task).reason, 'aborted');
+  assert.equal(fixture.requests.filter((request) => request.kind === 'call').length, 1);
 });
 
-for (const lifecycleEvent of ['destroyed', 'render-process-gone'] as const) {
-  test(`${lifecycleEvent} stops a pending search before reading its opening transcript`, async () => {
-    const handlers = new Map<string, IpcHandler>();
-    const opening = deferred<never>();
-    const started = deferred<void>();
-    const opened: string[] = [];
-    let closed = 0;
-    let read = 0;
-    registerRuntimeHostSearchIpc({
-      ipcMain: {
-        handle: (channel, listener) => { handlers.set(channel, listener); },
-        handleReconnectableRead: (channel, listener) => { handlers.set(channel, listener); },
-      },
-      client: searchClient({
-        listSessions: async () => [catalogSession('a', 'First'), catalogSession('b', 'Second')],
-        openSession: async (id) => { opened.push(id); started.resolve(); return opening.promise; },
-      }),
-    });
-    const sender = new EventEmitter();
-    const task = handlers.get('search:thread')!({ sender } as Parameters<IpcHandler>[0],
-      { source: 'thread', query: 'missing', limit: 10 }, 'request');
-    await started.promise;
-    sender.emit(lifecycleEvent, {}, { reason: 'crashed', exitCode: 1 });
-    opening.resolve({
-      loadTranscript: async () => { read += 1; return []; },
-      close: async () => { closed += 1; },
-    } as never);
-    assert.equal((await task).reason, 'aborted');
-    assert.deepEqual(opened, ['a']);
-    assert.equal(read, 0);
-    assert.equal(closed, 1);
-    assert.equal(sender.listenerCount('destroyed'), 0);
-    assert.equal(sender.listenerCount('render-process-gone'), 0);
-  });
+type SearchClient = Pick<DesktopRuntimeHostClient, 'request' | 'hostId' | 'queryRuntimePolicy'>;
+function remoteClient(call: () => Promise<PluginRemoteResult>, close: () => void = () => {}) {
+  const requests: PluginRemoteInput[] = [];
+  let policy = createDefaultRuntimePolicy();
+  const transport = async (operation: string, input: unknown): Promise<PluginRemoteResult> => {
+    assert.equal(operation, 'plugin.remote');
+    const request = HOST_OPERATION_SPECS['plugin.remote'].decodeInput(input);
+    requests.push(request);
+    switch (request.kind) {
+      case 'open_document': return { kind: 'document', document };
+      case 'bind': return { kind: 'bound', handler: 'method', target: { entryId: 'recall', activation: document, registration: document } };
+      case 'call': return call();
+      case 'close_document': close(); return { kind: 'closed' };
+      default: throw new Error(`Unexpected request ${request.kind}`);
+    }
+  };
+  const client: SearchClient = {
+    hostId: 'host-b', request: transport as SearchClient['request'],
+    queryRuntimePolicy: async () => ({ revision: 1, policy }),
+  };
+  return { client, requests, setIncognito: (incognitoActive: boolean) => {
+    policy = { ...policy, privacy: { ...policy.privacy, incognitoActive } };
+  } };
 }
-
-test('renderer crash closes an in-flight search and allows a new search on the same WebContents', async () => {
+function register(client: SearchClient) {
   const handlers = new Map<string, IpcHandler>();
-  const started = deferred<void>();
-  const transcript = deferred<StoredMessage[]>();
-  const opened: string[] = [];
-  const closed: string[] = [];
+  const sender = new EventEmitter();
   registerRuntimeHostSearchIpc({
     ipcMain: {
       handle: (channel, listener) => { handlers.set(channel, listener); },
       handleReconnectableRead: (channel, listener) => { handlers.set(channel, listener); },
-    },
-    client: searchClient({
-      listSessions: async () => [catalogSession('a', 'First'), catalogSession('b', 'Second')],
-      openSession: async (id) => {
-        opened.push(id);
-        const abandoned = opened.length === 1;
-        return {
-          loadTranscript: async () => {
-            if (abandoned) { started.resolve(); return transcript.promise; }
-            return [{ type: 'user', id: 'message', turnId: 'turn', ts: 1, text: 'latest match' }];
-          },
-          close: async () => { closed.push(id); },
-        } as never;
-      },
-    }),
+    }, client,
   });
-  const sender = new EventEmitter();
-  const event = { sender } as Parameters<IpcHandler>[0];
-  const search = handlers.get('search:thread')!;
-  const abandoned = search(event, { source: 'thread', query: 'missing', limit: 10 }, 'old');
-  await started.promise;
-  sender.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
-  assert.deepEqual(closed, ['a'], 'a crash closes the transcript before its pending reply arrives');
-  assert.equal(sender.listenerCount('destroyed'), 0);
-  assert.equal(sender.listenerCount('render-process-gone'), 0);
-
-  // Recovery reloads the same WebContents while the abandoned read is pending.
-  const latest = await search(event, { source: 'thread', query: 'latest', limit: 10 }, 'new');
-  assert.equal(expectResults(latest).length, 2);
-  assert.deepEqual(opened, ['a', 'a', 'b']);
-  assert.deepEqual(closed, ['a', 'a', 'b']);
-  assert.equal(sender.listenerCount('destroyed'), 0);
-  assert.equal(sender.listenerCount('render-process-gone'), 0);
-
-  transcript.resolve([]);
-  assert.equal((await abandoned).reason, 'aborted');
-  assert.deepEqual(opened, ['a', 'a', 'b'], 'a late reply must not resume the abandoned scan');
-  assert.deepEqual(closed, ['a', 'a', 'b'], 'each search handle closes exactly once');
-  sender.emit('destroyed');
-  assert.deepEqual(closed, ['a', 'a', 'b']);
-});
-
-test('rapid replacement and dismissal stop each old scan while the latest query still completes', async () => {
-  const handlers = new Map<string, IpcHandler>();
-  const sender = new EventEmitter();
-  const event = { sender } as Parameters<IpcHandler>[0];
-  const scans: Array<{ closed: number; page: ReturnType<typeof deferred<StoredMessage[]>> }> = [];
-  let started = deferred<void>();
-  let completeLatest = false;
-  registerRuntimeHostSearchIpc({
-    ipcMain: {
-      handle: (channel, listener) => { handlers.set(channel, listener); },
-      handleReconnectableRead: (channel, listener) => { handlers.set(channel, listener); },
-    },
-    client: searchClient({
-      listSessions: async () => [catalogSession('a', 'First'), catalogSession('b', 'Second')],
-      openSession: async () => {
-        const scan = { closed: 0, page: deferred<StoredMessage[]>() };
-        scans.push(scan);
-        return {
-          loadTranscript: async () => {
-            started.resolve();
-            if (completeLatest) return [
-              { type: 'user', id: 'message', turnId: 'turn', ts: 1, text: 'latest match' },
-            ];
-            return scan.page.promise;
-          },
-          close: async () => { scan.closed += 1; },
-        } as never;
-      },
-    }),
-  });
-  const outcomes: Array<Promise<SearchResult[] | SearchError>> = [];
-  const client = createThreadSearchClient({
-    scopes: async () => ['host'],
-    search: (_scope, request, requestId) => {
-      const task = Promise.resolve(handlers.get('search:thread')!(event, request, requestId));
-      outcomes.push(task);
-      return task;
-    },
-    cancel: async (_scope, requestId) => {
-      await handlers.get('search:thread:cancel')!(event, requestId);
-    },
-  });
-  for (let index = 0; index < 10; index += 1) {
-    started = deferred<void>();
-    const task = client.thread({ source: 'thread', query: `old-${index}`, limit: 10 }, `request-${index}`);
-    await started.promise;
-    await client.cancelThread(`request-${index}`);
-    const outcome = await task;
-    assert.equal(Array.isArray(outcome), false);
-    if (!Array.isArray(outcome)) assert.equal(outcome.reason, 'aborted');
-    assert.equal(scans[index]!.closed, 1, 'cancellation closes a read even before its reply arrives');
-    assert.equal(sender.listenerCount('destroyed'), 0, 'canceled reads release window listeners immediately');
-    assert.equal(sender.listenerCount('render-process-gone'), 0, 'canceled reads release crash listeners immediately');
-  }
-  assert.equal(scans.length, 10, 'each old query stops at its first transcript');
-
-  completeLatest = true;
-  const latest = await client.thread({ source: 'thread', query: 'latest', limit: 10 }, 'latest');
-  assert.equal(expectResults(latest).length, 2);
-  assert.equal(scans.length, 12);
-
-  // Replies for the abandoned reads can arrive after the new result. They
-  // must not resume scanning further sessions or close the handles twice.
-  for (const scan of scans.slice(0, 10)) scan.page.resolve([]);
-  await Promise.all(outcomes);
-  assert.equal(scans.length, 12);
-  assert.ok(scans.every((scan) => scan.closed === 1));
-  assert.equal(sender.listenerCount('destroyed'), 0);
-  assert.equal(sender.listenerCount('render-process-gone'), 0);
-});
-
-function expectResults(outcome: unknown): Array<{
-  summary?: string;
-  target?: {
-    kind: string;
-    sessionId: string;
-    turnId?: string;
-    sequence?: number;
-  };
-}> {
-  if (!Array.isArray(outcome)) {
-    assert.fail(`expected search results, got ${JSON.stringify(outcome)}`);
-  }
-  return outcome;
-}
-
-function searchClient(
-  overrides: Partial<Pick<DesktopRuntimeHostClient, 'listSessions' | 'openSession'>>,
-): Pick<DesktopRuntimeHostClient, 'listSessions' | 'openSession' | 'queryRuntimePolicy'> {
-  return {
-    listSessions: async () => [],
-    openSession: async () => {
-      throw new Error('openSession is not used by this test');
-    },
-    queryRuntimePolicy: async () => ({
-      revision: 1,
-      policy: createDefaultRuntimePolicy(),
-    }),
-    ...overrides,
-  };
-}
-
-function catalogSession(id: string, name: string): SessionCatalogProjection {
-  return {
-    id,
-    revision: 1,
-    workspace: {
-      target: { kind: 'host_path', path: '/workspace' },
-      hostCwd: '/workspace',
-    },
-    createdAt: 1,
-    activityAt: 1,
-    lastMessageAt: 1,
-    name,
-    isFlagged: false,
-    isArchived: false,
-    labels: [],
-    labelsTruncated: false,
-    hasUnread: false,
-    status: 'active',
-    backend: 'ai-sdk',
-    llmConnectionId: 'connection-1',
-    llmConnectionSlug: 'zai-live',
-    connectionLocked: true,
-    model: 'glm-5.1',
-    sandboxMode: 'workspace-write',
-    approvalPolicy: {kind: 'on-request'},
-    collaborationMode: 'agent',
-    orchestrationMode: 'default',
-  };
+  return { handlers, sender, event: { sender } as Parameters<IpcHandler>[0] };
 }

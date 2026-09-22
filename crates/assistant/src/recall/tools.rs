@@ -78,30 +78,7 @@ impl ToolPreparer for Recall {
                     };
                     let mut result = match input {
                         Input::Material(_) => unreachable!("material handled before search"),
-                        Input::Search(query) => {
-                            let scan =
-                                rank::search(recall.history.clone(), &call, &query, permit.clone())
-                                    .await?;
-                            let mut hits = scan.hits;
-                            for hit in &mut hits {
-                                hit.offset = hit.offset.saturating_sub(512);
-                            }
-                            let passages = passages::build(
-                                recall.history.clone(),
-                                &call,
-                                &scan.sources,
-                                &hits,
-                                &query.terms,
-                                (4, 4),
-                                permit,
-                            )
-                            .await?;
-                            ResultSet {
-                                passages,
-                                searched_every_session: scan.complete,
-                                gaps: scan.gaps,
-                            }
-                        }
+                        Input::Search(query) => recall.search(&call, &query, permit).await?,
                         Input::More(more) => {
                             let (catalog, _) = reader::sessions(
                                 recall.history.as_ref(),
@@ -193,6 +170,36 @@ impl ToolPreparer for Recall {
                     ))
                 })
             }))
+        })
+    }
+}
+
+impl Recall {
+    pub(super) async fn search(
+        &self,
+        call: &maka_plugins::call::Scope,
+        query: &Query,
+        permit: Arc<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Result<ResultSet, ToolError> {
+        let scan = rank::search(self.history.clone(), call, query, permit.clone()).await?;
+        let mut hits = scan.hits;
+        for hit in &mut hits {
+            hit.offset = hit.offset.saturating_sub(512);
+        }
+        let passages = passages::build(
+            self.history.clone(),
+            call,
+            &scan.sources,
+            &hits,
+            &query.terms,
+            (4, 4),
+            permit,
+        )
+        .await?;
+        Ok(ResultSet {
+            passages,
+            searched_every_session: scan.complete,
+            gaps: scan.gaps,
         })
     }
 }

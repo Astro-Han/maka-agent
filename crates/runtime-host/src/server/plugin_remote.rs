@@ -97,7 +97,7 @@ pub(super) async fn execute(
             };
             // Session identity is canonical Host-local, not a Desktop projection.
             let gate = host.executions.lock_admission().await;
-            if let Some(session) = &binding.session_id {
+            if let Some(session) = binding.session_id() {
                 host.log
                     .get_session::<crate::session::SessionConfiguration>(session)
                     .await
@@ -131,12 +131,12 @@ pub(super) async fn execute(
                 connection_id: connection,
                 client_instance_id: client.into(),
                 document_id: document,
-                session_id: binding.session_id.clone(),
+                session_id: binding.session_id().map(str::to_owned),
                 access: bound.endpoint.value.access,
                 views: Arc::new(views::SessionViews {
                     host: Arc::downgrade(host),
                     owner: bound.endpoint.owner.clone(),
-                    session_id: binding.session_id,
+                    session_id: binding.session_id().map(str::to_owned),
                     connection_id: connection,
                     client_instance_id: client.into(),
                     authority: authority.clone(),
@@ -220,8 +220,7 @@ async fn call_method(
     let result = tokio::select! {
         biased;
         _ = cancellation.cancelled() => Err(Error::Cancelled),
-        _ = bound.client.retired() => Err(Error::Retired),
-        _ = bound.endpoint.retired() => Err(Error::Retired),
+        _ = bound.retired() => Err(Error::Retired),
         _ = tokio::time::sleep(Duration::from_secs(30)) => Err(Error::Cancelled),
         result = &mut call => {
             if matches!(result, Err(Error::CleanupUnconfirmed)) {

@@ -34,11 +34,10 @@ export interface PluginRemoteClient {
   contentDigest: string;
   clientDigest: string;
 }
-export interface PluginRemoteBinding {
-  client: PluginRemoteClient;
+export type PluginRemoteBinding = ({ client: PluginRemoteClient } | { packageId: string }) & {
   method: string;
   sessionId: string | null;
-}
+};
 export interface PluginRemoteTarget {
   entryId: string;
   activation: string;
@@ -162,9 +161,16 @@ export const PLUGIN_REMOTE_OPERATION_SPECS = {
   }),
 } as const;
 function binding(value: unknown): PluginRemoteBinding {
-  const row = requireExactRecord(value, 'Remote binding', ['client', 'method', 'sessionId']);
+  const input = requireRecord(value, 'Remote binding');
+  const row = requireExactRecord(input, 'Remote binding', [
+    'client' in input ? 'client' : 'packageId',
+    'method',
+    'sessionId',
+  ]);
   return {
-    client: decodePluginClientIdentity(row.client),
+    ...('client' in row
+      ? { client: decodePluginClientIdentity(row.client) }
+      : { packageId: identity(row.packageId) }),
     method: identity(row.method),
     sessionId: row.sessionId === null ? null : requireEntityId(row.sessionId, 'Remote Session'),
   };
