@@ -21,7 +21,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, realpath, stat, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import type { SessionEvent } from '@maka/core/events';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { CreateSessionInput, UserMessageInput } from '@maka/core/runtime-inputs';
 import type { SessionSummary } from '@maka/core/session';
 import type { RuntimeEvent } from '@maka/core/runtime-event';
@@ -51,14 +51,7 @@ export interface MakaActivationOptions {
   input: string;
   timeoutMs?: number;
   maxSteps?: number;
-  /**
-   * `ask` was excluded here while `execute` existed, but the two compiled to
-   * the same workspace-write profile and the same confirmation behavior — the
-   * exclusion separated the names, not the boundaries. With `execute` gone,
-   * `ask` is that boundary, and an activation asking for it gets exactly what
-   * `--permission-mode execute` always gave it.
-   */
-  permissionMode?: PermissionMode;
+  sandboxMode?: SandboxMode;
   connection?: string;
   model?: string;
 }
@@ -229,19 +222,17 @@ export function parseMakaActivateArgs(argv: readonly string[]): ParseMakaActivat
   if (parsedMaxSteps !== undefined && (!Number.isInteger(parsedMaxSteps) || parsedMaxSteps < 1)) {
     return { kind: 'error', message: '--max-steps must be a positive integer' };
   }
-  // `execute` stays accepted as an alias for `ask`: this is a public
-  // subcommand whose callers live outside this repo, and the two named the
-  // same boundary for as long as both existed. It is not offered in the error
-  // message, so nothing new learns to send it.
-  const requestedPermissionMode = values.get('permission-mode');
-  const permissionMode = requestedPermissionMode === 'execute' ? 'ask' : requestedPermissionMode;
+  const sandboxMode = values.get('permission-mode');
   if (
-    permissionMode !== undefined &&
-    permissionMode !== 'explore' &&
-    permissionMode !== 'ask' &&
-    permissionMode !== 'bypass'
+    sandboxMode !== undefined &&
+    sandboxMode !== 'read-only' &&
+    sandboxMode !== 'workspace-write' &&
+    sandboxMode !== 'danger-full-access'
   ) {
-    return { kind: 'error', message: '--permission-mode must be explore, ask, or bypass' };
+    return {
+      kind: 'error',
+      message: '--permission-mode must be read-only, workspace-write, or danger-full-access',
+    };
   }
   return {
     kind: 'activate',
@@ -252,7 +243,7 @@ export function parseMakaActivateArgs(argv: readonly string[]): ParseMakaActivat
       input: values.get('input') ?? '-',
       ...(timeoutSeconds === undefined ? {} : { timeoutMs: Math.ceil(timeoutSeconds * 1000) }),
       ...(parsedMaxSteps === undefined ? {} : { maxSteps: parsedMaxSteps }),
-      ...(permissionMode === undefined ? {} : { permissionMode }),
+      ...(sandboxMode === undefined ? {} : { sandboxMode }),
       ...(values.get('connection') === undefined ? {} : { connection: values.get('connection') }),
       ...(values.get('model') === undefined ? {} : { model: values.get('model') }),
     },
@@ -478,7 +469,7 @@ export async function runMakaActivationCli(
         name: `Cloud activation ${request.activationId}`.slice(0, 80),
         llmConnectionSlug: context.target.connection.slug,
         model: context.target.model,
-        permissionMode: options.permissionMode ?? 'explore',
+        sandboxMode: options.sandboxMode ?? 'workspace-write',
       });
     }
     const stop = (): void => {
@@ -798,7 +789,7 @@ function makaActivateHelpText(): string {
     '  --input <path>            JSON request file, or - for stdin (default: -)',
     '  --timeout <seconds>       Invocation timeout',
     '  --max-steps <count>       Tool-step cap',
-    '  --permission-mode <mode>  explore|ask|bypass',
+    '  --permission-mode <mode>  read-only|workspace-write|danger-full-access',
     '  --connection <slug>       Model connection override',
     '  --model <id>              Model override',
   ].join('\n');

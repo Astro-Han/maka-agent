@@ -155,7 +155,7 @@ export class ExecutionFixture {
         llmConnectionId: FAKE_CONNECTION_ID,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       return session.id;
     } finally {
@@ -198,7 +198,7 @@ export class ExecutionFixture {
           configuration: {
             cwd: this.root,
             workspaceIdentity: workspace.workspaceIdentity,
-            permissionMode: 'ask',
+            sandboxMode: 'workspace-write',
             collaborationMode: 'agent',
             orchestrationMode: 'default',
             orchestrationSource: 'session',
@@ -504,7 +504,7 @@ export class ExecutionFixture {
         llmConnectionId: FAKE_CONNECTION_ID,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         subagentParent: {
@@ -566,7 +566,7 @@ export class ExecutionFixture {
             },
             configuration: {
               cwd: this.root,
-              permissionMode: 'explore',
+              sandboxMode: 'read-only',
               collaborationMode: 'agent',
               orchestrationMode: 'default',
               orchestrationSource: 'session',
@@ -671,7 +671,7 @@ export class ExecutionFixture {
           },
           configuration: {
             cwd: this.root,
-            permissionMode: 'explore',
+            sandboxMode: 'read-only',
             collaborationMode: 'agent',
             orchestrationMode: 'default',
             orchestrationSource: 'session',
@@ -837,7 +837,7 @@ export class ExecutionFixture {
             },
             configuration: {
               cwd: this.root,
-              permissionMode: 'ask',
+              sandboxMode: 'workspace-write',
               collaborationMode: 'agent',
               orchestrationMode: 'default',
               orchestrationSource: 'session',
@@ -1059,7 +1059,7 @@ export class ExecutionFixture {
             },
             configuration: {
               cwd: this.root,
-              permissionMode: 'ask',
+              sandboxMode: 'workspace-write',
               collaborationMode: 'agent',
               orchestrationMode: 'default',
               orchestrationSource: 'session',
@@ -1327,7 +1327,7 @@ export async function withExecutionRoot(
       llmConnectionId: FAKE_CONNECTION_ID,
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     sessionId = session.id;
   } finally {

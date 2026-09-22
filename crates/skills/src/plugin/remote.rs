@@ -27,7 +27,7 @@ use maka_plugins::{
     contributions::Staged,
     remote::{Caller, Endpoint, Error, Handler, Method, WorkspaceViewInput, key},
 };
-use maka_runtime::execution::{CollaborationMode, PermissionMode, WorkspaceTarget};
+use maka_runtime::execution::{CollaborationMode, SandboxMode, WorkspaceTarget};
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -51,7 +51,7 @@ enum Source {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProjectRequest {
     project_id: String,
-    permission_mode: PermissionMode,
+    sandbox_mode: SandboxMode,
     collaboration_mode: CollaborationMode,
     request: Request,
 }
@@ -59,7 +59,7 @@ struct ProjectRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PathRequest {
     path: String,
-    permission_mode: PermissionMode,
+    sandbox_mode: SandboxMode,
     collaboration_mode: CollaborationMode,
     request: Request,
 }
@@ -146,14 +146,14 @@ impl Method for Service {
                     }
                     match workspace {
                         Some(input) => {
-                            let permission_mode = input.permission_mode;
+                            let sandbox_mode = input.sandbox_mode;
                             let collaboration_mode = input.collaboration_mode;
                             let view = caller.views.workspace(input).await?;
                             let target = InvocableTarget::NewSession {
                                 context: WorkspaceContext {
                                     workspace: view.workspace.target.clone(),
                                 },
-                                permission_mode,
+                                sandbox_mode,
                                 collaboration_mode,
                             };
                             (request, view, target)
@@ -184,7 +184,7 @@ impl Method for Service {
                         Source::Project => {
                             let ProjectRequest {
                                 project_id,
-                                permission_mode,
+                                sandbox_mode,
                                 collaboration_mode,
                                 request,
                             } = decode(input)?;
@@ -192,7 +192,7 @@ impl Method for Service {
                                 request,
                                 WorkspaceViewInput {
                                     workspace: WorkspaceTarget::Project { project_id },
-                                    permission_mode,
+                                    sandbox_mode,
                                     collaboration_mode,
                                 },
                             )
@@ -200,7 +200,7 @@ impl Method for Service {
                         Source::Path => {
                             let PathRequest {
                                 path,
-                                permission_mode,
+                                sandbox_mode,
                                 collaboration_mode,
                                 request,
                             } = decode(input)?;
@@ -208,21 +208,21 @@ impl Method for Service {
                                 request,
                                 WorkspaceViewInput {
                                     workspace: WorkspaceTarget::HostPath { path },
-                                    permission_mode,
+                                    sandbox_mode,
                                     collaboration_mode,
                                 },
                             )
                         }
                         Source::Session | Source::User => unreachable!(),
                     };
-                    let permission_mode = input.permission_mode;
+                    let sandbox_mode = input.sandbox_mode;
                     let collaboration_mode = input.collaboration_mode;
                     let view = caller.views.workspace(input).await?;
                     let target = InvocableTarget::NewSession {
                         context: WorkspaceContext {
                             workspace: view.workspace.target.clone(),
                         },
-                        permission_mode,
+                        sandbox_mode,
                         collaboration_mode,
                     };
                     (request, view, target)
@@ -287,7 +287,7 @@ impl Method for Import {
                     workspace: WorkspaceTarget::HostPath {
                         path: parent.into(),
                     },
-                    permission_mode: PermissionMode::Explore,
+                    sandbox_mode: SandboxMode::ReadOnly,
                     collaboration_mode: CollaborationMode::Agent,
                 })
                 .await?;

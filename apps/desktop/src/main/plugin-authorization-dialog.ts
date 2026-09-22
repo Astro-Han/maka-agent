@@ -40,9 +40,9 @@ export function pluginAuthorizationDialog(input: PluginAuthorizationInput, local
   const {request} = input.command;
   const target = request.target.kind === 'profile' ? 'profile' : request.target.kind === 'session'
     ? `${request.target.sessionId} (${zh ? '当前工作区与权限' : 'current workspace and permissions'})`
-    : request.target.kind === 'plugin_workspace' ? `${zh ? '插件私有工作区' : 'Plugin-private workspace'} (${request.target.permissionMode})`
+    : request.target.kind === 'plugin_workspace' ? `${zh ? '插件私有工作区' : 'Plugin-private workspace'} (${request.target.sandboxMode})`
     : request.target.kind === 'directory' ? request.target.path
-    : `${request.target.workspace.kind === 'project' ? request.target.workspace.projectId : request.target.workspace.path} (${request.target.permissionMode})`;
+    : `${request.target.workspace.kind === 'project' ? request.target.workspace.projectId : request.target.workspace.path} (${request.target.sandboxMode})`;
   return {
     type: 'warning', title: zh ? '插件后台授权' : 'Plugin background authorization',
     message: `${input.client.extensionId}\n${zh ? '允许此插件在后台工作？' : 'Allow this plugin to work in the background?'}`,

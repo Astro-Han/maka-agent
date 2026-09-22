@@ -27,8 +27,9 @@ import type { ThinkingLevel } from './model-thinking.js';
 import type { ProviderType } from './provider-registry.js';
 import type { ModelOverride } from './model-thinking.js';
 import {
+  defaultChatDefaultsSettings,
   networkProxyCredentialTarget,
-  type ChatDefaultPermissionMode,
+  type ChatDefaultSandboxMode,
   type NetworkProxyCredentialTarget,
   type ProxyProtocol,
   type ShellSettings,
@@ -145,7 +146,7 @@ export interface RuntimePolicy {
     readonly incognitoActive: boolean;
   };
   readonly chatDefaults: {
-    readonly permissionMode: ChatDefaultPermissionMode;
+    readonly sandboxMode: ChatDefaultSandboxMode;
     readonly thinkingLevel?: ThinkingLevel;
     readonly codeModeEnabled?: boolean;
   };
@@ -242,7 +243,7 @@ export function createDefaultRuntimePolicy(): RuntimePolicy {
     memory: { enabled: true, agentReadEnabled: false },
     workspaceInstructions: { enabled: true },
     privacy: { incognitoActive: false },
-    chatDefaults: { permissionMode: 'bypass' },
+    chatDefaults: defaultChatDefaultsSettings(),
     shell: { preference: 'auto', executable: '' },
     externalAgents: { antigravity: { executable: '' } },
   };

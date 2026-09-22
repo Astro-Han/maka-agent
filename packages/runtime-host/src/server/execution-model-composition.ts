@@ -23,8 +23,8 @@ import { resolveModelVisionSupport } from '@maka/core/model-metadata';
 import { modelOverride } from '@maka/core/model-thinking';
 import type { ModelCallAttempt } from '@maka/core/model-call-attempt';
 import type { ModelCallCommit } from '@maka/core/agent-run';
-import type { PermissionMode } from '@maka/core/permission';
-import { resolveCollaborationPermissionMode } from '@maka/core/collaboration';
+import type { SandboxMode } from '@maka/core/permission';
+import { resolveCollaborationSandboxMode } from '@maka/core/collaboration';
 import { AiSdkBackend } from '@maka/runtime/ai-sdk-backend';
 import {
   buildDefaultContextBudgetPolicy,
@@ -362,9 +362,9 @@ async function buildHostAiSdkBackend(
         header: {
           ...input.context.header,
           model: target.model,
-          permissionMode: resolveCollaborationPermissionMode({
+          sandboxMode: resolveCollaborationSandboxMode({
             collaborationMode: input.context.header.collaborationMode ?? 'agent',
-            permissionMode: input.context.header.permissionMode,
+            sandboxMode: input.context.header.sandboxMode,
           }),
         },
         ...(input.context.recordSystemNote
@@ -372,8 +372,8 @@ async function buildHostAiSdkBackend(
           : {}),
         readExecutionBoundary: () =>
           input.context.store.readExecutionBoundary(input.context.sessionId),
-        readPermissionMode: async () =>
-          (await input.context.store.readHeader(input.context.sessionId)).permissionMode,
+        readSandboxMode: async () =>
+          (await input.context.store.readHeader(input.context.sessionId)).sandboxMode,
         ...(input.context.store.createSandboxBoundaryRequest
           ? {
               createSandboxBoundaryRequest: (request) =>

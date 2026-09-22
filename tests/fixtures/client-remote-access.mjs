@@ -178,7 +178,7 @@ export async function verifyRemoteAccess(local, handshake, url, control) {
         document: document.document,
         input: {
           projectId: project.project.id,
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           collaborationMode: 'agent',
           request: { kind: 'catalog', view: 'governance', page: null },
         },

@@ -416,7 +416,7 @@ describe('HostInteractionCoordinator', () => {
         llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const identity = { ...RUN, sessionId: session.id };
       const requestId = 'boundary_1';
@@ -549,7 +549,7 @@ describe('HostInteractionCoordinator', () => {
         llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const identity = { ...RUN, sessionId: session.id };
       const wakeStarted = deferred();
@@ -691,7 +691,7 @@ describe('HostInteractionCoordinator', () => {
         llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const identity = { ...RUN, sessionId: session.id };
       const poison: RuntimeInteractionFailStopError[] = [];
@@ -751,7 +751,7 @@ describe('HostInteractionCoordinator', () => {
         llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const identity = { ...RUN, sessionId: session.id };
       const admissionRefreshStarted = deferred();
@@ -824,7 +824,7 @@ describe('HostInteractionCoordinator', () => {
         llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const identity = { ...RUN, sessionId: session.id };
       const request: SandboxBoundaryRequest = {
@@ -1001,7 +1001,7 @@ describe('HostInteractionCoordinator', () => {
         llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const boundary = await stores.sessionStore.createSandboxBoundaryRequest({
         sessionId: session.id,

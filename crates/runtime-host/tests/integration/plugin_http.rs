@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod permissions;
 mod proxy;
 
 use super::{
@@ -62,17 +63,17 @@ async fn http_streams_follow_proxy_permissions_and_invocation_settlement() {
         let installed = peer.rpc("plugin.package.install", json!({"sourcePath":source})).await;
         assert_eq!(installed["ok"], true, "{installed}");
         ready(&mut peer).await;
-        for mode in ["ask", "bypass"] {
+        for mode in ["workspace-write", "danger-full-access"] {
             let result = peer.rpc("session.create", json!({
                 "sessionId":mode, "workspace":{"kind":"host_path","path":fixture.workspace},
-                "executorId":"example.http", "permissionMode":mode
+                "executorId":"example.http", "sandboxMode":mode,"approvalPolicy":{"kind":"never"}
             })).await;
             assert_eq!(result["ok"], true, "{result}");
         }
         let inspector = Fiber::new("example.http", "inspector", Scope::Profile).unwrap();
         inspector.begin_loading().unwrap();
         let storage = host.plugin_storage(inspector.context()).unwrap();
-        for (index, (session, command)) in [("ask", "denied"), ("bypass", "complete"), ("bypass", "complete"), ("bypass", "retire")].into_iter().enumerate() {
+        for (index, (session, command)) in [("workspace-write", "denied"), ("danger-full-access", "complete"), ("danger-full-access", "complete"), ("danger-full-access", "retire")].into_iter().enumerate() {
             let turn = format!("http-{index}");
             let started = peer.rpc("turn.start", json!({"sessionId":session,"turnId":turn,"content":{"text":command}})).await;
             assert_eq!(started["ok"], true, "{started}");
@@ -108,5 +109,40 @@ async fn http_streams_follow_proxy_permissions_and_invocation_settlement() {
         stop.cancel();
         server.await.unwrap().unwrap();
         cleanup.disarm();
+        drop(storage);
+        drop(host);
+        let log = fixture.log().await;
+        let prefix = log.prefix(1000, 4 * 1024 * 1024).await.unwrap();
+        let mut pending = std::collections::BTreeMap::new();
+        let mut recorded = 0;
+        let mut streams = 0;
+        let mut interrupted = 0;
+        for row in prefix.events {
+            use maka_runtime::event::{Fact, ToolOutcome};
+            match row.event.fact {
+                Fact::ToolDispatched { operation_id, name, input, .. } if name == "Http" => {
+                    assert_eq!(input["kind"], "http");
+                    pending.insert(operation_id, input["input"]["url"].as_str().unwrap().to_owned());
+                    recorded += 1;
+                }
+                Fact::ToolSettled { operation_id, outcome } => {
+                    if let Some(url) = pending.remove(&operation_id) {
+                        if url.ends_with("/stream") {
+                            assert!(matches!(outcome, ToolOutcome::Succeeded { .. }));
+                            streams += 1;
+                        } else if url.ends_with("/truncated") || url.ends_with("/blocked") {
+                            assert!(matches!(outcome, ToolOutcome::Unknown { .. }), "{url}: {outcome:?}");
+                            interrupted += 1;
+                        }
+                    }
+                }
+                Fact::InvocationEnded { .. } => assert!(pending.is_empty(), "HTTP settlement outlived its invocation"),
+                _ => {}
+            }
+        }
+        assert_eq!(recorded, 15);
+        assert_eq!(streams, 3);
+        assert_eq!(interrupted, 6);
+        log.close().await.unwrap();
     }).await.expect("HTTP resource settlement must make bounded progress");
 }

@@ -20,7 +20,13 @@
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export async function createMessageSession(connection, workspace, sessionId, baseUrl) {
+export async function createMessageSession(
+  connection,
+  workspace,
+  sessionId,
+  baseUrl,
+  sandboxMode = 'workspace-write',
+) {
   const request = (op, input) => connection.request(op, input, 3000);
   const created = await request('connection.catalog.create', {
     expectedCatalogRevision: 0,
@@ -52,7 +58,7 @@ export async function createMessageSession(connection, workspace, sessionId, bas
   });
   await request('session.create', {
     sessionId,
-    permissionMode: 'ask',
+    sandboxMode,
     workspace: { kind: 'host_path', path: workspace },
     modelTarget: { kind: 'default' },
   });

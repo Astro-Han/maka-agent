@@ -58,7 +58,7 @@ const plugin: ClientPlugin = {
                 const grant = await context.authorization.approve('profile', {
                   operationId: crypto.randomUUID(),
                   title: 'Run a public plugin workflow',
-                  target: { kind: 'plugin_workspace', permissionMode: 'explore' },
+                  target: { kind: 'plugin_workspace', sandboxMode: 'read-only' },
                   capabilities: ['executions'],
                 });
                 if (grant && !grant.revoked)

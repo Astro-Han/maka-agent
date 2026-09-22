@@ -104,11 +104,11 @@ export function createRuntimeHostBotSessionAdapter(
       if (!session || session.isArchived) {
         throw unavailableSession(sessionId);
       }
-      if (session.permissionMode === 'explore') return 'ready';
+      if (session.sandboxMode === 'read-only') return 'ready';
 
       try {
         session = await deps.client.updateSessionConfiguration(sessionId, {
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
         });
       } catch (error) {
         throwUnavailable(error, sessionId);
@@ -118,7 +118,7 @@ export function createRuntimeHostBotSessionAdapter(
       if (session.isArchived) {
         throw unavailableSession(sessionId);
       }
-      if (session.permissionMode !== 'explore') return 'permission_refused';
+      if (session.sandboxMode !== 'read-only') return 'permission_refused';
       deps.emitSessionsChanged('updated', sessionId);
       return 'ready';
     },

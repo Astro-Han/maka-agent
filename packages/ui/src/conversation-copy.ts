@@ -19,7 +19,7 @@
 
 import type { DeepResearchReportSectionKey } from '@maka/core/deep-research-run';
 import type { ProviderRetryReason } from '@maka/core/events';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { SessionBlockedReason, SessionStatus } from '@maka/core/session';
 import type { ThinkingLevel } from '@maka/core/model-thinking';
 import type { UiCatalog, UiLocale } from '@maka/core/ui-locale';
@@ -204,8 +204,16 @@ export interface ConversationCopy {
     configureTitle: string;
   };
   permissions: {
-    mode: Record<PermissionMode, { label: string; hint: string }>;
+    mode: Record<SandboxMode, { label: string; hint: string }>;
     modeAriaLabel: (label: string) => string;
+    approval: {
+      label: string;
+      hint: string;
+      unrestricted: string;
+      unrestrictedHint: string;
+      modes: Record<'on-request' | 'never' | 'granular', string>;
+      categories: Record<'sandbox' | 'rules' | 'permissions' | 'client', string>;
+    };
   };
   sandboxBoundary: {
     title: string;
@@ -521,11 +529,17 @@ const CONVERSATION_COPY = {
     },
     permissions: {
       mode: {
-        explore: { label: '只读', hint: '只读搜索，不写文件、不上网；需要时先问你。' },
-        ask: { label: '自动', hint: '保护层内自动执行，越权先问你。' },
-        bypass: { label: '完全权限', hint: '直接访问文件和网络，仅限可信任务。' },
+        'read-only': { label: '只读', hint: '允许读取和搜索，默认不允许写入和联网。' },
+        'workspace-write': { label: '工作区写入', hint: '允许工作区内写入，保护内部数据，默认不联网。' },
+        'danger-full-access': { label: '完全访问', hint: '直接访问文件和网络，仅限可信任务。' },
       },
       modeAriaLabel: (label) => `权限模式：${label}`,
+      approval: {
+        label: '扩权审批', hint: '控制是否可以向你申请授权，不改变已有访问权限。',
+        unrestricted: '完全绕过（危险）', unrestrictedHint: '关闭沙箱和所有权限审批。仅用于可信任务。',
+        modes: { 'on-request': '需要时询问', never: '不询问，直接拒绝扩权', granular: '按类别询问' },
+        categories: { sandbox: '允许询问沙箱外执行', rules: '允许询问命令规则', permissions: '允许申请额外权限', client: '允许询问客户端能力' },
+      },
     },
     sandboxBoundary: {
       title: '允许访问工作区以外的内容？',
@@ -679,11 +693,17 @@ const CONVERSATION_COPY = {
     },
     permissions: {
       mode: {
-        explore: { label: '只讀', hint: '只讀搜尋，不寫檔案、不上網；需要時先問你。' },
-        ask: { label: '自動', hint: '保護層內自動執行，越權先問你。' },
-        bypass: { label: '完全權限', hint: '直接存取檔案和網路，僅限可信任務。' },
+        'read-only': { label: '只讀', hint: '允許讀取和搜尋，預設不允許寫入和連網。' },
+        'workspace-write': { label: '工作區寫入', hint: '允許工作區內寫入，保護內部資料，預設不連網。' },
+        'danger-full-access': { label: '完全存取', hint: '直接存取檔案和網路，僅限可信任務。' },
       },
       modeAriaLabel: (label) => `權限模式：${label}`,
+      approval: {
+        label: '擴權審批', hint: '控制是否可以向你申請授權，不改變既有存取權限。',
+        unrestricted: '完全繞過（危險）', unrestrictedHint: '關閉沙箱和所有權限審批。僅用於可信任務。',
+        modes: { 'on-request': '需要時詢問', never: '不詢問，直接拒絕擴權', granular: '按類別詢問' },
+        categories: { sandbox: '允許詢問沙箱外執行', rules: '允許詢問命令規則', permissions: '允許申請額外權限', client: '允許詢問用戶端能力' },
+      },
     },
     sandboxBoundary: {
       title: '允許存取工作區以外的內容？',
@@ -863,11 +883,17 @@ const CONVERSATION_COPY = {
     },
     permissions: {
       mode: {
-        explore: { label: 'Read only', hint: 'Read and search only; asks before write or network.' },
-        ask: { label: 'Auto', hint: "Runs inside Maka's protection; asks before going further." },
-        bypass: { label: 'Full access', hint: 'Direct file and network access. Trust-only tasks.' },
+        'read-only': { label: 'Read only', hint: 'Read and search; no writes or network by default.' },
+        'workspace-write': { label: 'Workspace write', hint: 'Write within the workspace; internal data protected and network off by default.' },
+        'danger-full-access': { label: 'Full access', hint: 'Direct file and network access. Trust-only tasks.' },
       },
       modeAriaLabel: (label) => `Permission mode: ${label}`,
+      approval: {
+        label: 'Approval requests', hint: 'Controls requests for your approval, not existing access.',
+        unrestricted: 'Bypass all protections (dangerous)', unrestrictedHint: 'Disable the sandbox and all permission approvals. Trusted tasks only.',
+        modes: { 'on-request': 'Ask when needed', never: 'Never ask; deny escalation', granular: 'Ask by category' },
+        categories: { sandbox: 'Ask to run outside the sandbox', rules: 'Ask about command rules', permissions: 'Request additional access', client: 'Ask to use client capabilities' },
+      },
     },
     sandboxBoundary: {
       title: 'Allow access outside the workspace?',

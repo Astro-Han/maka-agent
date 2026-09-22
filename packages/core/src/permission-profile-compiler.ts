@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import type { PermissionMode } from './permission.js';
+import type { SandboxMode } from './permission.js';
 import type {
   NetworkSandboxPolicy,
   PermissionProfile,
@@ -31,13 +31,13 @@ import {
 } from './permission-profile.js';
 
 export interface CompilePermissionProfileInput {
-  mode: PermissionMode;
+  mode: SandboxMode;
   cwd: string;
   workspaceRoots?: readonly string[];
 }
 
 export interface CompiledPermissionProfile {
-  mode: PermissionMode;
+  mode: SandboxMode;
   profileName: PermissionProfileName;
   profile: PermissionProfile;
   workspaceRoots: readonly string[];
@@ -50,17 +50,17 @@ export function compilePermissionProfile(
   const workspaceRoots = input.workspaceRoots ?? [input.cwd];
 
   switch (input.mode) {
-    case 'explore':
+    case 'read-only':
       return compileManaged(input.mode, createReadOnlyPermissionProfile(), workspaceRoots);
-    case 'ask':
+    case 'workspace-write':
       return compileManaged(input.mode, createWorkspaceWritePermissionProfile(), workspaceRoots);
-    case 'bypass':
+    case 'danger-full-access':
       return compileManaged(input.mode, createDangerFullAccessPermissionProfile(), workspaceRoots);
   }
 }
 
 function compileManaged(
-  mode: PermissionMode,
+  mode: SandboxMode,
   profile: PermissionProfileManaged,
   workspaceRoots: readonly string[],
 ): CompiledPermissionProfile {

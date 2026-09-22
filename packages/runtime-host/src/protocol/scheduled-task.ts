@@ -20,7 +20,7 @@
 import { isBotDeliveryProvider } from '@maka/core/bot-chat-settings';
 import { isCollaborationMode } from '@maka/core/collaboration';
 import { isOrchestrationMode } from '@maka/core/orchestration';
-import { isPermissionMode } from '@maka/core/permission';
+import { isSandboxMode } from '@maka/core/permission';
 import {
   isScheduledTaskStatus,
   SCHEDULED_TASK_CHAT_ID_MAX_CHARS,
@@ -546,20 +546,13 @@ function decodeExecution(
   const execution = requireShapedRecord(
     value,
     'ScheduledTask execution template',
-    [
-      'cwd',
-      'llmConnectionSlug',
-      'model',
-      'permissionMode',
-      'collaborationMode',
-      'orchestrationMode',
-    ],
+    ['cwd', 'llmConnectionSlug', 'model', 'sandboxMode', 'collaborationMode', 'orchestrationMode'],
     ['projectId', 'thinkingLevel', 'backend', 'llmConnectionId'],
   );
   if (requireConnectionId && !Object.hasOwn(execution, 'llmConnectionId')) {
     throw invalidProtocolFrame('ScheduledTask execution requires Connection id');
   }
-  if (!isPermissionMode(execution.permissionMode)) {
+  if (!isSandboxMode(execution.sandboxMode)) {
     throw invalidProtocolFrame('Invalid ScheduledTask permission mode');
   }
   if (!isCollaborationMode(execution.collaborationMode)) {
@@ -603,7 +596,7 @@ function decodeExecution(
           thinkingLevel: execution.thinkingLevel as ScheduledTaskExecutionTemplate['thinkingLevel'],
         }
       : {}),
-    permissionMode: execution.permissionMode,
+    sandboxMode: execution.sandboxMode,
     collaborationMode: execution.collaborationMode,
     orchestrationMode: execution.orchestrationMode,
   };

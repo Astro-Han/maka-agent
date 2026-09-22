@@ -36,6 +36,7 @@ pub(crate) struct Environment {
     bindings: Option<PreparedBindings>,
     directory: maka_fs_tools::workspace::directory::PublishedDirectory,
     input_catalog: maka_plugins::contributions::Catalog,
+    workspace: maka_plugins::filesystem::ReadRoot,
     prepared_input: Option<maka_plugins::input::Prepared>,
     cancellation: tokio_util::sync::CancellationToken,
 }
@@ -94,6 +95,21 @@ impl Executions {
             return Err(failure(Code::SessionArchived, "Session is archived"));
         }
         self.prepare_worktree(&session).await?;
+        let cwd = session.workspace.host_cwd.clone();
+        let sandbox_mode = session.sandbox_mode;
+        let origin = session.workspace_origin;
+        let state_root = self.paths.state_root.clone();
+        let workspace = tokio::task::spawn_blocking(move || {
+            super::super::permissions::read_root(
+                sandbox_mode,
+                std::path::Path::new(&cwd),
+                &state_root,
+                origin,
+            )
+        })
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
         use maka_protocol::session::CollaborationMode;
         if session.collaboration_mode != CollaborationMode::Agent {
             return Err(failure(
@@ -140,6 +156,7 @@ impl Executions {
                     },
                     cancellation: self.shutdown.child_token(),
                 },
+                Some(&workspace),
             )
             .await
             .map_err(internal)?;
@@ -174,6 +191,7 @@ impl Executions {
                 prompt,
                 directory,
                 input_catalog: self.plugin_catalog.clone(),
+                workspace,
                 prepared_input: None,
                 cancellation: self.shutdown.child_token(),
             });
@@ -261,11 +279,17 @@ impl Executions {
         let prompt = session
             .initial_prompt(&behavior.instructions)
             .map_err(internal)?;
-        let mut native = self.native_tools(&session.workspace.host_cwd, session.tool_profile);
+        let mut native = self
+            .native_tools(
+                &session.workspace.host_cwd,
+                session.tool_profile,
+                session.workspace_origin,
+            )
+            .await?;
         native.set = behavior.native_tools;
         let ceiling = session.tool_ceiling(behavior.tool_ceiling);
         let native_ceiling = ceiling.clone();
-        let mode = session.permission_mode;
+        let mode = session.sandbox_mode;
         let (directory, tools) = tokio::task::spawn_blocking(move || {
             let directory = maka_fs_tools::workspace::directory::PublishedDirectory::open(
                 std::path::Path::new(&native.cwd),
@@ -303,6 +327,7 @@ impl Executions {
             prompt_capture: None,
             directory,
             input_catalog: self.plugin_catalog.clone(),
+            workspace,
             prepared_input: None,
             cancellation: self.shutdown.child_token(),
         })
@@ -339,6 +364,7 @@ impl Environment {
                 tools,
                 cancellation: self.cancellation.clone(),
             },
+            &self.workspace,
         )
         .await?;
         let content = prepared.content.clone();

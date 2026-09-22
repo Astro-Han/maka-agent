@@ -499,19 +499,20 @@ export class RuntimeHostSessionChannel {
       turnId: answered.turnId,
       ts: this.#now(),
       requestId: answered.interactionId,
-      toolUseId:
-        pending.request.kind === 'sandbox_boundary'
-          ? pending.interactionId
-          : pending.request.toolUseId,
     };
-    if (answered.outcome.kind === 'question_answer') {
-      this.#emit({ type: 'user_question_answer_ack', ...base });
-    } else if (answered.outcome.kind === 'form_answer') {
-      this.#emit({ type: 'form_answer_ack', ...base });
+    if (answered.outcome.kind === 'question_answer' && pending.request.kind === 'question') {
+      this.#emit({
+        type: 'user_question_answer_ack',
+        ...base,
+        toolUseId: pending.request.toolUseId,
+      });
+    } else if (answered.outcome.kind === 'form_answer' && pending.request.kind === 'form') {
+      this.#emit({ type: 'form_answer_ack', ...base, toolUseId: pending.request.toolUseId });
     } else if (answered.outcome.kind === 'sandbox_boundary_decision') {
       this.#emit({
         type: 'sandbox_boundary_decision_ack',
         ...base,
+        toolUseId: pending.interactionId,
         decision: answered.outcome.decision,
         status: answered.outcome.status,
         revision: answered.revision,

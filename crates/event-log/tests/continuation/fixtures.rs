@@ -29,6 +29,9 @@ pub(super) fn opening(id: &str, claim: Option<ContinuationClaim>) -> RuntimeEven
         },
         Fact::InvocationOpened {
             configuration: Some(Box::new(InvocationConfiguration {
+                workspace_origin: maka_runtime::execution::WorkspaceOrigin::Selected,
+                approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
+                boundary_revision: 0,
                 system_prompt: None,
                 tool_composition: None,
                 cwd: ".".into(),
@@ -36,7 +39,7 @@ pub(super) fn opening(id: &str, claim: Option<ContinuationClaim>) -> RuntimeEven
                     WorkspaceIdentity::from_marker_id("ef751105-55b5-4d65-a364-646281586a17")
                         .unwrap(),
                 ),
-                permission_mode: PermissionMode::Explore,
+                sandbox_mode: SandboxMode::ReadOnly,
                 collaboration_mode: CollaborationMode::Agent,
                 orchestration_mode: BehaviorId::default(),
                 tool_mode: ToolMode::Direct,

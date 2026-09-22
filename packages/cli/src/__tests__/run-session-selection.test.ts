@@ -126,7 +126,7 @@ describe('maka run session selection', () => {
       ),
       /has no stored cwd/,
     );
-    const auto = session({ id: 'resume-me', permissionMode: 'ask' });
+    const auto = session({ id: 'resume-me', sandboxMode: 'workspace-write' });
     const resumedAuto = await selectMakaRunSession(
       {
         sessions: [auto],
@@ -142,7 +142,7 @@ describe('maka run session selection', () => {
       { explicitConnection: 'other' },
       { explicitModel: 'other' },
       { thinkingSpecified: true, explicitThinking: undefined },
-      { explicitPermissionMode: 'bypass' as const },
+      { explicitSandboxMode: 'danger-full-access' as const },
     ]) {
       await assert.rejects(
         selectMakaRunSession(
@@ -167,7 +167,7 @@ describe('maka run session selection', () => {
         sessions: [
           session({ id: 'archived', lastMessageAt: 500, isArchived: true }),
           session({ id: 'blocked', lastMessageAt: 500, status: 'blocked' }),
-          session({ id: 'ask', lastMessageAt: 500, permissionMode: 'ask' }),
+          session({ id: 'ask', lastMessageAt: 500, sandboxMode: 'workspace-write' }),
           session({ id: 'missing-time', lastMessageAt: undefined }),
           session({ id: 'inaccessible', cwd: '/missing', lastMessageAt: 400 }),
           session({ id: 'b', cwd: '/repo-link', lastMessageAt: 300 }),
@@ -263,7 +263,7 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
     llmConnectionSlug: 'fixture',
     connectionLocked: false,
     model: 'fixture-model',
-    permissionMode: 'explore',
+    sandboxMode: 'read-only',
     ...overrides,
   };
 }

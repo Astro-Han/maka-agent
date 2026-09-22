@@ -65,11 +65,15 @@ for (const settlement of ['resolve', 'reject'] as const) {
         kind: 'get',
         sessionId: 'pending-query',
       });
-      const command = connected.connection.request('session.create', {
-        sessionId: 'pending-command',
-        workspace: { kind: 'host_path', path: '/tmp' },
-        modelTarget: { kind: 'default' },
-      });
+      const command = connected.connection.request(
+        'session.create',
+        {
+          sessionId: 'pending-command',
+          workspace: { kind: 'host_path', path: '/tmp' },
+          modelTarget: { kind: 'default' },
+        },
+        185_000,
+      );
       await requestsObserved.promise;
       const resourceFailure = new Error('tunnel process exited');
       if (settlement === 'resolve') resource.resolve();

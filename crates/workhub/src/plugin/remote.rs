@@ -132,10 +132,7 @@ impl Method for Call {
                         collaboration_mode: maka_runtime::execution::CollaborationMode,
                     }
                     let request: Template = decode(input)?;
-                    let Target::Workspace {
-                        permission_mode, ..
-                    } = &request.authorization
-                    else {
+                    let Target::Workspace { sandbox_mode, .. } = &request.authorization else {
                         return Err(Error::Invalid("Expected a workspace".into()));
                     };
                     let model = manager
@@ -151,7 +148,8 @@ impl Method for Call {
                                 model,
                                 thinking_level: None,
                             },
-                            permission_mode: *permission_mode,
+                            sandbox_mode: *sandbox_mode,
+                            approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
                             tool_mode: manager
                                 .preferences
                                 .read()

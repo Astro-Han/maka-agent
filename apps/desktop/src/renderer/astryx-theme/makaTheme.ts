@@ -191,7 +191,7 @@ export const makaTheme = defineTheme({
     //
     // Deleting the five-selector seam in astryx-mount.css moved three values
     // for the containers it used to cover (the composer's model picker, the
-    // workspace picker, the plus menu, permissionModeIcon and the inspector
+    // workspace picker, the plus menu, sandboxModeIcon and the inspector
     // panel): --color-accent-muted goes 0.12 → 0.24, converging on the one
     // status-tint rung (#4465 review); --color-accent goes from raw --accent to
     // --accent-solid, the only accent tier that clears text contrast; and

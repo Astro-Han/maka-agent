@@ -24,9 +24,9 @@ import { compilePermissionProfile } from '../permission-profile-compiler.js';
 
 describe('compilePermissionProfile', () => {
   it('maps explore to a read-only profile and defaults workspaceRoots to cwd', () => {
-    const compiled = compilePermissionProfile({ mode: 'explore', cwd: '/repo' });
+    const compiled = compilePermissionProfile({ mode: 'read-only', cwd: '/repo' });
 
-    assert.equal(compiled.mode, 'explore');
+    assert.equal(compiled.mode, 'read-only');
     assert.equal(compiled.profileName, 'read-only');
     assert.equal(compiled.profile.type, 'managed');
     assert.equal(compiled.profile.name, 'read-only');
@@ -36,9 +36,9 @@ describe('compilePermissionProfile', () => {
   });
 
   it('maps ask to the workspace-write profile while preserving mode', () => {
-    const ask = compilePermissionProfile({ mode: 'ask', cwd: '/repo' });
+    const ask = compilePermissionProfile({ mode: 'workspace-write', cwd: '/repo' });
 
-    assert.equal(ask.mode, 'ask');
+    assert.equal(ask.mode, 'workspace-write');
     assert.equal(ask.profileName, 'workspace-write');
     assert.equal(ask.profile.type, 'managed');
     assert.equal(ask.profile.name, 'workspace-write');
@@ -46,9 +46,9 @@ describe('compilePermissionProfile', () => {
   });
 
   it('maps bypass to danger-full-access', () => {
-    const compiled = compilePermissionProfile({ mode: 'bypass', cwd: '/repo' });
+    const compiled = compilePermissionProfile({ mode: 'danger-full-access', cwd: '/repo' });
 
-    assert.equal(compiled.mode, 'bypass');
+    assert.equal(compiled.mode, 'danger-full-access');
     assert.equal(compiled.profileName, 'danger-full-access');
     assert.equal(compiled.profile.type, 'managed');
     assert.equal(compiled.profile.name, 'danger-full-access');
@@ -58,7 +58,7 @@ describe('compilePermissionProfile', () => {
 
   it('uses explicit workspaceRoots when provided', () => {
     const compiled = compilePermissionProfile({
-      mode: 'ask',
+      mode: 'workspace-write',
       cwd: '/repo',
       workspaceRoots: ['/repo', '/other-repo'],
     });

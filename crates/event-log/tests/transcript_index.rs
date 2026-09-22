@@ -99,8 +99,8 @@ async fn completed_bytes_digest_identity_reopen_and_exact_rebuild() {
     assert!(!wake.has_changed().unwrap());
     let db = Connection::open(&path).unwrap();
     let original = rows(&db, "a");
-    assert_eq!(original.len(), 4);
-    let assistant: Value = serde_json::from_slice(&original[1].1).unwrap();
+    assert_eq!(original.len(), 5);
+    let assistant: Value = serde_json::from_slice(&original[2].1).unwrap();
     assert_eq!(assistant["id"], id);
     assert_eq!(assistant["modelId"], "real-model");
     for (_, bytes, digest, size) in &original {
@@ -162,19 +162,26 @@ async fn partial_freezes_at_interruption_and_old_fence_excludes_later_boundaries
             .is_empty()
     );
     assert!(log.prepare_transcript("a", live, 32).await.unwrap());
-    assert_eq!(rows(&db, "a").len(), 1);
+    let running = rows(&db, "a");
+    assert_eq!(running.len(), 2);
+    let state: Value = serde_json::from_slice(&running[1].1).unwrap();
+    assert_eq!(state["type"], "turn_state");
+    assert_eq!(
+        state["status"], "running",
+        "pending work is not interrupted"
+    );
     assert_eq!(progress(&db, "a"), live as i64);
     assert!(log.prepare_transcript("a", interrupted, 32).await.unwrap());
     let frozen = rows(&db, "a");
-    assert_eq!(frozen.len(), 2);
-    let assistant: Value = serde_json::from_slice(&frozen[1].1).unwrap();
+    assert_eq!(frozen.len(), 3);
+    let assistant: Value = serde_json::from_slice(&frozen[2].1).unwrap();
     assert_eq!(assistant["id"], id);
     assert_eq!(assistant["text"], "partial😀");
     assert!(log.prepare_transcript("a", ended, 32).await.unwrap());
     let final_rows = rows(&db, "a");
-    assert_eq!(&final_rows[..2], frozen.as_slice());
-    assert_eq!(final_rows.len(), 3); // no invented unknown usage
-    let terminal: Value = serde_json::from_slice(&final_rows[2].1).unwrap();
+    assert_eq!(&final_rows[..3], frozen.as_slice());
+    assert_eq!(final_rows.len(), 4); // no invented unknown usage
+    let terminal: Value = serde_json::from_slice(&final_rows[3].1).unwrap();
     assert_eq!(terminal["status"], "aborted");
 }
 
@@ -228,8 +235,8 @@ async fn terminal_without_model_interruption_seals_only_committed_partial_eviden
         );
         let db = Connection::open(&path).unwrap();
         let original = rows(&db, "a");
-        assert_eq!(original.len(), 3); // user, factual partial, terminal; no usage
-        let assistant: Value = serde_json::from_slice(&original[1].1).unwrap();
+        assert_eq!(original.len(), 4); // user, running, factual partial, terminal; no usage
+        let assistant: Value = serde_json::from_slice(&original[2].1).unwrap();
         assert_eq!(assistant["id"], id);
         let failed = matches!(outcome, InvocationOutcome::Failed { .. });
         let mut expected = serde_json::to_value(&overlay[0]).unwrap();
@@ -244,8 +251,8 @@ async fn terminal_without_model_interruption_seals_only_committed_partial_eviden
         assert!(matches!(&delivery.events[0].fact,
             maka_event_log::observation::StreamFact::InvocationEnded { interrupted, .. }
             if if failed { interrupted == std::slice::from_ref(&id) } else { interrupted.is_empty() }));
-        assert_eq!(original[1].0, (through * 256) as i64);
-        let terminal: Value = serde_json::from_slice(&original[2].1).unwrap();
+        assert_eq!(original[2].0, (through * 256) as i64);
+        let terminal: Value = serde_json::from_slice(&original[3].1).unwrap();
         assert_eq!(
             terminal["status"],
             if matches!(outcome, InvocationOutcome::Failed { .. }) {

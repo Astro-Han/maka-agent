@@ -35,9 +35,9 @@ import {
   type ToolResultContent,
 } from './events.js';
 import {
-  isPermissionMode,
+  isSandboxMode,
   isToolCategory,
-  type PermissionMode,
+  type SandboxMode,
   type PolicyDecision,
   type ToolCategory,
 } from './permission.js';
@@ -311,7 +311,7 @@ export interface SessionHeader {
   toolProfile?: SessionToolProfile;
   /** Per-model reasoning-depth variant; `undefined` = model default. Cleared on model switch. */
   thinkingLevel?: import('./model-thinking.js').ThinkingLevel;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   /** Defaults to `agent` when absent on legacy session records. */
   collaborationMode?: CollaborationMode;
   /** Defaults to `default` when absent on legacy session records. */
@@ -425,7 +425,7 @@ export interface SessionSummary {
   model: string;
   /** Per-model reasoning-depth variant; `undefined` = model default. Cleared on model switch. */
   thinkingLevel?: import('./model-thinking.js').ThinkingLevel;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   /** Defaults to `agent` when absent on legacy summaries. */
   collaborationMode?: CollaborationMode;
   /** Defaults to `default` when absent on legacy summaries. */
@@ -974,18 +974,18 @@ export interface WorkHubCreateDefaults {
     readonly llmConnectionSlug: string;
     readonly model: string;
   };
-  readonly permissionMode?: PermissionMode;
+  readonly sandboxMode?: SandboxMode;
 }
 
 export function isWorkHubCreateDefaults(value: unknown): value is WorkHubCreateDefaults {
   if (
     !isRecord(value) ||
     Object.keys(value).some(
-      (key) => key !== 'executorId' && key !== 'model' && key !== 'permissionMode',
+      (key) => key !== 'executorId' && key !== 'model' && key !== 'sandboxMode',
     )
   )
     return false;
-  if (value.permissionMode !== undefined && !isPermissionMode(value.permissionMode)) return false;
+  if (value.sandboxMode !== undefined && !isSandboxMode(value.sandboxMode)) return false;
   if (value.executorId !== undefined && !isExecutorId(value.executorId)) return false;
   if (value.executorId !== undefined && value.model !== undefined) return false;
   if (value.model === undefined) return true;

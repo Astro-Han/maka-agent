@@ -17,9 +17,10 @@
  * under the License.
  */
 
-import type { ChatDefaultPermissionMode } from '@maka/core/settings';
-import type { PermissionMode } from '@maka/core/permission';
-import { CHAT_DEFAULT_PERMISSION_MODES } from '@maka/core/settings';
+import type { ChatDefaultSandboxMode } from '@maka/core/settings';
+import type { SandboxMode } from '@maka/core/permission';
+import type { ApprovalPolicy } from '@maka/core/execution-permissions';
+import { CHAT_DEFAULT_SANDBOX_MODES } from '@maka/core/settings';
 import type { UiLocale } from '@maka/core/ui-locale';
 import {
   Selector,
@@ -30,104 +31,83 @@ import {
   DropdownMenu,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuCheckboxItem,
+  DropdownMenuDivider,
+  DropdownMenuItem,
 } from '@astryxdesign/core/DropdownMenu';
 import { ICON_SIZE, Eye, ShieldAlert, ShieldCheck } from './icons.js';
 import { useUiLocale } from './locale-context.js';
 import { getConversationCopy } from './conversation-copy.js';
 import { cn } from './utils.js';
 
-type PermissionModeAppearance = 'field' | 'icon';
+type SandboxModeAppearance = 'field' | 'icon';
 
-function permissionModeIcon(mode: PermissionMode) {
-  if (mode === 'bypass') return <ShieldAlert size={ICON_SIZE.control} aria-hidden="true" />;
-  if (mode === 'explore') return <Eye size={ICON_SIZE.control} aria-hidden="true" />;
+function sandboxModeIcon(mode: SandboxMode) {
+  if (mode === 'danger-full-access') return <ShieldAlert size={ICON_SIZE.control} aria-hidden="true" />;
+  if (mode === 'read-only') return <Eye size={ICON_SIZE.control} aria-hidden="true" />;
   return <ShieldCheck size={ICON_SIZE.control} aria-hidden="true" />;
 }
 
-export interface PermissionModeMeta {
+export interface SandboxModeMeta {
   label: string;
   hint: string;
 }
 
-/**
- * Sessions may run under a read-only (`explore`) boundary, so metadata stays
- * complete for the whole PermissionMode union. User-facing pickers offer only
- * Auto (`ask`) and full access (`bypass`), but any mode can be the state being
- * displayed.
- *
- * This module is the one home for the mode table and shared picker: both the
- * composer and Settings render from it so labels, hints, and markup cannot
- * drift between the two surfaces.
- *
- * The danger of full access is carried by the words and by the destructive
- * confirmation dialog that guards the switch — not by a per-mode colour. An
- * earlier `tone` field here was never read by any renderer.
- */
-export function getPermissionModeMeta(locale: UiLocale): Record<PermissionMode, PermissionModeMeta> {
+/** Shared labels and hints for the composer and settings. */
+export function getSandboxModeMeta(locale: UiLocale): Record<SandboxMode, SandboxModeMeta> {
   return getConversationCopy(locale).permissions.mode;
 }
 
 /** User-selectable modes in canonical display order. */
-export const PERMISSION_MODE_ORDER: readonly ChatDefaultPermissionMode[] = CHAT_DEFAULT_PERMISSION_MODES;
+export const SANDBOX_MODE_ORDER: readonly ChatDefaultSandboxMode[] = CHAT_DEFAULT_SANDBOX_MODES;
 
-/**
- * Shared permission-mode picker.
- *
- * - **field** (Settings): Astryx Selector with option hints — the correct
- *   single-value primitive.
- * - **icon** (quiet composer footer): ghost icon button + radio menu of the
- *   two selectable modes (label only). Hints stay on the trigger tooltip /
- *   aria-description so the open panel stays short and matches the ＋ control.
- *
- * Legacy `execute` sessions collapse to Auto for display. A read-only
- * (`explore`) session has no matching option, so the control shows that state
- * without selecting Auto or full access.
- */
-export function PermissionModeSelect(props: {
-  activeMode: PermissionMode;
-  onSelect(mode: ChatDefaultPermissionMode): void | Promise<void>;
+/** Field in settings; compact icon menu in the composer. */
+export function SandboxModeSelect(props: {
+  activeMode: SandboxMode;
+  onSelect(mode: ChatDefaultSandboxMode): void | Promise<void>;
   align?: 'start' | 'end';
   disabled?: boolean;
   disabledReason?: string;
   ariaLabel?: string;
   className?: string;
-  appearance?: PermissionModeAppearance;
+  appearance?: SandboxModeAppearance;
+  approval?: {
+    policy: ApprovalPolicy;
+    onChange(policy: ApprovalPolicy): void | Promise<void>;
+    onDisableProtections?(): void | Promise<void>;
+  };
 }) {
   const locale = useUiLocale();
   const permissionCopy = getConversationCopy(locale).permissions;
-  const modeMeta = getPermissionModeMeta(locale);
-  // #1611: `explore` is a real read-only boundary the user is running under,
-  // so it shows its own label and hint instead of borrowing Auto's.
-  const displayMode: PermissionMode = props.activeMode;
+  const modeMeta = getSandboxModeMeta(locale);
+  const displayMode: SandboxMode = props.activeMode;
   const meta = modeMeta[displayMode];
-  const selectedValue: ChatDefaultPermissionMode | undefined = PERMISSION_MODE_ORDER.includes(
-    displayMode as ChatDefaultPermissionMode,
-  )
-    ? (displayMode as ChatDefaultPermissionMode)
-    : undefined;
-  const options: SelectorOptionData[] = PERMISSION_MODE_ORDER.map((mode) => ({
+  const selectedValue = displayMode;
+  const fullyUnrestricted = displayMode === 'danger-full-access' && props.approval?.policy.kind === 'never';
+  const options: SelectorOptionData[] = SANDBOX_MODE_ORDER.map((mode) => ({
     value: mode,
     label: modeMeta[mode].label,
   }));
-  const ariaLabel = props.ariaLabel ?? permissionCopy.modeAriaLabel(meta.label);
+  const modeLabel = fullyUnrestricted ? permissionCopy.approval.unrestricted : meta.label;
+  const ariaLabel = props.ariaLabel ?? permissionCopy.modeAriaLabel(modeLabel);
 
   // Composer footer: match the ＋ ghost icon button. Astryx puts DropdownMenu
   // className on the panel, so product anchors wrap the whole control.
   if (props.appearance === 'icon') {
     return (
-      <span className={cn('permissionModeIcon', props.className)}>
+      <span className={cn('sandboxModeIcon', props.className)}>
         <DropdownMenu
           placement="above"
           hasChevron={false}
           className="maka-composer-quiet-menu"
           button={{
             label: ariaLabel,
-            icon: permissionModeIcon(displayMode),
+            icon: sandboxModeIcon(displayMode),
             isIconOnly: true,
             variant: 'ghost',
             size: 'sm',
             isDisabled: props.disabled,
-            tooltip: props.disabledReason ?? `${meta.label} — ${meta.hint}`,
+            tooltip: props.disabledReason ?? `${modeLabel} — ${meta.hint}`,
             'aria-description': meta.hint,
           }}
         >
@@ -135,19 +115,72 @@ export function PermissionModeSelect(props: {
             value={selectedValue}
             label={ariaLabel}
             onChange={(value) => {
-              void props.onSelect(value as ChatDefaultPermissionMode);
+              void props.onSelect(value as ChatDefaultSandboxMode);
             }}
           >
-            {PERMISSION_MODE_ORDER.map((mode) => (
+            {SANDBOX_MODE_ORDER.map((mode) => (
               <DropdownMenuRadioItem
                 key={mode}
                 value={mode}
                 label={modeMeta[mode].label}
-                icon={permissionModeIcon(mode)}
+                icon={sandboxModeIcon(mode)}
                 isDisabled={props.disabled}
               />
             ))}
           </DropdownMenuRadioGroup>
+          {props.approval ? (
+            <>
+              <DropdownMenuDivider />
+              <DropdownMenuRadioGroup
+                value={props.approval.policy.kind}
+                label={permissionCopy.approval.label}
+                onChange={(value) => {
+                  if (value === props.approval?.policy.kind) return;
+                  const policy: ApprovalPolicy = value === 'granular'
+                    ? { kind: 'granular', sandbox: false, rules: false, permissions: false, client: false }
+                    : { kind: value === 'on-request' ? 'on-request' : 'never' };
+                  void props.approval?.onChange(policy);
+                }}
+              >
+                {(['on-request', 'never', 'granular'] as const).map((kind) => (
+                  <DropdownMenuRadioItem
+                    key={kind}
+                    value={kind}
+                    label={permissionCopy.approval.modes[kind]}
+                    isDisabled={props.disabled}
+                    aria-description={permissionCopy.approval.hint}
+                  />
+                ))}
+              </DropdownMenuRadioGroup>
+              {props.approval.policy.kind === 'granular'
+                ? (['sandbox', 'rules', 'permissions', 'client'] as const).map((category) => (
+                    <DropdownMenuCheckboxItem
+                      key={category}
+                      label={permissionCopy.approval.categories[category]}
+                      value={props.approval?.policy.kind === 'granular' && props.approval.policy[category]}
+                      isDisabled={props.disabled}
+                      onChange={(enabled) => {
+                        if (props.approval?.policy.kind === 'granular') {
+                          void props.approval.onChange({ ...props.approval.policy, [category]: enabled });
+                        }
+                      }}
+                    />
+                  ))
+                : null}
+              {props.approval.onDisableProtections ? (
+                <>
+                  <DropdownMenuDivider />
+                  <DropdownMenuItem
+                    label={permissionCopy.approval.unrestricted}
+                    icon={<ShieldAlert size={ICON_SIZE.control} aria-hidden="true" />}
+                    isDisabled={props.disabled || fullyUnrestricted}
+                    description={permissionCopy.approval.unrestrictedHint}
+                    onClick={() => { void props.approval?.onDisableProtections?.(); }}
+                  />
+                </>
+              ) : null}
+            </>
+          ) : null}
         </DropdownMenu>
       </span>
     );
@@ -161,19 +194,19 @@ export function PermissionModeSelect(props: {
       placeholder={meta.label}
       options={options}
       onChange={(value) =>
-        void props.onSelect(value as ChatDefaultPermissionMode)
+        void props.onSelect(value as ChatDefaultSandboxMode)
       }
       isDisabled={props.disabled}
       disabledMessage={props.disabledReason}
       aria-description={meta.hint}
       placement="below"
-      className={cn('permissionModeSelector', props.className)}
+      className={cn('sandboxModeSelector', props.className)}
       renderOption={(option) => (
         <SelectorOption
-          icon={permissionModeIcon(option.value as PermissionMode)}
+          icon={sandboxModeIcon(option.value as SandboxMode)}
           label={option.label ?? option.value}
           description={
-            modeMeta[option.value as ChatDefaultPermissionMode].hint
+            modeMeta[option.value as ChatDefaultSandboxMode].hint
           }
         />
       )}

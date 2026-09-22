@@ -46,15 +46,55 @@ impl SessionViews {
         workspace: &maka_runtime::execution::WorkspaceProjection,
         session: bool,
     ) -> Result<maka_plugins::filesystem::ReadDirectory, Error> {
+        let host = self.host().await?;
+        let scoped = matches!(
+            self.owner.identity().map_err(|_| Error::Retired)?.scope,
+            maka_plugins::composition::Scope::Session(_)
+        );
+        let (mode, boundary_revision, origin) = if session || scoped {
+            let id = self.session_id.as_ref().ok_or(Error::Retired)?;
+            let record = host
+                .log
+                .get_session::<SessionConfiguration>(id)
+                .await
+                .map_err(|error| Error::Provider(error.to_string()))?
+                .ok_or(Error::Retired)?;
+            (
+                record.configuration.sandbox_mode,
+                Some(record.configuration.boundary_revision),
+                if record.configuration.workspace == *workspace {
+                    record.configuration.workspace_origin
+                } else {
+                    maka_runtime::execution::WorkspaceOrigin::Selected
+                },
+            )
+        } else {
+            (
+                maka_runtime::execution::SandboxMode::ReadOnly,
+                None,
+                maka_runtime::execution::WorkspaceOrigin::Selected,
+            )
+        };
         let grant = ReadGrant {
             views: self.clone(),
             workspace: workspace.clone(),
             session,
+            boundary_revision,
         };
         grant.validate().await?;
-        let root = maka_plugins::filesystem::ReadRoot::open(&workspace.host_cwd)
-            .await
-            .map_err(|error| Error::Provider(error.to_string()))?;
+        let cwd = workspace.host_cwd.clone();
+        let state_root = host.root.canonical_path().to_owned();
+        let root = tokio::task::spawn_blocking(move || {
+            crate::execution::permissions::read_root(
+                mode,
+                std::path::Path::new(&cwd),
+                &state_root,
+                origin,
+            )
+        })
+        .await
+        .map_err(|error| Error::Provider(error.to_string()))?
+        .map_err(|error| Error::Provider(error.to_string()))?;
         Ok(root.bind_authorized(
             self.owner.clone(),
             self.cancellation.clone(),
@@ -174,7 +214,7 @@ impl Views for SessionViews {
                             Some(&id),
                             self.connection_id,
                             &session.workspace.host_cwd,
-                            session.permission_mode,
+                            session.sandbox_mode,
                             session.tool_profile,
                         )
                         .await
@@ -234,7 +274,7 @@ impl Views for SessionViews {
                             None,
                             self.connection_id,
                             &workspace.host_cwd,
-                            input.permission_mode,
+                            input.sandbox_mode,
                             None,
                         )
                         .await

@@ -39,7 +39,7 @@ import type { MakaTool } from '../tool-runtime.js';
  * it was stricter than the profile every other mode enforces.
  */
 
-const BYPASS: ExecutionBoundary = { kind: 'bypass', revision: 0 };
+const BYPASS: ExecutionBoundary = { kind: 'danger-full-access', revision: 0 };
 const EXTERNAL: ExecutionBoundary = { kind: 'external', revision: 0 };
 const MANAGED: ExecutionBoundary = {
   kind: 'managed',

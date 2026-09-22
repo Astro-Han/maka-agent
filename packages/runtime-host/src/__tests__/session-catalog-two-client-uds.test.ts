@@ -110,7 +110,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
         createInput.sessionId,
       );
       assert.equal(created.id, createInput.sessionId);
-      assert.equal(created.permissionMode, 'bypass');
+      assert.equal(created.sandboxMode, 'bypass');
       assert.equal(created.labelsTruncated, false);
       assert.deepEqual(
         await desktop.request('runtime.resource.query', {
@@ -151,28 +151,28 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
           name: 'Caller override',
           labels: ['customer-label'],
           modelTarget: { kind: 'default' },
-          permissionMode: 'bypass',
+          sandboxMode: 'danger-full-access',
         }),
       );
       assert.equal(researchSession.name, DEEP_RESEARCH_SESSION_NAME);
       assert.deepEqual(researchSession.labels, ['customer-label', DEEP_RESEARCH_SESSION_LABEL]);
-      assert.equal(researchSession.permissionMode, 'explore');
+      assert.equal(researchSession.sandboxMode, 'explore');
 
       const sandboxChoice = requireSessionProjection(
         await desktop.request('session.create', {
           ...createInput,
           sessionId: 'explicit-sandbox-session',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
         }),
       );
-      assert.equal(sandboxChoice.permissionMode, 'ask');
+      assert.equal(sandboxChoice.sandboxMode, 'ask');
 
       const policy = await tui.request('runtime.policy.query', {});
       const changedPolicy = await tui.request('runtime.policy.mutate', {
         expectedRevision: policy.revision,
         operation: {
           kind: 'set_chat_defaults',
-          value: { permissionMode: 'ask' },
+          value: { sandboxMode: 'workspace-write' },
         },
       });
       assert.equal(changedPolicy.kind, 'committed');
@@ -184,7 +184,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
           sessionId: 'inherited-sandbox-session',
         }),
       );
-      assert.equal(inheritedSandbox.permissionMode, 'ask');
+      assert.equal(inheritedSandbox.sandboxMode, 'ask');
 
       const subscription = await tui.openSessionSubscription({
         sessionId: created.id,
@@ -221,7 +221,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
           sessionId: created.id,
           expectedRevision: configurationRevision,
           patch: {
-            permissionMode: 'bypass',
+            sandboxMode: 'danger-full-access',
             orchestrationMode: 'graph',
           },
         }),
@@ -229,7 +229,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
           sessionId: created.id,
           expectedRevision: configurationRevision,
           patch: {
-            permissionMode: 'bypass',
+            sandboxMode: 'danger-full-access',
             orchestrationMode: 'default',
           },
         }),
@@ -254,7 +254,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
         sessionId: configuredSession.id,
         expectedRevision: configuredSession.revision,
         patch: {
-          permissionMode: configuredSession.permissionMode,
+          sandboxMode: configuredSession.sandboxMode,
         },
       });
       assert.deepEqual(unchangedConfiguration, {
@@ -265,7 +265,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
         sessionId: configuredSession.id,
         expectedRevision: configuredSession.revision,
         patch: {
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
         },
       });
       assert.equal(narrowedConfiguration.kind, 'committed');
@@ -273,7 +273,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
         assert.fail('Runtime Resource authority must permit a quiescent permission narrowing');
       }
       const narrowedSession = requireSessionProjection(narrowedConfiguration.session);
-      assert.equal(narrowedSession.permissionMode, 'explore');
+      assert.equal(narrowedSession.sandboxMode, 'explore');
 
       const firstCwd = join(base, 'workspace-first');
       const secondCwd = join(base, 'workspace-second');
@@ -654,7 +654,7 @@ test('deleted account identity survives same-slug reuse until explicit recovery'
       const preserved = await client.request('session.configuration.update', {
         sessionId: created.id,
         expectedRevision: created.revision,
-        patch: { permissionMode: 'bypass' },
+        patch: { sandboxMode: 'danger-full-access' },
       });
       assert.equal(preserved.kind, 'committed');
       if (preserved.kind !== 'committed' || 'kind' in preserved.session) {
@@ -769,7 +769,7 @@ async function seedAuthority(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     await seedInvocation(execution.runtimeEventStore, {
       sessionId: unread.id,
@@ -826,7 +826,7 @@ async function seedAuthority(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const retirement = await execution.sessionStore.create({
       cwd: root,
@@ -834,7 +834,7 @@ async function seedAuthority(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const recovery = await execution.sessionStore.create({
       cwd: root,
@@ -842,7 +842,7 @@ async function seedAuthority(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const artifacts = await openInteractiveArtifactStoreForWrite(owner.lease);
     const todos = await openInteractiveSessionTodoStoreForWrite(owner.lease);

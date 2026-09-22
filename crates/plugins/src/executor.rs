@@ -229,24 +229,31 @@ impl Call {
     ) -> Settlement {
         let token = cancellation.child_token();
         let closed = token.clone().drop_guard();
-        let scope = match self
-            .calls
-            .as_ref()
-            .map(|issuer| {
-                issuer.issue(
+        let admitted = match self.calls.as_ref() {
+            Some(issuer) => tokio::select! {
+                biased;
+                _ = token.cancelled() => Err(Error::Cancelled),
+                _ = self.contribution.retired() => Err(Error::Retired),
+                result = issuer.admit(
                     crate::call::Identity::Agent {
                         invocation: self.request.invocation.clone(),
                         operation_id: None,
                     },
                     token.clone(),
-                )
-            })
-            .transpose()
-        {
+                ) => result.map(Some).map_err(|error| match error {
+                    maka_runtime::tools::ToolError::Persistence(message) => Error::Persistence(message),
+                    maka_runtime::tools::ToolError::CleanupUnconfirmed(_) => Error::CleanupUnconfirmed,
+                    _ if token.is_cancelled() => Error::Cancelled,
+                    other => Error::Provider(other.to_string()),
+                }),
+            },
+            None => Ok(None),
+        };
+        let scope = match admitted {
             Ok(scope) => scope,
-            Err(_) => {
+            Err(error) => {
                 return Settlement {
-                    result: Err(Error::Cancelled),
+                    result: Err(error),
                     _lease: self.lease,
                 };
             }

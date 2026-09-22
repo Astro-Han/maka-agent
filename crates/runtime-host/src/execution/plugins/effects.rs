@@ -18,6 +18,7 @@
  */
 
 mod client;
+mod http;
 mod notification;
 use super::Executions;
 use futures_util::future::BoxFuture;
@@ -103,7 +104,7 @@ impl Executions {
         let boundary = self
             .plugin_resource_boundary(&call, capability)
             .await
-            .map_err(failed)?;
+            .map_err(ToolError::from)?;
         let effect = self
             .prepare_resource_file(boundary, input.clone(), cancellation.clone())
             .await?;
@@ -130,7 +131,7 @@ impl Executions {
         let boundary = self
             .plugin_resource_boundary(&call, capability)
             .await
-            .map_err(failed)?;
+            .map_err(ToolError::from)?;
         let prepared = self
             .prepare_resource_model(boundary, &call.identity, input, cancellation.clone())
             .await?;
@@ -152,7 +153,7 @@ impl Executions {
         let boundary = self
             .plugin_resource_boundary(&call, prepared.capability)
             .await
-            .map_err(failed)?;
+            .map_err(ToolError::from)?;
         let _admitted = owner.admit().map_err(failed)?;
         let request = Request {
             source: call.identity.clone(),
@@ -209,7 +210,21 @@ impl Executions {
         input: File,
         cancellation: CancellationToken,
     ) -> Result<BoxFuture<'static, Result<Output, ToolError>>, ToolError> {
-        let (root, directory) = tokio::task::spawn_blocking(move || {
+        let state_root = self.paths.state_root.clone();
+        let (root, directory, policy) = tokio::task::spawn_blocking(move || {
+            let origin = match &boundary {
+                Boundary::Session { boundary, .. } => boundary.workspace_origin,
+                Boundary::Workspace { origin, .. } => *origin,
+                _ => maka_runtime::execution::WorkspaceOrigin::Selected,
+            };
+            let mode = match &boundary {
+                Boundary::Session { boundary, .. } => boundary.sandbox_mode,
+                Boundary::Workspace { sandbox_mode, .. } => *sandbox_mode,
+                Boundary::Directory { .. } => {
+                    maka_runtime::execution::SandboxMode::DangerFullAccess
+                }
+                Boundary::Profile => maka_runtime::execution::SandboxMode::ReadOnly,
+            };
             let (path, directory) = match boundary {
                 Boundary::Directory { path, identity } => {
                     let directory =
@@ -244,7 +259,17 @@ impl Executions {
                     ));
                 }
             };
-            Ok::<_, std::io::Error>((PathBuf::from(path), directory))
+            let root = PathBuf::from(path);
+            let (sandbox, _) =
+                crate::execution::permissions::resolve(mode, &root, &state_root, origin)
+                    .map_err(std::io::Error::other)?;
+            let policy = match sandbox {
+                maka_sandbox::Sandbox::Managed { filesystem, .. } => Some(Arc::new(
+                    filesystem.compile().map_err(std::io::Error::other)?,
+                )),
+                _ => None,
+            };
+            Ok::<_, std::io::Error>((root, directory, policy))
         })
         .await
         .map_err(failed)?
@@ -255,9 +280,20 @@ impl Executions {
                     if cancellation.is_cancelled() {
                         return Err(failed("file operation cancelled before effect"));
                     }
-                    maka_plugins::filesystem::entries::execute(&directory, operation, &cancellation)
-                        .map(Output::Entries)
-                        .map_err(super::filesystem::entry_error)
+                    let ceiling = policy.as_deref().map(|filesystem| {
+                        maka_plugins::filesystem::entries::Policy {
+                            root: &root,
+                            filesystem,
+                        }
+                    });
+                    maka_plugins::filesystem::entries::execute(
+                        &directory,
+                        operation,
+                        &cancellation,
+                        ceiling,
+                    )
+                    .map(Output::Entries)
+                    .map_err(super::filesystem::entry_error)
                 })
                 .await
                 .map_err(failed)?
@@ -268,9 +304,10 @@ impl Executions {
             root.clone(),
             directory.try_clone().map_err(failed)?,
             ReadLimits::default(),
+            policy.clone(),
         )?;
         let mutation = write
-            .then(|| MutationExecutor::from_directory(root, directory, self.writes.clone()))
+            .then(|| MutationExecutor::from_directory(root, directory, self.writes.clone(), policy))
             .transpose()?;
         Ok(Box::pin(async move {
             if let File::Read(input) = input {

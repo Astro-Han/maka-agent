@@ -51,7 +51,7 @@ function projection(sessionId: string) {
     llmConnectionSlug: 'fake',
     connectionLocked: false,
     model: 'fake-model',
-    permissionMode: 'ask' as const,
+    sandboxMode: 'workspace-write' as const,
     collaborationMode: 'agent' as const,
     orchestrationMode: 'default' as const,
   };
@@ -105,6 +105,22 @@ test('the orchestration default writes its own field alone', async () => {
   await ipc.invoke('sessions:setOrchestrationMode', 'session-1', 'default');
 
   assert.deepEqual(patches, [{ orchestrationMode: 'swarm' }, { orchestrationMode: 'default' }]);
+});
+
+test('full bypass commits sandbox and approvals atomically and rejects partial policies', async () => {
+  const patches: DesktopSessionConfigurationPatch[] = [];
+  const ipc = harness(patches);
+  const policy = { sandboxMode: 'danger-full-access', approvalPolicy: { kind: 'never' } };
+  await ipc.invoke('sessions:setExecutionPolicy', 'session-1', policy);
+  assert.deepEqual(patches, [policy]);
+  for (const invalid of [
+    { sandboxMode: 'danger-full-access' },
+    { ...policy, sandboxMode: 'bypass' },
+    { ...policy, approvalPolicy: { kind: 'on_request' } },
+  ]) {
+    await assert.rejects(ipc.invoke('sessions:setExecutionPolicy', 'session-1', invalid) as Promise<unknown>);
+  }
+  assert.equal(patches.length, 1, 'invalid policies never reach the Host');
 });
 
 test('model and thinking are committed through one configuration patch', async () => {

@@ -1368,7 +1368,7 @@ function header(): SessionHeader {
     llmConnectionSlug: 'c',
     connectionLocked: true,
     model: 'm',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     schemaVersion: 1,
   };
 }

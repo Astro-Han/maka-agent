@@ -34,9 +34,9 @@ import type { LiveTurnProjection } from '../live-turn-projection.js';
 const REF = 'maka://runtime/background-tasks/pty-1';
 
 describe('ShellRun UI projection', () => {
-  test('reconciles WriteStdin into its Bash parent while retaining safe operation metadata', () => {
+  test('reconciles WriteStdin into its Shell parent while retaining safe operation metadata', () => {
     const messages: StoredMessage[] = [
-      toolCall('bash-1', 'turn-1', 'Bash', { command: 'read value', pty: true }, 1),
+      toolCall('bash-1', 'turn-1', 'Shell', { command: 'read value', pty: true }, 1),
       toolResult('bash-1', 'turn-1', shellRun(1), 2),
       toolCall('write-1', 'turn-2', 'WriteStdin', {
         ref: REF,
@@ -56,7 +56,7 @@ describe('ShellRun UI projection', () => {
     const turns = materializeTurns(messages, 'en');
     const bash = turns[0]?.tools[0];
     const write = turns[1]?.tools[0];
-    assert.equal(bash?.toolName, 'Bash');
+    assert.equal(bash?.toolName, 'Shell');
     assert.equal(bash?.result?.kind, 'shell_run');
     if (bash?.result?.kind !== 'shell_run') assert.fail('expected ShellRun parent');
     assert.equal(bash.result.revision, 2);
@@ -81,7 +81,7 @@ describe('ShellRun UI projection', () => {
 
   test('keeps a durable background update ahead of a stale live turn result', () => {
     const messages: StoredMessage[] = [
-      toolCall('bash-1', 'turn-1', 'Bash', { command: 'job', pty: true }, 1),
+      toolCall('bash-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 1),
       toolResult('bash-1', 'turn-1', shellRun(1), 2),
       { type: 'user', id: 'user-2', turnId: 'turn-2', ts: 3, text: 'next' },
     ];
@@ -105,7 +105,7 @@ describe('ShellRun UI projection', () => {
         contentOrder: ['tools'],
         tools: [{
           toolUseId: 'bash-1',
-          toolName: 'Bash',
+          toolName: 'Shell',
           status: 'running',
           args: { command: 'job', pty: true },
           result: shellRun(2),
@@ -123,7 +123,7 @@ describe('ShellRun UI projection', () => {
 
   test('keeps a newer live PTY screen ahead of the persisted snapshot', () => {
     const messages: StoredMessage[] = [
-      toolCall('bash-1', 'turn-1', 'Bash', { command: 'job', pty: true }, 1),
+      toolCall('bash-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 1),
       toolResult('bash-1', 'turn-1', shellRun(1), 2),
     ];
     const liveResult = shellRun(2);
@@ -136,7 +136,7 @@ describe('ShellRun UI projection', () => {
         contentOrder: ['tools'],
         tools: [{
           toolUseId: 'bash-1',
-          toolName: 'Bash',
+          toolName: 'Shell',
           status: 'running',
           args: { command: 'job', pty: true },
           result: liveResult,
@@ -163,7 +163,7 @@ describe('ShellRun UI projection', () => {
     assert.equal(tool?.outputChunks?.[0]?.text, 'still running');
   });
 
-  test('applies a durable update that arrives before the live Bash result', () => {
+  test('applies a durable update that arrives before the live Shell result', () => {
     const live: LiveTurnProjection = {
       turnId: 'turn-1',
       steps: [{
@@ -171,7 +171,7 @@ describe('ShellRun UI projection', () => {
         contentOrder: ['tools'],
         tools: [{
           toolUseId: 'bash-1',
-          toolName: 'Bash',
+          toolName: 'Shell',
           status: 'running',
           args: { command: 'job', pty: true },
         }],
@@ -200,7 +200,7 @@ describe('ShellRun UI projection', () => {
 
   test('marks a running ShellRun inherited from a source session as detached', () => {
     const messages: StoredMessage[] = [
-      toolCall('bash-1', 'turn-1', 'Bash', { command: 'job', pty: true }, 1),
+      toolCall('bash-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 1),
       toolResult('bash-1', 'turn-1', shellRun(1), 2),
     ];
     const turns = createTranscriptProjection().project({ locale: 'en', messages, shellRunUpdates: [{
@@ -233,7 +233,7 @@ describe('ShellRun UI projection', () => {
   test('does not pair stale ownership with a newer ShellRun revision', () => {
     const tool: ToolActivityItem = {
       toolUseId: 'bash-1',
-      toolName: 'Bash',
+      toolName: 'Shell',
       status: 'completed',
       args: { command: 'job' },
       result: shellRun(5),

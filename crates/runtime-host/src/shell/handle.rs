@@ -212,6 +212,23 @@ impl ShellHandle {
         size: Option<TerminalSize>,
         cancellation: CancellationToken,
     ) -> Result<WriteReceipt, ControlError> {
+        self.enqueue_control(input, size, cancellation)?.await
+    }
+
+    /// Queue admission is synchronous; callers may release their authorization
+    /// gate before awaiting native I/O. A full queue accepts no input.
+    pub(crate) fn enqueue_control(
+        &self,
+        input: Input,
+        size: Option<TerminalSize>,
+        cancellation: CancellationToken,
+    ) -> Result<impl Future<Output = Result<WriteReceipt, ControlError>> + Send + use<>, ControlError>
+    {
+        if cancellation.is_cancelled() {
+            return Err(ControlError::rejected(
+                "PTY control cancelled before admission",
+            ));
+        }
         let (reply, response) = oneshot::channel();
         let commands = &self
             .pty
@@ -224,13 +241,14 @@ impl ShellHandle {
             reply,
             cancellation: cancellation.clone(),
         };
-        tokio::select! {
-            biased;
-            _ = cancellation.cancelled() => return Err(ControlError::rejected("PTY control cancelled before admission")),
-            sent = commands.send(command) => sent.map_err(|_| ControlError::new("PTY closed", 0))?,
-        }
-        response
-            .await
-            .map_err(|_| ControlError::unknown("PTY control outcome unknown"))?
+        commands.try_send(command).map_err(|error| match error {
+            mpsc::error::TrySendError::Full(_) => ControlError::rejected("PTY input queue is full"),
+            mpsc::error::TrySendError::Closed(_) => ControlError::new("PTY closed", 0),
+        })?;
+        Ok(async move {
+            response
+                .await
+                .map_err(|_| ControlError::unknown("PTY control outcome unknown"))?
+        })
     }
 }

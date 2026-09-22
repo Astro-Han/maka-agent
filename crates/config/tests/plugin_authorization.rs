@@ -28,7 +28,7 @@ use maka_plugins::{
     execution::SessionBoundary,
     storage::Namespace,
 };
-use maka_runtime::execution::{PermissionMode, WorkspaceIdentity};
+use maka_runtime::execution::{SandboxMode, WorkspaceIdentity};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -55,11 +55,13 @@ async fn consent_retries_preserve_original_boundary_and_revocation_across_restar
         },
         capabilities: [Capability::Executions].into(),
     };
-    let boundary = |revision, permission_mode| Boundary::Session {
+    let boundary = |revision, sandbox_mode| Boundary::Session {
         boundary: SessionBoundary {
+            workspace_origin: maka_runtime::execution::WorkspaceOrigin::Selected,
             session_id: "session".into(),
             boundary_revision: revision,
-            permission_mode,
+            sandbox_mode,
+            approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
             cwd: temp.path().to_str().unwrap().into(),
         },
         workspace_identity: WorkspaceIdentity::from_marker_id(
@@ -70,7 +72,7 @@ async fn consent_retries_preserve_original_boundary_and_revocation_across_restar
     let approve = |principal, request, boundary| {
         store.approve_plugin_authorization(namespace.clone(), principal, request, boundary)
     };
-    let first = boundary(1, PermissionMode::Ask);
+    let first = boundary(1, SandboxMode::WorkspaceWrite);
     let (left, right) = tokio::join!(
         approve(
             Principal::LocalUser {
@@ -99,7 +101,7 @@ async fn consent_retries_preserve_original_boundary_and_revocation_across_restar
             client_instance_id: "client".into(),
         },
         request.clone(),
-        boundary(2, PermissionMode::Bypass),
+        boundary(2, SandboxMode::DangerFullAccess),
     )
     .await
     .unwrap() else {

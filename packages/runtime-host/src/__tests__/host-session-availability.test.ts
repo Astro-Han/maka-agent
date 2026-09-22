@@ -41,7 +41,7 @@ const execution = {
 const base = {
   collaborationMode: 'agent' as const,
   orchestrationMode: 'default' as const,
-  permissionMode: 'explore' as const,
+  sandboxMode: 'read-only' as const,
   subagentWorkspace: undefined,
   transcriptLedgerVersion: 1 as const,
   toolProfile: 'workhub-coordination-v1' as const,
@@ -115,11 +115,11 @@ test('WorkHub v2 requires its capability permission mode and cannot run as an or
     id: WORKHUB_COORDINATION_SESSION_ID,
     role: WORKHUB_COORDINATION_SESSION_ROLE,
     toolProfile: 'workhub-coordination-v2' as const,
-    permissionMode: 'bypass' as const,
+    sandboxMode: 'danger-full-access' as const,
   };
   assert.equal(runtimeHostExecutionUnavailableReason(header, execution), undefined);
   assert.equal(
-    runtimeHostExecutionUnavailableReason({ ...header, permissionMode: 'explore' }, execution),
+    runtimeHostExecutionUnavailableReason({ ...header, sandboxMode: 'read-only' }, execution),
     WORKHUB_COORDINATION_EXECUTION_UNAVAILABLE_REASON,
   );
   assert.equal(

@@ -24,6 +24,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+maka-sandbox.workspace = true
 maka-plugins.workspace = true
 libc.workspace = true
 serde.workspace = true

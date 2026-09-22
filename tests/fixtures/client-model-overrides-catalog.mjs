@@ -154,7 +154,7 @@ export function sessionInput(workspace, row, sessionId, model = modelId) {
   return {
     sessionId,
     workspace: { kind: 'host_path', path: workspace },
-    permissionMode: 'explore',
+    sandboxMode: 'read-only',
     mode: 'bot',
     modelTarget: {
       kind: 'explicit',

@@ -22,25 +22,17 @@ mod codec;
 pub mod network_test;
 pub mod network_update;
 mod settings;
-use crate::execution::ThinkingLevel;
+use crate::execution::{SandboxMode, ThinkingLevel};
 pub use codec::{decode_canonical_snapshot, normalize_mutation};
 use serde::{Deserialize, Serialize};
 pub use settings::*;
 
 pub const MAX_POLICY_SNAPSHOT_BYTES: usize = 48 * 1024;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ChatDefaultPermissionMode {
-    Ask,
-    #[default]
-    Bypass,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChatDefaults {
-    pub permission_mode: ChatDefaultPermissionMode,
+    pub sandbox_mode: SandboxMode,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub code_mode_enabled: bool,
     #[serde(
@@ -49,6 +41,16 @@ pub struct ChatDefaults {
         deserialize_with = "super::present"
     )]
     pub thinking_level: Option<ThinkingLevel>,
+}
+
+impl Default for ChatDefaults {
+    fn default() -> Self {
+        Self {
+            sandbox_mode: SandboxMode::WorkspaceWrite,
+            code_mode_enabled: false,
+            thinking_level: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

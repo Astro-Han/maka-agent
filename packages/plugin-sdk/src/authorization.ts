@@ -36,7 +36,10 @@ export interface AuthorizationRequest {
   readonly capabilities: readonly AuthorizationCapability[];
   readonly target:
     | { readonly kind: 'profile' }
-    | { readonly kind: 'plugin_workspace'; readonly permissionMode: 'explore' | 'ask' | 'bypass' }
+    | {
+        readonly kind: 'plugin_workspace';
+        readonly sandboxMode: import('./execution.js').SandboxMode;
+      }
     | { readonly kind: 'directory'; readonly path: string }
     | { readonly kind: 'session'; readonly sessionId: string }
     | {
@@ -44,7 +47,7 @@ export interface AuthorizationRequest {
         readonly workspace:
           | { readonly kind: 'project'; readonly projectId: string }
           | { readonly kind: 'host_path'; readonly path: string };
-        readonly permissionMode: 'explore' | 'ask' | 'bypass';
+        readonly sandboxMode: import('./execution.js').SandboxMode;
       };
 }
 /** A durable reference, never a bearer permission. */
@@ -61,16 +64,19 @@ export type AuthorizationBoundary =
       readonly kind: 'session';
       readonly workspaceIdentity: string;
       readonly boundary: {
+        readonly workspaceOrigin: 'selected' | 'allocated';
         readonly sessionId: string;
         readonly boundaryRevision: number;
-        readonly permissionMode: 'explore' | 'ask' | 'bypass';
+        readonly sandboxMode: import('./execution.js').SandboxMode;
+        readonly approvalPolicy: import('./execution.js').ApprovalPolicy;
         readonly cwd: string;
       };
     }
   | {
       readonly kind: 'workspace';
+      readonly origin: 'selected' | 'allocated';
       readonly workspaceIdentity: string;
-      readonly permissionMode: 'explore' | 'ask' | 'bypass';
+      readonly sandboxMode: import('./execution.js').SandboxMode;
       readonly workspace: import('./execution.js').SessionConfiguration['workspace'];
     };
 export interface ClientAuthorization {

@@ -36,6 +36,8 @@ use uuid::Uuid;
 
 pub mod directory;
 pub(crate) mod git;
+pub use git::metadata as git_metadata;
+pub mod permissions;
 pub mod project;
 
 pub const MARKER_FILE: &str = ".maka-workspace.json";

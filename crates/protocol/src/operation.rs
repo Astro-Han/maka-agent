@@ -85,6 +85,9 @@ impl Operation {
 }
 
 operations! {
+    SandboxSetupQuery => ("sandbox.setup.query", Query, Ready),
+    SandboxSetupInstall => ("sandbox.setup.install", Command, Ready),
+    SandboxSetupRemove => ("sandbox.setup.remove", Command, Ready),
     AccessCredentialFinalize => ("access.credential.finalize", Command, Ready),
     AccessCredentialIssue => ("access.credential.issue", Command, Ready),
     AccessCredentialPrepare => ("access.credential.prepare", Command, Ready),

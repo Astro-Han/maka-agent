@@ -18,11 +18,11 @@
  */
 
 import type { OrchestrationMode } from '@maka/core/orchestration';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
+import { executionPoliciesEqual, type ExecutionPolicy, type ApprovalPolicy } from '@maka/core/execution-permissions';
 import type { ThinkingLevel } from '@maka/core/model-thinking';
 import {
-  isChatDefaultPermissionMode,
-  type ChatDefaultPermissionMode,
+  isChatDefaultSandboxMode,
 } from '@maka/core/settings';
 import {
   useSessionSettingIntent as useSharedSessionSettingIntent,
@@ -39,7 +39,7 @@ import { useSessionSettingsServices } from './services-context.js';
 
 type SessionSettingValues = {
   modelConfiguration: SessionModelConfigurationIntent;
-  permissionMode: ChatDefaultPermissionMode;
+  executionPolicy: ExecutionPolicy;
   planMode: boolean;
   orchestrationMode: OrchestrationMode;
 };
@@ -48,7 +48,7 @@ export function useSessionSettingIntent<Owner extends { sessionId?: string }>(in
   catalogRevision: number;
   isActiveSession(sessionId: string): boolean;
   sessions: readonly DesktopSessionSummary[];
-  newTaskPermissionMode: ChatDefaultPermissionMode;
+  newTaskExecutionPolicy: ExecutionPolicy;
   refreshCatalog(): Promise<unknown>;
   saveComposerDefaults(model: SessionModelTarget): void;
   writeFailureCopy(
@@ -61,8 +61,8 @@ export function useSessionSettingIntent<Owner extends { sessionId?: string }>(in
   };
   captureOwner(): Owner;
   isOwnerActive(owner: Owner): boolean;
-  setNewTaskPermissionMode(mode: ChatDefaultPermissionMode): void;
-  confirmBypass(): Promise<boolean>;
+  setNewTaskExecutionPolicy(policy: ExecutionPolicy): void;
+  confirmBypass(allProtections?: boolean): Promise<boolean>;
 }) {
   const services = useSessionSettingsServices();
   const reportWriteError = (
@@ -101,11 +101,14 @@ export function useSessionSettingIntent<Owner extends { sessionId?: string }>(in
         onWriteError: (sessionId, error, attempted) =>
           reportWriteError(sessionId, error, attempted.changedSetting),
       },
-      permissionMode: {
-        write: async (sessionId, mode) => {
-          const summary = await services.setPermissionMode(sessionId, mode);
+      executionPolicy: {
+        isEqual: executionPoliciesEqual,
+        write: async (sessionId, policy) => {
+          const summary = await services.setExecutionPolicy(sessionId, policy);
           return {
-            committed: summary.permissionMode === mode,
+            committed: summary.approvalPolicy !== null && executionPoliciesEqual({
+              sandboxMode: summary.sandboxMode, approvalPolicy: summary.approvalPolicy,
+            }, policy),
             sessionRevision: summary.revision,
           };
         },
@@ -133,11 +136,42 @@ export function useSessionSettingIntent<Owner extends { sessionId?: string }>(in
     },
   });
 
+  const sessionPolicy = (sessionId: string): ExecutionPolicy | undefined => {
+    const pending = intent.overlayByChannel.executionPolicy[sessionId];
+    if (pending) return pending;
+    const session = input.sessions.find((candidate) => candidate.id === sessionId);
+    return session?.approvalPolicy
+      ? { sandboxMode: session.sandboxMode, approvalPolicy: session.approvalPolicy }
+      : undefined;
+  };
+
   return {
     clear: intent.clear,
     abandonPlanProposal: services.abandonPlanProposal,
     setCollaborationMode: services.setCollaborationMode,
     overlays: intent.overlayByChannel,
+    setApprovalPolicy: (approvalPolicy: ApprovalPolicy) => {
+      const owner = input.captureOwner();
+      if (!input.isOwnerActive(owner)) return Promise.resolve(false);
+      if (!owner.sessionId) {
+        input.setNewTaskExecutionPolicy({ ...input.newTaskExecutionPolicy, approvalPolicy });
+        return Promise.resolve(true);
+      }
+      const current = sessionPolicy(owner.sessionId);
+      return current ? intent.request('executionPolicy', owner.sessionId, { ...current, approvalPolicy })
+        : Promise.resolve(false);
+    },
+    disableProtections: async () => {
+      const owner = input.captureOwner();
+      if (owner.sessionId && !sessionPolicy(owner.sessionId)) return false;
+      if (!(await input.confirmBypass(true)) || !input.isOwnerActive(owner)) return false;
+      const policy: ExecutionPolicy = {
+        sandboxMode: 'danger-full-access', approvalPolicy: { kind: 'never' },
+      };
+      if (owner.sessionId) return intent.request('executionPolicy', owner.sessionId, policy);
+      input.setNewTaskExecutionPolicy(policy);
+      return true;
+    },
     setSessionModel: (sessionId: string, modelTarget: SessionModelTarget) =>
       intent.request('modelConfiguration', sessionId, modelConfigurationIntentForModel(modelTarget)),
     setSessionThinkingLevel: (sessionId: string, thinkingLevel: ThinkingLevel | null) => {
@@ -155,23 +189,27 @@ export function useSessionSettingIntent<Owner extends { sessionId?: string }>(in
         ? intent.request('modelConfiguration', sessionId, next)
         : Promise.resolve(false);
     },
-    setPermissionMode: async (mode: PermissionMode) => {
-      if (!isChatDefaultPermissionMode(mode)) return false;
+    setSandboxMode: async (mode: SandboxMode) => {
+      if (!isChatDefaultSandboxMode(mode)) return false;
       const owner = input.captureOwner();
       const sessionId = owner.sessionId;
-      const overlay = sessionId ? intent.overlayByChannel.permissionMode[sessionId] : undefined;
+      const overlay = sessionId ? intent.overlayByChannel.executionPolicy[sessionId] : undefined;
+      const currentPolicy = sessionId ? sessionPolicy(sessionId) : undefined;
+      if (sessionId && !currentPolicy) return false;
       const currentMode = sessionId
-        ? overlay ?? input.sessions.find((session) => session.id === sessionId)?.permissionMode
-        : input.newTaskPermissionMode;
+        ? currentPolicy?.sandboxMode
+        : input.newTaskExecutionPolicy.sandboxMode;
       if (currentMode === mode) {
         return sessionId && overlay !== undefined
-          ? intent.request('permissionMode', sessionId, mode)
+          ? intent.request('executionPolicy', sessionId, overlay)
           : true;
       }
-      if (mode === 'bypass' && !(await input.confirmBypass())) return false;
+      if (mode === 'danger-full-access' && !(await input.confirmBypass())) return false;
       if (!input.isOwnerActive(owner)) return false;
-      if (sessionId) return intent.request('permissionMode', sessionId, mode);
-      input.setNewTaskPermissionMode(mode);
+      if (sessionId && currentPolicy) {
+        return intent.request('executionPolicy', sessionId, { ...currentPolicy, sandboxMode: mode });
+      }
+      input.setNewTaskExecutionPolicy({ ...input.newTaskExecutionPolicy, sandboxMode: mode });
       return true;
     },
     setPlanMode: (sessionId: string, active: boolean) =>

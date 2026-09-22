@@ -121,7 +121,8 @@ impl Backend {
             llm_connection_slug: model.connection_slug,
             model: model.model,
             thinking_level,
-            permission_mode: view.permission_mode,
+            sandbox_mode: view.sandbox_mode,
+            approval_policy: view.approval_policy,
             collaboration_mode: view.collaboration_mode,
             orchestration_mode: view.behavior,
             tool_mode: view.tool_mode,
@@ -168,8 +169,8 @@ impl Backend {
             }
             Effect::AgentRun { execution } => {
                 grant.request.capabilities.contains(&Capability::Executions)
-                    && matches!(&grant.request.target, Target::Workspace { workspace, permission_mode }
-                    if *permission_mode == execution.permission_mode && match workspace {
+                    && matches!(&grant.request.target, Target::Workspace { workspace, sandbox_mode }
+                    if *sandbox_mode == execution.sandbox_mode && match workspace {
                         maka_runtime::execution::WorkspaceTarget::Project { project_id } => execution.project_id.as_ref() == Some(project_id),
                         maka_runtime::execution::WorkspaceTarget::HostPath { .. } => execution.project_id.is_none(),
                     })
@@ -248,7 +249,8 @@ impl Backend {
                     }
                     Effect::AgentRun { execution }
                         if execution.cwd != source.workspace.host_cwd
-                            || execution.permission_mode != source.permission_mode =>
+                            || execution.sandbox_mode != source.sandbox_mode
+                            || execution.approval_policy != source.approval_policy =>
                     {
                         return Err(invalid(
                             "scheduled target differs from the Agent's authorized workspace",
@@ -314,7 +316,8 @@ impl Backend {
                                 },
                                 thinking_level: execution.thinking_level,
                             },
-                            permission_mode: execution.permission_mode,
+                            sandbox_mode: execution.sandbox_mode,
+                            approval_policy: execution.approval_policy,
                             tool_mode: execution.tool_mode,
                             collaboration_mode: execution.collaboration_mode,
                             behavior: execution.orchestration_mode.clone(),

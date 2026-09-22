@@ -20,40 +20,73 @@
 use crate::{
     PipeEvent, failed,
     output::{Captured, Outcome, Termination},
-    shell::ShellPlan,
     tail,
 };
 use maka_runtime::shell_run::PipeStream;
 use maka_runtime::tools::ToolError;
-use std::{io, path::PathBuf, time::Duration};
-use tokio::process::{Child, Command};
+use std::{io, time::Duration};
+use tokio::process::Child;
 use tokio_util::sync::CancellationToken;
 
 const GRACE: Duration = Duration::from_secs(2);
 const REAP: Duration = Duration::from_secs(2);
 
 pub(crate) async fn run(
-    cwd: PathBuf,
-    _shell: ShellPlan,
-    command: String,
+    plan: crate::Command,
     timeout_ms: Option<u64>,
     cancellation: CancellationToken,
     observer: Option<tokio::sync::mpsc::Sender<PipeEvent>>,
 ) -> Result<Captured, ToolError> {
     if cancellation.is_cancelled() {
-        return Err(failed("Bash cancelled before spawn"));
+        return Err(failed("Shell cancelled before spawn"));
     }
-    let mut child = Command::new("/bin/sh")
-        .arg("-c")
-        .arg(&command)
-        .current_dir(&cwd)
+    let mut plan = plan
+        .prepare()
+        .await
+        .map_err(|error| failed(error.to_string()))?;
+    let mut proxy = plan.take_proxy();
+    #[cfg(target_os = "linux")]
+    let mut cleanup = crate::command::Cleanup::from(plan.take_mount_lease());
+    if cancellation.is_cancelled() {
+        drop(plan);
+        if let Some(proxy) = &mut proxy {
+            proxy
+                .close()
+                .await
+                .map_err(|error| ToolError::CleanupUnconfirmed(error.to_string()))?;
+        }
+        #[cfg(target_os = "linux")]
+        cleanup
+            .finish()
+            .await
+            .map_err(|error| ToolError::CleanupUnconfirmed(error.to_string()))?;
+        return Err(failed("Shell cancelled before spawn"));
+    }
+    let child = plan
+        .unix()
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .process_group(0)
         .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| failed(format!("Bash spawn failed: {e}")))?;
+        .spawn();
+    let mut child = match child {
+        Ok(child) => child,
+        Err(error) => {
+            if let Some(proxy) = &mut proxy {
+                proxy
+                    .close()
+                    .await
+                    .map_err(|error| ToolError::CleanupUnconfirmed(error.to_string()))?;
+            }
+            #[cfg(target_os = "linux")]
+            cleanup
+                .finish()
+                .await
+                .map_err(|error| ToolError::CleanupUnconfirmed(error.to_string()))?;
+            return Err(failed(format!("Shell spawn failed: {error}")));
+        }
+    };
     let pid = child.id().expect("spawned child has a pid");
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
@@ -80,6 +113,17 @@ pub(crate) async fn run(
             observer.map(|o| (o, PipeStream::Stderr))
         )
     );
+    #[cfg(target_os = "linux")]
+    cleanup
+        .finish()
+        .await
+        .map_err(|error| ToolError::CleanupUnconfirmed(error.to_string()))?;
+    if let Some(proxy) = &mut proxy {
+        proxy
+            .close()
+            .await
+            .map_err(|error| ToolError::CleanupUnconfirmed(error.to_string()))?;
+    }
     Ok(Captured::new(outcome?, stdout, stderr))
 }
 
@@ -106,7 +150,7 @@ async fn settle(
     tokio::time::timeout(REAP, child.wait())
         .await
         .map_err(|_| {
-            ToolError::CleanupUnconfirmed("Bash root exit not confirmed after KILL".into())
+            ToolError::CleanupUnconfirmed("Shell root exit not confirmed after KILL".into())
         })?
         .map_err(unknown)?;
     Ok(Outcome::Interrupted {
@@ -121,5 +165,5 @@ fn signal_group(pid: u32, signal: libc::c_int) -> bool {
     unsafe { libc::kill(-(pid as libc::pid_t), signal) == 0 }
 }
 fn unknown(error: io::Error) -> ToolError {
-    ToolError::CleanupUnconfirmed(format!("Bash root exit not confirmed: {error}"))
+    ToolError::CleanupUnconfirmed(format!("Shell root exit not confirmed: {error}"))
 }

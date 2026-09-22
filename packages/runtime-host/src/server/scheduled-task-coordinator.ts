@@ -743,7 +743,7 @@ export class HostScheduledTaskCoordinator implements ScheduledTaskToolAuthority 
         ...(execution.thinkingLevel === undefined
           ? {}
           : { thinkingLevel: execution.thinkingLevel }),
-        permissionMode: execution.permissionMode,
+        sandboxMode: execution.sandboxMode,
         collaborationMode: execution.collaborationMode,
         orchestrationMode: execution.orchestrationMode,
       },
@@ -954,7 +954,7 @@ function executionTemplateFromHeader(header: SessionHeader): ScheduledTaskExecut
     llmConnectionSlug: header.llmConnectionSlug,
     model: header.model,
     ...(header.thinkingLevel === undefined ? {} : { thinkingLevel: header.thinkingLevel }),
-    permissionMode: header.permissionMode,
+    sandboxMode: header.sandboxMode,
     collaborationMode: header.collaborationMode ?? 'agent',
     orchestrationMode: header.orchestrationMode ?? 'default',
     toolMode: header.toolMode ?? DEFAULT_TOOL_MODE,

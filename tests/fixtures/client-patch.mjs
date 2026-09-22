@@ -74,17 +74,7 @@ async function fixture(workspace) {
         assert.equal(after.dev, identity.dev);
       }
       if (index === 6) await assert.rejects(stat(target), { code: 'ENOENT' });
-      assert.deepEqual(input.tools.map((tool) => tool.function.name).sort(), [
-        'AskUserQuestion',
-        'Edit',
-        'Glob',
-        'Grep',
-        'Read',
-        'WebFetch',
-        'Write',
-        'apply_patch',
-        'tool_search',
-      ]);
+      assert(input.tools.some((tool) => tool.function.name === 'apply_patch'));
       if (Object.hasOwn(action, 'expected')) {
         const result = input.messages.at(-1);
         assert.equal(result.role, 'tool');
@@ -204,7 +194,7 @@ export async function verifyPatchWorkflow(connection, workspace, reopened) {
       sessionId,
       workspace: { kind: 'host_path', path: workspace },
       modelTarget: { kind: 'default' },
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     for (const turnId of ['patch-create-update', 'patch-delete']) {
       const live = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });

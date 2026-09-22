@@ -133,7 +133,7 @@ async fn scenario() {
             let workspace = approve(
                 &mut peer,
                 &client,
-                json!({"kind":"plugin_workspace","permissionMode":"bypass"}),
+                json!({"kind":"plugin_workspace","sandboxMode":"workspace-write"}),
             )
             .await;
             remote(
@@ -149,6 +149,8 @@ async fn scenario() {
             coordinator = view["sessionId"].as_str().unwrap().to_owned();
             assert_ne!(coordinator, "maka_workhub_coordination");
             assert_eq!(view["behavior"], "z.workhub.coordinator");
+            assert_eq!(view["sandboxMode"], "workspace-write");
+            assert_eq!(view["approvalPolicy"], json!({"kind":"on-request"}));
             success(peer.rpc("session.create", json!({
                 "sessionId":"workhub-target", "workspace":{"kind":"host_path","path":fixture.workspace},
                 "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}

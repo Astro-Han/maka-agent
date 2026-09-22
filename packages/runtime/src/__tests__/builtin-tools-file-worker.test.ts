@@ -57,7 +57,7 @@ describe('builtin file tools use the sandboxed worker', () => {
     const managed = createManagedExecutionBoundary(createWorkspaceWritePermissionProfile(), 0);
     for (const executionBoundary of [
       managed,
-      { kind: 'bypass', revision: 0 } as const,
+      { kind: 'danger-full-access', revision: 0 } as const,
       { kind: 'external', revision: 0 } as const,
     ]) {
       for (const coordinates of [{ offset: -1 }, { offset: 1.5 }, { limit: 0 }]) {
@@ -74,7 +74,7 @@ describe('builtin file tools use the sandboxed worker', () => {
     assert.equal(workerCalls, 0);
     const page = await filesystem.execute({
       cwd,
-      executionBoundary: { kind: 'bypass', revision: 0 },
+      executionBoundary: { kind: 'danger-full-access', revision: 0 },
       operation: { kind: 'read', path: 'sample.txt' },
     });
     assert.equal(page.kind, 'read');
@@ -142,7 +142,7 @@ describe('builtin file tools use the sandboxed worker', () => {
     );
   });
 
-  for (const kind of ['bypass', 'external'] as const) {
+  for (const kind of ['danger-full-access', 'external'] as const) {
     test(`uses the host filesystem path for an authoritative ${kind} boundary`, async () => {
       const cwd = await temporaryDirectory(`maka-file-${kind}-`);
       let workerCalled = false;
@@ -164,7 +164,7 @@ describe('builtin file tools use the sandboxed worker', () => {
           turnId: 'turn-1',
           toolCallId: `tool-${kind}`,
           cwd,
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
           executionBoundary: { kind, revision: 1 },
           abortSignal: new AbortController().signal,
           emitOutput: () => {},
@@ -263,7 +263,7 @@ describe('builtin file tools use the sandboxed worker', () => {
       true,
     );
     assert.equal(
-      calls.every((call) => call.mode === 'ask' && call.cwd === cwd),
+      calls.every((call) => call.mode === 'workspace-write' && call.cwd === cwd),
       true,
     );
     assert.equal(
@@ -352,7 +352,7 @@ describe('builtin file tools use the sandboxed worker', () => {
             turnId: 'turn-1',
             toolCallId: 'provider-call-reused',
             cwd: await temporaryDirectory('maka-file-worker-cwd-'),
-            permissionMode: 'ask',
+            sandboxMode: 'workspace-write',
             executionBoundary: createManagedExecutionBoundary(
               createWorkspaceWritePermissionProfile(),
               0,
@@ -601,7 +601,7 @@ async function runTool(
     toolCallId: `tool-${name}`,
     operationId: `toolop-${name}`,
     cwd,
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     executionBoundary: createManagedExecutionBoundary(createWorkspaceWritePermissionProfile(), 0),
     abortSignal: new AbortController().signal,
     emitOutput: () => {},

@@ -34,29 +34,35 @@ pub(crate) enum ShellPlan {
 }
 
 impl ShellPlan {
-    pub(crate) fn pty_command(
+    pub(crate) fn command(
         &self,
         cwd: &std::path::Path,
         source: &str,
-    ) -> crate::pty::PtyCommand {
-        use crate::pty::PtyCommand;
+        terminal: bool,
+    ) -> crate::Command {
+        use crate::Command;
         match self {
             #[cfg(unix)]
             Self::Posix => {
-                let mut command = PtyCommand::new("/bin/sh", cwd);
+                let _ = terminal;
+                let mut command = Command::new("/bin/sh", cwd);
                 command.args(["-c", source]);
                 command
             }
             #[cfg(windows)]
             Self::Pwsh(path) | Self::WindowsPowerShell(path) => {
-                let mut plan = PtyCommand::new(path, cwd);
-                plan.args(["-NoLogo", "-NoProfile", "-Command", command::WRAPPER])
+                let mut plan = Command::new(path, cwd);
+                plan.args(["-NoLogo", "-NoProfile"]);
+                if !terminal {
+                    plan.arg("-NonInteractive");
+                }
+                plan.args(["-Command", command::WRAPPER])
                     .env(command::SLOT, format!("{source}{}", command::EXIT));
                 plan
             }
             #[cfg(windows)]
             Self::Cmd(path) => {
-                let mut command = PtyCommand::new(path, cwd);
+                let mut command = Command::new(path, cwd);
                 command.raw_arg(format!("/d /s /c \"{source}\""));
                 command
             }
@@ -190,68 +196,28 @@ fn account_shell() -> Option<std::ffi::OsString> {
 
 #[cfg(windows)]
 pub(crate) mod command {
-    use super::ShellPlan;
-    use std::{collections::BTreeMap, ffi::OsString, os::windows::ffi::OsStrExt, path::Path};
+    use std::{os::windows::ffi::OsStrExt, path::Path};
 
     pub(super) const SLOT: &str = "__MAKA_RUNTIME_POWERSHELL_COMMAND";
-    pub(super) const WRAPPER: &str = "$__makaUtf8 = [System.Text.UTF8Encoding]::new($false)\n[Console]::InputEncoding = $__makaUtf8\n[Console]::OutputEncoding = $__makaUtf8\n$OutputEncoding = $__makaUtf8\n$__makaCommandText = [Environment]::GetEnvironmentVariable('__MAKA_RUNTIME_POWERSHELL_COMMAND')\n[Environment]::SetEnvironmentVariable('__MAKA_RUNTIME_POWERSHELL_COMMAND', $null)\n$__makaCommand = [ScriptBlock]::Create($__makaCommandText)\n. $__makaCommand";
+    // A read-only TEMP can put Windows PowerShell in ConstrainedLanguage.
+    // Invoke-Expression parses in the current language mode; unlike
+    // ScriptBlock::Create it does not require FullLanguage merely to launch a
+    // native command. Never override machine application-control policy.
+    pub(super) const WRAPPER: &str = r#"
+if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') {
+    $__makaUtf8 = [System.Text.UTF8Encoding]::new($false)
+    [Console]::InputEncoding = $__makaUtf8
+    [Console]::OutputEncoding = $__makaUtf8
+    $OutputEncoding = $__makaUtf8
+} else {
+    & "$env:SystemRoot\System32\chcp.com" 65001 > $null
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+}
+$__makaCommandText = $env:__MAKA_RUNTIME_POWERSHELL_COMMAND
+Remove-Item Env:\__MAKA_RUNTIME_POWERSHELL_COMMAND
+Invoke-Expression $__makaCommandText
+"#;
     pub(super) const EXIT: &str = "\n$__makaOk = $?\nif (-not $__makaOk) { if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE } else { exit 1 } }";
-
-    pub(crate) struct Command {
-        pub executable: Vec<u16>,
-        pub line: Vec<u16>,
-        pub environment: Vec<u16>,
-    }
-
-    pub(crate) fn prepare(shell: &ShellPlan, source: &str) -> std::io::Result<Command> {
-        let (path, line, script) = match shell {
-            ShellPlan::Pwsh(path) | ShellPlan::WindowsPowerShell(path) => {
-                let line = [
-                    path.to_str()
-                        .ok_or_else(|| std::io::Error::other("shell path must be UTF-8"))?,
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    WRAPPER,
-                ]
-                .map(quote)
-                .join(" ");
-                (path, line, Some(format!("{source}{EXIT}")))
-            }
-            ShellPlan::Cmd(path) => (
-                path,
-                format!("{} /d /s /c \"{source}\"", quote(&path.to_string_lossy())),
-                None,
-            ),
-        };
-        let mut environment = BTreeMap::<Vec<u16>, (OsString, OsString)>::new();
-        for (key, value) in std::env::vars_os() {
-            let folded = key
-                .to_string_lossy()
-                .to_uppercase()
-                .encode_utf16()
-                .collect();
-            environment.insert(folded, (key, value));
-        }
-        if let Some(script) = script {
-            // Windows environment keys are case-insensitive.
-            environment.insert(SLOT.encode_utf16().collect(), (SLOT.into(), script.into()));
-        }
-        let mut block = Vec::new();
-        for (key, value) in environment.into_values() {
-            block.extend(key.encode_wide());
-            block.push('=' as u16);
-            block.extend(value.encode_wide());
-            block.push(0);
-        }
-        block.push(0);
-        Ok(Command {
-            executable: wide(path)?,
-            line: wide(Path::new(&line))?,
-            environment: block,
-        })
-    }
 
     pub(crate) fn wide(path: &Path) -> std::io::Result<Vec<u16>> {
         let mut value: Vec<_> = path.as_os_str().encode_wide().collect();

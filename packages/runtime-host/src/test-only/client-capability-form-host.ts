@@ -122,7 +122,7 @@ async function createFormHost(
     modelId: 'model-1',
     readExecutionBoundary: async () =>
       createManagedExecutionBoundary(createWorkspaceWritePermissionProfile(), 0),
-    readPermissionMode: async () => header.permissionMode,
+    readSandboxMode: async () => header.sandboxMode,
     newId: nextId(),
     now: nextNow(),
     getPermissionPauseTarget: () => null,
@@ -242,7 +242,7 @@ function sessionHeader(): SessionHeader {
     llmConnectionSlug: 'connection-1',
     connectionLocked: true,
     model: 'model-1',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     schemaVersion: 1,
   };
 }

@@ -26,6 +26,8 @@ import type { IpcMainInvokeEvent, WebContents } from 'electron';
 import type { IpcHandler } from '../ipc-reconnect-policy.js';
 import { registerClientPluginRemoteIpc } from '../client-plugin-remote-ipc.js';
 import { clientPluginRemote } from '../../renderer/platform/desktop/client-plugin-remote.js';
+import { ClientPluginComposerSlot } from '../../renderer/features/client-plugins/index.js';
+import { desktopSessionKey } from '../../shared/runtime-host-identity.js';
 
 function renderer() {
   const emitter = Object.assign(new EventEmitter(), {
@@ -114,6 +116,12 @@ test('reconnecting to the same Host revokes old Remote leases without fencing th
   const handlers = new Map<string, IpcHandler>();
   const calls: unknown[] = [];
   const closes: string[] = [];
+  const sessionId = randomUUID();
+  const host = { profileId: 'origin', hostId: 'host' };
+  const input = { sessionId: desktopSessionKey({ hostId: host.hostId, sessionId }), locale: 'en' as const, onOpenSession() {} };
+  const composer = ClientPluginComposerSlot({ host, input });
+  assert.equal(composer.props.input.sessionId, sessionId);
+  assert.throws(() => ClientPluginComposerSlot({ host: { ...host, hostId: 'other' }, input }), /another Host/);
   const register = () => registerClientPluginRemoteIpc({
     ipcMain: { handle: (name, handler) => { handlers.set(name, handler); } },
     ownsRenderer: contents => contents === owner.emitter as unknown as WebContents,
@@ -121,7 +129,9 @@ test('reconnecting to the same Host revokes old Remote leases without fencing th
     client: { hostEpoch: 'same-host', async request(_operation, input) {
       switch (input.kind) {
         case 'open_document': return { kind: 'document', document: randomUUID() };
-        case 'bind': return { kind: 'bound', handler: 'method', target: {
+        case 'bind':
+          assert.equal(input.binding.sessionId, sessionId);
+          return { kind: 'bound', handler: 'method', target: {
           entryId: 'backend', activation: randomUUID(), registration: randomUUID(),
         } };
         case 'call': calls.push(input.input); return { kind: 'value', value: input.input };
@@ -139,8 +149,10 @@ test('reconnecting to the same Host revokes old Remote leases without fencing th
   try {
     const before = await handlers.get('plugins:connection')!(owner.event, nonce);
     const old = remote(before.epoch);
-    const call = old.api.method<string, string>('echo');
+    const call = old.api.method<string, string>('echo', composer.props.input.sessionId);
     assert.equal(await call('before reconnect'), 'before reconnect');
+    await assert.rejects(old.api.method('echo', input.sessionId)(null), /Invalid Remote Session/);
+    assert.deepEqual(calls, ['before reconnect'], 'a Desktop projection never reaches the Host');
     await dispose();
     dispose = register();
     const after = await handlers.get('plugins:connection')!(owner.event, nonce);
@@ -149,7 +161,7 @@ test('reconnecting to the same Host revokes old Remote leases without fencing th
     await assert.rejects(call('never replay'));
     await old.close();
     const next = remote(after.epoch);
-    assert.equal(await next.api.method<string, string>('echo')('after reconnect'), 'after reconnect');
+    assert.equal(await next.api.method<string, string>('echo', sessionId)('after reconnect'), 'after reconnect');
     await next.close();
     assert.deepEqual(calls, ['before reconnect', 'after reconnect']);
     assert.equal(closes.length, 2);

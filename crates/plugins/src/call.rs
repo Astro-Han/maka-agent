@@ -97,16 +97,52 @@ impl std::ops::Deref for Scope {
 
 /// Embedding dispatch owns an issuer. A different embedding can create its own
 /// issuer but cannot mint scopes accepted by this one's resource adapters.
+pub type Evidence = Arc<dyn Any + Send + Sync>;
+
+/// Capture the embedding's authority once at call entry. Forwarded calls retain
+/// this evidence; resource adapters still recheck revocation before effects.
+pub trait Admission: Send + Sync {
+    fn authorize<'a>(
+        &'a self,
+        identity: &'a Identity,
+    ) -> futures_util::future::BoxFuture<'a, Result<Evidence, ToolError>>;
+}
+
 #[derive(Clone, Default)]
-pub struct Issuer(Arc<()>);
+pub struct Issuer {
+    source: Arc<()>,
+    admission: Option<Arc<dyn Admission>>,
+}
 impl Issuer {
+    pub fn with_admission(admission: Arc<dyn Admission>) -> Self {
+        Self {
+            admission: Some(admission),
+            ..Self::default()
+        }
+    }
+
+    pub async fn admit(
+        &self,
+        identity: Identity,
+        cancellation: CancellationToken,
+    ) -> Result<Scope, ToolError> {
+        let evidence = match &self.admission {
+            Some(admission) => Some(tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return Err(ToolError::Failed("plugin invocation is closed".into())),
+                evidence = admission.authorize(&identity) => evidence?,
+            }),
+            None => None,
+        };
+        Scope::new(self.source.clone(), identity, evidence, cancellation)
+    }
     pub async fn run<T>(
         &self,
         identity: Identity,
         cancellation: CancellationToken,
         operation: impl Future<Output = Result<T, ToolError>>,
     ) -> Result<T, ToolError> {
-        let scope = self.issue(identity, cancellation)?;
+        let scope = self.admit(identity, cancellation).await?;
         let _closed = scope.cancellation.clone().drop_guard();
         let result = CURRENT.scope(scope.clone(), operation).await;
         scope.finish().await?;
@@ -117,10 +153,10 @@ impl Issuer {
         identity: Identity,
         cancellation: CancellationToken,
     ) -> Result<Scope, ToolError> {
-        Scope::new(self.0.clone(), identity, None, cancellation)
+        Scope::new(self.source.clone(), identity, None, cancellation)
     }
     pub fn owns(&self, scope: &Scope) -> bool {
-        Arc::ptr_eq(&self.0, &scope.source)
+        Arc::ptr_eq(&self.source, &scope.source)
     }
     pub fn issue_with<T: Any + Send + Sync>(
         &self,
@@ -129,7 +165,7 @@ impl Issuer {
         cancellation: CancellationToken,
     ) -> Result<Scope, ToolError> {
         Scope::new(
-            self.0.clone(),
+            self.source.clone(),
             identity,
             Some(Arc::new(evidence)),
             cancellation,

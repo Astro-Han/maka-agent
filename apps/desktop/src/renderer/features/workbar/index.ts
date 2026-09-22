@@ -26,4 +26,4 @@ export { WorkbarHost } from './ui/workbar-host';
 export { WorkbarServicesProvider } from './services-context';
 export { useWorkbarController } from './controller/use-workbar-controller';
 export type { SessionWorkbarTabKind } from './model/workbar-tabs';
-export type { WorkbarServices } from './ports';
+export type { SideChatSession, WorkbarServices } from './ports';

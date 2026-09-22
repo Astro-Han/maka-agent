@@ -36,6 +36,12 @@ pub(super) struct Stops {
     pub invocation: CancellationToken,
 }
 impl Stops {
+    fn is_cancelled(&self) -> bool {
+        self.explicit.is_cancelled()
+            || self.retiring.is_cancelled()
+            || self.invocation.is_cancelled()
+    }
+
     async fn cancelled(&self) {
         tokio::select! { _ = self.explicit.cancelled() => {}, _ = self.retiring.cancelled() => {}, _ = self.invocation.cancelled() => {} }
     }
@@ -48,14 +54,18 @@ pub(super) async fn run(
     stops: Stops,
     admission: tokio::sync::OwnedMutexGuard<()>,
 ) -> Result<(), String> {
-    let spawned = tokio::select! {
-        biased;
-        _ = async { tokio::select! { _ = stops.cancelled() => {}, _ = stops.launch.cancelled() => {} } } => {
-            state.send_replace(State::Ended(Ok(Exit { code: None, success: false, stopped: true, error: None })));
-            return Ok(());
-        }
-        result = maka_process::pipe::spawn(command) => result,
-    };
+    if stops.is_cancelled() || stops.launch.is_cancelled() {
+        state.send_replace(State::Ended(Ok(Exit {
+            code: None,
+            success: false,
+            stopped: true,
+            error: None,
+        })));
+        return Ok(());
+    }
+    // An accepted startup owns preparation and native handles. Cancellation
+    // during startup is settled by the lifecycle below, never by dropping spawn.
+    let spawned = maka_process::pipe::spawn(command).await;
     drop(admission);
     let mut process = match spawned {
         Ok(process) => process,
@@ -64,6 +74,11 @@ pub(super) async fn run(
             return Ok(());
         }
     };
+    // Cancellation while startup was in progress still belongs to the launch,
+    // even when a successfully returned handle would have Instance lifetime.
+    if stops.launch.is_cancelled() {
+        stops.explicit.cancel();
+    }
     state.send_replace(State::Running);
     let finished = CancellationToken::new();
     let fault = CancellationToken::new();

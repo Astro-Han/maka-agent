@@ -70,7 +70,7 @@ function originalRecord(record) {
 
 export async function verifyResourceQueries(connection, workspace) {
   const query = (input) =>
-    connection.request('runtime.resource.query', { sessionId: 'bash-bypass', ...input }, 10000);
+    connection.request('runtime.resource.query', { sessionId: 'shell-bypass', ...input }, 10000);
   const records = JSON.parse(await readFile(join(workspace, 'resource-records.json'), 'utf8'));
   const expected = canonicalRuntimeResources(
     records.map((record) => shellRunUpdate(originalRecord(record))),
@@ -107,7 +107,7 @@ export async function verifyResourceQueries(connection, workspace) {
   assert.equal(missing.resource, null);
   const empty = await connection.request('runtime.resource.query', {
     kind: 'list_start',
-    sessionId: 'bash-ask',
+    sessionId: 'shell-readonly',
   });
   assert.deepEqual(empty.resources, []);
   assert.equal(empty.revision, missing.revision);

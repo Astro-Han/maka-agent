@@ -97,7 +97,7 @@ async fn original_client_reads_frozen_archives_after_compaction_and_restart_with
                 .events
                 .iter()
                 .filter(|stored| matches!(
-                    &stored.event.fact, Fact::ToolDispatched { name, .. } if name == "Bash"
+                    &stored.event.fact, Fact::ToolDispatched { name, .. } if name == "Shell"
                 ))
                 .count(),
             1,

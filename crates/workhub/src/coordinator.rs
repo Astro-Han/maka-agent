@@ -24,7 +24,7 @@ use maka_plugins::{
     llm::{Models, Selection},
     session::View,
 };
-use maka_runtime::execution::{CollaborationMode, PermissionMode, ToolMode};
+use maka_runtime::execution::{CollaborationMode, SandboxMode, ToolMode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -52,7 +52,7 @@ impl Coordinator {
     }
     pub async fn resolve(&self) -> Result<(View, Arc<dyn Commands>), Error> {
         let target = AuthorizationTarget::PluginWorkspace {
-            permission_mode: PermissionMode::Bypass,
+            sandbox_mode: SandboxMode::WorkspaceWrite,
         };
         let commands = self.access.commands(&target).await?;
         let intent = match self.repository.read::<Intent>(KEY).await? {
@@ -74,7 +74,8 @@ impl Coordinator {
                                 model,
                                 thinking_level: None,
                             },
-                            permission_mode: PermissionMode::Bypass,
+                            sandbox_mode: SandboxMode::WorkspaceWrite,
+                            approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
                             tool_mode: ToolMode::Direct,
                             collaboration_mode: CollaborationMode::Agent,
                             behavior: self.behavior.clone(),

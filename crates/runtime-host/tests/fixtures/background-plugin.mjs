@@ -19,6 +19,38 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function (ctx) {
+  await ctx.remote.method('network', async (input) => {
+    const intent = parseIntent(input);
+    return ctx
+      .withAuthorization(intent.grant, async (call, _grant, boundary) => {
+        if (boundary.kind !== 'workspace' || boundary.sandboxMode !== 'read-only')
+          throw new Error('HTTP consent changed filesystem isolation');
+        for (const forbidden of [
+          () => call.files.entries.write({ path: 'network-must-not-write', bytes: [1] }),
+          () => call.processes.spawn({ executable: '__PROTOCOL_EXECUTABLE__', args: [], env: {} }),
+        ]) {
+          try {
+            await forbidden();
+            throw new Error('HTTP consent became file or process authority');
+          } catch (error) {
+            if (error.code !== 'revoked') throw error;
+          }
+        }
+        const response = await call.http.request({ url: '__RESOURCE_URL__' });
+        let body = '';
+        const decoder = new TextDecoder();
+        for (let chunk = await response.next(); chunk !== null; chunk = await response.next())
+          body += decoder.decode(chunk, { stream: true });
+        await response.close();
+        if (response.status !== 200 || body !== 'authorized')
+          throw new Error('Authorized HTTP response lost');
+        return true;
+      })
+      .catch((error) => {
+        if (error.code === 'revoked') return false;
+        throw error;
+      });
+  });
   await ctx.remote.method('history', async (_input, caller) =>
     caller.views.authorize(
       {
@@ -116,7 +148,8 @@ export default async function (ctx) {
         managed: true,
         settings: {
           target: { kind: 'executor', executorId: 'example.background' },
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
+          approvalPolicy: { kind: 'on-request' },
           toolMode: 'direct',
           collaborationMode: 'agent',
           behavior: 'default',
@@ -125,7 +158,7 @@ export default async function (ctx) {
       try {
         await commands.createRoot({
           ...request,
-          settings: { ...request.settings, permissionMode: 'bypass' },
+          settings: { ...request.settings, sandboxMode: 'danger-full-access' },
         });
         throw new Error('workspace grant widened');
       } catch (error) {
@@ -179,7 +212,7 @@ export default async function (ctx) {
         if (error.code !== 'revoked') throw error;
       }
       const view = await commands.session(root.sessionId);
-      if (view.permissionMode !== 'explore' || view.target.kind !== 'executor')
+      if (view.sandboxMode !== 'read-only' || view.target.kind !== 'executor')
         throw new Error('root settings changed');
       return JSON.parse(JSON.stringify({ root, receipt }));
     } finally {
@@ -242,7 +275,7 @@ export default async function (ctx) {
           if (
             view.target.kind !== 'executor' ||
             view.target.executorId !== 'example.background' ||
-            view.permissionMode !== 'bypass' ||
+            view.sandboxMode !== 'danger-full-access' ||
             view.sessionId !== child.sessionId
           )
             throw new Error('authorized Session projection changed');

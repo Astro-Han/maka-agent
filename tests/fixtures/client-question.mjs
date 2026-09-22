@@ -34,7 +34,7 @@ const questions = ['Pick\u0001one', 'Explain your choice', 'Optional detail'].ma
 }));
 const answers = ['Beta', 'a free answer outside the labels', null];
 
-export async function verifyQuestions(connection, workspace, reopened, permissionMode) {
+export async function verifyQuestions(connection, workspace, reopened, sandboxMode) {
   const request = (op, input) => connection.request(op, input, 3000);
   const query = (interactionId) => request('interaction.query', { sessionId, interactionId });
   const answer = (interactionId, value) =>
@@ -169,8 +169,8 @@ export async function verifyQuestions(connection, workspace, reopened, permissio
       sessionId,
       workspace: { kind: 'host_path', path: workspace },
       modelTarget: { kind: 'default' },
-      permissionMode,
-      ...(permissionMode === 'explore' ? { mode: 'bot' } : {}),
+      sandboxMode,
+      ...(sandboxMode === 'read-only' ? { mode: 'bot' } : {}),
     });
     live = await watchSession(connection, sessionId);
     const snapshots = [];

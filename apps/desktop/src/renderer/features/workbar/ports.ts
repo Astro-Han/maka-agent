@@ -34,7 +34,7 @@ import type {
 } from '@maka/core/artifacts';
 import type { BrowserState, BrowserViewRect } from '@maka/core/browser';
 import type { GitReviewReadResult, GitReviewSource } from '@maka/core/git-review';
-import type { PermissionMode } from '@maka/core/permission';
+import type { ApprovalPolicy, ExecutionPolicy } from '@maka/core/execution-permissions';
 import type { RegenerateTurnInput } from '@maka/core/runtime-inputs';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
 import type { ClientCapabilityResponse } from '@maka/core/client-capability-grant';
@@ -75,6 +75,7 @@ export interface WorkbarReviewService {
 }
 
 export interface WorkbarTerminalService {
+  prepareExecution(sessionId: string): Promise<boolean>;
   /** Live, locally owned manual terminals; excludes model tools and inherited resources. */
   recover(sessionId: string): Promise<import('../../../shared/runtime-host-identity.js').TerminalRecovery>;
   subscribeCloseChanges(handler: (change: import('../../../shared/runtime-host-identity.js').TerminalCloseChange) => void): WorkbarUnsubscribe;
@@ -195,8 +196,11 @@ export type SideChatStopTarget =
   | { readonly kind: 'admission'; readonly messageId: string }
   | { readonly kind: 'turn'; readonly turnId: string };
 
+export type SideChatSession = SessionSummary & { approvalPolicy: ApprovalPolicy | null };
+
 export interface SideChatSessionPort {
-  listSessions(): Promise<SessionSummary[]>;
+  prepareExecution(sessionId: string): Promise<boolean>;
+  listSessions(): Promise<SideChatSession[]>;
   listTurns(sessionId: string): Promise<TurnRecord[]>;
   readSettledMessages(
     sessionId: string,
@@ -211,7 +215,7 @@ export interface SideChatSessionPort {
       sideConversation: true;
     },
   ): Promise<
-    | { ok: true; session: SessionSummary }
+    | { ok: true; session: SideChatSession }
     | { ok: false; reason: 'session_busy' | 'operation_unavailable' }
   >;
   cleanupSessionCopy(sessionId: string): Promise<void>;
@@ -251,10 +255,10 @@ export interface SideChatSessionPort {
     text: string,
   ): Promise<void>;
   reorderQueueEntries(sessionId: string, entryIds: readonly string[]): Promise<void>;
-  setPermissionMode(
+  setExecutionPolicy(
     sessionId: string,
-    mode: PermissionMode,
-  ): Promise<SessionSummary>;
+    policy: ExecutionPolicy,
+  ): Promise<SideChatSession>;
   regenerateTurn(sessionId: string, input: RegenerateTurnInput): Promise<void>;
   respondToSandboxBoundary(
     sessionId: string,
@@ -272,6 +276,7 @@ export interface SideChatSessionPort {
     sessionId: string,
     response: InteractionFormResponse,
   ): Promise<void>;
+  respondToPermissions(sessionId: string, response: import('@maka/core/execution-permissions').PermissionsResponse): Promise<void>;
   subscribeEvents(
     sessionId: string,
     handler: (event: SessionEvent) => void,

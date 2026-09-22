@@ -768,7 +768,7 @@ describe('SQLite workflow stores', () => {
               llmConnectionId: 'connection-default',
               llmConnectionSlug: 'default',
               model: 'test-model',
-              permissionMode: 'ask',
+              sandboxMode: 'workspace-write',
               collaborationMode: 'agent',
               orchestrationMode: 'default',
             },
@@ -824,7 +824,7 @@ describe('SQLite workflow stores', () => {
                   llmConnectionId: 'connection-default',
                   llmConnectionSlug: 'default',
                   model: 'test-model',
-                  permissionMode: 'execute',
+                  sandboxMode: 'execute',
                   collaborationMode: 'agent',
                   orchestrationMode: 'default',
                 },
@@ -833,7 +833,7 @@ describe('SQLite workflow stores', () => {
             },
             now,
           ),
-        /execution.permissionMode is required/,
+        /execution.sandboxMode is required/,
       );
       const task = await store.create(
         {
@@ -847,7 +847,7 @@ describe('SQLite workflow stores', () => {
               llmConnectionId: 'connection-default',
               llmConnectionSlug: 'default',
               model: 'test-model',
-              permissionMode: 'ask',
+              sandboxMode: 'workspace-write',
               collaborationMode: 'agent',
               orchestrationMode: 'default',
             },
@@ -863,9 +863,9 @@ describe('SQLite workflow stores', () => {
       try {
         database.exec(`
           UPDATE workflow_scheduled_tasks
-          SET record_json = json_set(record_json, '$.effect.execution.permissionMode', 'execute');
+          SET record_json = json_set(record_json, '$.effect.execution.sandboxMode', 'execute');
           UPDATE workflow_scheduled_task_fires
-          SET record_json = json_set(record_json, '$.task.effect.execution.permissionMode', 'execute');
+          SET record_json = json_set(record_json, '$.task.effect.execution.sandboxMode', 'execute');
         `);
       } finally {
         database.close();
@@ -877,13 +877,13 @@ describe('SQLite workflow stores', () => {
         const decodedClaim = (await reopened.listPendingFires())[0];
         assert.equal(
           decodedTask?.effect.kind === 'agent_run'
-            ? decodedTask.effect.execution.permissionMode
+            ? decodedTask.effect.execution.sandboxMode
             : undefined,
           'ask',
         );
         assert.equal(
           decodedClaim?.task.effect.kind === 'agent_run'
-            ? decodedClaim.task.effect.execution.permissionMode
+            ? decodedClaim.task.effect.execution.sandboxMode
             : undefined,
           'ask',
         );

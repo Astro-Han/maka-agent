@@ -24,6 +24,234 @@ use maka_runtime::interaction::{
 };
 use sqlx::Connection;
 
+#[tokio::test]
+async fn permission_receipts_preserve_partial_scope_and_revoke_by_boundary_revision() {
+    use maka_runtime::{event::Invocation, interaction::PermissionRequest};
+    use maka_sandbox::{
+        Network,
+        filesystem::{Access, Rule},
+        grant,
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("permissions.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    log.create_session(
+        "session",
+        "create",
+        &serde_json::json!({"boundary_revision": 4}),
+        1,
+    )
+    .await
+    .unwrap();
+    let invocation = Invocation {
+        session_id: "session".into(),
+        turn_id: "turn".into(),
+        run_id: "run".into(),
+        invocation_id: "invocation".into(),
+    };
+    let requested = grant::Permissions {
+        filesystem: vec![Rule::subtree(temp.path(), Access::Write)],
+        network: Network::Allowed,
+    };
+    let partial = grant::Permissions {
+        filesystem: vec![Rule::exact(temp.path().join("result"), Access::Read)],
+        network: Network::Denied,
+    };
+    let make_request = |id: &str| InteractionRecord {
+        request: InteractionRequest::Permissions {
+            tool_use_id: Some("tool-use".into()),
+            base_revision: 4,
+            request: PermissionRequest {
+                reason: "Read the requested result".into(),
+                command: None,
+                permissions: requested.clone(),
+            },
+        },
+        ..request(id)
+    };
+    let mut oversized = make_request("unanswerable");
+    let InteractionRequest::Permissions { request, .. } = &mut oversized.request else {
+        unreachable!()
+    };
+    request.permissions.filesystem = (0..32)
+        .map(|index| {
+            Rule::exact(
+                temp.path().join(format!("{index}{}", "x".repeat(300))),
+                Access::Read,
+            )
+        })
+        .collect();
+    assert!(
+        log.establish_interaction(&oversized).await.is_err(),
+        "a request must leave room for its complete approval receipt"
+    );
+    for (id, scope) in [
+        ("once", grant::Scope::Once),
+        ("turn_grant", grant::Scope::Turn),
+        ("session_grant", grant::Scope::Session),
+    ] {
+        log.establish_interaction(&make_request(id)).await.unwrap();
+        let outcome = InteractionOutcome::PermissionsDecision {
+            decision: grant::Decision::Allow {
+                permissions: partial.clone(),
+                scope,
+            },
+            committed_at: 20,
+        };
+        let committed = log.commit_interaction_outcome(id, outcome).await.unwrap();
+        assert!(committed.matches);
+        let retry = InteractionOutcome::PermissionsDecision {
+            decision: grant::Decision::Allow {
+                permissions: requested.clone(),
+                scope,
+            },
+            committed_at: 21,
+        };
+        assert!(
+            !log.commit_interaction_outcome(id, retry)
+                .await
+                .unwrap()
+                .matches,
+            "lost reply cannot broaden a partial approval"
+        );
+    }
+    let all = log
+        .permission_grants(&invocation, Some("tool-use"), 4)
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 3);
+    assert!(all.iter().all(|grant| grant.permissions == partial));
+    assert_eq!(
+        log.permission_grants(&invocation, None, 4)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        log.permission_grants(&invocation, Some("other-tool"), 4)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    let other_run = Invocation {
+        run_id: "other-run".into(),
+        ..invocation.clone()
+    };
+    assert_eq!(
+        log.permission_grants(&other_run, Some("tool-use"), 4)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    let other_turn = Invocation {
+        turn_id: "other-turn".into(),
+        ..other_run
+    };
+    assert_eq!(
+        log.permission_grants(&other_turn, Some("tool-use"), 4)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let other_session = Invocation {
+        session_id: "other-session".into(),
+        ..invocation.clone()
+    };
+    assert!(
+        log.permission_grants(&other_session, Some("tool-use"), 4)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    log.establish_interaction(&make_request("pending"))
+        .await
+        .unwrap();
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(log.close_abandoned_interactions(30).await.unwrap(), 1);
+    assert_eq!(
+        log.permission_grants(&invocation, Some("tool-use"), 4)
+            .await
+            .unwrap(),
+        all
+    );
+    let late = InteractionOutcome::PermissionsDecision {
+        decision: grant::Decision::Allow {
+            permissions: requested.clone(),
+            scope: grant::Scope::Session,
+        },
+        committed_at: 31,
+    };
+    assert!(
+        !log.commit_interaction_outcome("pending", late)
+            .await
+            .unwrap()
+            .matches
+    );
+
+    log.establish_interaction(&make_request("stale"))
+        .await
+        .unwrap();
+    let session = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap();
+    log.update_session_metadata(
+        "session",
+        session.revision,
+        |value: &mut serde_json::Value| {
+            value["boundary_revision"] = serde_json::json!(5);
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+    let stale = InteractionOutcome::PermissionsDecision {
+        decision: grant::Decision::Allow {
+            permissions: partial,
+            scope: grant::Scope::Session,
+        },
+        committed_at: 32,
+    };
+    assert!(
+        log.commit_interaction_outcome("stale", stale)
+            .await
+            .is_err()
+    );
+    assert!(
+        log.interaction("stale")
+            .await
+            .unwrap()
+            .unwrap()
+            .outcome
+            .is_none()
+    );
+    assert!(
+        log.permission_grants(&invocation, Some("tool-use"), 4)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        log.permission_grants(&invocation, Some("tool-use"), 5)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        log.establish_interaction(&make_request("stale_request"))
+            .await
+            .is_err()
+    );
+    log.close().await.unwrap();
+}
+
 fn request(id: &str) -> InteractionRecord {
     InteractionRecord {
         session_id: "session".into(),

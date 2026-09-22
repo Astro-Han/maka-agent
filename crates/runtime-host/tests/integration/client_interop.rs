@@ -28,7 +28,7 @@ use maka_event_log::EventLog;
 use maka_event_log::root::{RootNamespaces, RootOwner};
 use maka_runtime::{
     event::Fact,
-    execution::{PermissionMode, ToolMode},
+    execution::{SandboxMode, ToolMode},
 };
 use maka_runtime_host::server::{Host, local::LocalListener};
 use maka_runtime_host::session::SessionConfiguration;
@@ -167,11 +167,11 @@ async fn unchanged_client_configures_session_checks_cas_and_reopens_durable_stat
                 "later relocation cannot reinterpret historical execution cwd"
             );
             assert_eq!(
-                configuration.permission_mode,
+                configuration.sandbox_mode,
                 if turn == "first-turn" {
-                    PermissionMode::Explore
+                    SandboxMode::ReadOnly
                 } else {
-                    PermissionMode::Ask
+                    SandboxMode::WorkspaceWrite
                 },
                 "opening must retain the grants actually used by this Turn"
             );

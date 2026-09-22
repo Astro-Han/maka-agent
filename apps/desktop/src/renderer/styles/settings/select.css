@@ -32,7 +32,7 @@
    regression did exactly that). The field wraps the trigger, so sizing the
    trigger here sizes the whole control. */
 .settingsRows .settingsModelPickerTrigger,
-.settingsRows .permissionModeSelector {
+.settingsRows .sandboxModeSelector {
   width: var(--settings-control-width);
   max-width: 100%;
 }

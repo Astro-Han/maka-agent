@@ -35,6 +35,7 @@ import {
 import { openSystemPermissionPane, requestPermissionAccess } from "./permissions-actions.js";
 import { permissionSnapshotE2eFixture } from "./permission-snapshot-e2e-fixture.js";
 import type { DesktopRuntimeHostClient } from "./runtime-host-client.js";
+import { createSandboxSetup } from './sandbox-setup.js';
 import {
   handleReconnectableRead,
   type ReconnectableReadIpcMain,
@@ -47,6 +48,11 @@ type ComputerUseCapabilityInput = NonNullable<
 interface RuntimeHostPermissionsIpcDeps {
   readonly ipcMain: ReconnectableReadIpcMain;
   readonly client: DesktopRuntimeHostClient;
+  readonly sandboxSetup: {
+    confirm(): Promise<boolean>;
+    isCurrent(): boolean;
+    unavailable(status: import('@maka/runtime-host/protocol').SandboxSetupStatus): Error;
+  };
   readonly getSettings: () => Promise<AppSettings>;
   readonly listConnections: () => Promise<LlmConnection[]>;
   readonly botRegistry: BotRegistry;
@@ -56,6 +62,12 @@ interface RuntimeHostPermissionsIpcDeps {
 export function registerRuntimeHostPermissionsIpc(
   deps: RuntimeHostPermissionsIpcDeps,
 ): void {
+  const ensureSandbox = createSandboxSetup({
+    ...deps.sandboxSetup,
+    query: () => deps.client.request('sandbox.setup.query', {}, 5_000),
+    install: () => deps.client.request('sandbox.setup.install', {}, 185_000),
+  });
+  deps.ipcMain.handle('permissions:ensureSandbox', ensureSandbox);
   const permissions = (now = Date.now()) =>
     permissionSnapshotE2eFixture(now) ?? buildPermissionSnapshot(now);
 

@@ -112,6 +112,21 @@ pub struct ReadRoot {
     files: Option<Arc<BTreeSet<String>>>,
 }
 impl ReadRoot {
+    /// Capture on the embedding's blocking worker, before publishing a view.
+    pub fn capture(path: impl AsRef<Path>) -> io::Result<Self> {
+        Directory::capture(path.as_ref()).map(|directory| Self {
+            directory,
+            files: None,
+        })
+    }
+
+    pub fn restrict(
+        mut self,
+        policy: Arc<maka_sandbox::filesystem::Compiled>,
+    ) -> Result<Self, Error> {
+        self.directory = self.directory.restrict(policy)?;
+        Ok(self)
+    }
     pub fn bind_authorized(
         &self,
         owner: Context,
@@ -130,14 +145,9 @@ impl ReadRoot {
     }
     pub async fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_owned();
-        tokio::task::spawn_blocking(move || {
-            Directory::capture(&path).map(|directory| Self {
-                directory,
-                files: None,
-            })
-        })
-        .await
-        .map_err(io::Error::other)?
+        tokio::task::spawn_blocking(move || Self::capture(path))
+            .await
+            .map_err(io::Error::other)?
     }
     /// Restrict a mount to relative files or subtrees (names ending in '/').
     pub fn select(mut self, files: BTreeSet<String>) -> Result<Self, Error> {
@@ -375,6 +385,9 @@ impl Reader<'_> {
             if input.after.as_ref().is_some_and(|after| &name <= after) {
                 continue;
             }
+            if !directory.readable(Path::new(&name)) {
+                continue;
+            }
             let kind = entry.file_type()?;
             let kind = if kind.is_file() {
                 Kind::File
@@ -454,6 +467,35 @@ mod tests {
             offset: 0,
             limit: 3,
         };
+        let protected = root
+            .clone()
+            .restrict(Arc::new(
+                maka_sandbox::filesystem::Policy {
+                    default: maka_sandbox::filesystem::Access::Read,
+                    rules: vec![maka_sandbox::filesystem::Rule::exact(
+                        dunce::canonicalize(directory.path())
+                            .unwrap()
+                            .join("private"),
+                        maka_sandbox::filesystem::Access::Deny,
+                    )],
+                    deny_globs: vec![],
+                }
+                .compile()
+                .unwrap(),
+            ))
+            .unwrap()
+            .bind(owner.context(), cancellation.clone());
+        assert!(protected.read(read("private")).await.is_err());
+        assert_eq!(protected.read(read("allowed")).await.unwrap().bytes, b"abc");
+        assert!(matches!(
+            protected.read(read("missing")).await,
+            Err(ReadError::Io(error)) if error.kind() == io::ErrorKind::NotFound
+        ));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("private", directory.path().join("private-alias")).unwrap();
+            assert!(protected.read(read("private-alias")).await.is_err());
+        }
         let page = view.read(read("allowed")).await.unwrap();
         assert_eq!(page.bytes, b"abc");
         assert_eq!(page.next_offset, Some(3));
@@ -499,6 +541,10 @@ mod tests {
             .unwrap();
             assert_eq!(
                 workspace.read(read("absolute")).await.unwrap().bytes,
+                b"abc"
+            );
+            assert_eq!(
+                protected.read(read("absolute")).await.unwrap().bytes,
                 b"abc"
             );
             let selected_alias = root

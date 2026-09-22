@@ -21,12 +21,15 @@
 //! operations. File formats, transactions and coordination belong to plugins.
 
 use crate::storage::{Directory, StoreError};
+use cap_fs_ext::MetadataExt;
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::fs::{Dir, OpenOptions};
+use maka_sandbox::filesystem::{Access, Compiled};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     io::{self, Read, Seek, SeekFrom, Write},
+    path::Path,
 };
 
 use tokio_util::sync::CancellationToken;
@@ -99,12 +102,16 @@ pub fn execute(
     root: &Dir,
     operation: Operation,
     cancellation: &CancellationToken,
+    policy: Option<Policy<'_>>,
 ) -> Result<Output, Error> {
     check(cancellation)?;
+    if let Some(policy) = policy {
+        policy.authorize(root, &operation)?;
+    }
     match operation {
         Operation::Read(input) => read(root, input, cancellation).map(Output::Read),
-        Operation::Write(input) => write(root, input).map(|()| Output::Done),
-        Operation::List(input) => list(root, input, cancellation).map(Output::List),
+        Operation::Write(input) => write(root, input, policy.is_some()).map(|()| Output::Done),
+        Operation::List(input) => list(root, input, cancellation, policy).map(Output::List),
         Operation::Stat { path } => stat(root, path).map(Output::Stat),
         Operation::Sync { path } => {
             if !path.is_empty() {
@@ -116,6 +123,70 @@ pub fn execute(
         Operation::CreateDirectory { path } => create_directory(root, path).map(|()| Output::Done),
         Operation::Remove { path } => remove(root, path).map(|()| Output::Done),
         Operation::Rename { from, to } => rename(root, from, to).map(|()| Output::Done),
+    }
+}
+
+/// Optional workspace ceiling on an already captured directory capability.
+/// Private plugin data has its own namespace authority and does not use it.
+#[derive(Clone, Copy)]
+pub struct Policy<'a> {
+    pub root: &'a Path,
+    pub filesystem: &'a Compiled,
+}
+impl Policy<'_> {
+    fn check(&self, root: &Dir, name: &str, access: Access, subtree: bool) -> Result<(), Error> {
+        if !name.is_empty() {
+            path(name)?;
+        }
+        let lexical = self.root.join(name);
+        let resolved = match root.canonicalize(if name.is_empty() { "." } else { name }) {
+            Ok(path) => self.root.join(path),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let (parent, file) = name.rsplit_once('/').unwrap_or(("", name));
+                self.root
+                    .join(root.canonicalize(if parent.is_empty() { "." } else { parent })?)
+                    .join(file)
+            }
+            Err(error) => return Err(error.into()),
+        };
+        for path in [&lexical, &resolved] {
+            let path: std::path::PathBuf = path.components().collect();
+            if self.filesystem.access(&path).intersect(access) != access
+                || (subtree && !self.filesystem.permits_subtree(&path, access))
+            {
+                return Err(Error::Invalid(format!(
+                    "filesystem policy denies {access:?} access to {}",
+                    path.display()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn authorize(&self, root: &Dir, operation: &Operation) -> Result<(), Error> {
+        match operation {
+            Operation::Read(input) => self.check(root, &input.path, Access::Read, false),
+            Operation::List(input) => self.check(root, &input.path, Access::Read, false),
+            Operation::Stat { path } => self.check(root, path, Access::Read, false),
+            Operation::Write(input) => {
+                self.check(root, &input.path, Access::Write, false)?;
+                // Opening without truncation is harmless; check the held file
+                // again in write() before content or permissions can change.
+                Ok(())
+            }
+            Operation::CreateDirectory { path } | Operation::Sync { path } => {
+                self.check(root, path, Access::Write, false)
+            }
+            Operation::Remove { path } => {
+                let directory = root.symlink_metadata(path)?.is_dir();
+                self.check(root, path, Access::Write, directory)
+            }
+            Operation::Rename { from, to } => {
+                let directory = root.symlink_metadata(from)?.is_dir();
+                self.check(root, from, Access::Write, directory)?;
+                self.check(root, to, Access::Write, directory)
+            }
+        }
     }
 }
 
@@ -234,10 +305,10 @@ impl Directory {
             .await?
     }
     pub async fn write(&self, input: WriteFile) -> Result<(), Error> {
-        self.run(move |root, _| write(root, input)).await?
+        self.run(move |root, _| write(root, input, false)).await?
     }
     pub async fn list(&self, input: ListFiles) -> Result<DirectoryPage, Error> {
-        self.run(move |root, cancellation| list(root, input, cancellation))
+        self.run(move |root, cancellation| list(root, input, cancellation, None))
             .await?
     }
     pub async fn create_directory(&self, name: String) -> Result<(), Error> {
@@ -280,7 +351,7 @@ fn read(root: &Dir, input: ReadFile, cancellation: &CancellationToken) -> Result
     Ok(FilePage { bytes, next_offset })
 }
 
-fn write(root: &Dir, input: WriteFile) -> Result<(), Error> {
+fn write(root: &Dir, input: WriteFile, managed: bool) -> Result<(), Error> {
     path(&input.path)?;
     if input.bytes.len() > CHUNK
         || input.offset > MAX_OFFSET - input.bytes.len() as u64
@@ -298,8 +369,14 @@ fn write(root: &Dir, input: WriteFile) -> Result<(), Error> {
             .create(true)
             .create_new(input.create_new),
     )?;
-    if !file.metadata()?.is_file() {
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
         return Err(Error::Invalid("expected a regular file".into()));
+    }
+    if managed && metadata.nlink() != 1 {
+        return Err(Error::Invalid(
+            "managed writes cannot modify a multiply-linked file".into(),
+        ));
     }
     let mut write = || -> io::Result<()> {
         if input.truncate {
@@ -330,6 +407,7 @@ fn list(
     root: &Dir,
     input: ListFiles,
     cancellation: &CancellationToken,
+    policy: Option<Policy<'_>>,
 ) -> Result<DirectoryPage, Error> {
     if !input.path.is_empty() {
         path(&input.path)?;
@@ -352,6 +430,12 @@ fn list(
             .map_err(|_| Error::Invalid("filename is not UTF-8".into()))?;
         if input.after.as_ref().is_some_and(|after| &name <= after) {
             continue;
+        }
+        if let Some(policy) = policy {
+            let path = Path::new(&input.path).join(&name);
+            if !policy.filesystem.access(&policy.root.join(path)).can_read() {
+                continue;
+            }
         }
         let kind = entry.file_type()?;
         let kind = if kind.is_file() {

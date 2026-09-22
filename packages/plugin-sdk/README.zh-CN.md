@@ -54,6 +54,10 @@ Prompt 回调通过 `call.workspace`、输入准备通过 `request.workspace` �
 
 `call.files.entries` 与 `ctx.data` 共用有界字节／目录操作：read、write、list、stat、createDirectory、sync、remove 和禁止覆盖目标的 rename。路径必须相对根目录，不跟随链接，父目录需已存在；写入支持 `createNew` 和普通权限位。读取／列目录观察退休信号，已准入写入继续结算。事务与崩溃恢复由插件负责。`{ kind: 'directory', path }` 授权只允许文件访问，不创建工作区标记；目录被替换后授权失效。`withAuthorization(id, (call, grant, boundary) => ...)` 同时提供当前授权的观察信息。只读视图的 `location()` 用于展示或提出授权申请，不授予路径访问权限。
 
+显式 `network` 授权独立于文件／进程沙箱：只读工作区可以使用 Host HTTP，但不会因此获得文件写入或进程权限。Agent HTTP 仍需自己的执行授权。重启恢复时重新检查当前授权；撤销后拒绝新请求。
+
+每次 Agent 工具或 Executor 调用捕获当前权限边界。Session 权限变更只影响新调用，不升级已有调用上下文或进程。Service 转发保留原边界；过期上下文不能发起新操作，已接受的工作仍完成结算。
+
 已结束但结果不确定的操作记录为 `unknown` 并明确返回，后续恢复调用仍可继续。持久化事实缺失或资源清理未确认才关闭准入；捕获 SDK 异常不能隐藏这些故障。
 
 Remote 的 Session／工作区视图通过 `files` 提供相同接口。读取会重新检查当前凭据与工作区绑定，纳入 Remote 调用的资源结算，并随回调结束失效。序列化的工作区路径仅用于观察，不是访问授权。
@@ -66,9 +70,11 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 
 - 激活阶段暂存注册；通过 `ctx.run` 在发布生效后启动业务循环。用 `ctx.effect` 注册清理，观察 `ctx.signal`。
 - Tool 和 Executor 回调获得绑定调用身份的服务与进程能力。旧调用句柄会失效；实例级进程需通过下一次调用的 `processes.open(id)` 重新绑定，卸载时由 Host 清理。
-- 启动进程要求当前调用仍有 Bypass 权限，使用冻结的工作目录，以及绝对可执行路径和 argv。默认随调用结束。stdin 字符串按 UTF-8 编码；输出用 `TextDecoder` 增量解码。
+- 启动进程使用冻结的工作目录、沙箱及已批准的额外权限，以及绝对可执行路径和 argv。不支持的隔离在启动前拒绝。默认随调用结束；重新绑定实例进程或 PTY 时，当前权限必须覆盖其启动策略。stdin 字符串按 UTF-8 编码；输出用 `TextDecoder` 增量解码。
 - `call.terminals` 使用同样的命令与生命周期约定，提供原生 PTY、串行输入／尺寸变更回执、带明确 reset 事件的有界输出，以及持久退出和清理结果。后续调用需重新打开实例级终端；卸载会关闭它们。终端解析复用 Host 的共享 VM，不按 PTY 分配。
-- `call.http.request` 提供绑定调用身份的 HTTP，使用 Host 代理配置并要求 Bypass 权限。通过 `response.next()` 分块读取字节；`null` 表示完整结束，截断则报错。调用结束或插件卸载时关闭响应。不自动重试或重定向，远端副作用的恢复由插件负责。
+- `call.permissions.request({ reason, permissions })` 为 Agent 工具或 Executor 申请额外文件／网络权限。Host 在审批前解析路径；受保护资源仍不可访问。返回的批准子集不是能力令牌，每次操作仍检查当前授权。Executor 没有工具调用身份，只能获得 Turn/Session 授权。独立 Remote／后台工作使用显式授权。
+- `call.http.request` 使用 Host 代理配置，缺少网络权限时申请批准，不解除文件沙箱。独立调用要求显式 `network` 许可。通过 `response.next()` 分块读取字节；`null` 表示完整结束，截断则报错。调用结束或插件卸载时关闭响应。不自动重试或重定向，远端副作用的恢复由插件负责。
+  Host 在发送前记录准入、报告 EOF 前记录结算：Agent 调用进入所属 invocation 日志，独立调用进入 Host effect 记录。传输中断保留未知结果，不视为可以重放的失败。记录请求元数据和正文摘要，不重复保存流式载荷。
 - Behavior 准备回调收到受限 Session 配置快照，不代表获得权限。已授权的执行句柄提供 `activity(sessionId)` 和 `stop(invocation)`；控制前保存观察到的精确身份，重试不重新选择目标。`artifact({ operationId, artifactId, offset, limit })` 每次最多读取该执行 Turn 的 64 KiB 产物。
 - `resume({ operationId, source })` 恢复一个精确、已封口的模型 Run。重试和 Host 重启后均返回同一规范开场回执；选择恢复哪个来源属于插件业务。准备期间不持有 Host 准入锁。
 - `configure({ sessionId, expectedRevision, target })` 用 CAS 修改空闲 Session 的模型／Executor，不改变权限、工作区或行为。`createRoot({ managed: true, ... })` 声明包的管理所有权，不增加资源权限；`plugin_workspace` 授权选择与包数据目录分离的私有工作区。

@@ -19,7 +19,9 @@
 
 //! Append-only requests/outcomes and atomically derived Session grants.
 pub(crate) mod lifecycle;
+mod permissions;
 mod records;
+pub use permissions::PermissionGrant;
 
 use crate::{EventLog, StoreError};
 use maka_runtime::interaction::{
@@ -58,6 +60,7 @@ impl EventLog {
                         record.outcome = outcome;
                         return Ok(InteractionCommit { matches, record });
                     }
+                    permissions::require_revision(&mut tx, &request).await?;
                     sqlx::query("INSERT INTO interaction_requests VALUES (?, ?, ?, ?)")
                         .bind(&request.request_id)
                         .bind(&request.session_id)
@@ -104,6 +107,15 @@ impl EventLog {
                             matches: records::equivalent(existing, &outcome),
                             record,
                         });
+                    }
+                    if matches!(
+                        &outcome,
+                        InteractionOutcome::PermissionsDecision {
+                            decision: maka_sandbox::grant::Decision::Allow { .. },
+                            ..
+                        }
+                    ) {
+                        permissions::require_revision(&mut tx, &record).await?;
                     }
                     sqlx::query("INSERT INTO interaction_outcomes VALUES (?, ?)")
                         .bind(&request_id)

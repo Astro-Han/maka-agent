@@ -112,6 +112,7 @@ pub async fn prepare(
     catalog: &Catalog,
     scope: &Scope,
     mut request: Request,
+    workspace: &crate::filesystem::ReadRoot,
 ) -> Result<Prepared, Error> {
     maka_runtime::input::validate_selections(&request.selections)
         .map_err(|error| Error::Invalid(error.into()))?;
@@ -135,25 +136,13 @@ pub async fn prepare(
         validity: Vec::new(),
     };
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let workspace = if providers.is_empty() {
-        None
-    } else {
-        Some(
-            crate::filesystem::ReadRoot::open(&request.cwd)
-                .await
-                .map_err(|error| Error::Invalid(error.to_string()))?,
-        )
-    };
     for (name, source) in providers {
         let _call = source.admit()?;
         let stopping = source.owner.stopping()?;
         request.content = result.content.clone();
         let cancellation = request.cancellation.child_token();
         let _closed = cancellation.clone().drop_guard();
-        let files = workspace
-            .as_ref()
-            .expect("provider workspace")
-            .bind(source.owner.clone(), cancellation);
+        let files = workspace.bind(source.owner.clone(), cancellation);
         let outcome = tokio::select! {
             biased;
             _ = request.cancellation.cancelled() => return Err(Error::Invalid("input preparation cancelled".into())),

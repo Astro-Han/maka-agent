@@ -32,6 +32,14 @@ fn field<T: serde::de::DeserializeOwned>(v: &Value, key: &str) -> Result<T> {
 }
 fn request(v: &Value) -> Result<InteractionRequest> {
     let value = match v["kind"].as_str() {
+        Some("permissions") => {
+            shape(v, &["kind", "toolUseId", "baseRevision", "request"])?;
+            InteractionRequest::Permissions {
+                tool_use_id: field(v, "toolUseId")?,
+                base_revision: field(v, "baseRevision")?,
+                request: field(v, "request")?,
+            }
+        }
         Some("question") => {
             shape(v, &["kind", "toolUseId", "questions"])?;
             InteractionRequest::Question {
@@ -84,6 +92,12 @@ fn result(v: &Value, outcome: bool) -> Result<FormResult> {
 }
 fn answer(v: &Value) -> Result<InteractionAnswer> {
     let value = match v["kind"].as_str() {
+        Some("permissions") => {
+            shape(v, &["kind", "decision"])?;
+            InteractionAnswer::Permissions {
+                decision: field(v, "decision")?,
+            }
+        }
         Some("question") => {
             shape(v, &["kind", "answers"])?;
             InteractionAnswer::Question {
@@ -107,6 +121,13 @@ fn answer(v: &Value) -> Result<InteractionAnswer> {
 fn outcome(v: &Value) -> Result<InteractionOutcome> {
     let committed_at = field(v, "committedAt")?;
     let value = match v["kind"].as_str() {
+        Some("permissions_decision") => {
+            shape(v, &["kind", "decision", "committedAt"])?;
+            InteractionOutcome::PermissionsDecision {
+                decision: field(v, "decision")?,
+                committed_at,
+            }
+        }
         Some("question_answer") => {
             shape(v, &["kind", "answers", "committedAt"])?;
             InteractionOutcome::QuestionAnswer {

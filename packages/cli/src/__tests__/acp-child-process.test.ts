@@ -168,7 +168,7 @@ describe('Maka ACP child process', () => {
           assert.deepEqual(
             (first.configOptions ?? []).map((option) => [option.id, option.currentValue]),
             [
-              ['permission_mode', 'bypass'],
+              ['sandbox_mode', 'bypass'],
               ['collaboration_mode', 'agent'],
               ['orchestration_mode', 'default'],
             ],
@@ -181,7 +181,7 @@ describe('Maka ACP child process', () => {
           assert.deepEqual(
             (configured.configOptions ?? []).map((option) => [option.id, option.currentValue]),
             [
-              ['permission_mode', 'bypass'],
+              ['sandbox_mode', 'bypass'],
               ['collaboration_mode', 'plan'],
               ['orchestration_mode', 'default'],
             ],
@@ -249,13 +249,13 @@ describe('Maka ACP child process', () => {
           assert.deepEqual(
             (created.configOptions ?? []).map(({ id, currentValue }) => [id, currentValue]),
             [
-              ['permission_mode', 'bypass'],
+              ['sandbox_mode', 'bypass'],
               ['thinking_level', 'default'],
               ['collaboration_mode', 'agent'],
               ['orchestration_mode', 'default'],
             ],
           );
-          const permission = created.configOptions?.find(({ id }) => id === 'permission_mode');
+          const permission = created.configOptions?.find(({ id }) => id === 'sandbox_mode');
           assert.ok(permission?.type === 'select');
           assert.deepEqual(
             permission.options.flatMap((option) => ('value' in option ? [option.value] : [])),
@@ -270,7 +270,7 @@ describe('Maka ACP child process', () => {
 
           let configuredOptions = created.configOptions;
           for (const [configId, value] of [
-            ['permission_mode', 'ask'],
+            ['sandbox_mode', 'ask'],
             ['thinking_level', 'high'],
             ['collaboration_mode', 'plan'],
             ['orchestration_mode', 'swarm'],
@@ -286,7 +286,7 @@ describe('Maka ACP child process', () => {
           assert.deepEqual(
             (configuredOptions ?? []).map(({ id, currentValue }) => [id, currentValue]),
             [
-              ['permission_mode', 'ask'],
+              ['sandbox_mode', 'ask'],
               ['thinking_level', 'high'],
               ['collaboration_mode', 'plan'],
               ['orchestration_mode', 'swarm'],
@@ -528,7 +528,7 @@ describe('Maka ACP child process', () => {
                 const changed = await connected.connection.request('session.configuration.update', {
                   sessionId: created.sessionId,
                   expectedRevision: current.revision,
-                  patch: { permissionMode: 'bypass', thinkingLevel: 'low' },
+                  patch: { sandboxMode: 'danger-full-access', thinkingLevel: 'low' },
                 });
                 assert.equal(changed.kind, 'committed');
                 await waitFor(
@@ -538,7 +538,7 @@ describe('Maka ACP child process', () => {
                         update.sessionUpdate === 'config_option_update' &&
                         update.configOptions.some(
                           (option) =>
-                            option.id === 'permission_mode' && option.currentValue === 'bypass',
+                            option.id === 'sandbox_mode' && option.currentValue === 'bypass',
                         ) &&
                         update.configOptions.some(
                           (option) =>

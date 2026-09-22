@@ -55,7 +55,7 @@ async fn caught_service_error_cannot_hide_file_settlement_failure() {
         let installed = peer.rpc("plugin.package.install", json!({"sourcePath":source})).await;
         assert_eq!(installed["ok"], true, "{installed}"); ready(&mut peer).await;
         let created = peer.rpc("session.create", json!({
-            "sessionId":"files", "workspace":{"kind":"host_path","path":fixture.workspace}, "permissionMode":"ask",
+            "sessionId":"files", "workspace":{"kind":"host_path","path":fixture.workspace}, "sandboxMode":"workspace-write",
             "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
         })).await;
         assert_eq!(created["ok"], true, "{created}");

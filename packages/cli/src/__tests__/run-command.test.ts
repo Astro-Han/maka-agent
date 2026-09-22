@@ -277,7 +277,7 @@ function sessionSummary(): SessionSummary {
     llmConnectionSlug: 'test',
     connectionLocked: true,
     model: 'test',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     collaborationMode: 'agent',
     orchestrationMode: 'default',
   };

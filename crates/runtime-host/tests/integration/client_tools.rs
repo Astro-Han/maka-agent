@@ -19,7 +19,7 @@
 
 use super::support::client_probe::ClientFixture;
 use maka_runtime::event::Fact;
-use maka_runtime::execution::{PermissionMode, ToolMode};
+use maka_runtime::execution::{SandboxMode, ToolMode};
 use maka_runtime_host::session::SessionConfiguration;
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -75,7 +75,7 @@ async fn unchanged_client_reads_scoped_file_and_reopens_identical_facts_and_rows
                             .unwrap()
                     )
                 );
-                assert_eq!(configuration.permission_mode, PermissionMode::Explore);
+                assert_eq!(configuration.sandbox_mode, SandboxMode::ReadOnly);
                 assert_eq!(configuration.tool_mode, ToolMode::Direct);
                 assert_eq!(
                     configuration.model.as_ref(),

@@ -30,6 +30,7 @@ mod launch;
 pub(crate) mod message;
 mod plugins;
 pub(crate) use plugins::ResourceTarget;
+pub(crate) mod permissions;
 mod prepare;
 mod provider;
 mod read;
@@ -106,7 +107,10 @@ impl Executions {
         runtime: maka_js_runtime::trusted::TrustedRuntime,
     ) -> std::result::Result<Self, crate::server::HostError> {
         let workers = TaskTracker::new();
-        let plugin_calls = maka_plugins::call::Issuer::default();
+        let plugin_calls =
+            maka_plugins::call::Issuer::with_admission(Arc::new(plugins::AgentAdmission {
+                log: log.clone(),
+            }));
         let plugin_catalog = maka_plugins::contributions::Catalog::with_calls(plugin_calls.clone());
         tools::reserve_core_names(&plugin_catalog)?;
         let models = ModelExecutor::with_runtime(runtime.clone(), 64, Duration::from_secs(120))?;

@@ -26,9 +26,25 @@ use std::{path::Path, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 async fn invoke(cwd: &Path, input: Value, token: CancellationToken) -> Result<Value, ToolError> {
-    ShellExecutor::trusted_unrestricted(cwd)?
-        .invoke(SHELL_NAME.into(), input, token)
-        .await
+    executor(cwd)?.invoke(SHELL_NAME.into(), input, token).await
+}
+
+fn executor(cwd: &Path) -> Result<ShellExecutor, ToolError> {
+    #[cfg(target_os = "macos")]
+    let policy = maka_sandbox::Sandbox::Managed {
+        filesystem: maka_sandbox::filesystem::Policy {
+            default: maka_sandbox::filesystem::Access::Read,
+            rules: vec![maka_sandbox::filesystem::Rule::subtree(
+                cwd.canonicalize().unwrap(),
+                maka_sandbox::filesystem::Access::Write,
+            )],
+            deny_globs: Vec::new(),
+        },
+        network: maka_sandbox::Network::Denied,
+    };
+    #[cfg(not(target_os = "macos"))]
+    let policy = maka_sandbox::Sandbox::Disabled;
+    ShellExecutor::new(cwd, policy)
 }
 
 #[tokio::test]
@@ -120,7 +136,7 @@ async fn assert_stopped(pid: i32) {
 async fn timeout_cancel_and_dropped_caller_clean_process_group() {
     for mode in ["timeout", "cancel", "drop", "early-root"] {
         let dir = tempfile::tempdir().unwrap();
-        let executor = ShellExecutor::trusted_unrestricted(dir.path()).unwrap();
+        let executor = executor(dir.path()).unwrap();
         let token = CancellationToken::new();
         // The descendant always needs KILL; one case lets the root exit on
         // TERM first, retaining its unreaped PID through the grace period.

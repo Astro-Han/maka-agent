@@ -18,20 +18,59 @@
  */
 
 use super::{attributes::Attributes, checked, job::Job, owned, pipe};
-use crate::shell::{ShellPlan, command};
 use std::{
     fs::{File, OpenOptions},
     io,
     mem::size_of,
     os::windows::io::{AsRawHandle, OwnedHandle},
-    path::Path,
-    ptr,
 };
 use tokio::net::windows::named_pipe::NamedPipeServer;
 use windows_sys::Win32::{
     Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation},
     System::Threading::*,
 };
+
+pub(crate) enum Console {
+    None,
+    Inherited,
+}
+
+/// Shared by foreground commands, duplex pipes and the account runner. Native
+/// ownership and the exact inheritance whitelist are established atomically.
+pub(crate) fn launch(
+    plan: &crate::command::Prepared,
+    job: &Job,
+    stdio: [&File; 3],
+    console: Console,
+) -> io::Result<(OwnedHandle, u32)> {
+    let jobs = [job.0.as_raw_handle()];
+    let handles = stdio.map(AsRawHandle::as_raw_handle);
+    for handle in handles {
+        unsafe {
+            checked(SetHandleInformation(
+                handle,
+                HANDLE_FLAG_INHERIT,
+                HANDLE_FLAG_INHERIT,
+            ))?;
+        }
+    }
+    let mut attributes = Attributes::stdio(&handles, &jobs)?;
+    let mut startup = STARTUPINFOEXW::default();
+    startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = handles[0];
+    startup.StartupInfo.hStdOutput = handles[1];
+    startup.StartupInfo.hStdError = handles[2];
+    startup.lpAttributeList = attributes.as_ptr();
+    let flags = match console {
+        Console::None => CREATE_NO_WINDOW,
+        Console::Inherited => 0,
+    };
+    let process = unsafe { plan.spawn_windows(&startup, true, flags) }?;
+    let handle = owned(process.hProcess)?;
+    let _thread = owned(process.hThread)?;
+    Ok((handle, process.dwProcessId))
+}
 
 pub(super) struct Child {
     pub process: OwnedHandle,
@@ -44,64 +83,25 @@ pub(super) struct Spawned {
 }
 
 pub(super) async fn spawn(
-    shell: &ShellPlan,
-    cwd: &Path,
-    source: &str,
+    plan: &crate::command::Prepared,
     cancellation: &tokio_util::sync::CancellationToken,
 ) -> io::Result<Spawned> {
-    let mut command = command::prepare(shell, source)?;
-    let cwd = command::wide(dunce::simplified(cwd))?;
     let (stdout, stdout_writer) = pipe::output().await?;
     let (stderr, stderr_writer) = pipe::output().await?;
     let stdin: File = OpenOptions::new().read(true).open("NUL")?;
-    // SAFETY: owned NUL input, explicitly included in the inheritance whitelist.
-    unsafe {
-        checked(SetHandleInformation(
-            stdin.as_raw_handle(),
-            HANDLE_FLAG_INHERIT,
-            HANDLE_FLAG_INHERIT,
-        ))?;
-    }
     let job = Job::new()?;
-    let jobs = [job.0.as_raw_handle()];
-    let handles = [
-        stdin.as_raw_handle(),
-        stdout_writer.as_raw_handle(),
-        stderr_writer.as_raw_handle(),
-    ];
-    let mut attributes = Attributes::stdio(&handles, &jobs)?;
-    let mut startup = STARTUPINFOEXW::default();
-    startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
-    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdInput = handles[0];
-    startup.StartupInfo.hStdOutput = handles[1];
-    startup.StartupInfo.hStdError = handles[2];
-    startup.lpAttributeList = attributes.as_ptr();
-    let mut process = PROCESS_INFORMATION::default();
     if cancellation.is_cancelled() {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
             "Shell cancelled before spawn",
         ));
     }
-    // SAFETY: all UTF-16 buffers are terminated and live, the command line is
-    // writable, and the two valid attributes bind the Job before any user code.
-    unsafe {
-        checked(CreateProcessW(
-            command.executable.as_ptr(),
-            command.line.as_mut_ptr(),
-            ptr::null(),
-            ptr::null(),
-            1,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
-            command.environment.as_ptr().cast(),
-            cwd.as_ptr(),
-            &startup.StartupInfo,
-            &mut process,
-        ))?;
-    }
-    let process_handle = owned(process.hProcess)?;
-    let _thread = owned(process.hThread)?;
+    let (process_handle, _) = launch(
+        plan,
+        &job,
+        [&stdin, &stdout_writer, &stderr_writer],
+        Console::None,
+    )?;
     // Parent copies of write ends close here; EOF belongs to the child tree.
     Ok(Spawned {
         child: Child {

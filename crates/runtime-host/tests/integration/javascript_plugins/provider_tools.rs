@@ -146,7 +146,7 @@ async fn scenario() {
         ready(&mut peer).await;
         let created = peer.rpc("session.create", json!({
                 "sessionId":"research", "workspace":{"kind":"host_path","path":fixture.workspace},
-                "permissionMode":"bypass",
+                "sandboxMode":"danger-full-access",
                 "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
             })).await;
         assert_eq!(created["ok"], true, "{created}");

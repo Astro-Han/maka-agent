@@ -176,7 +176,7 @@ function sameSelectedHost(
       previous.hostId === next.hostId &&
       previous.name === next.name &&
       previous.kind === next.kind &&
-      previous.chatDefaults.permissionMode === next.chatDefaults.permissionMode &&
+      previous.chatDefaults.sandboxMode === next.chatDefaults.sandboxMode &&
       previous.chatDefaults.thinkingLevel === next.chatDefaults.thinkingLevel,
   );
 }

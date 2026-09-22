@@ -56,7 +56,7 @@ export const TOOL_OUTPUT_NOTE_CLASS =
 /**
  * The one surface a tool result and the line naming it share.
  *
- * A single Bash call used to render three different ways depending on which
+ * A single Shell call used to render three different ways depending on which
  * branch it landed in: streaming put the command in an Astryx `CodeBlock` card
  * with the output as loose text beside it, a settled foreground run passed the
  * command as that CodeBlock's `title` (comment-coloured mono, no rule, tucked
@@ -396,7 +396,7 @@ function TerminalPreview(props: {
   );
 }
 
-/** Background Bash after handoff: a live terminal surface for PTY, the existing
+/** Background Shell after handoff: a live terminal surface for PTY, the existing
  * command/status/ref preview for pipes. Never collapse either to `[shell_run]`. */
 function ShellRunPreview(props: {
   result: Extract<ToolResultContent, { kind: 'shell_run' }>;

@@ -316,7 +316,7 @@ async fn handoff_output_keeps_one_public_identity_and_all_physical_evidence_afte
     }
     assert_eq!(
         rows.iter()
-            .filter(|row| row["type"] == "turn_state")
+            .filter(|row| row["type"] == "turn_state" && row["status"] != "running")
             .count(),
         1,
         "physical pauses do not end the logical Turn"

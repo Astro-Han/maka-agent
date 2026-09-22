@@ -74,7 +74,7 @@ pub(crate) async fn seed(log: &EventLog, workspace: &Path) {
         };
         let record = ShellRun {
             id: format!("resource-{index:03}"),
-            session_id: "bash-bypass".into(),
+            session_id: "shell-bypass".into(),
             source_run_id: None,
             source_turn_id: "resource-turn".into(),
             source_tool_call_id: if index == 2 {
@@ -88,6 +88,10 @@ pub(crate) async fn seed(log: &EventLog, workspace: &Path) {
                 ShellVisibility::Model
             },
             cwd: workspace.to_string_lossy().into_owned(),
+            permissions: maka_runtime::shell_run::ShellPermissions {
+                boundary_revision: 0,
+                sandbox: maka_runtime::shell_run::Sandbox::Disabled,
+            },
             command: if index == 2 {
                 "c".repeat(20_700)
             } else {
@@ -102,7 +106,7 @@ pub(crate) async fn seed(log: &EventLog, workspace: &Path) {
         };
         log.create_shell_run(record.clone()).await.unwrap();
         log.patch_shell_run(
-            "bash-bypass",
+            "shell-bypass",
             &record.id,
             ShellPatch {
                 state: Some(ShellState::Running),
@@ -113,7 +117,7 @@ pub(crate) async fn seed(log: &EventLog, workspace: &Path) {
         .unwrap();
         let record = log
             .patch_shell_run(
-                "bash-bypass",
+                "shell-bypass",
                 &record.id,
                 ShellPatch {
                     state: Some(ShellState::Terminal {
@@ -130,12 +134,12 @@ pub(crate) async fn seed(log: &EventLog, workspace: &Path) {
         records.push(record);
     }
     let first = log
-        .query_shell_resources("bash-bypass", None, 0)
+        .query_shell_resources("shell-bypass", None, 0)
         .await
         .unwrap();
     let original = first.revision;
     log.patch_shell_run(
-        "bash-bypass",
+        "shell-bypass",
         "resource-066",
         ShellPatch {
             output: Some(ShellOutput::Pipes {
@@ -152,7 +156,7 @@ pub(crate) async fn seed(log: &EventLog, workspace: &Path) {
     .unwrap();
     assert_ne!(
         original,
-        log.query_shell_resources("bash-bypass", None, 0)
+        log.query_shell_resources("shell-bypass", None, 0)
             .await
             .unwrap()
             .revision
@@ -161,7 +165,7 @@ pub(crate) async fn seed(log: &EventLog, workspace: &Path) {
     let last = records.last_mut().unwrap();
     *last = log
         .patch_shell_run(
-            "bash-bypass",
+            "shell-bypass",
             &last.id,
             ShellPatch {
                 output: Some(last.output.clone()),

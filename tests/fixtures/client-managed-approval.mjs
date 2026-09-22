@@ -169,7 +169,7 @@ export async function verifyManagedApproval(connection, workspace, reopened, ope
       sessionId,
       workspace: { kind: 'host_path', path: workspace },
       modelTarget: { kind: 'default' },
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     provider = await openConnection();
     await provider.replaceClientCapabilities(

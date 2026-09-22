@@ -63,7 +63,7 @@ describe('ToolRuntime settlement', () => {
 
     const blocked = await settle(
       makeRuntime({
-        readExecutionBoundary: async () => createGenesisExecutionBoundary('ask'),
+        readExecutionBoundary: async () => createGenesisExecutionBoundary('workspace-write'),
       }),
       'call-managed',
     );
@@ -110,7 +110,7 @@ describe('ToolRuntime settlement', () => {
       },
     });
     const runtime = makeRuntime({
-      readPermissionMode: async () => 'explore',
+      readSandboxMode: async () => 'read-only',
       readExecutionBoundary: async () => ({
         kind: 'managed',
         profile: expandedProfile,
@@ -501,7 +501,7 @@ describe('ToolRuntime settlement', () => {
       agentName: 'Reviewer',
       turnId: 'child-turn',
       status: 'failed',
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
       summary: 'review failed',
       artifactIds: [],
     };
@@ -630,7 +630,7 @@ describe('ToolRuntime settlement', () => {
           runId: 'child-run',
           agentId: 'local_read',
           agentName: 'Local Read',
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
         });
         return {
           kind: 'subagent',
@@ -640,7 +640,7 @@ describe('ToolRuntime settlement', () => {
           turnId: 'child-turn',
           runId: 'child-run',
           status: 'completed',
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
           summary: 'done',
           artifactIds: [],
         };
@@ -682,7 +682,7 @@ describe('ToolRuntime settlement', () => {
       turnId: 'child-turn',
       runId: 'child-run',
       status: 'running',
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
     });
     const previewIndex = events.findIndex((event) => event.type === 'tool_result_preview');
     const resultIndex = events.findIndex((event) => event.type === 'tool_result');
@@ -699,7 +699,7 @@ function makeRuntime(
     Pick<
       ToolRuntimeInput,
       | 'readExecutionBoundary'
-      | 'readPermissionMode'
+      | 'readSandboxMode'
       | 'spawnChildSession'
       | 'runId'
       | 'invocationId'
@@ -750,7 +750,7 @@ function header(): SessionHeader {
     llmConnectionSlug: 'connection-1',
     connectionLocked: true,
     model: 'model-1',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     schemaVersion: 1,
   };
 }

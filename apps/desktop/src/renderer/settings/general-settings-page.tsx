@@ -28,7 +28,7 @@ import {
 } from "./settings-section";
 import type {
   AppSettings,
-  ChatDefaultPermissionMode,
+  ChatDefaultSandboxMode,
   ShellPreference,
   NetworkProxySettings,
   RuntimeHostNetworkProxySettings,
@@ -46,7 +46,7 @@ import {
   TextInput,
   NumberInput,
   ModelPicker,
-  PermissionModeSelect,
+  SandboxModeSelect,
   Selector,
   Switch,
   modelChoiceValue,
@@ -304,7 +304,7 @@ export function GeneralSettingsPage(props: {
           settingsInteractive={runtimeHostSettingsInteractive}
           showSettingsPlaceholder={showRuntimeHostSettingsPlaceholder}
           onRefresh={props.onRefreshConnections}
-          permissionMode={props.settings.chatDefaults.permissionMode}
+          sandboxMode={props.settings.chatDefaults.sandboxMode}
           thinkingLevel={props.settings.chatDefaults.thinkingLevel}
           codeModeEnabled={props.settings.chatDefaults.codeModeEnabled === true}
           onUpdate={props.onUpdate}
@@ -481,10 +481,10 @@ function isRejectedShellPreference(error: unknown): boolean {
  * PR-DEFAULT-PERMISSION-MODE-0: the composer's per-session boundary picker
  * did not previously control what a *new* chat starts on. Added
  * a second picker right below 默认模型, backed by
- * `settings.chatDefaults.permissionMode` (persisted via the generic
+ * `settings.chatDefaults.sandboxMode` (persisted via the generic
  * `settings.update` patch, unlike the model picker's dedicated
  * `connections.setDefaultModel` IPC). Renders the shared Astryx-backed
- * `PermissionModeSelect` so labels, hints, and markup can't drift from the
+ * `SandboxModeSelect` so labels, hints, and markup can't drift from the
  * composer picker.
  */
 /** Sentinel for "no preference" — Selector needs a value, absence is not one. */
@@ -501,7 +501,7 @@ function GeneralDefaultsCard(props: {
   settingsInteractive: boolean;
   showSettingsPlaceholder: boolean;
   onRefresh(): Promise<void>;
-  permissionMode: ChatDefaultPermissionMode;
+  sandboxMode: ChatDefaultSandboxMode;
   thinkingLevel?: ThinkingLevel;
   codeModeEnabled: boolean;
   onUpdate(
@@ -579,7 +579,7 @@ function GeneralDefaultsCard(props: {
     }
   }
 
-  async function persistPermissionMode(nextMode: ChatDefaultPermissionMode) {
+  async function persistSandboxMode(nextMode: ChatDefaultSandboxMode) {
     if (!props.settingsInteractive) return;
     // Same re-entrancy guard as persistDefault above: the disabled trigger
     // alone can't fully prevent overlapping saves (React disables it a tick
@@ -587,7 +587,7 @@ function GeneralDefaultsCard(props: {
     // ordering guarantee.
     const releaseSave = persistGuard.begin("permission-mode");
     if (!releaseSave) return;
-    if (nextMode === "bypass" && props.permissionMode !== "bypass") {
+    if (nextMode === "danger-full-access" && props.sandboxMode !== "danger-full-access") {
       let confirmed = false;
       try {
         confirmed = await toast.confirm({
@@ -614,7 +614,7 @@ function GeneralDefaultsCard(props: {
     }
     setRowSaving("permission-mode", true);
     try {
-      await props.onUpdate({ chatDefaults: { permissionMode: nextMode } });
+      await props.onUpdate({ chatDefaults: { sandboxMode: nextMode } });
     } catch (error) {
       if (mountedRef.current) {
         toast.error(
@@ -715,10 +715,10 @@ function GeneralDefaultsCard(props: {
           label={copy.defaultPermission}
           description={copy.defaultPermissionHelp}
           end={
-            <PermissionModeSelect
-              activeMode={props.permissionMode}
+            <SandboxModeSelect
+              activeMode={props.sandboxMode}
               onSelect={(mode) => {
-                void persistPermissionMode(mode);
+                void persistSandboxMode(mode);
               }}
               align="end"
               disabled={savingRows["permission-mode"] || !props.settingsInteractive}

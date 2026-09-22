@@ -23,7 +23,7 @@ use maka_runtime::{
     continuation::{ContinuationClaim, REPLAY_VERSION, ReplayEvidence, RunBoundary, SessionBase},
     event::{EventWrite, Fact, Invocation, InvocationOutcome, RuntimeEvent, StoredEvent},
     execution::{
-        BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode,
+        BehaviorId, CollaborationMode, InvocationConfiguration, SandboxMode, ToolMode,
         WorkspaceIdentity,
     },
     input::InvocationInput,
@@ -179,7 +179,12 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
     assert_eq!(committed.sequence, sequence);
     let mut view = InvocationView::new(65536).unwrap();
     assert!(
-        view.push(&committed).unwrap().is_empty(),
+        view.push(&committed).unwrap().iter().all(|row| matches!(
+            row.message.content,
+            maka_presentation::Content::TurnState {
+                state: maka_presentation::TurnState::Running
+            }
+        )),
         "continuation must not fabricate a user message"
     );
     let terminal = RuntimeEvent::new(

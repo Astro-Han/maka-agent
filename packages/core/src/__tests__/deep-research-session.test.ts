@@ -23,7 +23,7 @@ import { createGenesisExecutionBoundary } from '../sandbox-boundary.js';
 
 describe('deep research session profile', () => {
   it('gives explore sessions a managed read-only filesystem and restricted network', () => {
-    const boundary = createGenesisExecutionBoundary('explore');
+    const boundary = createGenesisExecutionBoundary('read-only');
     assert.equal(boundary.kind, 'managed');
     if (boundary.kind !== 'managed') return;
     assert.equal(boundary.profile.name, 'read-only');

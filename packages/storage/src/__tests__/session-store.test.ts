@@ -269,14 +269,14 @@ describe('SQLite SessionStore', () => {
         agentName: 'Explore',
         turnId: 'child-turn-1',
         status: 'completed',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         summary: 'done',
         artifactIds: [],
       },
     } as const satisfies StoredMessage;
     let sessionId: string;
     try {
-      const session = await store.create(makeInput({ permissionMode: 'ask' }));
+      const session = await store.create(makeInput({ sandboxMode: 'workspace-write' }));
       sessionId = session.id;
       await store.appendMessage(session.id, currentMessage);
       await assert.rejects(
@@ -284,7 +284,7 @@ describe('SQLite SessionStore', () => {
           store.appendMessage(session.id, {
             ...currentMessage,
             id: 'result-retired',
-            content: { ...currentMessage.content, permissionMode: 'execute' },
+            content: { ...currentMessage.content, sandboxMode: 'execute' },
           } as unknown as StoredMessage),
         /Invalid tool result content/,
       );
@@ -296,10 +296,10 @@ describe('SQLite SessionStore', () => {
     try {
       database.exec(`
         UPDATE session_metadata
-        SET payload_json = json_set(payload_json, '$.permissionMode', 'execute')
+        SET payload_json = json_set(payload_json, '$.sandboxMode', 'execute')
         WHERE session_id = '${sessionId!}';
         UPDATE session_messages
-        SET record_json = json_set(record_json, '$.content.permissionMode', 'execute')
+        SET record_json = json_set(record_json, '$.content.sandboxMode', 'execute')
         WHERE session_id = '${sessionId!}';
       `);
     } finally {
@@ -308,11 +308,11 @@ describe('SQLite SessionStore', () => {
 
     const reopened = createSessionStore(root);
     try {
-      assert.equal((await reopened.readHeaderSnapshot(sessionId!)).permissionMode, 'ask');
+      assert.equal((await reopened.readHeaderSnapshot(sessionId!)).sandboxMode, 'ask');
       const [message] = await reopened.readMessages(sessionId!);
       assert.equal(
         message?.type === 'tool_result' && message.content.kind === 'subagent'
-          ? message.content.permissionMode
+          ? message.content.sandboxMode
           : undefined,
         'ask',
       );
@@ -1185,7 +1185,7 @@ function makeInput(overrides: Partial<CreateSessionInput> = {}): CreateSessionIn
     cwd: '/tmp/cwd',
     llmConnectionSlug: 'test-connection',
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     name: 'Session',
     labels: [],
     ...overrides,

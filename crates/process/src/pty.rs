@@ -23,7 +23,7 @@ mod stream;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 #[cfg(unix)]
 pub use unix::{PtyChild, PtyIo, spawn};
 #[cfg(windows)]

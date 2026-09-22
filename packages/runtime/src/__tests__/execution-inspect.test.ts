@@ -41,7 +41,7 @@ describe('versioned execution inspect documents', () => {
         cwd: '/tmp/workspace',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       await runtimeStore.appendRuntimeEvent(session.id, RUN_ID, openingEvent(session.id));
       await runStore.appendEvent(

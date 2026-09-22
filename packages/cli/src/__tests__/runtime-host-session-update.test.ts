@@ -41,14 +41,14 @@ test('reads the latest Session and returns the committed update', async () => {
       assert.equal(current.revision, 7);
       return {
         kind: 'committed',
-        session: sessionProjection({ revision: 8, permissionMode: 'bypass' }),
+        session: sessionProjection({ revision: 8, sandboxMode: 'danger-full-access' }),
       };
     },
     { operation: 'session.configuration.update' },
   );
 
   assert.equal(committed.revision, 8);
-  assert.equal(committed.permissionMode, 'bypass');
+  assert.equal(committed.sandboxMode, 'danger-full-access');
   assert.deepEqual(requests, [{ kind: 'get', sessionId: 'session-1' }]);
 });
 
@@ -180,7 +180,8 @@ function sessionProjection(
     llmConnectionSlug: 'default',
     connectionLocked: false,
     model: 'default',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     ...overrides,

@@ -19,7 +19,7 @@
 
 use super::{Error, SessionBoundary, name};
 use maka_runtime::execution::{
-    BehaviorId, CollaborationMode, ModelBinding, PermissionMode, ThinkingLevel, ToolMode,
+    BehaviorId, CollaborationMode, ModelBinding, SandboxMode, ThinkingLevel, ToolMode,
     WorkspaceIdentity, WorkspaceTarget,
 };
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
     pub target: super::Target,
-    pub permission_mode: PermissionMode,
+    pub sandbox_mode: SandboxMode,
+    pub approval_policy: maka_runtime::execution::ApprovalPolicy,
     pub tool_mode: ToolMode,
     pub collaboration_mode: CollaborationMode,
     pub behavior: BehaviorId,
@@ -75,7 +76,8 @@ pub struct RootTemplate {
     pub model: ModelBinding,
     pub thinking_level: Option<ThinkingLevel>,
     pub tool_mode: ToolMode,
-    pub permission_mode: PermissionMode,
+    pub sandbox_mode: SandboxMode,
+    pub approval_policy: maka_runtime::execution::ApprovalPolicy,
     pub collaboration_mode: CollaborationMode,
     pub orchestration_mode: BehaviorId,
 }
@@ -86,7 +88,8 @@ impl RootTemplate {
                 model: self.model.clone(),
                 thinking_level: self.thinking_level,
             },
-            permission_mode: self.permission_mode,
+            sandbox_mode: self.sandbox_mode,
+            approval_policy: self.approval_policy,
             tool_mode: self.tool_mode,
             collaboration_mode: self.collaboration_mode,
             behavior: self.orchestration_mode.clone(),

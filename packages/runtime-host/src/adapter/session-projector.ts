@@ -576,16 +576,13 @@ export function projectRuntimeHostInteractionRequest(
     turnId: interaction.turnId,
     ts: now,
     requestId: interaction.interactionId,
-    toolUseId:
-      interaction.request.kind === 'sandbox_boundary'
-        ? interaction.interactionId
-        : interaction.request.toolUseId,
   };
   if (interaction.request.kind === 'question') {
     return [
       {
         type: 'user_question_request',
         ...base,
+        toolUseId: interaction.request.toolUseId,
         questions: interaction.request.questions.map((question) => ({
           question: question.question,
           options: question.options.map((option) => ({ ...option })),
@@ -598,6 +595,7 @@ export function projectRuntimeHostInteractionRequest(
       {
         type: 'form_request',
         ...base,
+        toolUseId: interaction.request.toolUseId,
         message: interaction.request.message,
         requester: structuredClone(interaction.request.requester),
         fields: structuredClone(interaction.request.fields),
@@ -609,6 +607,7 @@ export function projectRuntimeHostInteractionRequest(
       {
         type: 'sandbox_boundary_request',
         ...base,
+        toolUseId: interaction.interactionId,
         justification: interaction.request.justification,
         expansion: interaction.request.expansion,
       },
@@ -619,8 +618,19 @@ export function projectRuntimeHostInteractionRequest(
       {
         type: 'client_capability_request',
         ...base,
+        toolUseId: interaction.request.toolUseId,
         capability: interaction.request.target.capability,
         scope: structuredClone(interaction.request.target.scope),
+      },
+    ];
+  }
+  if (interaction.request.kind === 'permissions') {
+    return [
+      {
+        type: 'permissions_request',
+        ...base,
+        toolUseId: interaction.request.toolUseId,
+        request: structuredClone(interaction.request.request),
       },
     ];
   }

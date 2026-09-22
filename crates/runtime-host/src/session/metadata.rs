@@ -63,7 +63,7 @@ fn replace_user_owned_labels(current: &[String], requested: Vec<String>) -> Vec<
 mod tests {
     use super::*;
     use crate::session::{PreparedSession, SessionModel};
-    use maka_protocol::session::{PermissionMode, SessionCreateInput};
+    use maka_protocol::session::{SandboxMode, SessionCreateInput};
     use serde_json::json;
 
     fn configuration() -> SessionConfiguration {
@@ -88,7 +88,7 @@ mod tests {
                     model: "model".into(),
                 },
             },
-            PermissionMode::Explore,
+            SandboxMode::ReadOnly,
             maka_runtime::execution::ToolMode::Direct,
         )
     }

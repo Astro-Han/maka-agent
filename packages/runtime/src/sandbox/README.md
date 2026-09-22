@@ -36,7 +36,7 @@ Code and focused tests are the final authority. Windows enforcement work is trac
 
 `@maka/runtime` owns platform transformation:
 
-- `types.ts` defines sandbox selection, command, path-context, execution-request, and typed failure contracts.
+- `types.ts` defines sandbox selection, command, path-context, execution_request, and typed failure contracts.
 - `sandbox-manager.ts` decides whether a profile requires a sandbox, selects a platform backend, and delegates transformation.
 - `macos-seatbelt.ts` builds the Seatbelt policy and wraps inner argv with `/usr/bin/sandbox-exec`.
 - `linux-sandbox.ts` builds the bubblewrap mounts, namespace arguments, and network seccomp filter.

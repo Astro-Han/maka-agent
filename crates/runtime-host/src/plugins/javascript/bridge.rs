@@ -40,6 +40,7 @@ struct State {
     source: Arc<super::remote::Source>,
     processes: Arc<dyn maka_plugins::process::Processes>,
     http: Arc<dyn maka_plugins::http::Client>,
+    permissions: Arc<dyn maka_plugins::permissions::Access>,
     responses: Mutex<BTreeMap<String, HttpResponse>>,
     files: Arc<dyn maka_plugins::filesystem::Files>,
     models: Arc<dyn maka_plugins::llm::Models>,
@@ -78,6 +79,7 @@ impl HostBridge {
             preferences: host.preferences,
             source,
             http: host.http,
+            permissions: host.permissions,
             responses: Default::default(),
             files: host.files,
             models: host.models,
@@ -350,6 +352,15 @@ impl State {
                     .await
                     .map_err(Error::tool)
             }
+            Request::Permissions(input) => {
+                let authority = self.calls.get(&input.authority)?;
+                encode(
+                    self.permissions
+                        .request(authority, input.request)
+                        .await
+                        .map_err(Error::tool)?,
+                )
+            }
             Request::HttpSend(input) => {
                 let authority = self.calls.get(&input.authority)?;
                 self.responses
@@ -463,7 +474,12 @@ impl State {
             Request::Data(operation) => encode(
                 self.data()?
                     .run(move |root, cancellation| {
-                        maka_plugins::filesystem::entries::execute(root, operation, cancellation)
+                        maka_plugins::filesystem::entries::execute(
+                            root,
+                            operation,
+                            cancellation,
+                            None,
+                        )
                     })
                     .await??,
             ),

@@ -101,7 +101,7 @@ impl Method for Service {
                 session_id: id.clone(),
             },
             _ => Target::PluginWorkspace {
-                permission_mode: maka_runtime::execution::PermissionMode::Bypass,
+                sandbox_mode: maka_runtime::execution::SandboxMode::ReadOnly,
             },
         };
         Box::pin(async move {

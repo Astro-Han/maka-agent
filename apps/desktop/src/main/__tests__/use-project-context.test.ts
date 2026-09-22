@@ -19,10 +19,10 @@
 
 import { deferred } from '@maka/core/test-only/async-primitives';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, test } from 'node:test';
+import { afterEach, test, type TestContext } from 'node:test';
 import { act, createElement } from 'react';
 import { build } from 'esbuild';
 import type { ProjectRecord } from '@maka/core/project';
@@ -38,8 +38,8 @@ const NO_PROJECT_CAPABILITIES = {
   setLocalDefault: false,
   viewClientPath: false,
 } as const;
-test('discards a pending Project projection after the default Host changes', async () => {
-  const projectContext = await importProjectContext();
+test('discards a pending Project projection after the default Host changes', async (t) => {
+  const projectContext = await importProjectContext(t);
   const { root } = installReactRenderer();
   const hostA = { profileId: 'profile-a', hostId: 'host-a' };
   const hostB = { profileId: 'profile-b', hostId: 'host-b' };
@@ -121,8 +121,9 @@ afterEach(() => {
   cleanupFakeDom();
 });
 
-async function importProjectContext(): Promise<typeof ProjectContext> {
+async function importProjectContext(t: TestContext): Promise<typeof ProjectContext> {
   const outdir = await mkdtemp(resolve(REPO_ROOT, 'apps/desktop/dist/main/__tests__/project-context-'));
+  t.after(() => rm(outdir, { recursive: true, force: true }));
   const outfile = resolve(outdir, 'use-project-context.mjs');
   await mkdir(dirname(outfile), { recursive: true });
   await build({
@@ -132,7 +133,7 @@ async function importProjectContext(): Promise<typeof ProjectContext> {
     platform: 'node',
     format: 'esm',
     target: 'node20',
-    external: ['react'],
+    packages: 'external',
     logLevel: 'silent',
   });
   return (await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`)) as typeof ProjectContext;

@@ -214,6 +214,17 @@ async fn linked_worktree_marker_uses_git_owned_exclusion_without_overwriting_it(
     std::fs::write(child.join(".git"), "invalid nested repository").unwrap();
     assert!(resolve_selected(&child).await.is_err());
     std::fs::remove_file(child.join(".git")).unwrap();
+    std::fs::create_dir(child.join(".git")).unwrap();
+    assert_eq!(
+        maka_fs_tools::workspace::git_metadata(&child).unwrap(),
+        vec![dunce::canonicalize(child.join(".git")).unwrap()],
+        "empty mount target stays protected without selecting the enclosing repository"
+    );
+    // An empty target is not permission to ignore real, invalid indirection.
+    std::fs::write(child.join(".git/commondir"), "../elsewhere").unwrap();
+    assert!(maka_fs_tools::workspace::git_metadata(&child).is_err());
+    std::fs::remove_file(child.join(".git/commondir")).unwrap();
+    std::fs::remove_dir(child.join(".git")).unwrap();
     assert!(
         !project.join(MARKER_FILE).exists(),
         "selection cannot create workspace markers"

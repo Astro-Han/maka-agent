@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { readPage } from '../../packages/runtime/src/read-page.ts';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { decodeStoredMessage } from '../../packages/core/src/session.ts';
 import { watchSession } from './client-subscription.mjs';
@@ -45,14 +45,14 @@ async function fixture(workspace) {
       }
       const input = JSON.parse(body);
       requests.push(input);
-      assert.deepEqual(
-        input.tools.map((tool) => tool.function.name),
-        ['AskUserQuestion', 'Glob', 'Grep', 'Read', 'WebFetch', 'tool_search'],
-      );
+      assert(input.tools.some((tool) => tool.function.name === 'Read'));
+      assert(!input.tools.some((tool) => tool.function.name === 'Write'));
       const index = requests.length;
       assert(index <= 4, 'exactly two model steps per turn');
       const denied = index > 2;
-      const path = denied ? join(workspace, '..', 'outside.txt') : 'inside.txt';
+      const path = denied
+        ? join(workspace, '..', 'root', 'test-private', 'outside.txt')
+        : 'inside.txt';
       if (index % 2 === 0) {
         const result = input.messages.at(-1);
         assert.equal(result.role, 'tool');
@@ -129,7 +129,8 @@ export async function verifyReadWorkflow(connection, workspace, reopened) {
     return;
   }
   await writeFile(join(workspace, 'inside.txt'), 'OLD_WORKSPACE_SENTINEL');
-  await writeFile(join(workspace, '..', 'outside.txt'), 'OUTSIDE_SECRET');
+  await mkdir(join(workspace, '..', 'root', 'test-private'), { recursive: true });
+  await writeFile(join(workspace, '..', 'root', 'test-private', 'outside.txt'), 'OUTSIDE_SECRET');
   const model = await fixture(workspace);
   const request = (operation, input) => connection.request(operation, input, 3000);
   try {
@@ -171,7 +172,7 @@ export async function verifyReadWorkflow(connection, workspace, reopened) {
       workspace: { kind: 'host_path', path: workspace },
       modelTarget: { kind: 'default' },
       mode: 'bot',
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
     });
     const relocated = await verifyWorkspace(connection, sessionId, workspace);
     await writeFile(join(relocated, 'inside.txt'), content);

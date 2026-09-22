@@ -103,9 +103,9 @@ impl Worker {
             .session()
             .ok_or_else(|| Error::Invalid("a terminal requires a Session".into()))?;
         let invocation = self.authority.identity.agent();
-        let (cwd, _gate) = self
+        let prepared = self
             .host
-            .admit_plugin_process(&self.authority)
+            .admit_plugin_process(&self.authority, &self.input.command)
             .await
             .map_err(Error::from)?;
         if self.stop.is_cancelled()
@@ -114,8 +114,6 @@ impl Worker {
         {
             return Err(Error::Denied);
         }
-        let command =
-            crate::plugins::process::prepare(&self.input.command, &cwd).map_err(Error::Invalid)?;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(super::failed)?
@@ -137,7 +135,16 @@ impl Worker {
                 })
                 .unwrap_or_else(|| format!("plugin:{}", self.id)),
             visibility: ShellVisibility::Model,
-            cwd,
+            permissions: maka_runtime::shell_run::ShellPermissions {
+                boundary_revision: match &prepared.boundary {
+                    maka_plugins::authorization::Boundary::Session { boundary, .. } => {
+                        boundary.boundary_revision
+                    }
+                    _ => return Err(Error::Denied),
+                },
+                sandbox: prepared.sandbox,
+            },
+            cwd: prepared.cwd,
             command: serde_json::to_string(&(
                 &self.input.command.executable,
                 &self.input.command.args,
@@ -152,9 +159,13 @@ impl Worker {
                 screen: TerminalScreen::new(self.input.size),
             },
         };
-        self.host
+        let handle = self
+            .host
             .shells
-            .start_pty(record, command, self.input.size)
-            .map_err(super::failed)
+            .start_pty(record, prepared.command, self.input.size)
+            .map_err(super::failed)?;
+        handle.clone().ready().await.map_err(super::failed)?;
+        drop(prepared.gate);
+        Ok(handle)
     }
 }

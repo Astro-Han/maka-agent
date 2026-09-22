@@ -691,7 +691,7 @@ test('startup recovery closes a ScheduledTask Run after its pending fire was set
         },
         configuration: {
           cwd: session.cwd,
-          permissionMode: session.permissionMode,
+          sandboxMode: session.sandboxMode,
           collaborationMode: session.collaborationMode ?? 'agent',
           orchestrationMode: 'default',
           orchestrationSource: 'session',
@@ -776,7 +776,7 @@ test('startup recovery commits the catalog facts a crashed Turn wrote no project
         },
         configuration: {
           cwd: session.cwd,
-          permissionMode: session.permissionMode,
+          sandboxMode: session.sandboxMode,
           collaborationMode: session.collaborationMode ?? 'agent',
           orchestrationMode: 'default',
           orchestrationSource: 'session',
@@ -1099,7 +1099,7 @@ test('turn.start durably binds a Guest request approval to the admitted Turn', a
   });
   const input = {
     sessionId: fixture.sessionId,
-    turnId: 'turn-collaboration-request',
+    turnId: 'turn-collaboration_request',
     content: { text: 'Run the exact approved request.' },
   };
   const authorization = {
@@ -1833,7 +1833,7 @@ test('linked child Sessions reject public safe-boundary continuation', async () 
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
       subagentParent: {
@@ -1977,7 +1977,7 @@ test('worktree child Sessions reject roots outside managed child execution', asy
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
       subagentParent: {
@@ -2907,7 +2907,7 @@ test('hosted linked child roots share admission, message, terminal, and stop aut
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const sessionAdmission = new SessionAdmissionGate();
     const rootAdmissionOwner = new RootAdmissionOwner(stores.agentRunStore);
@@ -3146,7 +3146,7 @@ test('hosted linked child roots share admission, message, terminal, and stop aut
       runId: child.runId,
       agentId: child.agentId,
       agentName: child.agentName,
-      permissionMode: child.permissionMode,
+      sandboxMode: child.sandboxMode,
     });
     assert.equal(initialEventCount, child.eventCount);
     assert.ok(
@@ -3703,7 +3703,8 @@ test('WorkHub v2 requires binding evidence before admission while v1 stays unbou
           model: 'fake-model',
           role: WORKHUB_COORDINATION_SESSION_ROLE,
           toolProfile,
-          permissionMode: toolProfile === 'workhub-coordination-v2' ? 'bypass' : 'explore',
+          sandboxMode:
+            toolProfile === 'workhub-coordination-v2' ? 'danger-full-access' : 'read-only',
         },
       });
       const turnId = 'workhub-binding-turn';
@@ -3818,7 +3819,8 @@ test('active WorkHub authority reads the admitted v2 input and refuses other or 
           model: 'fake-model',
           role: WORKHUB_COORDINATION_SESSION_ROLE,
           toolProfile,
-          permissionMode: toolProfile === 'workhub-coordination-v2' ? 'bypass' : 'explore',
+          sandboxMode:
+            toolProfile === 'workhub-coordination-v2' ? 'danger-full-access' : 'read-only',
         },
       });
       const submit = (
@@ -5010,7 +5012,7 @@ test('post-start backend failure closes its owner without draining an unrelated 
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const unrelatedTurnId = 'turn-unrelated-active-root';
     const unrelatedStarted = await fixture.interactiveTurns.handlers['turn.start'](
@@ -5590,7 +5592,7 @@ async function seedPendingSafeBoundaryContinuation(
       configuration: {
         cwd: session.cwd,
         workspaceIdentity,
-        permissionMode: session.permissionMode,
+        sandboxMode: session.sandboxMode,
         collaborationMode: session.collaborationMode ?? 'agent',
         toolMode: 'direct',
         ...(sourceOrchestrationMode
@@ -6178,7 +6180,7 @@ async function createFailureFixture(options: {
       : { llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }),
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   });
   if (options.corruptSessionRole) {
     const database = new DatabaseSync(

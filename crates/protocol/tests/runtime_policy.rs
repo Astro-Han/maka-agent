@@ -76,7 +76,7 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
     let reordered = r#"{"policy":{
         "externalAgents":{"antigravity":{"executable":""}},
         "shell":{"executable":"","preference":"auto"},
-        "chatDefaults":{"thinkingLevel":"high","permissionMode":"ask"},
+        "chatDefaults":{"thinkingLevel":"high","sandboxMode":"workspace-write"},
         "privacy":{"incognitoActive":false},
         "workspaceInstructions":{"enabled":true},
         "memory":{"agentReadEnabled":false,"enabled":true},
@@ -99,17 +99,17 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
     for (pointer, value, valid) in [
         (
             "/policy/chatDefaults",
-            json!({"permissionMode":"ask","codeModeEnabled":true}),
+            json!({"sandboxMode":"workspace-write","codeModeEnabled":true}),
             true,
         ),
         (
             "/policy/chatDefaults",
-            json!({"permissionMode":"ask","codeModeEnabled":false}),
+            json!({"sandboxMode":"workspace-write","codeModeEnabled":false}),
             false,
         ),
         (
             "/policy/chatDefaults",
-            json!({"permissionMode":"ask","codeModeEnabled":null}),
+            json!({"sandboxMode":"workspace-write","codeModeEnabled":null}),
             false,
         ),
         (
@@ -126,18 +126,18 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         ("/revision", json!(9_007_199_254_740_992u64), false),
         (
             "/policy/chatDefaults",
-            json!({"permissionMode":"bypass","thinkingLevel":"high"}),
+            json!({"sandboxMode":"danger-full-access","thinkingLevel":"high"}),
             true,
         ),
         (
             "/policy/chatDefaults",
-            json!({"permissionMode":"ask","thinkingLevel":null}),
+            json!({"sandboxMode":"workspace-write","thinkingLevel":null}),
             false,
         ),
         (
             "/policy/chatDefaults",
-            json!({"permissionMode":"explore"}),
-            false,
+            json!({"sandboxMode":"read-only"}),
+            true,
         ),
         ("/policy/networkProxy/host", json!(" localhost "), false),
         (
@@ -193,20 +193,24 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
             true,
         ),
         ("patch_agent_settings", json!({}), true),
-        ("set_chat_defaults", json!({"permissionMode":"ask"}), true),
         (
             "set_chat_defaults",
-            json!({"permissionMode":"ask","codeModeEnabled":true}),
+            json!({"sandboxMode":"workspace-write"}),
             true,
         ),
         (
             "set_chat_defaults",
-            json!({"permissionMode":"ask","codeModeEnabled":false}),
+            json!({"sandboxMode":"workspace-write","codeModeEnabled":true}),
             true,
         ),
         (
             "set_chat_defaults",
-            json!({"permissionMode":"ask","codeModeEnabled":null}),
+            json!({"sandboxMode":"workspace-write","codeModeEnabled":false}),
+            true,
+        ),
+        (
+            "set_chat_defaults",
+            json!({"sandboxMode":"workspace-write","codeModeEnabled":null}),
             false,
         ),
         (
@@ -226,23 +230,23 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         ),
         (
             "set_chat_defaults",
-            json!({"permissionMode":"bypass","thinkingLevel":"off"}),
+            json!({"sandboxMode":"danger-full-access","thinkingLevel":"off"}),
             true,
         ),
         (
             "set_chat_defaults",
-            json!({"permissionMode":"ask","thinkingLevel":null}),
+            json!({"sandboxMode":"workspace-write","thinkingLevel":null}),
             false,
         ),
         (
             "set_chat_defaults",
-            json!({"permissionMode":"explore"}),
-            false,
+            json!({"sandboxMode":"read-only"}),
+            true,
         ),
         ("set_chat_defaults", json!({"thinkingLevel":"high"}), false),
         (
             "set_chat_defaults",
-            json!({"permissionMode":"ask","extra":true}),
+            json!({"sandboxMode":"workspace-write","extra":true}),
             false,
         ),
         (

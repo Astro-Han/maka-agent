@@ -53,7 +53,7 @@ async function rows(connection, sessionId) {
   }
 }
 function rawSource(stored) {
-  const calls = stored.filter((row) => row.type === 'tool_call' && row.toolName === 'Bash');
+  const calls = stored.filter((row) => row.type === 'tool_call' && row.toolName === 'Shell');
   assert.equal(calls.length, 1, 'Resource reads must not rerun the source command');
   const raw = stored.find((row) => row.type === 'tool_result' && row.toolUseId === calls[0].id);
   assert.equal(raw.isError, false);
@@ -154,7 +154,7 @@ export async function verifyPruning(connection, workspace, reopened) {
         await request('session.create', {
           sessionId,
           workspace: { kind: 'host_path', path: workspace },
-          permissionMode: 'bypass',
+          sandboxMode: 'danger-full-access',
           modelTarget: {
             kind: 'explicit',
             connectionId: basis.connectionId,
@@ -168,7 +168,7 @@ export async function verifyPruning(connection, workspace, reopened) {
           request,
           saved.sessionId,
           'read-and-archive',
-          'Capture evidence.txt using Bash, then Read its archived output',
+          'Capture evidence.txt using Shell, then Read its archived output',
           model,
         ),
       ];

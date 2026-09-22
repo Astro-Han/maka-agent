@@ -17,36 +17,47 @@
  * under the License.
  */
 
-use super::Command;
+use super::Prepared;
 use crate::shell::command::{quote, wide};
-use std::{collections::BTreeMap, io, os::windows::ffi::OsStrExt, path::Path};
+use std::{
+    collections::BTreeMap,
+    io,
+    os::windows::{
+        ffi::OsStrExt,
+        io::{AsHandle, AsRawHandle},
+    },
+    path::Path,
+    ptr,
+};
+use windows_sys::Win32::System::Threading::*;
 
-pub(crate) struct Buffers {
+struct Buffers {
     pub executable: Vec<u16>,
     pub cwd: Vec<u16>,
     pub line: Vec<u16>,
     pub environment: Vec<u16>,
 }
-impl Command {
-    pub(crate) fn windows(&self) -> io::Result<Buffers> {
-        if !self.executable.is_absolute() || !self.cwd.is_absolute() {
+impl Prepared {
+    fn windows(&self) -> io::Result<Buffers> {
+        let plan = &self.0;
+        if !plan.executable.is_absolute() || !plan.cwd.is_absolute() {
             return Err(io::Error::other(
                 "process requires captured absolute executable and cwd",
             ));
         }
-        let executable = wide(dunce::simplified(&self.executable))?;
-        let cwd = wide(dunce::simplified(&self.cwd))?;
-        let executable_arg = dunce::simplified(&self.executable)
+        let executable = wide(dunce::simplified(&plan.executable))?;
+        let cwd = wide(dunce::simplified(&plan.cwd))?;
+        let executable_arg = dunce::simplified(&plan.executable)
             .to_str()
             .map(|path| quote(&path.replace('/', "\\")))
             .ok_or_else(|| io::Error::other("process executable must be UTF-8"))?;
         let arguments = std::iter::once(Ok(executable_arg))
-            .chain(self.args.iter().map(super::Argument::command_line))
+            .chain(plan.args.iter().map(super::Argument::command_line))
             .collect::<io::Result<Vec<_>>>()?
             .join(" ");
         let line = wide(Path::new(&arguments))?;
         let mut sorted = BTreeMap::new();
-        for (key, value) in &self.environment {
+        for (key, value) in &plan.environment {
             if key.is_empty()
                 || key.encode_wide().any(|c| c == 0)
                 || value.encode_wide().any(|c| c == 0)
@@ -72,5 +83,51 @@ impl Command {
             line,
             environment,
         })
+    }
+
+    /// # Safety
+    /// Startup attributes and any inherited handles must remain valid for this
+    /// call. A Job-list attribute must establish ownership before user code runs.
+    pub(crate) unsafe fn spawn_windows(
+        &self,
+        startup: &STARTUPINFOEXW,
+        inherit: bool,
+        flags: u32,
+    ) -> io::Result<PROCESS_INFORMATION> {
+        let mut buffers = self.windows()?;
+        let mut process = PROCESS_INFORMATION::default();
+        let flags = flags | EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT;
+        let result = unsafe {
+            match &self.0.write_token {
+                Some(token) => CreateProcessAsUserW(
+                    token.as_handle().as_raw_handle(),
+                    buffers.executable.as_ptr(),
+                    buffers.line.as_mut_ptr(),
+                    ptr::null(),
+                    ptr::null(),
+                    inherit.into(),
+                    flags,
+                    buffers.environment.as_ptr().cast(),
+                    buffers.cwd.as_ptr(),
+                    &startup.StartupInfo,
+                    &mut process,
+                ),
+                None => CreateProcessW(
+                    buffers.executable.as_ptr(),
+                    buffers.line.as_mut_ptr(),
+                    ptr::null(),
+                    ptr::null(),
+                    inherit.into(),
+                    flags,
+                    buffers.environment.as_ptr().cast(),
+                    buffers.cwd.as_ptr(),
+                    &startup.StartupInfo,
+                    &mut process,
+                ),
+            }
+        };
+        // A failed restricted launch is final, never retried with CreateProcessW.
+        crate::windows::checked(result)?;
+        Ok(process)
     }
 }

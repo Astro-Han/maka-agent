@@ -22,6 +22,7 @@ import {
   Banner,
   Button,
   ClientCapabilityPrompt,
+  PermissionsPrompt,
   Composer,
   type ComposerInteraction,
   ComposerGoalProjectionConsumer,
@@ -123,6 +124,7 @@ interface ChatComposerRegionProps
   stopPendingBySession: Record<string, boolean>;
   respondToSandboxBoundary: ComponentProps<typeof SandboxBoundaryPrompt>['onRespond'];
   respondToClientCapability: ComponentProps<typeof ClientCapabilityPrompt>['onRespond'];
+  respondToPermissions: ComponentProps<typeof PermissionsPrompt>['onRespond'];
   respondToUserQuestion: ComponentProps<typeof UserQuestionPrompt>['onRespond'];
   respondToUserForm: ComponentProps<typeof FormInteractionPrompt>['onRespond'];
   stop: ComponentProps<typeof UserQuestionPrompt>['onStop'];
@@ -178,6 +180,7 @@ export function ChatComposerRegion({
   stopPendingBySession,
   respondToSandboxBoundary,
   respondToClientCapability,
+  respondToPermissions,
   respondToUserQuestion,
   respondToUserForm,
   stop,
@@ -208,6 +211,7 @@ export function ChatComposerRegion({
     activeInteraction?.type === 'sandbox_boundary_request' ? activeInteraction : undefined;
   const activeClientCapability =
     activeInteraction?.type === 'client_capability_request' ? activeInteraction : undefined;
+  const activePermissions = activeInteraction?.type === 'permissions_request' ? activeInteraction : undefined;
   const activeQuestion = activeInteraction?.type === 'user_question_request' ? activeInteraction : undefined;
   const activeForm = activeInteraction?.type === 'form_request' ? activeInteraction : undefined;
   const activeModelChoice = composerRest.activeModel
@@ -359,6 +363,7 @@ export function ChatComposerRegion({
             onRespond={respondToClientCapability}
           />
         )}
+        {activePermissions && <PermissionsPrompt request={activePermissions} onRespond={respondToPermissions} />}
         {activeQuestion && (
           <UserQuestionPrompt
             request={activeQuestion}

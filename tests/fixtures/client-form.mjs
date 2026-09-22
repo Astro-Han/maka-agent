@@ -168,7 +168,7 @@ export async function verifyForms(connection, workspace, reopened, openClient, d
       sessionId,
       workspace: { kind: 'host_path', path: workspace },
       modelTarget: { kind: 'default' },
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
     const opened = await openClient();
     provider = opened.connection;

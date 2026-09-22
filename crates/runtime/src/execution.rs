@@ -17,15 +17,8 @@
  * under the License.
  */
 
+pub use maka_sandbox::{Approval as ApprovalPolicy, Mode as SandboxMode};
 use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PermissionMode {
-    Explore,
-    Ask,
-    Bypass,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -99,7 +92,12 @@ pub struct InvocationConfiguration {
     /// Captured from the workspace marker, never reconstructed from a later path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_identity: Option<WorkspaceIdentity>,
-    pub permission_mode: PermissionMode,
+    pub workspace_origin: WorkspaceOrigin,
+    pub sandbox_mode: SandboxMode,
+    pub approval_policy: ApprovalPolicy,
+    /// Identifies the admitted boundary even when a later configuration returns
+    /// to the same modes and paths. Equality of values does not restore a grant.
+    pub boundary_revision: u64,
     pub collaboration_mode: CollaborationMode,
     pub orchestration_mode: BehaviorId,
     pub tool_mode: ToolMode,
@@ -151,6 +149,15 @@ pub enum WorkspaceTarget {
 pub struct WorkspaceProjection {
     pub target: WorkspaceTarget,
     pub host_cwd: String,
+}
+
+/// Host-issued provenance recorded with execution authority, never inferred from
+/// the display projection's path or supplied by a workspace locator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceOrigin {
+    Selected,
+    Allocated,
 }
 
 /// Intrinsic workspace identity is distinct from its current filesystem location.

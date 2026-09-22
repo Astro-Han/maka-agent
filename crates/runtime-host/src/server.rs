@@ -44,6 +44,7 @@ mod outbound;
 pub(crate) mod plugin_authorization;
 mod plugin_remote;
 mod projects;
+mod sandbox_setup;
 pub(crate) use projects::Usage as ProjectUsage;
 pub(crate) use projects::resolve_record as resolve_project_workspace;
 mod registration;

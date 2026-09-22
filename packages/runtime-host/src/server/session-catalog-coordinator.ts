@@ -144,7 +144,7 @@ interface ResolvedSessionConfiguration {
   readonly model: string;
   readonly thinkingLevel: SessionHeader['thinkingLevel'];
   readonly connectionLocked: boolean;
-  readonly permissionMode: SessionHeader['permissionMode'];
+  readonly sandboxMode: SessionHeader['sandboxMode'];
   readonly collaborationMode: NonNullable<SessionHeader['collaborationMode']>;
   readonly orchestrationMode: NonNullable<SessionHeader['orchestrationMode']>;
 }
@@ -349,7 +349,7 @@ export class HostSessionCatalogCoordinator {
       llmConnectionId: model.connectionId,
       llmConnectionSlug: model.connectionSlug,
       model: model.model,
-      permissionMode: policy.policy.chatDefaults.permissionMode,
+      sandboxMode: policy.policy.chatDefaults.sandboxMode,
       toolMode: policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
@@ -388,7 +388,7 @@ export class HostSessionCatalogCoordinator {
           model: model.model,
           ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }),
           ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
-          permissionMode: prepared.permissionMode ?? policy.policy.chatDefaults.permissionMode,
+          sandboxMode: prepared.sandboxMode ?? policy.policy.chatDefaults.sandboxMode,
           toolMode: policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct',
           collaborationMode: input.collaborationMode ?? 'agent',
           orchestrationMode: input.orchestrationMode ?? 'default',
@@ -622,7 +622,7 @@ export class HostSessionCatalogCoordinator {
               model: model.model,
               ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }),
               ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
-              permissionMode: prepared.permissionMode ?? policy.policy.chatDefaults.permissionMode,
+              sandboxMode: prepared.sandboxMode ?? policy.policy.chatDefaults.sandboxMode,
               toolMode:
                 toolMode ?? (policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct'),
               collaborationMode: input.collaborationMode ?? 'agent',
@@ -778,7 +778,7 @@ export class HostSessionCatalogCoordinator {
         await this.#manager.transitionSessionConfiguration(input.sessionId, {
           expectedRevision: input.expectedRevision,
           clearConnectionBlock: input.patch.modelTarget !== undefined,
-          permissionModeOnly: isPermissionModeOnlyPatch(input.patch),
+          sandboxModeOnly: isSandboxModeOnlyPatch(input.patch),
           configuration,
         });
         return configurationSuccess(
@@ -1267,7 +1267,7 @@ export class HostSessionCatalogCoordinator {
       model: model.model,
       thinkingLevel,
       connectionLocked: patch.modelTarget === undefined ? current.connectionLocked : true,
-      permissionMode: patch.permissionMode ?? current.permissionMode,
+      sandboxMode: patch.sandboxMode ?? current.sandboxMode,
       collaborationMode: patch.collaborationMode ?? current.collaborationMode ?? 'agent',
       orchestrationMode: patch.orchestrationMode ?? current.orchestrationMode ?? 'default',
     };
@@ -1326,15 +1326,15 @@ function sessionConfigurationMatches(
     header.model === configuration.model &&
     header.thinkingLevel === configuration.thinkingLevel &&
     header.connectionLocked === configuration.connectionLocked &&
-    header.permissionMode === configuration.permissionMode &&
+    header.sandboxMode === configuration.sandboxMode &&
     (header.collaborationMode ?? 'agent') === configuration.collaborationMode &&
     (header.orchestrationMode ?? 'default') === configuration.orchestrationMode
   );
 }
 
-function isPermissionModeOnlyPatch(patch: SessionConfigurationUpdateInput['patch']): boolean {
+function isSandboxModeOnlyPatch(patch: SessionConfigurationUpdateInput['patch']): boolean {
   return (
-    patch.permissionMode !== undefined &&
+    patch.sandboxMode !== undefined &&
     patch.modelTarget === undefined &&
     patch.thinkingLevel === undefined &&
     patch.collaborationMode === undefined &&
@@ -1345,7 +1345,7 @@ function isPermissionModeOnlyPatch(patch: SessionConfigurationUpdateInput['patch
 interface PreparedSessionCreate {
   readonly name: string;
   readonly labels: readonly string[];
-  readonly permissionMode?: SessionCreateInput['permissionMode'];
+  readonly sandboxMode?: SessionCreateInput['sandboxMode'];
 }
 
 async function prepareCreate(input: SessionCreateInput): Promise<PreparedSessionCreate> {
@@ -1365,7 +1365,7 @@ async function prepareCreate(input: SessionCreateInput): Promise<PreparedSession
     );
   }
   const mode = input.mode === undefined ? undefined : sessionStartModeSpec(input.mode);
-  if (mode === undefined && input.permissionMode === 'explore') {
+  if (mode === undefined && input.sandboxMode === 'read-only') {
     throw new SessionOperationFailure(
       'invalid_request',
       'Session creation requires a declared mode for explore permission',
@@ -1373,11 +1373,11 @@ async function prepareCreate(input: SessionCreateInput): Promise<PreparedSession
   }
   const name = normalizedSessionName(mode?.name ?? input.name ?? DEFAULT_SESSION_NAME);
   const labels = [...(input.labels ?? []), ...(mode?.labels ?? [])];
-  const permissionMode = mode?.permissionMode ?? input.permissionMode;
+  const sandboxMode = mode?.sandboxMode ?? input.sandboxMode;
   return {
     name,
     labels,
-    ...(permissionMode === undefined ? {} : { permissionMode }),
+    ...(sandboxMode === undefined ? {} : { sandboxMode }),
   };
 }
 
@@ -1405,7 +1405,7 @@ function createRequestFingerprint(
           ],
     input.thinkingLevel ?? null,
     input.toolProfile ?? null,
-    prepared.permissionMode ?? ['runtime_default'],
+    prepared.sandboxMode ?? ['runtime_default'],
     input.collaborationMode ?? 'agent',
     input.orchestrationMode ?? 'default',
   ];
@@ -1481,7 +1481,8 @@ export function projectSessionCatalogRecord(
     connectionLocked: header.connectionLocked,
     model: header.model,
     ...(header.thinkingLevel === undefined ? {} : { thinkingLevel: header.thinkingLevel }),
-    permissionMode: header.permissionMode,
+    sandboxMode: header.sandboxMode,
+    approvalPolicy: { kind: 'on-request' },
     collaborationMode: header.collaborationMode ?? 'agent',
     orchestrationMode: header.orchestrationMode ?? 'default',
   };
@@ -1750,7 +1751,7 @@ function projectExecutionBoundary(boundary: ExecutionBoundary): ExecutionBoundar
   if (boundary.kind !== 'managed') return { kind: boundary.kind, revision: boundary.revision };
   return {
     kind: 'managed',
-    access: executionBoundaryDisplayMode(boundary) === 'explore' ? 'read_only' : 'writable',
+    access: executionBoundaryDisplayMode(boundary) === 'read-only' ? 'read_only' : 'writable',
     revision: boundary.revision,
   };
 }

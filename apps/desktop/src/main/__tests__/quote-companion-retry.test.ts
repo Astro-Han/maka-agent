@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import type { SideChatSession } from '../../renderer/features/workbar/index.js';
 import { deferred } from '@maka/core/test-only/async-primitives';
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
@@ -26,10 +27,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { ChatSurfaceLayout, ChatView, LocaleProvider } from '@maka/ui';
 import type { SessionEvent } from '@maka/core/events';
 import type { ChatModelChoice } from '@maka/core/chat-model-choice';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type {
   SessionChangedEvent,
-  SessionSummary,
   StoredMessage,
   TurnRecord,
 } from '@maka/core/session';
@@ -127,7 +127,7 @@ async function renderProbe(
   sideChat: Partial<WorkbarServices['sideChat']>,
   options: {
     ownership?: boolean;
-    sourceSession?: SessionSummary;
+    sourceSession?: SideChatSession;
     modelChoices?: readonly ChatModelChoice[];
     ready?: (container: Element) => boolean;
     onSend?: (send: (text: string) => Promise<boolean>) => void;
@@ -136,8 +136,8 @@ async function renderProbe(
     onSteer?: (steer: SteerFn) => void;
     onStop?: (stop: () => Promise<void>) => void;
     onDeleteQueuedEntry?: (deleteEntry: (entryId: string) => Promise<void>) => void;
-    onSetPermissionMode?: (set: (mode: PermissionMode) => Promise<boolean>) => void;
-    confirmBypass?: () => Promise<boolean>;
+    onSetSandboxMode?: (set: (mode: SandboxMode) => Promise<boolean>) => void;
+    confirmBypass?: (allProtections?: boolean) => Promise<boolean>;
     onContextCompactionError?: (sessionId: string, error: unknown) => void;
     pendingQuotes?: readonly StagedCompanionQuote[];
     onQuotesConsumed?: (snapshot: CompanionQuoteSnapshot) => void;
@@ -164,7 +164,8 @@ async function renderProbe(
         onSteer: options.onSteer,
         onStop: options.onStop,
         onDeleteQueuedEntry: options.onDeleteQueuedEntry,
-        onSetPermissionMode: options.onSetPermissionMode,
+        onSetSandboxMode: options.onSetSandboxMode,
+        confirmBypass: options.confirmBypass,
         onContextCompactionError: options.onContextCompactionError,
         pendingQuotes: options.pendingQuotes,
         onQuotesConsumed: options.onQuotesConsumed,
@@ -174,7 +175,7 @@ async function renderProbe(
     : createElement(QuoteCompanionProbe, {
         sourceSession: options.sourceSession,
         modelChoices: options.modelChoices,
-        onSetPermissionMode: options.onSetPermissionMode,
+        onSetSandboxMode: options.onSetSandboxMode,
         confirmBypass: options.confirmBypass,
       });
 
@@ -196,9 +197,10 @@ async function renderOwnershipProbe(
   options: {
     pendingQuotes?: readonly StagedCompanionQuote[];
     onQuotesConsumed?: (snapshot: CompanionQuoteSnapshot) => void;
-    sourceSession?: SessionSummary;
+    sourceSession?: SideChatSession;
     modelChoices?: readonly ChatModelChoice[];
     onContextCompactionError?: (sessionId: string, error: unknown) => void;
+    confirmBypass?: (allProtections?: boolean) => Promise<boolean>;
   } = {},
 ) {
   let send!: (text: string) => Promise<boolean>;
@@ -207,7 +209,7 @@ async function renderOwnershipProbe(
   let steer!: SteerFn;
   let stop!: () => Promise<void>;
   let deleteQueuedEntry!: (entryId: string) => Promise<void>;
-  let setPermissionMode!: (mode: PermissionMode) => Promise<boolean>;
+  let setSandboxMode!: (mode: SandboxMode) => Promise<boolean>;
   let eventHandler: ((event: SessionEvent) => void) | undefined;
   let executionHandler: Parameters<WorkbarServices['sideChat']['subscribeEvents']>[4];
   let observationError: Parameters<WorkbarServices['sideChat']['subscribeEvents']>[3];
@@ -236,7 +238,7 @@ async function renderOwnershipProbe(
       onSteer: (value) => (steer = value),
       onStop: (value) => (stop = value),
       onDeleteQueuedEntry: (value) => (deleteQueuedEntry = value),
-      onSetPermissionMode: (value) => (setPermissionMode = value),
+      onSetSandboxMode: (value) => (setSandboxMode = value),
       ...options,
     },
   );
@@ -248,7 +250,8 @@ async function renderOwnershipProbe(
       steer(text, attachmentItems, onAdmitted),
     stop: () => stop(),
     deleteQueuedEntry: (entryId: string) => deleteQueuedEntry(entryId),
-    setPermissionMode: (mode: PermissionMode) => setPermissionMode(mode),
+    setSandboxMode: (mode: SandboxMode) => setSandboxMode(mode),
+    disableProtections: () => projection.disableProtections(),
     async transcript() {
       return parseHTML(`<html><body>${await renderTranscriptMarkup(
         createElement(LocaleProvider, { locale: 'en', children: createElement(ChatSurfaceLayout, {
@@ -289,7 +292,7 @@ async function commitIdleCompanion(
   await awaitCompanion(rendered.container);
 }
 
-const REBOUND_MODEL: Partial<SessionSummary> = {
+const REBOUND_MODEL: Partial<SideChatSession> = {
   llmConnectionId: 'connection-2',
   llmConnectionSlug: 'openai-2',
   model: 'model-2',
@@ -307,7 +310,7 @@ function exactModelRebindScenario() {
 
 function probeTree(
   services: WorkbarServices,
-  sourceSession: SessionSummary,
+  sourceSession: SideChatSession,
   modelChoices: readonly ChatModelChoice[] = [choiceFor(sourceSession)],
 ) {
   return createElement(WorkbarServicesProvider, {
@@ -318,7 +321,7 @@ function probeTree(
 
 async function rerenderProbeSource(
   rendered: { root: Root; services: WorkbarServices },
-  sourceSession: SessionSummary,
+  sourceSession: SideChatSession,
   modelChoices: readonly ChatModelChoice[] = [choiceFor(sourceSession)],
 ) {
   await act(async () => {
@@ -329,7 +332,7 @@ async function rerenderProbeSource(
 
 function ownershipProbeTree(
   services: WorkbarServices,
-  sourceSession: SessionSummary,
+  sourceSession: SideChatSession,
   onSend: (send: (text: string) => Promise<boolean>) => void,
 ) {
   return createElement(WorkbarServicesProvider, {
@@ -344,7 +347,7 @@ function ownershipProbeTree(
 
 async function rerenderOwnershipSource(
   rendered: { root: Root; services: WorkbarServices },
-  sourceSession: SessionSummary,
+  sourceSession: SideChatSession,
   onSend: (send: (text: string) => Promise<boolean>) => void,
 ) {
   await act(async () => {
@@ -420,7 +423,7 @@ test('first send after a completed turn forks through the settled turn', async (
 test('a first send shows the question bubble immediately but arms Stop only once the fork exists', async () => {
   // `branchFromTurn` is the Host round trip a first send waits on. Holding it
   // open lets us observe the panel while the fork is still being created.
-  const branch = deferred<{ ok: true; session: SessionSummary }>();
+  const branch = deferred<{ ok: true; session: SideChatSession }>();
   const rendered = await renderOwnershipProbe({
     listTurns: async () => [settledTurn('done-turn')],
     branchFromTurn: () => branch.promise,
@@ -524,6 +527,29 @@ for (const proof of ['send reply', 'admission event'] as const) {
     }
   });
 }
+
+test('cancelled sandbox preparation retains the side-chat draft without arming a turn', async () => {
+  let ready = false;
+  let sent = 0;
+  const rendered = await renderOwnershipProbe({
+    prepareExecution: async () => ready,
+    send: async () => { sent += 1; return { ok: true, turnId: 'accepted' }; },
+  });
+  await act(async () => {
+    assert.equal(await rendered.send('keep this draft'), false);
+  });
+  const probe = rendered.container.firstElementChild;
+  assert.ok(probe);
+  assert.equal(sent, 0);
+  assert.equal(probe.getAttribute('data-transient-count'), '0');
+  assert.equal(probe.getAttribute('data-streaming'), 'false');
+  assert.equal(probe.getAttribute('data-live-turn-id'), '');
+  ready = true;
+  await act(async () => {
+    assert.equal(await rendered.send('keep this draft'), true);
+  });
+  assert.equal(sent, 1);
+});
 
 test('a failed first send retires the optimistic bubble without ever arming Stop', async () => {
   // The fork never materializes: `branchFromTurn` throws. The optimistic bubble
@@ -866,7 +892,7 @@ test('rejects /compact while the companion is running without consuming staged q
 });
 
 test('rejects /compact while the companion fork is preparing', async () => {
-  const pendingFork = deferred<SessionSummary>();
+  const pendingFork = deferred<SideChatSession>();
   let compactCalls = 0;
   let branchStarted = false;
   const rendered = await renderOwnershipProbe({
@@ -3101,23 +3127,28 @@ test('releases a send waiting for observation when the Side Conversation is disp
   mountedRoot = undefined;
 });
 
-test('applies a permission mode picked before the first send once the fork is created', async () => {
-  const permissionCalls: Array<{ sessionId: string; mode: PermissionMode }> = [];
+test('applies both full-bypass policies atomically before the first fork send', async () => {
+  const permissionCalls: Parameters<WorkbarServices['sideChat']['setExecutionPolicy']>[] = [];
   const probe = await renderOwnershipProbe({
-    send: async () => ({ ok: true as const, turnId: 'turn-1' }),
-    setPermissionMode: async (sessionId, mode) => {
-      permissionCalls.push({ sessionId, mode });
-      return { ...session('side-conversation'), permissionMode: mode };
+    send: async () => {
+      assert.deepEqual(permissionCalls, [['side-conversation', {
+        sandboxMode: 'danger-full-access', approvalPolicy: { kind: 'never' },
+      }]]);
+      return { ok: true as const, turnId: 'turn-1' };
+    },
+    setExecutionPolicy: async (sessionId, policy) => {
+      permissionCalls.push([sessionId, policy]);
+      return { ...session('side-conversation'), ...policy };
     },
   });
 
   // No fork exists yet: the choice is staged and drives the read-only chip.
   await act(async () => {
-    assert.equal(await probe.setPermissionMode('bypass'), true);
+    assert.equal(await probe.disableProtections(), true);
     await Promise.resolve();
   });
   const el = probe.container.firstElementChild;
-  assert.equal(el?.getAttribute('data-permission-mode'), 'bypass');
+  assert.equal(el?.getAttribute('data-permission-mode'), 'danger-full-access');
   assert.equal(el?.getAttribute('data-companion-id'), '');
   assert.deepEqual(permissionCalls, []);
 
@@ -3127,7 +3158,42 @@ test('applies a permission mode picked before the first send once the fork is cr
     await Promise.resolve();
   });
   await waitUntil(() => permissionCalls.length === 1);
-  assert.deepEqual(permissionCalls, [{ sessionId: 'side-conversation', mode: 'bypass' }]);
+  assert.equal(permissionCalls.length, 1);
+});
+
+test('does not apply delayed full-bypass confirmation after first-send admission begins', async () => {
+  let confirm!: (accepted: boolean) => void;
+  let createFork!: () => void;
+  let writes = 0;
+  const probe = await renderOwnershipProbe({
+    branchFromTurn: async () => {
+      await new Promise<void>((resolve) => { createFork = resolve; });
+      return { ok: true as const, session: session('side-conversation') };
+    },
+    setExecutionPolicy: async (id, policy) => {
+      writes += 1;
+      return session(id, policy);
+    },
+    send: async () => ({ ok: true as const, turnId: 'turn-1' }),
+  }, {
+    confirmBypass: (allProtections) => {
+      assert.equal(allProtections, true);
+      return new Promise<boolean>((resolve) => { confirm = resolve; });
+    },
+  });
+  let confirmed!: Promise<boolean>;
+  let sent!: Promise<boolean>;
+  await act(async () => { confirmed = probe.disableProtections(); });
+  await act(async () => { sent = probe.send('retain the original policy'); });
+  await waitUntil(() => createFork !== undefined);
+  await act(async () => {
+    confirm(true);
+    assert.equal(await confirmed, false);
+    createFork();
+    assert.equal(await sent, true);
+  });
+  assert.equal(writes, 0);
+  assert.equal(probe.container.firstElementChild?.getAttribute('data-permission-mode'), 'workspace-write');
 });
 
 test('replaces a stale empty fork on the next send after the source model rebinds', async () => {
@@ -3202,14 +3268,14 @@ test('fails closed when the staged permission write fails on the first send', as
       sendCalls += 1;
       return { ok: true as const, turnId: 'turn-1' };
     },
-    setPermissionMode: async () => {
+    setExecutionPolicy: async () => {
       throw new Error('permission write failed');
     },
   });
 
-  // Stage a stricter mode before the fork exists (source default is 'ask').
+  // Stage a stricter mode before the fork exists.
   await act(async () => {
-    assert.equal(await probe.setPermissionMode('explore'), true);
+    assert.equal(await probe.setSandboxMode('read-only'), true);
     await Promise.resolve();
   });
 
@@ -3222,7 +3288,7 @@ test('fails closed when the staged permission write fails on the first send', as
   assert.equal(sendCalls, 0);
   assert.equal(
     probe.container.firstElementChild?.getAttribute('data-permission-mode'),
-    'explore',
+    'read-only',
   );
 });
 
@@ -3264,13 +3330,13 @@ test('replays the empty copy point across an ambiguous retry even after the sour
 test('declining Full access through the side-chat hook does not persist the permission mode', async () => {
   let confirmations = 0;
   let writes = 0;
-  let setPermissionMode!: (mode: PermissionMode) => Promise<boolean>;
+  let setSandboxMode!: (mode: SandboxMode) => Promise<boolean>;
 
   const { container } = await renderProbe(
     {
-      setPermissionMode: async (sessionId, mode) => {
+      setExecutionPolicy: async (sessionId, policy) => {
         writes += 1;
-        return session(sessionId, { permissionMode: mode });
+        return session(sessionId, policy);
       },
     },
     {
@@ -3278,14 +3344,14 @@ test('declining Full access through the side-chat hook does not persist the perm
         confirmations += 1;
         return false;
       },
-      onSetPermissionMode: (setter) => {
-        setPermissionMode = setter;
+      onSetSandboxMode: (setter) => {
+        setSandboxMode = setter;
       },
     },
   );
 
   assert.ok(container.firstElementChild);
-  const result = await act(async () => setPermissionMode('bypass'));
+  const result = await act(async () => setSandboxMode('danger-full-access'));
 
   assert.equal(result, false);
   assert.equal(confirmations, 1);
@@ -3293,9 +3359,9 @@ test('declining Full access through the side-chat hook does not persist the perm
 });
 
 function QuoteCompanionProbe(props: {
-  sourceSession?: SessionSummary;
+  sourceSession?: SideChatSession;
   modelChoices?: readonly ChatModelChoice[];
-  onSetPermissionMode?: (setPermissionMode: (mode: PermissionMode) => Promise<boolean>) => void;
+  onSetSandboxMode?: (setSandboxMode: (mode: SandboxMode) => Promise<boolean>) => void;
   confirmBypass?: () => Promise<boolean>;
 }) {
   const sourceSession = props.sourceSession ?? SOURCE_SESSION;
@@ -3308,7 +3374,7 @@ function QuoteCompanionProbe(props: {
     onQuotesConsumed: () => undefined,
     confirmBypass: props.confirmBypass ?? (async () => true),
   });
-  props.onSetPermissionMode?.(companion.setPermissionMode);
+  props.onSetSandboxMode?.(companion.setSandboxMode);
   return createElement('div', {
     'data-error': companion.error ?? '',
     'data-companion-id': companion.companionSession?.id ?? '',
@@ -3322,11 +3388,12 @@ function QuoteCompanionOwnershipProbe(props: {
   onSteer?: (steer: SteerFn) => void;
   onStop?: (stop: () => Promise<void>) => void;
   onDeleteQueuedEntry?: (deleteEntry: (entryId: string) => Promise<void>) => void;
-  onSetPermissionMode?: (set: (mode: PermissionMode) => Promise<boolean>) => void;
+  onSetSandboxMode?: (set: (mode: SandboxMode) => Promise<boolean>) => void;
+  confirmBypass?: (allProtections?: boolean) => Promise<boolean>;
   onContextCompactionError?: (sessionId: string, error: unknown) => void;
   pendingQuotes?: readonly StagedCompanionQuote[];
   onQuotesConsumed?: (snapshot: CompanionQuoteSnapshot) => void;
-  sourceSession?: SessionSummary;
+  sourceSession?: SideChatSession;
   modelChoices?: readonly ChatModelChoice[];
 }) {
   const sourceSession = props.sourceSession ?? SOURCE_SESSION;
@@ -3337,7 +3404,7 @@ function QuoteCompanionOwnershipProbe(props: {
     modelChoices: props.modelChoices ?? [choiceFor(sourceSession)],
     locale: 'en',
     onQuotesConsumed: props.onQuotesConsumed ?? (() => undefined),
-    confirmBypass: async () => true,
+    confirmBypass: props.confirmBypass ?? (async () => true),
     onContextCompactionError: props.onContextCompactionError,
   });
   props.onSend(companion.send);
@@ -3346,7 +3413,7 @@ function QuoteCompanionOwnershipProbe(props: {
   props.onSteer?.(companion.steer);
   props.onStop?.(companion.stop);
   props.onDeleteQueuedEntry?.(companion.deleteQueuedEntry);
-  props.onSetPermissionMode?.(companion.setPermissionMode);
+  props.onSetSandboxMode?.(companion.setSandboxMode);
   return createElement('div', {
     'data-companion-id': companion.companionSession?.id ?? '',
     'data-error': companion.error ?? '',
@@ -3357,7 +3424,7 @@ function QuoteCompanionOwnershipProbe(props: {
     'data-active-turn': companion.activeTurn?.turnId ?? '',
     'data-processing': String(companion.processing),
     'data-model-ready': String(companion.modelReady),
-    'data-permission-mode': companion.permissionMode ?? '',
+    'data-permission-mode': companion.sandboxMode ?? '',
     'data-transient-count': String(companion.transientMessages.length),
     'data-transient-text': companion.transientMessages[0]?.text ?? '',
     'data-transient-texts': companion.transientMessages.map((message) => message.text).join('|'),
@@ -3368,7 +3435,7 @@ function QuoteCompanionOwnershipProbe(props: {
   });
 }
 
-function session(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
+function session(id: string, overrides: Partial<SideChatSession> = {}): SideChatSession {
   return {
     id,
     name: id,
@@ -3382,13 +3449,14 @@ function session(id: string, overrides: Partial<SessionSummary> = {}): SessionSu
     llmConnectionSlug: 'test',
     connectionLocked: false,
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
     ...overrides,
   };
 }
 
 function choiceFor(
-  source: SessionSummary,
+  source: SideChatSession,
   overrides: Partial<ChatModelChoice> = {},
 ): ChatModelChoice {
   assert.ok(source.llmConnectionId);

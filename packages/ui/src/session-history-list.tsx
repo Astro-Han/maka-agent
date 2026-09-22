@@ -932,7 +932,7 @@ function SessionHoverCardDescription(props: {
   const conversationCopy = getConversationCopy(props.locale);
   const copy = getSessionHoverCardCopy(props.locale);
   const session = props.session;
-  const permission = conversationCopy.permissions.mode[session.permissionMode].label;
+  const permission = conversationCopy.permissions.mode[session.sandboxMode].label;
   const description = [
     props.status,
     session.lastMessagePreview || copy.noMessages,
@@ -958,7 +958,7 @@ function SessionHoverCardContent(props: {
   const conversationCopy = getConversationCopy(props.locale);
   const copy = getSessionHoverCardCopy(props.locale);
   const session = props.session;
-  const permission = conversationCopy.permissions.mode[session.permissionMode].label;
+  const permission = conversationCopy.permissions.mode[session.sandboxMode].label;
 
   return (
     <span className="maka-sidebar-hover-card" data-kind="session">

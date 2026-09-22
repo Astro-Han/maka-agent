@@ -103,6 +103,9 @@ impl Host {
         if operation == Operation::SessionExecutionBoundaryQuery {
             return super::execution_boundary::execute(self, &input).await;
         }
+        if maka_protocol::sandbox_setup::supports(operation) {
+            return super::sandbox_setup::execute(self, operation).await;
+        }
         if super::onboarding::supports(operation) {
             return super::onboarding::execute(self, operation, &input).await;
         }

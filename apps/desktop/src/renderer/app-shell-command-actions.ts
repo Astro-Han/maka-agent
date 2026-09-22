@@ -19,7 +19,7 @@
 
 import { useMemo, useRef } from "react";
 import type { LlmConnection } from '@maka/core/llm-connections';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { SessionSummary, StoredMessage } from '@maka/core/session';
 import type { SettingsSection, ThemePreference } from '@maka/core/settings';
 import type { UiLocale } from '@maka/core/ui-locale';
@@ -65,8 +65,8 @@ type RefBox<T> = { current: T };
 export interface AppShellCommandListOptions {
   uiLocale: UiLocale;
   activeId: string | undefined;
-  activePermissionMode: PermissionMode | undefined;
-  canSetPermissionMode: boolean;
+  activeSandboxMode: SandboxMode | undefined;
+  canSetSandboxMode: boolean;
   clientPathsAccessible: boolean;
   connections: LlmConnection[];
   defaultConnection: string | null;
@@ -93,7 +93,7 @@ export interface AppShellCommandListOptions {
   pasteTodayDailyReview: () => Promise<void>;
   saveTodayDailyReview: () => Promise<void>;
   setNavSelection: (selection: NavSelection) => void;
-  setPermissionMode: (mode: PermissionMode) => Promise<boolean>;
+  setSandboxMode: (mode: SandboxMode) => Promise<boolean>;
   setThemePref: (themePref: ThemePreference) => void;
   toastApi: ToastApi;
 }
@@ -291,12 +291,12 @@ export function buildAppShellCommandList(
         );
       }
     },
-    onSetPermissionMode: options.canSetPermissionMode
+    onSetSandboxMode: options.canSetSandboxMode
       ? async (mode) => {
-          await optionsRef.current.setPermissionMode(mode);
+          await optionsRef.current.setSandboxMode(mode);
         }
       : undefined,
-    activePermissionMode: options.activePermissionMode,
+    activeSandboxMode: options.activeSandboxMode,
     onCopyTodayDailyReview: () => optionsRef.current.copyTodayDailyReview(),
     onPasteTodayDailyReviewIntoComposer: () => optionsRef.current.pasteTodayDailyReview(),
     onSaveTodayDailyReviewToFile: () => optionsRef.current.saveTodayDailyReview(),

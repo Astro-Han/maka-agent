@@ -1619,7 +1619,7 @@ function sessionHeader(): SessionHeader {
     llmConnectionSlug: 'test',
     connectionLocked: true,
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     schemaVersion: 1,

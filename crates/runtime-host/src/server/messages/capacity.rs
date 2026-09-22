@@ -214,7 +214,7 @@ mod tests {
                 connection_slug: "fixture".into(),
                 model: "fixture".into(),
             },
-            maka_protocol::session::PermissionMode::Explore,
+            maka_protocol::session::SandboxMode::ReadOnly,
             maka_runtime::execution::ToolMode::Direct,
         );
         log.create_session("session", "create", &configuration, 1)

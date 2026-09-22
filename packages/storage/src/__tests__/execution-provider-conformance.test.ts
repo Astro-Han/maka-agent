@@ -1260,7 +1260,7 @@ for (const backend of ['Local', 'Memory'] as const) {
         await assert.rejects(
           s.updateSessionConfiguration(session.id, {
             expectedVersion: snapshot.revision - 1,
-            configuration: { ...configuration, permissionMode: 'bypass' },
+            configuration: { ...configuration, sandboxMode: 'danger-full-access' },
             lifecycle: { kind: 'preserve' },
           }),
           SessionMetadataVersionConflictError,
@@ -1289,20 +1289,22 @@ for (const backend of ['Local', 'Memory'] as const) {
         decision: 'allow',
       });
       const approved = await s.readExecutionBoundary(session.id);
-      for (const permissionMode of ['explore', 'bypass'] as const) {
+      for (const sandboxMode of ['read-only', 'danger-full-access'] as const) {
         await s.setExecutionBoundaryKind(
           session.id,
-          permissionMode === 'bypass' ? 'bypass' : 'managed',
-          { permissionMode },
+          sandboxMode === 'danger-full-access' ? 'danger-full-access' : 'managed',
+          { sandboxMode },
         );
         const restored = await s.setExecutionBoundaryKind(session.id, 'managed', {
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
         });
         assert.deepEqual({ ...restored, revision: approved.revision }, approved);
       }
       const before = await sessionAuthority(s, session.id);
       await assert.rejects(
-        s.setExecutionBoundaryKind(session.id, 'bypass', { permissionMode: 'ask' }),
+        s.setExecutionBoundaryKind(session.id, 'danger-full-access', {
+          sandboxMode: 'workspace-write',
+        }),
       );
       assert.deepEqual(await sessionAuthority(s, session.id), before);
     });
@@ -1318,7 +1320,7 @@ for (const backend of ['Local', 'Memory'] as const) {
         const before = await sessionAuthority(s, session.id);
         const configuration = {
           ...sessionConfiguration(before.record.header),
-          permissionMode: 'bypass' as const,
+          sandboxMode: 'danger-full-access' as const,
         };
         await assert.rejects(
           s.updateSessionConfiguration(session.id, {
@@ -1349,7 +1351,7 @@ for (const backend of ['Local', 'Memory'] as const) {
         });
         assert.equal(unblocked.header.status, 'active');
         assert.equal(unblocked.header.blockedReason, undefined);
-        assert.equal((await s.readExecutionBoundary(session.id)).kind, 'bypass');
+        assert.equal((await s.readExecutionBoundary(session.id)).kind, 'danger-full-access');
       });
     },
   );
@@ -2306,7 +2308,7 @@ function sessionConfiguration(
     connectionLocked: header.connectionLocked ?? false,
     model: header.model,
     thinkingLevel: header.thinkingLevel,
-    permissionMode: header.permissionMode,
+    sandboxMode: header.sandboxMode,
     collaborationMode: header.collaborationMode ?? 'agent',
     orchestrationMode: header.orchestrationMode ?? 'default',
     labels: header.labels ?? [],
@@ -2318,7 +2320,7 @@ function sessionInput(root: string) {
     name: 'Target',
     llmConnectionSlug: 'test',
     model: 'test',
-    permissionMode: 'ask' as const,
+    sandboxMode: 'workspace-write' as const,
   };
 }
 function newAssignment(root: string, actionId: string): WorkHubMessageAssignmentRequest {

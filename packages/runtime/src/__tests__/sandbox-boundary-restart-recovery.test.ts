@@ -281,7 +281,7 @@ function sessionInput(cwd: string): CreateSessionInput {
     cwd,
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     name: 'Session',
     labels: [],
   };

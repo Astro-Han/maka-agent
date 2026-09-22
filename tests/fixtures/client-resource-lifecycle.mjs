@@ -43,7 +43,9 @@ export async function verifyResourceLifecycle(connection, workspace, reopened, o
     sessionId,
     workspace: { kind: 'host_path', path: workspace },
     modelTarget: { kind: 'default' },
-    permissionMode: 'ask',
+    // Ordinary transport tests do not provision elevated Windows accounts.
+    // Managed Windows pipe/PTY enforcement has a separate opt-in OS fixture.
+    sandboxMode: process.platform === 'win32' ? 'danger-full-access' : 'workspace-write',
   });
   const active = new Set();
   const results = [];

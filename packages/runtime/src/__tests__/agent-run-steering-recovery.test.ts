@@ -42,7 +42,7 @@ test('rejects an invalid tool mode before a durable AgentRun can be created', as
       cwd: '/tmp/cwd',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const runStore = createSqliteAgentRunStore(root);
     const runtimeEventStore = createWorkspaceRuntimeStore(root);
@@ -82,7 +82,7 @@ test('records changed request surfaces append-only and reuses unchanged epochs',
       cwd: '/tmp/cwd',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const runStore = createSqliteAgentRunStore(root);
     const runtimeEventStore = createWorkspaceRuntimeStore(root);
@@ -217,7 +217,7 @@ test('does not re-append atomically committed tool facts through the generic eve
       cwd: '/tmp/cwd',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const runtimeEventStore = createWorkspaceRuntimeStore(root);
     const runId = 'run-atomic-tool';
@@ -288,7 +288,7 @@ test('acks a steering event whose canonical append preceded proof publication fa
       cwd: '/tmp/cwd',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const runStore = createSqliteAgentRunStore(root);
     const runtimeEventStore = createWorkspaceRuntimeStore(root);
@@ -361,7 +361,7 @@ test('awaits the durable settlement fact before accepting an interaction resume'
       cwd: '/tmp/cwd',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const runStore = createSqliteAgentRunStore(root);
     const runtimeEventStore = createWorkspaceRuntimeStore(root);

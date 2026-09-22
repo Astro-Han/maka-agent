@@ -33,7 +33,7 @@ import { readPage } from './read-page.js';
 import { lstat, realpath, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import type { ExecutionBoundary } from '@maka/core/sandbox-boundary';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { PermissionProfile } from '@maka/core/permission-profile';
 import { ToolOutcomeUnknownError } from '@maka/core/events';
 import { computeEditedSource } from './edit-replace.js';
@@ -85,7 +85,7 @@ export interface FilesystemExecuteInput {
   cwd: string;
   executionBoundary?: ExecutionBoundary;
   /** Only consulted when no boundary is present; the boundary always wins. */
-  permissionMode?: PermissionMode;
+  sandboxMode?: SandboxMode;
   abortSignal?: AbortSignal;
 }
 
@@ -139,7 +139,7 @@ export interface BoundaryFilesystemExecutorInput {
  * never opted in — stays workspace-scoped.
  */
 function pathScopeForBoundary(boundary: ExecutionBoundary | undefined): WorkspacePathScope {
-  return boundary?.kind === 'bypass' ? 'host' : 'workspace';
+  return boundary?.kind === 'danger-full-access' ? 'host' : 'workspace';
 }
 
 /**
@@ -194,7 +194,7 @@ export function createBoundaryFilesystemExecutor(
   const workerFor = (
     boundary: ExecutionBoundary | undefined,
   ): Pick<FilesystemWorkerClient, 'execute'> | undefined => {
-    if (boundary?.kind === 'bypass' || boundary?.kind === 'external') return undefined;
+    if (boundary?.kind === 'danger-full-access' || boundary?.kind === 'external') return undefined;
     if (input.worker) return input.worker;
     if (boundary?.kind !== 'managed') return undefined;
     throw new SandboxCommandError({
@@ -234,7 +234,7 @@ export function createBoundaryFilesystemExecutor(
       // rewrite, and its own resolvers canonicalise what they need.
       cwd: await canonicalExistingPath(call.cwd),
       ...(call.executionBoundary ? { executionBoundary: call.executionBoundary } : {}),
-      mode: call.permissionMode ?? 'ask',
+      mode: call.sandboxMode ?? 'workspace-write',
       ...(input.permissionProfile ? { permissionProfile: input.permissionProfile } : {}),
       ...(call.abortSignal ? { abortSignal: call.abortSignal } : {}),
       // The worker client now requires an explicit T0 marker (#3484): a

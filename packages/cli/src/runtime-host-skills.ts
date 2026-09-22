@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { RuntimeHostConnection } from '@maka/runtime-host/client';
 import { createPluginRemote } from '@maka/runtime-host/client/plugin-remote';
 import type { WorkspaceTarget } from '@maka/runtime-host/protocol';
@@ -27,7 +27,7 @@ import type { InvocableSkillEntry } from '@maka/runtime/skill-invocation';
 export async function readRuntimeHostSkills(
   connection: RuntimeHostConnection,
   workspace: WorkspaceTarget,
-  permissionMode: PermissionMode,
+  sandboxMode: SandboxMode,
 ): Promise<InvocableSkillEntry[]> {
   const snapshot = await connection.request('plugin.client.query', { kind: 'snapshot' });
   if (snapshot.kind !== 'snapshot') throw new Error('Unexpected plugin catalog result');
@@ -61,7 +61,7 @@ export async function readRuntimeHostSkills(
       }
     | { kind: 'revision_changed'; expectedRevision: string; actualRevision: string };
   type Input = ({ projectId: string } | { path: string }) & {
-    permissionMode: PermissionMode;
+    sandboxMode: SandboxMode;
     collaborationMode: 'agent';
     request: Request;
   };
@@ -77,7 +77,7 @@ export async function readRuntimeHostSkills(
     do {
       const result = await call({
         ...target,
-        permissionMode,
+        sandboxMode,
         collaborationMode: 'agent',
         request: { kind: 'invocable', page },
       });

@@ -248,7 +248,9 @@ impl Host {
             let mut request = decode_request_envelope(&value)?;
             let implemented = operations::Operations.error_codes(request.operation).is_some();
             if implemented {
-                request.input = operations::Operations.decode_input(request.operation, &request.input)?;
+                request.input = operations::Operations
+                    .decode_input(request.operation, &request.input)
+                    .map_err(|error| format!("invalid {} input: {error}", request.operation))?;
             }
             // The client may immediately reuse an ID after seeing its reply.
             // Fair read selection must not mistake a pending flush ack for an

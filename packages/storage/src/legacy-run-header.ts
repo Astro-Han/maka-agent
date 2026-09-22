@@ -27,11 +27,7 @@
  * authority again.
  */
 
-import {
-  decodePersistedPermissionMode,
-  isPermissionMode,
-  type PermissionMode,
-} from '@maka/core/permission';
+import { decodePersistedSandboxMode, isSandboxMode, type SandboxMode } from '@maka/core/permission';
 import { isCollaborationMode, type CollaborationMode } from '@maka/core/collaboration';
 import {
   isAgentSwarmAuthorizationSource,
@@ -99,7 +95,7 @@ export interface LegacyRunHeader {
   modelId: string;
   cwd: string;
   workspaceIdentity?: string;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   collaborationMode?: CollaborationMode;
   orchestrationMode?: OrchestrationMode;
   orchestrationSource?: EffectiveOrchestrationSource;
@@ -148,7 +144,7 @@ const LEGACY_RUN_HEADER_SHAPE = defineObjectShape<LegacyRunHeader>()(
     'llmConnectionSlug',
     'modelId',
     'cwd',
-    'permissionMode',
+    'sandboxMode',
     'createdAt',
     'updatedAt',
   ],
@@ -227,9 +223,9 @@ export function decodePersistedLegacyRunHeader(persisted: unknown): LegacyRunHea
       typeof value.status === 'string'
         ? (RETIRED_RUN_STATUSES[value.status] ?? value.status)
         : value.status;
-    const permissionMode = decodePersistedPermissionMode(value.permissionMode);
-    if (status !== value.status || permissionMode !== value.permissionMode) {
-      value = { ...value, status, permissionMode };
+    const sandboxMode = decodePersistedSandboxMode(value.sandboxMode);
+    if (status !== value.status || sandboxMode !== value.sandboxMode) {
+      value = { ...value, status, sandboxMode };
     }
   }
   return decodeLegacyRunHeader(value);
@@ -251,7 +247,7 @@ function decodeLegacyRunHeader(value: unknown): LegacyRunHeader {
     typeof value.llmConnectionSlug === 'string' &&
     typeof value.modelId === 'string' &&
     typeof value.cwd === 'string' &&
-    isPermissionMode(value.permissionMode) &&
+    isSandboxMode(value.sandboxMode) &&
     (value.collaborationMode === undefined || isCollaborationMode(value.collaborationMode)) &&
     (value.orchestrationMode === undefined || isOrchestrationMode(value.orchestrationMode)) &&
     (value.orchestrationSource === undefined ||
@@ -334,7 +330,7 @@ export function invocationOpeningFromLegacyRunHeader(
     route: invocationRouteFromLegacyRunHeader(header),
     configuration: {
       cwd: header.cwd,
-      permissionMode: header.permissionMode,
+      sandboxMode: header.sandboxMode,
       collaborationMode: header.collaborationMode ?? 'agent',
       orchestrationMode: header.orchestrationMode ?? 'default',
       orchestrationSource: header.orchestrationSource ?? 'session',

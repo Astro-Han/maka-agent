@@ -18,22 +18,22 @@
  */
 
 import type { ExecutionBoundaryReadModel } from '@maka/core/sandbox-boundary';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import { executionBoundaryDisplayMode } from '@maka/core/sandbox-boundary';
 
 export interface DesktopExecutionBoundarySurface {
-  permissionMode: PermissionMode | undefined;
+  sandboxMode: SandboxMode | undefined;
   localInteractionAvailable: boolean;
 }
 
 export function deriveDesktopExecutionBoundarySurface(
   activeSessionId: string | undefined,
   boundary: ExecutionBoundaryReadModel | undefined,
-  fallbackMode: PermissionMode,
+  fallbackMode: SandboxMode,
 ): DesktopExecutionBoundarySurface {
   if (!activeSessionId) {
     return {
-      permissionMode: fallbackMode,
+      sandboxMode: fallbackMode,
       localInteractionAvailable: true,
     };
   }
@@ -42,8 +42,8 @@ export function deriveDesktopExecutionBoundarySurface(
   // the user sees — shared with the TUI so the two surfaces cannot drift.
   // Until it resolves (and permanently, for an externally isolated session)
   // this surface fails closed: no mode, no local controls.
-  const permissionMode = boundary ? executionBoundaryDisplayMode(boundary) : undefined;
-  return permissionMode
-    ? { permissionMode, localInteractionAvailable: true }
-    : { permissionMode: undefined, localInteractionAvailable: false };
+  const sandboxMode = boundary ? executionBoundaryDisplayMode(boundary) : undefined;
+  return sandboxMode
+    ? { sandboxMode, localInteractionAvailable: true }
+    : { sandboxMode: undefined, localInteractionAvailable: false };
 }

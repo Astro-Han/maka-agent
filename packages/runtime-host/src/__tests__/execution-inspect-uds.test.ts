@@ -54,7 +54,7 @@ test('a live Host serves Interactive inspection over its real endpoint while ret
     llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   });
   await stores.sessionStore.close?.();
   await owner.close();

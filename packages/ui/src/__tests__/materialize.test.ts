@@ -372,9 +372,9 @@ function shellRunResult(revision: number) {
 
 describe("flat timeline under tool projection (#1307 P1 regression)", () => {
   test("shell-run folding away a turn’s only tool leaves a flat thinking-only timeline", () => {
-    // Turn t1 owns the Bash ShellRun parent; the live turn t2's ONLY tool is a
+    // Turn t1 owns the Shell ShellRun parent; the live turn t2's ONLY tool is a
     // Read carrying a shell_run result with the same ref, so foldShellRunTurns
-    // merges it into t1's Bash and drops it from t2 entirely. With the fold
+    // merges it into t1's Shell and drops it from t2 entirely. With the fold
     // living in the model this used to strand an illegal thinking-only
     // "processing" block with an empty summary; the flat model simply drops
     // the emptied tools group.
@@ -384,7 +384,7 @@ describe("flat timeline under tool projection (#1307 P1 regression)", () => {
         id: "bash-1",
         turnId: "t1",
         ts: 1,
-        toolName: "Bash",
+        toolName: "Shell",
         args: { command: "job", pty: true },
       },
       {
@@ -503,7 +503,7 @@ describe("unfinished tools take their status from the turn", () => {
         id: "bash-1",
         turnId: "t1",
         ts: 3,
-        toolName: "Bash",
+        toolName: "Shell",
         args: { command: "sleep 600" },
       },
     ], "en");
@@ -526,7 +526,7 @@ describe("unfinished tools take their status from the turn", () => {
         id: "bash-1",
         turnId: "t1",
         ts: 3,
-        toolName: "Bash",
+        toolName: "Shell",
         args: { command: "sleep 600" },
       },
     ], "en");
@@ -552,7 +552,7 @@ describe("live tool status over persisted", () => {
         id: "bash-1",
         turnId: "t1",
         ts: 3,
-        toolName: "Bash",
+        toolName: "Shell",
         args: { command: "sleep 60" },
       },
     ], "en");
@@ -564,7 +564,7 @@ describe("live tool status over persisted", () => {
           tools: [
             {
               toolUseId: "bash-1",
-              toolName: "Bash",
+              toolName: "Shell",
               stepId: "a1",
               status: "running",
               args: { command: "sleep 60" },
@@ -597,7 +597,7 @@ describe("live tool status over persisted", () => {
         id: "bash-1",
         turnId: "t1",
         ts: 3,
-        toolName: "Bash",
+        toolName: "Shell",
         args: { command: "sleep 60" },
       },
     ], "en");
@@ -609,7 +609,7 @@ describe("live tool status over persisted", () => {
           tools: [
             {
               toolUseId: "bash-1",
-              toolName: "Bash",
+              toolName: "Shell",
               stepId: "a1",
               status: "running",
               args: { command: "sleep 60" },
@@ -709,7 +709,7 @@ describe("live tool status over persisted", () => {
         id: "bash-1",
         turnId: "t1",
         ts: 3,
-        toolName: "Bash",
+        toolName: "Shell",
         args: { command: "sleep 60" },
       },
     ], "en");
@@ -718,7 +718,7 @@ describe("live tool status over persisted", () => {
       id: "event-1",
       turnId: "t1",
       toolUseId: "bash-1",
-      toolName: "Bash",
+      toolName: "Shell",
       args: { command: "sleep 60" },
       ts: 4,
     });

@@ -331,7 +331,7 @@ describe('tool activity presentation', () => {
     const markup = renderToStaticMarkup(createElement(ToolCallDetail, {
       item: {
         toolUseId: 'tool-malformed-terminal',
-        toolName: 'Bash',
+        toolName: 'Shell',
         status: 'errored',
         args: { command: 'npm test' },
         result: malformed,
@@ -373,7 +373,7 @@ describe('tool activity presentation', () => {
     const markup = renderToStaticMarkup(createElement(ToolCallDetail, {
       item: {
         toolUseId: 'tool-shell-run-empty',
-        toolName: 'Bash',
+        toolName: 'Shell',
         activityKind: 'command',
         status: 'running',
         args: { command: 'npm test' },
@@ -407,7 +407,7 @@ describe('tool activity presentation', () => {
     const markup = renderToStaticMarkup(createElement(ToolCallDetail, {
       item: {
         toolUseId: 'tool-shell-run-empty-meta',
-        toolName: 'Bash',
+        toolName: 'Shell',
         activityKind: 'command',
         status: 'running',
         args: { command: 'npm test' },
@@ -440,7 +440,7 @@ describe('tool activity presentation', () => {
       renderToStaticMarkup(createElement(ToolCallDetail, {
         item: {
           toolUseId,
-          toolName: 'Bash',
+          toolName: 'Shell',
           status: 'running',
           args: { command: 'npm test' },
           outputChunks: [
@@ -453,7 +453,7 @@ describe('tool activity presentation', () => {
 
     assert.doesNotMatch(render(firstId), new RegExp(firstId));
     assert.doesNotMatch(render(secondId), new RegExp(secondId));
-    assert.match(render(firstId), /Bash/);
+    assert.match(render(firstId), /Shell/);
   });
 
   it('disambiguates code copy actions by their tool call', () => {
@@ -490,7 +490,7 @@ describe('tool activity presentation', () => {
 describe('collapsed tool row target', () => {
   const baseItem = {
     toolUseId: 'tool-collapsed',
-    toolName: 'Bash',
+    toolName: 'Shell',
     status: 'running' as const,
   };
 

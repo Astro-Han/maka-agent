@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SessionEvent } from '@maka/core/events';
-import type { SessionSummary } from '@maka/core/session';
+import type { DesktopSessionSummaryInput } from '../../shared/desktop-session-projection.js';
 import type { UsageStats } from '@maka/core/settings';
 import { EMPTY_USAGE_PROVENANCE } from '@maka/core/usage-ledger-merge';
 import {
@@ -117,7 +117,7 @@ test('projects typed linked Session ids without rewriting opaque tool data', () 
       agentName: 'Worker',
       turnId: 'child-turn',
       status: 'running',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     },
   });
   const opaque = projectDesktopSessionEvent(host, {
@@ -250,7 +250,7 @@ test('projects only present Usage Session ids into the Desktop host namespace', 
 });
 
 
-function summary(id: string): SessionSummary & { revision: number } {
+function summary(id: string): DesktopSessionSummaryInput {
   return {
     id,
     revision: 7,
@@ -264,6 +264,7 @@ function summary(id: string): SessionSummary & { revision: number } {
     llmConnectionSlug: 'default',
     connectionLocked: false,
     model: 'model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
   };
 }

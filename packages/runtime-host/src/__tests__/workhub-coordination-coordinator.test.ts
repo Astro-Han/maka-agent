@@ -218,7 +218,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test',
         model: 'test',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const candidates = await workhub.handlers['workhub.coordination.candidates']({}, CONTEXT);
       assert.ok(candidates.ok);
@@ -343,7 +343,7 @@ describe('Host WorkHub Coordination coordinator', () => {
           `UPDATE session_metadata
            SET payload_json = json_set(
              json_remove(payload_json, '$.toolProfile'),
-             '$.permissionMode', 'ask',
+             '$.sandboxMode', 'ask',
              '$.collaborationMode', 'plan',
              '$.orchestrationMode', 'graph'
            )
@@ -369,7 +369,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         'workhub-coordination-v2',
       );
       const migrated = await store.readHeaderSnapshot(WORKHUB_COORDINATION_SESSION_ID);
-      assert.equal(migrated.permissionMode, 'bypass');
+      assert.equal(migrated.sandboxMode, 'bypass');
       assert.equal(migrated.collaborationMode, 'agent');
       assert.equal(migrated.orchestrationMode, 'default');
       assert.equal((await store.listHeaders()).length, 1);
@@ -399,14 +399,14 @@ describe('Host WorkHub Coordination coordinator', () => {
       );
       assert.equal((await workhub.handlers['workhub.coordination.resolve']({}, CONTEXT)).ok, true);
       await store.setExecutionBoundaryKind(WORKHUB_COORDINATION_SESSION_ID, 'managed', {
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
       });
       const record = await store.readHeaderRecordSnapshot(WORKHUB_COORDINATION_SESSION_ID);
       await store.updateHeaderVersioned(
         WORKHUB_COORDINATION_SESSION_ID,
         {
           toolProfile: 'workhub-coordination-v1',
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
         },
         record.revision,
       );
@@ -420,7 +420,7 @@ describe('Host WorkHub Coordination coordinator', () => {
       assert.equal((await workhub.handlers['workhub.coordination.resolve']({}, CONTEXT)).ok, true);
       const upgraded = await store.readHeaderRecordSnapshot(WORKHUB_COORDINATION_SESSION_ID);
       assert.equal(upgraded.header.toolProfile, 'workhub-coordination-v2');
-      assert.equal(upgraded.header.permissionMode, 'bypass');
+      assert.equal(upgraded.header.sandboxMode, 'bypass');
       assert.ok(upgraded.revision > legacy.revision);
       assert.equal(
         (await store.readExecutionBoundary(WORKHUB_COORDINATION_SESSION_ID)).kind,
@@ -445,7 +445,7 @@ describe('Host WorkHub Coordination coordinator', () => {
           name: 'Ordinary collision',
           llmConnectionSlug: 'test-connection',
           model: 'test-model',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           role: WORKHUB_COORDINATION_SESSION_ROLE,
         },
       });
@@ -494,7 +494,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Keep me',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const initial = await coordinator(root, store).handlers['workhub.coordination.resolve'](
         {},
@@ -551,7 +551,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Keep me',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       assert.equal(
         (await coordinator(root, store).handlers['workhub.coordination.resolve']({}, CONTEXT)).ok,
@@ -736,7 +736,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const assignments: string[] = [];
       const first = coordinator(root, store, () => undefined, undefined, undefined, undefined, {
@@ -834,7 +834,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const workhub = coordinator(root, store, () => undefined, undefined, undefined, undefined, {
         assign: async () => {
@@ -879,7 +879,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       assert.equal(
         (await coordinator(root, store).handlers['workhub.coordination.resolve']({}, CONTEXT)).ok,
@@ -1002,7 +1002,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Terminal only',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       await persistTestAssignment(
         store,
@@ -1101,14 +1101,14 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const destination = await store.create({
         cwd: root,
         name: 'Login',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const workhub = coordinator(root, store, () => undefined, undefined, undefined, undefined, {
         retireDelegation: async () => assert.fail('a stale correction must not retire work'),
@@ -1190,7 +1190,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       targetId = target.id;
       let retireCalls = 0;
@@ -1295,7 +1295,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const workhub = coordinator(root, store, () => undefined, undefined, undefined, admission, {
         assign: (input) =>
@@ -1371,7 +1371,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       targetId = target.id;
       let resumeCalls = 0;
@@ -1439,7 +1439,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       let recovering = true;
       const workhub = coordinator(root, store, () => undefined, undefined, undefined, undefined, {
@@ -1515,7 +1515,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const admission = new SessionAdmissionGate();
       let injected = false;
@@ -1636,7 +1636,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       targetId = target.id;
       // The exact crash seam: the pending cancellation succeeds and the durable
@@ -1743,7 +1743,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       let failStopRequest = true;
       const stores = new Proxy(store, {
@@ -1845,7 +1845,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const workhub = coordinator(root, store, () => undefined, undefined, undefined, undefined, {
         assign: persistTestAssignmentAction(store, (input) => `${input.actionId}-turn`),
@@ -1960,7 +1960,7 @@ describe('Host WorkHub Coordination coordinator', () => {
         name: 'Payments',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const workhub = coordinator(root, store, () => undefined, undefined, undefined, undefined, {
         assign: persistTestAssignmentAction(store, 'payments-turn'),
@@ -2062,7 +2062,7 @@ describe('Host WorkHub Coordination coordinator', () => {
             name,
             llmConnectionSlug: 'test-connection',
             model: 'test-model',
-            permissionMode: 'ask',
+            sandboxMode: 'workspace-write',
           }),
         );
       }
@@ -2334,7 +2334,7 @@ function coordinator(
         llmConnectionId: 'test-connection-id',
         llmConnectionSlug: 'test-connection',
         model: 'test-model',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         collaborationMode: 'agent',
         orchestrationMode: 'default',
       })),

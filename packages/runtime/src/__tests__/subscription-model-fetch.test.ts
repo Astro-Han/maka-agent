@@ -596,7 +596,7 @@ describe('subscription model fetch', () => {
     assert.equal(observed[1]?.headers.get('x-initiator'), 'agent');
     assert.equal(observed[1]?.body, toolBody);
     assert.equal(observed[2]?.headers.get('x-initiator'), 'user');
-    assert.equal(observed[2]?.headers.get('copilot-vision-request'), 'true');
+    assert.equal(observed[2]?.headers.get('copilot-vision_request'), 'true');
     assert.equal(observed[2]?.body, responsesBody);
   });
 

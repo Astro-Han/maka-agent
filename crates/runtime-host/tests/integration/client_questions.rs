@@ -35,7 +35,7 @@ use tokio_util::sync::CancellationToken;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn original_client_questions_commit_answers_and_stop_without_draining() {
-    for mode in ["explore", "bypass"] {
+    for mode in ["read-only", "danger-full-access"] {
         verify_questions(mode).await;
     }
 }

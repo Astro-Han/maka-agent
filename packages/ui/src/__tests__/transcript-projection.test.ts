@@ -30,7 +30,7 @@ const REF = 'maka://runtime/background-tasks/pty-1';
 const SESSION = 'session-1';
 
 /**
- * A transcript with background-command history: `turn-1` owns a Bash whose
+ * A transcript with background-command history: `turn-1` owns a Shell whose
  * durable revision permanently leads the `tool_result` snapshot persisted in
  * messages. Re-deriving the overlay per token rebuilt that turn on every
  * delta; the projection has to merge it once.
@@ -38,7 +38,7 @@ const SESSION = 'session-1';
 function history(): StoredMessage[] {
   return [
     { type: 'user', id: 'u1', turnId: 'turn-1', ts: 1, text: 'run a job' },
-    toolCall('bash-1', 'turn-1', 'Bash', { command: 'job', pty: true }, 2),
+    toolCall('bash-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 2),
     toolResult('bash-1', 'turn-1', shellRun(1), 3),
     { type: 'assistant', id: 'a1', turnId: 'turn-1', ts: 4, text: 'started', modelId: 'model-1' },
     { type: 'user', id: 'u2', turnId: 'turn-2', ts: 5, text: 'and now?' },
@@ -345,7 +345,7 @@ describe('incremental transcript projection', () => {
 
   test('affects the ShellRun owner turn, not the turn the event names', () => {
     // A WriteStdin in turn-2 carries a shell_run whose `ref` belongs to the
-    // Bash in turn-1, and `foldShellRunToolActivities` folds it back into that
+    // Shell in turn-1, and `foldShellRunToolActivities` folds it back into that
     // owner. The turn an event names is therefore NOT the set of turns it
     // affects — which is why the affected set is derived from the projection's
     // own output rather than passed through from the event.
@@ -362,12 +362,12 @@ describe('incremental transcript projection', () => {
     });
     assert.notStrictEqual(after[0], before[0], 'the owner turn moved, though the event named turn-3');
     const owner = after[0]?.tools[0];
-    assert.equal(owner?.toolName, 'Bash');
+    assert.equal(owner?.toolName, 'Shell');
     assert.equal(owner?.result?.kind === 'shell_run' ? owner.result.revision : undefined, 4);
     assert.strictEqual(after[1], before[1], 'the untouched turn keeps identity');
   });
 
-  test('folds a child that renders ahead of the Bash owning the run', () => {
+  test('folds a child that renders ahead of the Shell owning the run', () => {
     // A turn's tools are a flattening of its timeline, and a live overlay moves
     // that turn's tools to the end of it — which can order a child ahead of its
     // parent. Folding must not depend on that order: scanning only what has
@@ -382,7 +382,7 @@ describe('incremental transcript projection', () => {
     };
     const parent: ToolActivityItem = {
       toolUseId: 'bash-1',
-      toolName: 'Bash',
+      toolName: 'Shell',
       status: 'running',
       args: {},
       result: shellRun(1),
@@ -394,7 +394,7 @@ describe('incremental transcript projection', () => {
   });
 
   test('applies an update whose only target is a live-only tool', () => {
-    // A durable update can arrive before the Bash tool_call is persisted, so
+    // A durable update can arrive before the Shell tool_call is persisted, so
     // the canonical settled tool map has no target for it yet. The overlay runs
     // over the live-merged turns, where the live-only tool already exists.
     const projection = createTranscriptProjection();
@@ -407,7 +407,7 @@ describe('incremental transcript projection', () => {
         steps: [{
           stepId: 'tool:bash-live',
           contentOrder: ['tools'],
-          tools: [{ toolUseId: 'bash-live', toolName: 'Bash', status: 'running', args: { command: 'job', pty: true } }],
+          tools: [{ toolUseId: 'bash-live', toolName: 'Shell', status: 'running', args: { command: 'job', pty: true } }],
         }],
       }],
       shellRunUpdates: [{

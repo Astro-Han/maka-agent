@@ -110,7 +110,7 @@ describe('Runtime Host Maka Session driver', () => {
       llmConnectionId: 'connection-1',
       llmConnectionSlug: 'openai-main',
       model: 'gpt-5',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
 
     const queried = await driver.queryTodo!('session-id');
@@ -144,7 +144,7 @@ describe('Runtime Host Maka Session driver', () => {
       llmConnectionId: 'connection-1',
       llmConnectionSlug: 'openai-main',
       model: 'gpt-5',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
 
     const changes: string[] = [];
@@ -216,7 +216,7 @@ describe('Runtime Host Maka Session driver', () => {
         llmConnectionId: 'connection-1',
         llmConnectionSlug: 'openai-main',
         model: 'gpt-5',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       }),
       /requires an explicit Project/,
     );
@@ -251,7 +251,7 @@ describe('Runtime Host Maka Session driver', () => {
       llmConnectionId: 'connection-1',
       llmConnectionSlug: 'openai-main',
       model: 'gpt-5',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
 
     // Channel adoption publishes the snapshot's goal without any RPC.
@@ -334,7 +334,7 @@ describe('Runtime Host Maka Session driver', () => {
       llmConnectionId: 'connection-1',
       llmConnectionSlug: 'openai-main',
       model: 'gpt-5',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
 
     // Clean path: one control request carrying the snapshot revision, no query.
@@ -465,7 +465,7 @@ describe('Runtime Host Maka Session driver', () => {
         llmConnectionId: 'connection-1',
         llmConnectionSlug: 'openai-main',
         model: 'gpt-5',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
 
       assert.deepEqual(
@@ -480,7 +480,7 @@ describe('Runtime Host Maka Session driver', () => {
             connectionSlug: 'openai-main',
             model: 'gpt-5',
           },
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
         },
       );
     }
@@ -978,7 +978,7 @@ describe('Runtime Host Maka Session driver', () => {
       llmConnectionId: 'connection-1',
       llmConnectionSlug: 'openai-main',
       model: 'gpt-5',
-      prospectivePermissionMode: 'ask',
+      prospectiveSandboxMode: 'workspace-write',
       newId: () => `session-${++nextId}`,
     });
 
@@ -987,14 +987,14 @@ describe('Runtime Host Maka Session driver', () => {
       llmConnectionId: 'connection-1',
       llmConnectionSlug: 'openai-main',
       model: 'gpt-5',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
-    connection.executionBoundary = { kind: 'bypass', revision: 2 };
-    await driver.setPermissionMode('bypass');
-    assert.equal(driver.getPermissionMode?.(), 'bypass');
+    connection.executionBoundary = { kind: 'danger-full-access', revision: 2 };
+    await driver.setSandboxMode('danger-full-access');
+    assert.equal(driver.getSandboxMode?.(), 'danger-full-access');
 
     await driver.startNewSession();
-    assert.equal(driver.getPermissionMode?.(), 'ask');
+    assert.equal(driver.getSandboxMode?.(), 'workspace-write');
 
     // The fresh Session's boundary is managed again once it exists.
     connection.executionBoundary = { kind: 'managed', access: 'writable', revision: 3 };
@@ -2967,7 +2967,7 @@ class FakeConnection {
         kind: 'committed',
         session: sessionProjection({
           revision: update.expectedRevision + 1,
-          permissionMode: update.patch.permissionMode ?? 'ask',
+          sandboxMode: update.patch.sandboxMode ?? 'workspace-write',
         }),
       } as OperationOutput<K>;
     }
@@ -3270,7 +3270,8 @@ function sessionProjection(
     llmConnectionSlug: 'openai-main',
     connectionLocked: true,
     model: 'gpt-5',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     ...overrides,

@@ -29,7 +29,7 @@ import {
 import type { ClientCapabilityResponse } from '@maka/core/client-capability-grant';
 import type { QuoteRef } from '@maka/core/events';
 import type { InteractionFormResponse } from '@maka/core/interaction';
-import type { SessionSummary } from '@maka/core/session';
+import type { SideChatSession } from '../ports.js';
 import type { WorkBoardItem, WorkBoardLinkedSession } from '@maka/core/work-board';
 import { useUiLocale, type ComposerHandle, type ToastApi } from '@maka/ui';
 import type { ChatModelChoice } from '@maka/ui';
@@ -77,6 +77,7 @@ export interface WorkbarControllerCommands {
   ): void;
   openSideChatWithQuote(quote: QuoteRef): void;
   respondToClientCapability(response: ClientCapabilityResponse): Promise<void>;
+  respondToPermissions(response: import('@maka/core/execution-permissions').PermissionsResponse): Promise<void>;
   respondToUserForm(sessionId: string, response: InteractionFormResponse): Promise<void>;
   toggleRight(): void;
   toggleTool(kind: SessionWorkbarTabKind): void;
@@ -104,7 +105,7 @@ export interface UseWorkbarControllerInput {
   /** Local selection owns layout even while Host creation is pending. */
   layoutSessionId: string | undefined;
   /** Independent persistent renderers must not overwrite each other’s panel topology. */
-  activeSession: SessionSummary | undefined;
+  activeSession: SideChatSession | undefined;
   projectId: string | null | undefined;
   projectAliases: readonly string[];
   authoritativeSessionIds: ReadonlySet<string> | undefined;
@@ -216,7 +217,9 @@ export function useWorkbarController(
     sessionId?: string;
   } | undefined>(undefined);
   const resourceGenerationRef = useRef(0);
+  const selectionGenerationRef = useRef(0);
   useLayoutEffect(() => {
+    selectionGenerationRef.current += 1;
     activeSessionIdRef.current = activeSessionId;
     return () => {
       activeSessionIdRef.current = undefined;
@@ -405,6 +408,14 @@ export function useWorkbarController(
     },
     [input, locale, sideChat],
   );
+  const respondToPermissions = useCallback<WorkbarControllerCommands['respondToPermissions']>(
+    async (response) => {
+      const sessionId = activeSessionIdRef.current;
+      if (!sessionId) throw new Error('Session is no longer active');
+      await sideChat.respondToPermissions(sessionId, response);
+    },
+    [sideChat],
+  );
   const panelsStateRef = useRef(layout.workbarPanelsState);
   useLayoutEffect(() => {
     panelsStateRef.current = layout.workbarPanelsState;
@@ -544,9 +555,17 @@ export function useWorkbarController(
           const ownerSessionId = activeSessionIdRef.current;
           if (!ownerSessionId) return;
           const generation = resourceGenerationRef.current;
+          const selection = selectionGenerationRef.current;
           void terminal
-            .start(ownerSessionId)
+            .prepareExecution(ownerSessionId)
+            .then((ready) => {
+              if (!ready || generation !== resourceGenerationRef.current ||
+                  selection !== selectionGenerationRef.current ||
+                  activeSessionIdRef.current !== ownerSessionId) return null;
+              return terminal.start(ownerSessionId);
+            })
             .then((update) => {
+              if (!update) return;
               const ref = update.result.ref;
               if (
                 generation !== resourceGenerationRef.current
@@ -882,6 +901,7 @@ export function useWorkbarController(
       toggleTool,
       openSideChatWithQuote,
       respondToClientCapability,
+      respondToPermissions,
       respondToUserForm: sideChat.respondToUserForm,
       toggleRight,
       bindNewTaskSessionResolver,
@@ -892,6 +912,7 @@ export function useWorkbarController(
       openTool,
       toggleTool,
       respondToClientCapability,
+      respondToPermissions,
       sideChat.respondToUserForm,
       toggleRight,
     ],

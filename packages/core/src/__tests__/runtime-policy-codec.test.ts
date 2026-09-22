@@ -84,7 +84,7 @@ test('Code Mode is opt-in and survives policy decoding', () => {
 test('preserves a valid default thinking level and rejects unknown levels', () => {
   const policy = {
     ...createDefaultRuntimePolicy(),
-    chatDefaults: { permissionMode: 'ask' as const, thinkingLevel: 'high' as const },
+    chatDefaults: { sandboxMode: 'workspace-write' as const, thinkingLevel: 'high' as const },
   };
   assert.deepEqual(decodeCanonicalRuntimePolicy(policy).chatDefaults, policy.chatDefaults);
   assert.throws(
@@ -93,7 +93,7 @@ test('preserves a valid default thinking level and rejects unknown levels', () =
         expectedRevision: 0,
         operation: {
           kind: 'set_chat_defaults',
-          value: { permissionMode: 'ask', thinkingLevel: 'unbounded' },
+          value: { sandboxMode: 'workspace-write', thinkingLevel: 'unbounded' },
         },
       }),
     RuntimePolicyDomainDecodeError,

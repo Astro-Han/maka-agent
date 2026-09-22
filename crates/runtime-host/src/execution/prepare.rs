@@ -67,12 +67,22 @@ pub(super) enum MessageOrigin<'a> {
 }
 
 impl Executions {
-    pub(super) fn native_tools(
+    pub(super) async fn native_tools(
         &self,
         cwd: &str,
         profile: Option<maka_protocol::session::SessionToolProfile>,
-    ) -> tools::NativeTools {
-        tools::NativeTools {
+        workspace_origin: maka_runtime::execution::WorkspaceOrigin,
+    ) -> Result<tools::NativeTools> {
+        let network = self
+            .configuration
+            .network_configuration()
+            .await
+            .map_err(internal)?;
+        let network_route =
+            maka_network::Policy::from_settings(&network.proxy, network.password.as_deref())
+                .map_err(internal)?;
+        Ok(tools::NativeTools {
+            workspace_origin,
             cwd: cwd.into(),
             profile,
             set: Default::default(),
@@ -80,7 +90,10 @@ impl Executions {
             writes: self.writes.clone(),
             shells: self.shells.clone(),
             controllers: self.controllers.clone(),
-        }
+            state_root: self.paths.state_root.clone(),
+            interactions: self.interactions.clone(),
+            network_route,
+        })
     }
     pub(crate) async fn validate_message_content(
         &self,

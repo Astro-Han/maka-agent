@@ -140,7 +140,7 @@ try {
           },
           configuration: {
             cwd: '/workspace/repo',
-            permissionMode: 'ask',
+            sandboxMode: 'workspace-write',
             collaborationMode: 'agent',
             orchestrationMode: 'default',
             orchestrationSource: 'session',

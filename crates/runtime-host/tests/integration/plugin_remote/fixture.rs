@@ -112,7 +112,7 @@ impl Method for Adapter {
             assert!(
                 matches!(forged.views.workspace(maka_plugins::remote::WorkspaceViewInput {
                 workspace: maka_runtime::execution::WorkspaceTarget::HostPath { path: "ungranted".into() },
-                permission_mode: maka_runtime::execution::PermissionMode::Bypass,
+                sandbox_mode: maka_runtime::execution::SandboxMode::DangerFullAccess,
                 collaboration_mode: maka_runtime::execution::CollaborationMode::Agent,
             }).await, Err(Error::Invalid(reason)) if reason == "Remote endpoint does not allow Host paths")
             );

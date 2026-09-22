@@ -47,6 +47,7 @@ pub use operation::{Availability, Operation, OperationMode};
 pub use operation_error::OperationErrorCode;
 pub mod network_proxy;
 pub mod runtime_policy;
+pub mod sandbox_setup;
 pub mod session;
 pub mod subscription;
 pub mod transcript;

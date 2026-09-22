@@ -91,7 +91,7 @@ const plugin: ClientPlugin = {
                 const zh = props.locale !== 'en';
                 await authorize(
                   context,
-                  { kind: 'plugin_workspace', permissionMode: 'bypass' },
+                  { kind: 'plugin_workspace', sandboxMode: 'workspace-write' },
                   zh ? '启用 WorkHub 协调会话' : 'Enable the WorkHub coordinator',
                 );
                 await authorize(

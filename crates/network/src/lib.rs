@@ -21,6 +21,8 @@
 mod policy;
 mod probe;
 pub use probe::probe;
+pub mod proxy;
+mod tunnel;
 mod websocket;
 pub use policy::Policy;
 pub use websocket::{Socket, connect_websocket};

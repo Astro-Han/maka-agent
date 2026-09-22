@@ -51,7 +51,7 @@ export interface Terminal {
   close(): Promise<void>;
 }
 export interface Terminals {
-  /** Requires admitted and current Bypass. Uses Host PTY limits and the frozen workspace. */
+  /** Uses the same authorized OS sandbox as processes, plus Host PTY limits. */
   spawn(command: ProcessCommand, size?: TerminalSize): Promise<Terminal>;
   /** Rebind an instance terminal to a later invocation of the same Session. */
   open(id: string): Terminal;

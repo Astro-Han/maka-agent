@@ -152,7 +152,7 @@ test('cancels managed approval owners and joiners with the canonical provider id
         modelId: 'model-1',
         readExecutionBoundary: async () =>
           createManagedExecutionBoundary(createWorkspaceWritePermissionProfile(), 0),
-        readPermissionMode: async () => 'ask',
+        readSandboxMode: async () => 'workspace-write',
         newId: nextId(),
         now: nextNow(),
         getPermissionPauseTarget: () => null,
@@ -287,7 +287,7 @@ function sessionHeader(): SessionHeader {
     llmConnectionSlug: 'connection-1',
     connectionLocked: true,
     model: 'model-1',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     schemaVersion: 1,
   };
 }

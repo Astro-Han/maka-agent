@@ -42,7 +42,7 @@ async fn submit_receipt_is_atomic_and_survives_edit_delivery_cancellation_and_ep
     let owner = invocation("original");
     append(&log, &owner, opening()).await;
     let mut pending = admission(&owner, "queued", Disposition::Followup);
-    pending.required_tools.insert("Bash".into());
+    pending.required_tools.insert("Shell".into());
     pending.source.message.content.preparation.push(serde_json::from_value(json!({
         "source":{"kind":"input","name":"review","packageId":"reviewer","entryId":"entry","activation":"1","revision":"1"},
         "receipt":{"document":"report.md"}

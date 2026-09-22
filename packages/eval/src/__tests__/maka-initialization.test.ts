@@ -160,7 +160,7 @@ test('official Maka shim uses one Host for preflight and execution across retrie
         session: {
           workspace: { kind: 'host_path', path: root },
           modelTarget: { kind: 'explicit', connectionSlug: 'fixture', model: 'deepseek-chat' },
-          permissionMode: 'bypass',
+          sandboxMode: 'danger-full-access',
         },
         content: { text: 'Find the Bash tool, then reply.' },
         maxSteps: 4,

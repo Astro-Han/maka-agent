@@ -84,16 +84,20 @@ export function currentSourcePlugin(temporary) {
         })();
         return { path: await metadata };
       });
-      build.onResolve({ filter: /^@maka\// }, async ({ path }) => {
-        const [, name, ...subpath] = path.split('/');
-        const packageRoot = join(root, 'packages', name);
-        const metadata = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
-        const exported = metadata.exports[subpath.length ? './' + subpath.join('/') : '.'];
-        if (typeof exported !== 'string' || !exported.startsWith('./dist/')) throw Error(path);
-        return {
-          path: join(packageRoot, exported.replace('./dist/', 'src/').replace(/\.js$/, '.ts')),
-        };
-      });
+      build.onResolve(
+        { filter: /^@(?:maka\/|maka-agent\/plugin-sdk(?:\/|$))/ },
+        async ({ path }) => {
+          const [, name, ...subpath] = path.split('/');
+          const packageRoot = join(root, 'packages', name);
+          const metadata = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
+          const entry = metadata.exports[subpath.length ? './' + subpath.join('/') : '.'];
+          const exported = typeof entry === 'string' ? entry : entry?.default;
+          if (typeof exported !== 'string' || !exported.startsWith('./dist/')) throw Error(path);
+          return {
+            path: join(packageRoot, exported.replace('./dist/', 'src/').replace(/\.js$/, '.ts')),
+          };
+        },
+      );
       build.onResolve({ filter: /^[^./]/ }, ({ path, resolveDir }) => {
         if (isAbsolute(path) || path.startsWith('@maka/')) return;
         // Preserve the importing workspace's nested dependency versions;

@@ -30,6 +30,12 @@ use uuid::Uuid;
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", content = "input", rename_all = "snake_case")]
 pub enum Operation {
+    Http {
+        method: maka_plugins::http::Method,
+        url: String,
+        body_digest: String,
+        body_bytes: usize,
+    },
     Notification {
         input: maka_plugins::client_capability::Notification,
         provider: maka_runtime::capability::Identity,

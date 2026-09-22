@@ -190,7 +190,7 @@ const PROFILE_PREPARERS: Record<Profile, (setup: ProfileSetup) => Promise<string
       join(home, 'config.toml'),
       [
         'telemetry = false',
-        'default_permission_mode = "auto"',
+        'default_sandbox_mode = "auto"',
         '',
         '[background]',
         'keep_alive_on_exit = true',

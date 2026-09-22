@@ -40,7 +40,7 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
     const catalog = (input) =>
       skills.method('path-request')({
         path: workspace,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         collaborationMode: 'agent',
         request: { kind: 'catalog', ...input },
       });
@@ -289,7 +289,13 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
       }
     });
     try {
-      const basis = await createMessageSession(connection, workspace, sessionId, model.baseUrl);
+      const basis = await createMessageSession(
+        connection,
+        workspace,
+        sessionId,
+        model.baseUrl,
+        'read-only',
+      );
       const skillPage = await invocable({});
       assert.deepEqual(
         skillPage.items.map((skill) => skill.id),
@@ -409,12 +415,12 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
       );
       const owned = (await resolutions([second.messageId])).resolutions[0];
       assert.equal(owned.turnId, active.turnId);
-      assert(!model.requests[1].tools.some((tool) => tool.function.name === 'Bash'));
+      assert(!model.requests[1].tools.some((tool) => tool.function.name === 'Write'));
       const session = (await request('session.catalog.query', { kind: 'get', sessionId })).session;
       const widened = await request('session.configuration.update', {
         sessionId,
         expectedRevision: session.revision,
-        patch: { permissionMode: 'bypass' },
+        patch: { sandboxMode: 'danger-full-access' },
       });
       assert.equal(widened.kind, 'committed');
       const changedSkills = await invocable({
@@ -534,7 +540,7 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
       assert.equal(model.requests.length, 4);
       assertPreparedInput(model.requests[2], preparedText('late steering input'));
       assertPreparedInput(model.requests[3], preparedText('edited next input', true));
-      assert(model.requests[3].tools.some((tool) => tool.function.name === 'Bash'));
+      assert(model.requests[3].tools.some((tool) => tool.function.name === 'Write'));
       assert.deepEqual(
         await submit(followup),
         accepted,
@@ -624,10 +630,15 @@ async function verifyInvocableCatalog(connection, request, skills, workspace) {
   const target = {
     path: workspace,
     collaborationMode: 'agent',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   };
   const query = (page) =>
     skills.method('path-request')({ ...target, request: { kind: 'invocable', page } });
+  const baseline = await readRuntimeHostSkills(
+    connection,
+    { kind: 'host_path', path: workspace },
+    'workspace-write',
+  );
   const directories = Array.from({ length: 129 }, (_, n) =>
     join(workspace, '.maka/skills', 'catalog-' + String(n).padStart(3, '0')),
   );
@@ -649,10 +660,14 @@ async function verifyInvocableCatalog(connection, request, skills, workspace) {
     });
     assert.equal(last.nextCursor, null);
     const all = [...first.items, ...last.items];
-    assert.equal(all.length, 132);
-    assert.equal(new Set(all.map((item) => item.ref)).size, 132);
+    assert.equal(all.length, baseline.length + directories.length);
+    assert.equal(new Set(all.map((item) => item.ref)).size, all.length);
     assert.deepEqual(
-      await readRuntimeHostSkills(connection, { kind: 'host_path', path: workspace }, 'ask'),
+      await readRuntimeHostSkills(
+        connection,
+        { kind: 'host_path', path: workspace },
+        'workspace-write',
+      ),
       all,
       'the real CLI picker uses the same public Remote pages',
     );
@@ -692,7 +707,7 @@ async function verifyInvocableCatalog(connection, request, skills, workspace) {
     });
     const projectTarget = {
       projectId: registered.project.id,
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       collaborationMode: 'agent',
       request: { kind: 'invocable' },
     };

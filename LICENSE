@@ -789,6 +789,11 @@ shell, streaming and execution-service dependencies, adds bounded pure APIs,
 and excludes unsupported patch operations. Detailed provenance and modifications
 are recorded in crates/apply-patch/SOURCE.md.
 
+OpenAI Codex sandbox policy (unmodified source)
+
+crates/sandbox/src/seatbelt/{base,network}.sbpl are Copyright OpenAI, Apache License 2.0.
+Source provenance is recorded in crates/sandbox/README.md.
+
 Deno telemetry TypeScript sources (unmodified)
 
 crates/js-runtime/third-party/deno-telemetry/{telemetry,util}.ts are copied from

@@ -151,7 +151,7 @@ function OverlayLayer({
             onUiLocalePreferenceChange={props.setUiLocalePreference}
             uiLocaleUpdateGate={props.uiLocaleUpdateGate}
             onUserLabelChange={props.setUserLabel}
-            onDefaultPermissionModeChange={() => props.refreshChatDefaults()}
+            onDefaultSandboxModeChange={() => props.refreshChatDefaults()}
             request={settings.request}
             openProviderCatalog={settings.providerCatalogOpen}
             initialConnectionSlug={settings.connectionDetailSlug}

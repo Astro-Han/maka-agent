@@ -76,7 +76,7 @@ pub struct SessionView {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceViewInput {
     pub workspace: maka_runtime::execution::WorkspaceTarget,
-    pub permission_mode: maka_runtime::execution::PermissionMode,
+    pub sandbox_mode: maka_runtime::execution::SandboxMode,
     pub collaboration_mode: maka_runtime::execution::CollaborationMode,
 }
 pub trait Views: Send + Sync {

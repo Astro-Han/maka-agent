@@ -621,22 +621,36 @@ export class RuntimeHostSessionObserver {
       turnId: answered.turnId,
       ts: this.#now(),
       requestId: answered.interactionId,
-      toolUseId: interactionToolUseId(pending),
+      toolUseId: pending.request.kind === "sandbox_boundary"
+        ? pending.interactionId : pending.request.toolUseId,
     };
+    if (pending.request.kind === "permissions") {
+      if (answered.outcome.kind === "permissions_decision") {
+        this.#broadcast(answered.sessionId, {
+          type: "permissions_decision_ack", ...base, decision: answered.outcome.decision,
+        });
+      }
+      return;
+    }
+    const toolUseId = pending.request.kind === "sandbox_boundary"
+      ? pending.interactionId : pending.request.toolUseId;
     if (answered.outcome.kind === "question_answer") {
       this.#broadcast(answered.sessionId, {
         type: "user_question_answer_ack",
         ...base,
+        toolUseId,
       });
     } else if (answered.outcome.kind === "form_answer") {
       this.#broadcast(answered.sessionId, {
         type: "form_answer_ack",
         ...base,
+        toolUseId,
       });
     } else if (answered.outcome.kind === "sandbox_boundary_decision") {
       this.#broadcast(answered.sessionId, {
         type: "sandbox_boundary_decision_ack",
         ...base,
+        toolUseId,
         decision: answered.outcome.decision,
         status: answered.outcome.status,
         revision: answered.revision,
@@ -645,6 +659,7 @@ export class RuntimeHostSessionObserver {
       this.#broadcast(answered.sessionId, {
         type: "client_capability_decision_ack",
         ...base,
+        toolUseId,
         decision: answered.outcome.decision,
       });
     }
@@ -1633,12 +1648,6 @@ export class RuntimeHostSessionObserver {
     const update = this.#client.setSessionReadMarker?.(state.sessionId, messageId);
     if (update) void update.catch(() => undefined);
   }
-}
-
-function interactionToolUseId(interaction: InteractionPendingSnapshot): string {
-  return interaction.request.kind === "sandbox_boundary"
-    ? interaction.interactionId
-    : interaction.request.toolUseId;
 }
 
 function sessionEventChannel(sessionId: string): string {

@@ -207,7 +207,7 @@ export function startActiveExecutionBoundaryRead(input: {
 export function useActiveExecutionBoundary(
   activeSessionId: string | undefined,
   /** Re-read when the session's stored permission mode changes under us. */
-  permissionMode: string | undefined,
+  sandboxMode: string | undefined,
 ): {
   boundary: ExecutionBoundaryReadModel | undefined;
   /** The read for this session ran out of attempts; the boundary is unknown. */
@@ -236,7 +236,7 @@ export function useActiveExecutionBoundary(
       read: (sessionId) => window.maka.sessions.readExecutionBoundary(sessionId),
       commit: { setReading, setSnapshot },
     });
-  }, [activeSessionId, permissionMode, reloadNonce]);
+  }, [activeSessionId, sandboxMode, reloadNonce]);
 
   const reload = useCallback((sessionId: string) => {
     // Only the active session is read here, so a decision settled on any other

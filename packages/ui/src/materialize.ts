@@ -328,7 +328,7 @@ function mergeLiveOverPersisted(
     merged.args = persisted.args;
   }
   if (
-    merged.toolName === "Bash" &&
+    merged.toolName === "Shell" &&
     persisted.result?.kind === "shell_run" &&
     live.result?.kind === "shell_run"
   ) {
@@ -700,7 +700,7 @@ export function applyShellRunOverlayEntry(
   tool: ToolActivityItem,
   entry: ShellRunOverlayEntry,
 ): ToolActivityItem {
-  if (tool.toolName !== "Bash") return tool;
+  if (tool.toolName !== "Shell") return tool;
   const current = tool.result?.kind === "shell_run" ? tool.result : undefined;
   if (tool.result && !current) return tool;
   const merged = mergeShellRunStateWithDiagnostics(
@@ -719,7 +719,7 @@ export function applyShellRunOverlayEntry(
 /** Presentation is derived from invocation and resource facts, never persisted as another state. */
 export function toolActivityPresentationStatus(item: ToolActivityItem): ToolActivityStatus {
   if (item.status === "errored") return "errored";
-  if (item.toolName === "Bash" && item.result?.kind === "shell_run") {
+  if (item.toolName === "Shell" && item.result?.kind === "shell_run") {
     return SHELL_RUN_PRESENTATION_STATUS[item.result.status];
   }
   return item.status;
@@ -910,11 +910,11 @@ export function finalAssistantReplyText(turn: TurnViewModel): string {
 
 /**
  * Fold a background command's child tools (its `Read`s and `StopBackgroundTask`)
- * into the `Bash` that owns the run.
+ * into the `Shell` that owns the run.
  *
  * Parent lookup is deliberately position-independent. A turn's tools are a
  * flattening of its timeline, and a live overlay moves that turn's tools to the
- * end of the timeline — which can order a child ahead of the `Bash` it belongs
+ * end of the timeline — which can order a child ahead of the `Shell` it belongs
  * to. Scanning only what has been folded so far would silently stop folding
  * there, leaving an orphan tool row and a parent that never took the child's
  * revision.
@@ -924,7 +924,7 @@ export function foldShellRunToolActivities(
 ): ToolActivityItem[] {
   const ownedRefs = new Set<string>();
   for (const item of items) {
-    if (item.toolName === "Bash" && item.result?.kind === "shell_run")
+    if (item.toolName === "Shell" && item.result?.kind === "shell_run")
       ownedRefs.add(item.result.ref);
   }
 
@@ -934,7 +934,7 @@ export function foldShellRunToolActivities(
 
   for (const item of items) {
     const result = item.result?.kind === "shell_run" ? item.result : undefined;
-    if (!result || item.toolName === "Bash") {
+    if (!result || item.toolName === "Shell") {
       if (result) parentIndexByRef.set(result.ref, folded.length);
       folded.push(item);
       continue;

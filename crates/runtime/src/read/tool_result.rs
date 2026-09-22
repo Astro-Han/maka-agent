@@ -49,7 +49,7 @@ impl ReadRequest {
         serialized: &str,
         budget: usize,
     ) -> Result<ReadPage, ReadError> {
-        if matches!(tool_name, "Bash" | "Shell" | "Read")
+        if matches!(tool_name, "Shell" | "Read")
             && let Some(page) = read_archived_shell(serialized, self, budget)
         {
             return page;

@@ -126,7 +126,7 @@ test('archived tool-result copy preflight detects conversation-owned references'
         turnId: 'retired-turn',
         runId: 'retired-run',
         status: 'completed',
-        permissionMode: 'execute',
+        sandboxMode: 'execute',
         summary: 'done',
         artifactIds: [],
       }),
@@ -150,7 +150,7 @@ test('archived tool-result copy preflight detects conversation-owned references'
     turnId: 'child-turn',
     runId: 'child-run',
     status: 'completed',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     summary: 'done',
     artifactIds: ['child-artifact'],
   });
@@ -183,7 +183,7 @@ test('archived tool-result copy preflight detects conversation-owned references'
         turnId: 'turn-child',
         runId: 'run-child',
         status: 'completed',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         summary: 'done',
         artifactIds: [],
       }),
@@ -226,7 +226,7 @@ test('conversation copy discovers linked children in persisted retired tool resu
     turnId: 'child-turn',
     runId: 'child-run',
     status: 'completed',
-    permissionMode: 'execute',
+    sandboxMode: 'execute',
     summary: 'done',
     artifactIds: ['child-artifact'],
   };
@@ -378,7 +378,7 @@ test('Side Conversation preflight identifies linked-child archive bodies', () =>
         turnId: 'child-turn',
         runId: 'child-run',
         status: 'completed',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         summary: 'done',
         artifactIds: ['child-artifact'],
       }),
@@ -537,7 +537,7 @@ test('Side Conversation snapshots rewrite source-owned subagent identities', () 
       turnId: 'turn-1',
       runId: 'run-source',
       status: 'completed',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       summary: 'The source-owned run completed.',
       artifactIds: ['artifact-source'],
     },
@@ -664,7 +664,7 @@ test('Side Conversation snapshots retire archived linked-child results', () => {
             turnId: 'child-turn',
             runId: 'child-run',
             status: 'completed',
-            permissionMode: 'ask',
+            sandboxMode: 'workspace-write',
             summary: 'The archived review found one issue.',
             artifactIds: ['child-artifact'],
           }),
@@ -683,7 +683,7 @@ test('Side Conversation snapshots retire archived linked-child results', () => {
     agentName: 'Researcher',
     turnId: 'child-turn',
     status: 'completed',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     summary: 'The archived review found one issue.',
     artifactIds: ['child-artifact-snapshot'],
   });
@@ -1062,7 +1062,7 @@ test('conversation copy rewrites owned references without changing opaque tool p
         turnId: 'child-turn',
         runId: 'child-run',
         status: 'completed',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         summary: 'done',
         artifactIds: ['child-artifact'],
       },
@@ -1918,7 +1918,7 @@ test('conversation copy clones one terminal Runtime ledger with new owned identi
             turnId: 'turn-1',
             runId: 'run-source',
             status: 'completed',
-            permissionMode: 'execute' as never,
+            sandboxMode: 'execute' as never,
             summary: 'done',
             artifactIds: ['artifact-deleted'],
           },
@@ -2234,7 +2234,7 @@ test('conversation copy clones one terminal Runtime ledger with new owned identi
         ? copiedEvents[4].content.result
         : undefined;
     const typedResult = decodeCanonicalToolResultContent(typedResultValue);
-    assert.equal(typedResult.kind === 'subagent' ? typedResult.permissionMode : undefined, 'ask');
+    assert.equal(typedResult.kind === 'subagent' ? typedResult.sandboxMode : undefined, 'ask');
     assert.deepEqual(typedResult.kind === 'subagent' ? typedResult.artifactIds : undefined, [
       'artifact-target-deleted',
     ]);

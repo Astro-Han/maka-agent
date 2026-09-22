@@ -31,14 +31,14 @@ fn projection(id: &str) -> Value {
         "createdAt":0,"activityAt":1,"name":"Chat","isFlagged":false,"isArchived":false,
         "labels":[],"labelsTruncated":false,"hasUnread":false,"status":"active","backend":"ai-sdk",
         "llmConnectionId":null,"llmConnectionSlug":"default","connectionLocked":false,"model":"model",
-        "permissionMode":"ask","collaborationMode":"agent","orchestrationMode":"default"
+        "sandboxMode":"workspace-write","approvalPolicy":{"kind":"on-request"},"collaborationMode":"agent","orchestrationMode":"default"
     })
 }
 
 #[test]
 fn configuration_thinking_preserves_clears_and_sets_without_relaxing_other_contracts() {
     for (patch, thinking) in [
-        (json!({"permissionMode":"ask"}), Patch::Keep),
+        (json!({"sandboxMode":"workspace-write"}), Patch::Keep),
         (json!({"thinkingLevel":null}), Patch::Clear),
         (
             json!({"thinkingLevel":"high"}),
@@ -62,7 +62,7 @@ fn configuration_thinking_preserves_clears_and_sets_without_relaxing_other_contr
         json!({"modelTarget":{"kind":"explicit","connectionId":"bad.id",
             "connectionSlug":"provider","model":"model"}}),
         json!({"modelTarget":null}),
-        json!({"permissionMode":null}),
+        json!({"sandboxMode":null}),
         json!({"collaborationMode":null}),
         json!({"orchestrationMode":null}),
         json!({"thinkingLevel":false}),

@@ -23,7 +23,7 @@ mod account;
 mod filesystem;
 mod security;
 
-pub use account::account_home;
+pub use account::{account_home, account_sid};
 pub use filesystem::publish_file;
 pub use filesystem::{
     FileIdentity, create_private_file, file_identity, open_nofollow, private_directory,

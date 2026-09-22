@@ -59,7 +59,7 @@ impl ToolCatalog {
         let mut groups: Vec<(Arc<dyn BindingProvider>, String, Option<Binding>)> = Vec::new();
         let mut context = Resolved::default();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        let mut workspace = None;
+        let workspace = self.workspace.clone();
         let contributions = captured.typed::<PluginTool>().entries;
         for (name, contribution) in contributions.clone() {
             let Some(entry) = self.entries.get(&name).cloned() else {
@@ -77,14 +77,9 @@ impl ToolCatalog {
             } else {
                 let _lease = contribution.admit().map_err(failed)?;
                 let stopping = contribution.owner.stopping().map_err(failed)?;
-                let root = match &workspace {
-                    Some(root) => root,
-                    None => workspace.insert(
-                        maka_plugins::filesystem::ReadRoot::open(&request.cwd)
-                            .await
-                            .map_err(failed)?,
-                    ),
-                };
+                let root = workspace
+                    .as_ref()
+                    .ok_or_else(|| failed("tool binding workspace capability is unavailable"))?;
                 let cancellation = request.cancellation.child_token();
                 let _closed = cancellation.clone().drop_guard();
                 let files = root.bind(contribution.owner.clone(), cancellation);

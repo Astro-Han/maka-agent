@@ -64,22 +64,13 @@ async function fixture(writeResult) {
       const index = ++count;
       assert(index <= script.length);
       const action = script[index - 1];
-      assert.deepEqual(
-        input.tools.map((tool) => tool.function.name).sort(),
-        index <= 6
-          ? [
-              'AskUserQuestion',
-              'Edit',
-              'Glob',
-              'Grep',
-              'Read',
-              'WebFetch',
-              'Write',
-              'apply_patch',
-              'tool_search',
-            ]
-          : ['AskUserQuestion', 'Glob', 'Grep', 'Read', 'WebFetch', 'tool_search'],
-      );
+      assert(input.tools.some((tool) => tool.function.name === 'Read'));
+      for (const name of ['Write', 'Edit', 'apply_patch']) {
+        assert.equal(
+          input.tools.some((tool) => tool.function.name === name),
+          index <= 6,
+        );
+      }
       if (Object.hasOwn(action, 'expected')) {
         const result = input.messages.at(-1);
         assert.equal(result.role, 'tool');
@@ -208,7 +199,9 @@ export async function verifyWriteWorkflow(connection, workspace, reopened) {
         sessionId,
         workspace: { kind: 'host_path', path: workspace },
         modelTarget: { kind: 'default' },
-        ...(explore ? { mode: 'bot', permissionMode: 'explore' } : { permissionMode: 'ask' }),
+        ...(explore
+          ? { mode: 'bot', sandboxMode: 'read-only' }
+          : { sandboxMode: 'workspace-write' }),
       });
       const live = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
       try {

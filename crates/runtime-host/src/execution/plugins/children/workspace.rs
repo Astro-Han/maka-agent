@@ -20,7 +20,7 @@
 use super::{BoundCommands, CreateChild, Error, SessionConfiguration, storage};
 use maka_fs_tools::worktree::Binding;
 use maka_plugins::execution::ChildWorkspace;
-use maka_runtime::execution::PermissionMode;
+use maka_runtime::execution::SandboxMode;
 use sha2::{Digest, Sha256};
 
 impl BoundCommands {
@@ -35,7 +35,7 @@ impl BoundCommands {
         if request.workspace != Some(ChildWorkspace::IsolatedGit) {
             return Ok(None);
         }
-        if parent.permission_mode == PermissionMode::Explore {
+        if parent.sandbox_mode == SandboxMode::ReadOnly {
             return Err(Error::Denied);
         }
         // Creation replay must survive a now-dirty source or a moved child HEAD.
@@ -82,6 +82,7 @@ pub(super) fn bind(
         host_cwd: cwd,
     };
     child.worktree = Some(binding);
+    child.workspace_origin = maka_runtime::execution::WorkspaceOrigin::Allocated;
     Ok(())
 }
 
@@ -91,11 +92,13 @@ pub(super) fn matches_parent(
     workspace: Option<ChildWorkspace>,
 ) -> bool {
     if workspace == Some(ChildWorkspace::IsolatedGit) {
-        child.worktree.as_ref().is_some_and(|binding| {
-            binding.source() == std::path::Path::new(&parent.workspace.host_cwd)
-                && binding.directory() == std::path::Path::new(&child.workspace.host_cwd)
-        })
+        child.workspace_origin == maka_runtime::execution::WorkspaceOrigin::Allocated
+            && child.worktree.as_ref().is_some_and(|binding| {
+                binding.source() == std::path::Path::new(&parent.workspace.host_cwd)
+                    && binding.directory() == std::path::Path::new(&child.workspace.host_cwd)
+            })
     } else {
         child.workspace.host_cwd == parent.workspace.host_cwd
+            && child.workspace_origin == parent.workspace_origin
     }
 }

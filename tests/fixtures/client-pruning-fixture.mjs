@@ -88,7 +88,7 @@ export async function pruningFixture(port = 0, reopened = false) {
         const original = tools.find((message) => message.tool_call_id === 'original-read');
         const placeholder = JSON.parse(original.content);
         assert.equal(placeholder.kind, 'maka.archived_tool_result');
-        assert.equal(placeholder.toolName, 'Bash');
+        assert.equal(placeholder.toolName, 'Shell');
         assert.equal(placeholder.reason, 'tool_result_pruned');
         assert.equal(placeholder.previousTransitionId, undefined);
         assert(placeholder.originalBytes > Buffer.byteLength(text));
@@ -143,7 +143,7 @@ export async function pruningFixture(port = 0, reopened = false) {
       let calls = [];
       if (stage === 1)
         calls = [
-          call('original-read', 'Bash', {
+          call('original-read', 'Shell', {
             command:
               process.platform === 'win32'
                 ? '[Console]::Write([IO.File]::ReadAllText((Join-Path (Get-Location) evidence.txt)))'

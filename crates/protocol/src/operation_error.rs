@@ -26,6 +26,7 @@ pub enum OperationErrorCode {
     HostNotReady,
     HostDraining,
     Unauthorized,
+    UserCancelled,
     OperationUnavailable,
     NotFound,
     SessionArchived,

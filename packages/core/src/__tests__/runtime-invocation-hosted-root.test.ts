@@ -53,7 +53,7 @@ function invocation(
       },
       configuration: {
         cwd: '/workspace',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         collaborationMode: 'agent',
         orchestrationMode: overrides.orchestrationMode ?? 'default',
         orchestrationSource: overrides.orchestrationSource ?? 'session',

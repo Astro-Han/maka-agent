@@ -80,7 +80,7 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
         let directory = fixture.workspace.join(".maka/skills").join(id);
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(directory.join("SKILL.md"), format!(
-            "---\nname: {}\ndescription: work\nrequired-tools: Bash\n---\nFrozen tool instructions.",
+            "---\nname: {}\ndescription: work\nrequired-tools: Write\n---\nFrozen tool instructions.",
             if id == "tools" { "Tools" } else { "Write" }
         )).unwrap();
     }

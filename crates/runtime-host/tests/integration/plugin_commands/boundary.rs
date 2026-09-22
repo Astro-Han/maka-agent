@@ -44,7 +44,7 @@ pub(super) async fn verify(
         let created = peer.rpc("session.create", json!({
             "sessionId":"scheduled-authority", "workspace":{"kind":"host_path","path":workspace},
             "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model},
-            "permissionMode":"ask"
+            "sandboxMode":"workspace-write"
         })).await;
         assert_eq!(created["ok"], true, "{created}");
         let commands = host
@@ -53,8 +53,8 @@ pub(super) async fn verify(
             .unwrap();
         let boundaries = commands.boundaries().unwrap();
         assert_eq!(
-            boundaries[0].permission_mode,
-            maka_runtime::execution::PermissionMode::Ask
+            boundaries[0].sandbox_mode,
+            maka_runtime::execution::SandboxMode::WorkspaceWrite
         );
         storage
             .batch(vec![Mutation {
@@ -65,7 +65,7 @@ pub(super) async fn verify(
             .await
             .unwrap();
         let updated = peer.rpc("session.configuration.update", json!({
-            "sessionId":"scheduled-authority", "expectedRevision":created["result"]["revision"], "patch":{"permissionMode":"bypass"}
+            "sessionId":"scheduled-authority", "expectedRevision":created["result"]["revision"], "patch":{"sandboxMode":"danger-full-access"}
         })).await;
         assert_eq!(updated["result"]["kind"], "committed", "{updated}");
     }
@@ -98,12 +98,35 @@ pub(super) async fn verify(
         .await
         .unwrap();
     assert_eq!(
-        current.boundaries().unwrap()[0].permission_mode,
-        maka_runtime::execution::PermissionMode::Bypass
+        current.boundaries().unwrap()[0].sandbox_mode,
+        maka_runtime::execution::SandboxMode::DangerFullAccess
     );
     assert_ne!(
         current.boundaries().unwrap()[0].boundary_revision,
         boundaries[0].boundary_revision
+    );
+    let mut forged = current.boundaries().unwrap();
+    assert_eq!(
+        forged[0].workspace_origin,
+        maka_runtime::execution::WorkspaceOrigin::Selected
+    );
+    forged[0].workspace_origin = maka_runtime::execution::WorkspaceOrigin::Allocated;
+    let forged = host
+        .restore_plugin_execution(fiber.context(), forged)
+        .unwrap();
+    assert!(
+        matches!(
+            forged
+                .submit(Submit {
+                    orchestration_mode: None,
+                    operation_id: "forged-workspace-origin".into(),
+                    session_id: "scheduled-authority".into(),
+                    content: "must not execute".into(),
+                })
+                .await,
+            Err(CommandError::Denied)
+        ),
+        "restoring a boundary cannot claim Host allocation authority"
     );
     let request = CreateRoot {
         managed: true,
@@ -114,7 +137,8 @@ pub(super) async fn verify(
                 model: model.clone(),
                 thinking_level: None,
             },
-            permission_mode: maka_runtime::execution::PermissionMode::Explore,
+            sandbox_mode: maka_runtime::execution::SandboxMode::ReadOnly,
+            approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
             tool_mode: maka_runtime::execution::ToolMode::CodeMode,
             collaboration_mode: maka_runtime::execution::CollaborationMode::Agent,
             behavior: maka_runtime::execution::BehaviorId::default(),
@@ -140,7 +164,8 @@ pub(super) async fn verify(
         model: model.clone(),
         thinking_level: None,
         tool_mode: maka_runtime::execution::ToolMode::CodeMode,
-        permission_mode: maka_runtime::execution::PermissionMode::Explore,
+        sandbox_mode: maka_runtime::execution::SandboxMode::ReadOnly,
+        approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
         collaboration_mode: maka_runtime::execution::CollaborationMode::Agent,
         orchestration_mode: maka_runtime::execution::BehaviorId::default(),
     };
@@ -214,13 +239,13 @@ pub(super) async fn verify(
         .await;
     assert_eq!(queried["ok"], true, "{queried}");
     assert_eq!(
-        queried["result"]["session"]["permissionMode"], "explore",
+        queried["result"]["session"]["sandboxMode"], "read-only",
         "{queried}"
     );
     assert_eq!(roots.boundaries().unwrap().len(), 1);
     let changed = peer.rpc("session.configuration.update", json!({
         "sessionId": root.session_id, "expectedRevision": queried["result"]["session"]["revision"],
-        "patch": { "permissionMode": "bypass" }
+        "patch": { "sandboxMode": "danger-full-access" }
     })).await;
     assert_eq!(
         changed["ok"], false,

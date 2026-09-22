@@ -56,13 +56,14 @@ const NEW_SESSION_REVISION = `sha256:${'b'.repeat(64)}` as const;
 const DEFAULT_CONFIG_OPTIONS: Array<Extract<SessionConfigOption, { type: 'select' }>> = [
   {
     type: 'select',
-    id: 'permission_mode',
+    id: 'sandbox_mode',
     name: 'Permission mode',
-    category: '_maka/permission_mode',
-    currentValue: 'ask',
+    category: '_maka/sandbox_mode',
+    currentValue: 'workspace-write',
     options: [
-      { value: 'ask', name: 'Ask' },
-      { value: 'bypass', name: 'Bypass' },
+      { value: 'read-only', name: 'Read only' },
+      { value: 'workspace-write', name: 'Workspace write' },
+      { value: 'danger-full-access', name: 'Full access' },
     ],
   },
   {
@@ -137,8 +138,8 @@ describe('ACP Session registry', () => {
         () =>
           registry.setConfigOption({
             sessionId: 'session-closed',
-            configId: 'permission_mode',
-            value: 'bypass',
+            configId: 'sandbox_mode',
+            value: 'danger-full-access',
           }),
       ],
       [
@@ -1695,7 +1696,7 @@ describe('ACP Session registry', () => {
                   kind: 'session',
                   session: catalogSession(sessionId, '/workspace', {
                     revision: 3,
-                    permissionMode: 'bypass',
+                    sandboxMode: 'danger-full-access',
                   }),
                 };
               }
@@ -1792,7 +1793,10 @@ describe('ACP Session registry', () => {
     await registry.close({ sessionId });
     read.resolve({
       kind: 'session',
-      session: catalogSession(sessionId, '/workspace', { revision: 2, permissionMode: 'bypass' }),
+      session: catalogSession(sessionId, '/workspace', {
+        revision: 2,
+        sandboxMode: 'danger-full-access',
+      }),
     });
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(notifications, []);
@@ -1909,7 +1913,7 @@ describe('ACP Session registry', () => {
     let subscriptionOpens = 0;
     const created = catalogSession('session-configured', '/workspace', {
       thinkingLevel: 'high',
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
       collaborationMode: 'plan',
       orchestrationMode: 'swarm',
     });
@@ -1939,7 +1943,7 @@ describe('ACP Session registry', () => {
       sessionId: 'session-configured',
       configOptions: configOptions(
         {
-          permission_mode: 'explore',
+          sandbox_mode: 'read-only',
           thinking_level: 'high',
           collaboration_mode: 'plan',
           orchestration_mode: 'swarm',
@@ -1978,7 +1982,7 @@ describe('ACP Session registry', () => {
 
     assert.deepEqual(
       response.configOptions?.map(({ id }) => id),
-      ['permission_mode', 'collaboration_mode', 'orchestration_mode'],
+      ['sandbox_mode', 'collaboration_mode', 'orchestration_mode'],
     );
     await registry.dispose();
   });
@@ -2004,8 +2008,8 @@ describe('ACP Session registry', () => {
     await assertInvalidParams(
       registry.setConfigOption({
         sessionId: 'listed-session',
-        configId: 'permission_mode',
-        value: 'bypass',
+        configId: 'sandbox_mode',
+        value: 'danger-full-access',
       }),
       { reason: 'unknown_session' },
     );
@@ -2013,57 +2017,35 @@ describe('ACP Session registry', () => {
     await registry.dispose();
   });
 
-  test('keeps failed creates unowned and returns committed IDs even for unsupported projections', async () => {
-    for (const [name, createOutcome] of [
-      [
-        'failed',
-        new RuntimeHostOperationError('session.create', 'operation_conflict', 'create failed'),
-      ],
-      [
-        'legacy',
-        {
-          kind: 'unsupported_legacy_record',
-          id: 'session-legacy',
-          revision: 1,
-          reason: 'not_wire_representable',
-        },
-      ],
-    ] as const) {
-      let requests = 0;
-      const sessionId = `session-${name}`;
-      const registry = new AcpSessionRegistry({
-        connect: async () =>
-          fakeConnection({
-            request: async () => {
-              requests += 1;
-              if (createOutcome instanceof Error) throw createOutcome;
-              return createOutcome;
-            },
-          }),
-        newSessionId: () => sessionId,
-      });
-
-      if (!(createOutcome instanceof Error)) {
-        assert.deepEqual(await registry.create({ cwd: '/workspace', mcpServers: [] }), {
-          sessionId,
-        });
-        await registry.close({ sessionId });
-        assert.equal(requests, 1);
-        await registry.dispose();
-        continue;
-      }
-      await assert.rejects(registry.create({ cwd: '/workspace', mcpServers: [] }));
-      await assertInvalidParams(
-        registry.setConfigOption({
-          sessionId,
-          configId: 'permission_mode',
-          value: 'bypass',
+  test('keeps failed creates unowned', async () => {
+    let requests = 0;
+    const sessionId = 'session-failed';
+    const registry = new AcpSessionRegistry({
+      connect: async () =>
+        fakeConnection({
+          request: async () => {
+            requests += 1;
+            throw new RuntimeHostOperationError(
+              'session.create',
+              'operation_conflict',
+              'create failed',
+            );
+          },
         }),
-        { reason: 'unknown_session' },
-      );
-      assert.equal(requests, 1);
-      await registry.dispose();
-    }
+      newSessionId: () => sessionId,
+    });
+
+    await assert.rejects(registry.create({ cwd: '/workspace', mcpServers: [] }));
+    await assertInvalidParams(
+      registry.setConfigOption({
+        sessionId,
+        configId: 'sandbox_mode',
+        value: 'danger-full-access',
+      }),
+      { reason: 'unknown_session' },
+    );
+    assert.equal(requests, 1);
+    await registry.dispose();
   });
 
   test('returns the committed ID on catalog failure without admitting mutations during projection', async () => {
@@ -2087,8 +2069,8 @@ describe('ACP Session registry', () => {
     await assertInvalidParams(
       registry.setConfigOption({
         sessionId: 'created',
-        configId: 'permission_mode',
-        value: 'bypass',
+        configId: 'sandbox_mode',
+        value: 'danger-full-access',
       }),
       { reason: 'unknown_session' },
     );
@@ -2114,8 +2096,8 @@ describe('ACP Session registry', () => {
     await assertInvalidParams(
       registry.setConfigOption({
         sessionId: 'session-unowned',
-        configId: 'permission_mode',
-        value: 'bypass',
+        configId: 'sandbox_mode',
+        value: 'danger-full-access',
       }),
       { reason: 'unknown_session' },
     );
@@ -2125,20 +2107,20 @@ describe('ACP Session registry', () => {
     assert.equal(requests, 1);
     for (const [request, data] of [
       [
-        { sessionId: 'session-owned', configId: 'unknown', value: 'bypass' },
+        { sessionId: 'session-owned', configId: 'unknown', value: 'danger-full-access' },
         { field: 'configId', reason: 'unsupported' },
       ],
       [
         {
           sessionId: 'session-owned',
-          configId: 'permission_mode',
+          configId: 'sandbox_mode',
           value: true,
           type: 'boolean',
         },
         { field: 'value', reason: 'invalid_type' },
       ],
       [
-        { sessionId: 'session-owned', configId: 'permission_mode', value: 'maybe' },
+        { sessionId: 'session-owned', configId: 'sandbox_mode', value: 'maybe' },
         { field: 'value', reason: 'unsupported' },
       ],
     ] as const) {
@@ -2158,7 +2140,7 @@ describe('ACP Session registry', () => {
     });
     const committed = catalogSession('session-cas', '/workspace', {
       revision: 8,
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
       thinkingLevel: 'high',
     });
     const requests: Array<{ operation: string; input: unknown }> = [];
@@ -2180,8 +2162,8 @@ describe('ACP Session registry', () => {
 
     const response = await registry.setConfigOption({
       sessionId: 'session-cas',
-      configId: 'permission_mode',
-      value: 'bypass',
+      configId: 'sandbox_mode',
+      value: 'danger-full-access',
     });
 
     assert.deepEqual(requests.slice(1), [
@@ -2194,12 +2176,12 @@ describe('ACP Session registry', () => {
         input: {
           sessionId: 'session-cas',
           expectedRevision: 7,
-          patch: { permissionMode: 'bypass' },
+          patch: { sandboxMode: 'danger-full-access' },
         },
       },
     ]);
     assert.deepEqual(response, {
-      configOptions: configOptions({ permission_mode: 'bypass', thinking_level: 'high' }),
+      configOptions: configOptions({ sandbox_mode: 'danger-full-access', thinking_level: 'high' }),
     });
     await registry.dispose();
   });
@@ -2231,7 +2213,7 @@ describe('ACP Session registry', () => {
                   kind: 'committed',
                   session: catalogSession('session-retry', '/workspace', {
                     revision: 3,
-                    permissionMode: 'bypass',
+                    sandboxMode: 'danger-full-access',
                     collaborationMode: 'plan',
                   }),
                 };
@@ -2243,8 +2225,8 @@ describe('ACP Session registry', () => {
 
     await registry.setConfigOption({
       sessionId: 'session-retry',
-      configId: 'permission_mode',
-      value: 'bypass',
+      configId: 'sandbox_mode',
+      value: 'danger-full-access',
     });
 
     assert.deepEqual(
@@ -2259,7 +2241,7 @@ describe('ACP Session registry', () => {
     assert.deepEqual(requests[4]?.input, {
       sessionId: 'session-retry',
       expectedRevision: 2,
-      patch: { permissionMode: 'bypass' },
+      patch: { sandboxMode: 'danger-full-access' },
     });
     await registry.dispose();
   });
@@ -2289,17 +2271,17 @@ describe('ACP Session registry', () => {
                 kind: 'session',
                 session: catalogSession('session-converge', '/workspace', {
                   revision: 2,
-                  permissionMode: 'bypass',
+                  sandboxMode: 'danger-full-access',
                 }),
               };
             }
             const patch = (input as { patch: Record<string, unknown> }).patch;
-            if ('permissionMode' in patch) {
+            if ('sandboxMode' in patch) {
               return {
                 kind: 'committed',
                 session: catalogSession('session-converge', '/workspace', {
                   revision: 2,
-                  permissionMode: 'bypass',
+                  sandboxMode: 'danger-full-access',
                 }),
               };
             }
@@ -2310,7 +2292,7 @@ describe('ACP Session registry', () => {
               kind: 'committed',
               session: catalogSession('session-converge', '/workspace', {
                 revision: 3,
-                permissionMode: 'bypass',
+                sandboxMode: 'danger-full-access',
                 collaborationMode: 'plan',
               }),
             };
@@ -2323,8 +2305,8 @@ describe('ACP Session registry', () => {
     const [permission, collaboration] = await Promise.all([
       registry.setConfigOption({
         sessionId: 'session-converge',
-        configId: 'permission_mode',
-        value: 'bypass',
+        configId: 'sandbox_mode',
+        value: 'danger-full-access',
       }),
       registry.setConfigOption({
         sessionId: 'session-converge',
@@ -2338,14 +2320,18 @@ describe('ACP Session registry', () => {
     );
     assert.deepEqual(
       updates.map(({ input }) => (input as { patch: unknown }).patch),
-      [{ permissionMode: 'bypass' }, { collaborationMode: 'plan' }, { collaborationMode: 'plan' }],
+      [
+        { sandboxMode: 'danger-full-access' },
+        { collaborationMode: 'plan' },
+        { collaborationMode: 'plan' },
+      ],
     );
     assert.deepEqual(permission, {
-      configOptions: configOptions({ permission_mode: 'bypass' }),
+      configOptions: configOptions({ sandbox_mode: 'danger-full-access' }),
     });
     assert.deepEqual(collaboration, {
       configOptions: configOptions({
-        permission_mode: 'bypass',
+        sandbox_mode: 'danger-full-access',
         collaboration_mode: 'plan',
       }),
     });
@@ -2404,7 +2390,7 @@ describe('ACP Session registry', () => {
     await registry.dispose();
   });
 
-  test('rejects invalid, missing, and legacy catalog lookup results with stable errors', async () => {
+  test('rejects invalid and missing catalog lookup results with stable errors', async () => {
     for (const [name, result, acpCode, data] of [
       [
         'invalid',
@@ -2450,8 +2436,8 @@ describe('ACP Session registry', () => {
       await assert.rejects(
         registry.setConfigOption({
           sessionId,
-          configId: 'permission_mode',
-          value: 'bypass',
+          configId: 'sandbox_mode',
+          value: 'danger-full-access',
         }),
         (error: unknown) => {
           assert.ok(error instanceof RequestError);
@@ -2542,8 +2528,8 @@ describe('ACP Session registry', () => {
       await assert.rejects(
         registry.setConfigOption({
           sessionId: 'session-errors',
-          configId: 'permission_mode',
-          value: 'bypass',
+          configId: 'sandbox_mode',
+          value: 'danger-full-access',
         }),
         (error: unknown) => {
           assert.ok(error instanceof RequestError);
@@ -2586,8 +2572,8 @@ describe('ACP Session registry', () => {
     await registry.create({ cwd: '/workspace', mcpServers: [] });
     const update = registry.setConfigOption({
       sessionId: 'session-closing',
-      configId: 'permission_mode',
-      value: 'bypass',
+      configId: 'sandbox_mode',
+      value: 'danger-full-access',
     });
     await waitFor(() => catalogReads === 1);
 
@@ -2653,8 +2639,8 @@ describe('ACP Session registry', () => {
     await registry.create({ cwd: '/workspace', mcpServers: [] });
     const update = registry.setConfigOption({
       sessionId: 'session-conflict-closing',
-      configId: 'permission_mode',
-      value: 'bypass',
+      configId: 'sandbox_mode',
+      value: 'danger-full-access',
     });
     await waitFor(() => updates === 1);
 
@@ -2784,12 +2770,6 @@ describe('ACP Session registry', () => {
                     name: 'Other',
                     activityAt: 1_000,
                   }),
-                  {
-                    kind: 'unsupported_legacy_record',
-                    id: 'legacy',
-                    revision: 1,
-                    reason: 'not_wire_representable',
-                  },
                 ],
                 nextCursor: 'page-2',
               };
@@ -3418,7 +3398,8 @@ function catalogSession(
     llmConnectionSlug: 'default',
     connectionLocked: false,
     model: 'default',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     ...overrides,
@@ -3427,10 +3408,7 @@ function catalogSession(
 
 function configOptions(
   values: Partial<
-    Record<
-      'permission_mode' | 'thinking_level' | 'collaboration_mode' | 'orchestration_mode',
-      string
-    >
+    Record<'sandbox_mode' | 'thinking_level' | 'collaboration_mode' | 'orchestration_mode', string>
   >,
   thinkingLevels: readonly ThinkingLevel[] = THINKING_LEVELS,
 ): SessionConfigOption[] {

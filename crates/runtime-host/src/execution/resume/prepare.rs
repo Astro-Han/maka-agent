@@ -77,7 +77,7 @@ impl Executions {
                         Some(session_id),
                         connection,
                         &configuration.cwd,
-                        session.permission_mode,
+                        session.sandbox_mode,
                         session.tool_profile,
                     )
                     .await?;

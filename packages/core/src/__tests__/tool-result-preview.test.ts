@@ -29,7 +29,7 @@ describe('tool_result_preview open-facts', () => {
         agentName: 'X',
         turnId: 't',
         status: 'running',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       }),
     );
     assert.throws(() =>
@@ -39,7 +39,7 @@ describe('tool_result_preview open-facts', () => {
         agentName: 'X',
         turnId: 't',
         status: 'running',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         summary: 'nope',
       }),
     );
@@ -50,7 +50,7 @@ describe('tool_result_preview open-facts', () => {
         agentName: 'X',
         turnId: 't',
         status: 'waiting_for_user',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       }),
     );
     assert.throws(() =>
@@ -66,21 +66,21 @@ describe('tool_result_preview permission modes', () => {
     agentName: 'Explore',
     turnId: 't',
     status: 'running',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   } as const;
 
   it('rejects a retired mode on the live wire', () => {
     // Live open facts, not a stored record: the compatibility epoch already
     // refuses a peer old enough to send a retired mode, so accepting one here
     // would only hide a handshake that should never have succeeded.
-    assert.throws(() => decodeToolResultPreviewContent({ ...preview, permissionMode: 'execute' }));
+    assert.throws(() => decodeToolResultPreviewContent({ ...preview, sandboxMode: 'execute' }));
   });
 
   it('accepts every live mode', () => {
-    for (const permissionMode of ['explore', 'ask', 'bypass'] as const) {
-      assert.deepEqual(decodeToolResultPreviewContent({ ...preview, permissionMode }), {
+    for (const sandboxMode of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
+      assert.deepEqual(decodeToolResultPreviewContent({ ...preview, sandboxMode }), {
         ...preview,
-        permissionMode,
+        sandboxMode,
       });
     }
   });

@@ -45,7 +45,7 @@ function session(overrides: Partial<SessionSummary> & { id: string }): SessionSu
     llmConnectionSlug: 'anthropic',
     connectionLocked: false,
     model: 'claude-sonnet-4-5-20250929',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     lastMessageAt: 1_700_000_000_000,
     ...overrides,
   };

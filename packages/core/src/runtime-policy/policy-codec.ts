@@ -18,7 +18,7 @@
  */
 
 import { isThinkingLevel } from '../model-thinking.js';
-import { CHAT_DEFAULT_PERMISSION_MODES } from '../settings.js';
+import { CHAT_DEFAULT_SANDBOX_MODES } from '../settings.js';
 import type {
   AgentRuntimeSettingsPatch,
   MutateRuntimePolicyInput,
@@ -387,10 +387,10 @@ function normalizeChatDefaults(value: unknown): RuntimePolicy['chatDefaults'] {
   const item = exactRecord(
     value,
     'chat defaults',
-    ['permissionMode', 'thinkingLevel', 'codeModeEnabled'],
-    ['permissionMode'],
+    ['sandboxMode', 'thinkingLevel', 'codeModeEnabled'],
+    ['sandboxMode'],
   );
-  if (!(CHAT_DEFAULT_PERMISSION_MODES as readonly unknown[]).includes(item.permissionMode)) {
+  if (!(CHAT_DEFAULT_SANDBOX_MODES as readonly unknown[]).includes(item.sandboxMode)) {
     throw domainError('chat default permission mode is invalid');
   }
   if (item.thinkingLevel !== undefined && !isThinkingLevel(item.thinkingLevel)) {
@@ -400,7 +400,7 @@ function normalizeChatDefaults(value: unknown): RuntimePolicy['chatDefaults'] {
     throw domainError('chat default code mode is invalid');
   }
   return {
-    permissionMode: item.permissionMode as RuntimePolicy['chatDefaults']['permissionMode'],
+    sandboxMode: item.sandboxMode as RuntimePolicy['chatDefaults']['sandboxMode'],
     ...(item.codeModeEnabled === true ? { codeModeEnabled: true } : {}),
     ...(item.thinkingLevel === undefined ? {} : { thinkingLevel: item.thinkingLevel }),
   };

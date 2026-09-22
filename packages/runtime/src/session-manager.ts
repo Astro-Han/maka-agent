@@ -74,7 +74,7 @@ import type {
 } from '@maka/core/runtime-inputs';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
 import type { UserQuestionResponse } from '@maka/core/user-question';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import { isCanonicalReadOnlyPermissionProfile } from '@maka/core/permission-profile';
 import { DEFAULT_TOOL_MODE, type ToolMode } from '@maka/core/tool-mode';
 import type {
@@ -328,7 +328,7 @@ export interface SpawnChildSessionInput {
     runId: string;
     agentId: string;
     agentName: string;
-    permissionMode: SessionHeader['permissionMode'];
+    sandboxMode: SessionHeader['sandboxMode'];
   }) => void | Promise<void>;
   /** Presentation-only observer for projecting child activity into a parent surface. */
   onEvent?: (event: SessionEvent) => void;
@@ -346,7 +346,7 @@ export interface SpawnChildSessionResult {
   runId: string;
   profile: string;
   status: 'completed' | 'failed' | 'cancelled' | 'running' | 'waiting_for_user';
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   summary: string;
   artifactIds: string[];
   startedAt: number;
@@ -430,7 +430,7 @@ export interface AgentListItem {
   agentId?: string;
   agentName?: string;
   status: RunLifecycleStatus;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
@@ -445,7 +445,7 @@ export interface SubagentExecutionListItem {
   profile?: string;
   turnId?: string;
   status: RunLifecycleStatus;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
@@ -539,7 +539,7 @@ export interface SessionConfigurationStoreUpdate {
     readonly connectionLocked: boolean;
     readonly model: string;
     readonly thinkingLevel: SessionHeader['thinkingLevel'];
-    readonly permissionMode: SessionHeader['permissionMode'];
+    readonly sandboxMode: SessionHeader['sandboxMode'];
     readonly collaborationMode: NonNullable<SessionHeader['collaborationMode']>;
     readonly orchestrationMode: NonNullable<SessionHeader['orchestrationMode']>;
     readonly labels: readonly string[];
@@ -552,7 +552,7 @@ export interface SessionConfigurationStoreUpdate {
 export interface SessionConfigurationTransitionRequest {
   readonly expectedRevision: number;
   readonly clearConnectionBlock: boolean;
-  readonly permissionModeOnly: boolean;
+  readonly sandboxModeOnly: boolean;
   readonly configuration: Omit<SessionConfigurationStoreUpdate['configuration'], 'labels'>;
 }
 
@@ -632,9 +632,9 @@ export interface SessionStore {
   ): Promise<SandboxBoundarySettlement>;
   setExecutionBoundaryKind(
     sessionId: string,
-    kind: 'managed' | 'bypass',
+    kind: 'managed' | 'danger-full-access',
     projection?: {
-      permissionMode: SessionHeader['permissionMode'];
+      sandboxMode: SessionHeader['sandboxMode'];
       labels?: readonly string[];
     },
   ): Promise<ExecutionBoundary>;
@@ -1194,9 +1194,9 @@ export class SessionManager {
     ) {
       return observed;
     }
-    const permissionModeOnly =
-      input.permissionModeOnly &&
-      sessionConfigurationMatchesExceptPermissionMode(observed.header, input.configuration);
+    const sandboxModeOnly =
+      input.sandboxModeOnly &&
+      sessionConfigurationMatchesExceptSandboxMode(observed.header, input.configuration);
     const prepareCommit = async (): Promise<() => Promise<VersionedSessionHeader>> => {
       const current = await store.readHeaderRecordSnapshot(sessionId);
       if (current.revision !== input.expectedRevision) {
@@ -1223,7 +1223,7 @@ export class SessionManager {
       );
       const leavingDeepResearch =
         isDeepResearchSession(current.header.labels) &&
-        input.configuration.permissionMode !== 'explore';
+        input.configuration.sandboxMode !== 'read-only';
       const labels = leavingDeepResearch
         ? current.header.labels.filter((label) => label !== DEEP_RESEARCH_SESSION_LABEL)
         : current.header.labels;
@@ -1243,16 +1243,16 @@ export class SessionManager {
               : { kind: 'preserve' },
         });
     };
-    const next = permissionModeOnly
+    const next = sandboxModeOnly
       ? await this.commitExecutionBoundaryTransition(
           sessionId,
           await this.deps.store.readExecutionBoundary(sessionId),
-          input.configuration.permissionMode,
+          input.configuration.sandboxMode,
           prepareCommit,
         )
       : await this.commitExecutionResourceTransition(
           sessionId,
-          input.configuration.permissionMode,
+          input.configuration.sandboxMode,
           prepareCommit,
         );
     this.runtimeKernel.updateCachedHeader(sessionId, next.header);
@@ -1684,36 +1684,36 @@ export class SessionManager {
     return this.runtimeKernel.listActiveInteractions?.(sessionId) ?? [];
   }
 
-  async setPermissionMode(sessionId: string, mode: PermissionMode): Promise<SessionSummary> {
+  async setSandboxMode(sessionId: string, mode: SandboxMode): Promise<SessionSummary> {
     const readHeaderRecordSnapshot = this.deps.store.readHeaderRecordSnapshot?.bind(
       this.deps.store,
     );
     if (!readHeaderRecordSnapshot || !this.deps.store.updateSessionConfiguration) {
       // Temporary compatibility bridge for SessionStore embeddings that predate
       // versioned configuration authority. A follow-up PR will shortly remove
-      // setPermissionMode and this redundant fallback after callers migrate.
-      return this.setPermissionModeWithLegacyStore(sessionId, mode);
+      // setSandboxMode and this redundant fallback after callers migrate.
+      return this.setSandboxModeWithLegacyStore(sessionId, mode);
     }
     const current = await readHeaderRecordSnapshot(sessionId);
     const next = await this.transitionSessionConfiguration(sessionId, {
       expectedRevision: current.revision,
       clearConnectionBlock: false,
-      permissionModeOnly: true,
-      configuration: sessionConfigurationWithPermissionMode(current.header, mode),
+      sandboxModeOnly: true,
+      configuration: sessionConfigurationWithSandboxMode(current.header, mode),
     });
     return headerToSummary(next.header);
   }
 
-  private async setPermissionModeWithLegacyStore(
+  private async setSandboxModeWithLegacyStore(
     sessionId: string,
-    mode: PermissionMode,
+    mode: SandboxMode,
   ): Promise<SessionSummary> {
     const previous = await this.deps.store.readHeader(sessionId);
     const boundary = await this.deps.store.readExecutionBoundary(sessionId);
-    const leavingDeepResearch = isDeepResearchSession(previous.labels) && mode !== 'explore';
+    const leavingDeepResearch = isDeepResearchSession(previous.labels) && mode !== 'read-only';
     if (
-      previous.permissionMode === mode &&
-      executionBoundaryMatchesPermissionMode(boundary, mode) &&
+      previous.sandboxMode === mode &&
+      executionBoundaryMatchesSandboxMode(boundary, mode) &&
       !leavingDeepResearch
     ) {
       return headerToSummary(previous);
@@ -1722,7 +1722,7 @@ export class SessionManager {
     const labels = leavingDeepResearch
       ? previous.labels.filter((label) => label !== DEEP_RESEARCH_SESSION_LABEL)
       : previous.labels;
-    const kind = mode === 'bypass' ? 'bypass' : 'managed';
+    const kind = mode === 'danger-full-access' ? 'danger-full-access' : 'managed';
     await this.commitExecutionBoundaryTransition(sessionId, boundary, mode, async () => {
       const current = await this.deps.store.readHeader(sessionId);
       if (current.status === 'waiting_for_user') {
@@ -1733,7 +1733,7 @@ export class SessionManager {
       }
       return () =>
         this.deps.store.setExecutionBoundaryKind(sessionId, kind, {
-          permissionMode: mode,
+          sandboxMode: mode,
           labels,
         });
     });
@@ -1744,19 +1744,19 @@ export class SessionManager {
 
   async setExecutionBoundaryKind(
     sessionId: string,
-    kind: 'managed' | 'bypass',
+    kind: 'managed' | 'danger-full-access',
   ): Promise<ExecutionBoundary> {
     const current = await this.deps.store.readExecutionBoundary(sessionId);
     const header = await this.deps.store.readHeader(sessionId);
     // Managed includes Explore. Match Storage's default projection, then pass
     // it explicitly so classification and commit describe the same transition.
-    const permissionMode =
-      kind === 'bypass'
-        ? 'bypass'
-        : header.permissionMode === 'bypass'
-          ? 'ask'
-          : header.permissionMode;
-    const narrows = narrowsExecutionAuthority(current, permissionMode);
+    const sandboxMode =
+      kind === 'danger-full-access'
+        ? 'danger-full-access'
+        : header.sandboxMode === 'danger-full-access'
+          ? 'workspace-write'
+          : header.sandboxMode;
+    const narrows = narrowsExecutionAuthority(current, sandboxMode);
     if (narrows && this.runtimeKernel.hasActiveRuns(sessionId)) {
       throw new SessionConfigurationTransitionError(
         'session_busy',
@@ -1772,9 +1772,8 @@ export class SessionManager {
     const boundary = await this.commitExecutionBoundaryTransition(
       sessionId,
       current,
-      permissionMode,
-      async () => () =>
-        this.deps.store.setExecutionBoundaryKind(sessionId, kind, { permissionMode }),
+      sandboxMode,
+      async () => () => this.deps.store.setExecutionBoundaryKind(sessionId, kind, { sandboxMode }),
     );
     return boundary;
   }
@@ -1782,7 +1781,7 @@ export class SessionManager {
   private async commitExecutionBoundaryTransition<T>(
     sessionId: string,
     current: ExecutionBoundary,
-    nextPermissionMode: PermissionMode,
+    nextSandboxMode: SandboxMode,
     prepareCommit: () => Promise<() => Promise<T>>,
   ): Promise<T> {
     const prepareBoundaryCommit = async (): Promise<() => Promise<T>> => {
@@ -1795,7 +1794,7 @@ export class SessionManager {
       }
       return prepareCommit();
     };
-    if (!narrowsExecutionAuthority(current, nextPermissionMode)) {
+    if (!narrowsExecutionAuthority(current, nextSandboxMode)) {
       // Widening needs no quiescence. Every consumer that froze the old, tighter
       // boundary fails closed against a wider one, and a descendant's admission
       // check only gets easier — so the grant is just written. Waiting for the
@@ -1822,18 +1821,18 @@ export class SessionManager {
     }
     return this.commitExecutionResourceTransition(
       sessionId,
-      nextPermissionMode,
+      nextSandboxMode,
       prepareBoundaryCommit,
     );
   }
 
   private async commitExecutionResourceTransition<T>(
     sessionId: string,
-    nextPermissionMode: PermissionMode,
+    nextSandboxMode: SandboxMode,
     prepareCommit: () => Promise<() => Promise<T>>,
   ): Promise<T> {
     const initialBoundary = await this.deps.store.readExecutionBoundary(sessionId);
-    const initiallyNarrows = narrowsExecutionAuthority(initialBoundary, nextPermissionMode);
+    const initiallyNarrows = narrowsExecutionAuthority(initialBoundary, nextSandboxMode);
     const initialDescendants = initiallyNarrows
       ? await this.listLinkedDescendantSessionIds(sessionId)
       : [];
@@ -1841,7 +1840,7 @@ export class SessionManager {
 
     return this.runSessionQuiescentMutation<T>(fencedSessionIds, async () => {
       const currentBoundary = await this.deps.store.readExecutionBoundary(sessionId);
-      const narrowsShellAuthority = narrowsExecutionAuthority(currentBoundary, nextPermissionMode);
+      const narrowsShellAuthority = narrowsExecutionAuthority(currentBoundary, nextSandboxMode);
       const descendantSessionIds = narrowsShellAuthority
         ? await this.listLinkedDescendantSessionIds(sessionId)
         : [];
@@ -2727,8 +2726,10 @@ export class SessionManager {
     const resolvedToolNames = executorId
       ? []
       : await this.resolveChildToolNames(input.source.sessionId, parentHeader, definition);
-    const childPermissionMode =
-      parentHeader.permissionMode === 'bypass' ? 'bypass' : definition.permissionMode;
+    const childSandboxMode =
+      parentHeader.sandboxMode === 'danger-full-access'
+        ? 'danger-full-access'
+        : definition.sandboxMode;
 
     const initialTurnId = this.deps.newId();
     const initialRunId = this.deps.newId();
@@ -2750,7 +2751,7 @@ export class SessionManager {
         agentId: definition.id,
         profile: definition.profile,
         workspace: definition.contract.workspace,
-        permissionMode: childPermissionMode,
+        sandboxMode: childSandboxMode,
         toolNames: resolvedToolNames,
         categoryPolicy: {},
         systemPrompt: definition.systemPrompt,
@@ -2813,7 +2814,7 @@ export class SessionManager {
                   ? { thinkingLevel: parentHeader.thinkingLevel }
                   : {}),
             }),
-        permissionMode: childPermissionMode,
+        sandboxMode: childSandboxMode,
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         toolMode: parentHeader.toolMode ?? DEFAULT_TOOL_MODE,
@@ -3194,7 +3195,7 @@ export class SessionManager {
       turnId: claim.targetTurnId,
       runId: claim.targetRunId,
       status: agentRunStatusForSpawnResult(completedFacts.status),
-      permissionMode: child.permissionMode,
+      sandboxMode: child.sandboxMode,
       summary: summary.text(),
       artifactIds: artifacts.map((artifact) => artifact.id),
       startedAt,
@@ -3362,7 +3363,7 @@ export class SessionManager {
                   ? { thinkingLevel: parentHeader.thinkingLevel }
                   : {}),
             }),
-        permissionMode: definition.permissionMode,
+        sandboxMode: definition.sandboxMode,
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         toolMode: parentHeader.toolMode ?? DEFAULT_TOOL_MODE,
@@ -3421,7 +3422,7 @@ export class SessionManager {
         runId,
         agentId: snapshot.agentId,
         agentName: snapshot.agentName,
-        permissionMode: child.permissionMode,
+        sandboxMode: child.sandboxMode,
       };
       let readyNotification: Promise<void> | undefined;
       const notifyReady = (): Promise<void> => {
@@ -3538,7 +3539,7 @@ export class SessionManager {
         turnId,
         runId,
         status: facts ? agentRunStatusForSpawnResult(facts.status) : summary.status(aborted),
-        permissionMode: child.permissionMode,
+        sandboxMode: child.sandboxMode,
         summary: summary.text(),
         artifactIds: artifacts.map((artifact) => artifact.id),
         startedAt,
@@ -3619,7 +3620,7 @@ export class SessionManager {
       turnId: run.turnId,
       runId: run.runId,
       status: agentRunStatusForSpawnResult(facts.status),
-      permissionMode: child.permissionMode,
+      sandboxMode: child.sandboxMode,
       summary: trimSummary(durableRuntimeSummary ?? partialRuntimeSummary),
       artifactIds: artifacts.map((artifact) => artifact.id),
       startedAt: facts.createdAt,
@@ -3725,7 +3726,7 @@ export class SessionManager {
           ...(child.subagentRuntime?.profile ? { profile: child.subagentRuntime.profile } : {}),
           ...(run?.turnId ? { turnId: run.turnId } : {}),
           status: facts?.status ?? (child.status === 'aborted' ? 'cancelled' : 'running'),
-          permissionMode: facts?.permissionMode ?? child.permissionMode,
+          sandboxMode: facts?.sandboxMode ?? child.sandboxMode,
           createdAt: facts?.createdAt ?? child.createdAt,
           updatedAt: facts?.updatedAt ?? child.lastMessageAt ?? child.createdAt,
           ...(facts?.completedAt !== undefined ? { completedAt: facts.completedAt } : {}),
@@ -3750,7 +3751,7 @@ export class SessionManager {
             ...(run.agentName ? { agentName: run.agentName } : {}),
             turnId: run.turnId,
             status: run.status,
-            permissionMode: run.permissionMode,
+            sandboxMode: run.sandboxMode,
             createdAt: run.createdAt,
             updatedAt: run.updatedAt,
             ...(run.completedAt !== undefined ? { completedAt: run.completedAt } : {}),
@@ -4095,7 +4096,7 @@ export class SessionManager {
             },
       configuration: {
         cwd: session.cwd,
-        permissionMode: session.permissionMode,
+        sandboxMode: session.sandboxMode,
         collaborationMode: session.collaborationMode ?? 'agent',
         toolMode: session.toolMode ?? DEFAULT_TOOL_MODE,
         ...orchestration,
@@ -5157,7 +5158,7 @@ export function headerToSummary(h: SessionHeader): SessionSummary {
     llmConnectionSlug: h.llmConnectionSlug,
     connectionLocked: h.connectionLocked,
     model: h.model,
-    permissionMode: h.permissionMode ?? 'ask',
+    sandboxMode: h.sandboxMode ?? 'workspace-write',
     collaborationMode: h.collaborationMode ?? 'agent',
     orchestrationMode: h.orchestrationMode ?? 'default',
   };
@@ -5177,7 +5178,7 @@ export function headerToSummary(h: SessionHeader): SessionSummary {
  */
 function invocationListingFacts(invocation: RuntimeInvocationRecord): {
   status: RunLifecycleStatus;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
@@ -5188,7 +5189,7 @@ function invocationListingFacts(invocation: RuntimeInvocationRecord): {
   const failureClass = runtimeInvocationFailureClass(invocation);
   return {
     status: runtimeInvocationOutcome(invocation) ?? 'running',
-    permissionMode: invocation.opening.configuration.permissionMode,
+    sandboxMode: invocation.opening.configuration.sandboxMode,
     createdAt: invocation.openedAt,
     updatedAt: completedAt ?? invocation.openedAt,
     ...(completedAt !== undefined ? { completedAt } : {}),
@@ -5333,9 +5334,9 @@ function claimedAgentGraphIntentResult(
   };
 }
 
-function sessionConfigurationWithPermissionMode(
+function sessionConfigurationWithSandboxMode(
   header: SessionHeader,
-  permissionMode: PermissionMode,
+  sandboxMode: SandboxMode,
 ): SessionConfigurationTransitionRequest['configuration'] {
   return {
     backend: header.backend,
@@ -5345,13 +5346,13 @@ function sessionConfigurationWithPermissionMode(
     connectionLocked: header.connectionLocked,
     model: header.model,
     thinkingLevel: header.thinkingLevel,
-    permissionMode,
+    sandboxMode,
     collaborationMode: header.collaborationMode ?? 'agent',
     orchestrationMode: header.orchestrationMode ?? 'default',
   };
 }
 
-function sessionConfigurationMatchesExceptPermissionMode(
+function sessionConfigurationMatchesExceptSandboxMode(
   header: SessionHeader,
   configuration: SessionConfigurationTransitionRequest['configuration'],
 ): boolean {
@@ -5373,31 +5374,29 @@ function sessionConfigurationMatches(
   configuration: SessionConfigurationTransitionRequest['configuration'],
 ): boolean {
   return (
-    header.permissionMode === configuration.permissionMode &&
-    sessionConfigurationMatchesExceptPermissionMode(header, configuration)
+    header.sandboxMode === configuration.sandboxMode &&
+    sessionConfigurationMatchesExceptSandboxMode(header, configuration)
   );
 }
 
-function executionBoundaryMatchesPermissionMode(
+function executionBoundaryMatchesSandboxMode(
   boundary: ExecutionBoundary,
-  mode: PermissionMode,
+  mode: SandboxMode,
 ): boolean {
-  if (mode === 'bypass') return boundary.kind === 'bypass';
+  if (mode === 'danger-full-access') return boundary.kind === 'danger-full-access';
   if (boundary.kind !== 'managed') return false;
-  return mode === 'explore'
+  return mode === 'read-only'
     ? boundary.profile.name === 'read-only'
     : boundary.profile.name !== 'read-only';
 }
 
 function narrowsExecutionAuthority(
   boundary: ExecutionBoundary,
-  nextPermissionMode: PermissionMode,
+  nextSandboxMode: SandboxMode,
 ): boolean {
-  if (nextPermissionMode === 'bypass') return false;
+  if (nextSandboxMode === 'danger-full-access') return false;
   if (boundary.kind !== 'managed') return true;
-  return (
-    nextPermissionMode === 'explore' && !isCanonicalReadOnlyPermissionProfile(boundary.profile)
-  );
+  return nextSandboxMode === 'read-only' && !isCanonicalReadOnlyPermissionProfile(boundary.profile);
 }
 
 function agentRunStatusForSpawnResult(

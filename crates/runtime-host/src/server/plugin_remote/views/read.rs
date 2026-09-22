@@ -25,6 +25,7 @@ pub(super) struct ReadGrant {
     pub views: SessionViews,
     pub workspace: WorkspaceProjection,
     pub session: bool,
+    pub boundary_revision: Option<u64>,
 }
 impl ReadGrant {
     pub async fn validate(&self) -> Result<(), Error> {
@@ -50,7 +51,9 @@ impl ReadGrant {
                 .await
                 .map_err(|error| Error::Provider(error.to_string()))?
                 .ok_or(Error::Retired)?;
-            if record.archived {
+            if record.archived
+                || self.boundary_revision != Some(record.configuration.boundary_revision)
+            {
                 return Err(Error::Retired);
             }
             record.configuration.workspace

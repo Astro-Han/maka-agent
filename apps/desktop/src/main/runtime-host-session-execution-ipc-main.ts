@@ -38,8 +38,9 @@ import {
   type SessionChangedReason,
 } from '@maka/core/session';
 import { type ActiveInteractionRequestEvent, type AttachmentRef } from '@maka/core/events';
-import { type PermissionMode } from '@maka/core/permission';
+import { type SandboxMode } from '@maka/core/permission';
 import { decodeInteractionFormResponse } from '@maka/core/interaction';
+import { decodePermissionsResponse } from '@maka/core/execution-permissions';
 import { type SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
 import type { AttachmentApprovalRegistry } from "./attachment-approval.js";
 import {
@@ -180,7 +181,7 @@ export interface RuntimeHostSessionExecutionIpcDeps {
       response: SandboxBoundaryResponse,
     ): Promise<
       | { readonly handled: false }
-      | { readonly handled: true; readonly permissionMode?: PermissionMode }
+      | { readonly handled: true; readonly sandboxMode?: SandboxMode }
     >;
   };
   newId?: () => string;
@@ -672,9 +673,9 @@ export function registerRuntimeHostSessionExecutionIpc(
         response,
       );
       if (fixtureResult?.handled) {
-        if (fixtureResult.permissionMode) {
+        if (fixtureResult.sandboxMode) {
           await deps.client.updateSessionConfiguration(sessionId, {
-            permissionMode: fixtureResult.permissionMode,
+            sandboxMode: fixtureResult.sandboxMode,
           });
           deps.emitSessionsChanged("mode-change", sessionId);
         }
@@ -728,6 +729,19 @@ export function registerRuntimeHostSessionExecutionIpc(
         sessionId,
         interactionId: response.requestId,
         answer: { kind: "client_capability", decision: response.decision },
+      });
+      deps.observer.publishInteractionAnswer(answered, pending);
+    },
+  );
+  ipcMain.handle(
+    "sessions:respondToPermissions",
+    async (_event, sessionId: string, input: unknown) => {
+      const response = decodePermissionsResponse(input);
+      const pending = await requireInteraction(deps.observer, sessionId, response.requestId);
+      if (pending.request.kind !== "permissions") throw new Error("Interaction is not a permissions request");
+      const answered = await deps.client.answerInteraction({
+        sessionId, interactionId: response.requestId,
+        answer: {kind: "permissions", decision: response.decision},
       });
       deps.observer.publishInteractionAnswer(answered, pending);
     },

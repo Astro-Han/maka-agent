@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { isSandboxMode } from '@maka/core/permission';
 import type {
   AuthorizationCapability,
   AuthorizationGrant,
@@ -167,18 +168,9 @@ function proposal(value: unknown): AuthorizationRequest {
   let resolved: AuthorizationRequest['target'];
   switch (target.kind) {
     case 'plugin_workspace': {
-      requireExactRecord(target, 'Plugin workspace authorization', ['kind', 'permissionMode']);
-      const mode = target.permissionMode;
-      if (mode !== 'explore' && mode !== 'ask' && mode !== 'bypass')
-        throw invalidProtocolFrame('Invalid authorization permission mode');
-      if (
-        mode !== 'bypass' &&
-        requested.some((capability) =>
-          ['write_files', 'network', 'processes', 'client_capabilities'].includes(capability),
-        )
-      )
-        throw invalidProtocolFrame('Unattended side effects require bypass permission');
-      resolved = { kind: 'plugin_workspace', permissionMode: mode };
+      requireExactRecord(target, 'Plugin workspace authorization', ['kind', 'sandboxMode']);
+      const mode = authorizationMode(target.sandboxMode, requested);
+      resolved = { kind: 'plugin_workspace', sandboxMode: mode };
       break;
     }
     case 'directory': {
@@ -213,11 +205,7 @@ function proposal(value: unknown): AuthorizationRequest {
       };
       break;
     case 'workspace': {
-      requireExactRecord(target, 'Workspace authorization', [
-        'kind',
-        'workspace',
-        'permissionMode',
-      ]);
+      requireExactRecord(target, 'Workspace authorization', ['kind', 'workspace', 'sandboxMode']);
       const workspace = requireRecord(target.workspace, 'Authorization workspace');
       let location: Extract<AuthorizationRequest['target'], { kind: 'workspace' }>['workspace'];
       if (workspace.kind === 'project') {
@@ -234,15 +222,8 @@ function proposal(value: unknown): AuthorizationRequest {
         if (path.includes('\0')) throw invalidProtocolFrame('Invalid Host path');
         location = { kind: 'host_path', path };
       }
-      const mode = target.permissionMode;
-      if (mode !== 'explore' && mode !== 'ask' && mode !== 'bypass')
-        throw invalidProtocolFrame('Invalid authorization permission mode');
-      if (
-        mode !== 'bypass' &&
-        requested.some((capability) => ['write_files', 'network', 'processes'].includes(capability))
-      )
-        throw invalidProtocolFrame('Unattended side effects require bypass permission');
-      resolved = { kind: 'workspace', workspace: location, permissionMode: mode };
+      const mode = authorizationMode(target.sandboxMode, requested);
+      resolved = { kind: 'workspace', workspace: location, sandboxMode: mode };
       break;
     }
     default:
@@ -250,6 +231,15 @@ function proposal(value: unknown): AuthorizationRequest {
   }
   return { operationId: uuid(row.operationId), title, capabilities: requested, target: resolved };
 }
+function authorizationMode(value: unknown, requested: AuthorizationRequest['capabilities']) {
+  if (!isSandboxMode(value)) throw invalidProtocolFrame('Invalid authorization sandbox mode');
+  if (value !== 'danger-full-access' && requested.includes('client_capabilities'))
+    throw invalidProtocolFrame('Client capabilities require unrestricted sandbox permission');
+  if (value === 'read-only' && requested.includes('write_files'))
+    throw invalidProtocolFrame('Read-only authorization cannot grant file writes');
+  return value;
+}
+
 function uuid(value: unknown): string {
   const id = requireString(value, 'Authorization identity', 36);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))

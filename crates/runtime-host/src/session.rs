@@ -86,6 +86,7 @@ impl From<SessionModel> for SessionTarget {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SessionConfiguration {
+    pub workspace_origin: maka_runtime::execution::WorkspaceOrigin,
     pub workspace: WorkspaceProjection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<maka_fs_tools::worktree::Binding>,
@@ -105,12 +106,11 @@ pub struct SessionConfiguration {
     pub bound_tools: Option<std::collections::BTreeSet<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
-    /// Frozen at creation. Missing on older Rust Sessions means direct tools.
-    #[serde(default)]
+    /// Frozen at creation.
     pub tool_mode: maka_runtime::execution::ToolMode,
-    pub permission_mode: PermissionMode,
+    pub sandbox_mode: SandboxMode,
+    pub approval_policy: ApprovalPolicy,
     /// Revision of the enforced policy, independent of unrelated catalog changes.
-    #[serde(default)]
     pub boundary_revision: u64,
     pub collaboration_mode: CollaborationMode,
     pub orchestration_mode: BehaviorId,
@@ -138,7 +138,8 @@ impl SessionConfiguration {
             boundary_revision: self.boundary_revision,
             workspace: self.workspace.clone(),
             target,
-            permission_mode: self.permission_mode,
+            sandbox_mode: self.sandbox_mode,
+            approval_policy: self.approval_policy,
             collaboration_mode: self.collaboration_mode,
             behavior: self.orchestration_mode.clone(),
             tool_mode: self.tool_mode,
@@ -165,7 +166,10 @@ impl SessionConfiguration {
             tool_composition: None,
             cwd: self.workspace.host_cwd.clone(),
             workspace_identity: Some(workspace_identity),
-            permission_mode: self.permission_mode,
+            workspace_origin: self.workspace_origin,
+            sandbox_mode: self.sandbox_mode,
+            approval_policy: self.approval_policy,
+            boundary_revision: self.boundary_revision,
             collaboration_mode: self.collaboration_mode,
             orchestration_mode: self.orchestration_mode.clone(),
             tool_mode: self.tool_mode,
@@ -183,7 +187,8 @@ pub struct PreparedSession {
     target: SessionCreateTarget,
     name: String,
     labels: Vec<String>,
-    permission_mode: Option<PermissionMode>,
+    sandbox_mode: Option<SandboxMode>,
+    approval_policy: ApprovalPolicy,
     thinking_level: Option<ThinkingLevel>,
     tool_profile: Option<SessionToolProfile>,
     collaboration_mode: CollaborationMode,
@@ -217,11 +222,6 @@ impl PreparedSession {
                 "Session creation cannot set reserved execution labels",
             ));
         }
-        if input.mode.is_none() && input.permission_mode == Some(PermissionMode::Explore) {
-            return Err(ProtocolError::invalid(
-                "Explore permission requires a declared Session mode",
-            ));
-        }
         let requested_name = match input.mode {
             Some(SessionStartMode::DeepResearch) => "Deep Research",
             _ => input.name.as_deref().unwrap_or("New Chat"),
@@ -233,10 +233,10 @@ impl PreparedSession {
             Some(SessionStartMode::Bot) => labels.push("mode:bot".into()),
             None => {}
         }
-        let permission_mode = if input.mode.is_some() {
-            Some(PermissionMode::Explore)
+        let sandbox_mode = if input.mode.is_some() {
+            Some(SandboxMode::ReadOnly)
         } else {
-            input.permission_mode
+            input.sandbox_mode
         };
         Ok(Self {
             session_id: input.session_id,
@@ -244,7 +244,8 @@ impl PreparedSession {
             target: input.target,
             name,
             labels,
-            permission_mode,
+            sandbox_mode,
+            approval_policy: input.approval_policy.unwrap_or(ApprovalPolicy::OnRequest),
             thinking_level: input.thinking_level,
             tool_profile: input.tool_profile,
             collaboration_mode: input.collaboration_mode.unwrap_or(CollaborationMode::Agent),
@@ -282,7 +283,7 @@ impl PreparedSession {
             } => json!([connection_id, connection_slug, model]),
         };
         let permission = self
-            .permission_mode
+            .sandbox_mode
             .map(|mode| json!(mode))
             .unwrap_or_else(|| json!(["runtime_default"]));
         let identity = json!([
@@ -295,6 +296,7 @@ impl PreparedSession {
             self.thinking_level,
             self.tool_profile,
             permission,
+            self.approval_policy,
             self.collaboration_mode,
             self.orchestration_mode,
         ]);
@@ -308,10 +310,11 @@ impl PreparedSession {
         self,
         workspace: WorkspaceProjection,
         target: impl Into<SessionTarget>,
-        default_permission: PermissionMode,
+        default_permission: SandboxMode,
         tool_mode: maka_runtime::execution::ToolMode,
     ) -> SessionConfiguration {
         SessionConfiguration {
+            workspace_origin: maka_runtime::execution::WorkspaceOrigin::Selected,
             workspace,
             worktree: None,
             name: self.name,
@@ -325,7 +328,8 @@ impl PreparedSession {
             bound_tools: None,
             instructions: None,
             tool_mode,
-            permission_mode: self.permission_mode.unwrap_or(default_permission),
+            sandbox_mode: self.sandbox_mode.unwrap_or(default_permission),
+            approval_policy: self.approval_policy,
             boundary_revision: 0,
             collaboration_mode: self.collaboration_mode,
             orchestration_mode: self.orchestration_mode,
@@ -392,7 +396,8 @@ pub fn metadata_projection(
         llm_connection_slug: connection_slug,
         connection_locked: config.connection_locked,
         model,
-        permission_mode: config.permission_mode,
+        sandbox_mode: config.sandbox_mode,
+        approval_policy: config.approval_policy,
         collaboration_mode: config.collaboration_mode,
         orchestration_mode: config.orchestration_mode,
         thinking_level: config.thinking_level,

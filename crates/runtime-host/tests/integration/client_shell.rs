@@ -23,52 +23,50 @@ use maka_runtime::shell_run::{ShellOutcome, ShellOutput, ShellRun, ShellState, S
 use sha2::{Digest, Sha256};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unchanged_client_runs_bash_and_reopens_without_repeating_process() {
+async fn client_runs_shell_and_reopens_without_repeating_process() {
     let fixture = ClientFixture::new("maka-shell-");
     let workspace = &fixture.workspace;
     let mut original = None;
     for reopened in [false, true] {
         fixture
             .run(
-                "--bash-workspace",
+                "--shell-workspace",
                 reopened,
                 if reopened {
-                    "original-client-bash-reopened"
+                    "original-client-shell-reopened"
                 } else {
-                    "original-client-bash"
+                    "original-client-shell"
                 },
             )
             .await;
         let log = fixture.log().await;
         let prefix = log.prefix(1000, 4 * 1024 * 1024).await.unwrap();
         let rows: Vec<serde_json::Value> =
-            serde_json::from_slice(&std::fs::read(workspace.join("bash-rows.json")).unwrap())
+            serde_json::from_slice(&std::fs::read(workspace.join("shell-rows.json")).unwrap())
                 .unwrap();
         let mut dispatched = 0;
         let mut settled = 0;
         let mut rejected = 0;
         let live: Vec<serde_json::Value> =
-            serde_json::from_slice(&std::fs::read(workspace.join("bash-live.json")).unwrap())
+            serde_json::from_slice(&std::fs::read(workspace.join("shell-live.json")).unwrap())
                 .unwrap();
         for stored in &prefix.events {
-            if !["bash-bypass", "bash-ask"].contains(&stored.event.invocation.session_id.as_str()) {
+            if !["shell-bypass", "shell-readonly"]
+                .contains(&stored.event.invocation.session_id.as_str())
+            {
                 continue;
             }
             match &stored.event.fact {
                 Fact::ToolSettled { .. } => settled += 1,
                 Fact::ToolRejected { name, .. } => {
                     rejected += 1;
-                    assert_eq!(name, "Bash");
-                    assert_eq!(stored.event.invocation.session_id, "bash-ask");
+                    assert_eq!(name, "Shell");
+                    assert_eq!(stored.event.invocation.session_id, "shell-readonly");
                 }
                 _ => {}
             }
             if let Fact::ToolDispatched { operation_id, .. } = &stored.event.fact {
                 dispatched += 1;
-                assert_eq!(
-                    stored.event.invocation.session_id, "bash-bypass",
-                    "Ask guessed Bash must reject before T1"
-                );
                 let invocation = &stored.event.invocation;
                 let tuple = serde_json::to_vec(&[
                     "maka.tool-presentation.v1",
@@ -95,7 +93,7 @@ async fn unchanged_client_runs_bash_and_reopens_without_repeating_process() {
                     && row["id"] == expected));
             }
         }
-        assert_eq!((dispatched, settled, rejected), (1, 1, 1));
+        assert_eq!((dispatched, settled, rejected), (2, 2, 0));
         for session in ["model-shell", "model-shell-pty"] {
             let saved: serde_json::Value = serde_json::from_slice(
                 &std::fs::read(workspace.join(format!("{session}.json"))).unwrap(),
@@ -114,7 +112,7 @@ async fn unchanged_client_runs_bash_and_reopens_without_repeating_process() {
             let dispatch = prefix.events.iter().find(|stored| {
             stored.event.invocation.session_id == session &&
             stored.event.invocation.turn_id == "background-launch" &&
-            matches!(&stored.event.fact, Fact::ToolDispatched { name, .. } if name == "Bash")
+            matches!(&stored.event.fact, Fact::ToolDispatched { name, .. } if name == "Shell")
         }).unwrap();
             assert_eq!(
                 background.source_run_id.as_deref(),
@@ -137,11 +135,15 @@ async fn unchanged_client_runs_bash_and_reopens_without_repeating_process() {
             // The next Host startup must orphan it without interpreting its command.
             log.create_shell_run(ShellRun {
                 id: "abandoned-shell".into(),
-                session_id: "bash-bypass".into(),
+                session_id: "shell-bypass".into(),
                 source_run_id: None,
                 source_turn_id: "abandoned-turn".into(),
                 source_tool_call_id: "abandoned-call".into(),
                 visibility: ShellVisibility::Model,
+                permissions: maka_runtime::shell_run::ShellPermissions {
+                    boundary_revision: 0,
+                    sandbox: maka_runtime::shell_run::Sandbox::Disabled,
+                },
                 cwd: workspace.to_string_lossy().into_owned(),
                 command: "echo unexpectedly-replayed > shell-replay.txt".into(),
                 started_at: 1,
@@ -161,7 +163,7 @@ async fn unchanged_client_runs_bash_and_reopens_without_repeating_process() {
             .unwrap();
         } else {
             let abandoned = log
-                .read_shell_run("bash-bypass", "abandoned-shell")
+                .read_shell_run("shell-bypass", "abandoned-shell")
                 .await
                 .unwrap()
                 .unwrap();

@@ -30,7 +30,7 @@ use windows_sys::Win32::{
         OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES,
         WinLocalSystemSid,
     },
-    System::SystemServices::ACCESS_ALLOWED_ACE_TYPE,
+    System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE},
 };
 
 fn denied() -> io::Error {
@@ -155,6 +155,14 @@ pub fn validate_private(file: &File) -> io::Result<()> {
         let mut ace = ptr::null_mut();
         checked(unsafe { GetAce(info.dacl, index as u32, &mut ace) })?;
         let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+        // Standard denies only remove authority. Sandbox account exclusions
+        // must not make an otherwise private recovery journal unreadable to its
+        // own validator. Unknown ACE forms still fail closed below.
+        if u32::from(header.AceType) == ACCESS_DENIED_ACE_TYPE
+            && usize::from(header.AceSize) >= size_of::<ACCESS_ALLOWED_ACE>()
+        {
+            continue;
+        }
         if u32::from(header.AceType) != ACCESS_ALLOWED_ACE_TYPE
             || usize::from(header.AceSize) < size_of::<ACCESS_ALLOWED_ACE>()
         {
@@ -205,44 +213,55 @@ mod tests {
         assert_eq!(std::fs::read(&child).unwrap(), b"test-only");
         validate_private(&File::open(&child).unwrap()).unwrap();
 
-        let public = wide("D:P(A;OICI;FA;;;WD)".as_ref()).unwrap();
-        let mut descriptor = ptr::null_mut();
-        // SAFETY: this test grants Everyone access only to its temporary directory.
-        checked(unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                public.as_ptr(),
-                SDDL_REVISION_1,
-                &mut descriptor,
-                ptr::null_mut(),
-            )
-        })
-        .unwrap();
-        let allocation = LocalAllocation(descriptor);
-        let (mut present, mut defaulted, mut dacl) = (0, 0, ptr::null_mut());
-        checked(unsafe {
-            GetSecurityDescriptorDacl(descriptor, &mut present, &mut dacl, &mut defaulted)
-        })
-        .unwrap();
-        assert_ne!(present, 0);
-        assert_eq!(
-            unsafe {
-                SetSecurityInfo(
-                    directory.as_raw_handle(),
-                    SE_FILE_OBJECT,
-                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                    ptr::null_mut(),
-                    ptr::null_mut(),
-                    dacl,
+        let account = AccountSid::current().unwrap().text().unwrap();
+        for (sddl, private) in [
+            ("D:P(A;OICI;FA;;;WD)".to_owned(), false),
+            (
+                format!("D:P(D;;FR;;;S-1-5-21-1-2-3-4567)(A;OICI;FA;;;{account})(A;OICI;FA;;;SY)"),
+                true,
+            ),
+        ] {
+            let public = wide(sddl.as_ref()).unwrap();
+            let mut descriptor = ptr::null_mut();
+            // SAFETY: this test grants Everyone access only to its temporary directory.
+            checked(unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    public.as_ptr(),
+                    SDDL_REVISION_1,
+                    &mut descriptor,
                     ptr::null_mut(),
                 )
-            },
-            0
-        );
-        drop(allocation);
-        assert_eq!(
-            validate_private(&directory).unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
-        );
+            })
+            .unwrap();
+            let allocation = LocalAllocation(descriptor);
+            let (mut present, mut defaulted, mut dacl) = (0, 0, ptr::null_mut());
+            checked(unsafe {
+                GetSecurityDescriptorDacl(descriptor, &mut present, &mut dacl, &mut defaulted)
+            })
+            .unwrap();
+            assert_ne!(present, 0);
+            assert_eq!(
+                unsafe {
+                    SetSecurityInfo(
+                        directory.as_raw_handle(),
+                        SE_FILE_OBJECT,
+                        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                        ptr::null_mut(),
+                        ptr::null_mut(),
+                        dacl,
+                        ptr::null_mut(),
+                    )
+                },
+                0
+            );
+            drop(allocation);
+            let result = validate_private(&directory);
+            if private {
+                result.unwrap();
+            } else {
+                assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+            }
+        }
         crate::root::windows::private_directory(&path).unwrap();
         validate_private(&directory).unwrap();
         validate_private(&File::open(child).unwrap()).unwrap();

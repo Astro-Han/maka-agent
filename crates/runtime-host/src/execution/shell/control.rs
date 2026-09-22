@@ -168,7 +168,29 @@ impl super::SessionShell {
             cancelled(&cancellation)?;
             record = (*handle.ready().await.map_err(worker_error)?).clone();
             if record.state.active() {
-                match handle.control(input.data, input.size, cancellation).await {
+                let admission = tokio::select! {
+                    _ = cancellation.cancelled() => return Err(failed("PTY control cancelled before admission")),
+                    gate = self.interactions.own_admission() => gate,
+                };
+                let current = self
+                    .log
+                    .get_session::<crate::session::SessionConfiguration>(session)
+                    .await
+                    .map_err(persistence)?
+                    .filter(|session| !session.archived)
+                    .ok_or_else(|| failed("Session permissions are unavailable"))?;
+                if current.configuration.boundary_revision != record.permissions.boundary_revision {
+                    return Err(failed(
+                        "PTY launch permissions no longer match this Session; start a new terminal",
+                    ));
+                }
+                let result = handle.enqueue_control(input.data, input.size, cancellation);
+                drop(admission);
+                let result = match result {
+                    Ok(receipt) => receipt.await,
+                    Err(error) => Err(error),
+                };
+                match result {
                     Ok(receipt) => {
                         record = (*receipt.record).clone();
                         queued = input.bytes.is_some();

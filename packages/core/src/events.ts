@@ -31,7 +31,7 @@ import type { ModelRetryDecision } from './model-failure.js';
 import { CONTEXT_OFFLOAD_ID_MAX_CODE_POINTS, type SessionContextRef } from './context-offload.js';
 import type {
   AdditionalPermissionRequest,
-  PermissionMode,
+  SandboxMode,
   PermissionRequest,
   PermissionResponse,
   SandboxEscalationRequest,
@@ -589,6 +589,8 @@ export type SessionEvent =
   | SandboxBoundaryDecisionAckEvent
   | ClientCapabilityRequestEvent
   | ClientCapabilityDecisionAckEvent
+  | PermissionsRequestEvent
+  | PermissionsDecisionAckEvent
   | PermissionAnswerAckEvent
   | PermissionClosureAckEvent
   | PermissionDecisionAckEvent
@@ -752,7 +754,7 @@ export type ToolResultPreviewContent = {
   turnId: string;
   runId?: string;
   status: 'running';
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
 };
 
 export interface ToolResultPreviewEvent extends BaseEvent, ToolActivityIdentity {
@@ -928,7 +930,7 @@ export type ToolResultContent =
       turnId: string;
       runId?: string;
       status: 'completed' | 'failed' | 'cancelled' | 'running' | 'waiting_for_user';
-      permissionMode: PermissionMode;
+      sandboxMode: SandboxMode;
       summary: string;
       artifactIds: readonly string[];
       startedAt?: number;
@@ -1073,6 +1075,20 @@ export interface ClientCapabilityRequestEvent extends BaseEvent {
   scope: ClientCapabilityGrantScope;
 }
 
+export interface PermissionsRequestEvent extends BaseEvent {
+  type: 'permissions_request';
+  requestId: string;
+  toolUseId: string | null;
+  request: import('./execution-permissions.js').AccessRequest;
+}
+
+export interface PermissionsDecisionAckEvent extends BaseEvent {
+  type: 'permissions_decision_ack';
+  requestId: string;
+  toolUseId: string | null;
+  decision: import('./execution-permissions.js').PermissionDecision;
+}
+
 /**
  * The requests a session can park on while it waits for the user. Both are
  * registered by RuntimeKernel while unanswered, so a surface that missed the
@@ -1082,7 +1098,8 @@ export type ActiveInteractionRequestEvent =
   | SandboxBoundaryRequestEvent
   | UserQuestionRequestEvent
   | FormRequestEvent
-  | ClientCapabilityRequestEvent;
+  | ClientCapabilityRequestEvent
+  | PermissionsRequestEvent;
 
 export interface SandboxBoundaryDecisionAckEvent extends BaseEvent {
   type: 'sandbox_boundary_decision_ack';

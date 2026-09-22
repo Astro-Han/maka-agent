@@ -42,7 +42,7 @@ test('creates a bot-mode Session through the Host-owned default model route', as
   const client = botClient({
     createSession: async (input) => {
       creates.push(input);
-      return session(input.sessionId, { permissionMode: 'explore' });
+      return session(input.sessionId, { sandboxMode: 'read-only' });
     },
   });
   const adapter = createRuntimeHostBotSessionAdapter({
@@ -79,10 +79,10 @@ test('creates a bot-mode Session through the Host-owned default model route', as
 test('prepares a bound Session without exposing Host configuration revisions to the Bot', async () => {
   const updates: unknown[] = [];
   const client = botClient({
-    getSession: async () => session('bot-session-1', { permissionMode: 'ask' }),
+    getSession: async () => session('bot-session-1', { sandboxMode: 'workspace-write' }),
     updateSessionConfiguration: async (sessionId, patch) => {
       updates.push({ sessionId, patch });
-      return session(sessionId, { permissionMode: 'explore' });
+      return session(sessionId, { sandboxMode: 'read-only' });
     },
   });
   const adapter = createRuntimeHostBotSessionAdapter({
@@ -93,7 +93,7 @@ test('prepares a bound Session without exposing Host configuration revisions to 
 
   assert.equal(await adapter.prepareSession('bot-session-1'), 'ready');
   assert.deepEqual(updates, [
-    { sessionId: 'bot-session-1', patch: { permissionMode: 'explore' } },
+    { sessionId: 'bot-session-1', patch: { sandboxMode: 'read-only' } },
   ]);
 
   const unavailable = createRuntimeHostBotSessionAdapter({
@@ -123,10 +123,10 @@ test('rejects archived Sessions before and after a permission transition', async
 
   const archivedDuringUpdate = createRuntimeHostBotSessionAdapter({
     client: botClient({
-      getSession: async () => session('bot-session-1', { permissionMode: 'ask' }),
+      getSession: async () => session('bot-session-1', { sandboxMode: 'workspace-write' }),
       updateSessionConfiguration: async (sessionId) =>
         session(sessionId, {
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
           isArchived: true,
           status: 'active',
         }),
@@ -150,7 +150,7 @@ test('reconciles an uncertain Host Session create with its stable Session identi
           'response lost',
         );
       },
-      getSession: async (sessionId) => session(sessionId, { permissionMode: 'explore' }),
+      getSession: async (sessionId) => session(sessionId, { sandboxMode: 'read-only' }),
     }),
     resolveCreateTarget: hostPathCreateTarget,
     emitSessionsChanged() {},
@@ -431,7 +431,8 @@ function session(
     llmConnectionSlug: 'test-connection',
     connectionLocked: false,
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: {kind: 'on-request'},
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     ...overrides,

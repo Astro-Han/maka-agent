@@ -454,7 +454,7 @@ test('a real package reaches every scoped ctx service through one Agent Tool inv
             createdAt: 1,
             settledAt: 2,
           },
-          boundary: { kind: 'bypass', revision: 1 },
+          boundary: { kind: 'danger-full-access', revision: 1 },
           changed: true,
         };
       },

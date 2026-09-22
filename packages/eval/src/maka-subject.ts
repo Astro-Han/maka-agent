@@ -59,7 +59,7 @@ export function createMakaSubjectAdapter(): SubjectAdapter {
             model: config.model,
           },
           ...(config.thinkingLevel === undefined ? {} : { thinkingLevel: config.thinkingLevel }),
-          permissionMode: config.permissionMode,
+          sandboxMode: config.sandboxMode,
           collaborationMode: config.collaborationMode,
           orchestrationMode: config.orchestrationMode,
           toolProfile: config.toolProfile,
@@ -288,7 +288,7 @@ interface MakaConfig {
   readonly connectionSlug: string;
   readonly model: string;
   readonly thinkingLevel?: RunHostedExecutionInput['execution']['session']['thinkingLevel'];
-  readonly permissionMode: RunHostedExecutionInput['execution']['session']['permissionMode'];
+  readonly sandboxMode: RunHostedExecutionInput['execution']['session']['sandboxMode'];
   readonly collaborationMode: RunHostedExecutionInput['execution']['session']['collaborationMode'];
   readonly orchestrationMode: RunHostedExecutionInput['execution']['session']['orchestrationMode'];
   readonly toolProfile: SessionToolProfile;
@@ -304,7 +304,7 @@ function decodeConfig(value: JsonObject): MakaConfig {
     'model',
     ...(Object.hasOwn(value, 'providerType') ? ['providerType', 'apiKeyEnvironment'] : []),
     ...(Object.hasOwn(value, 'thinkingLevel') ? ['thinkingLevel'] : []),
-    'permissionMode',
+    'sandboxMode',
     'collaborationMode',
     'orchestrationMode',
     'hostSettlementTimeoutMs',

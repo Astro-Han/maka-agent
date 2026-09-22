@@ -1163,8 +1163,8 @@ export function DeepResearchProgressPanel({
  * just the greeting + a softer fallback line.
  */
 
-// PR-MOVE-PERMISSION-MODE: the chat-header `PermissionModeSwitcher`
+// PR-MOVE-PERMISSION-MODE: the chat-header `SandboxModeSwitcher`
 // radiogroup was deleted. Mode picking now lives inside the composer's
-// left-controls as a shared Select (PermissionModeSelect), so the picker
+// left-controls as a shared Select (SandboxModeSelect), so the picker
 // sits where you actually start typing, matching the reference product.
 // Keyboard arrow/Home/End handling is delegated to the Select primitive.

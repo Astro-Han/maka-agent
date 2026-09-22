@@ -118,7 +118,7 @@ async fn question_commit_failures_never_publish_an_unjournaled_question_or_deliv
                 .write(&request(
                     maka_protocol::Operation::SessionConfigurationUpdate.as_str(),
                     json!({"sessionId":"session","expectedRevision":revision,
-                    "patch":{"permissionMode":"bypass"}}),
+                    "patch":{"sandboxMode":"danger-full-access"}}),
                 ))
                 .await
                 .unwrap();

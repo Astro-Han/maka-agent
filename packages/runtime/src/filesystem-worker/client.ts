@@ -27,7 +27,7 @@ import { compilePermissionProfile } from '@maka/core/permission-profile-compiler
 
 import { type ExecutionBoundary, type SandboxBoundaryExpansion } from '@maka/core/sandbox-boundary';
 
-import { type PermissionMode } from '@maka/core/permission';
+import { type SandboxMode } from '@maka/core/permission';
 
 import { normalizeSandboxBoundaryPath } from '../sandbox-boundary-path.js';
 import { MAX_CHILD_FD } from '../child-fd-input.js';
@@ -95,7 +95,7 @@ export interface FilesystemWorkerExecuteInput {
   operation: FilesystemWorkerClientOperation;
   cwd: string;
   executionBoundary?: ExecutionBoundary;
-  mode?: PermissionMode;
+  mode?: SandboxMode;
   /** Explicit embedding policy. Mode-based defaults are compiled only when omitted. */
   permissionProfile?: PermissionProfile;
   abortSignal?: AbortSignal;
@@ -294,7 +294,7 @@ export class FilesystemWorkerClient {
               profile: input.permissionProfile,
               workspaceRoots: [canonicalCwd],
             }
-          : compilePermissionProfile({ mode: input.mode ?? 'ask', cwd: canonicalCwd });
+          : compilePermissionProfile({ mode: input.mode ?? 'workspace-write', cwd: canonicalCwd });
     const effectiveProfile = compiled.profile;
     const platform = this.input.platform ?? process.platform;
     const runtimeWritableRoots = filesystemWorkerRuntimeWritableRoots({

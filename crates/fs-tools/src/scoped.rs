@@ -25,6 +25,8 @@ use cap_std::{
     fs::{Dir, File, OpenOptions},
 };
 use maka_runtime::{read::ReadRequest, tools::ToolError};
+use maka_sandbox::filesystem::Compiled;
+use std::sync::Arc;
 use std::{
     io::Read,
     path::{Component, Path, PathBuf},
@@ -34,7 +36,9 @@ use tokio_util::sync::CancellationToken;
 const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_IMAGE_DIMENSION: usize = 2000;
 
+mod directory;
 mod path;
+pub(crate) use directory::Directory;
 
 struct Root {
     path: PathBuf,
@@ -45,10 +49,11 @@ struct Root {
 pub(crate) struct Authority {
     cwd: PathBuf,
     scope: CapturedScope,
+    policy: Option<Arc<Compiled>>,
 }
 
 pub(crate) struct Route {
-    pub root: Dir,
+    pub root: Directory,
     pub relative: PathBuf,
     pub root_path: PathBuf,
 }
@@ -59,12 +64,17 @@ enum CapturedScope {
 }
 
 impl Authority {
-    pub(crate) fn from_directory(path: PathBuf, dir: Dir) -> Result<Self, ToolError> {
+    pub(crate) fn from_directory(
+        path: PathBuf,
+        dir: Dir,
+        policy: Option<Arc<Compiled>>,
+    ) -> Result<Self, ToolError> {
         if !path.is_absolute() {
             return Err(failed("Captured directory location must be absolute"));
         }
         Ok(Self {
             cwd: path.clone(),
+            policy,
             scope: CapturedScope::Restricted(vec![Root {
                 aliases: vec![path.clone()],
                 path,
@@ -94,7 +104,11 @@ impl Authority {
                     .last()
                     .ok_or_else(|| failed("absolute path required"))?;
                 Ok(vec![Route {
-                    root: Dir::open_ambient_dir(root, ambient_authority()).map_err(io_error)?,
+                    root: Directory::new(
+                        Dir::open_ambient_dir(root, ambient_authority()).map_err(io_error)?,
+                        root.to_owned(),
+                        self.policy.clone(),
+                    ),
                     relative: absolute
                         .strip_prefix(root)
                         .map_err(|_| failed("invalid Write path"))?
@@ -106,7 +120,11 @@ impl Authority {
                 .into_iter()
                 .map(|(root, relative, _)| {
                     Ok(Route {
-                        root: root.dir.try_clone().map_err(io_error)?,
+                        root: Directory::new(
+                            root.dir.try_clone().map_err(io_error)?,
+                            root.path.clone(),
+                            self.policy.clone(),
+                        ),
                         relative: relative.to_owned(),
                         root_path: root.path.clone(),
                     })
@@ -124,11 +142,19 @@ impl Authority {
             return Err(failed("Session cwd must be a directory"));
         }
         let paths = match scope {
+            ReadScope::Policy(policy) => {
+                return Ok(Self {
+                    cwd,
+                    scope: CapturedScope::Unrestricted,
+                    policy: Some(policy),
+                });
+            }
             ReadScope::Restricted { roots } => roots,
             ReadScope::Unrestricted => {
                 return Ok(Self {
                     cwd,
                     scope: CapturedScope::Unrestricted,
+                    policy: None,
                 });
             }
         };
@@ -161,10 +187,25 @@ impl Authority {
         Ok(Self {
             cwd,
             scope: CapturedScope::Restricted(roots),
+            policy: None,
         })
     }
 
     fn open(&self, absolute: &Path) -> Result<File, ToolError> {
+        if self.policy.is_some() {
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            options.custom_flags(libc::O_NONBLOCK);
+            let mut error = failed("path is outside the admitted Read roots");
+            for route in self.routes(absolute)? {
+                match route.root.open_with(&route.relative, &options) {
+                    Ok(file) => return Ok(file),
+                    Err(reason) => error = io_error(reason),
+                }
+            }
+            return Err(error);
+        }
         let roots = match &self.scope {
             CapturedScope::Restricted(roots) => roots,
             CapturedScope::Unrestricted => {
@@ -293,5 +334,8 @@ fn check_cancelled(token: &CancellationToken) -> Result<(), ToolError> {
 }
 
 fn io_error(error: std::io::Error) -> ToolError {
-    failed(format!("Read filesystem error: {error}"))
+    ToolError::Io {
+        kind: error.kind(),
+        message: format!("Read filesystem error: {error}"),
+    }
 }

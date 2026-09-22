@@ -64,6 +64,21 @@ impl Executions {
             });
         };
         let cwd = &session.configuration.workspace.host_cwd;
+        let location = cwd.clone();
+        let mode = session.configuration.sandbox_mode;
+        let origin = session.configuration.workspace_origin;
+        let state_root = self.paths.state_root.clone();
+        let workspace = tokio::task::spawn_blocking(move || {
+            crate::execution::permissions::read_root(
+                mode,
+                std::path::Path::new(&location),
+                &state_root,
+                origin,
+            )
+        })
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
         let (prepared, selection) = super::prepare(
             &self.plugin_catalog,
             maka_plugins::input::Request {
@@ -74,6 +89,7 @@ impl Executions {
                 selections: Default::default(),
                 cancellation: self.shutdown.child_token(),
             },
+            &workspace,
         )
         .await?;
         Ok(PreparedMessageInput {

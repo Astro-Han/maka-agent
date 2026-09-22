@@ -62,7 +62,7 @@ export function registerAccess(context: ClientContext): void {
           const target: Target = {
             kind: 'workspace',
             workspace: props.workspace,
-            permissionMode: props.permissionMode,
+            sandboxMode: props.sandboxMode,
           };
           await authorize(
             context,

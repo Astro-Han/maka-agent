@@ -29,11 +29,7 @@ import { isCollaborationMode, type CollaborationMode } from './collaboration.js'
 import { isOrchestrationMode, type OrchestrationMode } from './orchestration.js';
 import { isThinkingLevel, type ThinkingLevel } from './model-thinking.js';
 import { isToolMode, type ToolMode } from './tool-mode.js';
-import {
-  decodePersistedPermissionMode,
-  isPermissionMode,
-  type PermissionMode,
-} from './permission.js';
+import { decodePersistedSandboxMode, isSandboxMode, type SandboxMode } from './permission.js';
 import { isBotDeliveryProvider, type BotProvider } from './bot-chat-settings.js';
 import type { PersistedValue } from './persisted-value.js';
 
@@ -83,7 +79,7 @@ export type ScheduledTaskExecutionTemplate = {
   readonly llmConnectionSlug: string;
   readonly model: string;
   readonly thinkingLevel?: ThinkingLevel;
-  readonly permissionMode: PermissionMode;
+  readonly sandboxMode: SandboxMode;
   readonly collaborationMode: CollaborationMode;
   readonly orchestrationMode: OrchestrationMode;
 };
@@ -526,8 +522,8 @@ function normalizeExecution(
   if (typeof value.model !== 'string' || !value.model.trim()) {
     return fail('execution.model is required');
   }
-  if (!isPermissionMode(value.permissionMode)) {
-    return fail('execution.permissionMode is required');
+  if (!isSandboxMode(value.sandboxMode)) {
+    return fail('execution.sandboxMode is required');
   }
   if (!isCollaborationMode(value.collaborationMode)) {
     return fail('execution.collaborationMode is required');
@@ -558,7 +554,7 @@ function normalizeExecution(
       llmConnectionSlug: value.llmConnectionSlug.trim(),
       model: value.model.trim(),
       ...(value.thinkingLevel === undefined ? {} : { thinkingLevel: value.thinkingLevel }),
-      permissionMode: value.permissionMode,
+      sandboxMode: value.sandboxMode,
       collaborationMode: value.collaborationMode,
       orchestrationMode: value.orchestrationMode,
       ...(value.toolMode === undefined ? {} : { toolMode: value.toolMode }),
@@ -703,15 +699,15 @@ export function decodePersistedScheduledTask(
   if (!isObject(effect.execution)) {
     throw new Error('Invalid persisted ScheduledTask execution template');
   }
-  const permissionMode = decodePersistedPermissionMode(effect.execution.permissionMode);
-  if (permissionMode === undefined) {
+  const sandboxMode = decodePersistedSandboxMode(effect.execution.sandboxMode);
+  if (sandboxMode === undefined) {
     throw new Error('Invalid persisted ScheduledTask permission mode');
   }
-  if (permissionMode === effect.execution.permissionMode) {
+  if (sandboxMode === effect.execution.sandboxMode) {
     return task;
   }
   return {
     ...task,
-    effect: { ...effect, execution: { ...effect.execution, permissionMode } },
+    effect: { ...effect, execution: { ...effect.execution, sandboxMode } },
   };
 }

@@ -22,16 +22,16 @@ use std::process::{Command, Stdio};
 
 use maka_event_log::{EventLog, StoreError};
 use maka_runtime::event::{Fact, TerminalStatus};
-use maka_runtime::execution::{PermissionMode, ToolMode};
+use maka_runtime::execution::{SandboxMode, ToolMode};
 use serde_json::json;
 
 #[tokio::test]
 async fn binary_runs_journaled_file_tools_and_reconstructs_the_invocation_after_exit() {
     let directory = tempfile::tempdir().unwrap();
     let log_path = directory.path().join("events.sqlite");
-    let file_path = directory.path().join("output.txt");
+    let file_path = directory.path().canonicalize().unwrap().join("output.txt");
     let source = format!(
-        "await tools.write_file({}); return await tools.read_file({});",
+        "await tools.Write({}); return await tools.Read({});",
         json!({"path":file_path, "content":"hello from Rust"}),
         json!({"path":file_path})
     );
@@ -58,7 +58,7 @@ async fn binary_runs_journaled_file_tools_and_reconstructs_the_invocation_after_
     );
     let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["output"]["ok"], true);
-    assert_eq!(response["output"]["value"]["text"], "hello from Rust");
+    assert_eq!(response["output"]["value"]["content"], "hello from Rust");
     assert_eq!(
         std::fs::read_to_string(file_path).unwrap(),
         "hello from Rust"
@@ -99,7 +99,11 @@ async fn binary_runs_journaled_file_tools_and_reconstructs_the_invocation_after_
         cwd.canonicalize().unwrap(),
         directory.path().canonicalize().unwrap()
     );
-    assert_eq!(configuration.permission_mode, PermissionMode::Bypass);
+    assert_eq!(configuration.sandbox_mode, SandboxMode::WorkspaceWrite);
+    assert_eq!(
+        configuration.approval_policy,
+        maka_runtime::execution::ApprovalPolicy::OnRequest
+    );
     assert_eq!(configuration.tool_mode, ToolMode::CodeMode);
     assert!(configuration.model.is_none());
     log.close().await.unwrap();
@@ -119,4 +123,51 @@ async fn binary_runs_journaled_file_tools_and_reconstructs_the_invocation_after_
         Err(StoreError::Sqlx(_))
     ));
     assert_eq!(std::fs::read(foreign).unwrap(), b"not a Maka database");
+}
+
+#[test]
+fn code_presets_protect_metadata_and_only_explicit_bypass_disables_both_protections() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join(".agents")).unwrap();
+    let target = directory
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join(".agents/instructions.txt");
+    let source = format!(
+        "return await tools.Write({});",
+        json!({"path":target,"content":"explicit"})
+    );
+    for (index, flags, allowed) in [
+        (0, Vec::<&str>::new(), false),
+        (1, vec!["--ask-for-approval", "never"], false),
+        (2, vec!["--dangerously-bypass-approvals-and-sandbox"], true),
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_maka"))
+            .current_dir(directory.path())
+            .args(["code", "--log"])
+            .arg(directory.path().join(format!("events-{index}.sqlite")))
+            .args(flags)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(source.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+        assert_eq!(output.status.success(), allowed, "{response}");
+        assert_eq!(
+            target.exists(),
+            allowed,
+            "an unapproved write must leave no file"
+        );
+    }
+    assert_eq!(std::fs::read_to_string(target).unwrap(), "explicit");
 }

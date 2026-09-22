@@ -201,9 +201,9 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
     // nested call, result or rejection from the already-existing future suffix.
     prepare(&log, accepted_fence).await;
     let first = rows(&db);
-    assert_eq!(first.len(), 2);
+    assert_eq!(first.len(), 3);
     let parent_id = tool_message_id("invocation", parent);
-    let planned: Value = serde_json::from_slice(&first[1].1).unwrap();
+    let planned: Value = serde_json::from_slice(&first[2].1).unwrap();
     assert_eq!(planned["type"], "tool_call");
     assert_eq!(planned["id"], parent_id);
     assert!(
@@ -216,14 +216,15 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
         "derived cache must not publish execution commits"
     );
     let original = rows(&db);
-    assert_eq!(&original[..2], first.as_slice());
-    assert_eq!(original.len(), 12);
+    assert_eq!(&original[..3], first.as_slice());
+    assert_eq!(original.len(), 13);
     let values: Vec<Value> = original
         .iter()
         .map(|(_, bytes, digest)| {
             assert_eq!(digest, &format!("sha256:{:x}", Sha256::digest(bytes)));
             serde_json::from_slice(bytes).unwrap()
         })
+        .filter(|row: &Value| row["status"] != "running")
         .collect();
     for index in 0..3 {
         let call = &values[2 + index * 2];

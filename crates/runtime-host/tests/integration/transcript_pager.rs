@@ -155,7 +155,7 @@ async fn byte_fragments_reassemble_both_directions_with_digest_and_reachable_tur
             }
         }
         assert_eq!(completed_ranges, 2);
-        assert_eq!(messages.len(), 4);
+        assert_eq!(messages.len(), 6);
         for (sequence, bytes) in &messages {
             assert_eq!(
                 digests[sequence],
@@ -177,7 +177,7 @@ async fn anchors_are_exclusive_and_cursors_reject_tampering_and_transplants() {
     let state = pager("sub", through);
     let mut input = request(through, SessionTranscriptPageDirection::Newer, 512 * 1024);
     let first = state.page(&log, &input).await.unwrap();
-    assert_eq!(first.fragments.len(), 4);
+    assert_eq!(first.fragments.len(), 6);
     let first_sequence = first.fragments[0].identity();
     input.anchor_sequence = Some(first_sequence);
     let next = state.page(&log, &input).await.unwrap();

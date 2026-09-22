@@ -59,7 +59,10 @@ async fn conpty_console_unicode_resize_exit_259_and_final_output_drain() {
         .await
         .unwrap();
     until(&io, "ready").await;
-    child.resize(TerminalSize::new(101, 37).unwrap()).unwrap();
+    child
+        .resize(TerminalSize::new(101, 37).unwrap())
+        .await
+        .unwrap();
     write(&io, "中文😀\r".as_bytes()).await;
     let (status, output) = tokio::time::timeout(Duration::from_secs(15), async {
         tokio::join!(
@@ -79,7 +82,12 @@ async fn conpty_console_unicode_resize_exit_259_and_final_output_drain() {
     assert!(output.contains("size:101x37"), "{output:?}");
     assert!(output.contains("final-frame"), "{output:?}");
     child.close().await.unwrap();
-    assert!(child.resize(TerminalSize::new(80, 24).unwrap()).is_err());
+    assert!(
+        child
+            .resize(TerminalSize::new(80, 24).unwrap())
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

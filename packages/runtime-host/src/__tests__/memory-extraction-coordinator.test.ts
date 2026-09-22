@@ -2502,7 +2502,7 @@ function header(): SessionHeader {
     llmConnectionSlug: 'test',
     connectionLocked: true,
     model: 'test-model',
-    permissionMode: 'bypass',
+    sandboxMode: 'danger-full-access',
     schemaVersion: 1,
   };
 }

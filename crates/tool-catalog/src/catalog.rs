@@ -49,6 +49,7 @@ pub struct ToolCatalog {
     pub(crate) entries: Arc<BTreeMap<String, Arc<RegisteredTool>>>,
     pub(super) discovery: bool,
     pub(crate) plugins: Option<crate::plugins::Source>,
+    pub(crate) workspace: Option<maka_plugins::filesystem::ReadRoot>,
 }
 
 impl ToolCatalog {
@@ -119,6 +120,7 @@ impl ToolCatalog {
             entries: Arc::new(entries),
             discovery: false,
             plugins: None,
+            workspace: None,
         })
     }
 
@@ -126,6 +128,15 @@ impl ToolCatalog {
     pub fn with_discovery(mut self) -> Self {
         self.discovery = true;
         self
+    }
+
+    pub fn with_workspace(mut self, workspace: maka_plugins::filesystem::ReadRoot) -> Self {
+        self.workspace = Some(workspace);
+        self
+    }
+
+    pub fn workspace(&self) -> Option<&maka_plugins::filesystem::ReadRoot> {
+        self.workspace.as_ref()
     }
 
     pub(super) fn select(&self, keep: impl Fn(&str) -> bool) -> Self {
@@ -139,6 +150,7 @@ impl ToolCatalog {
             ),
             discovery: self.discovery,
             plugins: self.plugins.clone(),
+            workspace: self.workspace.clone(),
         }
     }
 
@@ -159,6 +171,7 @@ impl ToolCatalog {
             ),
             discovery: self.discovery,
             plugins: self.plugins.clone(),
+            workspace: self.workspace.clone(),
         }
     }
 

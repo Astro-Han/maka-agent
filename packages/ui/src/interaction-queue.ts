@@ -21,6 +21,7 @@ import type {
   ActiveInteractionRequestEvent,
   ClientCapabilityRequestEvent,
   FormRequestEvent,
+  PermissionsRequestEvent,
   SandboxBoundaryRequestEvent,
   SessionEvent,
   UserQuestionRequestEvent,
@@ -31,13 +32,15 @@ export type ComposerInteraction =
   | SandboxBoundaryRequestEvent
   | ClientCapabilityRequestEvent
   | UserQuestionRequestEvent
-  | FormRequestEvent;
+  | FormRequestEvent
+  | PermissionsRequestEvent;
 export type InteractionQueues = Record<string, ComposerInteraction[]>;
 
 function isComposerInteraction(event: ActiveInteractionRequestEvent): event is ComposerInteraction {
   return (
     event.type === 'sandbox_boundary_request' ||
     event.type === 'client_capability_request' ||
+    event.type === 'permissions_request' ||
     event.type === 'user_question_request' ||
     event.type === 'form_request'
   );
@@ -87,11 +90,13 @@ export function reduceInteractionQueues(
   switch (event.type) {
     case 'sandbox_boundary_request':
     case 'client_capability_request':
+    case 'permissions_request':
     case 'user_question_request':
     case 'form_request':
       return enqueueInteraction(queues, sessionId, event);
     case 'sandbox_boundary_decision_ack':
     case 'client_capability_decision_ack':
+    case 'permissions_decision_ack':
     case 'user_question_answer_ack':
     case 'form_answer_ack':
       return dequeueInteractionByRequestId(queues, sessionId, event.requestId);

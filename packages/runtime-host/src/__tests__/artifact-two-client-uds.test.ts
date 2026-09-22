@@ -280,14 +280,14 @@ async function seedExecutionRoot(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const otherSession = await stores.sessionStore.create({
       cwd: root,
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const openedArtifacts = await openInteractiveArtifactStoreForWrite(owner.lease);
     artifacts = openedArtifacts;

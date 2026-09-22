@@ -66,7 +66,7 @@ function sessionProjection(
     llmConnectionSlug: 'openai-main',
     connectionLocked: true,
     model: 'gpt-5',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     ...overrides,
@@ -75,7 +75,7 @@ function sessionProjection(
 
 test('projects the ordered ACP configuration options', () => {
   assert.deepEqual(projectAcpSessionConfigOptions(sessionProjection(), ['off', 'low', 'high']), [
-    selectOption('permission_mode', 'Permission mode', '_maka/permission_mode', 'ask', [
+    selectOption('sandbox_mode', 'Permission mode', '_maka/sandbox_mode', 'ask', [
       ['ask', 'Ask'],
       ['bypass', 'Bypass'],
     ]),
@@ -105,25 +105,25 @@ test('projects the ordered ACP configuration options', () => {
 
 test('projects canonical values and keeps reserved explore as a current value only', () => {
   for (const [configId, values, field] of [
-    ['permission_mode', ['explore', 'ask', 'bypass'], 'permissionMode'],
+    ['sandbox_mode', ['explore', 'ask', 'bypass'], 'sandboxMode'],
     ['collaboration_mode', ['agent', 'plan'], 'collaborationMode'],
     ['orchestration_mode', ['default', 'swarm', 'graph'], 'orchestrationMode'],
   ] as const) {
     for (const value of values) {
       const overrides: Partial<SessionCatalogProjection> =
-        field === 'permissionMode'
-          ? { permissionMode: value as SessionCatalogProjection['permissionMode'] }
+        field === 'sandboxMode'
+          ? { sandboxMode: value as SessionCatalogProjection['sandboxMode'] }
           : field === 'collaborationMode'
             ? { collaborationMode: value as SessionCatalogProjection['collaborationMode'] }
             : { orchestrationMode: value as SessionCatalogProjection['orchestrationMode'] };
       const option = projectAcpSessionConfigOptions(sessionProjection(overrides), ['low'])[
-        configId === 'permission_mode' ? 0 : configId === 'collaboration_mode' ? 2 : 3
+        configId === 'sandbox_mode' ? 0 : configId === 'collaboration_mode' ? 2 : 3
       ];
       assert.equal(option.currentValue, value);
     }
   }
   const permission = projectAcpSessionConfigOptions(
-    sessionProjection({ permissionMode: 'explore' }),
+    sessionProjection({ sandboxMode: 'read-only' }),
     ['low'],
   )[0];
   assert.equal(permission.currentValue, 'explore');
@@ -150,14 +150,14 @@ test('projects only the current model thinking levels and omits the switch when 
   );
   assert.deepEqual(
     projectAcpSessionConfigOptions(sessionProjection(), []).map(({ id }) => id),
-    ['permission_mode', 'collaboration_mode', 'orchestration_mode'],
+    ['sandbox_mode', 'collaboration_mode', 'orchestration_mode'],
   );
 });
 
 test('validates requests and creates exact one-field patches', () => {
   const cases = [
-    ['permission_mode', 'ask', { permissionMode: 'ask' }],
-    ['permission_mode', 'bypass', { permissionMode: 'bypass' }],
+    ['sandbox_mode', 'ask', { sandboxMode: 'workspace-write' }],
+    ['sandbox_mode', 'bypass', { sandboxMode: 'danger-full-access' }],
     ['thinking_level', 'default', { thinkingLevel: null }],
     ['thinking_level', 'off', { thinkingLevel: 'off' }],
     ['thinking_level', 'minimal', { thinkingLevel: 'minimal' }],
@@ -183,17 +183,17 @@ test('rejects unsupported config ids, boolean values, and unsupported strings', 
   for (const [request, field, reason] of [
     [{ sessionId: 'session-1', configId: 'unknown', value: 'ask' }, 'configId', 'unsupported'],
     [
-      { sessionId: 'session-1', configId: 'permission_mode', type: 'boolean', value: true },
+      { sessionId: 'session-1', configId: 'sandbox_mode', type: 'boolean', value: true },
       'value',
       'invalid_type',
     ],
     [
-      { sessionId: 'session-1', configId: 'permission_mode', value: 'invalid' },
+      { sessionId: 'session-1', configId: 'sandbox_mode', value: 'invalid' },
       'value',
       'unsupported',
     ],
     [
-      { sessionId: 'session-1', configId: 'permission_mode', value: 'explore' },
+      { sessionId: 'session-1', configId: 'sandbox_mode', value: 'explore' },
       'value',
       'unsupported',
     ],

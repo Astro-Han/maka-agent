@@ -36,6 +36,7 @@ pub mod http;
 pub mod kernel;
 pub mod llm;
 pub mod package;
+pub mod permissions;
 pub mod preferences;
 pub mod process;
 pub mod prompt;

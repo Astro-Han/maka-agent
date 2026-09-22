@@ -82,11 +82,27 @@ export default async function (ctx) {
           { key: 'waiting', expectedRevision: null, data: { kind: 'present', value: true } },
         ]);
         while (!(await ctx.storage.read('continue'))) await ctx.sleep(10);
+        await denied(() => call.files.read({ path: 'source.txt' }));
+        await denied(() => call.files.entries.read({ path: 'source.txt' }));
+        await denied(() => call.files.write({ path: 'forbidden.txt', content: 'wrong' }));
+        return { status: 'completed', text: 'stale authority rejected' };
       }
-      if (command === 'restricted' || command === 'widen') {
-        await denied(() => call.files.read({ path: '../outside.txt' }));
+      if (command === 'restricted') {
+        const outside = await call.files.read({ path: '../outside.txt' });
+        if (!('content' in outside) || outside.content !== 'private')
+          throw new Error('read-only preset cannot read ordinary files outside cwd');
+        await denied(() => call.files.read({ path: '../root/test-private/secret.txt' }));
         await denied(() => call.files.write({ path: 'forbidden.txt', content: 'wrong' }));
       } else {
+        await call.files.entries.createDirectory('raw');
+        await call.files.entries.write({ path: 'raw/content', bytes: [1, 2, 3] });
+        await call.files.entries.rename('raw/content', 'raw/renamed');
+        const raw = await call.files.entries.read({ path: 'raw/renamed' });
+        if (raw.bytes.join(',') !== '1,2,3') throw new Error('managed raw file operations failed');
+        await denied(() => call.files.entries.createDirectory('.agents'));
+        await denied(() => call.files.entries.write({ path: '.maka-workspace.json', bytes: [0] }));
+        await call.files.entries.remove('raw/renamed');
+        await call.files.entries.remove('raw');
         await call.files.write({ path: 'result.txt', content: 'before\n' });
         await call.files.edit({ path: 'result.txt', old_string: 'before', new_string: 'after' });
         const page = await call.files.read({ path: 'result.txt' });

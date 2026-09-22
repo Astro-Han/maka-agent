@@ -22,11 +22,12 @@ use super::{
     mutation::{active_session, fault},
 };
 use crate::controllers::{self as state, conflict};
-use crate::shell::ShellHandle;
+use crate::shell::{ControlInput, ShellHandle};
 use maka_presentation::shell::RESOURCE_REF_PREFIX;
 use maka_protocol::{Operation, OperationErrorCode as Code, Outcome, resource::*};
 use serde::Serialize;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub(super) async fn acquire(
@@ -40,7 +41,7 @@ pub(super) async fn acquire(
     };
     let _gate = handle.control_gate.lock().await;
     let _admission = host.executions.lock_admission().await;
-    if let Err(outcome) = active_session(host, &identity.session_id).await {
+    if let Err(outcome) = authorize_control(host, &identity, &handle).await {
         return outcome;
     }
     let mut state = host.controllers.lock();
@@ -136,7 +137,7 @@ pub(super) async fn control(
             return outcome;
         }
     }
-    if let Err(outcome) = active_session(host, &identity.session_id).await {
+    if let Err(outcome) = authorize_control(host, &identity, &handle).await {
         return outcome;
     }
     {
@@ -155,11 +156,20 @@ pub(super) async fn control(
             return conflict("Runtime Resource controller sequence is out of order");
         }
     }
-    // Admission is complete; neither global lock is held across native I/O.
-    // The per-resource gate survives disconnect and is shared by new controllers.
-    drop(admission);
     let (bytes, size) = input.control.parts().expect("decoded control");
-    let outcome = match handle.write_raw(bytes.to_owned(), size).await {
+    let pending = handle.enqueue_control(
+        ControlInput::Raw(bytes.to_owned()),
+        size,
+        CancellationToken::new(),
+    );
+    // Queue acceptance and permission updates share one admission boundary.
+    // Native I/O retains only the per-resource gate, including across disconnect.
+    drop(admission);
+    let result = match pending {
+        Ok(receipt) => receipt.await,
+        Err(error) => Err(error),
+    };
+    let outcome = match result {
         Ok(_) => encoded(
             host,
             Operation::RuntimeResourceControllerControl,
@@ -254,6 +264,25 @@ async fn live(host: &Host, identity: &ControllerIdentity) -> Result<ShellHandle,
         )),
         Err(error) => Err(fault(host, error)),
     }
+}
+
+// Caller holds execution admission. Reading a Session ID alone does not grant
+// new input to a process launched under an obsolete permission boundary.
+async fn authorize_control(
+    host: &Host,
+    identity: &ControllerIdentity,
+    handle: &ShellHandle,
+) -> Result<(), Outcome> {
+    let session = active_session(host, &identity.session_id).await?;
+    let Some(Ok(record)) = handle.latest() else {
+        return Err(conflict("Runtime Resource PTY is not available"));
+    };
+    if session.configuration.boundary_revision != record.permissions.boundary_revision {
+        return Err(conflict(
+            "PTY launch permissions no longer match this Session; start a new terminal",
+        ));
+    }
+    Ok(())
 }
 fn active(handle: &ShellHandle) -> bool {
     matches!(handle.latest(), Some(Ok(record)) if record.state.active() && record.output.is_pty())

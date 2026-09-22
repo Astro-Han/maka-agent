@@ -58,19 +58,24 @@ async fn apply(host: &Host, input: SessionConfigurationUpdateInput) -> Result<Se
     }
     let mut next = merge(host, &current.configuration, input.patch.clone()).await?;
     if next != current.configuration {
-        let permission_only = input.patch.permission_mode.is_some()
+        let permission_only = (input.patch.sandbox_mode.is_some()
+            || input.patch.approval_policy.is_some())
             && input.patch.model_target.is_none()
             && input.patch.thinking_level.is_keep()
             && input.patch.collaboration_mode.is_none()
             && input.patch.orchestration_mode.is_none();
-        let widening = permission_only
-            && matches!(
-                (current.configuration.permission_mode, next.permission_mode),
-                (
-                    PermissionMode::Explore,
-                    PermissionMode::Ask | PermissionMode::Bypass
-                ) | (PermissionMode::Ask, PermissionMode::Bypass)
-            );
+        // An explicit permission edit may change later calls, including the
+        // atomic full-bypass choice (isolation + approvals). Existing process
+        // authority remains captured; tightening isolation still requires drain.
+        let live_permissions = permission_only
+            && (current.configuration.sandbox_mode == next.sandbox_mode
+                || matches!(
+                    (current.configuration.sandbox_mode, next.sandbox_mode),
+                    (
+                        SandboxMode::ReadOnly,
+                        SandboxMode::WorkspaceWrite | SandboxMode::DangerFullAccess
+                    ) | (SandboxMode::WorkspaceWrite, SandboxMode::DangerFullAccess)
+                ));
         if !host
             .log
             .pending_interactions(&input.session_id)
@@ -83,7 +88,7 @@ async fn apply(host: &Host, input: SessionConfigurationUpdateInput) -> Result<Se
                 "Session has a pending Interaction",
             ));
         }
-        if !widening
+        if !live_permissions
             && (current.execution.as_ref().is_some_and(|execution| {
                 matches!(execution.state, SessionExecutionState::Live { .. })
             }) || host
@@ -103,14 +108,14 @@ async fn apply(host: &Host, input: SessionConfigurationUpdateInput) -> Result<Se
                 "Collaboration changes require Plan authority",
             ));
         }
-        if !widening && next.permission_mode != current.configuration.permission_mode {
+        if !live_permissions && next.sandbox_mode != current.configuration.sandbox_mode {
             host.executions
                 .shells
                 .stop_session(&input.session_id)
                 .await
                 .map_err(|error| failure(Code::PersistenceFailed, &error.to_string()))?;
         }
-        if next.permission_mode != PermissionMode::Explore {
+        if next.sandbox_mode != SandboxMode::ReadOnly {
             next.labels.retain(|label| label != "mode:deep_research");
         }
     }
@@ -179,20 +184,24 @@ async fn merge(
             model: model::resolve(&host.configuration, &target, next.thinking_level).await?,
         };
     }
-    if let Some(mode) = patch.permission_mode {
-        next.permission_mode = mode;
-        if mode != current.permission_mode {
-            next.boundary_revision = current
-                .boundary_revision
-                .checked_add(1)
-                .filter(|revision| *revision <= 9_007_199_254_740_991)
-                .ok_or_else(|| {
-                    failure(
-                        Code::PersistenceFailed,
-                        "Execution boundary revision exhausted",
-                    )
-                })?;
-        }
+    if let Some(mode) = patch.sandbox_mode {
+        next.sandbox_mode = mode;
+    }
+    if let Some(policy) = patch.approval_policy {
+        next.approval_policy = policy;
+    }
+    if next.sandbox_mode != current.sandbox_mode || next.approval_policy != current.approval_policy
+    {
+        next.boundary_revision = current
+            .boundary_revision
+            .checked_add(1)
+            .filter(|revision| *revision <= 9_007_199_254_740_991)
+            .ok_or_else(|| {
+                failure(
+                    Code::PersistenceFailed,
+                    "Execution boundary revision exhausted",
+                )
+            })?;
     }
     if let Some(mode) = patch.collaboration_mode {
         next.collaboration_mode = mode;

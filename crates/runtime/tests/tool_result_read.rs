@@ -65,7 +65,7 @@ fn verified_read_envelopes_preserve_lines_and_opaque_results_preserve_continuati
         "exitCode":0,"output":{"mode":"pipes","stdout":text,"stderr":"",
         "stdoutTruncated":true,"stderrTruncated":false,"redacted":false}})
     .to_string();
-    let actual = page("Bash", &terminal, &input);
+    let actual = page("Shell", &terminal, &input);
     assert_eq!(actual["metadata"]["stdoutTruncated"], true);
     assert_eq!(actual["metadata"]["exitCode"], 0);
     assert_eq!(actual["metadata"]["kind"], "terminal");

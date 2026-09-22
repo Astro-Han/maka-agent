@@ -20,17 +20,9 @@
 use super::Spawned;
 use crate::{
     Command,
-    windows::{attributes::Attributes, checked, job::Job, owned, pipe, wait_process},
+    windows::{job::Job, pipe, wait_process},
 };
-use std::{
-    io,
-    mem::size_of,
-    os::windows::io::{AsRawHandle, OwnedHandle},
-    process::ExitStatus,
-    ptr,
-    time::Duration,
-};
-use windows_sys::Win32::System::Threading::*;
+use std::{io, os::windows::io::OwnedHandle, process::ExitStatus, time::Duration};
 
 pub struct Child {
     process: OwnedHandle,
@@ -38,46 +30,26 @@ pub struct Child {
     pid: u32,
     status: Option<ExitStatus>,
     cleaned: bool,
+    runner: Option<crate::bootstrap::Runner>,
 }
 pub async fn spawn(plan: Command) -> io::Result<Spawned> {
-    let mut buffers = plan.windows()?;
+    let mut plan = plan.prepare().await?;
+    if let Some(launch) = plan.take_launch() {
+        return launch
+            .runner
+            .pipes(launch.endpoint, plan, launch.capabilities)
+            .await;
+    }
     let (stdin, stdin_peer) = pipe::input().await?;
     let (stdout, stdout_peer) = pipe::output().await?;
     let (stderr, stderr_peer) = pipe::output().await?;
     let job = Job::new()?;
-    let jobs = [job.0.as_raw_handle()];
-    let handles = [
-        stdin_peer.as_raw_handle(),
-        stdout_peer.as_raw_handle(),
-        stderr_peer.as_raw_handle(),
-    ];
-    let mut attributes = Attributes::stdio(&handles, &jobs)?;
-    let mut startup = STARTUPINFOEXW::default();
-    startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
-    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdInput = handles[0];
-    startup.StartupInfo.hStdOutput = handles[1];
-    startup.StartupInfo.hStdError = handles[2];
-    startup.lpAttributeList = attributes.as_ptr();
-    let mut info = PROCESS_INFORMATION::default();
-    // SAFETY: buffers are terminated and live; attribute lists bind the Job
-    // and exact pipe handles before any child code executes.
-    unsafe {
-        checked(CreateProcessW(
-            buffers.executable.as_ptr(),
-            buffers.line.as_mut_ptr(),
-            ptr::null(),
-            ptr::null(),
-            1,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
-            buffers.environment.as_ptr().cast(),
-            buffers.cwd.as_ptr(),
-            &startup.StartupInfo,
-            &mut info,
-        ))?;
-    }
-    let process = owned(info.hProcess)?;
-    let _thread = owned(info.hThread)?;
+    let (process, pid) = crate::windows::spawn::launch(
+        &plan,
+        &job,
+        [&stdin_peer, &stdout_peer, &stderr_peer],
+        crate::windows::spawn::Console::None,
+    )?;
     Ok(Spawned {
         stdin,
         stdout,
@@ -85,13 +57,30 @@ pub async fn spawn(plan: Command) -> io::Result<Spawned> {
         child: Child {
             process,
             job,
-            pid: info.dwProcessId,
+            pid,
             status: None,
             cleaned: false,
+            runner: None,
         },
     })
 }
 impl Child {
+    pub(crate) fn from_runner(
+        process: OwnedHandle,
+        pid: u32,
+        job: Job,
+        runner: crate::bootstrap::Runner,
+    ) -> Self {
+        Self {
+            process,
+            pid,
+            job,
+            status: None,
+            cleaned: false,
+            runner: Some(runner),
+        }
+    }
+
     pub fn id(&self) -> u32 {
         self.pid
     }
@@ -113,6 +102,9 @@ impl Child {
             .await
             .map_err(|_| io::Error::other("process Job exit is unconfirmed"))??;
             self.cleaned = true;
+        }
+        if let Some(runner) = &mut self.runner {
+            runner.finish().await?;
         }
         Ok(self.status.expect("root exited"))
     }

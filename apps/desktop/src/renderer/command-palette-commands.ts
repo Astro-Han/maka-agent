@@ -45,10 +45,11 @@ import {
   Wifi,
   type LucideIcon,
 } from '@maka/ui/icons';
-import type { ChatDefaultPermissionMode, SettingsSection, ThemePreference } from '@maka/core/settings';
+import type { ChatDefaultSandboxMode, SettingsSection, ThemePreference } from '@maka/core/settings';
+import { CHAT_DEFAULT_SANDBOX_MODES } from '@maka/core/settings';
 import type { LlmConnection } from '@maka/core/llm-connections';
 import { isRetiredProvider } from '@maka/core/provider-registry';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { SessionSummary } from '@maka/core/session';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type { NavSelection } from '@maka/ui';
@@ -106,8 +107,8 @@ export function buildCommandList(args: {
    * composer's permission-mode dropdown (PR-MOVE-PERMISSION-MODE
    * relocated the picker out of the chat header).
    */
-  onSetPermissionMode?(mode: ChatDefaultPermissionMode): Promise<void> | void;
-  activePermissionMode?: PermissionMode;
+  onSetSandboxMode?(mode: ChatDefaultSandboxMode): Promise<void> | void;
+  activeSandboxMode?: SandboxMode;
   /**
    * PR-CMD-PALETTE-PASTE-DAILY-REVIEW-0: fetch today's review and
    * paste the Markdown into the composer instead of the clipboard.
@@ -386,12 +387,11 @@ export function buildCommandList(args: {
       run: () => args.onTestNetworkProxy!(),
     });
   }
-  if (args.onSetPermissionMode && args.activeSessionId) {
-    const setMode = args.onSetPermissionMode;
-    const current = args.activePermissionMode;
-    const modes: ChatDefaultPermissionMode[] = ['ask', 'bypass'];
-    for (const mode of modes) {
-      const localized = copy.permissionModes[mode];
+  if (args.onSetSandboxMode && args.activeSessionId) {
+    const setMode = args.onSetSandboxMode;
+    const current = args.activeSandboxMode;
+    for (const mode of CHAT_DEFAULT_SANDBOX_MODES) {
+      const localized = copy.sandboxModes[mode];
       cmds.push({
         id: `perm:set-${mode}`,
         kind: 'action',

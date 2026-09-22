@@ -158,7 +158,7 @@ test('idle schedules and armed or paused Goals allow production handoff and reco
           llmConnectionId: FAKE_CONNECTION_ID,
           llmConnectionSlug: 'fake',
           model: 'fake-model',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
         });
         const armed = await composition.handlers['goal.arm'](
           {
@@ -276,7 +276,7 @@ test('production composition resumes a sealed logical Root after all stores and 
         llmConnectionId: FAKE_CONNECTION_ID,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const started = await first.composition.handlers['turn.start'](
         {
@@ -602,7 +602,7 @@ test('production composition reaches Ready when the optional context Store canno
         llmConnectionId: FAKE_CONNECTION_ID,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         name: 'Preparing context copy',
         labels: [],
         parentSessionId: 'source-session',
@@ -662,7 +662,7 @@ test('production composition closes long-term memory after a later startup failu
       llmConnectionId: FAKE_CONNECTION_ID,
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const memory = await openInteractiveLongTermMemoryStoreForWrite(owner.lease);
 
@@ -702,14 +702,14 @@ test('production recovery preserves legacy Automation history and closes an orph
       llmConnectionId: FAKE_CONNECTION_ID,
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const pending = await stores.sessionStore.create({
       cwd: root,
       llmConnectionId: FAKE_CONNECTION_ID,
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const admitted = await stores.agentRunStore.admitRootTurn({
       sessionId: pending.id,
@@ -938,7 +938,7 @@ test('production composition commits automatic titles through Host-owned Session
         llmConnectionId: FAKE_CONNECTION_ID,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const started = await composition.handlers['turn.start'](
         {
@@ -996,7 +996,7 @@ test('default production WorkHub selects and delegates through its durable Host 
         llmConnectionId: connectionId,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'bypass',
+        sandboxMode: 'danger-full-access',
       });
       const beta = await manager.createSession({
         cwd: root,
@@ -1004,7 +1004,7 @@ test('default production WorkHub selects and delegates through its durable Host 
         llmConnectionId: connectionId,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'bypass',
+        sandboxMode: 'danger-full-access',
       });
       const page = await composition.handlers['workhub.coordination.candidates']({}, context);
       assert.ok(page.ok);
@@ -1071,7 +1071,7 @@ test('default production WorkHub selects and delegates through its durable Host 
         llmConnectionId: connectionId,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'bypass',
+        sandboxMode: 'danger-full-access',
       });
       const answered = await composition.handlers['interaction.answer'](
         {
@@ -1318,7 +1318,7 @@ test('WorkHub Resume and Stop follow logical lineage across repeated physical ha
         llmConnectionId: connectionId,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         name: 'Payments',
       });
       targetSessionId = target.id;
@@ -1529,7 +1529,7 @@ test('WorkHub does not record resume while safe-boundary resume is disabled', as
         llmConnectionId: connectionId,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         name: 'Payments',
       });
       await composition.handlers['workhub.coordination.resolve']({}, context);
@@ -1615,7 +1615,7 @@ test('WorkHub correction replaces its link without stopping a shared manual Turn
         llmConnectionId: connectionId,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       sourceId = source.id;
       const destination = await manager.createSession({
@@ -1623,7 +1623,7 @@ test('WorkHub correction replaces its link without stopping a shared manual Turn
         llmConnectionId: connectionId,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const started = await composition.handlers['turn.start'](
         {
@@ -1841,7 +1841,7 @@ test('production composition orphans ownerless ShellRuns before serving Resource
       llmConnectionId: FAKE_CONNECTION_ID,
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const shellRuns = await openInteractiveShellRunStoreForWrite(owner.lease);
     await shellRuns.createShellRun(shellRunRecord(session.id, 'starting-shell', 'starting'));
@@ -1889,7 +1889,7 @@ test('production composition validates graph stop before aborting a claimed chil
       llmConnectionId: FAKE_CONNECTION_ID,
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const completedPrompt = 'execute the canonical claimed graph activation';
     const completed = await createClaimedGraphChild({
@@ -2137,7 +2137,7 @@ test('interaction fail-stop stops graph operators through the kernel and release
         llmConnectionId: FAKE_CONNECTION_ID,
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       await graph.toolsForSession(session.id);
       const turnId = 'interaction-drain-turn';
@@ -2326,7 +2326,7 @@ async function seedLegacyFakeBackendSession(
     cwd: root,
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   });
 
   const legacy = new DatabaseSync(join(root, 'runtime.sqlite'));
@@ -2440,7 +2440,7 @@ async function createClaimedGraphChild(input: {
     llmConnectionId: FAKE_CONNECTION_ID,
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'explore',
+    sandboxMode: 'read-only',
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     subagentParent: {

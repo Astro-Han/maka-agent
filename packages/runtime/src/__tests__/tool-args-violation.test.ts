@@ -383,7 +383,7 @@ function header(): SessionHeader {
     llmConnectionSlug: 'test',
     connectionLocked: true,
     model: 'mock-model',
-    permissionMode: 'bypass',
+    sandboxMode: 'danger-full-access',
     schemaVersion: 1,
   };
 }

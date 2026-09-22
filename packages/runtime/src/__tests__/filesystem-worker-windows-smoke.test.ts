@@ -113,7 +113,7 @@ describe('Windows filesystem worker smoke', { skip: !enabled }, () => {
     await client.execute({
       operation: { kind: 'write', path: target, content: 'windows-relay-ok' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: { dev: String(meta.dev), ino: String(meta.ino) },
     });
     assert.equal(await readFile(target, 'utf8'), 'windows-relay-ok');
@@ -121,7 +121,7 @@ describe('Windows filesystem worker smoke', { skip: !enabled }, () => {
     const read = await client.execute({
       operation: { kind: 'read', path: target },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.equal(read.kind, 'read');
@@ -137,7 +137,7 @@ describe('Windows filesystem worker smoke', { skip: !enabled }, () => {
       client.execute({
         operation: { kind: 'write', path: missing, content: 'blocked' },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) =>
@@ -157,7 +157,7 @@ describe('Windows filesystem worker smoke', { skip: !enabled }, () => {
     const globResult = await client.execute({
       operation: { kind: 'glob', path: sourceDirectory, pattern: '**/*.ts' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.equal(globResult.kind, 'glob');
@@ -180,7 +180,7 @@ describe('Windows filesystem worker smoke', { skip: !enabled }, () => {
           timeoutMs: 10_000,
         },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) =>
@@ -197,7 +197,7 @@ describe('Windows filesystem worker smoke', { skip: !enabled }, () => {
           content: 'blocked',
         },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) =>

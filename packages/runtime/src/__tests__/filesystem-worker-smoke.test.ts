@@ -64,7 +64,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
     await client.execute({
       operation: { kind: 'write', path: insidePath, content: 'inside-ok' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.equal(await readFile(insidePath, 'utf8'), 'inside-ok');
@@ -73,7 +73,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
       client.execute({
         operation: { kind: 'write', path: outsidePath, content: 'blocked' },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) =>
@@ -92,7 +92,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
         diff: '+created\n',
       },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
 
@@ -109,7 +109,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
       client.execute({
         operation: { kind: 'glob', path: root, pattern: '**/*.txt', limit: 200 },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
       });
     try {
       await chmod(blocked, 0);
@@ -142,7 +142,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
     await client.execute({
       operation: { kind: 'apply_patch', path: aliasedTarget, action: 'delete' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity,
     });
 
@@ -157,7 +157,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
       client.execute({
         operation: { kind: 'write', path: siblingPath, content: 'blocked' },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         executionBoundary,
         expectedIdentity: 'unchecked',
       }),
@@ -175,7 +175,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
     await client.execute({
       operation: { kind: 'write', path: allowedPath, content: 'outside-ok' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       executionBoundary,
       expectedIdentity: 'unchecked',
     });
@@ -191,7 +191,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
     const fileResult = await client.execute({
       operation: grepOperation(sourceFile, 'healthSignal'),
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.equal(fileResult.kind, 'grep');
@@ -209,7 +209,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
     const directoryResult = await client.execute({
       operation: grepOperation(sourceDirectory, 'healthSignal'),
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.equal(directoryResult.kind, 'grep');
@@ -227,7 +227,7 @@ describe('macOS filesystem worker smoke', { skip: process.platform !== 'darwin' 
     const emptyResult = await client.execute({
       operation: grepOperation(sourceDirectory, 'does-not-exist'),
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.deepEqual(emptyResult, {

@@ -41,7 +41,7 @@ test('maps session setting services to the existing compound Desktop bridge', as
     model: 'gpt-5',
     thinkingLevel: 'high',
   });
-  await services.setPermissionMode('session-1', 'bypass');
+  await services.setExecutionPolicy('session-1', { sandboxMode: 'danger-full-access', approvalPolicy: { kind: 'never' } });
   await services.setOrchestrationMode('session-1', 'swarm');
   await services.abandonPlanProposal('session-1', 'proposal-1');
 
@@ -55,7 +55,7 @@ test('maps session setting services to the existing compound Desktop bridge', as
         thinkingLevel: 'high',
       }],
     },
-    { name: 'setPermissionMode', args: ['session-1', 'bypass'] },
+    { name: 'setExecutionPolicy', args: ['session-1', { sandboxMode: 'danger-full-access', approvalPolicy: { kind: 'never' } }] },
     { name: 'setOrchestrationMode', args: ['session-1', 'swarm'] },
     { name: 'abandonPlanProposal', args: ['session-1', 'proposal-1'] },
   ]);

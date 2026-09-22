@@ -131,7 +131,7 @@ async fn scenario() {
                 workspace: maka_runtime::execution::WorkspaceTarget::HostPath {
                     path: "ungranted".into()
                 },
-                permission_mode: maka_runtime::execution::PermissionMode::Bypass,
+                sandbox_mode: maka_runtime::execution::SandboxMode::DangerFullAccess,
                 collaboration_mode: maka_runtime::execution::CollaborationMode::Agent,
             })
             .await,

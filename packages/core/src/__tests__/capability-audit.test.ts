@@ -46,7 +46,7 @@ describe('capability audit facts', () => {
       ],
     );
     assert.equal(
-      report.skills.some((skill) => 'permissionMode' in skill),
+      report.skills.some((skill) => 'sandboxMode' in skill),
       false,
     );
     assert.deepEqual(
@@ -59,7 +59,7 @@ describe('capability audit facts', () => {
       ],
     );
     assert.equal(
-      report.scheduledTasks.some((task) => 'permissionMode' in task),
+      report.scheduledTasks.some((task) => 'sandboxMode' in task),
       false,
     );
     assert.equal(report.summary.activeScheduledTaskCount, 1);

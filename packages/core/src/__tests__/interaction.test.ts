@@ -69,6 +69,30 @@ function browserPermission(toolName: string, args: unknown): PermissionRequestPa
 }
 
 describe('Interaction projection', () => {
+  test('executor access approval cannot acquire a fabricated tool-call scope', () => {
+    const permissions = { filesystem: [], network: 'allowed' } as const;
+    const request = decodeInteractionRequest({
+      kind: 'permissions',
+      baseRevision: 1,
+      toolUseId: null,
+      request: { reason: 'Executor fetch', command: null, permissions },
+    });
+    for (const scope of ['once', 'turn', 'session'] as const) {
+      const decision = { decision: 'allow', permissions, scope } as const;
+      const answer = decodeInteractionAnswer({ kind: 'permissions', decision });
+      const outcome = decodeInteractionCanonicalOutcome({
+        kind: 'permissions_decision',
+        decision,
+        committedAt: 1,
+      });
+      assert.equal(isInteractionAnswerValidForRequest(request, answer), scope !== 'once');
+      assert.equal(
+        isInteractionCanonicalOutcomeValidForRequest(request, outcome),
+        scope !== 'once',
+      );
+    }
+  });
+
   test('projects tool permission without retaining raw args or secrets', () => {
     const projected = projectInteractionPermissionRequest(toolPermission);
     assert.deepEqual(projected, {

@@ -32,7 +32,7 @@ async fn oversized_turn_reports_incomplete_boundary_without_losing_rows() {
         .await
         .unwrap();
     let mut fence = 0;
-    // One logical Turn may have successor Runs. Its 258 rows exceed the range
+    // One logical Turn may have successor Runs. Its 387 rows exceed the range
     // message cap without requiring a giant payload allocation in this test.
     for number in 0..129 {
         let invocation = Invocation {
@@ -87,7 +87,7 @@ async fn oversized_turn_reports_incomplete_boundary_without_losing_rows() {
     request.cursor = first.next_cursor;
     assert!(request.cursor.is_some());
     let last = state.page(&log, &request).await.unwrap();
-    assert_eq!(last.fragments.len(), 2);
+    assert_eq!(last.fragments.len(), 131);
     assert!(last.ends_at_turn_boundary);
     assert!(last.next_cursor.is_none());
     assert!(last.fragments[0].identity() < first.fragments.last().unwrap().identity());

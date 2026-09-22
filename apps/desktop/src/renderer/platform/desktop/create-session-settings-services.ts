@@ -33,10 +33,10 @@ export function createDesktopSessionSettingsServices(
   bridge: DesktopSessionSettingsBridge = window.maka,
 ): SessionSettingsServices {
   return {
+    setExecutionPolicy: async (sessionId, policy) =>
+      expectSessionUpdate(await bridge.sessions.setExecutionPolicy(sessionId, policy)),
     setModelConfiguration: async (sessionId, input) =>
       expectSessionUpdate(await bridge.sessions.setModelConfiguration(sessionId, input)),
-    setPermissionMode: async (sessionId, mode) =>
-      expectSessionUpdate(await bridge.sessions.setPermissionMode(sessionId, mode)),
     setOrchestrationMode: async (sessionId, mode) =>
       expectSessionUpdate(await bridge.sessions.setOrchestrationMode(sessionId, mode)),
     setCollaborationMode: async (sessionId, mode) =>

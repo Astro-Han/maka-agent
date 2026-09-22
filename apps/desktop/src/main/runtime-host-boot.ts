@@ -259,6 +259,7 @@ import { registerRuntimeHostPermissionsIpc } from "./runtime-host-permissions-ip
 import { registerRuntimeHostRendererIpc } from "./runtime-host-renderer-ipc-main.js";
 import { registerClientPluginRemoteIpc } from './client-plugin-remote-ipc.js';
 import { pluginAuthorizationDialog } from './plugin-authorization-dialog.js';
+import { sandboxSetupDialog, sandboxSetupUnavailable } from './sandbox-setup.js';
 import { registerRuntimeHostSearchIpc } from "./runtime-host-search-ipc-main.js";
 import { createRuntimeHostProjectCatalog } from "./runtime-host-project-catalog.js";
 import { createRuntimeHostDefaultRecovery } from "./runtime-host-default-recovery.js";
@@ -1849,6 +1850,15 @@ function registerHostClientIpc(
   registerRuntimeHostPermissionsIpc({
     ipcMain: scopedIpc,
     client,
+    sandboxSetup: {
+      isCurrent: () => runtimePolicyTargetsByEpoch.get(scope.targetEpoch) === targetContext,
+      confirm: async () => {
+        const locale = desktopLocale.current();
+        const result = await showDesktopMessageBox(sandboxSetupDialog(locale), {locale});
+        return result.response === 1;
+      },
+      unavailable: (status) => sandboxSetupUnavailable(desktopLocale.current(), status),
+    },
     getSettings: () => runtimeHostSettings.get(),
     listConnections: async () =>
       projectHostConnections(await client.loadConnectionCatalog()),

@@ -109,13 +109,10 @@ pub(super) struct Record {
 
 impl super::plugin::Manager {
     pub(super) async fn configure_creation(&self, creation: Creation) -> Result<(), Error> {
-        let authorization::Target::Workspace {
-            permission_mode, ..
-        } = &creation.authorization
-        else {
+        let authorization::Target::Workspace { sandbox_mode, .. } = &creation.authorization else {
             return Err(invalid("New work requires explicit workspace consent"));
         };
-        if *permission_mode != creation.settings.permission_mode {
+        if *sandbox_mode != creation.settings.sandbox_mode {
             return Err(invalid("New-work permissions differ from consent"));
         }
         creation.settings.validate().map_err(invalid)?;

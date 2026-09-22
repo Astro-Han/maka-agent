@@ -430,8 +430,8 @@ function timeoutBeforeDispatch(
 
 function requestDeadline(timeoutMs: number | undefined): number | undefined {
   if (timeoutMs === undefined) return undefined;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
-    throw new RangeError('timeoutMs must be an integer between 1 and 120000');
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
+    throw new RangeError('timeoutMs must be an integer between 1 and 2147483647');
   }
   return Date.now() + timeoutMs;
 }

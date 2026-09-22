@@ -22,7 +22,6 @@ use crate::session::{PreparedSession, SessionConfiguration, SessionTarget};
 use maka_config::ConfigurationStore;
 use maka_protocol::OperationErrorCode;
 use maka_protocol::session::*;
-use maka_runtime::configuration::policy::ChatDefaultPermissionMode;
 
 pub(super) async fn create(
     host: &super::super::Host,
@@ -126,10 +125,7 @@ pub(crate) async fn resolve(
         .runtime_policy()
         .await
         .map_err(super::super::configuration::failure)?;
-    let default_permission = match policy.policy.chat_defaults.permission_mode {
-        ChatDefaultPermissionMode::Ask => PermissionMode::Ask,
-        ChatDefaultPermissionMode::Bypass => PermissionMode::Bypass,
-    };
+    let default_permission = policy.policy.chat_defaults.sandbox_mode;
     // Thinking defaults are applied by the client composer. Omission here also
     // represents its explicit "model default" choice and must remain unchanged.
     let tool_mode = if policy.policy.chat_defaults.code_mode_enabled {

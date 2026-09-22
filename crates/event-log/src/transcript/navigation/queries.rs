@@ -25,11 +25,11 @@ AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'contin
 
 pub(super) const ROWS: &str = "
 SELECT row.sequence, row.turn_id,
- CASE WHEN source.kind IN ('invocation_opened', 'message_steered') THEN
+ CASE WHEN source.kind IN ('invocation_opened', 'message_steered')
+      AND json_extract(row.payload, '$.type') = 'user' THEN
    navigation_preview(COALESCE(json_extract(row.payload, '$.displayText'),
                               json_extract(row.payload, '$.text')), 256) END,
- CASE WHEN source.kind = 'invocation_ended'
-      AND json_extract(row.payload, '$.type') = 'turn_state' THEN row.payload END
+ CASE WHEN json_extract(row.payload, '$.type') = 'turn_state' THEN row.payload END
 FROM transcript_rows row
 JOIN runtime_events source ON source.sequence = row.sequence / 256
 WHERE row.session_id = ?1 AND row.sequence <= ?2 AND row.sequence >= ?3
@@ -60,5 +60,6 @@ SELECT row.sequence, row.turn_id,
 FROM runtime_events source
 JOIN transcript_rows row ON row.sequence >= source.sequence * 256 AND row.sequence < (source.sequence + 1) * 256
 WHERE source.invocation_id = ?2 AND source.kind IN ('invocation_opened', 'message_steered')
+AND json_extract(row.payload, '$.type') = 'user'
 AND row.session_id = ?1 AND row.sequence <= ?3
 ORDER BY row.sequence LIMIT 1";

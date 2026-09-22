@@ -63,7 +63,10 @@ export interface MakaRunRuntime {
     response: { requestId: string; decision: 'deny' },
   ): Promise<void>;
   stopSession(sessionId: string, input?: { source?: 'stop_button' }): Promise<void>;
-  setExecutionBoundaryKind(sessionId: string, kind: 'managed' | 'bypass'): Promise<unknown>;
+  setExecutionBoundaryKind(
+    sessionId: string,
+    kind: 'managed' | 'danger-full-access',
+  ): Promise<unknown>;
   resumeLatest?(sessionId: string): Promise<AsyncIterable<SessionEvent> | null>;
 }
 
@@ -332,7 +335,7 @@ export async function runMakaTextCliCore(
             // `--yolo` is a one-shot elevation, not one half of a choice.
             // Omitting the field lets the Session start in the Host's
             // configured default instead of forcing Auto onto every run.
-            ...(parsed.options.yolo ? { permissionMode: 'bypass' as const } : {}),
+            ...(parsed.options.yolo ? { sandboxMode: 'danger-full-access' as const } : {}),
             ...(parsed.options.thinking !== undefined
               ? { thinkingLevel: parsed.options.thinking }
               : {}),
@@ -340,8 +343,8 @@ export async function runMakaTextCliCore(
     if (selection.kind === 'existing') {
       const boundary = await context.runtime.readExecutionBoundary(session.id);
       if (parsed.options.yolo) {
-        await context.runtime.setExecutionBoundaryKind(session.id, 'bypass');
-      } else if (boundary.kind === 'bypass') {
+        await context.runtime.setExecutionBoundaryKind(session.id, 'danger-full-access');
+      } else if (boundary.kind === 'danger-full-access') {
         throw new Error(`resuming a full-access session ${session.id} requires --yolo`);
       } else if (boundary.kind === 'external') {
         throw new Error(`cannot resume externally isolated session ${session.id} from maka run`);

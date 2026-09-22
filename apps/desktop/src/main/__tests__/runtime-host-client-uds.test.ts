@@ -174,7 +174,7 @@ test('drives the renderer Session catalog facade through real UDS framing', asyn
           },
           'session.create': async (input) => {
             assert.deepEqual(input.modelTarget, { kind: 'default' });
-            assert.equal(input.permissionMode, undefined);
+            assert.equal(input.sandboxMode, undefined);
             assert.equal(input.workspace.kind, 'host_path');
             if (input.workspace.kind !== 'host_path') throw new Error('Expected Host path');
             projected = session(input.sessionId, {
@@ -191,9 +191,9 @@ test('drives the renderer Session catalog facade through real UDS framing', asyn
             projected = session(projected.id, {
               ...(input.patch.thinkingLevel === null ? withoutThinkingLevel : projected),
               revision: projected.revision + 1,
-              ...(input.patch.permissionMode === undefined
+              ...(input.patch.sandboxMode === undefined
                 ? {}
-                : { permissionMode: input.patch.permissionMode }),
+                : { sandboxMode: input.patch.sandboxMode }),
               ...(input.patch.collaborationMode === undefined
                 ? {}
                 : { collaborationMode: input.patch.collaborationMode }),
@@ -309,16 +309,16 @@ test('drives the renderer Session catalog facade through real UDS framing', asyn
         /Invalid Session list filter/,
       );
     }
-    const modeUpdate = await ipc.invoke('sessions:setPermissionMode', 'session-ipc', 'bypass');
+    const modeUpdate = await ipc.invoke('sessions:setSandboxMode', 'session-ipc', 'danger-full-access');
     if (typeof modeUpdate !== 'object' || modeUpdate === null || !('ok' in modeUpdate)) {
-      throw new Error('sessions:setPermissionMode did not return an update envelope');
+      throw new Error('sessions:setSandboxMode did not return an update envelope');
     }
     if (!modeUpdate.ok) throw new Error('Expected the committed mode update envelope');
     if (!('session' in modeUpdate) || typeof modeUpdate.session !== 'object') {
       throw new Error('Committed envelope missing session');
     }
-    const updatedSession = modeUpdate.session as { permissionMode: string; revision: number };
-    assert.equal(updatedSession.permissionMode, 'bypass');
+    const updatedSession = modeUpdate.session as { sandboxMode: string; revision: number };
+    assert.equal(updatedSession.sandboxMode, 'danger-full-access');
     assert.equal(updatedSession.revision, 2);
     await ipc.invoke('sessions:archive', 'session-ipc');
     assert.equal((await ipc.invoke('sessions:list') as Array<{ isArchived: boolean }>)[0]?.isArchived, true);
@@ -623,7 +623,8 @@ function session(
     llmConnectionSlug: 'test-connection',
     connectionLocked: true,
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: {kind: 'on-request'},
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     ...overrides,

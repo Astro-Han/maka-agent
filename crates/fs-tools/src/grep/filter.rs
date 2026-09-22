@@ -19,7 +19,7 @@
 
 use super::io_error;
 use crate::failed;
-use cap_std::fs::Dir;
+use crate::scoped::Directory as Dir;
 use ignore::{
     gitignore::{Gitignore, GitignoreBuilder},
     overrides::{Override, OverrideBuilder},
@@ -104,7 +104,9 @@ impl Filters {
             Err(error)
                 if matches!(
                     error.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::NotADirectory
+                        | io::ErrorKind::PermissionDenied
                 ) =>
             {
                 return Ok(Gitignore::empty());

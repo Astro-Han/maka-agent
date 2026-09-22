@@ -61,7 +61,10 @@ pub(super) fn launch(
     resources
         .start_pipes(
             record,
-            maka_process::ShellExecutor::trusted_unrestricted(cwd).unwrap(),
+            maka_process::ShellExecutor::new(cwd, maka_sandbox::Sandbox::Disabled)
+                .unwrap()
+                .command_pipes(source)
+                .unwrap(),
         )
         .unwrap()
 }

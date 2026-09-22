@@ -46,82 +46,97 @@ pub struct PtyChild {
     pid: Pid,
     master: Arc<AsyncFd<OwnedFd>>,
     status: Option<ExitStatus>,
+    proxy: Option<maka_network::proxy::Proxy>,
+    #[cfg(target_os = "linux")]
+    mount_cleanup: crate::command::Cleanup,
 }
 
 pub async fn spawn(plan: PtyCommand, size: TerminalSize) -> io::Result<(PtyChild, PtyIo)> {
-    let mut command = std::process::Command::new(plan.executable);
-    command
-        .args(plan.args)
-        .current_dir(plan.cwd)
-        .env_clear()
-        .envs(plan.environment);
-    // Open the multiplexor with CLOEXEC atomically: openpty + a later fcntl
-    // leaves a descriptor-inheritance window when other sessions spawn.
-    let master = rustix::fs::open(
-        c"/dev/ptmx",
-        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )?;
-    rustix::pty::grantpt(&master)?;
-    rustix::pty::unlockpt(&master)?;
+    let mut plan = plan.prepare().await?;
+    let mut proxy = plan.take_proxy();
     #[cfg(target_os = "linux")]
-    let slave = rustix::pty::ioctl_tiocgptpeer(
-        &master,
-        rustix::pty::OpenptFlags::RDWR
-            | rustix::pty::OpenptFlags::NOCTTY
-            | rustix::pty::OpenptFlags::CLOEXEC,
-    )?;
-    #[cfg(target_os = "macos")]
-    let slave = rustix::fs::open(
-        rustix::pty::ptsname(&master, Vec::new())?,
-        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-        Mode::empty(),
-    )?;
-    stream::resize(&master, size)?;
-    let flags = rustix::fs::fcntl_getfl(&master)?;
-    rustix::fs::fcntl_setfl(&master, flags | OFlags::NONBLOCK)?;
-    let master = Arc::new(AsyncFd::new(master)?);
-    command
-        .env("TERM", "xterm-256color")
-        .env("COLORTERM", "truecolor")
-        .stdin(Stdio::from(slave.try_clone()?))
-        .stdout(Stdio::from(slave.try_clone()?))
-        .stderr(Stdio::from(slave));
-    let mut command = tokio::process::Command::from(command);
-    command.kill_on_drop(true);
-    // SAFETY: pre_exec performs only async-signal-safe syscalls and creates no
-    // allocations/locks. std has already installed the owned slave on fd 0..2.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(io::Error::last_os_error());
+    let mount_lease = plan.take_mount_lease();
+    let spawned = (|| -> io::Result<_> {
+        let mut command = plan.unix();
+        // Open the multiplexor with CLOEXEC atomically: openpty + a later fcntl
+        // leaves a descriptor-inheritance window when other sessions spawn.
+        let master = rustix::fs::open(
+            c"/dev/ptmx",
+            OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        rustix::pty::grantpt(&master)?;
+        rustix::pty::unlockpt(&master)?;
+        #[cfg(target_os = "linux")]
+        let slave = rustix::pty::ioctl_tiocgptpeer(
+            &master,
+            rustix::pty::OpenptFlags::RDWR
+                | rustix::pty::OpenptFlags::NOCTTY
+                | rustix::pty::OpenptFlags::CLOEXEC,
+        )?;
+        #[cfg(target_os = "macos")]
+        let slave = rustix::fs::open(
+            rustix::pty::ptsname(&master, Vec::new())?,
+            OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::empty(),
+        )?;
+        stream::resize(&master, size)?;
+        let flags = rustix::fs::fcntl_getfl(&master)?;
+        rustix::fs::fcntl_setfl(&master, flags | OFlags::NONBLOCK)?;
+        let master = Arc::new(AsyncFd::new(master)?);
+        command
+            .env("TERM", "xterm-256color")
+            .env("COLORTERM", "truecolor")
+            .stdin(Stdio::from(slave.try_clone()?))
+            .stdout(Stdio::from(slave.try_clone()?))
+            .stderr(Stdio::from(slave));
+        command.kill_on_drop(true);
+        // SAFETY: pre_exec performs only async-signal-safe syscalls and creates no
+        // allocations/locks. std has already installed the owned slave on fd 0..2.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                if libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                for signal in [
+                    libc::SIGCHLD,
+                    libc::SIGHUP,
+                    libc::SIGINT,
+                    libc::SIGQUIT,
+                    libc::SIGTERM,
+                    libc::SIGALRM,
+                    libc::SIGTSTP,
+                    libc::SIGTTIN,
+                    libc::SIGTTOU,
+                ] {
+                    libc::signal(signal, libc::SIG_DFL);
+                }
+                let mut set = std::mem::zeroed();
+                if libc::sigemptyset(&mut set) != 0
+                    || libc::sigprocmask(libc::SIG_SETMASK, &set, std::ptr::null_mut()) != 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let child = command.spawn()?;
+        Ok((child, master))
+    })();
+    let (child, master) = match spawned {
+        Ok(spawned) => spawned,
+        Err(error) => {
+            if let Some(proxy) = &mut proxy {
+                proxy.close().await?;
             }
-            if libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            for signal in [
-                libc::SIGCHLD,
-                libc::SIGHUP,
-                libc::SIGINT,
-                libc::SIGQUIT,
-                libc::SIGTERM,
-                libc::SIGALRM,
-                libc::SIGTSTP,
-                libc::SIGTTIN,
-                libc::SIGTTOU,
-            ] {
-                libc::signal(signal, libc::SIG_DFL);
-            }
-            let mut set = std::mem::zeroed();
-            if libc::sigemptyset(&mut set) != 0
-                || libc::sigprocmask(libc::SIG_SETMASK, &set, std::ptr::null_mut()) != 0
-            {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let child = command.spawn()?;
+            #[cfg(target_os = "linux")]
+            crate::command::Cleanup::from(mount_lease).finish().await?;
+            return Err(error);
+        }
+    };
     // Drop the Command's parent copies of the slave before returning the master.
     let pid = Pid::from_raw(child.id().expect("spawned child has a pid") as i32)
         .expect("child pid is positive");
@@ -131,13 +146,16 @@ pub async fn spawn(plan: PtyCommand, size: TerminalSize) -> io::Result<(PtyChild
             pid,
             master: master.clone(),
             status: None,
+            proxy,
+            #[cfg(target_os = "linux")]
+            mount_cleanup: mount_lease.into(),
         },
         PtyIo { master },
     ))
 }
 
 impl PtyChild {
-    pub fn resize(&mut self, size: TerminalSize) -> io::Result<()> {
+    pub async fn resize(&mut self, size: TerminalSize) -> io::Result<()> {
         stream::resize(self.master.get_ref(), size)
     }
 
@@ -145,6 +163,11 @@ impl PtyChild {
     pub async fn close(&mut self) -> io::Result<()> {
         if self.status.is_none() {
             return Err(io::Error::other("wait for the PTY root before closing"));
+        }
+        #[cfg(target_os = "linux")]
+        self.mount_cleanup.finish().await?;
+        if let Some(proxy) = &mut self.proxy {
+            proxy.close().await?;
         }
         Ok(())
     }
@@ -155,12 +178,12 @@ impl PtyChild {
 
     /// Cancellation-safe root wait; output may still remain in the master.
     pub async fn wait(&mut self) -> io::Result<ExitStatus> {
-        if let Some(status) = self.status {
-            return Ok(status);
+        if self.status.is_none() {
+            self.status = Some(self.child.wait().await?);
         }
-        let status = self.child.wait().await?;
-        self.status = Some(status);
-        Ok(status)
+        #[cfg(target_os = "linux")]
+        self.mount_cleanup.finish().await?;
+        Ok(self.status.expect("root was reaped"))
     }
 
     /// Signal while the root remains unreaped. Foreground group signalling is

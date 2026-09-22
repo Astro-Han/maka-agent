@@ -18,20 +18,17 @@
  */
 
 import type { ThinkingLevel } from '@maka/core/model-thinking';
+import type { ExecutionPolicy } from '@maka/core/execution-permissions';
 import type { CollaborationMode } from '@maka/core/collaboration';
 import type { OrchestrationMode } from '@maka/core/orchestration';
-import type { ChatDefaultPermissionMode } from '@maka/core/settings';
 import type { DesktopSessionSummary } from '../../../shared/desktop-session-projection.js';
 import type { SessionModelTarget } from './session-model-configuration-intent.js';
 
 export interface SessionSettingsServices {
+  setExecutionPolicy(sessionId: string, policy: ExecutionPolicy): Promise<DesktopSessionSummary>;
   setModelConfiguration(
     sessionId: string,
     input: SessionModelTarget & { thinkingLevel: ThinkingLevel | null },
-  ): Promise<DesktopSessionSummary>;
-  setPermissionMode(
-    sessionId: string,
-    mode: ChatDefaultPermissionMode,
   ): Promise<DesktopSessionSummary>;
   setOrchestrationMode(
     sessionId: string,

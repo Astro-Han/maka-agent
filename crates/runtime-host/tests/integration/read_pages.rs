@@ -71,7 +71,7 @@ async fn scenario() {
                 let created = peer.rpc(Operation::SessionCreate.as_str(), json!({"sessionId":session,
                     "workspace":{"kind":"host_path","path":fixture.workspace},
                     "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model},
-                    "permissionMode":"explore","mode":"bot"})).await;
+                    "sandboxMode":"read-only","mode":"bot"})).await;
                 assert_eq!(created["ok"], true, "{created}");
             }
             for input in [

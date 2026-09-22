@@ -18,7 +18,7 @@
  */
 
 import { useRef } from 'react';
-import type { ChatDefaultPermissionMode, SettingsSection, ThemePalette, ThemePreference } from '@maka/core/settings';
+import type { ChatDefaultSandboxMode, SettingsSection, ThemePalette, ThemePreference } from '@maka/core/settings';
 import type { ProviderType } from '@maka/core/llm-connections';
 import type { DesktopSessionSummary } from '../../preload/bridge-contract.js';
 import type { UiLocalePreference } from '@maka/core/ui-locale';
@@ -44,7 +44,7 @@ export default function SettingsModal(props: {
   onUiLocalePreferenceChange(preference: UiLocalePreference): void;
   uiLocaleUpdateGate: UiLocaleUpdateGate;
   onUserLabelChange?(label: string): void;
-  onDefaultPermissionModeChange(mode: ChatDefaultPermissionMode): void;
+  onDefaultSandboxModeChange(mode: ChatDefaultSandboxMode): void;
   /**
    * Force the modal to a specific section and Runtime Host when it mounts.
    * Section changes while already open remain live for command-palette jumps.
@@ -100,7 +100,7 @@ export default function SettingsModal(props: {
         onUiLocalePreferenceChange={props.onUiLocalePreferenceChange}
         uiLocaleUpdateGate={props.uiLocaleUpdateGate}
         onUserLabelChange={props.onUserLabelChange}
-        onDefaultPermissionModeChange={props.onDefaultPermissionModeChange}
+        onDefaultSandboxModeChange={props.onDefaultSandboxModeChange}
         request={props.request}
         openProviderCatalog={props.openProviderCatalog}
         initialConnectionSlug={props.initialConnectionSlug}

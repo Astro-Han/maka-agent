@@ -29,20 +29,28 @@ use std::{
     ptr,
 };
 use windows_sys::Win32::{
-    Foundation::ERROR_INSUFFICIENT_BUFFER,
+    Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_NO_TOKEN},
     Security::{
         Authorization::ConvertSidToStringSidW, GetTokenInformation, PSID, TOKEN_QUERY, TOKEN_USER,
         TokenUser,
     },
-    System::Threading::{GetCurrentProcess, OpenProcessToken},
+    System::Threading::{GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken},
     UI::Shell::GetUserProfileDirectoryW,
 };
 
 pub(super) fn token() -> io::Result<OwnedHandle> {
     let mut handle = ptr::null_mut();
-    // SAFETY: valid process pseudo-handle and writable handle output.
-    checked(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut handle) })?;
-    // SAFETY: successful OpenProcessToken transfers a unique owned handle.
+    // Filesystem operations use the effective thread identity. An elevated
+    // one-shot helper may be opening private state on behalf of its caller;
+    // choosing the helper's primary account would create the wrong owner.
+    if unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut handle) } == 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(ERROR_NO_TOKEN as i32) {
+            return Err(error);
+        }
+        checked(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut handle) })?;
+    }
+    // SAFETY: the successful token query transfers a unique owned handle.
     Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
 }
 
@@ -103,6 +111,11 @@ impl AccountSid {
         drop(allocation);
         value
     }
+}
+
+/// SID of the effective filesystem identity, including an impersonated caller.
+pub fn account_sid() -> io::Result<String> {
+    AccountSid::current()?.text()
 }
 
 /// Uses the OS account token, never HOME/USERPROFILE/APPDATA overrides.

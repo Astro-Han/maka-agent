@@ -119,15 +119,16 @@ export async function completedTail(connection, sessionId, frames, startedAt) {
   await withTail(connection, sessionId, async (rows, subscription) => {
     assert.deepEqual(
       rows.map((row) => row.type),
-      ['user', 'assistant', 'token_usage', 'turn_state'],
+      ['user', 'turn_state', 'assistant', 'token_usage', 'turn_state'],
     );
     assistant(rows, 'first-turn', frames, 'completed😀 fixture');
     assert.equal(rows[0].text, 'first question');
     assert.equal(userFacingText(rows[0]), 'First visible question 😀 @source.rs');
     assertReferencedRow(rows[0], connection.rootId);
-    assert.equal(rows[2].input, 7);
-    assert.equal(rows[2].output, 3);
-    assert.equal(rows[3].status, 'completed');
+    assert.equal(rows[1].status, 'running');
+    assert.equal(rows[3].input, 7);
+    assert.equal(rows[3].output, 3);
+    assert.equal(rows[4].status, 'completed');
     for (const row of rows) assert(row.ts >= startedAt && row.ts <= Date.now());
     const initial = bootstrap(subscription).durable;
     assert(initial.nextCursor, 'two-byte bootstrap must require fragmented continuation');
@@ -196,7 +197,7 @@ export async function cancelledTail(connection, sessionId, frames) {
     assert.deepEqual(turn[0].inlineReferences, [], 'explicit empty reference marker survives');
     assert.deepEqual(
       turn.map((row) => row.type),
-      ['user', 'assistant', 'turn_state'],
+      ['user', 'turn_state', 'assistant', 'turn_state'],
     );
     assert.equal(turn.at(-1).status, 'aborted');
     assert.equal(turn.at(-1).abortSource, 'runtime_cancellation');

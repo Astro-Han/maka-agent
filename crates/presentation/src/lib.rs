@@ -166,6 +166,14 @@ impl InvocationView {
                 } else if input.inherited_claim().is_none() {
                     return Err(ProjectionError::Unsupported("Code invocation"));
                 }
+                messages.push(Message {
+                    id: format!("{}:state", event.id),
+                    turn_id: event.invocation.turn_id.clone(),
+                    ts,
+                    content: Content::TurnState {
+                        state: TurnState::Running,
+                    },
+                });
                 self.state = State::Active {
                     invocation: event.invocation.clone(),
                     step: None,

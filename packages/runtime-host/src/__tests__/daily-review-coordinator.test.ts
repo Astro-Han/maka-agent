@@ -100,7 +100,7 @@ test('Daily Review shutdown during summary reads prevents model admission and pu
             llmConnectionSlug: '',
             connectionLocked: false,
             model: '',
-            permissionMode: 'ask',
+            sandboxMode: 'workspace-write',
           },
         ];
       },

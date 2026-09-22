@@ -267,7 +267,7 @@ describe('ACP Session event mapper', () => {
           agentName: 'Worker',
           turnId: 'child-turn',
           status: 'running',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
         },
       }),
     );
@@ -323,7 +323,7 @@ describe('ACP Session event mapper', () => {
           agentName: 'Worker',
           turnId: 'child-turn',
           status: 'running',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
         },
       }),
     );

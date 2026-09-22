@@ -245,7 +245,7 @@ test('WorkHub v2 keeps its attachment and browser tool ceiling visible in direct
       llmConnectionSlug: 'test',
       connectionLocked: true,
       model: 'test',
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
       toolProfile: 'workhub-coordination-v2',
       toolMode: 'code_mode',
       schemaVersion: 1,
@@ -260,7 +260,7 @@ test('WorkHub v2 keeps its attachment and browser tool ceiling visible in direct
     tools: [...projected],
     maxSteps: 1,
     readExecutionBoundary: async () => createBypassExecutionBoundary(0),
-    readPermissionMode: async () => 'bypass',
+    readSandboxMode: async () => 'danger-full-access',
     modelFactory: () => ({
       specificationVersion: 'v4',
       provider: 'test',

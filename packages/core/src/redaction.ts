@@ -235,7 +235,7 @@ export type GeneralizedErrorClass =
 export function classifyGeneralizedError(error: unknown): GeneralizedErrorClass | undefined {
   const message = error instanceof Error ? error.message : String(error);
   const lower = redactSecrets(message).toLowerCase();
-  if (lower.includes('timeout')) return 'timeout';
+  if (/\b(?:timeout|timed[\s-]+out|etimedout)\b/u.test(lower)) return 'timeout';
   if (lower.includes('429') || lower.includes('rate')) return 'rate_limited';
   if (lower.includes('401') || lower.includes('403') || isAuthenticationErrorText(lower))
     return 'auth_failed';

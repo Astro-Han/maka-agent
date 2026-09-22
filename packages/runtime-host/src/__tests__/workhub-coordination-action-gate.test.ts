@@ -1060,7 +1060,7 @@ describe('WorkHub Coordination Action Gate', () => {
       ],
       newWorkDefaults: {
         model: { llmConnectionId: 'conn', llmConnectionSlug: 'test', model: 'chosen-model' },
-        permissionMode: 'ask' as const,
+        sandboxMode: 'workspace-write' as const,
       },
       userText: 'Create an accessibility audit',
       proposal: { disposition: 'create_new' as const, title: 'Accessibility audit' },
@@ -1087,7 +1087,10 @@ describe('WorkHub Coordination Action Gate', () => {
     );
     await assert.rejects(
       new WorkHubCoordinationActionGate(effects).act(
-        { ...input, newWorkDefaults: { ...input.newWorkDefaults, permissionMode: 'bypass' } },
+        {
+          ...input,
+          newWorkDefaults: { ...input.newWorkDefaults, sandboxMode: 'danger-full-access' },
+        },
         CONTEXT,
       ),
       (error) => error instanceof WorkHubActionGateFailure && error.code === 'action_conflict',

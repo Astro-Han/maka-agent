@@ -34,6 +34,9 @@ pub struct Child {
     changed: tokio::signal::unix::Signal,
     cleaned: bool,
     signalled: bool,
+    proxy: Option<maka_network::proxy::Proxy>,
+    #[cfg(target_os = "linux")]
+    mount_cleanup: crate::command::Cleanup,
 }
 
 pub async fn spawn(plan: Command) -> io::Result<Spawned> {
@@ -42,19 +45,34 @@ pub async fn spawn(plan: Command) -> io::Result<Spawned> {
             "pipe processes require captured absolute executable and cwd",
         ));
     }
-    // Subscribe before spawn/check so an immediate exit cannot lose its wake.
-    let changed = signal(SignalKind::child())?;
-    let mut child = tokio::process::Command::new(plan.executable)
-        .args(plan.args)
-        .current_dir(plan.cwd)
-        .env_clear()
-        .envs(plan.environment)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .kill_on_drop(true)
-        .spawn()?;
+    let mut plan = plan.prepare().await?;
+    let mut proxy = plan.take_proxy();
+    #[cfg(target_os = "linux")]
+    let mount_lease = plan.take_mount_lease();
+    let spawned = (|| {
+        // Subscribe before spawn/check so an immediate exit cannot lose its wake.
+        let changed = signal(SignalKind::child())?;
+        let child = plan
+            .unix()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()?;
+        Ok((child, changed))
+    })();
+    let (mut child, changed) = match spawned {
+        Ok(spawned) => spawned,
+        Err(error) => {
+            if let Some(proxy) = &mut proxy {
+                proxy.close().await?;
+            }
+            #[cfg(target_os = "linux")]
+            crate::command::Cleanup::from(mount_lease).finish().await?;
+            return Err(error);
+        }
+    };
     let pid = Pid::from_raw(child.id().expect("spawned process has a PID") as i32)
         .expect("positive child PID");
     Ok(Spawned {
@@ -68,6 +86,9 @@ pub async fn spawn(plan: Command) -> io::Result<Spawned> {
             status: None,
             cleaned: false,
             signalled: false,
+            proxy,
+            #[cfg(target_os = "linux")]
+            mount_cleanup: mount_lease.into(),
         },
     })
 }
@@ -110,12 +131,17 @@ impl Child {
                     return Err(io::Error::other("process exit signal closed"));
                 }
             }
-            self.terminate().map_err(|error| {
-                io::Error::new(
+            if let Err(error) = self.terminate()
+                && error.raw_os_error() != Some(libc::EPERM)
+            {
+                return Err(io::Error::new(
                     error.kind(),
                     format!("terminate remaining process group: {error}"),
-                )
-            })?;
+                ));
+            }
+            // macOS can report EPERM for a group containing only our zombie.
+            // Reap the known-exited root, then still require the group to vanish.
+            // A live unsignallable descendant is NOT treated as successful cleanup.
             self.status = Some(self.child.wait().await?);
         }
         if !self.cleaned {
@@ -142,6 +168,11 @@ impl Child {
             .await
             .map_err(|_| io::Error::other("process group exit is unconfirmed"))??;
             self.cleaned = true;
+        }
+        #[cfg(target_os = "linux")]
+        self.mount_cleanup.finish().await?;
+        if let Some(proxy) = &mut self.proxy {
+            proxy.close().await?;
         }
         Ok(self.status.expect("root was reaped"))
     }

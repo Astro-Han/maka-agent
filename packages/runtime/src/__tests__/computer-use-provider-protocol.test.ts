@@ -112,7 +112,7 @@ describe('Anthropic-compatible Computer Use product loops', () => {
       llmConnectionId: 'connection-anthropic',
       llmConnectionSlug: 'anthropic',
       modelId: 'claude-sonnet-4-5-20250929',
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
       openedAt: 1,
       completedAt: 2,
     });
@@ -481,7 +481,7 @@ describe('OpenAI-compatible product loops', () => {
       llmConnectionId: 'connection-copilot',
       llmConnectionSlug: 'github-copilot',
       modelId: 'gpt-5.4',
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
       openedAt: 1,
       completedAt: 2,
     });
@@ -668,7 +668,7 @@ describe('OpenAI-compatible product loops', () => {
       llmConnectionId: 'test-connection-id',
       llmConnectionSlug: providerConnection.slug,
       modelId: 'k3',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       openedAt: 1,
       completedAt: 5,
     });
@@ -809,7 +809,7 @@ describe('OpenAI-compatible product loops', () => {
       llmConnectionId: 'test-connection-id',
       llmConnectionSlug: providerConnection.slug,
       modelId: 'k3',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       openedAt: firstTurn.anchor.ts,
       completedAt: firstTurn.anchor.ts + 1,
     });
@@ -1489,7 +1489,7 @@ function header(providerType: LlmConnection['providerType'], model: string): Ses
     llmConnectionSlug: providerType,
     connectionLocked: true,
     model,
-    permissionMode: 'bypass',
+    sandboxMode: 'danger-full-access',
     schemaVersion: 1,
   };
 }
@@ -1572,7 +1572,7 @@ function sourceInvocation(input: {
   llmConnectionId: string;
   llmConnectionSlug: string;
   modelId: string;
-  permissionMode: 'ask' | 'bypass';
+  sandboxMode: 'workspace-write' | 'danger-full-access';
   openedAt: number;
   completedAt: number;
 }): RuntimeInvocationRecord {
@@ -1596,7 +1596,7 @@ function sourceInvocation(input: {
       },
       configuration: {
         cwd: '/tmp/maka',
-        permissionMode: input.permissionMode,
+        sandboxMode: input.sandboxMode,
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         orchestrationSource: 'session',

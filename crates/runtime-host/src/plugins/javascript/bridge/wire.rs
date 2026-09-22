@@ -89,6 +89,8 @@ pub(super) enum Request {
     ClientNotify(NotificationRequest),
     #[serde(rename = "http.request")]
     HttpSend(HttpRequest),
+    #[serde(rename = "permissions.request")]
+    Permissions(PermissionRequest),
     #[serde(rename = "http.next")]
     HttpNext(ProcessHandle),
     #[serde(rename = "http.close")]
@@ -257,6 +259,12 @@ pub(super) struct HttpRequest {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct PermissionRequest {
+    pub authority: String,
+    pub request: maka_plugins::permissions::Request,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct ModelRequest {
     pub authority: String,
     pub input: maka_plugins::llm::Generate,
@@ -378,6 +386,7 @@ impl Error {
             code: match error {
                 maka_runtime::tools::ToolError::Failed(_) => Code::Invalid,
                 maka_runtime::tools::ToolError::Io { kind, .. } => match kind {
+                    std::io::ErrorKind::PermissionDenied => Code::Revoked,
                     std::io::ErrorKind::NotFound => Code::NotFound,
                     std::io::ErrorKind::AlreadyExists => Code::Conflict,
                     _ => Code::Unavailable,

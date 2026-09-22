@@ -38,9 +38,11 @@ pub use root::{CreateRoot, RootApproval, RootTemplate, Settings as RootSettings}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionBoundary {
+    pub workspace_origin: maka_runtime::execution::WorkspaceOrigin,
     pub session_id: String,
     pub boundary_revision: u64,
-    pub permission_mode: maka_runtime::execution::PermissionMode,
+    pub sandbox_mode: maka_runtime::execution::SandboxMode,
+    pub approval_policy: maka_runtime::execution::ApprovalPolicy,
     pub cwd: String,
 }
 impl SessionBoundary {
@@ -126,7 +128,7 @@ pub struct CreateChild {
     pub parent_session_id: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<maka_runtime::execution::PermissionMode>,
+    pub sandbox_mode: Option<maka_runtime::execution::SandboxMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bound_tools: Option<std::collections::BTreeSet<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -333,6 +335,19 @@ pub enum CommandError {
     Unavailable(String),
     #[error("Host execution failed: {0}")]
     Host(String),
+}
+
+impl From<CommandError> for maka_runtime::tools::ToolError {
+    fn from(error: CommandError) -> Self {
+        match error {
+            CommandError::Denied | CommandError::Revoked => Self::Io {
+                kind: std::io::ErrorKind::PermissionDenied,
+                message: error.to_string(),
+            },
+            CommandError::OutcomeUnknown(message) => Self::OutcomeUnknown(message),
+            other => Self::Failed(other.to_string()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

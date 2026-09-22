@@ -495,7 +495,7 @@ function claimForBoundary(boundary: RuntimeBoundaryCursor) {
       },
       configuration: {
         cwd: '/workspace',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         orchestrationSource: 'session',

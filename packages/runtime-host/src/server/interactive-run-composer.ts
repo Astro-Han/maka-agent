@@ -28,7 +28,7 @@ import {
   isDeepResearchSession,
 } from '@maka/core/deep-research';
 import { activePlanExecution, type PlanSessionState, type PlanStore } from '@maka/core/plan';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import { createHash } from 'node:crypto';
 import type { RuntimeExecutionConnection } from '@maka/core/llm-connections';
 import type { RuntimePolicySnapshot } from '@maka/core/runtime-policy';
@@ -125,7 +125,7 @@ export interface InteractiveRunComposerInput {
     readonly store: PlanStore;
     readonly state: PlanSessionState;
     readonly mode: 'agent' | 'plan';
-    readonly permissionMode?: PermissionMode;
+    readonly sandboxMode?: SandboxMode;
   };
   readonly deepResearch?: {
     readonly tools: readonly MakaTool[];
@@ -185,7 +185,7 @@ export function createInteractiveRunComposer(input: InteractiveRunComposerInput)
           mode: input.plan.mode,
           tools: candidateTools,
           hasActiveExecution: activeExecution !== undefined,
-          fullAccess: input.plan.permissionMode === 'bypass',
+          fullAccess: input.plan.sandboxMode === 'danger-full-access',
         })
       : candidateTools;
     // A bound tool list is an exact child/local activation ceiling. Dynamic
@@ -258,7 +258,9 @@ export function createInteractiveRunComposer(input: InteractiveRunComposerInput)
               workspaceInstructions,
               promptState.memory,
               input.plan?.mode === 'plan'
-                ? renderPlanModePrompt({ fullAccess: input.plan.permissionMode === 'bypass' })
+                ? renderPlanModePrompt({
+                    fullAccess: input.plan.sandboxMode === 'danger-full-access',
+                  })
                 : undefined,
               input.deepResearch ? buildDeepResearchSystemPromptFragment() : undefined,
               input.sideConversation ? buildSideConversationSystemPromptFragment() : undefined,
@@ -471,7 +473,7 @@ export function createInteractiveRunComposerFactory(
                 store: input.planStore,
                 state: planState,
                 mode: backendContext.header.collaborationMode ?? 'agent',
-                permissionMode: backendContext.header.permissionMode,
+                sandboxMode: backendContext.header.sandboxMode,
               },
             }
           : {}),
@@ -526,7 +528,7 @@ function buildDefaultHostTools(
 ): MakaTool[] {
   // Full access has no boundary to widen, so neither the Bash declaration nor
   // the widening tool is offered. An unknown mode is not Full access.
-  const fullAccess = plan?.permissionMode === 'bypass';
+  const fullAccess = plan?.sandboxMode === 'danger-full-access';
   const builtins = builtinOptions
     ? buildBuiltinTools({ ...builtinOptions, declareSandboxBoundary: !fullAccess })
     : [];

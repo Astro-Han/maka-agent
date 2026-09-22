@@ -67,7 +67,7 @@ async function verifyMode(connection, workspace, reopened, model, pty) {
       sessionId: id,
       workspace: { kind: 'host_path', path: workspace },
       modelTarget: { kind: 'default' },
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
   }
   const windows = process.platform === 'win32';
@@ -144,16 +144,19 @@ async function verifyMode(connection, workspace, reopened, model, pty) {
   try {
     if (pty) {
       model.extend([
-        { name: 'Bash', args: { command, pty: true } },
+        { name: 'Shell', args: { command, pty: true } },
         (input) => {
-          assert.equal(input.messages.at(-1).content, 'PTY mode requires run_in_background=true');
+          assert.equal(
+            input.messages.at(-1).content,
+            'invalid tool input: PTY mode requires run_in_background=true',
+          );
           return { answer: 'foreground PTY rejected' };
         },
       ]);
       await turn(sessionId, 'reject-foreground-pty');
     }
     model.extend([
-      { name: 'Bash', args: { command, run_in_background: true, pty } },
+      { name: 'Shell', args: { command, run_in_background: true, pty } },
       async (input) => {
         const value = result(input);
         assert.equal(value.kind, 'shell_run');
@@ -200,7 +203,7 @@ async function verifyMode(connection, workspace, reopened, model, pty) {
     const firstRows = await rows(sessionId);
     const call = firstRows.find(
       (row) =>
-        row.type === 'tool_call' && row.toolName === 'Bash' && row.turnId === 'background-launch',
+        row.type === 'tool_call' && row.toolName === 'Shell' && row.turnId === 'background-launch',
     );
     assert.equal(live.sourceTurnId, 'background-launch');
     assert.equal(live.sourceToolCallId, call.id);
@@ -262,7 +265,7 @@ async function verifyMode(connection, workspace, reopened, model, pty) {
     }
     model.extend([
       {
-        name: 'Bash',
+        name: 'Shell',
         args: {
           command: windows
             ? "[Console]::Write('stop-ready'); Start-Sleep -Seconds 60"

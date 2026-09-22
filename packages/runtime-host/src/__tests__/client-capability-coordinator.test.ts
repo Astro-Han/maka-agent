@@ -1821,7 +1821,7 @@ async function prepare(
   assert.ok(tool?.prepareExecution);
   return tool.prepareExecution(args, {
     ...managedContext(toolCallId),
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   });
 }
 
@@ -1832,7 +1832,7 @@ function managedContext(toolCallId: string) {
     turnId: 'turn-a',
     cwd: '/tmp',
     toolCallId,
-    permissionMode: 'ask' as const,
+    sandboxMode: 'workspace-write' as const,
     executionBoundary: createManagedExecutionBoundary(createWorkspaceWritePermissionProfile(), 0),
     abortSignal: new AbortController().signal,
     emitOutput: () => undefined,

@@ -33,6 +33,7 @@ pub struct Services {
     pub sessions: Arc<dyn crate::session::catalog::Queries>,
     pub history: Arc<dyn crate::session::history::Queries>,
     pub authorizations: Arc<dyn crate::authorization::Access>,
+    pub permissions: Arc<dyn crate::permissions::Access>,
     pub files: Arc<dyn crate::filesystem::Files>,
     pub models: Arc<dyn crate::llm::Models>,
     pub clients: Arc<dyn crate::client_capability::Clients>,

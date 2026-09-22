@@ -643,7 +643,7 @@ describe('builtin Bash streaming output', () => {
         turnId: 'turn-1',
         toolCallId: 'tool-1',
         cwd: '/workspace',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         abortSignal: new AbortController().signal,
         emitOutput: () => {},
       },
@@ -778,7 +778,7 @@ describe('builtin Bash streaming output', () => {
           turnId: 'turn-1',
           toolCallId: 'tool-1',
           cwd: workspace,
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           abortSignal: new AbortController().signal,
           emitOutput: () => {},
           executionBoundary: {
@@ -981,7 +981,7 @@ describe('builtin Bash streaming output', () => {
           turnId: 'turn-1',
           toolCallId: 'tool-1',
           cwd,
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           executionBoundary: {
             kind: 'managed',
             revision: 1,
@@ -1043,7 +1043,7 @@ describe('builtin Bash streaming output', () => {
           turnId: 'turn-1',
           toolCallId: 'tool-1',
           cwd: '/workspace',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           abortSignal: new AbortController().signal,
           emitOutput: () => {},
           executionBoundary: {
@@ -1062,10 +1062,10 @@ describe('builtin Bash streaming output', () => {
       turnId: 'turn-1',
       toolCallId: 'tool-2',
       cwd: '/workspace',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       abortSignal: new AbortController().signal,
       emitOutput: () => {},
-      executionBoundary: { kind: 'bypass', revision: 1 },
+      executionBoundary: { kind: 'danger-full-access', revision: 1 },
     });
 
     assert.strictEqual(calls[0]?.argv, undefined);
@@ -1115,7 +1115,7 @@ describe('builtin Bash streaming output', () => {
       turnId: 'turn-1',
       toolCallId: 'tool-1',
       cwd: '/workspace',
-      permissionMode: 'ask' as const,
+      sandboxMode: 'workspace-write' as const,
       abortSignal: new AbortController().signal,
       emitOutput: () => {},
       executionBoundary: {
@@ -1205,7 +1205,7 @@ describe('builtin Bash streaming output', () => {
           turnId: 'turn-1',
           toolCallId: 'tool-1',
           cwd: '/workspace',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           abortSignal: new AbortController().signal,
           emitOutput: () => {},
         },
@@ -1235,7 +1235,7 @@ describe('builtin Bash streaming output', () => {
             turnId: 'turn-1',
             toolCallId: 'tool-1',
             cwd: '/workspace',
-            permissionMode: 'bypass',
+            sandboxMode: 'danger-full-access',
             executionBoundary: {
               kind: 'managed',
               revision: 0,
@@ -1304,7 +1304,7 @@ describe('builtin Bash streaming output', () => {
         turnId: 'turn-1',
         toolCallId: 'tool-1',
         cwd: canonicalWorkspace,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         abortSignal: new AbortController().signal,
         emitOutput: () => {},
         executionBoundary: {
@@ -1382,7 +1382,7 @@ describe('builtin Bash streaming output', () => {
               turnId: 'turn-1',
               toolCallId: 'tool-1',
               cwd,
-              permissionMode: 'ask',
+              sandboxMode: 'workspace-write',
               abortSignal: new AbortController().signal,
               emitOutput: () => {},
               executionBoundary: {
@@ -1432,7 +1432,7 @@ describe('builtin Bash streaming output', () => {
           turnId: 'turn-1',
           toolCallId: 'tool-1',
           cwd,
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           abortSignal: new AbortController().signal,
           emitOutput: () => {},
           executionBoundary: {
@@ -1498,7 +1498,7 @@ describe('builtin Bash streaming output', () => {
           turnId: 'turn-1',
           toolCallId: 'tool-1',
           cwd: workspaceAlias,
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           abortSignal: new AbortController().signal,
           emitOutput: () => {},
         },
@@ -2597,7 +2597,7 @@ async function linuxMissingExactWriteFixture() {
     turnId: 'turn-1',
     toolCallId: 'tool-1',
     cwd: canonicalWorkspace,
-    permissionMode: 'ask' as const,
+    sandboxMode: 'workspace-write' as const,
     abortSignal: new AbortController().signal,
     emitOutput: () => {},
     executionBoundary: {

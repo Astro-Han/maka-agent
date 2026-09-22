@@ -22,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { withSourceBundle } from '../support/source.mjs';
 
 const entries = [
+  ['--sandbox-workspace', 'client-sandbox-entry.mjs'],
   ['--skills-client-workspace', 'client-skills-entry.mjs'],
   ['--scheduler-workspace', 'client-scheduler-entry.mjs'],
   ['--plugin-remote', 'client-plugin-remote-entry.mjs'],
@@ -57,7 +58,8 @@ await withSourceBundle(fileURLToPath(new URL(entry, import.meta.url)), (bundle, 
             ? 55000
             : process.argv.includes('--large-output-workspace')
               ? 120000
-              : process.argv.includes('--bash-workspace') ||
+              : process.argv.includes('--sandbox-workspace') ||
+                  process.argv.includes('--shell-workspace') ||
                   process.argv.includes('--onboarding-workspace') ||
                   (process.argv.includes('--native-managed') &&
                     process.argv.includes('--management'))

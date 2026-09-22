@@ -27,7 +27,7 @@ use maka_plugins::{
     fiber::Fiber,
     storage::{Data, Mutation},
 };
-use maka_runtime::{event::Fact, execution::PermissionMode};
+use maka_runtime::{event::Fact, execution::SandboxMode};
 use maka_runtime_host::server::{Host, local::LocalListener};
 use serde_json::json;
 use std::time::Duration;
@@ -66,6 +66,9 @@ async fn scenario() {
         include_str!("../fixtures/files-plugin.mjs"),
         false,
     );
+    let private = fixture.owner().canonical_path().join("test-private");
+    std::fs::create_dir(&private).unwrap();
+    std::fs::write(private.join("secret.txt"), "host-only").unwrap();
     let host = Host::open(fixture.owner()).await.unwrap();
     #[cfg(unix)]
     let endpoint = fixture.workspace.parent().unwrap().join("files.sock");
@@ -91,7 +94,7 @@ async fn scenario() {
             "session.create",
             json!({
                 "sessionId":"parent", "workspace":{"kind":"host_path","path":fixture.workspace},
-                "executorId":"example.files", "permissionMode":"ask"
+                "executorId":"example.files", "sandboxMode":"workspace-write"
             }),
         )
         .await;
@@ -105,18 +108,18 @@ async fn scenario() {
         .unwrap();
     inspector.ready().unwrap();
     inspector.publish().unwrap();
-    let child = |id: &str, permission_mode, bound_tools| CreateChild {
+    let child = |id: &str, sandbox_mode, bound_tools| CreateChild {
         operation_id: id.into(),
         parent_session_id: "parent".into(),
         name: id.into(),
-        permission_mode,
+        sandbox_mode,
         bound_tools,
         instructions: None,
         workspace: None,
         target: None,
     };
     let restricted = commands
-        .create_child(child("restricted", Some(PermissionMode::Explore), None))
+        .create_child(child("restricted", Some(SandboxMode::ReadOnly), None))
         .await
         .unwrap();
     let ceiling = commands
@@ -180,7 +183,7 @@ async fn scenario() {
                 .await;
             let changed = peer.rpc("session.configuration.update", json!({
                 "sessionId":session, "expectedRevision":session_state["result"]["session"]["revision"],
-                "patch":{"permissionMode":"bypass"}
+                "patch":{"sandboxMode":"danger-full-access"}
             })).await;
             assert_eq!(changed["result"]["kind"], "committed", "{changed}");
             storage

@@ -28,6 +28,32 @@ pub(crate) fn has_entry(path: &Path) -> io::Result<bool> {
     Ok(repository_directory(path)?.is_some())
 }
 
+/// Resolve metadata for ordinary repositories and linked worktrees without
+/// executing Git or consulting global configuration. Call on a blocking worker.
+pub fn metadata(path: &Path) -> io::Result<Vec<std::path::PathBuf>> {
+    let Some(directory) = repository_directory(path)? else {
+        return Ok(Vec::new());
+    };
+    let entry = directory.join(".git");
+    // An empty metadata directory carries no Git indirection. It can be an
+    // uninitialized repository or a live native sandbox's mount target. Protect
+    // it as-is; do not reject unrelated operations or discover an enclosing repo.
+    if entry.symlink_metadata()?.is_dir()
+        && std::fs::read_dir(&entry)?.next().transpose()?.is_none()
+    {
+        return Ok(vec![dunce::canonicalize(entry)?]);
+    }
+    let repository = discover(directory)?;
+    let mut paths = vec![
+        dunce::canonicalize(directory.join(".git"))?,
+        dunce::canonicalize(repository.git_dir())?,
+        dunce::canonicalize(repository.common_dir())?,
+    ];
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
 fn repository_directory(path: &Path) -> io::Result<Option<&Path>> {
     for ancestor in path.ancestors() {
         match ancestor.join(".git").symlink_metadata() {

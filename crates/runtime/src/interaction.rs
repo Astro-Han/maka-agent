@@ -18,6 +18,7 @@
  */
 
 //! Canonical interaction facts. The store owns append-only outcome commitment.
+use maka_sandbox::grant;
 use serde::{Deserialize, Serialize};
 mod decode;
 mod question;
@@ -89,6 +90,11 @@ pub enum ClosureReason {
     deny_unknown_fields
 )]
 pub enum InteractionRequest {
+    Permissions {
+        tool_use_id: Option<String>,
+        base_revision: u64,
+        request: PermissionRequest,
+    },
     Question {
         tool_use_id: String,
         questions: Vec<InteractionQuestion>,
@@ -108,6 +114,9 @@ pub enum InteractionRequest {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InteractionAnswer {
+    Permissions {
+        decision: grant::Decision,
+    },
     Question {
         answers: Vec<Option<String>>,
     },
@@ -128,6 +137,10 @@ pub enum InteractionAnswer {
     deny_unknown_fields
 )]
 pub enum InteractionOutcome {
+    PermissionsDecision {
+        decision: grant::Decision,
+        committed_at: u64,
+    },
     QuestionAnswer {
         answers: Vec<Option<String>>,
         committed_at: u64,
@@ -151,6 +164,7 @@ impl InteractionOutcome {
     pub fn committed_at(&self) -> u64 {
         match self {
             Self::QuestionAnswer { committed_at, .. }
+            | Self::PermissionsDecision { committed_at, .. }
             | Self::FormAnswer { committed_at, .. }
             | Self::ClientCapabilityDecision { committed_at, .. }
             | Self::Closure { committed_at, .. } => *committed_at,
@@ -161,6 +175,10 @@ impl InteractionOutcome {
 impl InteractionAnswer {
     pub fn into_outcome(self, committed_at: u64) -> InteractionOutcome {
         match self {
+            Self::Permissions { decision } => InteractionOutcome::PermissionsDecision {
+                decision,
+                committed_at,
+            },
             Self::Question { answers } => InteractionOutcome::QuestionAnswer {
                 answers,
                 committed_at,
@@ -178,6 +196,12 @@ impl InteractionAnswer {
 
     pub fn matches_outcome(&self, outcome: &InteractionOutcome) -> bool {
         match (self, outcome) {
+            (
+                Self::Permissions { decision: left },
+                InteractionOutcome::PermissionsDecision {
+                    decision: right, ..
+                },
+            ) => left == right,
             (
                 Self::Question { answers: left },
                 InteractionOutcome::QuestionAnswer { answers: right, .. },
@@ -214,4 +238,52 @@ pub struct SessionGrant {
     pub session_id: String,
     pub target: GrantTarget,
     pub granted_at: u64,
+}
+
+/// The Host supplies the real operation description; it is display information,
+/// not authority inferred from a command string or a plugin-supplied Session ID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PermissionRequest {
+    pub reason: String,
+    pub command: Option<PermissionCommand>,
+    pub permissions: grant::Permissions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PermissionCommand {
+    pub command: String,
+    pub cwd: String,
+}
+
+impl PermissionRequest {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.reason.trim().is_empty() || self.reason.len() > 4096 || self.reason.contains('\0') {
+            return Err("Permission request requires a bounded reason");
+        }
+        if let Some(command) = &self.command
+            && (command.command.trim().is_empty()
+                || command.command.contains('\0')
+                || command.command.len() > 8192
+                || !std::path::Path::new(&command.cwd).is_absolute()
+                || command.cwd.contains('\0')
+                || command.cwd.len() > 4096)
+        {
+            return Err("Invalid permission command description");
+        }
+        self.permissions
+            .validate()
+            .map_err(|_| "Invalid additional permissions")?;
+        // Never publish a prompt whose full approval cannot be committed. The
+        // longest scope and timestamp reserve the complete receipt envelope.
+        InteractionOutcome::PermissionsDecision {
+            decision: grant::Decision::Allow {
+                permissions: self.permissions.clone(),
+                scope: grant::Scope::Session,
+            },
+            committed_at: MAX_SAFE_INTEGER,
+        }
+        .validate()
+    }
 }

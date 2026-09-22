@@ -17,7 +17,7 @@
  * under the License.
  */
 use super::support::{client_probe::ClientFixture, peer::Peer};
-use maka_protocol::session::{PermissionMode, WorkspaceProjection, WorkspaceTarget};
+use maka_protocol::session::{SandboxMode, WorkspaceProjection, WorkspaceTarget};
 use maka_runtime::{
     artifact::content_digest,
     continuation::{REPLAY_VERSION, ReplayEvidence},
@@ -27,7 +27,7 @@ use maka_runtime::{
 };
 use maka_runtime_host::{
     server::{Host, local::LocalListener},
-    session::{PreparedSession, SessionModel},
+    session::{PreparedSession, SessionConfiguration, SessionModel},
 };
 use serde_json::json;
 use std::{num::NonZeroU16, time::Duration};
@@ -53,7 +53,7 @@ async fn cooperative_retirement_recovers_frozen_step_without_repeating_effects()
             host_cwd: cwd,
         },
         model,
-        PermissionMode::Bypass,
+        SandboxMode::DangerFullAccess,
         ToolMode::Direct,
     );
     let log = fixture.log().await;
@@ -214,6 +214,69 @@ async fn cooperative_retirement_recovers_frozen_step_without_repeating_effects()
             outcome: InvocationOutcome::HandoffPaused { .. }
         }
     ));
+    let record = log
+        .get_session::<SessionConfiguration>("session")
+        .await
+        .unwrap()
+        .unwrap();
+    log.update_session_metadata(
+        "session",
+        record.revision,
+        |configuration: &mut SessionConfiguration| {
+            configuration.workspace_origin = maka_runtime::execution::WorkspaceOrigin::Allocated;
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+    log.close().await.unwrap();
+
+    // A path alone cannot restore an old workspace grant after authority changes.
+    // The unchanged marker and matching client offer are not sufficient either.
+    let host = Host::open(fixture.owner()).await.unwrap();
+    let cancel = CancellationToken::new();
+    let server = tokio::spawn(
+        LocalListener::bind(&endpoint)
+            .unwrap()
+            .serve(host.clone(), cancel.clone()),
+    );
+    let mut stale = Peer::new(host.clone(), "cooperative").await;
+    assert_eq!(
+        stale
+            .rpc("client.capability.replace", publication.clone())
+            .await["ok"],
+        true
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), requests.recv())
+            .await
+            .is_err()
+    );
+    stale.close().await;
+    cancel.cancel();
+    tokio::time::timeout(Duration::from_secs(10), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    drop(host);
+    let log = fixture.log().await;
+    assert_eq!(log.pending_handoffs(0).await.unwrap().len(), 1);
+    let record = log
+        .get_session::<SessionConfiguration>("session")
+        .await
+        .unwrap()
+        .unwrap();
+    log.update_session_metadata(
+        "session",
+        record.revision,
+        |configuration: &mut SessionConfiguration| {
+            configuration.workspace_origin = maka_runtime::execution::WorkspaceOrigin::Selected;
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
     log.close().await.unwrap();
 
     let host = Host::open(fixture.owner()).await.unwrap();
@@ -349,7 +412,7 @@ async fn stop_sealed_turn_uses_public_identity_without_provider_and_survives_res
                 host_cwd: cwd,
             },
             model,
-            PermissionMode::Explore,
+            SandboxMode::ReadOnly,
             ToolMode::Direct,
         );
         log.create_session("session", "fixture", &configuration, 1)

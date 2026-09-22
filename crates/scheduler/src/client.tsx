@@ -56,7 +56,7 @@ async function authorize(
             workspace: effect.execution.projectId
               ? { kind: 'project', projectId: effect.execution.projectId }
               : { kind: 'host_path', path: effect.execution.cwd },
-            permissionMode: effect.execution.permissionMode,
+            sandboxMode: effect.execution.sandboxMode,
           };
   const request: AuthorizationRequest = {
     operationId: crypto.randomUUID(),
@@ -191,7 +191,7 @@ function Session({
               llmConnectionSlug: view.target.model.connection_slug,
               model: view.target.model.model,
               ...(view.target.thinkingLevel ? { thinkingLevel: view.target.thinkingLevel } : {}),
-              permissionMode: view.permissionMode,
+              sandboxMode: view.sandboxMode,
               collaborationMode: view.collaborationMode,
               orchestrationMode: view.behavior,
               toolMode: view.toolMode,

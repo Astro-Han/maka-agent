@@ -83,7 +83,7 @@ const CREATE_FINGERPRINT = `sha256:${createHash('sha256')
   .digest('hex')}`;
 const COORDINATION_CWD_DIRECTORY = 'workhub-coordination';
 const COORDINATION_TOOL_PROFILE = 'workhub-coordination-v2' as const;
-const COORDINATION_PERMISSION_MODE = 'bypass' as const;
+const COORDINATION_SANDBOX_MODE = 'danger-full-access' as const;
 const COORDINATION_COLLABORATION_MODE = 'agent' as const;
 const COORDINATION_ORCHESTRATION_MODE = 'default' as const;
 const COORDINATION_SUMMARY_MESSAGE_KINDS = ['user', 'assistant', 'state'] as const;
@@ -863,7 +863,7 @@ export class HostWorkHubCoordinationCoordinator {
           requestFingerprint: CREATE_FINGERPRINT,
           input: {
             ...target,
-            permissionMode: COORDINATION_PERMISSION_MODE,
+            sandboxMode: COORDINATION_SANDBOX_MODE,
             collaborationMode: COORDINATION_COLLABORATION_MODE,
             orchestrationMode: COORDINATION_ORCHESTRATION_MODE,
             cwd: this.#coordinationCwd,
@@ -1056,7 +1056,7 @@ export class HostWorkHubCoordinationCoordinator {
       const configured = await this.#transitionConfiguration({
         expectedRevision: record.revision,
         clearConnectionBlock: false,
-        permissionModeOnly: false,
+        sandboxModeOnly: false,
         configuration: {
           backend: record.header.backend,
           llmConnectionId: record.header.llmConnectionId,
@@ -1064,7 +1064,7 @@ export class HostWorkHubCoordinationCoordinator {
           connectionLocked: record.header.connectionLocked,
           model: record.header.model,
           thinkingLevel: record.header.thinkingLevel,
-          permissionMode: COORDINATION_PERMISSION_MODE,
+          sandboxMode: COORDINATION_SANDBOX_MODE,
           collaborationMode: COORDINATION_COLLABORATION_MODE,
           orchestrationMode: COORDINATION_ORCHESTRATION_MODE,
         },
@@ -1119,8 +1119,8 @@ function validCoordinationHeader(header: SessionHeader): boolean {
   return (
     validCoordinationIdentityHeader(header) &&
     ((header.toolProfile === COORDINATION_TOOL_PROFILE &&
-      header.permissionMode === COORDINATION_PERMISSION_MODE) ||
-      (header.toolProfile === 'workhub-coordination-v1' && header.permissionMode === 'explore')) &&
+      header.sandboxMode === COORDINATION_SANDBOX_MODE) ||
+      (header.toolProfile === 'workhub-coordination-v1' && header.sandboxMode === 'read-only')) &&
     (header.collaborationMode ?? 'agent') === COORDINATION_COLLABORATION_MODE &&
     (header.orchestrationMode ?? 'default') === COORDINATION_ORCHESTRATION_MODE
   );

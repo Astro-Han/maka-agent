@@ -355,7 +355,7 @@ describe('LocalWorkspaceExecutor file operations', () => {
           timeoutMs: 5_000,
         },
         cwd,
-        executionBoundary: { kind: 'bypass' as const, revision: 1 },
+        executionBoundary: { kind: 'danger-full-access' as const, revision: 1 },
       };
 
       await withPath(emptyBin, async () => {

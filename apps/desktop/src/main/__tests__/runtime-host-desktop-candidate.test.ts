@@ -1731,7 +1731,8 @@ function session(id: string): SessionCatalogProjection {
     llmConnectionSlug: 'test-connection',
     connectionLocked: true,
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: {kind: 'on-request'},
     collaborationMode: 'agent',
     orchestrationMode: 'default',
   };

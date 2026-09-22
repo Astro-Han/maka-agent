@@ -74,6 +74,7 @@ export function createFakeWorkbarServices(
       subscribeSessionEvents: noopSubscription,
     },
     terminal: {
+      prepareExecution: async () => true,
       recover: async () => ({ resources: [], closes: [] }),
       subscribeCloseChanges: noopSubscription,
       subscribeUpdates: noopSubscription,
@@ -128,6 +129,7 @@ export function createFakeWorkbarServices(
       previewApproval: async () => ({ ok: false, reason: 'not configured' }),
     },
     sideChat: {
+      prepareExecution: async () => true,
       listSessions: async () => [],
       listTurns: async () => [],
       readSettledMessages: async () => ({ messages: [], settled: true }),
@@ -151,12 +153,13 @@ export function createFakeWorkbarServices(
       promoteQueueEntry: async () => undefined,
       updateQueueEntry: async () => undefined,
       reorderQueueEntries: async () => undefined,
-      setPermissionMode: async () => {
-        throw new Error('Fake sideChat.setPermissionMode is not configured');
+      setExecutionPolicy: async () => {
+        throw new Error('Fake sideChat.setExecutionPolicy is not configured');
       },
       regenerateTurn: async () => undefined,
       respondToSandboxBoundary: async () => undefined,
       respondToClientCapability: async () => undefined,
+      respondToPermissions: async () => undefined,
       respondToUserQuestion: async () => undefined,
       respondToUserForm: async () => undefined,
       subscribeEvents: (_sessionId, _handler, onSeeded) => {

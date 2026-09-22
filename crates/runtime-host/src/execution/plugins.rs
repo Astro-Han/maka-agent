@@ -17,7 +17,9 @@
  * under the License.
  */
 
+mod admission;
 mod attachment;
+pub(super) use admission::AgentAdmission;
 mod authority;
 mod children;
 mod client;
@@ -27,6 +29,7 @@ mod filesystem;
 mod interactions;
 mod llm;
 mod messages;
+mod network;
 mod resume;
 mod root;
 mod submit;
@@ -52,7 +55,7 @@ use maka_plugins::{
 };
 use maka_runtime::{
     event::{EventWrite, Fact, InvocationInput, InvocationOutcome, RuntimeEvent},
-    execution::PermissionMode,
+    execution::SandboxMode,
 };
 use std::{
     collections::BTreeMap,
@@ -61,8 +64,10 @@ use std::{
 
 #[derive(Clone)]
 struct Grant {
+    workspace_origin: maka_runtime::execution::WorkspaceOrigin,
     boundary_revision: u64,
-    permission_mode: PermissionMode,
+    sandbox_mode: SandboxMode,
+    approval_policy: maka_runtime::execution::ApprovalPolicy,
     cwd: String,
 }
 
@@ -81,72 +86,138 @@ struct BoundCommands {
     call: Option<maka_plugins::call::Scope>,
 }
 
+pub(crate) struct ProcessAdmission {
+    pub cwd: String,
+    pub command: maka_process::Command,
+    pub gate: tokio::sync::OwnedMutexGuard<()>,
+    pub boundary: maka_plugins::authorization::Boundary,
+    pub sandbox: maka_sandbox::Sandbox,
+}
+
 impl Executions {
     pub(crate) async fn admit_plugin_process(
         &self,
         scope: &maka_plugins::call::Scope,
-    ) -> Result<(String, tokio::sync::OwnedMutexGuard<()>), Error> {
-        let gate = self.interactions.own_admission().await;
-        let cwd = self
-            .plugin_resource_workspace(scope, maka_plugins::authorization::Capability::Processes)
-            .await?;
-        Ok((cwd, gate))
-    }
-
-    pub(crate) async fn plugin_network_policy(
-        &self,
-        scope: &maka_plugins::call::Scope,
-    ) -> Result<maka_network::Policy, Error> {
-        // Raw HTTP can have arbitrary external side effects, just like a process.
-        // Both the admitted and current permission must still allow them.
-        self.plugin_resource_workspace(scope, maka_plugins::authorization::Capability::Network)
-            .await?;
+        input: &maka_plugins::process::Command,
+    ) -> Result<ProcessAdmission, Error> {
+        use maka_plugins::authorization::Boundary;
+        input
+            .validate()
+            .map_err(|error| Error::Invalid(error.to_string()))?;
+        let boundary = self.plugin_process_boundary(scope).await?;
+        let cwd = match &boundary {
+            Boundary::Session { boundary, .. } => boundary.cwd.clone(),
+            Boundary::Workspace { workspace, .. } => workspace.host_cwd.clone(),
+            Boundary::Profile | Boundary::Directory { .. } => return Err(Error::Denied),
+        };
+        let sandbox = self.plugin_process_sandbox(scope, &boundary).await?;
         let network = self
             .configuration
             .network_configuration()
             .await
             .map_err(|error| Error::Host(error.to_string()))?;
-        maka_network::Policy::from_settings(&network.proxy, network.password.as_deref())
-            .map_err(|error| Error::Host(error.to_string()))
-    }
-
-    pub(crate) async fn plugin_process_workspace(
-        &self,
-        invocation: &maka_runtime::event::Invocation,
-    ) -> Result<String, Error> {
-        if !self.accepting() {
-            return Err(Error::Draining);
-        }
-        let frozen = self
-            .log
-            .invocation_configuration(invocation)
-            .await
-            .map_err(storage)?
-            .ok_or(Error::Denied)?;
-        let current = self
-            .log
-            .get_session::<SessionConfiguration>(&invocation.session_id)
-            .await
-            .map_err(storage)?
-            .ok_or(Error::NotFound)?;
-        if frozen.permission_mode != PermissionMode::Bypass
-            || current.archived
-            || current.configuration.permission_mode != PermissionMode::Bypass
-            || current.configuration.workspace.host_cwd != frozen.cwd
-        {
+        let route =
+            maka_network::Policy::from_settings(&network.proxy, network.password.as_deref())
+                .map_err(|error| Error::Host(error.to_string()))?;
+        let location = cwd.clone();
+        let input = input.clone();
+        #[cfg(windows)]
+        let backend = Arc::new(crate::sandbox::windows::Backend::new(
+            &self.paths.state_root,
+            &std::env::current_exe().map_err(|error| Error::Host(error.to_string()))?,
+        ));
+        let (command, sandbox) = tokio::task::spawn_blocking(move || {
+            let mut command = maka_process::Command::new(input.executable, &location);
+            command.args(input.args);
+            for (key, value) in input.env {
+                command.env(key, value);
+            }
+            #[cfg(windows)]
+            let command = command.with_backend(backend);
+            #[cfg(target_os = "linux")]
+            let command = command.with_network_helper(
+                std::env::current_exe().map_err(|error| Error::Host(error.to_string()))?,
+            );
+            command
+                .network_route(route)
+                .sandbox(&sandbox)
+                .map(|command| (command, sandbox))
+                .map_err(|error| Error::Invalid(error.to_string()))
+        })
+        .await
+        .map_err(|error| Error::Host(error.to_string()))??;
+        // Pin this boundary through native preparation and spawn. The captured
+        // command has no native resources before the accepted worker starts it.
+        let gate = tokio::select! {
+            biased;
+            _ = scope.cancellation.cancelled() => return Err(Error::Revoked),
+            gate = self.interactions.own_admission() => gate,
+        };
+        if self.plugin_process_boundary(scope).await? != boundary {
             return Err(Error::Denied);
         }
-        let cwd = frozen.cwd;
-        tokio::task::spawn_blocking(move || {
-            let identity = maka_fs_tools::workspace::read_identity(std::path::Path::new(&cwd))
-                .map_err(|_| Error::Denied)?;
-            if frozen.workspace_identity.as_ref() != Some(&identity) {
-                return Err(Error::Denied);
+        Ok(ProcessAdmission {
+            cwd,
+            command,
+            gate,
+            boundary,
+            sandbox,
+        })
+    }
+
+    pub(crate) async fn plugin_process_sandbox(
+        &self,
+        scope: &maka_plugins::call::Scope,
+        boundary: &maka_plugins::authorization::Boundary,
+    ) -> Result<maka_sandbox::Sandbox, Error> {
+        use maka_plugins::authorization::Boundary;
+        let (cwd, mode, origin) = match boundary {
+            Boundary::Session { boundary, .. } => (
+                boundary.cwd.clone(),
+                boundary.sandbox_mode,
+                boundary.workspace_origin,
+            ),
+            Boundary::Workspace {
+                workspace,
+                sandbox_mode,
+                origin,
+                ..
+            } => (workspace.host_cwd.clone(), *sandbox_mode, *origin),
+            _ => return Err(Error::Denied),
+        };
+        let grants = match boundary {
+            Boundary::Session { boundary, .. } if scope.identity.agent().is_some() => {
+                self.plugin_permission_grants(scope, boundary.boundary_revision)
+                    .await?
             }
-            Ok(cwd)
+            _ => Vec::new(),
+        };
+        let state_root = self.paths.state_root.clone();
+        tokio::task::spawn_blocking(move || {
+            let (mut sandbox, ceiling) =
+                super::permissions::resolve(mode, std::path::Path::new(&cwd), &state_root, origin)
+                    .map_err(|error| Error::Invalid(error.to_string()))?;
+            for grant in grants {
+                sandbox = sandbox
+                    .with_grant(&grant.permissions, &ceiling)
+                    .map_err(|error| Error::Invalid(error.to_string()))?;
+            }
+            Ok(sandbox)
         })
         .await
         .map_err(|error| Error::Host(error.to_string()))?
+    }
+
+    pub(crate) async fn plugin_process_boundary(
+        &self,
+        scope: &maka_plugins::call::Scope,
+    ) -> Result<maka_plugins::authorization::Boundary, Error> {
+        if scope.identity.agent().is_some() {
+            self.plugin_execution_boundary(scope).await
+        } else {
+            self.plugin_resource_boundary(scope, maka_plugins::authorization::Capability::Processes)
+                .await
+        }
     }
 
     pub(crate) fn executor_binding(
@@ -291,8 +362,10 @@ impl BoundCommands {
             .ok_or(Error::NotFound)?;
         if current.archived
             || current.configuration.boundary_revision != grant.boundary_revision
-            || current.configuration.permission_mode != grant.permission_mode
+            || current.configuration.sandbox_mode != grant.sandbox_mode
+            || current.configuration.approval_policy != grant.approval_policy
             || current.configuration.workspace.host_cwd != grant.cwd
+            || current.configuration.workspace_origin != grant.workspace_origin
         {
             return Err(Error::Denied);
         }
@@ -621,9 +694,11 @@ impl Commands for BoundCommands {
             .unwrap()
             .iter()
             .map(|(id, grant)| maka_plugins::execution::SessionBoundary {
+                workspace_origin: grant.workspace_origin,
                 session_id: id.clone(),
                 boundary_revision: grant.boundary_revision,
-                permission_mode: grant.permission_mode,
+                sandbox_mode: grant.sandbox_mode,
+                approval_policy: grant.approval_policy,
                 cwd: grant.cwd.clone(),
             })
             .collect())

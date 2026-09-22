@@ -269,7 +269,7 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time_and_original_decode
             assert!(
                 !rows
                     .iter()
-                    .any(|row| matches!(row.message.content, Content::TurnState { .. })),
+                    .any(|row| matches!(row.message.content, Content::TurnState { ref state } if !matches!(state, maka_presentation::TurnState::Running))),
                 "physical pause must not publish a logical Turn terminal"
             );
         }

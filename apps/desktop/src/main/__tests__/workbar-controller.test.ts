@@ -22,7 +22,7 @@ import { strict as assert } from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
 import { act, createElement, StrictMode, useLayoutEffect } from 'react';
 import type { ShellRunUpdate } from '@maka/core/events';
-import type { SessionSummary } from '@maka/core/session';
+import type { SideChatSession } from '../../renderer/features/workbar/index.js';
 import type { WorkBoardActiveItem, WorkBoardItem, WorkBoardLinkedSession } from '@maka/core/work-board';
 import { LocaleProvider, type ToastApi } from '@maka/ui';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
@@ -46,7 +46,7 @@ import {
   type TaskEntryServices,
 } from '../../renderer/features/task-entry/testing.js';
 
-function session(id: string): SessionSummary {
+function session(id: string): SideChatSession {
   return {
     id,
     name: id,
@@ -59,7 +59,8 @@ function session(id: string): SessionSummary {
     llmConnectionSlug: 'test',
     connectionLocked: false,
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
   };
 }
 
@@ -167,7 +168,7 @@ function createFakeToastApi(errors: string[] = []): ToastApi {
 }
 
 function input(
-  activeSession: SessionSummary | undefined,
+  activeSession: SideChatSession | undefined,
   toastApi: ToastApi = createFakeToastApi(),
 ): UseWorkbarControllerInput {
   return {
@@ -216,7 +217,7 @@ function workBoardItemDraftKey(itemId: string): string {
 }
 
 function workBoardInput(
-  activeSession: SessionSummary | undefined,
+  activeSession: SideChatSession | undefined,
   toastApi: ToastApi = createFakeToastApi(),
   overrides: Partial<UseWorkbarControllerInput> = {},
   ownerRef: { current: number } = { current: 0 },
@@ -264,7 +265,7 @@ function taskEntryHost(): Extract<TaskEntryHost, { state: 'available' }> {
       selectNoProject: false,
     },
     selectedProjectId: 'project-A',
-    chatDefaults: { permissionMode: 'ask', thinkingLevel: 'high' },
+    chatDefaults: { sandboxMode: 'workspace-write', thinkingLevel: 'high' },
   };
 }
 
@@ -567,6 +568,37 @@ describe('useWorkbarController', () => {
         .map((tab) => tab.ordinal),
       [1, 2],
     );
+  });
+
+  it('does not start a Terminal after cancelled or stale sandbox preparation', async () => {
+    const { root } = installReactRenderer();
+    const defaults = createFakeWorkbarServices();
+    let readiness = deferred<boolean>();
+    const starts: string[] = [];
+    const services = createFakeWorkbarServices({
+      terminal: {
+        ...defaults.terminal,
+        prepareExecution: () => readiness.promise,
+        start: async (id) => { starts.push(id); return shellUpdate(id, 'terminal'); },
+      },
+    });
+    await act(async () => renderController(root, services, input(session('a'))));
+    await act(async () => controller().commands.openTool('terminal'));
+    await act(async () => readiness.resolve(false));
+    assert.deepEqual(starts, []);
+    readiness = deferred<boolean>();
+    await act(async () => controller().commands.openTool('terminal'));
+    await act(async () => renderController(root, services, input(session('b'))));
+    await act(async () => readiness.resolve(true));
+    assert.deepEqual(starts, []);
+    await act(async () => controller().commands.openTool('terminal'));
+    assert.deepEqual(starts, ['b']);
+    readiness = deferred<boolean>();
+    await act(async () => controller().commands.openTool('terminal'));
+    await act(async () => renderController(root, services, input(session('a'))));
+    await act(async () => renderController(root, services, input(session('b'))));
+    await act(async () => readiness.resolve(true));
+    assert.deepEqual(starts, ['b']);
   });
 
   it('retains a Terminal whose start resolves after navigation without revealing it in the new Session', async () => {

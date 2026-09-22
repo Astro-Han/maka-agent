@@ -60,7 +60,7 @@ describe('ToolRuntime session sandbox boundary', () => {
         header: header(),
         connection: { providerType: 'openai', slug: 'test' } as never,
         modelId: 'test',
-        readPermissionMode: async () => 'ask',
+        readSandboxMode: async () => 'workspace-write',
         readExecutionBoundary: async () => {
           reads += 1;
           return {
@@ -124,7 +124,7 @@ describe('ToolRuntime session sandbox boundary', () => {
       header: header(),
       connection: { providerType: 'openai', slug: 'test' } as never,
       modelId: 'test',
-      readPermissionMode: async () => 'ask',
+      readSandboxMode: async () => 'workspace-write',
       readExecutionBoundary: async () => ({
         kind: 'managed',
         profile: createWorkspaceWritePermissionProfile(),
@@ -155,7 +155,7 @@ describe('ToolRuntime session sandbox boundary', () => {
   });
 
   test('reads the selected mode live while letting a Bypass boundary override it', async () => {
-    let selectedMode: 'explore' | 'ask' = 'explore';
+    let selectedMode: 'read-only' | 'workspace-write' = 'read-only';
     let boundary: ExecutionBoundary = {
       kind: 'managed',
       profile: applySandboxBoundaryExpansion(createReadOnlyPermissionProfile(), {
@@ -165,14 +165,14 @@ describe('ToolRuntime session sandbox boundary', () => {
       }),
       revision: 0,
     };
-    const observed: Array<{ kind: string; permissionMode: string | undefined }> = [];
+    const observed: Array<{ kind: string; sandboxMode: string | undefined }> = [];
     const runtime = createRuntime({
       turnId: 'turn-1',
       sessionId: 'session-1',
       header: header(),
       connection: { providerType: 'openai', slug: 'test' } as never,
       modelId: 'test',
-      readPermissionMode: async () => selectedMode,
+      readSandboxMode: async () => selectedMode,
       readExecutionBoundary: async () => boundary,
       newId: nextId(),
       now: () => 1,
@@ -186,23 +186,23 @@ describe('ToolRuntime session sandbox boundary', () => {
         assert.ok(context.executionBoundary);
         observed.push({
           kind: context.executionBoundary.kind,
-          permissionMode: context.permissionMode,
+          sandboxMode: context.sandboxMode,
         });
         return { ok: true };
       },
     };
 
     await settle(runtime, tool, 'tool-1');
-    selectedMode = 'ask';
+    selectedMode = 'workspace-write';
     await settle(runtime, tool, 'tool-2');
-    boundary = { kind: 'bypass', revision: 1 };
+    boundary = { kind: 'danger-full-access', revision: 1 };
     await settle(runtime, tool, 'tool-3');
 
-    assert.equal(header().permissionMode, 'ask');
+    assert.equal(header().sandboxMode, 'workspace-write');
     assert.deepEqual(observed, [
-      { kind: 'managed', permissionMode: 'explore' },
-      { kind: 'managed', permissionMode: 'ask' },
-      { kind: 'bypass', permissionMode: 'bypass' },
+      { kind: 'managed', sandboxMode: 'read-only' },
+      { kind: 'managed', sandboxMode: 'workspace-write' },
+      { kind: 'danger-full-access', sandboxMode: 'danger-full-access' },
     ]);
   });
 
@@ -231,14 +231,14 @@ describe('ToolRuntime session sandbox boundary', () => {
         description: 'test',
         parameters: {},
         impl: (_args, context) => {
-          observed = context.permissionMode;
+          observed = context.sandboxMode;
           return { ok: true };
         },
       },
       'tool-1',
     );
 
-    assert.equal(observed, 'explore');
+    assert.equal(observed, 'read-only');
   });
 
   test('parks the dedicated tool and admits only one boundary request at a time', async () => {
@@ -1167,12 +1167,12 @@ describe('ToolRuntime session sandbox boundary', () => {
   });
 });
 
-type SandboxToolRuntimeInput = Omit<ToolRuntimeInput, 'readPermissionMode'> &
-  Partial<Pick<ToolRuntimeInput, 'readPermissionMode'>>;
+type SandboxToolRuntimeInput = Omit<ToolRuntimeInput, 'readSandboxMode'> &
+  Partial<Pick<ToolRuntimeInput, 'readSandboxMode'>>;
 
 function createRuntime(input: SandboxToolRuntimeInput): ToolRuntime {
   return new ToolRuntime({
-    readPermissionMode: async () => input.header.permissionMode,
+    readSandboxMode: async () => input.header.sandboxMode,
     ...input,
   });
 }
@@ -1212,7 +1212,7 @@ function header(cwd = process.cwd()): SessionHeader {
     llmConnectionSlug: 'test',
     connectionLocked: true,
     model: 'test',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     schemaVersion: 1,
   };
 }

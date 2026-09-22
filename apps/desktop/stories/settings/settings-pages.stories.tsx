@@ -1439,7 +1439,7 @@ function archivedTask(
     llmConnectionSlug: 'zai-live',
     connectionLocked: true,
     model: 'glm-4.7',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     lastMessageAt: NOW - ageDays * 24 * 60 * 60 * 1000,
     ...overrides,
   };
@@ -1598,6 +1598,7 @@ function useArchivedTasksStoryBridge(seed: readonly SessionSummary[]): ArchivedT
       ...session,
       revision: 1,
       runtimeHostId: 'storybook-local',
+      approvalPolicy: { kind: 'on-request' },
       profileId: 'local',
       profileName: 'Local',
       profileKind: 'local',
@@ -1954,7 +1955,7 @@ function SettingsStoryFrame(props: SettingsStoryProps) {
               onThemePaletteChange={setThemePalette}
               onUiLocalePreferenceChange={noop}
               uiLocaleUpdateGate={uiLocaleUpdateGate}
-              onDefaultPermissionModeChange={noop}
+              onDefaultSandboxModeChange={noop}
               request={{ section: props.section }}
               openProviderCatalog={props.openProviderCatalog}
               initialConnectionSlug={props.initialConnectionSlug}

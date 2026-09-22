@@ -94,7 +94,22 @@ pub(super) async fn relocate(host: &Host, value: &Value) -> Result<SessionUpdate
             &input.session_id,
             input.expected_revision,
             move |configuration: &mut SessionConfiguration| {
+                if configuration.workspace != workspace
+                    || configuration.workspace_origin
+                        != maka_runtime::execution::WorkspaceOrigin::Selected
+                {
+                    configuration.boundary_revision = configuration
+                        .boundary_revision
+                        .checked_add(1)
+                        .filter(|revision| *revision <= maka_runtime::interaction::MAX_SAFE_INTEGER)
+                        .ok_or_else(|| {
+                            maka_event_log::StoreError::InvalidTransition(
+                                "Execution boundary revision exhausted".into(),
+                            )
+                        })?;
+                }
                 configuration.workspace = workspace;
+                configuration.workspace_origin = maka_runtime::execution::WorkspaceOrigin::Selected;
                 Ok(())
             },
         )

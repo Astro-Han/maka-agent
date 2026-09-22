@@ -28,8 +28,7 @@ import {
 } from './bot-chat-settings.js';
 import type { LocalMemorySettings } from './local-memory.js';
 import { defaultLocalMemorySettings, normalizeLocalMemorySettings } from './local-memory.js';
-import type { PermissionMode } from './permission.js';
-import { decodePersistedPermissionMode } from './permission.js';
+import type { SandboxMode } from './permission.js';
 import type { UsageProvenance } from './usage-ledger-merge.js';
 import {
   UI_LOCALE_PREFERENCES,
@@ -478,32 +477,24 @@ export interface PrivacySettings {
   incognitoActive: boolean;
 }
 
-/**
- * `explore` is excluded — it's reserved for Deep Research sessions and
- * Bot-incoming guards and is never a mode the user picks, in the composer
- * dropdown or here. Derived from the canonical PERMISSION_MODES (not a
- * hand-copied literal) so adding a future mode updates every consumer —
- * the Settings picker, the composer picker (@maka/ui re-exports this
- * list as PERMISSION_MODE_ORDER), and the settings validation — in one
- * place.
- */
-export type ChatDefaultPermissionMode = Extract<PermissionMode, 'ask' | 'bypass'>;
+/** The composer and settings expose the same three execution boundaries. */
+export type ChatDefaultSandboxMode = SandboxMode;
 
-export const CHAT_DEFAULT_PERMISSION_MODES: readonly ChatDefaultPermissionMode[] = [
-  'ask',
-  'bypass',
+export const CHAT_DEFAULT_SANDBOX_MODES: readonly ChatDefaultSandboxMode[] = [
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
 ];
 
-export function isChatDefaultPermissionMode(value: unknown): value is ChatDefaultPermissionMode {
+export function isChatDefaultSandboxMode(value: unknown): value is ChatDefaultSandboxMode {
   return (
-    typeof value === 'string' &&
-    (CHAT_DEFAULT_PERMISSION_MODES as readonly string[]).includes(value)
+    typeof value === 'string' && (CHAT_DEFAULT_SANDBOX_MODES as readonly string[]).includes(value)
   );
 }
 
 /** Seeds new sessions' starting permission mode (Settings → 通用 → 默认权限模式). */
 export interface ChatDefaultsSettings {
-  permissionMode: ChatDefaultPermissionMode;
+  sandboxMode: ChatDefaultSandboxMode;
   /** Applies only when a new task is created. */
   codeModeEnabled?: boolean;
   /**
@@ -1116,30 +1107,17 @@ function defaultProjectPreferencesSettings(): ProjectPreferencesSettings {
   return {};
 }
 
-function defaultChatDefaultsSettings(): ChatDefaultsSettings {
-  return { permissionMode: 'bypass' };
+export function defaultChatDefaultsSettings(): ChatDefaultsSettings {
+  return { sandboxMode: 'workspace-write' };
 }
 
-// Closed-enum fail-closed, same reasoning as appearance.palette /
-// personalization.uiLocale above: an unknown/garbage persisted value
-// (corrupted settings.json, a downgraded build reading a newer schema)
-// must not reach session-creation code as a `PermissionMode` the picker
-// doesn't recognize -- fall back to the safest default instead.
 function normalizeChatDefaultsSettings(settings: ChatDefaultsSettings): ChatDefaultsSettings {
   return {
     ...(settings.codeModeEnabled === true ? { codeModeEnabled: true } : {}),
-    // Same fail-closed reasoning as the mode below: a garbage persisted level
-    // drops to "no preference" (the model's own default) rather than reaching
-    // session creation as a rung no picker recognizes.
     thinkingLevel: isThinkingLevel(settings.thinkingLevel) ? settings.thinkingLevel : undefined,
-    // A retired mode is decoded (not rejected) so an existing settings file
-    // keeps working; knowing which modes are retired lives in one place.
-    // Anything that decodes to a mode outside the pickable set — including
-    // `explore`, which only a product mode confers — still falls back.
-    permissionMode: (() => {
-      const mode = decodePersistedPermissionMode(settings.permissionMode);
-      return mode !== undefined && isChatDefaultPermissionMode(mode) ? mode : 'ask';
-    })(),
+    sandboxMode: isChatDefaultSandboxMode(settings.sandboxMode)
+      ? settings.sandboxMode
+      : defaultChatDefaultsSettings().sandboxMode,
   };
 }
 

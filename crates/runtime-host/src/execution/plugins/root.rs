@@ -26,26 +26,33 @@ use maka_plugins::{
 use maka_protocol::session::{
     SessionCreateInput, SessionCreateTarget, SessionModelTarget, WorkspaceProjection,
 };
-use maka_runtime::execution::{PermissionMode, WorkspaceIdentity, WorkspaceTarget};
+use maka_runtime::execution::{SandboxMode, WorkspaceIdentity, WorkspaceTarget};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 #[derive(Clone, serde::Serialize)]
 pub(super) struct RootGrant {
+    pub workspace_origin: maka_runtime::execution::WorkspaceOrigin,
     pub workspace: WorkspaceProjection,
     pub workspace_identity: WorkspaceIdentity,
-    pub permission_mode: PermissionMode,
+    pub sandbox_mode: SandboxMode,
+    pub approval_policy: maka_runtime::execution::ApprovalPolicy,
     pub source: Option<SessionBoundary>,
 }
 impl From<RootApproval> for RootGrant {
     fn from(approval: RootApproval) -> Self {
         Self {
+            workspace_origin: approval.source.as_ref().map_or(
+                maka_runtime::execution::WorkspaceOrigin::Selected,
+                |source| source.workspace_origin,
+            ),
             workspace: WorkspaceProjection {
                 target: approval.template.workspace,
                 host_cwd: approval.template.cwd,
             },
             workspace_identity: approval.template.workspace_identity,
-            permission_mode: approval.template.permission_mode,
+            sandbox_mode: approval.template.sandbox_mode,
+            approval_policy: approval.template.approval_policy,
             source: approval.source,
         }
     }
@@ -59,8 +66,10 @@ impl BoundCommands {
                     let grants = self.grants.lock().unwrap();
                     let grant = grants.get(&boundary.session_id).ok_or(Error::Denied)?;
                     if grant.boundary_revision != boundary.boundary_revision
-                        || grant.permission_mode != boundary.permission_mode
+                        || grant.sandbox_mode != boundary.sandbox_mode
+                        || grant.approval_policy != boundary.approval_policy
                         || grant.cwd != boundary.cwd
+                        || grant.workspace_origin != boundary.workspace_origin
                     {
                         return Err(Error::Denied);
                     }
@@ -68,12 +77,14 @@ impl BoundCommands {
                 Boundary::Workspace {
                     workspace,
                     workspace_identity,
-                    permission_mode,
+                    origin,
+                    sandbox_mode,
                 } => {
                     let grant = self.root_grant.as_ref().ok_or(Error::Denied)?;
                     if grant.workspace != workspace
+                        || grant.workspace_origin != origin
                         || grant.workspace_identity != workspace_identity
-                        || grant.permission_mode != permission_mode
+                        || grant.sandbox_mode != sandbox_mode
                     {
                         return Err(Error::Denied);
                     }
@@ -116,8 +127,10 @@ impl BoundCommands {
             .ok_or(Error::NotFound)?;
         if current.archived
             || current.configuration.boundary_revision != source.boundary_revision
-            || current.configuration.permission_mode != source.permission_mode
+            || current.configuration.sandbox_mode != source.sandbox_mode
+            || current.configuration.approval_policy != source.approval_policy
             || current.configuration.workspace.host_cwd != source.cwd
+            || current.configuration.workspace_origin != source.workspace_origin
         {
             return Err(Error::Denied);
         }
@@ -128,7 +141,12 @@ impl BoundCommands {
             .validate()
             .map_err(|error| Error::Invalid(error.to_string()))?;
         let approval = self.root_grant.as_ref().ok_or(Error::Denied)?;
-        if rank(request.settings.permission_mode) > rank(approval.permission_mode) {
+        if rank(request.settings.sandbox_mode) > rank(approval.sandbox_mode)
+            || !request
+                .settings
+                .approval_policy
+                .is_subset_of(approval.approval_policy)
+        {
             return Err(Error::Denied);
         }
         let host = self.executions()?;
@@ -258,7 +276,9 @@ impl BoundCommands {
                 if record.archived
                     || current.boundary_revision != 0
                     || current.workspace != expected.workspace
-                    || current.permission_mode != expected.permission_mode
+                    || current.workspace_origin != expected.workspace_origin
+                    || current.sandbox_mode != expected.sandbox_mode
+                    || current.approval_policy != expected.approval_policy
                     || current.tool_mode != expected.tool_mode
                     || current.collaboration_mode != expected.collaboration_mode
                     || current.orchestration_mode != expected.orchestration_mode
@@ -271,8 +291,10 @@ impl BoundCommands {
                 grants.lock().unwrap().insert(
                     id.clone(),
                     Grant {
+                        workspace_origin: record.configuration.workspace_origin,
                         boundary_revision: 0,
-                        permission_mode: expected.permission_mode,
+                        sandbox_mode: expected.sandbox_mode,
+                        approval_policy: expected.approval_policy,
                         cwd: expected.workspace.host_cwd,
                     },
                 );
@@ -352,7 +374,8 @@ async fn configuration(
         tool_profile: None,
         // The explicit Host grant supplies the default to bind below. The
         // interactive create codec restricts Explore to UI-specific modes.
-        permission_mode: None,
+        sandbox_mode: None,
+        approval_policy: Some(settings.approval_policy),
         collaboration_mode: Some(settings.collaboration_mode),
         orchestration_mode: Some(settings.behavior.clone()),
     })
@@ -360,13 +383,17 @@ async fn configuration(
     let mut config = prepared.bind(
         approval.workspace.clone(),
         bound,
-        settings.permission_mode,
+        settings.sandbox_mode,
         settings.tool_mode,
     );
     config.bound_tools = settings.bound_tools.clone();
+    config.workspace_origin = approval.workspace_origin;
     config.instructions = settings.instructions.clone();
     if let Some(source) = &approval.source {
-        if rank(settings.permission_mode) > rank(source.permission_mode)
+        if rank(settings.sandbox_mode) > rank(source.sandbox_mode)
+            || !settings
+                .approval_policy
+                .is_subset_of(source.approval_policy)
             || approval.workspace.host_cwd != source.cwd
         {
             return Err(Error::Denied);
@@ -398,11 +425,11 @@ async fn configuration(
     }
     Ok(config)
 }
-fn rank(mode: PermissionMode) -> u8 {
+fn rank(mode: SandboxMode) -> u8 {
     match mode {
-        PermissionMode::Explore => 0,
-        PermissionMode::Ask => 1,
-        PermissionMode::Bypass => 2,
+        SandboxMode::ReadOnly => 0,
+        SandboxMode::WorkspaceWrite => 1,
+        SandboxMode::DangerFullAccess => 2,
     }
 }
 fn now() -> Result<u64, Error> {

@@ -252,6 +252,40 @@ export async function verifyResourceController(
       });
       await request(connection, 'release', identity);
     }
+    // Permission changes revoke new input, not accepted receipts or durable
+    // process ownership. Even an existing controller must recheck its boundary.
+    await request(connection, 'acquire', identity);
+    const beforeChange = {
+      ...identity,
+      sequence: 1,
+      control: { kind: 'resize', cols: 85, rows: 27 },
+    };
+    const receipt = await request(connection, 'control', beforeChange);
+    const { session } = await connection.request(
+      'session.catalog.query',
+      { kind: 'get', sessionId },
+      5000,
+    );
+    const changed = await connection.request(
+      'session.configuration.update',
+      {
+        sessionId,
+        expectedRevision: session.revision,
+        patch: { approvalPolicy: { kind: 'never' } },
+      },
+      5000,
+    );
+    assert.equal(changed.kind, 'committed');
+    assert.deepEqual(await request(connection, 'control', beforeChange), receipt);
+    await conflict(request(connection, 'control', { ...beforeChange, sequence: 2 }));
+    await conflict(request(connection, 'acquire', identity));
+    const retained = await connection.request(
+      'runtime.resource.query',
+      { kind: 'get', sessionId, ref },
+      5000,
+    );
+    assert.equal(retained.resource.result.status, 'running');
+    assert.equal((await request(connection, 'release', identity)).released, true);
   } finally {
     await stream?.close();
     await other.close();

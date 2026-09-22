@@ -73,9 +73,9 @@ async fn scenario() {
             rpc(&mut peer, "session.create", json!({
                 "sessionId":"scheduler-source","workspace":{"kind":"host_path","path":fixture.workspace},
                 "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model},
-                "permissionMode":"ask"
+                "sandboxMode":"workspace-write"
             })).await;
-            approve(&mut peer, json!({"kind":"workspace","workspace":{"kind":"host_path","path":fixture.workspace},"permissionMode":"ask"})).await;
+            approve(&mut peer, json!({"kind":"workspace","workspace":{"kind":"host_path","path":fixture.workspace},"sandboxMode":"workspace-write"})).await;
             rpc(&mut peer, "turn.start", json!({
                 "sessionId":"scheduler-source","turnId":"schedule-turn","content":{"text":"Schedule independent work"},
                 "maxSteps":5
@@ -142,7 +142,10 @@ async fn scenario() {
                 json!({"kind":"get","sessionId":session_id}),
             )
             .await;
-            assert_eq!(session["session"]["permissionMode"], "ask", "{session}");
+            assert_eq!(
+                session["session"]["sandboxMode"], "workspace-write",
+                "{session}"
+            );
             rpc(
                 &mut peer,
                 "plugin.composition.apply",
@@ -179,7 +182,7 @@ async fn scenario() {
             )
             .await;
             let update = rpc(&mut peer, "session.configuration.update", json!({
-                "sessionId":"scheduler-source","expectedRevision":current["session"]["revision"],"patch":{"permissionMode":"bypass"}
+                "sessionId":"scheduler-source","expectedRevision":current["session"]["revision"],"patch":{"sandboxMode":"danger-full-access"}
             })).await;
             assert_eq!(update["kind"], "committed", "{update}");
             scheduler(
@@ -211,7 +214,7 @@ async fn scenario() {
                 "effect":{"kind":"agent_run","execution":{
                     "cwd":fixture.workspace,"llmConnectionId":model.connection_id,
                     "llmConnectionSlug":model.connection_slug,"model":model.model,
-                    "permissionMode":"ask","toolMode":"direct","collaborationMode":"agent","orchestrationMode":"default"
+                    "sandboxMode":"workspace-write","approvalPolicy":{"kind":"on-request"},"toolMode":"direct","collaborationMode":"agent","orchestrationMode":"default"
                 }}
             }})).await;
         }

@@ -20,6 +20,18 @@
 import type { Interaction, InteractionOutcome, InteractionPrompt } from './interaction.js';
 import type { Json } from './host.js';
 
+export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+
+export type ApprovalPolicy =
+  | { readonly kind: 'on-request' | 'never' }
+  | {
+      readonly kind: 'granular';
+      readonly sandbox: boolean;
+      readonly rules: boolean;
+      readonly permissions: boolean;
+      readonly client: boolean;
+    };
+
 export interface Invocation {
   session_id: string;
   turn_id: string;
@@ -134,7 +146,8 @@ export interface SessionConfiguration {
     hostCwd: string;
   };
   target: ExecutionTarget;
-  permissionMode: 'explore' | 'ask' | 'bypass';
+  sandboxMode: SandboxMode;
+  approvalPolicy: ApprovalPolicy;
   collaborationMode: 'agent' | 'plan';
   behavior: string;
   toolMode: 'direct' | 'code_mode';
@@ -145,7 +158,7 @@ export interface CreateChild {
   parentSessionId: string;
   name: string;
   /** May narrow the parent's current permission, never widen it. */
-  permissionMode?: 'explore' | 'ask' | 'bypass';
+  sandboxMode?: SandboxMode;
   /** Intersected with the parent's ceiling, including future dynamic tools. */
   boundTools?: readonly string[];
   /** Appended to inherited instructions; the combined budget is 16 KiB UTF-8. */
@@ -204,7 +217,8 @@ export interface Executions {
     name: string;
     settings: {
       target: ExecutionTarget;
-      permissionMode: 'explore' | 'ask' | 'bypass';
+      sandboxMode: SandboxMode;
+      approvalPolicy: ApprovalPolicy;
       toolMode: 'direct' | 'code_mode';
       collaborationMode: 'agent' | 'plan';
       behavior: string;

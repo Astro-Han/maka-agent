@@ -329,7 +329,7 @@ fn explicit_preparation_and_receipt_wire_match_current_source() {
         .document
         .manifest
         .attributes
-        .required_tools = vec!["Bash".into()];
+        .required_tools = vec!["Shell".into()];
     let host = HostCapabilities {
         tools: ["Read".into()].into(),
         ..Default::default()

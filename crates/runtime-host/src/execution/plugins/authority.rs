@@ -33,6 +33,118 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 impl Executions {
+    pub(crate) async fn request_plugin_permissions(
+        &self,
+        call: &maka_plugins::call::Scope,
+        input: maka_plugins::permissions::Request,
+        cancellation: &CancellationToken,
+    ) -> Result<maka_plugins::permissions::Permissions, Error> {
+        use maka_runtime::{interaction::PermissionRequest, tool_call::ToolRejection};
+        let invocation = call.identity.agent().ok_or(Error::Denied)?;
+        let boundary = self.plugin_execution_boundary(call).await?;
+        let Boundary::Session {
+            boundary: session, ..
+        } = &boundary
+        else {
+            return Err(Error::Denied);
+        };
+        let permissions = tokio::task::spawn_blocking(move || {
+            crate::execution::permissions::materialize(input.permissions)
+        })
+        .await
+        .map_err(|error| Error::Host(error.to_string()))?
+        .map_err(|error| Error::Invalid(error.to_string()))?;
+        let request = PermissionRequest {
+            reason: input.reason,
+            permissions,
+            command: None,
+        };
+        request
+            .validate()
+            .map_err(|error| Error::Invalid(error.into()))?;
+        let cwd = session.cwd.clone();
+        let mode = session.sandbox_mode;
+        let origin = session.workspace_origin;
+        let state_root = self.paths.state_root.clone();
+        let ceiling = tokio::task::spawn_blocking(move || {
+            crate::execution::permissions::resolve(
+                mode,
+                std::path::Path::new(&cwd),
+                &state_root,
+                origin,
+            )
+            .map(|(_, ceiling)| ceiling)
+        })
+        .await
+        .map_err(|error| Error::Host(error.to_string()))?
+        .map_err(|error| Error::Invalid(error.to_string()))?;
+        if !ceiling
+            .permits(&request.permissions)
+            .map_err(|error| Error::Invalid(error.to_string()))?
+        {
+            return Err(Error::Denied);
+        }
+        if self
+            .plugin_process_sandbox(call, &boundary)
+            .await?
+            .permits(&request.permissions)
+            .map_err(|error| Error::Invalid(error.to_string()))?
+        {
+            return Ok(request.permissions);
+        }
+        let tool_use = call
+            .identity
+            .operation_id()
+            .map(|id| maka_runtime::tool_call::tool_use_id(&invocation.invocation_id, id));
+        let requested = request.permissions.clone();
+        let granted = self
+            .interactions
+            .request_permissions(
+                invocation,
+                tool_use.as_deref(),
+                request,
+                session.boundary_revision,
+                cancellation,
+            )
+            .await
+            .map_err(|error| match error {
+                ToolRejection::Cancelled => Error::Revoked,
+                ToolRejection::PolicyDenied { .. } => Error::Denied,
+                ToolRejection::InvalidInput { message } => Error::Invalid(message),
+                other => Error::Unavailable(other.to_string()),
+            })?;
+        // A concurrent call may have obtained a broader reusable grant while
+        // this request was being prepared. Return only this request's surface;
+        // a newly answered partial approval is already validated as its subset.
+        if granted
+            .permissions
+            .contains(&requested)
+            .map_err(|error| Error::Invalid(error.to_string()))?
+        {
+            Ok(requested)
+        } else {
+            Ok(granted.permissions)
+        }
+    }
+
+    /// Canonical additions follow the actual caller. Executor callbacks have no
+    /// tool-use identity and may consume Turn/Session grants, never Once grants.
+    pub(super) async fn plugin_permission_grants(
+        &self,
+        call: &maka_plugins::call::Scope,
+        revision: u64,
+    ) -> Result<Vec<maka_event_log::interactions::PermissionGrant>, Error> {
+        let invocation = call.identity.agent().ok_or(Error::Denied)?;
+        let tool_use = call
+            .identity
+            .operation_id()
+            .map(|id| maka_runtime::tool_call::tool_use_id(&invocation.invocation_id, id));
+        self.log
+            .permission_grants(invocation, tool_use.as_deref(), revision)
+            .await
+            .map_err(storage)
+    }
+
     pub(crate) async fn acquire_plugin_execution(
         self: &Arc<Self>,
         context: Context,
@@ -54,49 +166,12 @@ impl Executions {
         if !self.accepting() || !self.plugin_calls.owns(call) || call.cancellation.is_cancelled() {
             return Err(Error::Revoked);
         }
-        let Some(invocation) = call.identity.agent() else {
+        if call.identity.agent().is_none() {
             return self
                 .plugin_resource_boundary(call, maka_plugins::authorization::Capability::Executions)
                 .await;
-        };
-        let frozen = self
-            .log
-            .invocation_configuration(invocation)
-            .await
-            .map_err(storage)?
-            .ok_or(Error::Denied)?;
-        let current = self
-            .log
-            .get_session::<SessionConfiguration>(&invocation.session_id)
-            .await
-            .map_err(storage)?
-            .ok_or(Error::NotFound)?;
-        if current.archived
-            || current.configuration.workspace.host_cwd != frozen.cwd
-            || current.configuration.permission_mode != frozen.permission_mode
-        {
-            return Err(Error::Denied);
         }
-        let cwd = frozen.cwd.clone();
-        let workspace_identity = tokio::task::spawn_blocking(move || {
-            let observed = maka_fs_tools::workspace::read_identity(std::path::Path::new(&cwd))
-                .map_err(|_| Error::Denied)?;
-            if frozen.workspace_identity.as_ref() != Some(&observed) {
-                return Err(Error::Denied);
-            }
-            Ok(observed)
-        })
-        .await
-        .map_err(|error| Error::Host(error.to_string()))??;
-        Ok(Boundary::Session {
-            boundary: SessionBoundary {
-                session_id: invocation.session_id.clone(),
-                boundary_revision: current.configuration.boundary_revision,
-                permission_mode: current.configuration.permission_mode,
-                cwd: current.configuration.workspace.host_cwd,
-            },
-            workspace_identity,
-        })
+        Ok(self.plugin_agent_evidence(call).await?.boundary.clone())
     }
 
     pub(crate) async fn restore_plugin_consent(
@@ -148,9 +223,11 @@ impl Executions {
                 return Err(Error::Denied);
             }
             boundaries.push(SessionBoundary {
+                workspace_origin: session.configuration.workspace_origin,
                 session_id: id.clone(),
                 boundary_revision: session.configuration.boundary_revision,
-                permission_mode: session.configuration.permission_mode,
+                sandbox_mode: session.configuration.sandbox_mode,
+                approval_policy: session.configuration.approval_policy,
                 cwd: session.configuration.workspace.host_cwd,
             });
         }
@@ -212,13 +289,16 @@ impl Executions {
             Boundary::Workspace {
                 workspace,
                 workspace_identity,
-                permission_mode,
+                origin,
+                sandbox_mode,
             } => (
                 Vec::new(),
                 Some(RootGrant {
+                    workspace_origin: origin,
                     workspace,
                     workspace_identity,
-                    permission_mode,
+                    sandbox_mode,
+                    approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
                     source: None,
                 }),
             ),
@@ -259,8 +339,10 @@ impl Executions {
                 return Err(Error::Denied);
             }
             let grant = Grant {
+                workspace_origin: boundary.workspace_origin,
                 boundary_revision: boundary.boundary_revision,
-                permission_mode: boundary.permission_mode,
+                sandbox_mode: boundary.sandbox_mode,
+                approval_policy: boundary.approval_policy,
                 cwd: boundary.cwd,
             };
             if grants.insert(boundary.session_id, grant).is_some() {

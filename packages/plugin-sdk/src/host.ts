@@ -80,7 +80,7 @@ export interface RemoteCaller {
 }
 export interface WorkspaceViewInput {
   workspace: { kind: 'project'; projectId: string } | { kind: 'host_path'; path: string };
-  permissionMode: 'explore' | 'ask' | 'bypass';
+  sandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access';
   collaborationMode: 'agent' | 'plan';
 }
 export interface SessionView {
@@ -123,6 +123,8 @@ export interface ResourceContext {
   readonly processes: Processes;
   readonly terminals: Terminals;
   readonly http: Http;
+  /** Agent execution additions; independent work uses explicit authorization. */
+  readonly permissions: import('./permissions.js').Permissions;
   /** Metadata only; Agent scopes see their own Session, independent scopes require read_sessions. */
   readonly sessions: {
     list(

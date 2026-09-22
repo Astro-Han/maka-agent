@@ -698,7 +698,7 @@ test('records an unexpected accepted-connection failure before teardown', async 
   const run = session.run();
   try {
     await writeProtocolFrame(pair.clientTransport, {
-      requestId: 'failed-admission-request',
+      requestId: 'failed-admission_request',
       operation: 'turn.query',
       input: { sessionId: 'session', turnId: 'turn' },
     });

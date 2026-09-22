@@ -107,7 +107,7 @@ function resultHasCapturedStreams(result: ToolActivityItem['result']): boolean {
 }
 
 /**
- * Background Bash returns an empty shell_run body; keep the live chunks the
+ * Background Shell returns an empty shell_run body; keep the live chunks the
  * user already saw by filling empty stdout/stderr from outputChunks. Also
  * forward truncation / redaction hints so settled preview matches live.
  */

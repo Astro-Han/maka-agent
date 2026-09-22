@@ -40,7 +40,7 @@ import {
 import { isCollaborationMode } from '@maka/core/collaboration';
 import { DEFAULT_TOOL_MODE, isToolMode } from '@maka/core/tool-mode';
 import { isOrchestrationMode } from '@maka/core/orchestration';
-import { decodePersistedPermissionMode, isPermissionMode } from '@maka/core/permission';
+import { decodePersistedSandboxMode, isSandboxMode } from '@maka/core/permission';
 import type { PersistedValue } from '@maka/core/persisted-value';
 import { isSubagentWorkspaceBinding } from '@maka/core/subagent-workspace';
 import type { CreateSessionInput } from '@maka/core/runtime-inputs';
@@ -114,7 +114,7 @@ export function buildSessionHeader(
     model: input.model ?? 'default',
     ...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
     toolMode: input.toolMode ?? DEFAULT_TOOL_MODE,
-    permissionMode: input.permissionMode,
+    sandboxMode: input.sandboxMode,
     collaborationMode: input.collaborationMode ?? 'agent',
     orchestrationMode: input.orchestrationMode ?? 'default',
     ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
@@ -177,7 +177,7 @@ export function normalizeSessionHeader(
     typeof header.model === 'string' &&
     (header.toolProfile === undefined || isSessionToolProfile(header.toolProfile)) &&
     (header.toolMode === undefined || isToolMode(header.toolMode)) &&
-    isPermissionMode(header.permissionMode) &&
+    isSandboxMode(header.sandboxMode) &&
     isCollaborationMode(header.collaborationMode) &&
     isOrchestrationMode(header.orchestrationMode) &&
     (header.transcriptLedgerVersion === undefined ||
@@ -200,12 +200,12 @@ export function decodePersistedSessionHeader(
   sessionId?: string,
 ): SessionHeader {
   const header = persisted as unknown as SessionHeader;
-  const permissionMode = decodePersistedPermissionMode(header.permissionMode);
-  if (permissionMode === undefined) {
+  const sandboxMode = decodePersistedSandboxMode(header.sandboxMode);
+  if (sandboxMode === undefined) {
     return normalizeSessionHeader(header, sessionId ?? header.id);
   }
   return normalizeSessionHeader(
-    permissionMode === header.permissionMode ? header : { ...header, permissionMode },
+    sandboxMode === header.sandboxMode ? header : { ...header, sandboxMode },
     sessionId ?? header.id,
   );
 }
@@ -384,7 +384,7 @@ export function toSummary(header: SessionHeader): SessionSummary {
     llmConnectionSlug: header.llmConnectionSlug,
     connectionLocked: header.connectionLocked,
     model: header.model,
-    permissionMode: header.permissionMode,
+    sandboxMode: header.sandboxMode,
     collaborationMode: header.collaborationMode ?? 'agent',
     orchestrationMode: header.orchestrationMode ?? 'default',
     ...(header.thinkingLevel !== undefined ? { thinkingLevel: header.thinkingLevel } : {}),

@@ -22,7 +22,7 @@ use super::support::{
     message_recovery::{Provider, configure, unknown_dispatch},
 };
 use maka_event_log::{EventLog, message_admissions::PendingMessageAdmission};
-use maka_protocol::session::PermissionMode;
+use maka_protocol::session::SandboxMode;
 use maka_runtime::{
     event::{EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent},
     input::DeliveredMessage,
@@ -50,7 +50,7 @@ async fn pending(log: &EventLog, owner: &Invocation, id: &str, disposition: Disp
         invocation: owner.clone(),
         steering_invocation: None,
         required_tools: if id == "skill-gate" {
-            ["Bash".into()].into()
+            ["NeverRegisteredFixtureTool".into()].into()
         } else {
             Default::default()
         },
@@ -101,7 +101,7 @@ async fn startup_consumes_reserved_and_queued_work_once_without_replaying_unknow
                 host_cwd: fixture.workspace.to_string_lossy().into_owned(),
             },
             model,
-            PermissionMode::Explore,
+            SandboxMode::ReadOnly,
             maka_runtime::execution::ToolMode::Direct,
         );
         log.create_session(session, "fixture", &configuration, 1)

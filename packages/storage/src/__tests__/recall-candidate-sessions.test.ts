@@ -34,7 +34,7 @@ function makeInput(overrides: Partial<CreateSessionInput> = {}): CreateSessionIn
     cwd: '/tmp/cwd',
     llmConnectionSlug: 'test-connection',
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     name: 'Session',
     labels: [],
     ...overrides,

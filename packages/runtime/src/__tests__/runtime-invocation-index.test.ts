@@ -75,7 +75,7 @@ test('the invocation index returns the same inventory as a rebuild from events a
     const session = await manager.createSession({
       cwd: root,
       llmConnectionSlug: 'fake',
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
 
     for (const turnId of ['turn-1', 'turn-2', 'turn-3']) {

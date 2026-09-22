@@ -27,7 +27,7 @@ import type {
   McpToolSnapshot,
 } from '@maka/core/mcp';
 import type { InteractionFormInput, InteractionFormResult } from '@maka/core/interaction';
-import type { PermissionMode, ToolCategory } from '@maka/core/permission';
+import type { SandboxMode, ToolCategory } from '@maka/core/permission';
 import { REQUEST_COMPOSITION_MAX_TOOL_DESCRIPTION_LENGTH } from '@maka/core/run-composition';
 import { truncateUtf16Safe } from '@maka/core/text-sanitize';
 import type { ExecutionBoundary } from '@maka/core/sandbox-boundary';
@@ -87,7 +87,7 @@ export interface McpToolInvocationContext {
   readonly toolCallId: string;
   readonly cwd: string;
   readonly executionBoundary?: ExecutionBoundary;
-  readonly permissionMode?: PermissionMode;
+  readonly sandboxMode?: SandboxMode;
 }
 
 export interface BuildMcpToolsOptions {
@@ -157,7 +157,7 @@ export function buildMcpToolsWithIdentities(
                     toolCallId: context.toolCallId,
                     cwd: context.cwd,
                     executionBoundary: context.executionBoundary,
-                    permissionMode: context.permissionMode,
+                    sandboxMode: context.sandboxMode,
                   },
                 });
                 return {

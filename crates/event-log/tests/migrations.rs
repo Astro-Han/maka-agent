@@ -92,6 +92,7 @@ async fn initialization_and_reopen_preserve_facts_payloads_and_schema_identity()
     log.append(&outcome).await.unwrap();
     let before = serde_json::to_vec(&log.prefix(10, 16384).await.unwrap()).unwrap();
     let session = log.get_session::<Value>("session").await.unwrap();
+    assert!(log.prepare_transcript("session", 1, 32).await.unwrap());
     log.close().await.unwrap();
     let connection = Connection::open(&path).unwrap();
     let checksums = migration_checksums(&connection);
@@ -104,8 +105,29 @@ async fn initialization_and_reopen_preserve_facts_payloads_and_schema_identity()
             |row| row.get(0),
         )
         .unwrap();
+    // A projection upgrade discards only the derived cache, never accepted work.
+    connection
+        .execute("DELETE FROM _sqlx_migrations WHERE version = 2", [])
+        .unwrap();
     drop(connection);
     let log = EventLog::open(&path).await.unwrap();
+    let cache = Connection::open(&path).unwrap();
+    assert_eq!(
+        cache
+            .query_row("SELECT count(*) FROM transcript_rows", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert!(log.prepare_transcript("session", 1, 32).await.unwrap());
+    assert!(
+        cache
+            .query_row("SELECT count(*) FROM transcript_rows", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap()
+            > 0
+    );
+    drop(cache);
     assert_eq!(
         serde_json::to_vec(&log.prefix(10, 16384).await.unwrap()).unwrap(),
         before

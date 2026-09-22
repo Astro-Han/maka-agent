@@ -52,10 +52,14 @@ describe('resolveCreateSessionRequest', () => {
    * would make this module a second authority over the starting boundary.
    */
   it('leaves an omitted permission choice to the owning runtime', () => {
-    assert.equal(resolve(undefined).permissionMode, undefined);
-    assert.equal(resolve({}).permissionMode, undefined);
-    assert.equal(resolve({ permissionMode: 'bypass' }).permissionMode, 'bypass');
-    assert.equal(resolve({ permissionMode: 'ask' }).permissionMode, 'ask');
+    assert.equal(resolve(undefined).sandboxMode, undefined);
+    assert.equal(resolve({}).sandboxMode, undefined);
+    assert.equal(resolve({ sandboxMode: 'danger-full-access' }).sandboxMode, 'danger-full-access');
+    assert.equal(resolve({ sandboxMode: 'workspace-write' }).sandboxMode, 'workspace-write');
+    assert.equal(resolve({ sandboxMode: 'read-only' }).sandboxMode, 'read-only');
+    assert.equal(resolve(undefined).approvalPolicy, undefined);
+    assert.deepEqual(resolve({ approvalPolicy: { kind: 'never' } }).approvalPolicy, { kind: 'never' });
+    assert.throws(() => resolve({ approvalPolicy: { kind: 'invalid' } }));
   });
 
   it('passes a product mode through verbatim for the Host to expand', () => {
@@ -68,18 +72,8 @@ describe('resolveCreateSessionRequest', () => {
     });
   });
 
-  /**
-   * `explore` is a boundary a mode confers, never one a caller may open a
-   * session at — core names the pickable set `ChatDefaultPermissionMode`.
-   * Without this refusal the seed is only a default: a renderer could ask for
-   * `explore` outright and get it without the Deep Research label, tools or
-   * system prompt that define the mode. `sessions:setPermissionMode` stays the
-   * separate, deliberate path for moving an EXISTING session (the quote
-   * companion relies on it), so the guard belongs on creation only.
-   */
-  it('refuses a directly-requested explore boundary', () => {
-    assert.throws(() => resolve({ permissionMode: 'explore' }), TypeError);
-    assert.throws(() => resolve({ permissionMode: 'nonsense' }), TypeError);
+  it('refuses an unknown execution boundary', () => {
+    assert.throws(() => resolve({ sandboxMode: 'nonsense' }), TypeError);
   });
 
   it('rejects an invalid collaboration or orchestration mode', () => {

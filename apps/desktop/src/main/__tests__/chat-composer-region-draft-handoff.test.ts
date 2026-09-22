@@ -149,6 +149,7 @@ async function mountRegion(): Promise<{
               stopPendingBySession: {},
               respondToSandboxBoundary: () => {},
               respondToClientCapability: () => {},
+              respondToPermissions: () => {},
               respondToUserQuestion: () => {},
               respondToUserForm: () => {},
               stop: () => {},

@@ -195,7 +195,7 @@ async fn skill_publication_and_confirmed_update_work_through_host_without_a_mode
                 );
                 let basis = catalog(&mut peer, &context, "governance").await;
                 let removed = super::skills_plugin::client::request(&mut peer, "user-request", json!({
-                    "workspace":{"workspace":context["workspace"],"permissionMode":"ask","collaborationMode":"agent"},
+                    "workspace":{"workspace":context["workspace"],"sandboxMode":"workspace-write","collaborationMode":"agent"},
                     "request":{"kind":"mutate","expectedRevision":basis["revision"],"grant":grant,
                         "mutation":{"kind":"delete","ref":reference}}
                 })).await;

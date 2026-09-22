@@ -18,7 +18,7 @@
  */
 
 pub use maka_runtime::execution::{
-    BehaviorId, CollaborationMode, PermissionMode, ThinkingLevel, WorkspaceProjection,
+    ApprovalPolicy, BehaviorId, CollaborationMode, SandboxMode, ThinkingLevel, WorkspaceProjection,
     WorkspaceTarget,
 };
 use serde::{Deserialize, Serialize};
@@ -91,7 +91,8 @@ pub struct SessionCatalogProjection {
     pub llm_connection_slug: String,
     pub connection_locked: bool,
     pub model: String,
-    pub permission_mode: PermissionMode,
+    pub sandbox_mode: SandboxMode,
+    pub approval_policy: ApprovalPolicy,
     pub collaboration_mode: CollaborationMode,
     pub orchestration_mode: BehaviorId,
     #[serde(skip_serializing_if = "Option::is_none")]

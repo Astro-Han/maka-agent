@@ -141,7 +141,13 @@ fn accepted_tools_replay_with_distinct_ids_parentage_rejections_and_original_cli
         "dispatch never duplicates the accepted call"
     );
     assert_eq!(calls[0]["id"], tool_message_id("invocation", "first:raw"));
-    assert_eq!(calls[0]["stepId"], messages[1]["id"]);
+    assert_eq!(
+        calls[0]["stepId"],
+        messages
+            .iter()
+            .find(|row| row["type"] == "assistant")
+            .unwrap()["id"]
+    );
     assert_eq!(calls[0]["modelVisibility"], "visible");
     assert_eq!(calls[1]["parentToolCallId"], calls[0]["id"]);
     assert_eq!(calls[1]["parentOperationId"], "first:raw");

@@ -364,7 +364,7 @@ function testHeader(): SessionHeader {
     llmConnectionSlug: 'anthropic-main',
     connectionLocked: true,
     model: 'mock-model',
-    permissionMode: 'explore',
+    sandboxMode: 'read-only',
     schemaVersion: 1,
   };
 }

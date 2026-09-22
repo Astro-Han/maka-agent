@@ -47,7 +47,7 @@ export default async function activate(ctx) {
     /** @type {import('../../../../packages/plugin-sdk/src/host.js').WorkspaceViewInput} */
     const request = {
       workspace: { kind: 'host_path', path: input },
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
       collaborationMode: 'agent',
     };
     if (previous) {

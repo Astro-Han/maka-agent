@@ -73,7 +73,7 @@ function makeSession(input: {
     llmConnectionSlug: input.llmConnectionSlug ?? 'zai-live',
     connectionLocked: false,
     model: 'glm-4.7',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
     ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
     ...(input.lastMessagePreview !== undefined

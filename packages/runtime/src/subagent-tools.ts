@@ -279,7 +279,7 @@ function projectSubagentToolResult(value: unknown): Omit<SubagentToolResult, 'ki
     turnId: raw.turnId,
     ...(raw.runId !== undefined ? { runId: raw.runId } : {}),
     status: raw.status,
-    permissionMode: raw.permissionMode,
+    sandboxMode: raw.sandboxMode,
     summary: raw.summary,
     artifactIds: raw.artifactIds,
     ...(raw.startedAt !== undefined ? { startedAt: raw.startedAt } : {}),

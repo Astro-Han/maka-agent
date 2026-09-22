@@ -117,7 +117,7 @@ export function request(context: ClientContext, target: Target): Call {
       target.kind === 'workspace'
         ? {
             workspace: target.workspace,
-            permissionMode: target.permissionMode,
+            sandboxMode: target.sandboxMode,
             collaborationMode: target.collaborationMode,
           }
         : null;
@@ -130,30 +130,30 @@ export function request(context: ClientContext, target: Target): Call {
 function workspaceRequest(context: ClientContext, target: Target): Call {
   if (target.kind === 'session')
     return context.remote.method<Request, Reply>('request', target.sessionId);
-  const { workspace, permissionMode, collaborationMode } = target;
+  const { workspace, sandboxMode, collaborationMode } = target;
   if (workspace.kind === 'project') {
     const call = context.remote.method<
       {
         projectId: string;
-        permissionMode: ClientWorkspace['permissionMode'];
+        sandboxMode: ClientWorkspace['sandboxMode'];
         collaborationMode: ClientWorkspace['collaborationMode'];
         request: Request;
       },
       Reply
     >('project-request');
     return (request) =>
-      call({ projectId: workspace.projectId, permissionMode, collaborationMode, request });
+      call({ projectId: workspace.projectId, sandboxMode, collaborationMode, request });
   }
   const call = context.remote.method<
     {
       path: string;
-      permissionMode: ClientWorkspace['permissionMode'];
+      sandboxMode: ClientWorkspace['sandboxMode'];
       collaborationMode: ClientWorkspace['collaborationMode'];
       request: Request;
     },
     Reply
   >('path-request');
-  return (request) => call({ path: workspace.path, permissionMode, collaborationMode, request });
+  return (request) => call({ path: workspace.path, sandboxMode, collaborationMode, request });
 }
 export const copy = {
   en: {

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { WorkspaceProjection, WorkspaceTarget } from './workspace.js';
 
 export const SKILL_CATALOG_PAGE_MAX_ITEMS = 128;
@@ -118,7 +118,7 @@ export type SkillCatalogInvocableTarget =
       readonly kind: 'new_session';
       readonly context: SkillCatalogWorkspaceContext;
       readonly collaborationMode: 'agent' | 'plan';
-      readonly permissionMode: PermissionMode;
+      readonly sandboxMode: SandboxMode;
     };
 
 export interface SkillCatalogInvocableItem {

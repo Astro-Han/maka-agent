@@ -19,7 +19,7 @@
 
 use crate::settings::{Preset as SubagentPreset, Profile as SubagentProfile};
 use maka_plugins::execution::{CreateChild, Target as ExecutionTarget};
-use maka_runtime::execution::{ModelBinding, PermissionMode};
+use maka_runtime::execution::{ModelBinding, SandboxMode};
 use serde::Serialize;
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -233,10 +233,10 @@ impl Definitions {
             parent_session_id,
             name,
             target: selected,
-            permission_mode: Some(match (profile, parent.permission_mode) {
-                (Profile::LocalRead, _) | (_, PermissionMode::Explore) => PermissionMode::Explore,
+            sandbox_mode: Some(match (profile, parent.sandbox_mode) {
+                (Profile::LocalRead, _) | (_, SandboxMode::ReadOnly) => SandboxMode::ReadOnly,
                 (Profile::General, permission) => permission,
-                _ => PermissionMode::Ask,
+                _ => SandboxMode::WorkspaceWrite,
             }),
             bound_tools: profile.tools(),
             instructions: profile.instructions(),

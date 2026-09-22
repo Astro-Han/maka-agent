@@ -33,7 +33,7 @@ function input(name: string): CreateSessionInput {
     cwd: '/tmp/cwd',
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask' as const,
+    sandboxMode: 'workspace-write' as const,
     name,
     labels: [],
   };

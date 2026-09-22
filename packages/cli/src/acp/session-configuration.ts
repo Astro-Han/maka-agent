@@ -21,8 +21,8 @@ import type { SessionConfigOption, SetSessionConfigOptionRequest } from '@agentc
 import { COLLABORATION_MODES, type CollaborationMode } from '@maka/core/collaboration';
 import { THINKING_LEVELS, type ThinkingLevel } from '@maka/core/model-thinking';
 import { ORCHESTRATION_MODES, type OrchestrationMode } from '@maka/core/orchestration';
-import type { PermissionMode } from '@maka/core/permission';
-import { CHAT_DEFAULT_PERMISSION_MODES } from '@maka/core/settings';
+import type { SandboxMode } from '@maka/core/permission';
+import { CHAT_DEFAULT_SANDBOX_MODES } from '@maka/core/settings';
 import type {
   SessionCatalogProjection,
   SessionConfigurationPatch,
@@ -35,10 +35,10 @@ interface AcpSessionConfigSpec {
   readonly options: readonly (readonly [string, string])[];
 }
 
-const PERMISSION_NAMES: Readonly<Record<PermissionMode, string>> = {
-  explore: 'Explore',
-  ask: 'Ask',
-  bypass: 'Bypass',
+const PERMISSION_NAMES: Readonly<Record<SandboxMode, string>> = {
+  'read-only': 'Read only',
+  'workspace-write': 'Workspace write',
+  'danger-full-access': 'Full access',
 };
 
 const THINKING_NAMES: Readonly<Record<ThinkingLevel | 'default', string>> = {
@@ -64,10 +64,10 @@ const ORCHESTRATION_NAMES: Readonly<Record<OrchestrationMode, string>> = {
 };
 
 const PERMISSION_SPEC = {
-  id: 'permission_mode',
+  id: 'sandbox_mode',
   name: 'Permission mode',
-  category: '_maka/permission_mode',
-  options: namedOptions(CHAT_DEFAULT_PERMISSION_MODES, PERMISSION_NAMES),
+  category: '_maka/sandbox_mode',
+  options: namedOptions(CHAT_DEFAULT_SANDBOX_MODES, PERMISSION_NAMES),
 } as const satisfies AcpSessionConfigSpec;
 const THINKING_SPEC = {
   id: 'thinking_level',
@@ -100,7 +100,7 @@ export function projectAcpSessionConfigOptions(
   thinkingLevels: readonly ThinkingLevel[],
 ): SessionConfigOption[] {
   return [
-    configOption(PERMISSION_SPEC, session.permissionMode),
+    configOption(PERMISSION_SPEC, session.sandboxMode),
     ...(thinkingLevels.length === 0
       ? []
       : [
@@ -162,8 +162,8 @@ export function createAcpSessionConfigPatch(
 ): SessionConfigurationPatch {
   validateAcpSessionConfigOptionRequest(request);
   switch (request.configId) {
-    case 'permission_mode':
-      return { permissionMode: request.value as SessionConfigurationPatch['permissionMode'] };
+    case 'sandbox_mode':
+      return { sandboxMode: request.value as SessionConfigurationPatch['sandboxMode'] };
     case 'thinking_level':
       return {
         thinkingLevel:

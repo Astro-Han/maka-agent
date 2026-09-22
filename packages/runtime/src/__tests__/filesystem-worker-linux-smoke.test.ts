@@ -79,7 +79,7 @@ describe('Linux filesystem worker smoke', { skip }, () => {
         content: 'export const healthSignal = true;\n',
       },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.equal(await readFile(sourceFile, 'utf8'), 'export const healthSignal = true;\n');
@@ -87,7 +87,7 @@ describe('Linux filesystem worker smoke', { skip }, () => {
     const read = await client.execute({
       operation: { kind: 'read', path: sourceFile },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.deepEqual(read, {
@@ -111,7 +111,7 @@ describe('Linux filesystem worker smoke', { skip }, () => {
         newString: 'healthSignal = "healthy"',
       },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: { dev: String(editMeta.dev), ino: String(editMeta.ino) },
     });
     assert.equal(edit.kind, 'edit');
@@ -125,7 +125,7 @@ describe('Linux filesystem worker smoke', { skip }, () => {
         limit: 20,
       },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.deepEqual(glob, { kind: 'glob', files: ['health.ts'] });
@@ -140,7 +140,7 @@ describe('Linux filesystem worker smoke', { skip }, () => {
         timeoutMs: 10_000,
       },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
     assert.equal(grep.kind, 'grep');
@@ -161,7 +161,7 @@ describe('Linux filesystem worker smoke', { skip }, () => {
         diff: '+created\n',
       },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
 
@@ -177,7 +177,7 @@ describe('Linux filesystem worker smoke', { skip }, () => {
       client.execute({
         operation: { kind: 'write', path: allowedPath, content: 'blocked' },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       isPathDenied,
@@ -186,7 +186,7 @@ describe('Linux filesystem worker smoke', { skip }, () => {
       client.execute({
         operation: { kind: 'write', path: siblingPath, content: 'blocked' },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         executionBoundary,
         expectedIdentity: 'unchecked',
       }),
@@ -205,7 +205,7 @@ describe('Linux filesystem worker smoke', { skip }, () => {
     await client.execute({
       operation: { kind: 'write', path: allowedPath, content: 'outside-ok' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       executionBoundary,
       expectedIdentity: 'unchecked',
     });

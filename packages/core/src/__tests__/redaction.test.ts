@@ -361,6 +361,18 @@ describe('redactSecrets', () => {
 describe('generalizedErrorMessageForLocale', () => {
   test('renders the same classification in each locale and the fallback when none matches', () => {
     const timeout = new Error('request timeout after 30s');
+    assert.equal(
+      generalizedErrorMessageForLocale(
+        new RangeError('timeoutMs must be an integer between 1 and 120000'),
+        'fallback',
+        'en',
+      ),
+      'fallback',
+    );
+    assert.equal(
+      generalizedErrorMessageForLocale(new Error('ETIMEDOUT'), 'fallback', 'en'),
+      'Request timed out',
+    );
     assert.equal(generalizedErrorMessageForLocale(timeout, 'fallback', 'en'), 'Request timed out');
     assert.equal(generalizedErrorMessageForLocale(timeout, 'fallback', 'zh-CN'), '请求超时');
     assert.equal(

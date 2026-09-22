@@ -44,7 +44,7 @@ import {
 import type { ProcessLifetimeOwner } from '@maka/storage/process-lifetime-owner';
 
 import type { OrchestrationMode } from '@maka/core/orchestration';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 
 import { mergeShellRunUpdate } from '@maka/core/shell-run-result';
 import { isActiveShellRunStatus } from '@maka/core/shell-run';
@@ -143,7 +143,7 @@ export interface RuntimeHostMakaSessionDriverInput {
    * the authority — but a client that shows "the mode the next Session will
    * start in" needs a value before any Session exists.
    */
-  prospectivePermissionMode?: PermissionMode;
+  prospectiveSandboxMode?: SandboxMode;
   orchestrationMode?: OrchestrationMode;
   newId?: () => string;
   now?: () => number;
@@ -209,12 +209,12 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
   // the authority. Refreshed on `/new` because that default can change — and
   // showing the previous Session's mode there is the one direction that can
   // report Auto while the Host creates with full access.
-  #prospectivePermissionMode: PermissionMode | undefined;
+  #prospectiveSandboxMode: SandboxMode | undefined;
   // The user's explicit choice for the Session being created, before it
   // exists. Cleared by `startNewSession` so a previous Session's elevation
   // cannot leak into a fresh one (#3020).
-  #permissionMode: PermissionMode | undefined;
-  #activeBoundaryDisplayMode: PermissionMode | undefined;
+  #sandboxMode: SandboxMode | undefined;
+  #activeBoundaryDisplayMode: SandboxMode | undefined;
   #orchestrationMode: OrchestrationMode;
   #channel: RuntimeHostSessionChannel | undefined;
   #hiddenTranscriptThroughTurnId: string | undefined;
@@ -281,7 +281,7 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
     this.#model = input.model;
     this.#llmConnectionId = input.llmConnectionId;
     this.#llmConnectionSlug = input.llmConnectionSlug;
-    this.#prospectivePermissionMode = input.prospectivePermissionMode;
+    this.#prospectiveSandboxMode = input.prospectiveSandboxMode;
     this.#orchestrationMode = input.orchestrationMode ?? 'default';
   }
 
@@ -306,7 +306,7 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
     // An omitted mode stays omitted: the Host applies its configured default.
     // Substituting a literal `ask` here would make the CLI a second authority
     // over the starting boundary and silently override that default.
-    this.#permissionMode = input.permissionMode;
+    this.#sandboxMode = input.sandboxMode;
     const session = await this.#createSession(input.name ?? DEFAULT_SESSION_NAME);
     return projectSessionCatalogSummary(session);
   }
@@ -668,21 +668,21 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
     this.#thinkingLevel = level;
   }
 
-  setPermissionMode(mode: PermissionMode): Promise<void> {
-    return this.#admit(() => this.#setPermissionMode(mode));
+  setSandboxMode(mode: SandboxMode): Promise<void> {
+    return this.#admit(() => this.#setSandboxMode(mode));
   }
 
-  async #setPermissionMode(mode: PermissionMode): Promise<void> {
+  async #setSandboxMode(mode: SandboxMode): Promise<void> {
     if (this.#sessionId) {
-      const session = await this.#updateConfiguration(this.#sessionId, { permissionMode: mode });
-      this.#permissionMode = session.permissionMode;
+      const session = await this.#updateConfiguration(this.#sessionId, { sandboxMode: mode });
+      this.#sandboxMode = session.sandboxMode;
       const boundary = await this.#request('session.execution_boundary.query', {
         sessionId: this.#sessionId,
       });
       this.#activeBoundaryDisplayMode = executionBoundaryDisplayMode(boundary);
       return;
     }
-    this.#permissionMode = mode;
+    this.#sandboxMode = mode;
   }
 
   setOrchestrationMode(mode: OrchestrationMode): Promise<void> {
@@ -1042,11 +1042,11 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
     // A fresh Session carries no client claim on its mode: leaving a previous
     // Session's elevation here would both misreport the mode and create the
     // next Session with it (#3020). Full access stays an explicit per-session
-    // opt-in; `setPermissionMode` can still raise it before the first prompt
+    // opt-in; `setSandboxMode` can still raise it before the first prompt
     // creates the Session.
-    this.#permissionMode = undefined;
+    this.#sandboxMode = undefined;
     this.#activeBoundaryDisplayMode = undefined;
-    void this.#refreshProspectivePermissionMode();
+    void this.#refreshProspectiveSandboxMode();
     void this.#replaceChannel(undefined);
   }
 
@@ -1217,10 +1217,8 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
     return this.#orchestrationMode;
   }
 
-  getPermissionMode(): PermissionMode | undefined {
-    return (
-      this.#activeBoundaryDisplayMode ?? this.#permissionMode ?? this.#prospectivePermissionMode
-    );
+  getSandboxMode(): SandboxMode | undefined {
+    return this.#activeBoundaryDisplayMode ?? this.#sandboxMode ?? this.#prospectiveSandboxMode;
   }
 
   /**
@@ -1230,10 +1228,10 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
    * field either way, so a failed refresh keeps the last authoritative reading
    * rather than inventing one.
    */
-  async #refreshProspectivePermissionMode(): Promise<void> {
+  async #refreshProspectiveSandboxMode(): Promise<void> {
     try {
       const policy = await this.#request('runtime.policy.query', {});
-      this.#prospectivePermissionMode = policy.policy.chatDefaults.permissionMode;
+      this.#prospectiveSandboxMode = policy.policy.chatDefaults.sandboxMode;
     } catch {
       // Keep the previous reading.
     }
@@ -1305,7 +1303,7 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
         connectionSlug: this.#llmConnectionSlug,
         model: this.#model,
       },
-      ...(this.#permissionMode === undefined ? {} : { permissionMode: this.#permissionMode }),
+      ...(this.#sandboxMode === undefined ? {} : { sandboxMode: this.#sandboxMode }),
       ...(this.#orchestrationMode === 'default'
         ? {}
         : { orchestrationMode: this.#orchestrationMode }),
@@ -1367,7 +1365,7 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
         model: string;
       };
       thinkingLevel?: ThinkingLevel | null;
-      permissionMode?: PermissionMode;
+      sandboxMode?: SandboxMode;
       orchestrationMode?: OrchestrationMode;
     },
   ): Promise<SessionCatalogProjection> {
@@ -1389,7 +1387,7 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
     this.#llmConnectionId = session.llmConnectionId ?? undefined;
     this.#llmConnectionSlug = session.llmConnectionSlug;
     this.#thinkingLevel = session.thinkingLevel;
-    this.#permissionMode = session.permissionMode;
+    this.#sandboxMode = session.sandboxMode;
     this.#orchestrationMode = session.orchestrationMode;
   }
 
@@ -1749,7 +1747,7 @@ function workspaceTargetForCreate(
 
 interface LoadedSessionConfiguration {
   session: SessionCatalogProjection;
-  boundaryDisplayMode: PermissionMode | undefined;
+  boundaryDisplayMode: SandboxMode | undefined;
 }
 
 function sideConversationParentStatus(

@@ -267,7 +267,7 @@
 }
 
 /* Quiet footer: ＋ and permission are both ghost icon buttons. */
-.maka-composer-left-controls .permissionModeIcon,
+.maka-composer-left-controls .sandboxModeIcon,
 .maka-composer-left-controls .maka-composer-plus-menu {
   display: inline-flex;
   align-items: center;

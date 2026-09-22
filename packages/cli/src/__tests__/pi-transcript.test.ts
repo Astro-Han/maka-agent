@@ -412,7 +412,7 @@ describe('Maka Pi TUI transcript', () => {
       renderMakaPiStatusLine(
         {
           ...meta(),
-          permissionMode: 'bypass',
+          sandboxMode: 'danger-full-access',
           modelContextWindow: 500_000,
           usage: {
             costUsd: 9.99,
@@ -451,7 +451,7 @@ describe('Maka Pi TUI transcript', () => {
   test('status line compacts every critical segment before the narrow-width fallback (#3421)', () => {
     const metadata = {
       ...meta(),
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access' as const,
       model: 'anthropic/claude-opus-4-1-very-long',
       modelContextWindow: 500_000,
       usage: {
@@ -2091,7 +2091,7 @@ describe('Maka Pi TUI transcript', () => {
         cwd: '/tmp/project',
         model: 'test',
         connectionSlug: 'test',
-        permissionMode: 'auto',
+        sandboxMode: 'workspace-write',
       },
       100,
     ).map(stripAnsi);
@@ -5021,7 +5021,7 @@ function meta() {
     cwd: '/tmp/project',
     model: 'deepseek-v4-flash',
     connectionSlug: 'deepseek',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   } as const;
 }
 
@@ -5269,7 +5269,7 @@ function subagentResult(
     agentName: 'Local Read',
     turnId: 'child-turn',
     status: 'completed',
-    permissionMode: 'explore',
+    sandboxMode: 'read-only',
     summary: 'done',
     artifactIds: [],
     ...overrides,

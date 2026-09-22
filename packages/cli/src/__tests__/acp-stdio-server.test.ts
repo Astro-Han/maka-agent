@@ -478,12 +478,12 @@ describe('Maka ACP stdio server', () => {
           committed = sessionProjection({
             id: sessionId,
             revision: 2,
-            permissionMode: 'bypass',
+            sandboxMode: 'danger-full-access',
           });
           external = sessionProjection({
             id: sessionId,
             revision: 3,
-            permissionMode: 'ask',
+            sandboxMode: 'workspace-write',
           });
           return initial;
         }
@@ -499,7 +499,7 @@ describe('Maka ACP stdio server', () => {
           assert.deepEqual(input, {
             sessionId: sessionId!,
             expectedRevision: 1,
-            patch: { permissionMode: 'bypass' },
+            patch: { sandboxMode: 'danger-full-access' },
           });
           return { kind: 'committed', session: committed! };
         }
@@ -571,8 +571,8 @@ describe('Maka ACP stdio server', () => {
 
       send(3, 'session/set_config_option', {
         sessionId: sessionId!,
-        configId: 'permission_mode',
-        value: 'bypass',
+        configId: 'sandbox_mode',
+        value: 'danger-full-access',
       });
       await waitFor(() => catalogReads === 2);
 
@@ -587,14 +587,13 @@ describe('Maka ACP stdio server', () => {
       assert.deepEqual(
         configurationUpdates().map(
           ({ params }) =>
-            params?.update?.configOptions?.find(({ id }) => id === 'permission_mode')?.currentValue,
+            params?.update?.configOptions?.find(({ id }) => id === 'sandbox_mode')?.currentValue,
         ),
-        ['bypass', 'ask'],
+        ['danger-full-access', 'workspace-write'],
       );
       assert.equal(
-        response(3)?.result?.configOptions?.find(({ id }) => id === 'permission_mode')
-          ?.currentValue,
-        'bypass',
+        response(3)?.result?.configOptions?.find(({ id }) => id === 'sandbox_mode')?.currentValue,
+        'danger-full-access',
       );
       assert.equal(sessionReads, 2);
 
@@ -845,7 +844,7 @@ describe('Maka ACP stdio server', () => {
     assert.equal(createdResponse.result?.sessionId, created?.id);
     assert.deepEqual(
       createdResponse.result?.configOptions?.map((option) => (option as { id?: unknown }).id),
-      ['permission_mode', 'thinking_level', 'collaboration_mode', 'orchestration_mode'],
+      ['sandbox_mode', 'thinking_level', 'collaboration_mode', 'orchestration_mode'],
     );
     const configuredResponse = responses.get(3) as {
       result?: {
@@ -1096,7 +1095,8 @@ function sessionProjection(
     llmConnectionSlug: 'default',
     connectionLocked: false,
     model: 'default',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     ...overrides,

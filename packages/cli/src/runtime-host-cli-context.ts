@@ -25,7 +25,7 @@ import type {
   RuntimeHostConnectionCatalogEntry as ConnectionCatalogEntry,
   RuntimeHostConnectionCatalogSnapshot as ConnectionCatalogSnapshot,
 } from '@maka/runtime-host/client';
-import type { ChatDefaultPermissionMode } from '@maka/core/settings';
+import type { ChatDefaultSandboxMode } from '@maka/core/settings';
 import {
   connectOrSpawnRuntimeHost,
   forceTerminateObservedRegisteredRuntimeHost,
@@ -71,7 +71,7 @@ import {
 
 /**
  * The mode a new Session starts in belongs to the Host: `session.create`
- * falls back to `chatDefaults.permissionMode` in the Runtime Policy whenever a
+ * falls back to `chatDefaults.sandboxMode` in the Runtime Policy whenever a
  * client omits the field, so that policy value is the single authority.
  *
  * The CLI reads it rather than assuming Auto, because its pickers and its
@@ -85,10 +85,10 @@ import {
  * full access while the CLI displayed Auto. If the Host's own policy cannot be
  * read, the CLI has nothing true to show and should not start.
  */
-export async function readHostChatDefaultPermissionMode(
+export async function readHostChatDefaultSandboxMode(
   connection: Pick<RuntimeHostConnection, 'request'>,
-): Promise<ChatDefaultPermissionMode> {
-  return (await connection.request('runtime.policy.query', {})).policy.chatDefaults.permissionMode;
+): Promise<ChatDefaultSandboxMode> {
+  return (await connection.request('runtime.policy.query', {})).policy.chatDefaults.sandboxMode;
 }
 
 export interface RuntimeHostCliConnectionOnlyContext {

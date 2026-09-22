@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use crate::{Input, tail::Tail};
+use crate::tail::Tail;
 use serde_json::{Value, json};
 use std::{path::PathBuf, process::ExitStatus};
 
@@ -47,6 +47,11 @@ pub struct Captured {
 }
 
 impl Captured {
+    /// Present the final native evidence using the shell tool's common format.
+    pub fn into_output(self, cwd: PathBuf, command: String) -> Value {
+        render(cwd, command, self)
+    }
+
     pub(crate) fn new(outcome: Outcome, mut stdout: Tail, mut stderr: Tail) -> Self {
         Self {
             outcome,
@@ -58,7 +63,7 @@ impl Captured {
     }
 }
 
-pub(crate) fn render(cwd: PathBuf, input: Input, captured: Captured) -> Value {
+pub(crate) fn render(cwd: PathBuf, command: String, captured: Captured) -> Value {
     #[cfg(windows)]
     let cwd = dunce::simplified(&cwd);
     let (status, code, failure) = match captured.outcome {
@@ -73,7 +78,7 @@ pub(crate) fn render(cwd: PathBuf, input: Input, captured: Captured) -> Value {
             ..
         } => ("cancelled", Some(130), None),
     };
-    let mut result = json!({"kind":"terminal","cwd":cwd,"cmd":input.command,"status":status,
+    let mut result = json!({"kind":"terminal","cwd":cwd,"cmd":command,"status":status,
         "output":{"mode":"pipes","stdout":captured.stdout,"stderr":captured.stderr,
         "stdoutTruncated":captured.stdout_truncated,"stderrTruncated":captured.stderr_truncated,"redacted":false}});
     if let Some(code) = code {

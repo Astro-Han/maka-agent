@@ -17,13 +17,13 @@
  * under the License.
  */
 
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { SessionSummary } from '@maka/core/session';
 
 export interface PendingSessionViewInput {
   sessionId: string;
   name: string;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
 }
 
 /**
@@ -55,6 +55,6 @@ export function pendingSessionView(input: PendingSessionViewInput): SessionSumma
     llmConnectionSlug: '',
     connectionLocked: false,
     model: '',
-    permissionMode: input.permissionMode,
+    sandboxMode: input.sandboxMode,
   };
 }

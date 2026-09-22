@@ -29,7 +29,7 @@ fn projection() -> Value {
         "createdAt":0,"activityAt":1,"name":"New Chat","isFlagged":false,"isArchived":false,
         "labels":[],"labelsTruncated":false,"hasUnread":false,"status":"active","backend":"ai-sdk",
         "llmConnectionId":null,"llmConnectionSlug":"default","connectionLocked":false,"model":"model",
-        "permissionMode":"ask","collaborationMode":"agent","orchestrationMode":"default"
+        "sandboxMode":"workspace-write","approvalPolicy":{"kind":"on-request"},"collaborationMode":"agent","orchestrationMode":"default"
     })
 }
 #[test]
@@ -44,7 +44,7 @@ fn create_accepts_wire_options_without_materializing_defaults() {
     }
     let decoded = decode_session_create_input(&create()).unwrap();
     assert_eq!(decoded.name, None);
-    assert_eq!(decoded.permission_mode, None);
+    assert_eq!(decoded.sandbox_mode, None);
     assert!(
         !serde_json::to_value(decoded)
             .unwrap()
@@ -68,7 +68,7 @@ fn create_accepts_wire_options_without_materializing_defaults() {
     value["modelTarget"] =
         json!({"kind":"explicit","connectionId":"c1","connectionSlug":" x ","model":"m"});
     value["mode"] = json!("deep_research");
-    value["permissionMode"] = json!("explore");
+    value["sandboxMode"] = json!("read-only");
     value["labels"] = json!(["mode:deep_research"]);
     assert!(decode_session_create_input(&value).is_ok());
 }
@@ -103,7 +103,7 @@ fn create_rejects_unknown_null_invalid_ids_and_invalid_text() {
         "labels",
         "thinkingLevel",
         "toolProfile",
-        "permissionMode",
+        "sandboxMode",
         "collaborationMode",
         "orchestrationMode",
     ] {

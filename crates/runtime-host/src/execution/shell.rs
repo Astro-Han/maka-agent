@@ -23,16 +23,16 @@ use crate::shell::{ShellError, ShellResources};
 pub(super) use control::{STOP_NAME, stop_schema};
 use maka_event_log::EventLog;
 use maka_presentation::shell::{RESOURCE_REF_PREFIX, local_update};
-use maka_process::{SHELL_NAME, ShellExecutor};
+use maka_process::{PipeEvent, SHELL_NAME, ShellExecutor};
 use maka_runtime::{
     shell_run::{ShellOutput, ShellPatch, ShellRun, ShellState, ShellVisibility},
     terminal::{TerminalScreen, TerminalSize},
     tool_output::ToolSuccess,
-    tools::{ToolError, ToolExecutor},
+    tools::ToolError,
 };
 use maka_tools::{PreparationFuture, PreparedEffect, ToolCallContext, ToolPreparer};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -56,6 +56,11 @@ struct Input {
     /// Allocate a terminal; requires run_in_background=true.
     #[serde(default)]
     pty: bool,
+    /// Request additional filesystem or network access before this command.
+    /// On Linux/Windows, request an existing parent directory when creating a new path.
+    additional_permissions: Option<maka_sandbox::grant::Permissions>,
+    /// Explain why the additional access is necessary. Required with additional_permissions.
+    justification: Option<String>,
 }
 
 #[derive(Clone)]
@@ -64,6 +69,9 @@ pub(super) struct SessionShell {
     resources: Arc<ShellResources>,
     log: Arc<EventLog>,
     controllers: crate::controllers::Controllers,
+    interactions: Arc<crate::server::interactions::Interactions>,
+    ceiling: maka_sandbox::Sandbox,
+    revision: u64,
 }
 
 impl SessionShell {
@@ -72,12 +80,18 @@ impl SessionShell {
         resources: Arc<ShellResources>,
         log: Arc<EventLog>,
         controllers: crate::controllers::Controllers,
+        interactions: Arc<crate::server::interactions::Interactions>,
+        ceiling: maka_sandbox::Sandbox,
+        revision: u64,
     ) -> Self {
         Self {
             executor,
             resources,
             log,
             controllers,
+            interactions,
+            ceiling,
+            revision,
         }
     }
 }
@@ -92,10 +106,15 @@ impl ToolPreparer for SessionShell {
         name: String,
         input: Value,
         context: ToolCallContext,
-        _cancellation: CancellationToken,
+        cancellation: CancellationToken,
     ) -> PreparationFuture {
-        let shell = self.clone();
+        let mut shell = self.clone();
         Box::pin(async move {
+            let revision = if name == SHELL_NAME {
+                Some(shell.authorize(&input, &context, &cancellation).await?)
+            } else {
+                None
+            };
             let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
                 Box::pin(async move {
                     cancelled(&cancellation)?;
@@ -108,6 +127,7 @@ impl ToolPreparer for SessionShell {
                         executor,
                         resources,
                         log,
+                        interactions,
                         ..
                     } = shell;
                     if name == STOP_NAME {
@@ -124,27 +144,61 @@ impl ToolPreparer for SessionShell {
                         return Err(failed("unsupported shell tool"));
                     }
                     let input: Input = serde_json::from_value(input).map_err(failed)?;
-                    if input.pty && !input.run_in_background {
-                        return Err(failed("PTY mode requires run_in_background=true"));
+                    let source = input.command.clone();
+                    let terminal = input.pty;
+                    let compiler = executor.clone();
+                    let command = tokio::task::spawn_blocking(move || {
+                        if terminal {
+                            compiler.command_pty(&source)
+                        } else {
+                            compiler.command_pipes(&source)
+                        }
+                    })
+                    .await
+                    .map_err(failed)??;
+                    let admission = tokio::select! {
+                        biased;
+                        _ = cancellation.cancelled() => return Err(failed("Shell operation cancelled")),
+                        admission = interactions.own_admission() => admission,
+                    };
+                    let current = log
+                        .get_session::<crate::session::SessionConfiguration>(
+                            &context.invocation.session_id,
+                        )
+                        .await
+                        .map_err(persistence)?;
+                    cancelled(&cancellation)?;
+                    if !current.is_some_and(|record| {
+                        !record.archived && Some(record.configuration.boundary_revision) == revision
+                    }) {
+                        return Err(failed(
+                            "Session permissions changed before command admission",
+                        ));
                     }
                     if !input.run_in_background {
-                        let mut args = json!({"command":input.command});
-                        if let Some(timeout) = input.timeout_ms {
-                            args["timeout_ms"] = json!(timeout);
-                        }
-                        return executor
-                            .invoke(name, args, cancellation)
-                            .await
-                            .map(ToolSuccess::from);
+                        let mut process = command
+                            .observe(Some(input.timeout_ms.unwrap_or(120_000)), cancellation)?;
+                        let mut admission = Some(admission);
+                        let mut events_open = true;
+                        let captured = loop {
+                            tokio::select! {
+                                biased;
+                                event = process.events.recv(), if events_open => match event {
+                                    Some(PipeEvent::Started) => { admission.take(); }
+                                    Some(PipeEvent::Output { .. }) => {}
+                                    None => events_open = false,
+                                },
+                                result = &mut process.completion => break result?,
+                            }
+                        };
+                        return Ok(captured
+                            .into_output(executor.cwd().to_owned(), input.command)
+                            .into());
                     }
                     // The native prepared process validates the command before admission.
                     // Only this Host-issued context determines durable source identity.
                     let at = now()?;
                     let size = TerminalSize::new(80, 24).unwrap();
-                    let pty = input
-                        .pty
-                        .then(|| executor.command_pty(&input.command))
-                        .transpose()?;
                     let record = ShellRun {
                         id: uuid::Uuid::new_v4().to_string(),
                         session_id: context.invocation.session_id.clone(),
@@ -152,6 +206,11 @@ impl ToolPreparer for SessionShell {
                         source_turn_id: context.invocation.turn_id.clone(),
                         source_tool_call_id: context.tool_use_id(),
                         visibility: ShellVisibility::Model,
+                        permissions: maka_runtime::shell_run::ShellPermissions {
+                            boundary_revision: revision
+                                .expect("Shell authorization captured revision"),
+                            sandbox: executor.sandbox().clone(),
+                        },
                         cwd: executor.cwd().to_str().expect("validated shell cwd").into(),
                         command: input.command,
                         started_at: at,
@@ -173,9 +232,9 @@ impl ToolPreparer for SessionShell {
                             }
                         },
                     };
-                    let mut handle = match pty {
-                        Some(command) => resources.start_pty(record, command, size),
-                        None => resources.start_pipes(record, executor),
+                    let mut handle = match input.pty {
+                        true => resources.start_pty(record, command, size),
+                        false => resources.start_pipes(record, command),
                     }
                     .map_err(failed)?;
                     // Once accepted, never abandon native startup/cleanup. Cancellation
@@ -188,6 +247,7 @@ impl ToolPreparer for SessionShell {
                         }
                         ready = handle.ready() => ready.map_err(worker_error)?,
                     };
+                    drop(admission);
                     let record = if cancellation.is_cancelled() {
                         handle.stop();
                         handle.finished().await.map_err(worker_error)?
@@ -200,6 +260,123 @@ impl ToolPreparer for SessionShell {
             });
             Ok(effect)
         })
+    }
+}
+
+impl SessionShell {
+    async fn authorize(
+        &mut self,
+        input: &Value,
+        context: &ToolCallContext,
+        cancellation: &CancellationToken,
+    ) -> Result<u64, maka_runtime::tool_call::ToolRejection> {
+        use maka_runtime::{
+            interaction::{PermissionCommand, PermissionRequest},
+            tool_call::ToolRejection,
+        };
+        let invalid = |error: String| ToolRejection::InvalidInput { message: error };
+        let failed = |error: String| ToolRejection::PreparationFailed { message: error };
+        let mut input: Input =
+            serde_json::from_value(input.clone()).map_err(|error| invalid(error.to_string()))?;
+        maka_process::validate_command(&input.command)
+            .map_err(|error| invalid(error.to_string()))?;
+        if input.pty && !input.run_in_background {
+            return Err(invalid("PTY mode requires run_in_background=true".into()));
+        }
+        if input.timeout_ms.is_some_and(|value| {
+            value == 0
+                || value
+                    > if input.run_in_background {
+                        86_400_000
+                    } else {
+                        600_000
+                    }
+        }) {
+            return Err(invalid(
+                "Shell timeout must be 1..=600000 ms for foreground or 1..=86400000 ms for background".into(),
+            ));
+        }
+        if input.additional_permissions.is_some() != input.justification.is_some() {
+            return Err(invalid(
+                "additional_permissions and justification must be supplied together".into(),
+            ));
+        }
+        if cancellation.is_cancelled() {
+            return Err(ToolRejection::Cancelled);
+        }
+        if let Some(permissions) = input.additional_permissions.take() {
+            input.additional_permissions = Some(
+                tokio::task::spawn_blocking(move || super::permissions::materialize(permissions))
+                    .await
+                    .map_err(|error| failed(error.to_string()))?
+                    .map_err(|error| invalid(error.to_string()))?,
+            );
+        }
+        if let Some(permissions) = &input.additional_permissions
+            && !self
+                .ceiling
+                .permits(permissions)
+                .map_err(|error| invalid(error.to_string()))?
+        {
+            return Err(ToolRejection::PolicyDenied {
+                message: "The requested access includes Host-protected resources".into(),
+            });
+        }
+        let current = self
+            .log
+            .get_session::<crate::session::SessionConfiguration>(&context.invocation.session_id)
+            .await
+            .map_err(|error| failed(error.to_string()))?
+            .filter(|record| !record.archived)
+            .ok_or_else(|| failed("Session permissions are unavailable".into()))?;
+        let revision = current.configuration.boundary_revision;
+        if revision != self.revision {
+            return Err(ToolRejection::PolicyDenied {
+                message:
+                    "Session permissions changed during command preparation; retry the command"
+                        .into(),
+            });
+        }
+        let grants = self
+            .log
+            .permission_grants(&context.invocation, Some(&context.tool_use_id()), revision)
+            .await
+            .map_err(|error| failed(error.to_string()))?;
+        let mut sandbox = self.executor.sandbox().clone();
+        for grant in grants {
+            sandbox = sandbox
+                .with_grant(&grant.permissions, &self.ceiling)
+                .map_err(|error| failed(error.to_string()))?;
+        }
+        if let Some(permissions) = input.additional_permissions
+            && !sandbox
+                .permits(&permissions)
+                .map_err(|error| invalid(error.to_string()))?
+        {
+            let request = PermissionRequest {
+                reason: input.justification.expect("validated justification"),
+                command: Some(PermissionCommand {
+                    command: input.command,
+                    cwd: self.executor.cwd().to_str().expect("validated cwd").into(),
+                }),
+                permissions,
+            };
+            let grant = self
+                .interactions
+                .request_permissions(
+                    &context.invocation,
+                    Some(&context.tool_use_id()),
+                    request,
+                    revision,
+                    cancellation,
+                )
+                .await?;
+            sandbox = sandbox
+                .with_grant(&grant.permissions, &self.ceiling)
+                .map_err(|error| failed(error.to_string()))?;
+        }
+        self.executor = self.executor.with_sandbox(sandbox);
+        Ok(revision)
     }
 }
 

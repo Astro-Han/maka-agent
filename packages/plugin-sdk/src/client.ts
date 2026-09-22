@@ -79,6 +79,7 @@ export interface ClientSlots {
   'session.composer.before': {
     /** Invalidation hint only; Host still resolves the authoritative Session. */
     readonly contextRevision?: number;
+    /** Canonical Session ID on this plugin's Host, never a client projection key. */
     readonly sessionId: string;
     readonly locale: 'en' | 'zh-CN' | 'zh-TW';
     /** Canonical Session ID from this plugin's Host, not a Desktop projection key. */
@@ -116,7 +117,7 @@ export class RemoteError extends Error {
 /** A proposed workspace, not a resolved path or execution permission. */
 export interface ClientWorkspace {
   readonly workspace: { kind: 'project'; projectId: string } | { kind: 'host_path'; path: string };
-  readonly permissionMode: 'explore' | 'ask' | 'bypass';
+  readonly sandboxMode: import('./execution.js').SandboxMode;
   readonly collaborationMode: 'agent' | 'plan';
 }
 

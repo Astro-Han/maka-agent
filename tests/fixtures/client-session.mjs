@@ -34,7 +34,7 @@ export async function verifySessionWorkflow(connection, workspace, reopened, con
     workspace: { kind: 'host_path', path: workspace },
     modelTarget: { kind: 'default' },
     name: 'Rust  会话',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   };
   const pluginSessionId = 'unavailable-executor-session';
   await assert.rejects(

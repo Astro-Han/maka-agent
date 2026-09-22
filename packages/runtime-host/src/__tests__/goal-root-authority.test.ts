@@ -559,7 +559,7 @@ async function createFixture(options: { recoverAdmissions?: boolean } = {}): Pro
     llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   });
   const admission = new SessionAdmissionGate();
   const rootAdmissions = new RootAdmissionOwner(stores.agentRunStore);

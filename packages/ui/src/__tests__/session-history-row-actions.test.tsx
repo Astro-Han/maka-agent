@@ -60,7 +60,7 @@ const session: SessionSummary = {
   llmConnectionSlug: 'test-connection',
   connectionLocked: true,
   model: 'test-model',
-  permissionMode: 'ask',
+  sandboxMode: 'workspace-write',
 };
 
 const rowActions: SessionRowActions = {

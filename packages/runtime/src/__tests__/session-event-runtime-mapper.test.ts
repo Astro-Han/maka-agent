@@ -498,7 +498,7 @@ const PROJECTION_SAMPLES: ProjectionSamples = {
         agentName: 'Local Read',
         turnId: 'child-turn',
         status: 'running',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
       },
     },
   },

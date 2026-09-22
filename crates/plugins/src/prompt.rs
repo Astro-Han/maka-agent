@@ -128,6 +128,7 @@ pub async fn resolve(
     captured: Option<&Captured>,
     base: Option<&str>,
     request: Request,
+    workspace: Option<&crate::filesystem::ReadRoot>,
 ) -> Result<Resolved, Error> {
     let mut result = Resolved {
         system: base.map(str::to_owned),
@@ -152,12 +153,11 @@ pub async fn resolve(
     }
     // One deadline bounds the entire assembly, not 128 sequential timeouts.
     let assembly = async {
-        let workspace = crate::filesystem::ReadRoot::open(request.target.cwd())
-            .await
-            .map_err(|error| Error::Invalid(error.to_string()))?;
+        let workspace = workspace
+            .ok_or_else(|| Error::Invalid("prompt workspace capability is unavailable".into()))?;
         let mut values = BTreeMap::new();
         for (name, entry) in variables {
-            let text = evaluate(&entry.value.0, &entry, &request, &workspace).await?;
+            let text = evaluate(&entry.value.0, &entry, &request, workspace).await?;
             result
                 .sources
                 .push(source(&entry, SourceKind::PromptVariable, &name, &text)?);
@@ -176,7 +176,7 @@ pub async fn resolve(
             .iter()
             .filter(|(_, entry)| entry.value.mode == SectionMode::Complete)
         {
-            let text = evaluate(&entry.value.text, entry, &request, &workspace).await?;
+            let text = evaluate(&entry.value.text, entry, &request, workspace).await?;
             let text = text
                 .map(|text| entry.value.format.render(&text, &values))
                 .transpose()?;
@@ -198,7 +198,7 @@ pub async fn resolve(
                 .into_iter()
                 .filter(|(_, entry)| entry.value.mode == SectionMode::Append)
             {
-                let text = evaluate(&entry.value.text, &entry, &request, &workspace).await?;
+                let text = evaluate(&entry.value.text, &entry, &request, workspace).await?;
                 let text = text
                     .map(|text| entry.value.format.render(&text, &values))
                     .transpose()?;
@@ -216,7 +216,7 @@ pub async fn resolve(
         ordered.sort_by(|a, b| (&a.1.value.order, &a.0).cmp(&(&b.1.value.order, &b.0)));
         let mut total = 0usize;
         for (name, entry) in ordered {
-            let text = evaluate(&entry.value.text, &entry, &request, &workspace)
+            let text = evaluate(&entry.value.text, &entry, &request, workspace)
                 .await?
                 .unwrap_or_default();
             let text = entry.value.format.render(&text, &values)?;
@@ -366,15 +366,22 @@ mod tests {
                 .unwrap();
             let registration = catalog.register(&owner.context(), staged).unwrap();
             let captured = catalog.capture(&Scope::Profile);
-            let unused = resolve(Some(&captured), Some("base"), request.clone())
-                .await
-                .unwrap();
+            let workspace = crate::filesystem::ReadRoot::capture(".").unwrap();
+            let unused = resolve(
+                Some(&captured),
+                Some("base"),
+                request.clone(),
+                Some(&workspace),
+            )
+            .await
+            .unwrap();
             assert_eq!(unused.system.as_deref(), Some("base"));
             revisions.push(unused.sources[0].revision.clone());
             let literal = resolve(
                 Some(&captured),
                 Some("before{{optional}}after"),
                 request.clone(),
+                Some(&workspace),
             )
             .await
             .unwrap();
@@ -393,7 +400,7 @@ mod tests {
                 .unwrap();
             let template = catalog.register(&owner.context(), template).unwrap();
             let captured = catalog.capture(&Scope::Profile);
-            let rendered = resolve(Some(&captured), None, request.clone()).await;
+            let rendered = resolve(Some(&captured), None, request.clone(), Some(&workspace)).await;
             if missing {
                 assert!(
                     matches!(rendered, Err(Error::Invalid(message)) if message.contains("has no value"))
@@ -459,10 +466,12 @@ mod tests {
                 .unwrap();
             let registration = catalog.register(&owner.context(), staged).unwrap();
             let captured = catalog.capture(&Scope::Session("session".into()));
+            let workspace = crate::filesystem::ReadRoot::capture(".").unwrap();
             let result = resolve(
                 Some(&captured),
                 Some("execution constraints"),
                 request.clone(),
+                Some(&workspace),
             )
             .await;
             if active == 2 {

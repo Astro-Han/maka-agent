@@ -18,7 +18,7 @@
  */
 
 use super::support::client_probe::ClientFixture;
-use maka_runtime::execution::{PermissionMode, ToolMode};
+use maka_runtime::execution::{SandboxMode, ToolMode};
 use maka_runtime_host::session::SessionConfiguration;
 use serde_json::Value;
 
@@ -64,7 +64,7 @@ async fn tool_mode_is_frozen_at_creation_and_survives_host_reopen() {
         for (index, (id, _)) in sessions.iter().enumerate() {
             if !reopened && index > 0 {
                 let result = peer.rpc("runtime.policy.mutate", json!({"expectedRevision":index-1,
-                    "operation":{"kind":"set_chat_defaults","value":{"permissionMode":"ask","codeModeEnabled":index == 1}}})).await;
+                    "operation":{"kind":"set_chat_defaults","value":{"sandboxMode":"workspace-write","codeModeEnabled":index == 1}}})).await;
                 assert_eq!(result["result"]["kind"], "committed", "{result}");
             }
             let result = peer.rpc("session.create", create(id)).await;
@@ -155,16 +155,16 @@ async fn original_client_settings_cas_preserves_session_defaults_and_exact_reope
     assert!(log.prefix(8, 4096).await.unwrap().events.is_empty());
     let mut records = Vec::new();
     for (id, permission) in [
-        ("runtime-policy-old", PermissionMode::Ask),
-        ("runtime-policy-inherited", PermissionMode::Bypass),
-        ("runtime-policy-explicit", PermissionMode::Ask),
+        ("runtime-policy-old", SandboxMode::WorkspaceWrite),
+        ("runtime-policy-inherited", SandboxMode::DangerFullAccess),
+        ("runtime-policy-explicit", SandboxMode::WorkspaceWrite),
     ] {
         let record = log
             .get_session::<SessionConfiguration>(id)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(record.configuration.permission_mode, permission);
+        assert_eq!(record.configuration.sandbox_mode, permission);
         assert_eq!(
             record.configuration.tool_mode,
             if id == "runtime-policy-old" {

@@ -277,12 +277,12 @@ export function createBotIncomingMainService(deps: BotIncomingMainServiceDeps): 
       } else {
         let rebound = false;
         try {
-          const permissionModeOk = await ensureBotSessionExploreMode(
+          const sandboxModeOk = await ensureBotSessionExploreMode(
             sessionId,
             message,
             SYSTEM_NOTICE_TTL_MS,
           );
-          if (!permissionModeOk) return;
+          if (!sandboxModeOk) return;
         } catch (error) {
           if (!isBotSessionUnavailableError(error)) throw error;
           invalidateSessionBindings(sessionId);

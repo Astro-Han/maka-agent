@@ -315,7 +315,7 @@ test('production Host executes Bash against the current live sandbox boundary', 
       llmConnectionId: connection.connectionId,
       llmConnectionSlug: 'hosted-managed-bash-provider',
       model: MODEL_ID,
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const initialBoundary = await execution.sessionStore.readExecutionBoundary(session.id);
     assert.equal(initialBoundary.kind, 'managed');
@@ -608,7 +608,7 @@ async function runPermissionUpdateHostRegression(
       llmConnectionId: modelConnection.connectionId,
       llmConnectionSlug: `permission-${scenarioSlug}-provider`,
       model: MODEL_ID,
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
     });
     composition = await createExecutionRuntimeHostComposition({
       owner,
@@ -777,7 +777,7 @@ async function runPermissionUpdateHostRegression(
       );
       assert.ok(activeGoalRun, 'Goal continuation did not hold an active Run');
       if (!activeGoalRun) return;
-      assert.equal(activeGoalRun.opening.configuration.permissionMode, 'explore');
+      assert.equal(activeGoalRun.opening.configuration.sandboxMode, 'explore');
       exercisedRunId = activeGoalRun.runId;
 
       await commitBypassPermissionUpdate(composition, execution, session.id, context);
@@ -785,7 +785,7 @@ async function runPermissionUpdateHostRegression(
       await waitForGoalStatus(composition, session.id, 'achieved', context);
     }
 
-    assert.equal((await execution.sessionStore.readHeader(session.id)).permissionMode, 'bypass');
+    assert.equal((await execution.sessionStore.readHeader(session.id)).sandboxMode, 'bypass');
     assert.equal((await execution.sessionStore.readExecutionBoundary(session.id)).kind, 'bypass');
     assert.equal(admitted, 1);
     assert.equal(calls.length, 1);
@@ -834,7 +834,7 @@ async function commitBypassPermissionUpdate(
     {
       sessionId,
       expectedRevision: current.revision,
-      patch: { permissionMode: 'bypass' },
+      patch: { sandboxMode: 'danger-full-access' },
     },
     context,
   );
@@ -842,7 +842,7 @@ async function commitBypassPermissionUpdate(
   if (!updated.ok) return;
   assert.equal(updated.result.kind, 'committed');
   if (updated.result.kind !== 'committed' || 'kind' in updated.result.session) return;
-  assert.equal(updated.result.session.permissionMode, 'bypass');
+  assert.equal(updated.result.session.sandboxMode, 'bypass');
 }
 
 async function waitForGoalStatus(
@@ -1611,7 +1611,7 @@ test('Codex OAuth history compaction falls back to a text checkpoint after nativ
             },
             configuration: {
               cwd: '/workspace',
-              permissionMode: 'bypass',
+              sandboxMode: 'danger-full-access',
               collaborationMode: 'agent',
               orchestrationMode: 'default',
               orchestrationSource: 'session',
@@ -1637,7 +1637,7 @@ test('Codex OAuth history compaction falls back to a text checkpoint after nativ
             },
             configuration: {
               cwd: '/workspace',
-              permissionMode: 'bypass',
+              sandboxMode: 'danger-full-access',
               collaborationMode: 'agent',
               orchestrationMode: 'default',
               orchestrationSource: 'session',
@@ -2560,7 +2560,7 @@ test('hosted execution freezes the headless coding provider wire contract', asyn
             connectionSlug: 'profile-deepseek',
             model: 'deepseek-v4-flash',
           },
-          permissionMode: 'bypass',
+          sandboxMode: 'danger-full-access',
           collaborationMode: 'agent',
           orchestrationMode: 'default',
           toolProfile: 'headless-coding-v1',
@@ -2757,7 +2757,7 @@ test('production Host executes a canonical ai-sdk Session against a real provide
       llmConnectionId: connection.connectionId,
       llmConnectionSlug: 'hosted-real-provider',
       model: MODEL_ID,
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const sessionTodo = await openInteractiveSessionTodoStoreForWrite(owner.lease);
     await sessionTodo.replaceAll(session.id, [
@@ -3069,7 +3069,7 @@ test('production Host executes and durably supervises an Agent Graph over a real
       llmConnectionId: connection.connectionId,
       llmConnectionSlug: 'hosted-graph-provider',
       model: MODEL_ID,
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
     composition = await createExecutionRuntimeHostComposition({
       owner,
@@ -3317,7 +3317,7 @@ test('production Host executes a durable runnable child with an exact tool ceili
       llmConnectionId: connection.connectionId,
       llmConnectionSlug: 'hosted-child-provider',
       model: MODEL_ID,
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
     composition = await createExecutionRuntimeHostComposition({
       owner,
@@ -3512,7 +3512,7 @@ test('production Host publishes and retires an implementation child patch', asyn
       llmConnectionId: connection.connectionId,
       llmConnectionSlug: 'hosted-child-provider',
       model: MODEL_ID,
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
     composition = await createExecutionRuntimeHostComposition({
       owner,
@@ -3594,7 +3594,7 @@ test('production Host publishes and retires an implementation child patch', asyn
     if (!child) return;
     // The persisted header is a configuration projection, not execution
     // authority, and may be narrower than the inherited live boundary.
-    assert.notEqual(child.permissionMode, 'bypass');
+    assert.notEqual(child.sandboxMode, 'bypass');
     const childBoundary = await execution.sessionStore.readExecutionBoundary(child.id);
     assert.equal(childBoundary.kind, 'bypass');
     assert.ok(child.subagentWorkspace);
@@ -3757,7 +3757,7 @@ test('Host auxiliary calls preserve resolved DeepSeek reasoning settings', async
       llmConnectionSlug: 'deepseek-auxiliary',
       model: 'deepseek-v4-flash',
       thinkingLevel: 'high',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const effects = createHostSessionEffectModel({
       runtimePolicy: policy,
@@ -3825,7 +3825,7 @@ test('WorkHub routing reuses the saved Session model and calls Intent before bou
       llmConnectionSlug: connection.slug,
       model: 'deepseek-v4-flash',
       thinkingLevel: 'high',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const model = createHostWorkHubRoutingModel({
       runtimePolicy: policy,
@@ -3930,7 +3930,7 @@ test('Host auxiliary models meter provider usage and abort physical requests', {
       llmConnectionId: connection.connectionId,
       llmConnectionSlug: 'goal-evaluator-provider',
       model: MODEL_ID,
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const evaluatorInput = {
       runtimePolicy: policy,
@@ -5112,7 +5112,7 @@ function backendCreationFixture(input: {
         llmConnectionSlug: 'backend-creation-connection',
         model: input.modelId ?? MODEL_ID,
         cwd: '/workspace',
-        permissionMode: 'bypass',
+        sandboxMode: 'danger-full-access',
       },
       abortSignal: input.abortSignal,
       ...(input.tools ? { tools: input.tools } : {}),

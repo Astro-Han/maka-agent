@@ -22,7 +22,7 @@ use maka_event_log::{
     EventLog,
     root::{RootNamespaces, RootOwner},
 };
-use maka_protocol::session::PermissionMode;
+use maka_protocol::session::SandboxMode;
 use maka_runtime::configuration::*;
 use maka_runtime_host::server::Host;
 use maka_runtime_host::session::{PreparedSession, SessionModel};
@@ -114,7 +114,7 @@ pub async fn fixture() -> (
             connection_slug: "fixture".into(),
             model: "fixture-model".into(),
         },
-        PermissionMode::Explore,
+        SandboxMode::ReadOnly,
         maka_runtime::execution::ToolMode::Direct,
     );
     log.create_session("session", "fingerprint", &session, 1)

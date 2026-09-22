@@ -54,6 +54,8 @@ import {
   type OperationSpec,
 } from './operation-spec.js';
 import { RUNTIME_POLICY_OPERATION_SPECS } from './runtime-policy.js';
+import { SANDBOX_SETUP_OPERATION_SPECS } from './sandbox-setup.js';
+export type { SandboxSetupStatus } from './sandbox-setup.js';
 import { RUNTIME_RESOURCE_OPERATION_SPECS } from './runtime-resource.js';
 import { SCHEDULED_TASK_OPERATION_SPECS } from './scheduled-task.js';
 import { SESSION_CATALOG_OPERATION_SPECS } from './session-catalog.js';
@@ -233,6 +235,7 @@ export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
   EXTERNAL_AGENT_SETUP_OPERATION_SPECS,
   CLIENT_CAPABILITY_OPERATION_SPECS,
   NETWORK_PROXY_OPERATION_SPECS,
+  SANDBOX_SETUP_OPERATION_SPECS,
   CONFIGURATION_OPERATION_SPECS,
   WORKHUB_COORDINATION_OPERATION_SPECS,
   PLUGIN_PLATFORM_OPERATION_SPECS,
@@ -247,6 +250,7 @@ export type OperationKey = keyof OperationSpecMap;
 // Remote credentials are fail-closed: adding a protocol operation does not
 // grant it to remote owners until this policy is deliberately updated.
 export const REMOTE_OWNER_OPERATION_GRANTS = Object.freeze([
+  'sandbox.setup.query',
   'plugin.client.query',
   'plugin.remote',
   'plugin.authorization',

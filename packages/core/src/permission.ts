@@ -23,33 +23,12 @@
 // Mode + Tool categories
 // ============================================================================
 
-export const PERMISSION_MODES = ['explore', 'ask', 'bypass'] as const;
-export type PermissionMode = (typeof PERMISSION_MODES)[number];
+export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access'] as const;
+export type SandboxMode = (typeof SANDBOX_MODES)[number];
 
-/**
- * A mode that was removed but still appears in records written before the
- * removal. It never had behavior of its own — `execute` compiled to the same
- * profile as `ask`, displayed as `ask`, and produced the same execution
- * boundary — so folding it costs nothing and is not a downgrade.
- */
-const RETIRED_PERMISSION_MODES: Readonly<Record<string, PermissionMode>> = {
-  execute: 'ask',
-};
-
-/**
- * A permission mode read back from a persisted record, or `undefined` when the
- * value is not one.
- *
- * Decoders use this instead of {@link isPermissionMode} so a retired mode
- * stays readable: the record is old, not malformed, and refusing it would make
- * the Session, run or task it belongs to unopenable. New input and wire values
- * use the strict check — nothing should still be *sending* a retired mode.
- */
-export function decodePersistedPermissionMode(value: unknown): PermissionMode | undefined {
-  if (typeof value !== 'string') return undefined;
-  const retired = RETIRED_PERMISSION_MODES[value];
-  if (retired !== undefined) return retired;
-  return isPermissionMode(value) ? value : undefined;
+/** Strict decoding; unknown names never acquire a sandbox policy. */
+export function decodePersistedSandboxMode(value: unknown): SandboxMode | undefined {
+  return isSandboxMode(value) ? value : undefined;
 }
 
 export const APPROVALS_REVIEWERS = ['user', 'auto_review'] as const;
@@ -58,8 +37,8 @@ export type ApprovalsReviewer = (typeof APPROVALS_REVIEWERS)[number];
 export const APPROVAL_RISK_LEVELS = ['low', 'medium', 'high', 'critical'] as const;
 export type ApprovalRiskLevel = (typeof APPROVAL_RISK_LEVELS)[number];
 
-export function isPermissionMode(value: unknown): value is PermissionMode {
-  return typeof value === 'string' && (PERMISSION_MODES as readonly string[]).includes(value);
+export function isSandboxMode(value: unknown): value is SandboxMode {
+  return typeof value === 'string' && (SANDBOX_MODES as readonly string[]).includes(value);
 }
 
 /** Canonical category names use Claude SDK terminology. Pi adapter MUST

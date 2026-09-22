@@ -463,7 +463,8 @@ function session(id: string): SessionCatalogProjection {
     llmConnectionSlug: 'default',
     connectionLocked: true,
     model: 'gpt-5',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: {kind: 'on-request'},
     collaborationMode: 'agent',
     orchestrationMode: 'default',
   };

@@ -74,6 +74,20 @@ impl GrantTarget {
 impl InteractionRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
         match self {
+            Self::Permissions {
+                tool_use_id,
+                base_revision,
+                request,
+            } => {
+                if tool_use_id
+                    .as_ref()
+                    .is_some_and(|id| id.is_empty() || id.len() > 256)
+                    || *base_revision > MAX_SAFE_INTEGER
+                {
+                    return Err("Invalid permission request identity or revision");
+                }
+                request.validate()?;
+            }
             Self::Question {
                 tool_use_id,
                 questions,
@@ -118,6 +132,15 @@ impl InteractionOutcome {
         if self.committed_at() > MAX_SAFE_INTEGER {
             return Err("Invalid outcome timestamp");
         }
+        if let Self::PermissionsDecision {
+            decision: grant::Decision::Allow { permissions, .. },
+            ..
+        } = self
+        {
+            permissions
+                .validate()
+                .map_err(|_| "Invalid approved permissions")?;
+        }
         if let Self::FormAnswer { result, .. } = self {
             result.validate_values()?;
         }
@@ -132,12 +155,33 @@ impl InteractionOutcome {
         self.validate()?;
         match (request, self) {
             (
-                InteractionRequest::Form { .. } | InteractionRequest::Question { .. },
+                InteractionRequest::Form { .. }
+                | InteractionRequest::Question { .. }
+                | InteractionRequest::Permissions { .. },
                 Self::Closure {
                     reason: ClosureReason::TimedOut,
                     ..
                 },
-            ) => Err("Forms and questions have no human-response deadline"),
+            ) => Err("Human interactions have no response deadline"),
+            (
+                InteractionRequest::Permissions {
+                    tool_use_id: None, ..
+                },
+                Self::PermissionsDecision {
+                    decision:
+                        grant::Decision::Allow {
+                            scope: grant::Scope::Once,
+                            ..
+                        },
+                    ..
+                },
+            ) => Err("An Executor permission request requires Turn or Session scope"),
+            (
+                InteractionRequest::Permissions { request, .. },
+                Self::PermissionsDecision { decision, .. },
+            ) => decision
+                .validate_for(&request.permissions)
+                .map_err(|_| "Approved permissions exceed the request"),
             (
                 InteractionRequest::Question { questions, .. },
                 Self::QuestionAnswer { answers, .. },
@@ -157,6 +201,17 @@ impl InteractionOutcome {
 
 impl InteractionAnswer {
     pub fn validate(&self) -> Result<(), &'static str> {
+        if matches!(self, Self::Permissions { .. }) {
+            self.clone().into_outcome(MAX_SAFE_INTEGER).validate()?;
+        }
+        if let Self::Permissions {
+            decision: grant::Decision::Allow { permissions, .. },
+        } = self
+        {
+            permissions
+                .validate()
+                .map_err(|_| "Invalid approved permissions")?;
+        }
         if let Self::Form { result } = self {
             result.validate()?;
         }
@@ -169,6 +224,23 @@ impl InteractionAnswer {
         request.validate()?;
         self.validate()?;
         match (self, request) {
+            (
+                Self::Permissions {
+                    decision:
+                        grant::Decision::Allow {
+                            scope: grant::Scope::Once,
+                            ..
+                        },
+                },
+                InteractionRequest::Permissions {
+                    tool_use_id: None, ..
+                },
+            ) => Err("An Executor permission request requires Turn or Session scope"),
+            (Self::Permissions { decision }, InteractionRequest::Permissions { request, .. }) => {
+                decision
+                    .validate_for(&request.permissions)
+                    .map_err(|_| "Approved permissions exceed the request")
+            }
             (Self::Question { answers }, InteractionRequest::Question { questions, .. }) => {
                 question::validate_answer_count(answers, questions)
             }

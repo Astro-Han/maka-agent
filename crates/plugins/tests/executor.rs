@@ -38,6 +38,19 @@ struct Adapter {
     started: Arc<Semaphore>,
     cooperative: bool,
 }
+
+struct PendingAdmission(Arc<Semaphore>);
+impl maka_plugins::call::Admission for PendingAdmission {
+    fn authorize<'a>(
+        &'a self,
+        _: &'a maka_plugins::call::Identity,
+    ) -> BoxFuture<'a, Result<maka_plugins::call::Evidence, maka_runtime::tools::ToolError>> {
+        Box::pin(async move {
+            self.0.add_permits(1);
+            std::future::pending().await
+        })
+    }
+}
 impl Provider for Adapter {
     fn execute(&self, _: Request, context: Context) -> BoxFuture<'static, Result<Outcome, Error>> {
         let started = self.started.clone();
@@ -88,7 +101,7 @@ impl OutputSink for Sink {
 
 #[tokio::test]
 async fn retirement_cancels_exact_executor_and_keeps_settlement_lease_or_fences_failed_cleanup() {
-    for cooperative in [true, false] {
+    for (admitting, cooperative) in [(true, true), (false, true), (false, false)] {
         let catalog = Catalog::default();
         let fiber = Fiber::new("executor", "executor", Scope::Profile).unwrap();
         fiber.begin_loading().unwrap();
@@ -116,9 +129,14 @@ async fn retirement_cancels_exact_executor_and_keeps_settlement_lease_or_fences_
             .entries
             .remove("example")
             .unwrap();
+        let issuer = if admitting {
+            maka_plugins::call::Issuer::with_admission(Arc::new(PendingAdmission(started.clone())))
+        } else {
+            maka_plugins::call::Issuer::default()
+        };
         let binding = Binding::new("session".into(), contribution)
             .unwrap()
-            .with_calls(maka_plugins::call::Issuer::default());
+            .with_calls(issuer);
         let request = Request {
             invocation: Invocation {
                 session_id: "session".into(),
@@ -146,7 +164,7 @@ async fn retirement_cancels_exact_executor_and_keeps_settlement_lease_or_fences_
             1,
             "Host terminal commit still owns the lease"
         );
-        assert_eq!(sink.0.lock().unwrap().len(), 1);
+        assert_eq!(sink.0.lock().unwrap().len(), usize::from(!admitting));
         if cooperative {
             assert!(matches!(settlement.result, Err(Error::Retired)));
             assert!(

@@ -41,7 +41,7 @@ function createBridgeRecorder(): {
   ]);
   // Adapters that reshape a bridge answer need one to reshape.
   const answers = new Map<string, unknown>([
-    ['sessions.setPermissionMode', { ok: true, session: {} }],
+    ['sessions.setExecutionPolicy', { ok: true, session: {} }],
     [
       'sessions.submitMessage',
       {
@@ -261,7 +261,7 @@ describe('createDesktopWorkbarServices', () => {
     await services.sideChat.promoteQueueEntry('fork', 'entry-2');
     await services.sideChat.updateQueueEntry('fork', 'entry-3', 4, 'updated');
     await services.sideChat.reorderQueueEntries('fork', ['entry-3', 'entry-2']);
-    await services.sideChat.setPermissionMode('fork', 'ask');
+    await services.sideChat.setExecutionPolicy('fork', { sandboxMode: 'workspace-write', approvalPolicy: { kind: 'on-request' } });
     await services.sideChat.regenerateTurn('fork', {
       sourceTurnId: 'turn-2',
       turnId: 'turn-3',
@@ -322,7 +322,7 @@ describe('createDesktopWorkbarServices', () => {
         'sessions.promoteQueueEntry',
         'sessions.updateQueueEntry',
         'sessions.reorderQueueEntries',
-        'sessions.setPermissionMode',
+        'sessions.setExecutionPolicy',
         'sessions.regenerateTurn',
         'sessions.respondToSandboxBoundary',
         'sessions.respondToClientCapability',

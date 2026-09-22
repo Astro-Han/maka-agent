@@ -72,7 +72,7 @@ function makeSession(input: {
     llmConnectionSlug: 'zai-live',
     connectionLocked: false,
     model: 'glm-4.7',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   };
 }
 

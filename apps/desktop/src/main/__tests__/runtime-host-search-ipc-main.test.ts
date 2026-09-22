@@ -446,7 +446,8 @@ function catalogSession(id: string, name: string): SessionCatalogProjection {
     llmConnectionSlug: 'zai-live',
     connectionLocked: true,
     model: 'glm-5.1',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: {kind: 'on-request'},
     collaborationMode: 'agent',
     orchestrationMode: 'default',
   };

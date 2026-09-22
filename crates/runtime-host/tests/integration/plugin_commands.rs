@@ -173,7 +173,7 @@ async fn scenario() {
             operation_id: "graph:node-session".into(),
             parent_session_id: "plugin-session".into(),
             name: "Worker".into(),
-            permission_mode: Some(maka_runtime::execution::PermissionMode::Explore),
+            sandbox_mode: Some(maka_runtime::execution::SandboxMode::ReadOnly),
             bound_tools: Some(
                 ["Read", "FinishPlugin"]
                     .into_iter()
@@ -200,7 +200,7 @@ async fn scenario() {
                 .create_child(CreateChild {
                     operation_id: "forbidden-permission-escalation".into(),
                     parent_session_id: child.session_id.clone(),
-                    permission_mode: Some(maka_runtime::execution::PermissionMode::Bypass),
+                    sandbox_mode: Some(maka_runtime::execution::SandboxMode::DangerFullAccess),
                     ..provision.clone()
                 })
                 .await,
@@ -439,8 +439,8 @@ async fn scenario() {
                         panic!("missing admitted configuration")
                     };
                     assert_eq!(
-                        configuration.permission_mode,
-                        maka_runtime::execution::PermissionMode::Explore
+                        configuration.sandbox_mode,
+                        maka_runtime::execution::SandboxMode::ReadOnly
                     );
                     assert_ne!(std::path::Path::new(&configuration.cwd), fixture.workspace);
                     std::fs::write(

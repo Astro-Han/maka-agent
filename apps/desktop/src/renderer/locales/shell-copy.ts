@@ -18,8 +18,9 @@
  */
 
 import { type UiCatalog, type UiLocale, lookupCopy } from '@maka/core/ui-locale';
+import { getConversationCopy } from '@maka/ui';
 
-import { type PermissionMode } from '@maka/core/permission';
+import { type SandboxMode } from '@maka/core/permission';
 
 import { type SettingsSection } from '@maka/core/settings';
 
@@ -345,6 +346,8 @@ type ShellCopy = {
     bypassConfirmTitle: string;
     bypassConfirmDescription: string;
     bypassConfirmLabel: string;
+    unrestrictedConfirmTitle: string;
+    unrestrictedConfirmDescription: string;
     bypassCancelLabel: string;
     permissionFailedTitle: string;
     permissionFallback: string;
@@ -414,13 +417,13 @@ type ShellCopy = {
     staticKeywords: Record<StaticCommandId, readonly string[]>;
     commands: Record<StaticCommandId, CommandCopy>;
     settingsSections: Record<SettingsSection, string>;
-    permissionModes: Record<PermissionMode, { label: string; hint: string }>;
+    sandboxModes: Record<SandboxMode, { label: string; hint: string }>;
     settingsCommand(section: string): string;
     testDefaultConnection(name: string): string;
     setDefaultConnection(name: string): string;
     testConnection(name: string): string;
     settingsKeywords(section: SettingsSection, label: string): string[];
-    permissionKeywords(mode: PermissionMode): string[];
+    permissionKeywords(mode: SandboxMode): string[];
     connectionKeywords(action: 'default' | 'test', name: string, providerType: string): string[];
   };
   keyboardHelp: {
@@ -488,9 +491,9 @@ type ShellCopy = {
     boundaryUnreadableDetail: string;
     boundaryUnreadableRetry: string;
     boundaryUnreadableRetrying: string;
-    permissionModeStreaming: string;
-    permissionModeRunning: string;
-    permissionModeWaiting: string;
+    sandboxModeStreaming: string;
+    sandboxModeRunning: string;
+    sandboxModeWaiting: string;
     /** The one mode control locks for the same four reasons, worded once. */
     /** The Session summary has not arrived, so its mode is not known yet. */
     modeChangeLoading: string;
@@ -991,7 +994,9 @@ const SHELL_COPY_BY_LOCALE = {
       bypassConfirmDescription:
         '本地工具将直接读写你的文件并访问网络，不经 Maka 的保护层。仅用于你完全信任、或已在外部隔离环境中运行的任务。',
       bypassConfirmLabel: '开启完全权限',
-      bypassCancelLabel: '保持自动',
+      unrestrictedConfirmTitle: '完全绕过沙箱和审批？',
+      unrestrictedConfirmDescription: '此会话将能直接读写当前系统账号可访问的文件、联网并执行命令，不再询问权限审批。错误或恶意指令可能删除数据或泄露凭据。仅在你信任此任务时开启；可随时在权限菜单切回受限模式。',
+      bypassCancelLabel: '取消',
       permissionFailedTitle: '切换权限模式失败',
       permissionFallback: '权限模式暂时无法切换，请稍后重试。',
       updateFailures: {
@@ -1080,20 +1085,13 @@ const SHELL_COPY_BY_LOCALE = {
       staticKeywords: STATIC_COMMAND_KEYWORDS,
       commands: ZH_STATIC_COMMANDS,
       settingsSections: ZH_SETTINGS_SECTIONS,
-      permissionModes: {
-        explore: { label: '权限 · 只读', hint: '读取和搜索直通，写入和网络仍需确认' },
-        ask: { label: '权限 · 自动', hint: '在 Maka 的保护层内运行；需要超出当前权限范围时再询问' },
-        bypass: {
-          label: '权限 · 完全权限',
-          hint: '不经 Maka 的保护层，直接访问你的文件和网络',
-        },
-      },
+      sandboxModes: getConversationCopy('zh-CN').permissions.mode,
       settingsCommand: (section: string) => `设置 · ${section}`,
       testDefaultConnection: (name: string) => `测试默认连接 · ${name}`,
       setDefaultConnection: (name: string) => `设为默认 · ${name}`,
       testConnection: (name: string) => `测试连接 · ${name}`,
       settingsKeywords: (section: SettingsSection, label: string) => [section, label, 'settings', '设置'],
-      permissionKeywords: (mode: PermissionMode) => [mode, 'permission', 'mode', '权限', '模式'],
+      permissionKeywords: (mode: SandboxMode) => [mode, 'permission', 'mode', '权限', '模式'],
       connectionKeywords: (action: 'default' | 'test', name: string, providerType: string) => [
         action,
         'connection',
@@ -1220,12 +1218,12 @@ const SHELL_COPY_BY_LOCALE = {
       loading: '加载中',
       goToModels: '去模型',
       boundaryUnreadableTitle: '暂时读不到这个任务的权限',
-      boundaryUnreadableDetail: '在读到之前，这里暂时不能输入。可以重试，或先切换到别的任务。',
+      boundaryUnreadableDetail: '暂时无法发送，但可以继续编辑草稿。连接恢复后会自动重试，也可以手动重试。',
       boundaryUnreadableRetry: '重试',
       boundaryUnreadableRetrying: '重试中…',
-      permissionModeStreaming: '当前任务正在流式输出，等结束后再切换权限模式。',
-      permissionModeRunning: '当前任务正在运行，等结束后再切换权限模式。',
-      permissionModeWaiting: '当前有工具调用正在等待确认，处理后再切换权限模式。',
+      sandboxModeStreaming: '当前任务正在流式输出，等结束后再切换权限模式。',
+      sandboxModeRunning: '当前任务正在运行，等结束后再切换权限模式。',
+      sandboxModeWaiting: '当前有工具调用正在等待确认，处理后再切换权限模式。',
       modeChangeLoading: '会话还在载入，稍候即可切换模式。',
       modeChanging: '模式正在切换，完成后再继续操作。',
       modeChangeStreaming: '当前任务正在流式输出，等结束后再切换模式。',
@@ -1498,7 +1496,9 @@ const SHELL_COPY_BY_LOCALE = {
       bypassConfirmDescription:
         '本地工具將直接讀寫你的檔案並存取網路，不經 Maka 的保護層。僅用於你完全信任、或已在外部隔離環境中執行的任務。',
       bypassConfirmLabel: '開啟完全權限',
-      bypassCancelLabel: '保持自動',
+      unrestrictedConfirmTitle: '完全繞過沙箱和審批？',
+      unrestrictedConfirmDescription: '此會話將能直接讀寫目前系統帳號可存取的檔案、連網並執行命令，不再詢問權限審批。錯誤或惡意指令可能刪除資料或洩漏憑據。僅在你信任此任務時開啟；可隨時在權限選單切回受限模式。',
+      bypassCancelLabel: '取消',
       permissionFailedTitle: '切換權限模式失敗',
       permissionFallback: '權限模式暫時無法切換，請稍後重試。',
       updateFailures: {
@@ -1587,20 +1587,13 @@ const SHELL_COPY_BY_LOCALE = {
       staticKeywords: STATIC_COMMAND_KEYWORDS,
       commands: ZH_STATIC_COMMANDS,
       settingsSections: ZH_SETTINGS_SECTIONS,
-      permissionModes: {
-        explore: { label: '權限 · 只讀', hint: '讀取和搜尋直通，寫入和網路仍需確認' },
-        ask: { label: '權限 · 自動', hint: '在 Maka 的保護層內執行；需要超出目前權限範圍時再詢問' },
-        bypass: {
-          label: '權限 · 完全權限',
-          hint: '不經 Maka 的保護層，直接存取你的檔案和網路',
-        },
-      },
+      sandboxModes: getConversationCopy('zh-TW').permissions.mode,
       settingsCommand: (section: string) => `設定 · ${section}`,
       testDefaultConnection: (name: string) => `測試預設連線 · ${name}`,
       setDefaultConnection: (name: string) => `設為預設 · ${name}`,
       testConnection: (name: string) => `測試連線 · ${name}`,
       settingsKeywords: (section: SettingsSection, label: string) => [section, label, 'settings', '設定'],
-      permissionKeywords: (mode: PermissionMode) => [mode, 'permission', 'mode', '權限', '模式'],
+      permissionKeywords: (mode: SandboxMode) => [mode, 'permission', 'mode', '權限', '模式'],
       connectionKeywords: (action: 'default' | 'test', name: string, providerType: string) => [
         action,
         'connection',
@@ -1727,12 +1720,12 @@ const SHELL_COPY_BY_LOCALE = {
       loading: '載入中',
       goToModels: '去模型',
       boundaryUnreadableTitle: '暫時讀不到這個任務的權限',
-      boundaryUnreadableDetail: '在讀到之前，這裡暫時不能輸入。可以重試，或先切換到別的任務。',
+      boundaryUnreadableDetail: '暫時無法傳送，但可以繼續編輯草稿。連線恢復後會自動重試，也可以手動重試。',
       boundaryUnreadableRetry: '重試',
       boundaryUnreadableRetrying: '重試中…',
-      permissionModeStreaming: '目前任務正在流式輸出，等結束後再切換權限模式。',
-      permissionModeRunning: '目前任務正在執行，等結束後再切換權限模式。',
-      permissionModeWaiting: '目前有工具呼叫正在等待確認，處理後再切換權限模式。',
+      sandboxModeStreaming: '目前任務正在流式輸出，等結束後再切換權限模式。',
+      sandboxModeRunning: '目前任務正在執行，等結束後再切換權限模式。',
+      sandboxModeWaiting: '目前有工具呼叫正在等待確認，處理後再切換權限模式。',
       modeChangeLoading: '會話還在載入，稍候即可切換模式。',
       modeChanging: '模式正在切換，完成後再繼續操作。',
       modeChangeStreaming: '目前任務正在流式輸出，等結束後再切換模式。',
@@ -2011,7 +2004,9 @@ const SHELL_COPY_BY_LOCALE = {
       bypassConfirmDescription:
         "Local tools will read and write your files and reach the network directly, outside Maka's protection layer. Use only for tasks you fully trust, or ones already isolated by their environment.",
       bypassConfirmLabel: 'Turn on full access',
-      bypassCancelLabel: 'Keep Auto',
+      unrestrictedConfirmTitle: 'Bypass the sandbox and all approvals?',
+      unrestrictedConfirmDescription: 'This session can directly read and write files accessible to your system account, use the network, and run commands without permission prompts. Mistakes or malicious instructions may delete data or expose credentials. Enable only for a trusted task. You can return to a restricted mode from the permissions menu.',
+      bypassCancelLabel: 'Cancel',
       permissionFailedTitle: 'Could not change permission mode',
       permissionFallback: 'The permission mode could not be changed. Try again later.',
       updateFailures: {
@@ -2100,26 +2095,13 @@ const SHELL_COPY_BY_LOCALE = {
       staticKeywords: STATIC_COMMAND_KEYWORDS,
       commands: EN_STATIC_COMMANDS,
       settingsSections: EN_SETTINGS_SECTIONS,
-      permissionModes: {
-        explore: {
-          label: 'Permissions · Read only',
-          hint: 'Read and search directly; confirm writes and network access',
-        },
-        ask: {
-          label: 'Permissions · Auto',
-          hint: "Run inside Maka's protection layer; ask before going beyond the current permissions",
-        },
-        bypass: {
-          label: 'Permissions · Full access',
-          hint: "Reach your files and your network directly, outside Maka's protection layer",
-        },
-      },
+      sandboxModes: getConversationCopy('en').permissions.mode,
       settingsCommand: (section: string) => `Settings · ${section}`,
       testDefaultConnection: (name: string) => `Test default connection · ${name}`,
       setDefaultConnection: (name: string) => `Set as default · ${name}`,
       testConnection: (name: string) => `Test connection · ${name}`,
       settingsKeywords: (section: SettingsSection, label: string) => [section, label, 'settings', '设置'],
-      permissionKeywords: (mode: PermissionMode) => [mode, 'permission', 'mode', '权限', '模式'],
+      permissionKeywords: (mode: SandboxMode) => [mode, 'permission', 'mode', '权限', '模式'],
       connectionKeywords: (action: 'default' | 'test', name: string, providerType: string) => [
         action,
         'connection',
@@ -2281,13 +2263,13 @@ const SHELL_COPY_BY_LOCALE = {
       goToModels: 'Go to Models',
       boundaryUnreadableTitle: 'Could not read this task’s permissions',
       boundaryUnreadableDetail:
-        'Until they can be read, you cannot type here. Try again, or switch to another task.',
+        'You can keep editing your draft, but sending is unavailable. We will retry when the connection recovers, or you can retry now.',
       boundaryUnreadableRetry: 'Try again',
       boundaryUnreadableRetrying: 'Trying again…',
-      permissionModeStreaming:
+      sandboxModeStreaming:
         'This task is streaming. Wait for it to finish before changing the permission mode.',
-      permissionModeRunning: 'This task is running. Wait for it to finish before changing the permission mode.',
-      permissionModeWaiting: 'A tool call is waiting for confirmation. Respond before changing the permission mode.',
+      sandboxModeRunning: 'This task is running. Wait for it to finish before changing the permission mode.',
+      sandboxModeWaiting: 'A tool call is waiting for confirmation. Respond before changing the permission mode.',
       modeChangeLoading: 'This session is still loading. Its mode can be changed in a moment.',
       modeChanging: 'The mode is changing. Wait for it to finish before continuing.',
       modeChangeStreaming: 'This task is streaming. Wait for it to finish before changing the mode.',
@@ -2371,11 +2353,12 @@ export function confirmBypassPermission(
     }): Promise<boolean>;
   },
   locale: UiLocale,
+  allProtections = false,
 ): Promise<boolean> {
   const copy = getShellCopy(locale).sessionSettingsActions;
   return toast.confirm({
-    title: copy.bypassConfirmTitle,
-    description: copy.bypassConfirmDescription,
+    title: allProtections ? copy.unrestrictedConfirmTitle : copy.bypassConfirmTitle,
+    description: allProtections ? copy.unrestrictedConfirmDescription : copy.bypassConfirmDescription,
     confirmLabel: copy.bypassConfirmLabel,
     cancelLabel: copy.bypassCancelLabel,
     destructive: true,

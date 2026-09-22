@@ -93,9 +93,9 @@ export {
   type ComposerGoalProjection,
 } from './goal-projection-context.js';
 export {
-  getPermissionModeMeta,
-  PERMISSION_MODE_ORDER,
-  PermissionModeSelect,
+  getSandboxModeMeta,
+  SANDBOX_MODE_ORDER,
+  SandboxModeSelect,
 } from './permission-mode-menu.js';
-export type { PermissionModeMeta } from './permission-mode-menu.js';
+export type { SandboxModeMeta } from './permission-mode-menu.js';
 export { RelativeTime } from './relative-time.js';

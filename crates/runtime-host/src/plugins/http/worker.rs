@@ -24,12 +24,13 @@ pub(super) async fn run(
     request: reqwest::RequestBuilder,
     head: oneshot::Sender<Result<Head, String>>,
     send: mpsc::Sender<Vec<u8>>,
-) -> Result<(), String> {
+) -> Result<serde_json::Value, String> {
     let mut response = match request.send().await {
         Ok(response) => response,
         Err(error) => {
-            let _ = head.send(Err(message(error)));
-            return Ok(());
+            let error = message(error);
+            let _ = head.send(Err(error.clone()));
+            return Err(error);
         }
     };
     let headers = response
@@ -44,8 +45,9 @@ pub(super) async fn run(
         > 64 * 1024
     {
         let _ = head.send(Err("HTTP response headers exceed 64 KiB".into()));
-        return Ok(());
+        return Err("HTTP response headers exceed 64 KiB".into());
     }
+    let status = response.status().as_u16();
     if head
         .send(Ok(Head {
             status: response.status().as_u16(),
@@ -54,18 +56,22 @@ pub(super) async fn run(
         }))
         .is_err()
     {
-        return Ok(());
+        return Err("HTTP response receiver closed".into());
     }
+    let mut received_bytes = 0_u64;
     loop {
         match response.chunk().await {
             Ok(Some(bytes)) => {
+                received_bytes += bytes.len() as u64;
                 for chunk in bytes.chunks(16 * 1024) {
                     if send.send(chunk.to_vec()).await.is_err() {
-                        return Ok(());
+                        return Err("HTTP response reader closed before EOF".into());
                     }
                 }
             }
-            Ok(None) => return Ok(()),
+            Ok(None) => {
+                return Ok(serde_json::json!({"status": status, "receivedBytes": received_bytes}));
+            }
             Err(error) => return Err(message(error)),
         }
     }

@@ -35,7 +35,7 @@ import type {
   QuoteRef,
 } from '@maka/core/events';
 import type { OrchestrationMode } from '@maka/core/orchestration';
-import type { ChatDefaultPermissionMode } from '@maka/core/settings';
+import type { ExecutionPolicy } from '@maka/core/execution-permissions';
 import type { UiLocale, UiLocalePreference } from '@maka/core/ui-locale';
 import { collapseSessionRevisions } from '@maka/core/session-revisions';
 import { isLinkedSubagentSession } from '@maka/core/session';
@@ -413,8 +413,8 @@ function AppShellContent({
   // Plan toggle and one orchestration value, not one fused choice.
   const [newChatPlanModeActive, setNewChatPlanModeActive] = useState(false);
   const [newChatOrchestrationMode, setNewChatOrchestrationMode] = useState<OrchestrationMode>('default');
-  const [newTaskPermissionChoice, setNewTaskPermissionChoice, clearNewTaskPermissionChoice] =
-    useNewTaskChoice<ChatDefaultPermissionMode>(currentNewTaskDraftKey);
+  const [newTaskExecutionChoice, setNewTaskExecutionPolicy, clearNewTaskExecutionChoice] =
+    useNewTaskChoice<ExecutionPolicy>(currentNewTaskDraftKey);
   const transcriptReadingCommands = useRef<Conversation.TranscriptReadingPositionCommands>(null);
   const [transcriptTurnIndex, setTranscriptTurnIndex] = useState<Conversation.TranscriptTurnIndex>();
   const [petCompletionNonce, setPetCompletionNonce] = useState(0);
@@ -560,11 +560,11 @@ function AppShellContent({
    * not a statement about every later task, so it is sent once on create and
    * never written back to `chatDefaults` — the Settings surface owns that.
    */
-  const newTaskPermissionMode =
-    newTaskPermissionChoice ??
-    taskEntry.selectors.selectedHost?.chatDefaults.permissionMode ??
-    'bypass';
-  const setNewTaskPermissionMode = setNewTaskPermissionChoice;
+  const newTaskExecutionPolicy: ExecutionPolicy = newTaskExecutionChoice ?? {
+    sandboxMode: taskEntry.selectors.selectedHost?.chatDefaults.sandboxMode ?? 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
+  };
+  const newTaskSandboxMode = newTaskExecutionPolicy.sandboxMode;
   useEffect(() => {
     if (!appearanceHydrated) return;
     let cancelled = false;
@@ -625,7 +625,8 @@ function AppShellContent({
     resumePendingSessionId,
     resumeParkDescriptionBySession,
     resumeInterruptedSession,
-  } = useShellResume({ activeId: ownerActiveId, toastApi, shellCopy, uiLocale });
+  } = useShellResume({ activeId: ownerActiveId, toastApi, shellCopy, uiLocale,
+    captureSelection, checkExecutionReadiness: taskSubmissionReadyAtSend });
   const rendererMountedRef = useRef(true);
   // Set of session ids whose backend / connection is no longer usable —
   // drives the sidebar "已过期" pill (PR108g, paired with the PR108e chat
@@ -645,7 +646,7 @@ function AppShellContent({
     catalogRevision,
     isActiveSession: (sessionId) => activeIdRef.current === sessionId,
     sessions,
-    newTaskPermissionMode,
+    newTaskExecutionPolicy,
     refreshCatalog: refreshSessions,
     saveComposerDefaults: (model) => saveComposerDefaults({ model }),
     writeFailureCopy: (setting, error) => sessionSettingFailureCopy(uiLocale, setting, error),
@@ -655,10 +656,10 @@ function AppShellContent({
     },
     captureOwner: captureComposerImportOwner,
     isOwnerActive: isComposerImportOwnerActive,
-    setNewTaskPermissionMode,
-    confirmBypass: () => confirmBypassPermission(toastApi, uiLocale),
+    setNewTaskExecutionPolicy,
+    confirmBypass: (allProtections) => confirmBypassPermission(toastApi, uiLocale, allProtections),
   });
-  const { setPermissionMode, setSessionModel, setSessionThinkingLevel } = sessionSettingIntent;
+  const { setSandboxMode, setSessionModel, setSessionThinkingLevel } = sessionSettingIntent;
   const modelConfigurationOverlay = activeSession
     ? sessionSettingIntent.overlays.modelConfiguration[activeSession.id]
     : undefined;
@@ -906,7 +907,7 @@ function AppShellContent({
     ? pendingSessionView({
         sessionId: activeId,
         name: shellCopy.newConversation,
-        permissionMode: newTaskPermissionMode,
+        sandboxMode: newTaskSandboxMode,
       })
     : undefined);
   // Each control reads its own field. There is nothing to project and nothing
@@ -940,7 +941,7 @@ function AppShellContent({
     unreadable: activeExecutionBoundaryUnreadable,
     reading: activeExecutionBoundaryReading,
     reload: reloadActiveExecutionBoundary,
-  } = useActiveExecutionBoundary(ownerActiveId, activeSessionForView?.permissionMode);
+  } = useActiveExecutionBoundary(ownerActiveId, activeSessionForView?.sandboxMode);
   // The session view only subscribes to the session it shows, so a request
   // raised while another session was active never reaches this surface as a
   // live event — and neither does one raised before the window existed. The
@@ -976,12 +977,12 @@ function AppShellContent({
   const activeBoundarySurface = deriveDesktopExecutionBoundarySurface(
     activeId,
     activeExecutionBoundary,
-    activeId ? (activeSessionForView?.permissionMode ?? 'ask') : newTaskPermissionMode,
+    activeId ? (activeSessionForView?.sandboxMode ?? 'workspace-write') : newTaskSandboxMode,
   );
-  const activePermissionMode = activeId
-    ? sessionSettingIntent.overlays.permissionMode[activeId]
-      ?? activeBoundarySurface.permissionMode
-    : activeBoundarySurface.permissionMode;
+  const activeSandboxMode = activeId
+    ? sessionSettingIntent.overlays.executionPolicy[activeId]?.sandboxMode
+      ?? activeBoundarySurface.sandboxMode
+    : activeBoundarySurface.sandboxMode;
   const planMode = usePlanModeState(ownerActiveId ? activeHostSession : undefined);
   const planConversationItems = (planMode.state?.proposals ?? []).map((proposal) => ({
     id: proposal.proposalId,
@@ -1248,7 +1249,7 @@ function AppShellContent({
   const composerMentionsSurface: ComposerMentionsSurfaceInput = {
     scope: JSON.stringify(ownerActiveId
       ? [activeCatalogSession?.profileId, activeCatalogSession?.runtimeHostId, ownerActiveId]
-      : [taskEntry.selectors.target, taskEntry.selectors.projectPath, newTaskPermissionMode, newChatPlanModeActive]),
+      : [taskEntry.selectors.target, taskEntry.selectors.projectPath, newTaskSandboxMode, newChatPlanModeActive]),
     sessionId: ownerActiveId,
     newTaskTarget: activeId ? undefined : taskEntry.selectors.target,
   };
@@ -1418,14 +1419,15 @@ function AppShellContent({
     toastApi,
     newChatModel: newChatModel ?? null,
     pendingNewChatThinkingLevel: newChatThinkingLevel ?? null,
-    newChatPermissionChoice: newTaskPermissionChoice,
-    clearNewChatPermissionChoice: clearNewTaskPermissionChoice,
+    newChatExecutionChoice: newTaskExecutionChoice,
+    clearNewChatExecutionChoice: clearNewTaskExecutionChoice,
     newChatCollaborationMode: newChatPlanModeActive ? 'plan' : 'agent',
     newChatOrchestrationMode: newChatOrchestrationMode,
     newTaskTarget: taskEntry.selectors.target,
   });
 
   const { handleTurnFooterAction } = useStableActions(createAppShellTurnActions, {
+    checkExecutionReadiness: taskSubmissionReadyAtSend,
     uiLocale,
     activeIdRef,
     captureSelection,
@@ -1437,11 +1439,11 @@ function AppShellContent({
   const handleSwitchToBypassAndRetry = useCallback(
     async (turnId: string) => {
       const selectionIsCurrent = captureSelection();
-      const switched = await setPermissionMode('bypass');
+      const switched = await setSandboxMode('danger-full-access');
       if (!switched || !selectionIsCurrent()) return;
       await handleTurnFooterAction(turnId, 'regenerate');
     },
-    [captureSelection, handleTurnFooterAction, setPermissionMode],
+    [captureSelection, handleTurnFooterAction, setSandboxMode],
   );
 
   const {
@@ -1465,7 +1467,25 @@ function AppShellContent({
   });
 
   async function taskSubmissionReadyAtSend(): Promise<boolean> {
-    return !sharedSessionActive && (!!activeIdRef.current || !!taskEntry.selectors.target);
+    const sessionId = activeIdRef.current;
+    const target = taskEntry.selectors.target;
+    if (sharedSessionActive || (!sessionId && !target)) return false;
+    try {
+      // Settings may have just committed without a renderer update yet (for
+      // example, explicit bypass-and-retry). Read the accepted Session mode.
+      const mode = sessionId
+        ? (await window.maka.sessions.get(sessionId)).sandboxMode
+        : activeSandboxMode;
+      if (mode === 'danger-full-access') return true;
+      return await window.maka.permissions.ensureSandbox(sessionId
+        ? {sessionId}
+        : {host: target!});
+    } catch (error) {
+      const copy = getDesktopConversationCopy(uiLocale).actions;
+      toastApi.error(copy.operationFailedTitle,
+        localizedShellErrorMessage(error, copy.operationFailedFallback, uiLocale));
+      return false;
+    }
   }
 
   /**
@@ -1542,6 +1562,10 @@ function AppShellContent({
       sessionId ? retractedWorkspaceReferencesRef.current[sessionId] : undefined,
     );
     const followUpAtSubmit = slashCommand ? undefined : metadata?.followUpMode;
+    if ((sessionId && followUpAtSubmit) || revisionSend) {
+      const selectionIsCurrent = captureSelection();
+      if (!(await taskSubmissionReadyAtSend()) || !selectionIsCurrent()) return false;
+    }
     if (sessionId && followUpAtSubmit) {
       const queued = await enqueueFollowUp(sessionId, text, followUpAtSubmit, {
         ...metadata,
@@ -2102,8 +2126,8 @@ function AppShellContent({
   const commandOptions: AppShellCommandListOptions = {
     uiLocale,
     activeId,
-    activePermissionMode,
-    canSetPermissionMode: activeBoundarySurface.localInteractionAvailable,
+    activeSandboxMode,
+    canSetSandboxMode: activeBoundarySurface.localInteractionAvailable,
     clientPathsAccessible:
       activeId
         ? activeProjectCapabilities.viewClientPath
@@ -2136,7 +2160,7 @@ function AppShellContent({
     pasteTodayDailyReview: moduleHubCommands.pasteTodayDailyReview,
     saveTodayDailyReview: moduleHubCommands.saveTodayDailyReview,
     setNavSelection,
-    setPermissionMode,
+    setSandboxMode,
     setThemePref,
     toastApi,
   };
@@ -2157,7 +2181,7 @@ function AppShellContent({
     workspace: workspaceTarget.projectId
       ? { kind: 'project', projectId: workspaceTarget.projectId }
       : { kind: 'host_path', path: taskEntry.selectors.projectPath! },
-    permissionMode: newTaskPermissionMode,
+    sandboxMode: newTaskSandboxMode,
     collaborationMode: newChatPlanModeActive ? 'plan' : 'agent',
   } : undefined;
   return (
@@ -2435,6 +2459,7 @@ function AppShellContent({
                   stopPendingBySession={stopPendingBySession}
                   respondToSandboxBoundary={respondToSandboxBoundary}
                   respondToClientCapability={commands.respondToClientCapability}
+                  respondToPermissions={commands.respondToPermissions}
                   respondToUserQuestion={respondToUserQuestion}
                   respondToUserForm={respondToUserForm}
                   stop={stop}
@@ -2508,26 +2533,40 @@ function AppShellContent({
                     ? shellCopy.configureModelsOnHost(composerProfileName)
                     : undefined}
                   sendBlocked={taskSubmissionHardBlocked}
-                  permissionMode={activePermissionMode}
+                  sandboxMode={activeSandboxMode}
+                  approval={(!activeId || activeSession?.approvalPolicy) && activeBoundarySurface.localInteractionAvailable
+                    ? {
+                        policy: activeSession?.approvalPolicy
+                          ? sessionSettingIntent.overlays.executionPolicy[activeSession.id]?.approvalPolicy
+                            ?? activeSession.approvalPolicy
+                          : newTaskExecutionPolicy.approvalPolicy,
+                        onChange: async (policy) => {
+                          await sessionSettingIntent.setApprovalPolicy(policy);
+                        },
+                        onDisableProtections: async () => {
+                          await sessionSettingIntent.disableProtections();
+                        },
+                      }
+                    : undefined}
                   // Every "cannot change this mid-turn" gate reads `turnActive`,
                   // the same witness Stop reads. Reading the persisted status
                   // here instead left these toggles live through the whole
                   // send→run-start window — long enough on a cold backend for a
                   // mode change to land before the run registers and alter the
                   // execution config of the turn already sent.
-                  permissionModeDisabledReason={
+                  sandboxModeDisabledReason={
                     activeStreamingLive
-                      ? shellCopy.permissionModeStreaming
+                      ? shellCopy.sandboxModeStreaming
                       : activeId && turnActive
-                        ? shellCopy.permissionModeRunning
+                        ? shellCopy.sandboxModeRunning
                         : activeId && activeSessionForView?.status === 'waiting_for_user'
-                          ? shellCopy.permissionModeWaiting
+                          ? shellCopy.sandboxModeWaiting
                           : undefined
                   }
-                  onPermissionModeChange={
+                  onSandboxModeChange={
                     activeBoundarySurface.localInteractionAvailable
                       ? async mode => {
-                          await setPermissionMode(mode)
+                          await setSandboxMode(mode)
                         }
                       : undefined
                   }

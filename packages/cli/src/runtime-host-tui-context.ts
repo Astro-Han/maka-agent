@@ -19,7 +19,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import {
   createGenesisExecutionBoundary,
   executionBoundaryDisplayMode,
@@ -51,7 +51,7 @@ import type { AgentGraphClientSnapshot, WorkspaceTarget } from '@maka/runtime-ho
 import {
   connectRuntimeHostCli,
   connectRuntimeHostCliConnection,
-  readHostChatDefaultPermissionMode,
+  readHostChatDefaultSandboxMode,
   resolveRuntimeHostCliTarget,
 } from './runtime-host-cli-context.js';
 import type {
@@ -106,7 +106,7 @@ export interface RuntimeHostTuiContext {
    * stay the authority, and this snapshot goes stale the moment another client
    * changes the setting.
    */
-  readonly prospectivePermissionMode: PermissionMode;
+  readonly prospectiveSandboxMode: SandboxMode;
   readonly turnActivity: MakaPiTuiTurnActivitySurface;
   readonly listSkills: (cwd: string) => Promise<readonly InvocableSkillEntry[]>;
   readonly agentGraphHistory: {
@@ -178,10 +178,10 @@ export async function createRuntimeHostTuiContext(
     // Display state, never a create input. Deriving it through the same
     // boundary mapping every other surface uses keeps a prospective Session and
     // a live one from ever labelling the same permissions differently.
-    const prospectivePermissionMode =
+    const prospectiveSandboxMode =
       executionBoundaryDisplayMode(
-        createGenesisExecutionBoundary(await readHostChatDefaultPermissionMode(connection)),
-      ) ?? 'ask';
+        createGenesisExecutionBoundary(await readHostChatDefaultSandboxMode(connection)),
+      ) ?? 'workspace-write';
     const sessionCopyCleanupRoot = join(input.clientDataRoot, 'tui-session-copies');
     const owner = await acquireProcessLifetimeOwner(
       join(sessionCopyCleanupRoot, connection.rootId),
@@ -195,7 +195,7 @@ export async function createRuntimeHostTuiContext(
         : { llmConnectionId: selectedTarget.connectionId }),
       llmConnectionSlug: selectedTarget.connectionSlug,
       model: selectedTarget.model,
-      prospectivePermissionMode,
+      prospectiveSandboxMode,
       sessionCopyCleanupRoot,
       sessionCopyCleanupOwner: owner,
       executionLocation: runtimeHostProfileUsesHostWorkspace(connected.profile.kind)
@@ -272,7 +272,7 @@ export async function createRuntimeHostTuiContext(
             // has. The Host announces again the next time it changes.
             .catch(() => undefined);
         }),
-      prospectivePermissionMode,
+      prospectiveSandboxMode,
       turnActivity: createHostOwnedTurnActivity(),
       listSkills: (cwd) =>
         listStablePresentedSkills(
@@ -282,7 +282,7 @@ export async function createRuntimeHostTuiContext(
             (runtimeHostProfileUsesHostWorkspace(connected.profile.kind)
               ? undefined
               : { kind: 'host_path', path: cwd }),
-          driver.getPermissionMode?.() ?? prospectivePermissionMode,
+          driver.getSandboxMode?.() ?? prospectiveSandboxMode,
         ),
       agentGraphHistory: createRuntimeHostAgentGraphHistory(connection),
       recap: createRuntimeHostRecapGenerator(connection),
@@ -370,13 +370,13 @@ async function listStablePresentedSkills(
   connection: RuntimeHostConnection,
   sessionId: string | null,
   fallbackWorkspace: WorkspaceTarget | undefined,
-  permissionMode: PermissionMode,
+  sandboxMode: SandboxMode,
 ): Promise<InvocableSkillEntry[]> {
   const workspace = sessionId
     ? await readSessionWorkspace(connection, sessionId, fallbackWorkspace)
     : fallbackWorkspace;
   if (!workspace) throw new Error('The remote Session workspace is unavailable');
-  return readRuntimeHostSkills(connection, workspace, permissionMode);
+  return readRuntimeHostSkills(connection, workspace, sandboxMode);
 }
 
 export async function resolveRuntimeHostTuiWorkspace(

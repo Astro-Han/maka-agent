@@ -23,7 +23,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import type { ArtifactRecord } from '@maka/core/artifacts';
 import type { BrowserState } from '@maka/core/browser';
 import type { GitReviewReadResult, GitReviewSnapshot } from '@maka/core/git-review';
-import type { SessionSummary } from '@maka/core/session';
+import type { SideChatSession } from '../src/renderer/features/workbar/index.js';
 import type { SessionTrace } from '@maka/core/session-trace';
 import type { ContextDiagnosticsResult } from '@maka/runtime-host/protocol';
 import { ToastProvider } from '@maka/ui';
@@ -98,7 +98,7 @@ const LONG_BROWSER_URL =
   'https://maka.apache.org/docs/getting-started/configuration/advanced/runtime-host/agent-graph/scheduling/readiness-and-activation/edge-cases?highlight=very-long-query-string-that-keeps-going#a-deep-anchor-that-also-runs-long';
 const LONG_BROWSER_TITLE =
   'Getting started · Configuration · Advanced · Runtime Host · Agent Graph scheduling, readiness, and activation edge cases — Apache Maka documentation';
-const TOOL_PICKER_SOURCE_SESSION: SessionSummary = {
+const TOOL_PICKER_SOURCE_SESSION: SideChatSession = {
   id: SESSION_ID,
   name: '工作栏组件审查',
   isFlagged: false,
@@ -111,9 +111,10 @@ const TOOL_PICKER_SOURCE_SESSION: SessionSummary = {
   llmConnectionSlug: 'anthropic-main',
   connectionLocked: false,
   model: 'claude-sonnet-4-5',
-  permissionMode: 'ask',
+  sandboxMode: 'workspace-write',
+  approvalPolicy: { kind: 'on-request' },
 };
-const SIDE_CHAT_SESSION: SessionSummary = {
+const SIDE_CHAT_SESSION: SideChatSession = {
   ...TOOL_PICKER_SOURCE_SESSION,
   id: 'session-workbar-side-chat',
   name: '侧边对话',
@@ -832,6 +833,7 @@ function bridge(options: {
       subscribeSessionEvents: unsubscribe,
     },
     terminal: {
+      prepareExecution: async () => true,
       recover: async () => ({ resources: [], closes: [] }),
       subscribeCloseChanges: () => () => undefined,
       subscribeUpdates: () => () => undefined,
@@ -872,6 +874,7 @@ function bridge(options: {
       subscribeState: unsubscribe,
     },
     sideChat: {
+      prepareExecution: async () => true,
       listSessions: async () => [TOOL_PICKER_SOURCE_SESSION, SIDE_CHAT_SESSION],
       listTurns: async () => [
         {
@@ -908,13 +911,14 @@ function bridge(options: {
       promoteQueueEntry: async () => undefined,
       updateQueueEntry: async () => undefined,
       reorderQueueEntries: async () => undefined,
-      setPermissionMode: async (_sessionId, mode) => ({
+      setExecutionPolicy: async (_sessionId, policy) => ({
         ...SIDE_CHAT_SESSION,
-        permissionMode: mode,
+        ...policy,
       }),
       regenerateTurn: async () => undefined,
       respondToSandboxBoundary: async () => undefined,
       respondToClientCapability: async () => undefined,
+      respondToPermissions: async () => undefined,
       respondToUserQuestion: async () => undefined,
       respondToUserForm: async () => undefined,
       subscribeEvents: (_sessionId, _handler, onSeeded) => {
@@ -940,7 +944,7 @@ function Workbar(props: {
   tab?: SessionWorkbarTabKind;
   /** Extra faces opened after `tab`, so the strip can be seen with several. */
   alsoOpen?: readonly Exclude<SessionWorkbarTabKind, 'side-chat' | 'terminal'>[];
-  sourceSession?: SessionSummary;
+  sourceSession?: SideChatSession;
   /** Overrides the restored column width, the way the resize handle does. */
   width?: number;
   /**

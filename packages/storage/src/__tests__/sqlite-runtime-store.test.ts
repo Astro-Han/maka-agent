@@ -156,7 +156,7 @@ describe('SqliteRuntimeStore', () => {
             },
             configuration: {
               cwd: '/tmp',
-              permissionMode: 'ask',
+              sandboxMode: 'workspace-write',
               collaborationMode: 'agent',
               orchestrationMode: 'default',
               orchestrationSource: 'session',
@@ -1092,7 +1092,7 @@ describe('SqliteRuntimeStore', () => {
                 ...claim.targetOpening,
                 configuration: {
                   ...claim.targetOpening.configuration,
-                  permissionMode: 'execute',
+                  sandboxMode: 'execute',
                 },
               } as unknown as ContinuationClaimV1['targetOpening'],
             },
@@ -1107,7 +1107,7 @@ describe('SqliteRuntimeStore', () => {
           UPDATE runtime_continuation_claims
           SET target_opening_json = json_set(
             target_opening_json,
-            '$.configuration.permissionMode',
+            '$.configuration.sandboxMode',
             'execute'
           )
           WHERE claim_id = 'claim-1';
@@ -2486,7 +2486,7 @@ function continuationClaimForBoundary(
       },
       configuration: {
         cwd: '/workspace/repo',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         orchestrationSource: 'session',
@@ -2664,7 +2664,7 @@ async function appendSettledTurn(store: Store, index: number): Promise<void> {
         },
         configuration: {
           cwd: '/tmp',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           collaborationMode: 'agent',
           orchestrationMode: 'default',
           orchestrationSource: 'session',

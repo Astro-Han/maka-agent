@@ -32,22 +32,14 @@ type ToastApi = {
   ): void;
 };
 
-/**
- * Owns the #1223 safe-boundary resume cluster: the in-flight `resumePendingSessionId`
- * guard and the per-session parked-diagnostic descriptions surfaced on the
- * interrupted-turn banner, plus the `resumeInterruptedSession` handler that drives
- * `sessions.resumeLatest`. `activeId` is injected (the handler snapshots it as
- * `sessionId` so a session switch mid-resume settles the ORIGINAL session's pending
- * flag) alongside `toastApi` / `shellCopy` / `uiLocale`. The two state values are
- * returned raw so AppShell's banner JSX keeps its exact `resumePendingSessionId ===
- * activeId` / `resumeParkDescriptionBySession[activeId]` reads; the wiring
- * (`safeResumeAction=` element) stays in AppShell. Pure move — zero behavior change.
- */
+/** Resume only the selection that requested readiness; settle its own pending state. */
 export function useShellResume(options: {
   activeId: string | undefined;
   toastApi: ToastApi;
   shellCopy: ReturnType<typeof getShellCopy>['app'];
   uiLocale: UiLocale;
+  captureSelection(): () => boolean;
+  checkExecutionReadiness(): Promise<boolean>;
 }): {
   resumePendingSessionId: string | null;
   resumeParkDescriptionBySession: Record<string, string>;
@@ -60,8 +52,10 @@ export function useShellResume(options: {
   async function resumeInterruptedSession(): Promise<void> {
     const sessionId = activeId;
     if (!sessionId || resumePendingSessionId !== null) return;
+    const selectionIsCurrent = options.captureSelection();
     setResumePendingSessionId(sessionId);
     try {
+      if (!(await options.checkExecutionReadiness()) || !selectionIsCurrent()) return;
       const result = await window.maka.sessions.resumeLatest(sessionId);
       if (result.disposition === 'park') {
         const parkCopy = resumeParkToastCopy(result.rejectionReasons, uiLocale);

@@ -19,7 +19,7 @@
 
 //! Consent descriptions and durable references, never bearer capabilities.
 
-use maka_runtime::execution::{PermissionMode, WorkspaceTarget};
+use maka_runtime::execution::{SandboxMode, WorkspaceTarget};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -56,7 +56,7 @@ pub enum Target {
     Profile,
     /// Host-created scratch workspace for this package/scope, never arbitrary state files.
     PluginWorkspace {
-        permission_mode: PermissionMode,
+        sandbox_mode: SandboxMode,
     },
     Directory {
         path: String,
@@ -66,7 +66,7 @@ pub enum Target {
     },
     Workspace {
         workspace: WorkspaceTarget,
-        permission_mode: PermissionMode,
+        sandbox_mode: SandboxMode,
     },
 }
 
@@ -107,7 +107,7 @@ impl Request {
                 ));
             }
             Target::Session { session_id } => crate::name(session_id)?,
-            Target::PluginWorkspace { permission_mode } => self.validate_mode(*permission_mode)?,
+            Target::PluginWorkspace { sandbox_mode } => self.validate_mode(*sandbox_mode)?,
             Target::Directory { path } => {
                 if path.is_empty()
                     || path.len() > 32 * 1024
@@ -123,7 +123,7 @@ impl Request {
             }
             Target::Workspace {
                 workspace,
-                permission_mode,
+                sandbox_mode,
             } => {
                 match workspace {
                     WorkspaceTarget::Project { project_id } => crate::name(project_id)?,
@@ -135,27 +135,24 @@ impl Request {
                         ));
                     }
                 }
-                self.validate_mode(*permission_mode)?;
+                self.validate_mode(*sandbox_mode)?;
             }
         }
         Ok(())
     }
-    /// Interactive approvals remain a separate Host operation. An unattended
-    /// grant cannot turn Ask/Explore into permission for arbitrary side effects.
-    pub fn validate_mode(&self, mode: PermissionMode) -> Result<(), crate::Error> {
-        if mode != PermissionMode::Bypass
-            && self.capabilities.iter().any(|capability| {
-                matches!(
-                    capability,
-                    Capability::WriteFiles
-                        | Capability::Network
-                        | Capability::Processes
-                        | Capability::ClientCapabilities
-                )
-            })
+    /// Explicit HTTP consent is independent of the file/process sandbox. Client
+    /// capabilities can cross that sandbox and still require unrestricted access.
+    pub fn validate_mode(&self, mode: SandboxMode) -> Result<(), crate::Error> {
+        if mode != SandboxMode::DangerFullAccess
+            && self.capabilities.contains(&Capability::ClientCapabilities)
         {
             return Err(crate::Error::Invalid(
-                "unattended side effects require explicit bypass permission".into(),
+                "client capabilities require unrestricted sandbox permission".into(),
+            ));
+        }
+        if mode == SandboxMode::ReadOnly && self.capabilities.contains(&Capability::WriteFiles) {
+            return Err(crate::Error::Invalid(
+                "read-only authorization cannot grant file writes".into(),
             ));
         }
         Ok(())
@@ -209,7 +206,8 @@ pub enum Boundary {
     Workspace {
         workspace: maka_runtime::execution::WorkspaceProjection,
         workspace_identity: maka_runtime::execution::WorkspaceIdentity,
-        permission_mode: PermissionMode,
+        origin: maka_runtime::execution::WorkspaceOrigin,
+        sandbox_mode: SandboxMode,
     },
 }
 impl Boundary {
@@ -217,42 +215,44 @@ impl Boundary {
         let invalid =
             || crate::Error::Invalid("authorization boundary does not match proposal".into());
         let mode = match (self, &request.target) {
-            (Self::Profile, Target::Profile) => PermissionMode::Explore,
+            (Self::Profile, Target::Profile) => SandboxMode::ReadOnly,
             (Self::Directory { path, .. }, Target::Directory { .. }) if !path.is_empty() => {
-                PermissionMode::Bypass
+                SandboxMode::DangerFullAccess
             }
             (
                 Self::Workspace {
                     workspace,
-                    permission_mode,
+                    sandbox_mode,
+                    origin: maka_runtime::execution::WorkspaceOrigin::Allocated,
                     ..
                 },
                 Target::PluginWorkspace {
-                    permission_mode: proposed,
+                    sandbox_mode: proposed,
                 },
-            ) if permission_mode == proposed
+            ) if sandbox_mode == proposed
                 && !workspace.host_cwd.is_empty()
                 && matches!(&workspace.target, WorkspaceTarget::HostPath { path } if path == &workspace.host_cwd) =>
             {
-                *permission_mode
+                *sandbox_mode
             }
             (Self::Session { boundary, .. }, Target::Session { session_id })
                 if &boundary.session_id == session_id =>
             {
                 boundary.validate().map_err(|_| invalid())?;
-                boundary.permission_mode
+                boundary.sandbox_mode
             }
             (
                 Self::Workspace {
                     workspace,
-                    permission_mode,
+                    sandbox_mode,
+                    origin: maka_runtime::execution::WorkspaceOrigin::Selected,
                     ..
                 },
                 Target::Workspace {
                     workspace: target,
-                    permission_mode: proposed,
+                    sandbox_mode: proposed,
                 },
-            ) if permission_mode == proposed
+            ) if sandbox_mode == proposed
                 && match (&workspace.target, target) {
                     (
                         WorkspaceTarget::Project { project_id: left },
@@ -264,7 +264,7 @@ impl Boundary {
                 }
                 && !workspace.host_cwd.is_empty() =>
             {
-                *permission_mode
+                *sandbox_mode
             }
             _ => return Err(invalid()),
         };

@@ -17,8 +17,9 @@
  * under the License.
  */
 
+use crate::scoped::Directory as Dir;
 use crate::{ReadExecutor, failed};
-use cap_std::fs::{Dir, File, OpenOptions, OpenOptionsExt};
+use cap_std::fs::{File, OpenOptions, OpenOptionsExt};
 use maka_runtime::tools::ToolError;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -260,6 +261,12 @@ impl Search {
                 continue;
             }
             let child = path.join(&name);
+            if let Err(error) = root.check_read(&child) {
+                if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    continue;
+                }
+                return Err(io_error(error));
+            }
             let label = display.join(
                 child
                     .strip_prefix(target)
@@ -294,5 +301,8 @@ fn open(root: &Dir, path: &Path) -> std::io::Result<File> {
     root.open_with(path, &options)
 }
 fn io_error(e: std::io::Error) -> ToolError {
-    failed(format!("Grep filesystem error: {e}"))
+    ToolError::Io {
+        kind: e.kind(),
+        message: format!("Grep filesystem error: {e}"),
+    }
 }

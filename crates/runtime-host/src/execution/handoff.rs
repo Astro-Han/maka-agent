@@ -141,7 +141,9 @@ impl Executions {
                     )
                     .await
                     .map_err(internal)?;
-                if !session.is_some_and(|session| !session.archived) {
+                if !session.is_some_and(|session| {
+                    !session.archived && candidate.owns_workspace(&session.configuration)
+                }) {
                     remaining = true;
                     continue;
                 }

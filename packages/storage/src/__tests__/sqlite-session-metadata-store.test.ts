@@ -1943,7 +1943,7 @@ describe('SqliteSessionMetadataStore', () => {
             connectionLocked: header.connectionLocked,
             model: header.model,
             thinkingLevel: header.thinkingLevel,
-            permissionMode: header.permissionMode,
+            sandboxMode: header.sandboxMode,
             collaborationMode: header.collaborationMode ?? 'agent',
             orchestrationMode: header.orchestrationMode ?? 'default',
             labels: header.labels,
@@ -2534,9 +2534,9 @@ describe('SqliteSessionMetadataStore', () => {
         justification: 'Fetch a dependency.',
       });
 
-      const bypass = await store.setExecutionBoundaryKind('session-1', 'bypass');
-      assert.deepEqual(bypass, { kind: 'bypass', revision: 2 });
-      assert.equal((await store.read('session-1')).header.permissionMode, 'bypass');
+      const bypass = await store.setExecutionBoundaryKind('session-1', 'danger-full-access');
+      assert.deepEqual(bypass, { kind: 'danger-full-access', revision: 2 });
+      assert.equal((await store.read('session-1')).header.sandboxMode, 'danger-full-access');
       const conflict = await store.settleSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'stale-after-bypass',
@@ -2549,7 +2549,7 @@ describe('SqliteSessionMetadataStore', () => {
       const restored = await store.setExecutionBoundaryKind('session-1', 'managed');
       assert.equal(restored.kind, 'managed');
       assert.equal(restored.revision, 3);
-      assert.equal((await store.read('session-1')).header.permissionMode, 'ask');
+      assert.equal((await store.read('session-1')).header.sandboxMode, 'workspace-write');
       if (restored.kind === 'managed') {
         assert.equal(canReadPath(restored.profile, '/outside/kept/file.txt'), true);
       }
@@ -2569,7 +2569,7 @@ describe('SqliteSessionMetadataStore', () => {
         revision: 0,
       });
 
-      await store.setExecutionBoundaryKind('session-1', 'bypass');
+      await store.setExecutionBoundaryKind('session-1', 'danger-full-access');
       const restored = await store.setExecutionBoundaryKind('session-1', 'managed');
 
       assert.equal(restored.kind, 'managed');
@@ -2582,13 +2582,13 @@ describe('SqliteSessionMetadataStore', () => {
   test('restores canonical Auto when an Explore-origin session has no Auto history', async () => {
     const store = createSqliteSessionMetadataStore(':memory:', { now: nextNow(218) });
     try {
-      await store.create(fullHeader({ permissionMode: 'explore' }));
+      await store.create(fullHeader({ sandboxMode: 'read-only' }));
 
-      await store.setExecutionBoundaryKind('session-1', 'bypass', {
-        permissionMode: 'bypass',
+      await store.setExecutionBoundaryKind('session-1', 'danger-full-access', {
+        sandboxMode: 'danger-full-access',
       });
       const restored = await store.setExecutionBoundaryKind('session-1', 'managed', {
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
 
       assert.equal(restored.kind, 'managed');
@@ -2604,14 +2604,14 @@ describe('SqliteSessionMetadataStore', () => {
     const store = createSqliteSessionMetadataStore(':memory:', { now: nextNow(220) });
     const { name: _name, ...unnamedReadOnlyProfile } = createReadOnlyPermissionProfile();
     try {
-      await store.create(fullHeader({ permissionMode: 'explore' }), {
+      await store.create(fullHeader({ sandboxMode: 'read-only' }), {
         kind: 'managed',
         profile: unnamedReadOnlyProfile,
         revision: 0,
       });
 
       const restored = await store.setExecutionBoundaryKind('session-1', 'managed', {
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
 
       assert.equal(restored.kind, 'managed');
@@ -2645,13 +2645,13 @@ describe('SqliteSessionMetadataStore', () => {
       });
 
       const explore = await store.setExecutionBoundaryKind('session-1', 'managed', {
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
       });
       assert.equal(explore.kind, 'managed');
       if (explore.kind === 'managed') assert.equal(explore.profile.name, 'read-only');
 
       const restored = await store.setExecutionBoundaryKind('session-1', 'managed', {
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       assert.equal(restored.kind, 'managed');
       if (restored.kind === 'managed') {
@@ -2666,14 +2666,14 @@ describe('SqliteSessionMetadataStore', () => {
     const store = createSqliteSessionMetadataStore(':memory:', { now: nextNow(275) });
     try {
       await store.create(fullHeader());
-      await store.setExecutionBoundaryKind('session-1', 'bypass', {
-        permissionMode: 'bypass',
+      await store.setExecutionBoundaryKind('session-1', 'danger-full-access', {
+        sandboxMode: 'danger-full-access',
       });
 
       const snapshot = await store.readSessionAuthoritySnapshot('session-1');
 
-      assert.equal(snapshot.record.header.permissionMode, 'bypass');
-      assert.equal(snapshot.boundary.kind, 'bypass');
+      assert.equal(snapshot.record.header.sandboxMode, 'danger-full-access');
+      assert.equal(snapshot.boundary.kind, 'danger-full-access');
       assert.equal(snapshot.boundary.revision, 1);
     } finally {
       store.close();
@@ -2695,14 +2695,14 @@ describe('SqliteSessionMetadataStore', () => {
 
       await assert.rejects(
         () =>
-          store.setExecutionBoundaryKind('session-1', 'bypass', {
-            permissionMode: 'bypass',
+          store.setExecutionBoundaryKind('session-1', 'danger-full-access', {
+            sandboxMode: 'danger-full-access',
           }),
         /injected boundary projection failure/,
       );
 
       assert.equal((await store.readExecutionBoundary('session-1')).kind, 'managed');
-      assert.equal((await store.read('session-1')).header.permissionMode, 'ask');
+      assert.equal((await store.read('session-1')).header.sandboxMode, 'workspace-write');
     } finally {
       store.close();
     }
@@ -3469,7 +3469,7 @@ describe('SqliteSessionMetadataStore', () => {
         connectionLocked: true,
         model: 'openrouter/free',
         thinkingLevel: undefined,
-        permissionMode: 'bypass' as const,
+        sandboxMode: 'danger-full-access' as const,
         collaborationMode: 'plan' as const,
         orchestrationMode: 'graph' as const,
         labels: ['configured'],
@@ -3483,7 +3483,7 @@ describe('SqliteSessionMetadataStore', () => {
           status: 'active',
           blockedReason: undefined,
           parentSessionId: undefined,
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
         }),
       );
 
@@ -3493,7 +3493,7 @@ describe('SqliteSessionMetadataStore', () => {
         /boundary failpoint/,
       );
       armed = false;
-      assert.equal((await store.read('configured-session')).header.permissionMode, 'ask');
+      assert.equal((await store.read('configured-session')).header.sandboxMode, 'workspace-write');
       assert.deepEqual(await store.readExecutionBoundary('configured-session'), {
         kind: 'managed',
         profile: createWorkspaceWritePermissionProfile(),
@@ -3508,7 +3508,7 @@ describe('SqliteSessionMetadataStore', () => {
       assert.equal(updated.header.orchestrationMode, 'graph');
       assert.deepEqual(updated.header.labels, ['configured']);
       assert.deepEqual(await store.readExecutionBoundary('configured-session'), {
-        kind: 'bypass',
+        kind: 'danger-full-access',
         revision: 1,
       });
       await assert.rejects(
@@ -3553,7 +3553,7 @@ describe('SqliteSessionMetadataStore', () => {
           connectionLocked: true,
           model: 'openrouter/free',
           thinkingLevel: undefined,
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           collaborationMode: 'agent',
           orchestrationMode: 'default',
           labels: [],
@@ -4277,7 +4277,7 @@ function fullHeader(overrides: Partial<SessionHeader> = {}): SessionHeader {
     model: 'gpt-5',
     toolProfile: 'headless-coding-v1',
     thinkingLevel: 'high',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     collaborationMode: 'agent',
     orchestrationMode: 'swarm',
     schemaVersion: 1,

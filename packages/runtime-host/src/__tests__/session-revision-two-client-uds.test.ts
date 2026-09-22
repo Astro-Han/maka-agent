@@ -222,7 +222,7 @@ async function verifyConcurrentRevisionAuthority(
     const workHubSideConversationSession = requireSessionProjection(
       workHubSideConversation.session,
     );
-    assert.equal(workHubSideConversationSession.permissionMode, 'ask');
+    assert.equal(workHubSideConversationSession.sandboxMode, 'ask');
     assert.deepEqual(workHubSideConversationSession.labels, ['mode:side_conversation']);
     assert.equal(workHubSideConversationSession.parentSessionId, WORKHUB_COORDINATION_SESSION_ID);
     assert.equal(workHubSideConversationSession.branchOfTurnId, undefined);
@@ -854,7 +854,7 @@ async function seedSource(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const coordination = await execution.sessionStore.createStableSession({
       sessionId: WORKHUB_COORDINATION_SESSION_ID,
@@ -866,7 +866,7 @@ async function seedSource(
         llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'bypass',
+        sandboxMode: 'danger-full-access',
         role: WORKHUB_COORDINATION_SESSION_ROLE,
         toolProfile: 'workhub-coordination-v2',
         labels: ['coordination-control'],
@@ -882,7 +882,7 @@ async function seedSource(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const linkedChildSource = await execution.sessionStore.create({
       cwd: root,
@@ -890,7 +890,7 @@ async function seedSource(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const metadataLinkedSource = await execution.sessionStore.create({
       cwd: root,
@@ -898,7 +898,7 @@ async function seedSource(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const archivedOwnedSource = await execution.sessionStore.create({
       cwd: root,
@@ -906,7 +906,7 @@ async function seedSource(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const continuationSource = await execution.sessionStore.create({
       cwd: root,
@@ -914,7 +914,7 @@ async function seedSource(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
     const continuationParent = agentRunHeader(
       root,
@@ -1206,7 +1206,7 @@ async function seedSource(
         llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         subagentParent: {
           kind: 'subagent',
           parentSessionId: linkedChildSource.id,
@@ -1438,7 +1438,7 @@ async function seedSource(
       llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       subagentParent: {
         kind: 'subagent',
         parentSessionId: metadataLinkedSource.id,
@@ -1472,7 +1472,7 @@ async function seedSource(
       turnId: 'archived-owned-child-turn',
       runId: 'archived-owned-child-run',
       status: 'completed',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       summary: 'done',
       artifactIds: [],
     });
@@ -1829,7 +1829,7 @@ async function verifyDurableBranch(
     );
     assert.equal(workHubSideConversationHeader.role, undefined);
     assert.equal(workHubSideConversationHeader.toolProfile, undefined);
-    assert.equal(workHubSideConversationHeader.permissionMode, 'ask');
+    assert.equal(workHubSideConversationHeader.sandboxMode, 'ask');
     assert.deepEqual(workHubSideConversationHeader.labels, ['mode:side_conversation']);
     assert.equal(
       workHubSideConversationHeader.conversationCopy?.sourceSessionId,
@@ -1940,7 +1940,7 @@ async function verifyDurableBranch(
       turnId: 'archived-owned-child-turn',
       runId: archivedSideConversationChildRun.runId,
       status: 'completed',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       summary: 'done',
       artifactIds: [],
     });
@@ -2174,7 +2174,7 @@ function agentRunHeader(
       },
       configuration: {
         cwd,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         orchestrationSource: 'session',

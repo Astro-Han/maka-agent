@@ -429,7 +429,7 @@ function agentInput() {
         llmConnectionId: 'connection-default',
         llmConnectionSlug: 'default',
         model: 'test-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         collaborationMode: 'agent',
         orchestrationMode: 'default',
       },

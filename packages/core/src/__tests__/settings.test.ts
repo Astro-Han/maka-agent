@@ -35,20 +35,20 @@ import {
   UI_FONT_SIZE_MIN,
 } from '../settings.js';
 
-test('defaults new sessions to bypass while preserving saved choices and rejecting invalid modes', () => {
-  assert.equal(createDefaultSettings().chatDefaults.permissionMode, 'bypass');
-  assert.equal(normalizeSettings({}).chatDefaults.permissionMode, 'bypass');
-  assert.equal(normalizeSettings({ chatDefaults: {} }).chatDefaults.permissionMode, 'bypass');
-  for (const permissionMode of ['ask', 'bypass'] as const) {
+test('defaults new sessions to workspace-write while preserving explicit choices', () => {
+  assert.equal(createDefaultSettings().chatDefaults.sandboxMode, 'workspace-write');
+  assert.equal(normalizeSettings({}).chatDefaults.sandboxMode, 'workspace-write');
+  assert.equal(normalizeSettings({ chatDefaults: {} }).chatDefaults.sandboxMode, 'workspace-write');
+  for (const sandboxMode of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
     assert.equal(
-      normalizeSettings({ chatDefaults: { permissionMode } }).chatDefaults.permissionMode,
-      permissionMode,
+      normalizeSettings({ chatDefaults: { sandboxMode } }).chatDefaults.sandboxMode,
+      sandboxMode,
     );
   }
   assert.equal(
-    normalizeSettings({ chatDefaults: { permissionMode: 'invalid' as never } }).chatDefaults
-      .permissionMode,
-    'ask',
+    normalizeSettings({ chatDefaults: { sandboxMode: 'invalid' as never } }).chatDefaults
+      .sandboxMode,
+    'workspace-write',
   );
 });
 

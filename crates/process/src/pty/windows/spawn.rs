@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Console, PtyCommand};
+use super::Console;
 use crate::windows::{checked, job::Job, owned};
 use std::{
     io,
@@ -36,12 +36,11 @@ impl Drop for Attributes {
     }
 }
 
-pub(super) fn launch(
-    plan: &PtyCommand,
+pub(crate) fn launch(
+    plan: &crate::command::Prepared,
     console: &Console,
     job: &Job,
 ) -> io::Result<(OwnedHandle, u32)> {
-    let mut buffers = plan.windows()?;
     let jobs = [job.0.as_raw_handle()];
     let mut bytes = 0;
     unsafe {
@@ -88,22 +87,8 @@ pub(super) fn launch(
     // the host's redirected stdio even with bInheritHandles=false, bypassing PTY.
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     startup.lpAttributeList = attributes.0.as_mut_ptr().cast();
-    let mut process = PROCESS_INFORMATION::default();
     // No standard handle inheritance: ConPTY supplies the child's console.
-    unsafe {
-        checked(CreateProcessW(
-            buffers.executable.as_ptr(),
-            buffers.line.as_mut_ptr(),
-            ptr::null(),
-            ptr::null(),
-            0,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
-            buffers.environment.as_ptr().cast(),
-            buffers.cwd.as_ptr(),
-            &startup.StartupInfo,
-            &mut process,
-        ))?;
-    }
+    let process = unsafe { plan.spawn_windows(&startup, false, 0) }?;
     let handle = owned(process.hProcess)?;
     let _thread = owned(process.hThread)?;
     Ok((handle, process.dwProcessId))

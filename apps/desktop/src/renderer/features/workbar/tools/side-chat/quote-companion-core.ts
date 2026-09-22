@@ -25,17 +25,17 @@ import {
   type InteractionQueues,
   type LiveTurnProjection,
 } from '@maka/ui';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { ChatModelChoice } from '@maka/core/chat-model-choice';
 import type { QuoteRef, SessionEvent } from '@maka/core/events';
 import { isWorkHubCoordinationSessionId } from '@maka/core/session';
 import type {
-  SessionSummary,
   TurnRecord,
 } from '@maka/core/session';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type {
   SideChatSessionPort,
+  SideChatSession,
   SideChatSendResult,
   WorkbarIngestInput,
 } from '../../ports.js';
@@ -63,7 +63,7 @@ export type CompanionErrorCode =
   | 'send_rejected';
 
 export function sessionHasExactModelChoice(
-  session: SessionSummary | undefined,
+  session: SideChatSession | undefined,
   choices: readonly ChatModelChoice[],
 ): boolean {
   return Boolean(
@@ -78,7 +78,7 @@ export function sessionHasExactModelChoice(
 }
 
 export type EnsureCompanionForkResult =
-  | { status: 'ready'; session: SessionSummary }
+  | { status: 'ready'; session: SideChatSession }
   | { status: 'disposed' }
   | { status: 'error'; code: CompanionErrorCode };
 
@@ -98,14 +98,14 @@ export function createCompanionDismissalGuard(): CompanionDismissalGuard {
 
 export interface EnsureCompanionForkDeps {
   api: SideChatSessionPort;
-  sourceSession: SessionSummary;
+  sourceSession: SideChatSession;
   panelId: string;
   name: string;
   /** True once the panel has unmounted — checked after every await so a fork
    *  born after disposal is torn down instead of leaking a hidden run. */
   isDisposed: () => boolean;
   /** Fired as soon as creation returns so the host can hide this ephemeral child. */
-  onForkCreated?: (session: SessionSummary) => void;
+  onForkCreated?: (session: SideChatSession) => void;
   /** Fired only after the main-process cleanup authority confirms deletion. */
   onForkCleanupSucceeded?: (sessionId: string) => void;
 }
@@ -268,7 +268,7 @@ export async function ensureCompanionFork(
   const boundaryTurnId = latestSettledTurnId(turns);
   const attemptBoundary = boundaryTurnId ?? EMPTY_SOURCE_TURN_SENTINEL;
 
-  let created: SessionSummary;
+  let created: SideChatSession;
   try {
     let copyAttempt = acquireSessionCopyAttempt(
       companionCopyAttemptKey(sourceSession.id, deps.panelId),
@@ -339,7 +339,7 @@ export interface PerformCompanionTurnDeps extends EnsureCompanionForkDeps {
   quotes: QuoteRef[] | undefined;
   attachmentItems?: WorkbarIngestInput[];
   /** Fired once a fork is ready, so the caller can commit it. */
-  onForkCommitted: (session: SessionSummary) => void;
+  onForkCommitted: (session: SideChatSession) => void;
   /** Fired right before the send — the caller arms the optimistic live turn here. */
   onBeforeSend: (forkId: string) => void;
 }
@@ -458,11 +458,13 @@ export function applyCompanionInteractionEvent(
   switch (event.type) {
     case 'sandbox_boundary_request':
     case 'client_capability_request':
+    case 'permissions_request':
     case 'user_question_request':
     case 'form_request':
       return enqueueInteraction(queues, sessionId, event);
     case 'sandbox_boundary_decision_ack':
     case 'client_capability_decision_ack':
+    case 'permissions_decision_ack':
     case 'user_question_answer_ack':
     case 'form_answer_ack':
       return dequeueInteractionByRequestId(queues, sessionId, event.requestId);

@@ -105,7 +105,7 @@ test('a real send seals its observation into SQLite and reconstructs it after re
     const session = await manager.createSession({
       cwd: root,
       llmConnectionSlug: 'mock-main',
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
     for await (const _event of manager.sendMessage(session.id, {
       turnId: 'turn-1',
@@ -246,7 +246,7 @@ test('a turn aborted before dispatch does not create a canonical sent attempt', 
     const session = await manager.createSession({
       cwd: root,
       llmConnectionSlug: 'mock-main',
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
     for await (const _event of manager.sendMessage(session.id, {
       turnId: 'turn-aborted-before-dispatch',

@@ -211,11 +211,12 @@ mod tests {
     #[test]
     fn chat_defaults_are_replacement_and_optional_does_not_mean_nullable() {
         let request = |value| json!({"expectedRevision":0,"operation":{"kind":"set_chat_defaults","value":value}});
-        assert!(normalize_mutation(request(json!({"permissionMode":"ask"}))).is_ok());
-        assert!(normalize_mutation(request(json!({"permissionMode":"explore"}))).is_err());
+        assert!(normalize_mutation(request(json!({"sandboxMode":"workspace-write"}))).is_ok());
+        assert!(normalize_mutation(request(json!({"sandboxMode":"read-only"}))).is_ok());
+        assert!(normalize_mutation(request(json!({"sandboxMode":"invalid"}))).is_err());
         assert!(
             normalize_mutation(request(
-                json!({"permissionMode":"ask","thinkingLevel":null})
+                json!({"sandboxMode":"workspace-write","thinkingLevel":null})
             ))
             .is_err()
         );

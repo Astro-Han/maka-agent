@@ -35,9 +35,13 @@ pub(crate) enum Outcome {
     },
 }
 
-pub(super) async fn prepare(catalog: &Catalog, request: Request) -> Result<(Prepared, Outcome)> {
+pub(super) async fn prepare(
+    catalog: &Catalog,
+    request: Request,
+    workspace: &maka_plugins::filesystem::ReadRoot,
+) -> Result<(Prepared, Outcome)> {
     let scope = Scope::Session(request.session_id.clone());
-    let prepared = maka_plugins::input::prepare(catalog, &scope, request)
+    let prepared = maka_plugins::input::prepare(catalog, &scope, request, workspace)
         .await
         .map_err(|error| match error {
             maka_plugins::Error::Retired | maka_plugins::Error::Invalid(_) => failure(

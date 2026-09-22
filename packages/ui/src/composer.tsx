@@ -90,7 +90,7 @@ import type {
   MessageQueueEntryProjection,
   QuoteRef,
 } from '@maka/core/events';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { OrchestrationMode } from '@maka/core/orchestration';
 import type { ProviderType } from '@maka/core/llm-connections';
 import type { SessionSummary } from '@maka/core/session';
@@ -119,7 +119,7 @@ import {
   DropdownMenuRadioItem,
 } from '@astryxdesign/core/DropdownMenu';
 import { useIndicator } from '@astryxdesign/core/Indicator';
-import { PermissionModeSelect } from './permission-mode-menu.js';
+import { SandboxModeSelect } from './permission-mode-menu.js';
 import { AttachmentKindIcon } from './attachment-kinds.js';
 import { formatPreviewSize } from './artifact-preview-registry.js';
 import {
@@ -449,18 +449,15 @@ export const Composer = forwardRef<
     workspacePicker?: WorkspacePickerModel;
     /** Host actions that share the composer's existing footer. */
     footerAccessory?: ReactNode;
-    /**
-     * PR-MOVE-PERMISSION-MODE (WAWQAQ 47fe0d0e + a667cf6c): the
-     * permission mode picker lives inside the composer left-controls
-     * instead of the chat header. Composer renders a dropdown labelled
-     * by the mode the session's boundary is actually in (只读 / 自动 /
-     * 完全权限); selecting an option fires `onPermissionModeChange`.
-     * A read-only session displays 只读 without it becoming a third
-     * option (#1611).
-     */
-    permissionMode?: PermissionMode;
-    permissionModeDisabledReason?: string;
-    onPermissionModeChange?(mode: PermissionMode): void | Promise<void>;
+    /** Filesystem/network isolation and approval requests are independent. */
+    sandboxMode?: SandboxMode;
+    sandboxModeDisabledReason?: string;
+    onSandboxModeChange?(mode: SandboxMode): void | Promise<void>;
+    approval?: {
+      policy: import('@maka/core/execution-permissions').ApprovalPolicy;
+      onChange(policy: import('@maka/core/execution-permissions').ApprovalPolicy): void | Promise<void>;
+      onDisableProtections?(): void | Promise<void>;
+    };
     /**
      * Plan mode — a temporary collaboration excursion, and a toggle because
      * that is what it is. Agent is the implicit default, so the composer only
@@ -2115,18 +2112,19 @@ export const Composer = forwardRef<
                   </DropdownMenu>
                 </span>
               ) : null}
-              {props.onPermissionModeChange ? (
-                <PermissionModeSelect
+              {props.onSandboxModeChange ? (
+                <SandboxModeSelect
                   appearance="icon"
-                  activeMode={props.permissionMode ?? 'ask'}
+                  activeMode={props.sandboxMode ?? 'workspace-write'}
+                  approval={props.approval}
                   onSelect={(mode) => {
-                    void props.onPermissionModeChange?.(mode);
+                    void props.onSandboxModeChange?.(mode);
                   }}
                   disabled={
                     props.disabled
-                    || Boolean(props.permissionModeDisabledReason)
+                    || Boolean(props.sandboxModeDisabledReason)
                   }
-                  disabledReason={props.permissionModeDisabledReason}
+                  disabledReason={props.sandboxModeDisabledReason}
                 />
               ) : null}
               {/* Model + thinking sit left after permission (adjacent pair), not

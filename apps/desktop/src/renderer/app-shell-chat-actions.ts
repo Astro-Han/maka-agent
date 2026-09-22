@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import type { ChatDefaultPermissionMode } from '@maka/core/settings';
+import type { ExecutionPolicy } from '@maka/core/execution-permissions';
 import type { StoredMessage } from '@maka/core/session';
 import type { CollaborationMode } from '@maka/core/collaboration';
 import type * as DesktopBridge from '../preload/bridge-contract.js';
@@ -189,13 +189,13 @@ export function createAppShellChatActions(deps: {
    * none. Undefined omits the field on create so the Host applies its own
    * `chatDefaults`; a value is a real per-Session override and is sent once.
    */
-  newChatPermissionChoice: ChatDefaultPermissionMode | undefined;
+  newChatExecutionChoice: ExecutionPolicy | undefined;
   /**
    * Drops the draft's permission choice once it has reached a created Session.
    * The choice is keyed by Host/project target rather than by draft, so
    * without this the next task on the same target would silently re-send it.
    */
-  clearNewChatPermissionChoice: () => void;
+  clearNewChatExecutionChoice: () => void;
   newChatCollaborationMode: CollaborationMode;
   newChatOrchestrationMode: OrchestrationMode;
   newTaskTarget: DesktopNewTaskTarget | undefined;
@@ -224,8 +224,8 @@ export function createAppShellChatActions(deps: {
     toastApi,
     newChatModel,
     pendingNewChatThinkingLevel,
-    newChatPermissionChoice,
-    clearNewChatPermissionChoice,
+    newChatExecutionChoice,
+    clearNewChatExecutionChoice,
     newChatCollaborationMode,
     newChatOrchestrationMode,
     newTaskTarget,
@@ -388,7 +388,7 @@ export function createAppShellChatActions(deps: {
               }
             : {}),
           ...(pendingNewChatThinkingLevel ? { thinkingLevel: pendingNewChatThinkingLevel } : {}),
-          ...(newChatPermissionChoice ? { permissionMode: newChatPermissionChoice } : {}),
+          ...newChatExecutionChoice,
           collaborationMode: newChatCollaborationMode,
           orchestrationMode: newChatOrchestrationMode,
         });
@@ -426,8 +426,8 @@ export function createAppShellChatActions(deps: {
         unsentSessionId = undefined;
         // A refused first send deletes the Session, so its draft choice must
         // survive for retry. Clear only while this Session still owns the UI.
-        if (newChatPermissionChoice && activeIdRef.current === session.id)
-          clearNewChatPermissionChoice();
+        if (newChatExecutionChoice && activeIdRef.current === session.id)
+          clearNewChatExecutionChoice();
         // The callback fires only when this send's first message projected;
         // an unreconciled first message stays unreported.
         if (submitted.kind === 'projected')

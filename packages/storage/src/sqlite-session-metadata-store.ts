@@ -831,9 +831,9 @@ export class SqliteSessionMetadataStore {
 
   async setExecutionBoundaryKind(
     sessionId: string,
-    kind: 'managed' | 'bypass',
+    kind: 'managed' | 'danger-full-access',
     projection?: {
-      permissionMode: SessionHeader['permissionMode'];
+      sandboxMode: SessionHeader['sandboxMode'];
       labels?: readonly string[];
     },
   ): Promise<ExecutionBoundary> {
@@ -851,7 +851,8 @@ export class SqliteSessionMetadataStore {
     this.assertOpen();
     assertSafeSessionId(sessionId);
     assertMetadataVersion(input.expectedVersion, 'Session configuration expected version');
-    const kind = input.configuration.permissionMode === 'bypass' ? 'bypass' : 'managed';
+    const kind =
+      input.configuration.sandboxMode === 'danger-full-access' ? 'danger-full-access' : 'managed';
     return this.transaction(() => {
       const current = this.readRecordSync(sessionId);
       if (!current) throw new SessionNotFoundError(sessionId);
@@ -870,7 +871,7 @@ export class SqliteSessionMetadataStore {
         sessionId,
         kind,
         {
-          permissionMode: input.configuration.permissionMode,
+          sandboxMode: input.configuration.sandboxMode,
           labels: input.configuration.labels,
         },
         {
@@ -4656,7 +4657,7 @@ export class SqliteSessionMetadataStore {
 
     const boundary = initialBoundary
       ? { ...decodeExecutionBoundary(initialBoundary), revision: 0 }
-      : createGenesisExecutionBoundary(header.permissionMode);
+      : createGenesisExecutionBoundary(header.sandboxMode);
     this.db
       .prepare(
         `
@@ -4724,7 +4725,7 @@ export class SqliteSessionMetadataStore {
       }
       if (!isCanonicalReadOnlyPermissionProfile(boundary.profile)) return boundary.profile;
     }
-    return requireManagedProfile(createGenesisExecutionBoundary('ask'));
+    return requireManagedProfile(createGenesisExecutionBoundary('workspace-write'));
   }
 
   private readSandboxBoundaryRequestSync(
@@ -4940,9 +4941,9 @@ export class SqliteSessionMetadataStore {
 
   private setExecutionBoundaryKindSync(
     sessionId: string,
-    kind: 'managed' | 'bypass',
+    kind: 'managed' | 'danger-full-access',
     projection?: {
-      permissionMode: SessionHeader['permissionMode'];
+      sandboxMode: SessionHeader['sandboxMode'];
       labels?: readonly string[];
     },
     options: {
@@ -4970,21 +4971,21 @@ export class SqliteSessionMetadataStore {
       );
     }
     const projectedMode =
-      projection?.permissionMode ??
-      (kind === 'bypass'
-        ? 'bypass'
-        : record.header.permissionMode === 'bypass'
-          ? 'ask'
-          : record.header.permissionMode);
-    if ((projectedMode === 'bypass') !== (kind === 'bypass')) {
+      projection?.sandboxMode ??
+      (kind === 'danger-full-access'
+        ? 'danger-full-access'
+        : record.header.sandboxMode === 'danger-full-access'
+          ? 'workspace-write'
+          : record.header.sandboxMode);
+    if ((projectedMode === 'danger-full-access') !== (kind === 'danger-full-access')) {
       throw new Error('Execution boundary kind and projected permission mode disagree');
     }
 
     let boundary: ExecutionBoundary = current;
     const nextManagedProfile =
       kind === 'managed'
-        ? projectedMode === 'explore'
-          ? requireManagedProfile(createGenesisExecutionBoundary('explore'))
+        ? projectedMode === 'read-only'
+          ? requireManagedProfile(createGenesisExecutionBoundary('read-only'))
           : current.kind === 'managed' && !isCanonicalReadOnlyPermissionProfile(current.profile)
             ? current.profile
             : this.readLatestAutoSandboxProfileSync(sessionId)
@@ -4997,8 +4998,8 @@ export class SqliteSessionMetadataStore {
     if (boundaryChanged) {
       const revision = current.revision + 1;
       boundary =
-        kind === 'bypass'
-          ? { kind: 'bypass', revision }
+        kind === 'danger-full-access'
+          ? { kind: 'danger-full-access', revision }
           : {
               kind: 'managed',
               profile: nextManagedProfile!,
@@ -5034,7 +5035,7 @@ export class SqliteSessionMetadataStore {
     const projectedLabels = projection?.labels ? [...projection.labels] : record.header.labels;
     const patch = {
       ...options.headerPatch,
-      permissionMode: projectedMode,
+      sandboxMode: projectedMode,
       labels: projectedLabels,
     };
     const updated = this.updateHeaderSync(sessionId, patch, {

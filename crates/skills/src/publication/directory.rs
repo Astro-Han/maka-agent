@@ -88,7 +88,7 @@ impl Directory {
                     else {
                         unreachable!()
                     };
-                    entries::execute(directory, operation, cancellation)
+                    entries::execute(directory, operation, cancellation, None)
                 })
                 .await
                 .map_err(|e| Error::OutcomeUnknown(e.to_string()))?

@@ -1468,7 +1468,7 @@ describe('AiSdkBackend model history', () => {
     const traces: RunTraceEvent[] = [];
     const messages: ToolResultMessage[] = [];
     const backend = createBackend({
-      header: header('bypass'),
+      header: header('danger-full-access'),
       appendMessage: async (message) => {
         if (message.type === 'tool_result') messages.push(message);
       },
@@ -1530,7 +1530,7 @@ describe('AiSdkBackend model history', () => {
     const messages: ToolResultMessage[] = [];
     const events: SessionEvent[] = [];
     const backend = createBackend({
-      header: header('bypass'),
+      header: header('danger-full-access'),
       appendMessage: async (message) => {
         if (message.type === 'tool_result') messages.push(message);
       },
@@ -1580,7 +1580,7 @@ describe('AiSdkBackend model history', () => {
   test('does not label ordinary filesystem permission errors as sandbox denials', async () => {
     const messages: ToolResultMessage[] = [];
     const backend = createBackend({
-      header: header('bypass'),
+      header: header('danger-full-access'),
       appendMessage: async (message) => {
         if (message.type === 'tool_result') messages.push(message);
       },
@@ -5349,7 +5349,7 @@ describe('AiSdkBackend model history', () => {
           newId: idGenerator(),
           now: monotonicClock(),
           readExecutionBoundary: readExternalExecutionBoundary,
-          readPermissionMode: async () => 'ask',
+          readSandboxMode: async () => 'workspace-write',
           contextBudget: {
             name: 'malformed-summary-config-circuit-test',
             charsPerToken: 1,
@@ -11901,7 +11901,7 @@ describe('AiSdkBackend tool execution', () => {
   test('WebSearch telemetry never copies the user-derived query', async () => {
     const telemetry: Array<{ argsSummary?: string }> = [];
     const backend = createBackend({
-      header: header('bypass'),
+      header: header('danger-full-access'),
       connection: connection(),
       modelId: 'claude-sonnet-4-5-20250929',
       modelFactory: () => ({}),
@@ -11937,7 +11937,7 @@ describe('AiSdkBackend tool execution', () => {
     const events: SessionEvent[] = [];
     const telemetry: Array<{ status: string; errorClass?: string; bytesOut: number }> = [];
     const backend = createBackend({
-      header: header('ask'),
+      header: header('workspace-write'),
       appendMessage: async (message) => {
         messages.push(message);
       },
@@ -11989,7 +11989,7 @@ describe('AiSdkBackend tool execution', () => {
   test('flushes output deltas before successful and failed tool results', async () => {
     const events: SessionEvent[] = [];
     const backend = createBackend({
-      header: header('ask'),
+      header: header('workspace-write'),
       connection: connection(),
       modelId: 'claude-sonnet-4-5-20250929',
       modelFactory: () => ({}),
@@ -12048,7 +12048,7 @@ describe('AiSdkBackend tool execution', () => {
 
   test('pauses stream watchdog while a foreground subagent tool is running', async () => {
     const backend = createBackend({
-      header: header('explore'),
+      header: header('read-only'),
       connection: connection(),
       modelId: 'claude-sonnet-4-5-20250929',
       modelFactory: () => ({}),
@@ -12079,7 +12079,7 @@ describe('AiSdkBackend tool execution', () => {
               agentName: 'Researcher',
               turnId: 'child-turn',
               status: 'completed',
-              permissionMode: 'explore',
+              sandboxMode: 'read-only',
               summary: 'done',
               artifactIds: [],
             });
@@ -12107,7 +12107,7 @@ describe('AiSdkBackend tool execution', () => {
     // A long Bash command (apt-get install, a build) must not trip the model
     // stream idle timeout: the model is between steps while the tool runs.
     const backend = createBackend({
-      header: header('explore'),
+      header: header('read-only'),
       connection: connection(),
       modelId: 'claude-sonnet-4-5-20250929',
       modelFactory: () => ({}),
@@ -12202,7 +12202,7 @@ describe('AiSdkBackend tool execution', () => {
       },
     });
     const backend = createBackend({
-      header: header('bypass'),
+      header: header('danger-full-access'),
       connection: connection(),
       modelId: 'claude-sonnet-4-5-20250929',
       modelFactory: () => model,
@@ -12232,7 +12232,7 @@ describe('AiSdkBackend tool execution', () => {
     const messages: unknown[] = [];
     const events: SessionEvent[] = [];
     const backend = createBackend({
-      header: header('explore'),
+      header: header('read-only'),
       appendMessage: async (message) => {
         messages.push(message);
       },
@@ -12295,7 +12295,7 @@ describe('AiSdkBackend tool execution', () => {
     const events: SessionEvent[] = [];
     const telemetry: Array<{ status: string; toolCallId?: string }> = [];
     const backend = createBackend({
-      header: header('explore'),
+      header: header('read-only'),
       appendMessage: async (message) => {
         messages.push(message);
       },
@@ -12320,7 +12320,7 @@ describe('AiSdkBackend tool execution', () => {
           agentName: 'Researcher',
           turnId: `child-${input.status}`,
           status: input.status,
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
           summary: input.status,
           artifactIds: [],
         };
@@ -17226,7 +17226,7 @@ function createBackend(input: BackendTestOverrides): AiSdkBackend {
   });
 }
 
-function header(permissionMode: SessionHeader['permissionMode'] = 'ask'): SessionHeader {
+function header(sandboxMode: SessionHeader['sandboxMode'] = 'workspace-write'): SessionHeader {
   return {
     id: 'session-1',
     workspaceRoot: '/tmp/maka',
@@ -17245,7 +17245,7 @@ function header(permissionMode: SessionHeader['permissionMode'] = 'ask'): Sessio
     llmConnectionSlug: 'anthropic-main',
     connectionLocked: true,
     model: 'claude-sonnet-4-5-20250929',
-    permissionMode,
+    sandboxMode,
     schemaVersion: 1,
   };
 }

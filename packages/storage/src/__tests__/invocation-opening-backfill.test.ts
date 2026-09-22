@@ -562,7 +562,7 @@ function header(overrides: Partial<LegacyRunHeader>): LegacyRunHeader {
     llmConnectionSlug: 'fake',
     modelId: 'fake-model',
     cwd: '/tmp/cwd',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     createdAt: 1,
     updatedAt: 2,
     ...overrides,

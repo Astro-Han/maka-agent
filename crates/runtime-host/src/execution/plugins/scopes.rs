@@ -296,24 +296,4 @@ impl Executions {
             .collect();
         Ok(evidence.clients.get_or_init(|| clients).clone())
     }
-
-    pub(crate) async fn plugin_resource_workspace(
-        &self,
-        scope: &Scope,
-        capability: Capability,
-    ) -> Result<String, Error> {
-        if !self.plugin_calls.owns(scope) || scope.cancellation.is_cancelled() {
-            return Err(Error::Revoked);
-        }
-        if let Some(invocation) = scope.identity.agent() {
-            // This branch serves raw network/process operations. File/model/
-            // client operations retain their finer-grained journal admission.
-            return self.plugin_process_workspace(invocation).await;
-        }
-        match self.plugin_resource_boundary(scope, capability).await? {
-            Boundary::Session { boundary, .. } => Ok(boundary.cwd),
-            Boundary::Workspace { workspace, .. } => Ok(workspace.host_cwd),
-            Boundary::Profile | Boundary::Directory { .. } => Err(Error::Denied),
-        }
-    }
 }

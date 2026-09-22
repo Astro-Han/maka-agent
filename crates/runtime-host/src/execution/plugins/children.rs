@@ -18,7 +18,7 @@
  */
 
 use super::{
-    BoundCommands, ChildSession, CreateChild, Error, Grant, PermissionMode, SessionConfiguration,
+    BoundCommands, ChildSession, CreateChild, Error, Grant, SandboxMode, SessionConfiguration,
     storage,
 };
 use maka_runtime::execution::{BehaviorId, CollaborationMode};
@@ -80,8 +80,10 @@ impl BoundCommands {
         self.grants.lock().unwrap().insert(
             id.clone(),
             Grant {
+                workspace_origin: current.configuration.workspace_origin,
                 boundary_revision: current.configuration.boundary_revision,
-                permission_mode: current.configuration.permission_mode,
+                sandbox_mode: current.configuration.sandbox_mode,
+                approval_policy: current.configuration.approval_policy,
                 cwd: current.configuration.workspace.host_cwd,
             },
         );
@@ -186,11 +188,11 @@ impl BoundCommands {
                                 }
                             }
                         }
-                        if let Some(mode) = request.permission_mode {
-                            if permission_rank(mode) > permission_rank(child.permission_mode) {
+                        if let Some(mode) = request.sandbox_mode {
+                            if permission_rank(mode) > permission_rank(child.sandbox_mode) {
                                 return Err(Error::Denied);
                             }
-                            child.permission_mode = mode;
+                            child.sandbox_mode = mode;
                         }
                         if child.target.model().is_none()
                             && (request.bound_tools.is_some() || child.bound_tools.is_some())
@@ -243,8 +245,10 @@ impl BoundCommands {
                 grants.lock().unwrap().insert(
                     id.clone(),
                     Grant {
+                        workspace_origin: current.configuration.workspace_origin,
                         boundary_revision: current.configuration.boundary_revision,
-                        permission_mode: current.configuration.permission_mode,
+                        sandbox_mode: current.configuration.sandbox_mode,
+                        approval_policy: current.configuration.approval_policy,
                         cwd: current.configuration.workspace.host_cwd,
                     },
                 );
@@ -264,11 +268,11 @@ impl BoundCommands {
     }
 }
 
-fn permission_rank(mode: PermissionMode) -> u8 {
+fn permission_rank(mode: SandboxMode) -> u8 {
     match mode {
-        PermissionMode::Explore => 0,
-        PermissionMode::Ask => 1,
-        PermissionMode::Bypass => 2,
+        SandboxMode::ReadOnly => 0,
+        SandboxMode::WorkspaceWrite => 1,
+        SandboxMode::DangerFullAccess => 2,
     }
 }
 
@@ -280,7 +284,8 @@ fn validate_child(
 ) -> Result<(), Error> {
     if archived
         || !workspace::matches_parent(child, parent, workspace)
-        || permission_rank(child.permission_mode) > permission_rank(parent.permission_mode)
+        || permission_rank(child.sandbox_mode) > permission_rank(parent.sandbox_mode)
+        || !child.approval_policy.is_subset_of(parent.approval_policy)
         || parent.bound_tools.as_ref().is_some_and(|parent| {
             child
                 .bound_tools

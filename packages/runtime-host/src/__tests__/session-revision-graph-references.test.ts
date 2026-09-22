@@ -402,7 +402,7 @@ function linkedSubagentResult(
       turnId: CHILD_TURN_ID,
       runId: CHILD_RUN_ID,
       status,
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       summary: 'result',
       artifactIds: [CHILD_ARTIFACT_ID],
     },
@@ -470,7 +470,7 @@ function sessionHeader(id: string): SessionHeader {
     llmConnectionSlug: 'fake',
     connectionLocked: true,
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     schemaVersion: 1,
   };
 }

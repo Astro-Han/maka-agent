@@ -23,7 +23,7 @@ import { ResizeHandle, type ResizableProps } from '@astryxdesign/core/Resizable'
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { Composer, useToast, useUiLocale } from '@maka/ui';
 import type { ChatModelChoice } from '@maka/core/chat-model-choice';
-import type { SessionSummary } from '@maka/core/session';
+import type { SideChatSession } from '../ports.js';
 import type { WorkBoardItem, WorkBoardLinkedSession } from '@maka/core/work-board';
 import { confirmBypassPermission, getShellCopy } from '../../../locales/shell-copy';
 import type {
@@ -110,7 +110,7 @@ export interface WorkbarHostModel {
   onPromptAccepted?: (panelId: string, prompt: string) => void;
   onActivityStateChange?: (panelId: string, active: boolean) => void;
   activeSideChatPanelIds?: ReadonlySet<string>;
-  sourceSession?: SessionSummary;
+  sourceSession?: SideChatSession;
   modelChoices?: readonly ChatModelChoice[];
   onStartWorkBoardTask?: (item: WorkBoardItem) => void;
   resolveWorkBoardStartTask?: (item: WorkBoardItem) => { ok: boolean; message?: string };
@@ -197,7 +197,7 @@ export function WorkbarHost({ model: props }: { model: WorkbarHostModel }) {
               resolveWorkBoardStartTask={props.resolveWorkBoardStartTask}
               onOpenWorkBoardSession={props.onOpenWorkBoardSession}
               workBoardStartTaskEnabled={props.workBoardStartTaskEnabled}
-              confirmBypass={() => confirmBypassPermission(toast, locale)}
+              confirmBypass={(all) => confirmBypassPermission(toast, locale, all)}
             />
           </Suspense>
         </div>

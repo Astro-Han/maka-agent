@@ -106,7 +106,7 @@ function boundary(s: MemoryState, id: string): ExecutionBoundary {
   return rows<ExecutionBoundary>(s, 'boundaries').get(id)!;
 }
 type ManagedProfile = Extract<ExecutionBoundary, { kind: 'managed' }>['profile'];
-function genesisProfile(mode: 'ask' | 'explore'): ManagedProfile {
+function genesisProfile(mode: 'workspace-write' | 'read-only'): ManagedProfile {
   const initial = createGenesisExecutionBoundary(mode);
   if (initial.kind !== 'managed') throw new Error('Expected managed genesis boundary');
   return initial.profile;
@@ -121,8 +121,8 @@ function saveBoundary(s: MemoryState, id: string, value: ExecutionBoundary): voi
 function setBoundaryKind(
   s: MemoryState,
   id: string,
-  kind: 'managed' | 'bypass',
-  projection?: { permissionMode: SessionHeader['permissionMode']; labels?: readonly string[] },
+  kind: 'managed' | 'danger-full-access',
+  projection?: { sandboxMode: SessionHeader['sandboxMode']; labels?: readonly string[] },
   headerPatch: Partial<SessionHeader> = {},
   expectedVersion?: number,
 ): { boundary: ExecutionBoundary; record: Header } {
@@ -132,27 +132,28 @@ function setBoundaryKind(
   const current = boundary(s, id);
   if (current.kind === 'external')
     conflict('An externally isolated session cannot enter Auto or Bypass');
-  const permissionMode =
-    projection?.permissionMode ??
-    (kind === 'bypass'
-      ? 'bypass'
-      : record.header.permissionMode === 'bypass'
-        ? 'ask'
-        : record.header.permissionMode);
-  if ((permissionMode === 'bypass') !== (kind === 'bypass'))
+  const sandboxMode =
+    projection?.sandboxMode ??
+    (kind === 'danger-full-access'
+      ? 'danger-full-access'
+      : record.header.sandboxMode === 'danger-full-access'
+        ? 'workspace-write'
+        : record.header.sandboxMode);
+  if ((sandboxMode === 'danger-full-access') !== (kind === 'danger-full-access'))
     throw new Error('Execution boundary kind and projected permission mode disagree');
   const profile =
     kind === 'managed'
-      ? permissionMode === 'explore'
-        ? genesisProfile('explore')
+      ? sandboxMode === 'read-only'
+        ? genesisProfile('read-only')
         : current.kind === 'managed' && !isReadOnlyProfile(current.profile)
           ? current.profile
-          : (rows<ManagedProfile>(s, 'autoBoundaryProfiles').get(id) ?? genesisProfile('ask'))
+          : (rows<ManagedProfile>(s, 'autoBoundaryProfiles').get(id) ??
+            genesisProfile('workspace-write'))
       : undefined;
   let next = current;
   if (current.kind !== kind || (current.kind === 'managed' && !equal(current.profile, profile))) {
     next =
-      kind === 'bypass'
+      kind === 'danger-full-access'
         ? { kind, revision: current.revision + 1 }
         : { kind, profile: profile!, revision: current.revision + 1 };
     saveBoundary(s, id, next);
@@ -164,7 +165,7 @@ function setBoundaryKind(
       id,
       {
         ...headerPatch,
-        permissionMode,
+        sandboxMode,
         labels: projection?.labels ? [...projection.labels] : record.header.labels,
       },
       expectedVersion,
@@ -182,9 +183,7 @@ function insert(s: MemoryState, header: SessionHeader, initial?: ExecutionBounda
   saveBoundary(
     s,
     header.id,
-    initial
-      ? decodeExecutionBoundary(initial)
-      : createGenesisExecutionBoundary(header.permissionMode),
+    initial ? decodeExecutionBoundary(initial) : createGenesisExecutionBoundary(header.sandboxMode),
   );
   return record;
 }
@@ -608,7 +607,9 @@ export function createMemorySessionStore(
         return setBoundaryKind(
           s,
           id,
-          input.configuration.permissionMode === 'bypass' ? 'bypass' : 'managed',
+          input.configuration.sandboxMode === 'danger-full-access'
+            ? 'danger-full-access'
+            : 'managed',
           input.configuration,
           {
             ...input.configuration,

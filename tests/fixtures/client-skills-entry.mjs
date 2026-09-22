@@ -244,7 +244,7 @@ try {
   const skillRequest = (request) =>
     skills.method('path-request')({
       path: values['skills-client-workspace'],
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       collaborationMode: 'agent',
       request,
     });
@@ -287,7 +287,7 @@ try {
   );
   const workspace = {
     workspace: { kind: 'host_path', path: values['skills-client-workspace'] },
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     collaborationMode: 'agent',
     locale: 'en',
   };

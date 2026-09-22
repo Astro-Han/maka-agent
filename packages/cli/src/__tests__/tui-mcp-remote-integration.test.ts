@@ -184,7 +184,7 @@ test('remote TUI publication keeps its owner association across reconnect and re
       sessionId,
       workspace: { kind: 'host_path', path: hostRoot },
       modelTarget: { kind: 'default' },
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
     const started = await terminal.request('turn.start', {
       sessionId,

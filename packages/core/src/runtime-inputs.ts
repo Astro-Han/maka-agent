@@ -30,7 +30,8 @@ import type {
   SubagentSessionRuntime,
   SubagentSessionSpawn,
 } from './session.js';
-import type { PermissionMode } from './permission.js';
+import type { SandboxMode } from './permission.js';
+import type { ApprovalPolicy } from './execution-permissions.js';
 import type { ThinkingLevel } from './model-thinking.js';
 import type { CollaborationMode } from './collaboration.js';
 import type { OrchestrationMode, TurnOrchestration } from './orchestration.js';
@@ -66,7 +67,7 @@ export interface CreateSessionInput {
   toolProfile?: SessionToolProfile;
   /** Internal creation-time choice; not a per-task UI control. */
   toolMode?: ToolMode;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   /** Defaults to `agent`. */
   collaborationMode?: CollaborationMode;
   /** Defaults to `default`. Orthogonal to Agent/Plan collaboration mode. */
@@ -101,6 +102,7 @@ export interface CreateSessionInput {
  */
 export type CreateSessionRequestInput = Partial<CreateSessionInput> & {
   mode?: SessionStartMode;
+  approvalPolicy?: ApprovalPolicy;
 };
 
 export interface UserMessageInput extends MessageContent {

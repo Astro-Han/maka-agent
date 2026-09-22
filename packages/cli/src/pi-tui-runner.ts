@@ -31,7 +31,7 @@ import {
   type SelectItem,
   type Terminal,
 } from '@earendil-works/pi-tui';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { ExternalSessionLimit } from '@maka/core/external-session';
 import { CurrentTodoStore, TodoOverlay, renderTodoIndicator } from './pi-tui-todo.js';
 import { isThinkingLevel, type ThinkingLevel } from '@maka/core/model-thinking';
@@ -113,7 +113,7 @@ import {
   applyShellRunViewUpdateToTranscript,
   EXPANSION_COLLAPSE_CONFIRM_WINDOW_MS,
   hasExpandedEntriesAboveViewport,
-  permissionModeLabel,
+  sandboxModeLabel,
   retireCancelledTransientMessages,
   replaceTranscriptWithStoredMessages,
   hydrateToolsWithStoredMessages,
@@ -169,7 +169,7 @@ import {
   modelPickerItems,
   onboardingFailureMessage,
   onboardingOAuthFailureMessage,
-  permissionModePickerItems,
+  sandboxModePickerItems,
   skillPickerItems,
   thinkingLevelPickerItems,
   type MakaSlashCommand,
@@ -207,7 +207,7 @@ export interface MakaPiTuiInput {
   connectionId?: string;
   connectionIdentities?: readonly ConnectionIdentity[];
   connectionSlug: string;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   /** Maximum context tokens for the active model, for the statusline ctx segment. */
   modelContextWindow?: number;
   terminal?: Terminal;
@@ -561,7 +561,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
   let model = input.model;
   let connectionId = input.connectionId;
   let connectionSlug = input.connectionSlug;
-  let permissionMode = input.permissionMode;
+  let sandboxMode = input.sandboxMode;
   let orchestrationMode = input.driver.getOrchestrationMode?.() ?? 'default';
   let thinkingLevel: ThinkingLevel | undefined = undefined;
   let sessionListScope: 'current' | 'all' = input.sessionListScope ?? 'current';
@@ -747,7 +747,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     cwd,
     model,
     connectionSlug,
-    permissionMode,
+    sandboxMode,
     orchestrationMode,
     thinkingLevel,
     thinkingLevels: currentThinkingLevels(),
@@ -1773,7 +1773,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
       state.entries.push({ kind: 'notice', level: 'error', text: identityNotice });
     }
     connectionIdentityNotice = identityNotice;
-    permissionMode = input.driver.getPermissionMode?.() ?? summary.permissionMode;
+    sandboxMode = input.driver.getSandboxMode?.() ?? summary.sandboxMode;
     orchestrationMode = summary.orchestrationMode ?? 'default';
     thinkingLevel = summary.thinkingLevel;
     refreshEditorCwd?.(cwd);
@@ -3504,7 +3504,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     // Auto while a changed Host default creates with full access; the launch
     // reading is the Host's value, so it is the safe floor when the driver has
     // nothing newer.
-    permissionMode = input.driver.getPermissionMode?.() ?? input.permissionMode;
+    sandboxMode = input.driver.getSandboxMode?.() ?? input.sandboxMode;
     attention.setBaseTitle(input.title);
     shellRunHydration.reset();
     // Fresh transcript for the fresh session; the next prompt creates it on disk.
@@ -3685,21 +3685,23 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     );
   };
 
-  const setPermissionMode = async (mode: PermissionMode) => {
-    await input.driver.setPermissionMode(mode);
+  const setSandboxMode = async (mode: SandboxMode) => {
+    await input.driver.setSandboxMode(mode);
     // Report the boundary that resulted, not the one that was requested.
-    permissionMode = input.driver.getPermissionMode?.() ?? mode;
+    sandboxMode = input.driver.getSandboxMode?.() ?? mode;
     state.entries.push({
       kind: 'notice',
       level: 'info',
-      text: `Permissions: ${permissionModeLabel(permissionMode)}`,
+      text: `Permissions: ${sandboxModeLabel(sandboxMode)}`,
     });
     requestRender();
   };
 
   const requestSandboxBoundaryMode = (mode: 'auto' | 'bypass') => {
-    if (mode === 'auto' || permissionMode === 'bypass') {
-      void runControl(() => setPermissionMode(mode === 'auto' ? 'ask' : 'bypass'));
+    if (mode === 'auto' || sandboxMode === 'danger-full-access') {
+      void runControl(() =>
+        setSandboxMode(mode === 'auto' ? 'workspace-write' : 'danger-full-access'),
+      );
       return;
     }
     const confirmation = [
@@ -3721,7 +3723,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
       confirmation,
       (choice) => {
         if (choice.value === 'bypass') {
-          void runControl(() => setPermissionMode('bypass'));
+          void runControl(() => setSandboxMode('danger-full-access'));
         }
       },
       {
@@ -3951,16 +3953,16 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     overlay = showBottomPicker(picker);
   };
 
-  const showPermissionModeList = () => {
-    const items = permissionModePickerItems(permissionMode);
+  const showSandboxModeList = () => {
+    const items = sandboxModePickerItems(sandboxMode);
     // Where the cursor opens. It is NOT a claim about the current state —
-    // `permissionModePickerItems` marks `current` only on an option that is
+    // `sandboxModePickerItems` marks `current` only on an option that is
     // genuinely in force, so a read-only session marks neither and choosing
     // Auto reads as the permission change it is.
-    const cursorValue = permissionMode === 'bypass' ? 'bypass' : 'auto';
+    const cursorValue = sandboxMode === 'danger-full-access' ? 'bypass' : 'auto';
     showSelectPicker(
       'Permissions',
-      permissionModeLabel(permissionMode),
+      sandboxModeLabel(sandboxMode),
       items,
       (item) => {
         if (item.value === 'auto' || item.value === 'bypass') {
@@ -4472,7 +4474,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
       midTurn: 'refuse',
       run: (parts: string[]) => {
         if (parts.length === 1) {
-          showPermissionModeList();
+          showSandboxModeList();
           return;
         }
         const mode = parts.length === 2 ? parts[1] : undefined;

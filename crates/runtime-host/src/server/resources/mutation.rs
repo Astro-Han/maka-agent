@@ -42,8 +42,6 @@ pub(super) async fn start(host: &Host, input: ResourceStartInput) -> Result<Outc
             "Invalid shell launch identity or command",
         ));
     }
-    // Capture cwd/shell and settle startup inside the relocation/archive gate.
-    let _admission = host.executions.lock_admission().await;
     if host.draining.is_cancelled() {
         return Ok(failure(Code::HostDraining, "Host is draining"));
     }
@@ -52,45 +50,95 @@ pub(super) async fn start(host: &Host, input: ResourceStartInput) -> Result<Outc
         Err(outcome) => return Ok(outcome),
     };
     let cwd = session.configuration.workspace.host_cwd.clone();
-    let executor = match tokio::task::spawn_blocking(move || {
-        maka_process::ShellExecutor::trusted_unrestricted(cwd)
+    let mode = session.configuration.sandbox_mode;
+    let origin = session.configuration.workspace_origin;
+    let boundary_revision = session.configuration.boundary_revision;
+    let state_root = host.root.canonical_path().to_owned();
+    let source = input.command.clone();
+    let network = host.configuration.network_configuration().await?;
+    let route = maka_network::Policy::from_settings(&network.proxy, network.password.as_deref())?;
+    let (command, source, pty, sandbox) = match tokio::task::spawn_blocking(move || {
+        let (sandbox, _) = crate::execution::permissions::resolve(
+            mode,
+            std::path::Path::new(&cwd),
+            &state_root,
+            origin,
+        )
+        .map_err(|error| maka_runtime::tools::ToolError::Failed(error.to_string()))?;
+        let executor =
+            maka_process::ShellExecutor::new(cwd, sandbox.clone())?.with_network_route(route);
+        #[cfg(target_os = "linux")]
+        let executor = executor.with_network_helper(
+            std::env::current_exe()
+                .map_err(|error| maka_runtime::tools::ToolError::Failed(error.to_string()))?,
+        );
+        #[cfg(windows)]
+        let executor =
+            executor.with_backend(std::sync::Arc::new(crate::sandbox::windows::Backend::new(
+                &state_root,
+                &std::env::current_exe()
+                    .map_err(|error| maka_runtime::tools::ToolError::Failed(error.to_string()))?,
+            )));
+        let (source, command, pty) = match source {
+            Some(source) => {
+                let command = executor.command_pipes(&source)?;
+                (source, command, false)
+            }
+            None => {
+                let (source, command) = executor.interactive_pty()?;
+                (source, command, true)
+            }
+        };
+        Ok::<_, maka_runtime::tools::ToolError>((command, source, pty, sandbox))
     })
     .await?
     {
-        Ok(executor) => executor,
+        Ok(prepared) => prepared,
         Err(error) => return Ok(failure(Code::InvalidRequest, &error.to_string())),
     };
+    // Compile outside admission, then pin this exact boundary until native spawn.
+    let _admission = host.executions.lock_admission().await;
+    if host.draining.is_cancelled() {
+        return Ok(failure(Code::HostDraining, "Host is draining"));
+    }
+    let current = match active_session(host, &input.session_id).await {
+        Ok(session) => session,
+        Err(outcome) => return Ok(outcome),
+    };
+    if current.configuration.boundary_revision != boundary_revision {
+        return Ok(failure(
+            Code::OperationConflict,
+            "Session permissions changed during shell preparation",
+        ));
+    }
     let started_at = match super::super::configuration::now() {
         Ok(now) => now,
         Err(error) => return Ok(fault(host, error)),
     };
     let size = TerminalSize::new(80, 24).unwrap();
-    let (command, pty) = match input.command {
-        Some(command) => (command, None),
-        None => {
-            let (command, plan) = executor.interactive_pty();
-            (command, Some(plan))
-        }
-    };
     let record = ShellRun {
         id: uuid::Uuid::new_v4().to_string(),
         session_id: input.session_id,
         source_run_id: None,
         source_turn_id: input.launch_id.clone(),
         source_tool_call_id: input.launch_id,
-        visibility: if pty.is_some() {
+        visibility: if pty {
             ShellVisibility::Model
         } else {
             ShellVisibility::User
         },
+        permissions: maka_runtime::shell_run::ShellPermissions {
+            boundary_revision,
+            sandbox,
+        },
         cwd: session.configuration.workspace.host_cwd,
-        command,
+        command: source,
         started_at,
         updated_at: started_at,
         timeout_ms: None,
         revision: 1,
         state: ShellState::Starting,
-        output: if pty.is_some() {
+        output: if pty {
             ShellOutput::Pty {
                 screen: TerminalScreen::new(size),
             }
@@ -104,9 +152,10 @@ pub(super) async fn start(host: &Host, input: ResourceStartInput) -> Result<Outc
             }
         },
     };
-    let launch = match pty {
-        Some(command) => host.shells.start_pty(record, command, size),
-        None => host.shells.start_pipes(record, executor),
+    let launch = if pty {
+        host.shells.start_pty(record, command, size)
+    } else {
+        host.shells.start_pipes(record, command)
     };
     let mut handle = match launch {
         Ok(handle) => handle,

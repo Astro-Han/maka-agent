@@ -23,13 +23,13 @@
  */
 
 import type { ToolResultContent, ToolResultPreviewContent } from './events.js';
-import { isPermissionMode } from './permission.js';
+import { isSandboxMode } from './permission.js';
 import { defineObjectShape, hasExactShape, isOptionalString, isRecord } from './record-schema.js';
 
 const SUBAGENT_PREVIEW_SHAPE = defineObjectShape<
   Extract<ToolResultPreviewContent, { kind: 'subagent' }>
 >()(
-  ['kind', 'childSessionId', 'agentName', 'turnId', 'status', 'permissionMode'],
+  ['kind', 'childSessionId', 'agentName', 'turnId', 'status', 'sandboxMode'],
   ['agentId', 'runId'],
 );
 
@@ -59,7 +59,7 @@ export function materializeToolResultPreviewForActivity(
     turnId: content.turnId,
     ...(content.runId ? { runId: content.runId } : {}),
     status: content.status,
-    permissionMode: content.permissionMode,
+    sandboxMode: content.sandboxMode,
     summary: '',
     artifactIds: [],
   };
@@ -77,6 +77,6 @@ function isSubagentPreview(
     typeof value.turnId === 'string' &&
     isOptionalString(value.runId) &&
     value.status === 'running' &&
-    isPermissionMode(value.permissionMode)
+    isSandboxMode(value.sandboxMode)
   );
 }

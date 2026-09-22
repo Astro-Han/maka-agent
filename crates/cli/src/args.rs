@@ -45,9 +45,12 @@ enum Command {
     #[command(subcommand)]
     Host(HostCommand),
     /// Execute a journaled Code Mode cell read from stdin.
-    Code(Log),
+    Code(code::Args),
     /// Inspect the committed execution log.
     Inspect(Log),
+    /// Diagnose commands and manage native sandbox setup.
+    #[command(subcommand)]
+    Sandbox(crate::sandbox::Command),
 }
 
 #[derive(Subcommand)]
@@ -135,7 +138,7 @@ impl Cli {
         }
     }
 
-    pub(super) async fn run(self) -> Result<(), HostError> {
+    pub(super) async fn run(self) -> Result<std::process::ExitCode, HostError> {
         let finite = matches!(&self.command, Command::Host(command) if !matches!(command,
             HostCommand::Candidate(_) | HostCommand::Serve { .. } | HostCommand::ServiceRun(_)
             | HostCommand::Connect(_)));
@@ -150,7 +153,9 @@ impl Cli {
             };
             let timeout = std::time::Duration::from_millis(self.timeout_ms.unwrap_or(default));
             if !self.operation_worker {
-                return crate::operation::observe(timeout).await;
+                return crate::operation::observe(timeout)
+                    .await
+                    .map(|()| std::process::ExitCode::SUCCESS);
             }
             let result = crate::operation::scope(timeout, self.execute()).await;
             if let Err(error) = &result
@@ -167,8 +172,9 @@ impl Cli {
         self.execute().await
     }
 
-    async fn execute(self) -> Result<(), HostError> {
-        match self.command {
+    async fn execute(self) -> Result<std::process::ExitCode, HostError> {
+        let result = match self.command {
+            Command::Sandbox(args) => return args.run(self.timeout_ms).await,
             Command::Host(HostCommand::Fetch(args)) => args.run().await,
             Command::Host(HostCommand::Access(args)) => args.run().await,
             Command::Host(HostCommand::Candidate(args)) => args.run().await,
@@ -222,7 +228,7 @@ impl Cli {
                 println!("{}", serde_json::to_string(&result)?);
                 Ok(())
             }
-            Command::Code(args) => code::run(&args.log).await,
+            Command::Code(args) => code::run(args).await,
             Command::Inspect(args) => {
                 let log = EventLog::open(&args.log).await?;
                 let prefix = log.prefix(10_000, 8 * 1024 * 1024).await?;
@@ -230,6 +236,8 @@ impl Cli {
                 log.shutdown().await?;
                 Ok(())
             }
-        }
+        };
+        result?;
+        Ok(std::process::ExitCode::SUCCESS)
     }
 }

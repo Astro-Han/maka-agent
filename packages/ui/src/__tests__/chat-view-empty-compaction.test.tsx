@@ -70,7 +70,7 @@ test('renders the live compaction row in a session with no settled messages', as
 test('retains tool and compaction evidence without activity after observation loss', async () => {
   const messages = [{ type: 'user' as const, id: 'user', turnId: 'prior', text: 'Earlier request', ts: 1 }];
   const tool: LiveTurnProjection = { turnId: 'tool-turn', steps: [{ stepId: 'step', tools: [
-    { toolUseId: 'bash', toolName: 'Bash', args: { command: 'echo retained' }, status: 'running' },
+    { toolUseId: 'bash', toolName: 'Shell', args: { command: 'echo retained' }, status: 'running' },
   ] }] };
   const compact: LiveTurnProjection = { turnId: 'compact', rootExecutionKind: 'context_compact', steps: [] };
   for (const observed of [true, false, true]) {

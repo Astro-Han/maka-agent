@@ -73,7 +73,8 @@ describe('session workspace action identity', () => {
       hasUnread: false, status: 'active' as const, backend: 'ai-sdk' as const,
       revision: 1, runtimeHostId: 'local', profileId: 'local', profileName: 'Local',
       llmConnectionSlug: 'test', connectionLocked: false, model: 'test',
-      permissionMode: 'ask' as const, profileKind: 'local' as const,
+      sandboxMode: 'workspace-write' as const, profileKind: 'local' as const,
+      approvalPolicy: { kind: 'on-request' as const },
     }))));
     const row = (id: string): StoredMessage => ({ id, type: 'user', text: id, turnId: id, ts: 1 });
     const a = [row('a-message')];

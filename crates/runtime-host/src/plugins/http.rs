@@ -25,6 +25,7 @@ use maka_plugins::{
     fiber::Context,
     http::{Body, Client, Error, Head, Method, Request, Response},
 };
+use maka_runtime::tools::ToolError;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use std::{
     sync::{Arc, Weak},
@@ -36,14 +37,20 @@ use tokio_util::sync::CancellationToken;
 pub(super) struct Http {
     host: Weak<Executions>,
     owner: Context,
+    permissions: Arc<dyn maka_plugins::permissions::Access>,
     client: tokio::sync::Mutex<Option<(maka_network::Policy, reqwest::Client)>>,
     capacity: Arc<tokio::sync::Semaphore>,
 }
 impl Http {
-    pub fn new(host: Weak<Executions>, owner: Context) -> Self {
+    pub fn new(
+        host: Weak<Executions>,
+        owner: Context,
+        permissions: Arc<dyn maka_plugins::permissions::Access>,
+    ) -> Self {
         Self {
             host,
             owner,
+            permissions,
             client: Default::default(),
             capacity: Arc::new(tokio::sync::Semaphore::new(32)),
         }
@@ -79,6 +86,12 @@ impl Client for Http {
                 return Err(invalid("invalid HTTP request or request limit exceeded"));
             }
             let mut headers = HeaderMap::new();
+            let destination = maka_sandbox::Destination::new(
+                url.host_str().ok_or_else(|| invalid("missing HTTP host"))?,
+                url.port_or_known_default()
+                    .ok_or_else(|| invalid("missing HTTP port"))?,
+            )
+            .map_err(invalid)?;
             for (name, value) in input.headers {
                 let name = HeaderName::from_bytes(name.as_bytes()).map_err(invalid)?;
                 if matches!(
@@ -95,8 +108,36 @@ impl Client for Http {
                 }
                 headers.append(name, HeaderValue::from_str(&value).map_err(invalid)?);
             }
+            if call.identity.agent().is_some() {
+                let granted = self
+                    .permissions
+                    .request(
+                        call.clone(),
+                        maka_plugins::permissions::Request {
+                            reason: format!(
+                                "Allow plugin HTTP access to {}",
+                                url.origin().ascii_serialization()
+                            ),
+                            permissions: maka_plugins::permissions::Permissions {
+                                filesystem: Vec::new(),
+                                network: maka_sandbox::Network::destination(destination.clone()),
+                            },
+                        },
+                    )
+                    .await
+                    .map_err(|error| match error {
+                        ToolError::Io {
+                            kind: std::io::ErrorKind::PermissionDenied,
+                            ..
+                        } => Error::Denied,
+                        other => failed(other),
+                    })?;
+                if !granted.network.allows(&destination) {
+                    return Err(Error::Denied);
+                }
+            }
             let policy = host
-                .plugin_network_policy(&call)
+                .plugin_network_policy(&call, &destination)
                 .await
                 .map_err(|_| Error::Denied)?;
             let client = {
@@ -124,6 +165,12 @@ impl Client for Http {
                 Method::Delete => reqwest::Method::DELETE,
                 Method::Options => reqwest::Method::OPTIONS,
             };
+            let operation = maka_event_log::effects::Operation::Http {
+                method: input.method,
+                url: url.to_string(),
+                body_digest: maka_runtime::artifact::content_digest(&input.body),
+                body_bytes: input.body.len(),
+            };
             let request = client
                 .request(method, url)
                 .headers(headers)
@@ -137,24 +184,35 @@ impl Client for Http {
                 host: self.host.clone(),
                 owner: self.owner.clone(),
                 call: call.clone(),
+                destination: destination.clone(),
                 stop: stop.clone(),
                 output: tokio::sync::Mutex::new(output),
                 ended: finished,
                 _capacity: permit,
             });
+            let owner = self.owner.clone();
             self.owner.spawn_resource("HTTP response", move |retiring| async move {
                 ticket.start();
-                let result = tokio::select! {
-                    biased;
-                    _ = stop.cancelled() => Err("HTTP response closed".into()),
-                    _ = retiring.cancelled() => Err("plugin retired during HTTP response".into()),
-                    _ = call.cancellation.cancelled() => Err("invocation closed".into()),
-                    result = worker::run(request, head, send) => result,
-                };
+                let cancellation = call.cancellation.clone();
+                let effect = Box::pin(async move {
+                    tokio::select! {
+                        biased;
+                        _ = stop.cancelled() => Err("HTTP response closed".into()),
+                        _ = retiring.cancelled() => Err("plugin retired during HTTP response".into()),
+                        _ = cancellation.cancelled() => Err("invocation closed".into()),
+                        result = worker::run(request, head, send) => result,
+                    }.map_err(ToolError::OutcomeUnknown)
+                });
+                let result = host.record_plugin_http(owner, call, operation, destination, effect).await;
                 // Cancelling local I/O cannot roll back remote side effects.
-                ticket.complete(Ok(()));
-                ended.send_replace(Some(result));
-                Ok(())
+                let settled = match &result {
+                    Err(error @ (ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_))) =>
+                        Err(error.to_string()),
+                    _ => Ok(()),
+                };
+                ticket.complete(settled.clone());
+                ended.send_replace(Some(result.map(|_| ()).map_err(|error| error.to_string())));
+                settled
             }).map_err(|_| Error::Denied)?;
             match response.await {
                 Ok(Ok(head)) => Ok(Response { head, body }),
@@ -173,6 +231,7 @@ struct ResponseBody {
     host: Weak<Executions>,
     owner: Context,
     call: Scope,
+    destination: maka_sandbox::Destination,
     stop: CancellationToken,
     output: tokio::sync::Mutex<mpsc::Receiver<Vec<u8>>>,
     ended: watch::Receiver<Option<Result<(), String>>>,
@@ -193,10 +252,7 @@ impl Body for ResponseBody {
             self.host
                 .upgrade()
                 .ok_or(Error::Denied)?
-                .plugin_resource_workspace(
-                    &self.call,
-                    maka_plugins::authorization::Capability::Network,
-                )
+                .check_plugin_network(&self.call, &self.destination)
                 .await
                 .map_err(|_| Error::Denied)?;
             let mut output = self

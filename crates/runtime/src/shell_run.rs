@@ -19,6 +19,7 @@
 
 //! Durable shell-resource state, independent of invocation history and live handles.
 mod state;
+pub use maka_sandbox::Sandbox;
 pub use state::{ShellOutcome, ShellState};
 
 use crate::terminal::TerminalScreen;
@@ -80,6 +81,7 @@ pub struct ShellRun {
     pub source_turn_id: String,
     pub source_tool_call_id: String,
     pub visibility: ShellVisibility,
+    pub permissions: ShellPermissions,
     pub cwd: String,
     pub command: String,
     pub started_at: u64,
@@ -88,6 +90,14 @@ pub struct ShellRun {
     pub revision: u64,
     pub state: ShellState,
     pub output: ShellOutput,
+}
+
+/// Launch authority remains immutable when a Session's policy changes.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShellPermissions {
+    pub boundary_revision: u64,
+    pub sandbox: Sandbox,
 }
 
 /// Only mutable facts may be patched. State and final output share one commit.
@@ -101,6 +111,14 @@ pub struct ShellPatch {
 
 impl ShellRun {
     pub fn validate(&self) -> Result<(), &'static str> {
+        if self.permissions.boundary_revision > MAX_SAFE {
+            return Err("invalid shell permission revision");
+        }
+        if let maka_sandbox::Sandbox::Managed { filesystem, .. } = &self.permissions.sandbox {
+            filesystem
+                .compile()
+                .map_err(|_| "invalid shell launch policy")?;
+        }
         crate::interaction::entity_id(&self.id)?;
         crate::interaction::entity_id(&self.session_id)?;
         crate::interaction::entity_id(&self.source_turn_id)?;

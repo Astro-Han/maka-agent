@@ -44,6 +44,10 @@ pub(super) fn record(cwd: &Path, id: &str, command: &str) -> ShellRun {
         source_turn_id: "turn".into(),
         source_tool_call_id: id.into(),
         visibility: ShellVisibility::Model,
+        permissions: maka_runtime::shell_run::ShellPermissions {
+            boundary_revision: 0,
+            sandbox: maka_runtime::shell_run::Sandbox::Disabled,
+        },
         cwd: cwd.to_str().unwrap().into(),
         command: command.into(),
         started_at: 1,

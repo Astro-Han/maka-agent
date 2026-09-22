@@ -160,7 +160,7 @@ import type {
 } from '@maka/core/events';
 import type { UserQuestionResponse } from '@maka/core/user-question';
 import type { InteractionFormResponse } from '@maka/core/interaction';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { CollaborationMode } from '@maka/core/collaboration';
 import type { OrchestrationMode } from '@maka/core/orchestration';
 
@@ -2163,6 +2163,9 @@ const makaBridge = {
     respondToUserForm(sessionId: string, response: InteractionFormResponse): Promise<void> {
       return invokeSessionRuntimeHost('sessions:respondToUserForm', sessionId, response);
     },
+    respondToPermissions(sessionId: string, response: import('@maka/core/execution-permissions').PermissionsResponse): Promise<void> {
+      return invokeSessionRuntimeHost('sessions:respondToPermissions', sessionId, response);
+    },
     /**
      * PR-CMD-PALETTE-SAVE-CONVERSATION-FILE-0: write the renderer-formatted
      * conversation markdown to a user-chosen file. Renderer owns the
@@ -2301,8 +2304,14 @@ const makaBridge = {
     rename(sessionId: string, name: string, options?: { revisionFamily?: boolean }): Promise<void> {
       return invokeSessionRuntimeHost('sessions:rename', sessionId, name, options);
     },
-    setPermissionMode(sessionId: string, mode: PermissionMode): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>> {
-      return invokeSessionUpdate('sessions:setPermissionMode', sessionId, mode);
+    setSandboxMode(sessionId: string, mode: SandboxMode): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>> {
+      return invokeSessionUpdate('sessions:setSandboxMode', sessionId, mode);
+    },
+    setApprovalPolicy(sessionId: string, policy: import('@maka/core/execution-permissions').ApprovalPolicy): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>> {
+      return invokeSessionUpdate('sessions:setApprovalPolicy', sessionId, policy);
+    },
+    setExecutionPolicy(sessionId: string, policy: import('@maka/core/execution-permissions').ExecutionPolicy): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>> {
+      return invokeSessionUpdate('sessions:setExecutionPolicy', sessionId, policy);
     },
     setCollaborationMode(sessionId: string, mode: CollaborationMode): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>> {
       return invokeSessionUpdate('sessions:setCollaborationMode', sessionId, mode);
@@ -2954,6 +2963,11 @@ const makaBridge = {
     },
   },
   permissions: {
+    ensureSandbox(target: { sessionId: string } | { host: DesktopRuntimeHostRef }) {
+      return 'sessionId' in target
+        ? invokeRuntimeHostForSession<boolean>('permissions:ensureSandbox', target.sessionId)
+        : invokeSelectedRuntimeHost<boolean>(target.host, 'permissions:ensureSandbox');
+    },
     getSnapshot(host?: DesktopRuntimeHostRef): Promise<PermissionSnapshot> {
       return invokeSelectedRuntimeHost(host, 'permissions:getSnapshot');
     },

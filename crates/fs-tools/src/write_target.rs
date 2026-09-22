@@ -40,7 +40,10 @@ fn identity(metadata: &Metadata) -> Identity {
     (metadata.dev(), metadata.ino())
 }
 fn io_error(error: io::Error) -> ToolError {
-    failed(format!("Write filesystem error: {error}"))
+    ToolError::Io {
+        kind: error.kind(),
+        message: format!("Write filesystem error: {error}"),
+    }
 }
 fn unknown(error: impl std::fmt::Display) -> ToolError {
     ToolError::OutcomeUnknown(format!("Write may have modified the file: {error}"))
@@ -52,6 +55,7 @@ pub(crate) struct Target {
     parent: Dir,
     name: OsString,
     existing: Option<File>,
+    managed: bool,
     #[cfg(test)]
     after_write: Option<Box<dyn FnOnce() -> io::Result<()>>>,
 }
@@ -64,7 +68,11 @@ impl Target {
     ) -> Result<Self, ToolError> {
         let mut error = failed("path is outside the admitted Write roots");
         for route in authority.routes(path)? {
-            match Self::capture_route(route.root, &route.relative, read) {
+            let (root, managed) = route
+                .root
+                .authorize_write(&route.relative)
+                .map_err(io_error)?;
+            match Self::capture_route(root, &route.relative, read, managed) {
                 Ok(target) => return Ok(target),
                 Err(reason) => error = reason,
             }
@@ -72,7 +80,12 @@ impl Target {
         Err(error)
     }
 
-    fn capture_route(root: Dir, relative: &Path, read: bool) -> Result<Self, ToolError> {
+    fn capture_route(
+        root: Dir,
+        relative: &Path,
+        read: bool,
+        managed: bool,
+    ) -> Result<Self, ToolError> {
         if relative
             .components()
             .any(|part| !matches!(part, Component::Normal(_) | Component::CurDir))
@@ -97,6 +110,11 @@ impl Target {
                 if !opened.is_file() || identity(&opened) != identity(&metadata) {
                     return Err(failed("Write target changed during capture"));
                 }
+                if managed && opened.nlink() != 1 {
+                    return Err(failed(
+                        "Managed writes cannot modify a multiply-linked file",
+                    ));
+                }
                 Some(file)
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -108,6 +126,7 @@ impl Target {
             parent,
             name,
             existing,
+            managed,
             #[cfg(test)]
             after_write: None,
         })
@@ -124,7 +143,9 @@ impl Target {
             match (expected, parent.symlink_metadata(&self.name)) {
                 (None, Err(error)) if error.kind() == io::ErrorKind::NotFound => {}
                 (Some(expected), Ok(metadata))
-                    if metadata.is_file() && identity(&metadata) == expected => {}
+                    if metadata.is_file()
+                        && identity(&metadata) == expected
+                        && (!self.managed || metadata.nlink() == 1) => {}
                 _ => return Err(failed("Write target changed")),
             }
         }
@@ -172,8 +193,8 @@ impl Target {
             },
         };
         let metadata = file.metadata().map_err(unknown)?;
-        if !metadata.is_file() {
-            return Err(unknown("created target is not regular"));
+        if !metadata.is_file() || (self.managed && metadata.nlink() != 1) {
+            return Err(unknown("write target changed after admission"));
         }
         file.write_all(bytes).map_err(unknown)?;
         #[cfg(test)]
@@ -219,12 +240,38 @@ fn open_parent(root: &Dir, path: &Path) -> io::Result<Dir> {
     Ok(parent)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::ReadScope;
     use std::fs;
 
+    #[test]
+    fn managed_target_revalidates_links_before_modifying_a_captured_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::write(root.join("file"), "original").unwrap();
+        let authority = Authority::new(
+            &root,
+            ReadScope::Policy(std::sync::Arc::new(
+                maka_sandbox::filesystem::Policy::uniform(maka_sandbox::filesystem::Access::Write)
+                    .compile()
+                    .unwrap(),
+            )),
+        )
+        .unwrap();
+        let target = Target::capture(&authority, Path::new("file"), false).unwrap();
+        fs::hard_link(root.join("file"), root.join("alias")).unwrap();
+        let started = AtomicBool::new(false);
+        assert!(matches!(
+            target.apply(b"changed", &CancellationToken::new(), &started),
+            Err(ToolError::Failed(_))
+        ));
+        assert!(!started.load(Ordering::SeqCst));
+        assert_eq!(fs::read(root.join("alias")).unwrap(), b"original");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn parent_replacement_before_and_after_effect_and_cancellation_are_honest() {
         for after_effect in [false, true] {

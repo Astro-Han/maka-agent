@@ -17,8 +17,8 @@
  * under the License.
  */
 
+use crate::scoped::Directory as Dir;
 use crate::{ReadExecutor, failed};
-use cap_std::fs::Dir;
 use glob::MatchOptions;
 use maka_runtime::tools::ToolError;
 use serde::Deserialize;
@@ -157,6 +157,12 @@ impl Search {
             self.complete = false;
             return Ok(());
         }
+        if let Err(error) = root.check_read(relative) {
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                return Ok(());
+            }
+            return Err(failed(format!("Glob path: {error}")));
+        }
         let Some((segment, rest)) = segments.split_first() else {
             return self.record(relative);
         };
@@ -239,6 +245,12 @@ impl Search {
                 continue;
             }
             let child: PathBuf = relative.join(name);
+            if let Err(error) = root.check_read(&child) {
+                if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    continue;
+                }
+                return Err(failed(format!("Glob path: {error}")));
+            }
             if rest.is_empty() {
                 self.record(&child)?;
             }

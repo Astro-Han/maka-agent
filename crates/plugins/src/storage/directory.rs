@@ -222,6 +222,7 @@ mod tests {
                             },
                         ),
                         cancellation,
+                        None,
                     )
                 })
                 .await

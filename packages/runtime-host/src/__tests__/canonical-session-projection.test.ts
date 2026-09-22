@@ -105,7 +105,7 @@ test('projects the canonical root lifecycle and the attachment queue from real S
         },
         configuration: {
           cwd: '/private/runtime-cwd',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           collaborationMode: 'agent',
           orchestrationMode: 'default',
           orchestrationSource: 'session',
@@ -640,7 +640,7 @@ function sessionInput(root: string) {
     llmConnectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask' as const,
+    sandboxMode: 'workspace-write' as const,
   };
 }
 
@@ -676,7 +676,7 @@ async function createRunningRoot(
       },
       configuration: {
         cwd: '/private/runtime-cwd',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         orchestrationSource: 'session',

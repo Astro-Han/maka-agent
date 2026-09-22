@@ -158,7 +158,7 @@ for (const decision of [
       cwd: root,
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       name: 'handoff',
     });
     try {

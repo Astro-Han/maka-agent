@@ -2635,7 +2635,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
     }
     const snapshotDefinition = {
       id: snapshot.agentId,
-      permissionMode: header.permissionMode,
+      sandboxMode: header.sandboxMode,
       tools: snapshot.toolNames,
     };
     const available = await this.childToolActivationForSession(header.id);
@@ -3103,7 +3103,7 @@ function continuationTargetOpeningForExecution(input: {
     route: runtimeInvocationRouteForHeader(sessionHeader, input.targetProviderStateIdentity),
     configuration: {
       cwd: sessionHeader.cwd,
-      permissionMode: sessionHeader.permissionMode,
+      sandboxMode: sessionHeader.sandboxMode,
       collaborationMode: sessionHeader.collaborationMode ?? 'agent',
       orchestrationMode: effectiveOrchestration.mode,
       orchestrationSource: effectiveOrchestration.source,

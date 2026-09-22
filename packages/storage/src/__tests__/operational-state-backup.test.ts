@@ -57,7 +57,7 @@ test('backs up and restores runtime.sqlite plus artifact bytes', async () => {
       cwd: '/tmp/cwd',
       llmConnectionSlug: 'fake',
       model: 'fake-model',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       name: 'Backup',
       labels: [],
     });

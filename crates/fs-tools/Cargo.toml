@@ -25,6 +25,7 @@ publish.workspace = true
 
 [dependencies]
 maka-runtime.workspace = true
+maka-sandbox.workspace = true
 apply-patch.workspace = true
 cap-std.workspace = true
 cap-fs-ext.workspace = true

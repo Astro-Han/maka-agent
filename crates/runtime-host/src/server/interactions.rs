@@ -20,6 +20,7 @@
 mod approval;
 mod forms;
 mod operations;
+mod permissions;
 mod publication;
 mod question;
 mod waiting;
@@ -46,7 +47,7 @@ pub(crate) struct Interactions {
     pub(crate) catalog: Arc<super::catalog_feed::CatalogFeed>,
 }
 impl ClientInteractions for Interactions {
-    fn permission_mode(&self, context: ToolCallContext) -> maka_tools::PermissionFuture {
+    fn sandbox_mode(&self, context: ToolCallContext) -> maka_tools::PermissionFuture {
         let owner = self.clone();
         Box::pin(async move {
             owner
@@ -59,7 +60,7 @@ impl ClientInteractions for Interactions {
                     },
                 )?
                 .filter(|record| !record.archived)
-                .map(|record| record.configuration.permission_mode)
+                .map(|record| record.configuration.sandbox_mode)
                 .ok_or_else(
                     || maka_runtime::tool_call::ToolRejection::PreparationFailed {
                         message: "Session boundary is unavailable".into(),

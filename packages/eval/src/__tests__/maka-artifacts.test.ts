@@ -185,7 +185,7 @@ function makaCell(): ExperimentCell {
         connectionSlug: 'env-deepseek',
         model: 'deepseek-v4-flash',
         thinkingLevel: 'max',
-        permissionMode: 'bypass',
+        sandboxMode: 'danger-full-access',
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         hostSettlementTimeoutMs: 120_000,

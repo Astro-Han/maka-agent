@@ -52,7 +52,7 @@ const COMPOSITE_ROW_SESSIONS: SessionSummary[] = [
     llmConnectionSlug: 'fixture',
     connectionLocked: false,
     model: 'fixture-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   },
   {
     id: 'interaction-default',
@@ -66,7 +66,7 @@ const COMPOSITE_ROW_SESSIONS: SessionSummary[] = [
     llmConnectionSlug: 'fixture',
     connectionLocked: false,
     model: 'fixture-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   },
 ];
 

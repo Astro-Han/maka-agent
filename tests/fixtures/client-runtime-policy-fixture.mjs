@@ -97,18 +97,18 @@ export async function configureModel(request, baseUrl = 'http://127.0.0.1:9/v1')
   return { connection: created.connection, proxy: proxy.status };
 }
 
-export function createInput(workspace, sessionId, permissionMode) {
+export function createInput(workspace, sessionId, sandboxMode) {
   return {
     sessionId,
     name: sessionId,
     workspace: { kind: 'host_path', path: workspace },
     modelTarget: { kind: 'default' },
-    ...(permissionMode === undefined ? {} : { permissionMode }),
+    ...(sandboxMode === undefined ? {} : { sandboxMode }),
   };
 }
 
-export function modelDefault(session, permissionMode) {
-  assert.equal(session.permissionMode, permissionMode);
+export function modelDefault(session, sandboxMode) {
+  assert.equal(session.sandboxMode, sandboxMode);
   assert.equal(
     Object.hasOwn(session, 'thinkingLevel'),
     false,

@@ -69,7 +69,7 @@ test('a reconnecting Client retries an interrupted query on the replacement conn
       return replacement.connection;
     },
   });
-  assert.deepEqual(await connection.request('goal.query', { sessionId: 'session-1' }), {
+  assert.deepEqual(await connection.request('goal.query', { sessionId: 'session-1' }, 185_000), {
     sessionId: 'session-1',
     goal: null,
   });

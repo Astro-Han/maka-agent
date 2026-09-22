@@ -124,16 +124,16 @@ test('scoped Tool resolution receives the complete stable Host binding', () => {
 });
 
 test('Full access composes Bash without a boundary declaration and without the widening tool', () => {
-  const bashKeys = (permissionMode: 'bypass' | 'ask' | undefined) => {
+  const bashKeys = (sandboxMode: 'danger-full-access' | 'workspace-write' | undefined) => {
     const composer = createFixtureComposer({
       builtinTools: unusedManagedShellBuiltinTools(),
-      ...(permissionMode
+      ...(sandboxMode
         ? {
             plan: {
               store: {} as PlanStore,
               state: emptyPlanSessionState('session'),
               mode: 'agent' as const,
-              permissionMode,
+              sandboxMode,
             },
           }
         : {}),
@@ -147,12 +147,12 @@ test('Full access composes Bash without a boundary declaration and without the w
       enforced: bash.description.includes('Enforced by the current session sandbox boundary.'),
     };
   };
-  assert.deepEqual(bashKeys('bypass'), {
+  assert.deepEqual(bashKeys('danger-full-access'), {
     keys: ['command', 'timeout_ms', 'run_in_background', 'pty'],
     widening: false,
     enforced: false,
   });
-  for (const mode of ['ask', undefined] as const) {
+  for (const mode of ['workspace-write', undefined] as const) {
     assert.deepEqual(bashKeys(mode), {
       keys: [
         'command',

@@ -258,6 +258,7 @@ pub struct Thinking {
     rename_all_fields = "camelCase"
 )]
 pub enum TurnState {
+    Running,
     Completed,
     Failed {
         error_class: String,

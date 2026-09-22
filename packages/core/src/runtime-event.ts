@@ -55,8 +55,8 @@ import {
   type InteractionFormInput,
 } from './interaction.js';
 import {
-  isPermissionMode,
-  type PermissionMode,
+  isSandboxMode,
+  type SandboxMode,
   type PermissionRequestPayload,
   type PermissionResponse,
 } from './permission.js';
@@ -294,7 +294,7 @@ export type RuntimeInvocationRoute =
 /** Execution configuration frozen before an invocation's first dispatch. */
 export interface RuntimeInvocationConfiguration {
   cwd: string;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   collaborationMode: CollaborationMode;
   orchestrationMode: OrchestrationMode;
   orchestrationSource: EffectiveOrchestrationSource;
@@ -795,7 +795,7 @@ const INVOCATION_ROUTE_UNKNOWN_SHAPE = defineObjectShape<
 const INVOCATION_CONFIGURATION_SHAPE = defineObjectShape<RuntimeInvocationConfiguration>()(
   [
     'cwd',
-    'permissionMode',
+    'sandboxMode',
     'collaborationMode',
     'orchestrationMode',
     'orchestrationSource',
@@ -1205,7 +1205,7 @@ function isRuntimeInvocationConfiguration(value: unknown): value is RuntimeInvoc
     isRecord(value) &&
     hasExactShape(value, INVOCATION_CONFIGURATION_SHAPE) &&
     typeof value.cwd === 'string' &&
-    isPermissionMode(value.permissionMode) &&
+    isSandboxMode(value.sandboxMode) &&
     isCollaborationMode(value.collaborationMode) &&
     isOrchestrationMode(value.orchestrationMode) &&
     isEffectiveOrchestrationSource(value.orchestrationSource) &&

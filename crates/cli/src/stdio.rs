@@ -32,10 +32,11 @@ pub(super) struct Stdio {
 impl Stdio {
     pub fn open() -> io::Result<Self> {
         let (input, writer) = tokio::io::duplex(32 * 1024);
-        let (output, reader) = tokio::io::duplex(32 * 1024);
         let mut writer = SyncIoBridge::new(writer);
-        let mut reader = SyncIoBridge::new(reader);
-        let (done, output_done) = oneshot::channel();
+        let Output {
+            writer: output,
+            done: output_done,
+        } = Output::open("bridge-stdout", io::stdout())?;
         std::thread::Builder::new()
             .name("bridge-stdin".into())
             .spawn(move || {
@@ -43,27 +44,45 @@ impl Stdio {
                 // a partial greeting before allowing any Host activation.
                 let _ = io::copy(&mut io::stdin().lock(), &mut writer);
             })?;
+        Ok(Self {
+            input,
+            output,
+            output_done,
+        })
+    }
+}
+
+/// Blocking OS writes belong to process-lifetime threads, not Tokio's blocking
+/// pool: abandoning a full pipe must not prevent the CLI runtime from exiting.
+pub(super) struct Output {
+    pub writer: DuplexStream,
+    pub done: oneshot::Receiver<io::Result<()>>,
+}
+
+impl Output {
+    pub fn open(name: &str, mut output: impl Write + Send + 'static) -> io::Result<Self> {
+        let (writer, reader) = tokio::io::duplex(32 * 1024);
+        let mut reader = SyncIoBridge::new(reader);
+        let (done, completion) = oneshot::channel();
         std::thread::Builder::new()
-            .name("bridge-stdout".into())
+            .name(name.into())
             .spawn(move || {
                 let result = (|| {
-                    let mut stdout = io::stdout().lock();
                     let mut bytes = [0; 16 * 1024];
                     loop {
                         let count = reader.read(&mut bytes)?;
                         if count == 0 {
-                            return stdout.flush();
+                            return output.flush();
                         }
-                        stdout.write_all(&bytes[..count])?;
-                        stdout.flush()?;
+                        output.write_all(&bytes[..count])?;
+                        output.flush()?;
                     }
                 })();
                 let _ = done.send(result);
             })?;
         Ok(Self {
-            input,
-            output,
-            output_done,
+            writer,
+            done: completion,
         })
     }
 }

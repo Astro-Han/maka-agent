@@ -93,6 +93,10 @@ pub(super) fn package(
 async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_drain_on_disable() {
     if std::env::var_os("MAKA_PLUGIN_PROTOCOL_TEST_CHILD").is_some() {
         use std::io::{BufRead, IsTerminal, Write};
+        if std::env::var_os("MAKA_PLUGIN_SANDBOX_TEST_CHILD").is_some() {
+            assert!(std::fs::write(".agents", "must be blocked").is_err());
+            std::fs::write("managed-plugin-proof", "workspace write allowed").unwrap();
+        }
         if std::env::var_os("MAKA_PLUGIN_PTY_TEST_CHILD").is_some() {
             assert!(std::io::stdin().is_terminal());
             assert!(std::io::stdout().is_terminal());
@@ -114,6 +118,7 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
         std::fs::write(fixture.workspace.join("unshared.txt"), "not granted").unwrap();
         let service = package(&fixture.workspace, "example.service", "shared", SERVICE, false);
         let source = CONSUMER.replace("'__PROTOCOL_EXECUTABLE__'", &serde_json::to_string(&std::env::current_exe().unwrap()).unwrap())
+            .replace("__MANAGED_SANDBOX__", if cfg!(target_os = "macos") { "supported" } else { "unsupported" })
             .replace("'example.echo'", "'example.native'");
         let consumer = package(&fixture.workspace, "example.consumer", "dedicated", &source, true);
         let (provider, mut requests) = Provider::controlled_with_usage(3, 5).await;
@@ -144,20 +149,20 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
                 }
                 let result = peer.rpc("session.create", json!({
                     "sessionId":"js-session", "workspace":{"kind":"host_path","path":fixture.workspace},
-                    "permissionMode":"ask",
+                    "sandboxMode":"workspace-write",
                     "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
                 })).await;
                 assert_eq!(result["ok"], true, "{result}");
                 let external = peer.rpc("session.create", json!({
                     "sessionId":"executor-session", "workspace":{"kind":"host_path","path":fixture.workspace},
-                    "executorId":"example.external", "permissionMode":"bypass"
+                    "executorId":"example.external", "sandboxMode":"danger-full-access"
                 })).await;
                 assert_eq!(external["ok"], true, "{external}");
                 assert_eq!(external["result"]["backend"], "plugin-executor", "{external}");
                 assert_eq!(external["result"]["executorId"], "example.external", "{external}");
                 let parent = peer.rpc("session.create", json!({
                     "sessionId":"executor-parent", "workspace":{"kind":"host_path","path":fixture.workspace},
-                    "permissionMode":"bypass",
+                    "sandboxMode":"danger-full-access",
                     "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
                 })).await;
                 assert_eq!(parent["ok"], true, "{parent}");
@@ -169,7 +174,7 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
             let child_request = maka_plugins::execution::CreateChild {
                 workspace: None,
                 operation_id: "external-child".into(), parent_session_id: "executor-parent".into(), name: "External worker".into(),
-                permission_mode: None, bound_tools: None, instructions: Some("Executor child instructions".into()),
+                sandbox_mode: None, bound_tools: None, instructions: Some("Executor child instructions".into()),
                 target: Some(maka_plugins::execution::Target::Executor { executor_id: "example.external".to_owned().try_into().unwrap() }),
             };
             let external_child = commands.create_child(child_request.clone()).await.unwrap();

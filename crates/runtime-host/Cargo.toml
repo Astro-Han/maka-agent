@@ -42,6 +42,7 @@ maka-js-runtime.workspace = true
 maka-tools.workspace = true
 maka-fs-tools.workspace = true
 maka-process.workspace = true
+maka-sandbox.workspace = true
 maka-model.workspace = true
 maka-network.workspace = true
 reqwest.workspace = true
@@ -76,3 +77,9 @@ tempfile.workspace = true
 tokio-rustls = { version = "0.26.5", default-features = false, features = ["aws_lc_rs", "tls12"] }
 tempfile.workspace = true
 sqlx.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Security"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win32_System_Threading"] }

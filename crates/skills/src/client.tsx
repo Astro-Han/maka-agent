@@ -179,7 +179,7 @@ const plugin: ClientPlugin = {
       'skills',
       (props) => (
         <Panel
-          key={JSON.stringify([props.workspace, props.permissionMode, props.collaborationMode])}
+          key={JSON.stringify([props.workspace, props.sandboxMode, props.collaborationMode])}
           {...props}
           context={context}
           target={{ kind: 'workspace', ...props }}

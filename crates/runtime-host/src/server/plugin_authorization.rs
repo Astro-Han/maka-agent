@@ -315,12 +315,13 @@ pub(crate) async fn capture(
 ) -> Result<Boundary, OperationError> {
     Ok(match &request.target {
         Target::Profile => Boundary::Profile,
-        Target::PluginWorkspace { permission_mode } => {
+        Target::PluginWorkspace { sandbox_mode } => {
             let (workspace, workspace_identity) = workspace::prepare(state_root, namespace).await?;
             Boundary::Workspace {
                 workspace,
                 workspace_identity,
-                permission_mode: *permission_mode,
+                origin: maka_runtime::execution::WorkspaceOrigin::Allocated,
+                sandbox_mode: *sandbox_mode,
             }
         }
         Target::Directory { path } => {
@@ -348,7 +349,7 @@ pub(crate) async fn capture(
                 .ok_or_else(denied)?;
             let session = session.configuration;
             request
-                .validate_mode(session.permission_mode)
+                .validate_mode(session.sandbox_mode)
                 .map_err(invalid)?;
             let workspace_identity = maka_fs_tools::workspace::ensure_identity(
                 std::path::Path::new(&session.workspace.host_cwd),
@@ -357,9 +358,11 @@ pub(crate) async fn capture(
             .map_err(invalid)?;
             Boundary::Session {
                 boundary: SessionBoundary {
+                    workspace_origin: session.workspace_origin,
                     session_id: session_id.clone(),
                     boundary_revision: session.boundary_revision,
-                    permission_mode: session.permission_mode,
+                    sandbox_mode: session.sandbox_mode,
+                    approval_policy: session.approval_policy,
                     cwd: session.workspace.host_cwd,
                 },
                 workspace_identity,
@@ -367,7 +370,7 @@ pub(crate) async fn capture(
         }
         Target::Workspace {
             workspace,
-            permission_mode,
+            sandbox_mode,
         } => {
             let workspace = match workspace {
                 WorkspaceTarget::Project { project_id } => {
@@ -390,7 +393,8 @@ pub(crate) async fn capture(
             Boundary::Workspace {
                 workspace,
                 workspace_identity,
-                permission_mode: *permission_mode,
+                origin: maka_runtime::execution::WorkspaceOrigin::Selected,
+                sandbox_mode: *sandbox_mode,
             }
         }
     })
@@ -424,7 +428,9 @@ pub(crate) async fn validate_boundary(
                 .ok_or_else(denied)?;
             let current = current.configuration;
             if current.boundary_revision != boundary.boundary_revision
-                || current.permission_mode != boundary.permission_mode
+                || current.workspace_origin != boundary.workspace_origin
+                || current.sandbox_mode != boundary.sandbox_mode
+                || current.approval_policy != boundary.approval_policy
                 || current.workspace.host_cwd != boundary.cwd
             {
                 return Err(denied());

@@ -69,7 +69,7 @@ export function testInvocationOpening(
     ...rest,
     configuration: {
       cwd: '/tmp',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
       orchestrationSource: 'session',

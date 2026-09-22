@@ -198,7 +198,7 @@ function summary(id: string, overrides: Partial<SessionSummary> = {}): SessionSu
     llmConnectionSlug: 'fake',
     connectionLocked: false,
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     ...overrides,
@@ -221,7 +221,10 @@ describe('legacy child execution snapshots', () => {
     // Written before `permissionCeiling` was dropped. Rejecting it would make
     // the whole child Session unreadable, and nothing reads the value.
     assert.equal(isSubagentSessionRuntime({ ...runtime, permissionCeiling: 'execute' }), true);
-    assert.equal(isSubagentSessionRuntime({ ...runtime, permissionCeiling: 'ask' }), true);
+    assert.equal(
+      isSubagentSessionRuntime({ ...runtime, permissionCeiling: 'workspace-write' }),
+      true,
+    );
   });
 
   test('accepts a current snapshot without the key', () => {

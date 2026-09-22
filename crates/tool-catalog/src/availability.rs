@@ -310,8 +310,7 @@ fn invalid() -> ToolRejection {
 fn direct(name: &str) -> bool {
     matches!(
         name,
-        "Bash"
-            | "Shell"
+        "Shell"
             | "Read"
             | "Write"
             | "Edit"

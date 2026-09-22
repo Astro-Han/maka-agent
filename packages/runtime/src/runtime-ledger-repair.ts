@@ -296,7 +296,7 @@ function transcriptOpeningEvent(input: {
     },
     configuration: {
       cwd: input.header.cwd,
-      permissionMode: input.header.permissionMode,
+      sandboxMode: input.header.sandboxMode,
       collaborationMode: input.header.collaborationMode ?? 'agent',
       orchestrationMode: input.header.orchestrationMode ?? 'default',
       orchestrationSource: 'session',

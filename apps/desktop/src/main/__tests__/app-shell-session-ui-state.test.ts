@@ -119,7 +119,7 @@ describe('session live run display state', () => {
 describe('app shell session UI state controller', () => {
   it('does not mirror session-setting writes into UI pending state', () => {
     const state = createInitialAppShellSessionUiState();
-    assert.equal('pendingPermissionModeBySession' in state, false);
+    assert.equal('pendingSandboxModeBySession' in state, false);
     assert.equal('pendingSessionModelBySession' in state, false);
   });
 

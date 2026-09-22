@@ -140,7 +140,7 @@ async function workflow(connection, workspace, reopened) {
       sessionId: 'onboarded',
       mode: 'bot',
       workspace: { kind: 'host_path', path: workspace },
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
       modelTarget: {
         kind: 'explicit',
         connectionId: saved.connection.connectionId,

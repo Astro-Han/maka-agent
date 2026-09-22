@@ -611,11 +611,11 @@ export function buildBuiltinTools(options: BuildBuiltinToolsOptions = {}): MakaT
 /** The per-call context every file tool hands to the filesystem authority. */
 function filesystemCall(
   ctx: MakaToolContext,
-): Pick<FilesystemExecuteInput, 'cwd' | 'executionBoundary' | 'permissionMode' | 'abortSignal'> {
+): Pick<FilesystemExecuteInput, 'cwd' | 'executionBoundary' | 'sandboxMode' | 'abortSignal'> {
   return {
     cwd: ctx.cwd,
     ...(ctx.executionBoundary ? { executionBoundary: ctx.executionBoundary } : {}),
-    ...(ctx.permissionMode ? { permissionMode: ctx.permissionMode } : {}),
+    ...(ctx.sandboxMode ? { sandboxMode: ctx.sandboxMode } : {}),
     ...(ctx.abortSignal ? { abortSignal: ctx.abortSignal } : {}),
   };
 }
@@ -755,11 +755,11 @@ function sandboxCommand(
   | undefined {
   const cwd = canonicalExistingPath(ctx.cwd);
   const boundary = ctx.executionBoundary;
-  if (boundary?.kind === 'bypass' || boundary?.kind === 'external') return undefined;
+  if (boundary?.kind === 'danger-full-access' || boundary?.kind === 'external') return undefined;
   const effective =
     boundary?.kind === 'managed'
       ? { profile: boundary.profile, workspaceRoots: [cwd] }
-      : effectivePermissionProfile(explicitProfile, ctx.permissionMode ?? 'ask', cwd);
+      : effectivePermissionProfile(explicitProfile, ctx.sandboxMode ?? 'workspace-write', cwd);
   const env = { ...process.env };
   if (pty) {
     if (profileRequiresSandbox(effective.profile)) {
@@ -1108,13 +1108,13 @@ function macosRuntimeExecutableRoots(execPath: string): readonly string[] {
 
 function effectivePermissionProfile(
   explicitProfile: PermissionProfile | undefined,
-  permissionMode: NonNullable<MakaToolContext['permissionMode']>,
+  sandboxMode: NonNullable<MakaToolContext['sandboxMode']>,
   cwd: string,
 ): { profile: PermissionProfile; workspaceRoots: readonly string[] } {
   const canonicalCwd = canonicalExistingPath(cwd);
   if (explicitProfile) return { profile: explicitProfile, workspaceRoots: [canonicalCwd] };
   const compiled = compilePermissionProfile({
-    mode: permissionMode,
+    mode: sandboxMode,
     cwd: canonicalCwd,
   });
   return { profile: compiled.profile, workspaceRoots: compiled.workspaceRoots };

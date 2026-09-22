@@ -20,6 +20,30 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { collapseHomePath, DiagnosticLogBuffer } from '../diagnostic-log.js';
+import { installConsoleDiagnosticLogCapture } from '../node-diagnostic-log.js';
+
+test('retains diagnostics after a launcher pipe closes without hiding other console failures', () => {
+  const levels = ['debug', 'info', 'log', 'warn', 'error'] as const;
+  const original = Object.fromEntries(levels.map((level) => [level, console[level]]));
+  const buffer = new DiagnosticLogBuffer();
+  let failure = Object.assign(new Error('closed launcher pipe'), { code: 'EPIPE' });
+  try {
+    console.error = () => {
+      throw failure;
+    };
+    installConsoleDiagnosticLogCapture(buffer);
+    assert.doesNotThrow(() => console.error('startup warning'));
+    assert.match(buffer.snapshot().at(-1) ?? '', /ERROR startup warning$/);
+    failure = Object.assign(new Error('unexpected failure'), { code: 'EIO' });
+    assert.throws(
+      () => console.error('second warning'),
+      (error) => error === failure,
+    );
+    assert.match(buffer.snapshot().at(-1) ?? '', /ERROR second warning$/);
+  } finally {
+    Object.assign(console, original);
+  }
+});
 
 test('keeps a bounded redacted tail of diagnostic logs', () => {
   const buffer = new DiagnosticLogBuffer({

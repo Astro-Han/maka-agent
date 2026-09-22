@@ -37,7 +37,7 @@ import {
   type TUI,
 } from '@earendil-works/pi-tui';
 import type { UserQuestionOption } from '@maka/core/user-question';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { ThinkingLevel } from '@maka/core/model-thinking';
 import {
   defineUiMessageCatalog,
@@ -1102,8 +1102,8 @@ export class ModelSearchOverlay implements Component {
  * Auto as current there turned "confirm what I already have" into a silent
  * widening of the boundary.
  */
-export function permissionModePickerItems(currentMode: PermissionMode): SelectItem[] {
-  const autoIsCurrent = currentMode === 'ask';
+export function sandboxModePickerItems(currentMode: SandboxMode): SelectItem[] {
+  const autoIsCurrent = currentMode === 'workspace-write';
   return [
     {
       value: 'auto',
@@ -1114,7 +1114,7 @@ export function permissionModePickerItems(currentMode: PermissionMode): SelectIt
       value: 'bypass',
       label: 'Full access',
       description:
-        currentMode === 'bypass'
+        currentMode === 'danger-full-access'
           ? 'current · your files and network, unprotected'
           : 'your files and network, unprotected',
     },

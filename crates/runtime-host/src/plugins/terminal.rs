@@ -180,13 +180,26 @@ impl Terminals {
     }
     async fn get(&self, authority: &Authority, id: &str) -> Result<Arc<Handle>, api::Error> {
         let handle = self.handle(authority, id)?;
-        self.host(authority)?
-            .plugin_resource_workspace(
-                authority,
-                maka_plugins::authorization::Capability::Processes,
-            )
+        let host = self.host(authority)?;
+        let current = host
+            .plugin_process_boundary(authority)
             .await
             .map_err(api::Error::from)?;
+        let record = handle.shell.clone().ready().await.map_err(failed)?;
+        if !matches!(&current, maka_plugins::authorization::Boundary::Session { boundary, .. }
+            if boundary.boundary_revision == record.permissions.boundary_revision)
+        {
+            return Err(api::Error::Denied);
+        }
+        if !host
+            .plugin_process_sandbox(authority, &current)
+            .await
+            .map_err(api::Error::from)?
+            .contains(&record.permissions.sandbox)
+            .map_err(failed)?
+        {
+            return Err(api::Error::Denied);
+        }
         Ok(handle)
     }
     pub async fn control(
@@ -200,16 +213,19 @@ impl Terminals {
                 "terminal input is empty or exceeds 64 KiB".into(),
             ));
         }
+        let host = self.host(authority)?;
+        let gate = host.lock_admission().await;
         let handle = self.get(authority, id).await?;
         let receipt = handle
             .shell
-            .control(
+            .enqueue_control(
                 crate::shell::ControlInput::Raw(input.text),
                 input.size,
                 authority.cancellation.clone(),
             )
-            .await
             .map_err(failed)?;
+        drop(gate);
+        let receipt = receipt.await.map_err(failed)?;
         Ok(Written {
             accepted_bytes: receipt.accepted_bytes,
             resized: receipt.resized,

@@ -139,7 +139,7 @@ async fn scenario() {
     for session in ["source", "search"] {
         success(peer.rpc("session.create", json!({
             "sessionId":session,"workspace":{"kind":"host_path","path":fixture.workspace},
-            "permissionMode":"bypass","modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
+            "sandboxMode":"danger-full-access","modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
         })).await);
     }
     run(&host, "source", "Remember the exchange").await;

@@ -608,7 +608,7 @@ function memoryStore(): SessionStore {
     llmConnectionSlug: 'test',
     connectionLocked: true,
     model: 'test',
-    permissionMode: 'bypass',
+    sandboxMode: 'danger-full-access',
     schemaVersion: 1,
   };
   let messages: StoredMessage[] = [];

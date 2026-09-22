@@ -21,7 +21,6 @@ use super::{Error, Executions, SessionConfiguration, storage};
 use maka_plugins::client_capability::Call;
 use maka_plugins::fiber::Context;
 use maka_runtime::{
-    event::Invocation,
     tool_call::{ToolCallIdentity, ToolOrigin},
     tools::{ToolCallContext, ToolDefinition, ToolError, ToolJournal, ToolRegistration},
 };
@@ -32,38 +31,31 @@ use tokio_util::sync::CancellationToken;
 impl Executions {
     async fn plugin_client_tools(
         &self,
-        invocation: &Invocation,
+        call: &maka_plugins::call::Scope,
     ) -> Result<Vec<ToolRegistration>, Error> {
         if !self.accepting() {
             return Err(Error::Draining);
         }
-        let frozen = self
-            .log
-            .invocation_configuration(invocation)
-            .await
-            .map_err(storage)?
-            .ok_or(Error::Denied)?;
+        let evidence = self.plugin_agent_evidence(call).await?;
+        let frozen = &evidence.invocation;
+        let maka_plugins::authorization::Boundary::Session { boundary, .. } = &evidence.boundary
+        else {
+            return Err(Error::Denied);
+        };
+        let invocation = call.identity.agent().ok_or(Error::Denied)?;
         let current = self
             .log
             .get_session::<SessionConfiguration>(&invocation.session_id)
             .await
             .map_err(storage)?
             .ok_or(Error::NotFound)?;
-        if current.archived || current.configuration.workspace.host_cwd != frozen.cwd {
+        if current.archived
+            || current.configuration.boundary_revision != boundary.boundary_revision
+            || current.configuration.workspace.host_cwd != frozen.cwd
+        {
             return Err(Error::Denied);
         }
-        let cwd = frozen.cwd.clone();
-        tokio::task::spawn_blocking(move || {
-            let identity = maka_fs_tools::workspace::read_identity(std::path::Path::new(&cwd))
-                .map_err(|_| Error::Denied)?;
-            if frozen.workspace_identity.as_ref() != Some(&identity) {
-                return Err(Error::Denied);
-            }
-            Ok(())
-        })
-        .await
-        .map_err(|error| Error::Host(error.to_string()))??;
-        let proof = frozen.tool_composition.ok_or(Error::Denied)?;
+        let proof = frozen.tool_composition.as_ref().ok_or(Error::Denied)?;
         let (_, snapshot) = self
             .capabilities
             .registry
@@ -77,10 +69,10 @@ impl Executions {
             snapshot,
             self.capabilities.registry.clone(),
             self.capabilities.broker.clone(),
-            frozen.cwd,
+            frozen.cwd.clone(),
             self.interactions.clone(),
         )
-        .with_permission_ceiling(frozen.permission_mode)
+        .with_permission_ceiling(boundary.sandbox_mode)
         .registrations()
         .into_iter()
         .filter(|tool| {
@@ -100,11 +92,11 @@ impl Executions {
     pub(crate) async fn plugin_client_catalog(
         &self,
         owner: Context,
-        invocation: &Invocation,
+        call: &maka_plugins::call::Scope,
     ) -> Result<Vec<ToolDefinition>, Error> {
         let _lease = owner.admit().map_err(|_| Error::Revoked)?;
         Ok(self
-            .plugin_client_tools(invocation)
+            .plugin_client_tools(call)
             .await?
             .into_iter()
             .map(|tool| tool.definition)
@@ -114,8 +106,7 @@ impl Executions {
     pub(crate) async fn plugin_client_call(
         self: &Arc<Self>,
         owner: Context,
-        invocation: Invocation,
-        parent_operation_id: Option<String>,
+        call: maka_plugins::call::Scope,
         input: Call,
         cancellation: CancellationToken,
     ) -> Result<impl Future<Output = Result<Value, ToolError>> + Send + 'static, Error> {
@@ -125,11 +116,13 @@ impl Executions {
             return Err(Error::Revoked);
         }
         let registration = self
-            .plugin_client_tools(&invocation)
+            .plugin_client_tools(&call)
             .await?
             .into_iter()
             .find(|tool| tool.definition.name == input.name)
             .ok_or(Error::Denied)?;
+        let invocation = call.identity.agent().ok_or(Error::Denied)?.clone();
+        let parent_operation_id = call.identity.operation_id().map(str::to_owned);
         let operation_id = uuid::Uuid::new_v4().to_string();
         let arguments = Value::Object(input.input);
         // Preparation may wait for provider acceptance or human approval. No Host
@@ -147,6 +140,21 @@ impl Executions {
             )
             .await
             .map_err(|error| Error::Invalid(error.to_string()))?;
+        let admission = self.clone();
+        let effect = effect.map_future(move |operation, cancellation| {
+            Box::pin(async move {
+                let gate = admission.interactions.own_admission().await;
+                if cancellation.is_cancelled() {
+                    return Err(ToolError::from(Error::Revoked));
+                }
+                admission
+                    .plugin_agent_evidence(&call)
+                    .await
+                    .map_err(ToolError::from)?;
+                drop(gate);
+                operation.await
+            })
+        });
         let journal = ToolJournal::new(self.log.clone(), invocation);
         let host = self.clone();
         let (send, receive) = tokio::sync::oneshot::channel();

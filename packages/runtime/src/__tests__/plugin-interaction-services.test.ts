@@ -60,7 +60,7 @@ test('questions and approvals use the exact current Tool interaction authority',
           createdAt: 1,
           settledAt: 2,
         },
-        boundary: { kind: 'bypass', revision: 1 },
+        boundary: { kind: 'danger-full-access', revision: 1 },
         changed: true,
       };
     },

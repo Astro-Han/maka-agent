@@ -66,7 +66,7 @@ export function projectSessionCatalogSummary(
     connectionLocked: session.connectionLocked,
     model: session.model,
     ...(session.thinkingLevel === undefined ? {} : { thinkingLevel: session.thinkingLevel }),
-    permissionMode: session.permissionMode,
+    sandboxMode: session.sandboxMode,
     collaborationMode: session.collaborationMode,
     orchestrationMode: session.orchestrationMode,
   };

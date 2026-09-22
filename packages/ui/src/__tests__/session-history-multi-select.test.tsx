@@ -105,7 +105,7 @@ function summary(id: string, overrides: Partial<SessionSummary> = {}): SessionSu
     llmConnectionSlug: 'test-connection',
     connectionLocked: true,
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     ...overrides,
   };
 }

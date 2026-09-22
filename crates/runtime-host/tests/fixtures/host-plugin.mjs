@@ -330,19 +330,38 @@ export default async function (ctx) {
             if (error.code !== 'revoked') throw error;
           }
 
-          try {
-            const denied = await call.terminals.spawn(command);
-            await denied.close();
-            throw new Error('Ask Session gained unrestricted terminal access');
-          } catch (error) {
-            if (error.code !== 'revoked') throw error;
-          }
-          try {
-            const denied = await call.processes.spawn(command);
-            await denied.close();
-            throw new Error('Ask Session gained unrestricted process access');
-          } catch (error) {
-            if (error.code !== 'revoked') throw error;
+          for (const terminal of [false, true]) {
+            const protectedCommand = {
+              ...command,
+              env: {
+                ...command.env,
+                MAKA_PLUGIN_SANDBOX_TEST_CHILD: '1',
+                ...(terminal ? { MAKA_PLUGIN_PTY_TEST_CHILD: '1' } : {}),
+              },
+            };
+            if (String('__MANAGED_SANDBOX__') === 'supported') {
+              const resource = terminal
+                ? await call.terminals.spawn(protectedCommand)
+                : await call.processes.spawn(protectedCommand);
+              try {
+                await resource.write(terminal ? 'quit\r' : 'quit\n');
+                const outcome = await resource.wait();
+                if ('kind' in outcome ? outcome.kind !== 'completed' : !outcome.success)
+                  throw new Error('managed plugin process did not enforce metadata protection');
+              } finally {
+                await resource.close();
+              }
+            } else {
+              try {
+                const resource = terminal
+                  ? await call.terminals.spawn(protectedCommand)
+                  : await call.processes.spawn(protectedCommand);
+                await resource.close();
+                throw new Error('unsupported isolation executed without a sandbox');
+              } catch (error) {
+                if (error.code !== 'invalid' || !error.message.includes('sandbox')) throw error;
+              }
+            }
           }
           if (previousCall) {
             try {

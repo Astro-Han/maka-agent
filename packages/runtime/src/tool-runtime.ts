@@ -20,7 +20,7 @@
 import { decodeCanonicalToolResultContent } from '@maka/core/tool-result-record-schema';
 import { projectAgentSwarmResult } from '@maka/core/agent-swarm';
 import { projectToolActivityArgs } from '@maka/core/tool-activity-args';
-import { resolveCollaborationPermissionMode } from '@maka/core/collaboration';
+import { resolveCollaborationSandboxMode } from '@maka/core/collaboration';
 import {
   type CreateSandboxBoundaryRequest,
   type ExecutionBoundary,
@@ -63,7 +63,7 @@ import {
   type InteractionFormResponse,
   type InteractionFormResult,
 } from '@maka/core/interaction';
-import type { PermissionMode, ToolCategory, ToolExecutionFacts } from '@maka/core/permission';
+import type { SandboxMode, ToolCategory, ToolExecutionFacts } from '@maka/core/permission';
 import type { RuntimeExecutionConnection } from '@maka/core/llm-connections';
 import type { OrchestrationMode } from '@maka/core/orchestration';
 import type {
@@ -161,7 +161,7 @@ export type MakaToolPreparationContext = Pick<
   | 'turnId'
   | 'cwd'
   | 'executionBoundary'
-  | 'permissionMode'
+  | 'sandboxMode'
   | 'toolCallId'
   | 'abortSignal'
 >;
@@ -256,7 +256,7 @@ export interface MakaToolContext {
   cwd: string;
   /** Authoritative session boundary read immediately before Runtime-dispatched execution. */
   executionBoundary?: ExecutionBoundary;
-  permissionMode?: PermissionMode;
+  sandboxMode?: SandboxMode;
   toolCallId: string;
   /** Runtime-owned durable identity of this tool operation, when enabled. */
   operationId?: string;
@@ -295,7 +295,7 @@ export interface MakaToolContext {
       runId: string;
       agentId: string;
       agentName: string;
-      permissionMode: PermissionMode;
+      sandboxMode: SandboxMode;
     }) => void | Promise<void>;
     onEvent?: (event: SessionEvent) => void;
   }) => Promise<unknown>;
@@ -378,7 +378,7 @@ export interface ToolRuntimeInput {
   connection: RuntimeExecutionConnection;
   modelId: string;
   readExecutionBoundary: () => Promise<ExecutionBoundary>;
-  readPermissionMode: () => Promise<PermissionMode>;
+  readSandboxMode: () => Promise<SandboxMode>;
   createSandboxBoundaryRequest?: (
     input: CreateSandboxBoundaryRequest,
   ) => Promise<SandboxBoundaryRequest>;
@@ -435,7 +435,7 @@ export interface ToolRuntimeInput {
       runId: string;
       agentId: string;
       agentName: string;
-      permissionMode: PermissionMode;
+      sandboxMode: SandboxMode;
     }) => void | Promise<void>;
     onEvent?: (event: SessionEvent) => void;
   }) => Promise<unknown>;
@@ -536,7 +536,7 @@ export class ToolRuntime {
   private readonly durableToolAttempts = new Map<string, DurableToolAttempt>();
   private readonly activeToolSettlements = new Set<Promise<unknown>>();
   private readonly readExecutionBoundary: NonNullable<ToolRuntimeInput['readExecutionBoundary']>;
-  private readonly readPermissionMode: NonNullable<ToolRuntimeInput['readPermissionMode']>;
+  private readonly readSandboxMode: NonNullable<ToolRuntimeInput['readSandboxMode']>;
   private readonly stepAdmissions = new Map<
     string,
     { callCount: number; exclusiveToolName?: string }
@@ -545,7 +545,7 @@ export class ToolRuntime {
     if (!input.readExecutionBoundary) {
       throw new Error('ToolRuntime requires explicit execution boundary authority');
     }
-    if (!input.readPermissionMode) {
+    if (!input.readSandboxMode) {
       throw new Error('ToolRuntime requires explicit permission mode authority');
     }
     const hosted = input.hostedInteraction;
@@ -558,7 +558,7 @@ export class ToolRuntime {
     this.hostedInteraction = hosted;
     this.readExecutionBoundary = input.readExecutionBoundary;
     this.sandboxBoundaryDenied = input.inheritedSandboxBoundaryDenied === true;
-    this.readPermissionMode = input.readPermissionMode;
+    this.readSandboxMode = input.readSandboxMode;
   }
 
   /**
@@ -569,11 +569,12 @@ export class ToolRuntime {
    * without changing the mode the user selected. Keep that selection live in
    * its own authority, then apply the collaboration overlay for this backend.
    */
-  private async livePermissionMode(boundary: ExecutionBoundary): Promise<PermissionMode> {
-    const permissionMode = boundary.kind === 'bypass' ? 'bypass' : await this.readPermissionMode();
-    return resolveCollaborationPermissionMode({
+  private async liveSandboxMode(boundary: ExecutionBoundary): Promise<SandboxMode> {
+    const sandboxMode =
+      boundary.kind === 'danger-full-access' ? 'danger-full-access' : await this.readSandboxMode();
+    return resolveCollaborationSandboxMode({
       collaborationMode: this.input.header.collaborationMode ?? 'agent',
-      permissionMode,
+      sandboxMode,
     });
   }
 
@@ -1410,12 +1411,12 @@ export class ToolRuntime {
     }
 
     let clientCapabilityBoundary: ExecutionBoundary | undefined;
-    let clientCapabilityPermissionMode: PermissionMode | undefined;
+    let clientCapabilitySandboxMode: SandboxMode | undefined;
     let preparedExecution: PreparedMakaToolExecution | undefined;
     if (tool.hostAdmission === 'client_capability') {
       try {
         clientCapabilityBoundary = await this.readExecutionBoundary();
-        clientCapabilityPermissionMode = await this.livePermissionMode(clientCapabilityBoundary);
+        clientCapabilitySandboxMode = await this.liveSandboxMode(clientCapabilityBoundary);
       } catch (error) {
         const reason = formatSyntheticToolErrorText(error);
         await refuseBeforeDispatch(reason);
@@ -1430,7 +1431,8 @@ export class ToolRuntime {
       }
       const admissionFailure = !tool.prepareExecution
         ? CLIENT_CAPABILITY_PREPARATION_MESSAGE
-        : clientCapabilityBoundary.kind !== 'bypass' && clientCapabilityPermissionMode !== 'ask'
+        : clientCapabilityBoundary.kind !== 'danger-full-access' &&
+            clientCapabilitySandboxMode !== 'workspace-write'
           ? CLIENT_CAPABILITY_BOUNDARY_MESSAGE
           : undefined;
       if (admissionFailure) {
@@ -1459,7 +1461,7 @@ export class ToolRuntime {
           ...(runId ? { runId } : {}),
           cwd: this.input.header.cwd,
           executionBoundary: clientCapabilityBoundary,
-          permissionMode: clientCapabilityPermissionMode,
+          sandboxMode: clientCapabilitySandboxMode,
           toolCallId: toolUseId,
           abortSignal: ctx.abortSignal,
         });
@@ -1544,8 +1546,8 @@ export class ToolRuntime {
       try {
         const runId = this.input.runId;
         const executionBoundary = clientCapabilityBoundary ?? (await this.readExecutionBoundary());
-        const permissionMode =
-          clientCapabilityPermissionMode ?? (await this.livePermissionMode(executionBoundary));
+        const sandboxMode =
+          clientCapabilitySandboxMode ?? (await this.liveSandboxMode(executionBoundary));
         const toolContext: MakaToolContext = {
           sessionId: this.input.sessionId,
           turnId,
@@ -1555,7 +1557,7 @@ export class ToolRuntime {
             : {}),
           cwd: this.input.header.cwd,
           executionBoundary,
-          permissionMode,
+          sandboxMode,
           toolCallId: toolUseId,
           // The id the call event actually carries, not the candidate: by here
           // `prepareDurableToolAttempt` has pushed it on the dispatch lane.
@@ -2284,7 +2286,7 @@ export class ToolRuntime {
                           turnId: ready.turnId,
                           runId: ready.runId,
                           status: 'running',
-                          permissionMode: ready.permissionMode,
+                          sandboxMode: ready.sandboxMode,
                         } satisfies ToolResultPreviewContent,
                         ...input.activityIdentity,
                       });

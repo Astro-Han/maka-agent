@@ -96,7 +96,7 @@ export function runtimeHostExecutionUnavailableReason(
     | 'backend'
   > & {
     readonly toolProfile?: SessionToolProfile;
-    readonly permissionMode?: SessionHeader['permissionMode'];
+    readonly sandboxMode?: SessionHeader['sandboxMode'];
     readonly orchestrationMode?: SessionHeader['orchestrationMode'];
   },
   execution: RootExecutionDescriptor,
@@ -117,8 +117,8 @@ export function runtimeHostExecutionUnavailableReason(
       ? WORKHUB_COORDINATION_EXECUTION_UNAVAILABLE_REASON
       : undefined) ??
     (execution.kind === 'workhub_coordination' &&
-    (header.permissionMode !==
-      (header.toolProfile === 'workhub-coordination-v2' ? 'bypass' : 'explore') ||
+    (header.sandboxMode !==
+      (header.toolProfile === 'workhub-coordination-v2' ? 'danger-full-access' : 'read-only') ||
       (header.collaborationMode ?? 'agent') !== 'agent' ||
       (header.orchestrationMode ?? 'default') !== 'default')
       ? WORKHUB_COORDINATION_EXECUTION_UNAVAILABLE_REASON

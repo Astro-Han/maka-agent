@@ -18,7 +18,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { ExecutionBoundary } from '@maka/core/sandbox-boundary';
 import type { AgentProfile } from './agent-catalog.js';
 import { Service, type Context, type Disposable } from './plugin-kernel.js';
@@ -37,7 +37,7 @@ export interface PluginAgentInvocation {
   readonly runId?: string;
   readonly turnId: string;
   readonly cwd: string;
-  readonly permissionMode?: PermissionMode;
+  readonly sandboxMode?: SandboxMode;
   readonly executionBoundary?: ExecutionBoundary;
   readonly toolCallId?: string;
   readonly abortSignal: AbortSignal;
@@ -59,7 +59,7 @@ export interface PluginAgentCreateOptions {
   readonly agentProfile?: AgentProfile;
   readonly executorId?: string;
   readonly model?: string;
-  readonly permissionMode?: PermissionMode;
+  readonly sandboxMode?: SandboxMode;
   readonly signal?: AbortSignal;
 }
 
@@ -157,7 +157,7 @@ export class PluginAgentService extends Service {
       ...(toolContext.runId ? { runId: toolContext.runId } : {}),
       turnId: toolContext.turnId,
       cwd: toolContext.cwd,
-      ...(toolContext.permissionMode ? { permissionMode: toolContext.permissionMode } : {}),
+      ...(toolContext.sandboxMode ? { sandboxMode: toolContext.sandboxMode } : {}),
       ...(toolContext.executionBoundary
         ? { executionBoundary: toolContext.executionBoundary }
         : {}),

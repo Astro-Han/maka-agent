@@ -17,12 +17,12 @@
  * under the License.
  */
 
+import type { SideChatSession } from '../../renderer/features/workbar/index.js';
 import { deferred } from '@maka/core/test-only/async-primitives';
 import { WORKHUB_COORDINATION_SESSION_ID } from '@maka/core/session';
 import { strict as assert } from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
 import type {
-  SessionSummary,
   TurnRecord,
 } from '@maka/core/session';
 import {
@@ -35,7 +35,7 @@ import {
   type WorkbarServices,
 } from '../../renderer/features/workbar/testing.js';
 import { desktopSessionKey } from '../../shared/runtime-host-identity.js';
-function session(id: string): SessionSummary {
+function session(id: string): SideChatSession {
   return {
     id,
     name: id,
@@ -48,7 +48,8 @@ function session(id: string): SessionSummary {
     llmConnectionSlug: 'test',
     connectionLocked: false,
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
   };
 }
 
@@ -96,7 +97,7 @@ describe('quote companion disposal fencing', () => {
         sessionId: WORKHUB_COORDINATION_SESSION_ID,
       }),
     );
-    coordinationSession.permissionMode = 'bypass';
+    coordinationSession.sandboxMode = 'danger-full-access';
     let listedTurns = 0;
     const branchInputs: Parameters<WorkbarServices['sideChat']['branchFromTurn']>[1][] = [];
     const sideChat = {
@@ -205,7 +206,7 @@ describe('quote companion disposal fencing', () => {
   });
 
   it('cleans a fork that resolves after its panel was disposed and never sends', async () => {
-    const pendingFork = deferred<SessionSummary>();
+    const pendingFork = deferred<SideChatSession>();
     const cleaned: string[] = [];
     let disposed = false;
     let sends = 0;

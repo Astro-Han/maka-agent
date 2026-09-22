@@ -56,7 +56,7 @@ export async function verifyConfiguration(connection, sessionId, connectSibling)
     for (const patch of [
       {},
       { modelTarget: { kind: 'default' } },
-      { permissionMode: null },
+      { sandboxMode: null },
       { thinkingLevel: 'unknown' },
       { extra: true },
     ]) {
@@ -129,7 +129,7 @@ export async function verifyConfiguration(connection, sessionId, connectSibling)
       'no-op and conflict do not invalidate catalog',
     );
 
-    const explore = await update(connection, bound.session, { permissionMode: 'explore' });
+    const explore = await update(connection, bound.session, { sandboxMode: 'read-only' });
     assert.deepEqual(await boundary(connection, sessionId), {
       kind: 'managed',
       access: 'read_only',
@@ -157,15 +157,20 @@ export async function verifyConfiguration(connection, sessionId, connectSibling)
     );
     const restored = await update(connection, swarm.session, { orchestrationMode: 'default' });
     assert.equal(restored.kind, 'committed');
-    assert.equal(restored.session.permissionMode, 'explore');
+    assert.equal(restored.session.sandboxMode, 'read-only');
     assert.deepEqual(
       await boundary(sibling, sessionId),
       { kind: 'managed', access: 'read_only', revision: 1 },
       'model/metadata/no-op/rejected updates do not advance boundary',
     );
-    const bypass = await update(connection, restored.session, { permissionMode: 'bypass' });
-    assert.deepEqual(await boundary(sibling, sessionId), { kind: 'bypass', revision: 2 });
-    await update(connection, bypass.session, { permissionMode: 'explore' });
+    const bypass = await update(connection, restored.session, {
+      sandboxMode: 'danger-full-access',
+    });
+    assert.deepEqual(await boundary(sibling, sessionId), {
+      kind: 'danger-full-access',
+      revision: 2,
+    });
+    await update(connection, bypass.session, { sandboxMode: 'read-only' });
     assert.deepEqual(
       await boundary(connection, sessionId),
       { kind: 'managed', access: 'read_only', revision: 3 },
@@ -191,10 +196,10 @@ export async function verifyConfiguration(connection, sessionId, connectSibling)
 
 export async function restoreAsk(connection, sessionId) {
   const before = await query(connection, sessionId);
-  assert.equal(before.permissionMode, 'explore');
-  const result = await update(connection, before, { permissionMode: 'ask' });
+  assert.equal(before.sandboxMode, 'read-only');
+  const result = await update(connection, before, { sandboxMode: 'workspace-write' });
   assert.equal(result.kind, 'committed');
-  assert.equal(result.session.permissionMode, 'ask');
+  assert.equal(result.session.sandboxMode, 'workspace-write');
   assert.deepEqual(await boundary(connection, sessionId), {
     kind: 'managed',
     access: 'writable',
@@ -210,18 +215,18 @@ export async function verifyBusyConfiguration(connection, sessionId) {
     await update(
       connection,
       { ...before, revision: before.revision - 1 },
-      { permissionMode: 'explore' },
+      { sandboxMode: 'read-only' },
     ),
     conflict(before, before.revision - 1),
     'CAS precedes busy',
   );
   assert.deepEqual(
-    await update(connection, before, { permissionMode: 'ask' }),
+    await update(connection, before, { sandboxMode: 'workspace-write' }),
     { kind: 'committed', session: before },
     'busy semantic no-op succeeds',
   );
   await assert.rejects(
-    update(connection, before, { permissionMode: 'explore' }),
+    update(connection, before, { sandboxMode: 'read-only' }),
     (error) => error.code === 'session_busy',
   );
   assert.deepEqual(await query(connection, sessionId), before);
@@ -231,25 +236,25 @@ export async function verifyBusyConfiguration(connection, sessionId) {
 export async function verifyArchivedConfiguration(connection, session) {
   assert.deepEqual(
     await boundary(connection, session.id),
-    { kind: 'managed', access: 'writable', revision: 4 },
+    { kind: 'managed', access: 'writable', revision: 5 },
     'boundary is durable through runtime events, archive and host reopen',
   );
   assert.equal(session.isArchived, true);
   assert.equal(session.connectionLocked, true);
-  assert.equal(session.permissionMode, 'ask');
+  assert.equal(session.sandboxMode, 'workspace-write');
   assert.equal(session.orchestrationMode, 'default');
   assert.equal(Object.hasOwn(session, 'thinkingLevel'), false);
   assert.deepEqual(
     await update(
       connection,
       { ...session, revision: session.revision - 1 },
-      { permissionMode: 'ask' },
+      { sandboxMode: 'workspace-write' },
     ),
     conflict(session, session.revision - 1),
     'CAS precedes archived',
   );
   await assert.rejects(
-    update(connection, session, { permissionMode: 'ask' }),
+    update(connection, session, { sandboxMode: 'workspace-write' }),
     (error) => error.code === 'operation_conflict',
     'archived rejects even semantic no-op',
   );

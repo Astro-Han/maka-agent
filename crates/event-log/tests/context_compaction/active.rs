@@ -24,7 +24,10 @@ use maka_runtime::context::{CheckpointMode, ModelPurpose, ModelRequestContext};
 
 fn opening(id: &str) -> EventWrite {
     event(id, Fact::InvocationOpened { configuration: Some(serde_json::from_value(json!({
-        "cwd":"/tmp", "permission_mode":"ask", "collaboration_mode":"agent",
+        "cwd":"/tmp", "sandbox_mode":"workspace-write", "collaboration_mode":"agent",
+        "workspace_origin":"selected",
+        "approval_policy":{"kind":"on-request"},
+        "boundary_revision":0,
         "orchestration_mode":"default", "tool_mode":"direct",
         "model":{"connection_id":"connection", "connection_slug":"test", "model":"test"}, "thinking_level":null
     })).unwrap()), input: InvocationInput::Message { source_messages: Vec::new(), content: serde_json::from_value(json!({

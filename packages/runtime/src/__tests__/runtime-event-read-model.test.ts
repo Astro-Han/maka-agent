@@ -135,7 +135,7 @@ function baseEvents(): RuntimeEvent[] {
       refs: { toolCallId: 'tool-1' },
     }),
     ev({
-      id: 'evt-permission-request',
+      id: 'evt-permission_request',
       ts: ts + 3,
       role: 'system',
       author: 'system',
@@ -885,7 +885,7 @@ describe('projectRuntimeEventsToStoredMessages', () => {
           refs: { toolCallId: 'question-tool-1' },
         }),
         ev({
-          id: 'evt-question-request',
+          id: 'evt-question_request',
           ts: ts + 2,
           actions: {
             userQuestionRequest: {
@@ -1038,7 +1038,7 @@ describe('projectRuntimeEventsToStoredMessages', () => {
               turnId: 'child-turn',
               runId: 'child-run',
               status: 'completed',
-              permissionMode: 'execute',
+              sandboxMode: 'execute',
               summary: 'done',
               artifactIds: [],
             } as never,
@@ -1052,7 +1052,7 @@ describe('projectRuntimeEventsToStoredMessages', () => {
     const projected = out.messages.find((message) => message.type === 'tool_result');
     assert.deepStrictEqual(
       projected?.type === 'tool_result' && projected.content.kind === 'subagent'
-        ? projected.content.permissionMode
+        ? projected.content.sandboxMode
         : undefined,
       'ask',
     );
@@ -2758,7 +2758,7 @@ function makeHeader(id: string): SessionHeader {
     llmConnectionSlug: 'fake',
     connectionLocked: false,
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     schemaVersion: 1,
   };
 }

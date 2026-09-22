@@ -275,6 +275,9 @@ function canonicalOutcomeForHistoricalAnswer(
   if (answer.kind === 'client_capability') {
     return clientCapabilityCanonicalOutcome(answer, committedAt);
   }
+  if (answer.kind === 'permissions') {
+    return { kind: 'permissions_decision', decision: answer.decision, committedAt };
+  }
   return answer.decision === 'deny'
     ? {
         kind: 'permission_answer',

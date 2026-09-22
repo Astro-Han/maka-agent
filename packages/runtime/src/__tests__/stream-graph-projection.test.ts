@@ -532,7 +532,7 @@ describe('committed stream graph projection', () => {
           run,
           events: [
             runtimeEvent(run, {
-              id: 'permission-request',
+              id: 'permission_request',
               ts: baseTs + 1,
               actions: {
                 permissionRequest: {
@@ -548,7 +548,7 @@ describe('committed stream graph projection', () => {
               },
             }),
             runtimeEvent(run, {
-              id: 'question-request',
+              id: 'question_request',
               ts: baseTs + 2,
               actions: {
                 userQuestionRequest: {

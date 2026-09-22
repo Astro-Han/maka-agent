@@ -545,7 +545,7 @@ function sessionInput() {
     backend: 'fake' as const,
     llmConnectionSlug: 'fixture',
     model: 'fixture-model',
-    permissionMode: 'ask' as const,
+    sandboxMode: 'workspace-write' as const,
     name: 'Selected',
   };
 }

@@ -55,7 +55,7 @@ function makeServices(failFirst: boolean, withHistory: boolean | 'usage', colore
   let session: SessionSummary & { revision: number } = {
     id: sessionId, name: 'WorkHub', revision: 1, isFlagged: false, isArchived: false, labels: [], hasUnread: false,
     status: 'active', runningTurnIds: [], backend: 'ai-sdk', llmConnectionId: 'connection-test', llmConnectionSlug: 'test', connectionLocked: false,
-    model: 'model-a', permissionMode: 'ask',
+    model: 'model-a', sandboxMode: 'workspace-write',
   };
   const target = { ...session, id: targetId, name: '支付回调幂等性', cwd: '/projects/maka' };
   let messages: StoredMessage[] = withHistory ? [
@@ -156,7 +156,7 @@ function makeServices(failFirst: boolean, withHistory: boolean | 'usage', colore
     cancelAnswer: async () => { session = { ...session, runningTurnIds: [] }; updateSessions?.(); },
     configureModel: async (id, input) => {
       writes.model(id, input); session = { ...session, revision: session.revision + 1, model: input.target.model.model, thinkingLevel: input.target.thinkingLevel ?? undefined }; updateSessions?.();
-      return { kind: 'committed', session: { sessionId: id, revision: session.revision, name: session.name, boundaryRevision: 1, workspace: { target: { kind: 'host_path', path: '/projects/maka' }, hostCwd: '/projects/maka' }, target: input.target, permissionMode: 'ask', toolMode: 'direct', collaborationMode: 'agent', behavior: 'default', boundTools: null } };
+      return { kind: 'committed', session: { sessionId: id, revision: session.revision, name: session.name, boundaryRevision: 1, workspace: { target: { kind: 'host_path', path: '/projects/maka' }, hostCwd: '/projects/maka' }, target: input.target, sandboxMode: 'workspace-write', approvalPolicy: {kind: 'on-request'}, toolMode: 'direct', collaborationMode: 'agent', behavior: 'default', boundTools: null } };
     },
     observe: (_id, _event, _error, _phase, execution) => { updateExecution = execution; publishExecution(); return () => { updateExecution = undefined; }; },
     openTranscript: async (_id, handler) => { updateTranscript = handler; publish(); return { observationChanged: () => {}, loadEarlier: async () => {}, close: async () => { updateTranscript = undefined; } }; },
@@ -560,7 +560,7 @@ function PagedWorkConversation() {
   return <LocaleProvider locale="zh-CN"><AstryxLocaleProvider><ToastProvider>
     <WorkHubHighlightContext.Provider value={{ sessionId: undefined, highlight: () => {}, navigateWork: () => {}, selectedWork, selectWork, toggleWork: (work) => selectWork((current) => current?.sessionId === work.sessionId ? undefined : work) }}>
       <ChatSurfaceLayout composer={null}><div className="workhub-surface"><WorkHubConversation messages={messages} onOpenWork={() => {}} onNew={() => {}} scrollBehavior="auto"
-        activeSession={{ id: sessionId, name: 'WorkHub', isFlagged: false, isArchived: false, labels: [], hasUnread: false, status: 'active', runningTurnIds: [], backend: 'ai-sdk', llmConnectionId: 'connection-test', llmConnectionSlug: 'test', connectionLocked: false, model: 'model-a', permissionMode: 'ask' }}
+        activeSession={{ id: sessionId, name: 'WorkHub', isFlagged: false, isArchived: false, labels: [], hasUnread: false, status: 'active', runningTurnIds: [], backend: 'ai-sdk', llmConnectionId: 'connection-test', llmConnectionSlug: 'test', connectionLocked: false, model: 'model-a', sandboxMode: 'workspace-write' }}
         hasEarlierHistory={!loaded} onLoadEarlierHistory={() => setLoaded(true)}
         workLinks={['older-turn', 'latest-turn'].map((coordinationTurnId) => ({ id: coordinationTurnId, coordinationTurnId, targetSessionId: targetId, targetSessionName: '支付回调幂等性' }))} />
       </div></ChatSurfaceLayout>

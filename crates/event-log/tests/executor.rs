@@ -20,7 +20,7 @@
 use maka_event_log::EventLog;
 use maka_runtime::{
     event::{EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent},
-    execution::{BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode},
+    execution::{BehaviorId, CollaborationMode, InvocationConfiguration, SandboxMode, ToolMode},
     executor::{Binding, Output},
     tool_call::ToolCallIdentity,
 };
@@ -48,13 +48,16 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
             request_fingerprint: None,
         },
         configuration: Some(Box::new(InvocationConfiguration {
+            workspace_origin: maka_runtime::execution::WorkspaceOrigin::Selected,
+            approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
+            boundary_revision: 0,
             cwd: temp.path().to_string_lossy().into_owned(),
             workspace_identity: None,
             model: None,
             tool_composition: None,
             system_prompt: None,
             thinking_level: None,
-            permission_mode: PermissionMode::Ask,
+            sandbox_mode: SandboxMode::WorkspaceWrite,
             collaboration_mode: CollaborationMode::Agent,
             orchestration_mode: BehaviorId::default(),
             tool_mode: ToolMode::Direct,

@@ -33,6 +33,7 @@ pub(super) struct Directory {
     parents: Vec<Arc<Dir>>,
     names: Vec<OsString>,
     aliases: Arc<[PathBuf; 2]>,
+    policy: Option<Arc<maka_sandbox::filesystem::Compiled>>,
 }
 
 impl Directory {
@@ -41,6 +42,7 @@ impl Directory {
             parents: vec![Arc::new(directory)],
             names: Vec::new(),
             aliases: Arc::new([path.clone(), path]),
+            policy: None,
         }
     }
 
@@ -55,7 +57,61 @@ impl Directory {
             parents: vec![Arc::new(root)],
             names: Vec::new(),
             aliases: Arc::new([canonical, path.to_owned()]),
+            policy: None,
         })
+    }
+
+    pub(super) fn restrict(
+        mut self,
+        policy: Arc<maka_sandbox::filesystem::Compiled>,
+    ) -> Result<Self, crate::Error> {
+        self.policy = Some(match &self.policy {
+            Some(current) => Arc::new(
+                current
+                    .intersect(&policy)
+                    .map_err(|error| crate::Error::Invalid(error.to_string()))?,
+            ),
+            None => policy,
+        });
+        Ok(self)
+    }
+
+    pub(super) fn readable(&self, name: &Path) -> bool {
+        self.policy.is_none() || self.resolve(name, true).is_ok()
+    }
+
+    fn check_name(&self, name: &Path) -> io::Result<()> {
+        let Some(policy) = &self.policy else {
+            return Ok(());
+        };
+        let relative = self.relative(name);
+        let path: PathBuf = self.aliases[0].join(&relative).components().collect();
+        if policy.access(dunce::simplified(&path)).can_read() {
+            Ok(())
+        } else {
+            Err(blocked())
+        }
+    }
+
+    fn check_resolved(&self, name: &Path) -> io::Result<()> {
+        self.check_name(name)?;
+        let Some(policy) = &self.policy else {
+            return Ok(());
+        };
+        // Links have already been resolved on held handles. Expand alternate
+        // spellings (notably Windows short names) before checking the target.
+        let relative = self.relative(name);
+        let resolved = self.parents[0].canonicalize(if relative.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            &relative
+        })?;
+        let path: PathBuf = self.aliases[0].join(resolved).components().collect();
+        if policy.access(dunce::simplified(&path)).can_read() {
+            Ok(())
+        } else {
+            Err(blocked())
+        }
     }
 
     pub(super) fn dir(&self) -> &Dir {
@@ -68,6 +124,7 @@ impl Directory {
 
     pub(super) fn open(&self, path: &Path, follow: bool) -> io::Result<Self> {
         if path.as_os_str().is_empty() {
+            self.check_resolved(Path::new(""))?;
             return Ok(self.clone());
         }
         let (mut parent, name) = self.resolve(path, follow)?;
@@ -83,8 +140,13 @@ impl Directory {
     /// Resolve the final name without following it at the subsequent open.
     /// Nofollow opens close the metadata/open race if a link is replaced.
     pub(super) fn resolve(&self, path: &Path, follow: bool) -> io::Result<(Self, OsString)> {
+        self.check_name(path)?;
         let mut directory = self.clone();
         let mut pending = without_dots(path);
+        if pending.as_os_str().is_empty() {
+            directory.check_resolved(Path::new(""))?;
+            return Ok((directory, OsString::from(".")));
+        }
         let mut links = 0;
         loop {
             let mut components = pending.components();
@@ -117,11 +179,13 @@ impl Directory {
                         };
                         pending = without_dots(&target.join(remaining));
                         if pending.as_os_str().is_empty() {
+                            directory.check_resolved(Path::new(""))?;
                             return Ok((directory, OsString::from(".")));
                         }
                         continue;
                     }
                     if remaining.as_os_str().is_empty() {
+                        directory.check_resolved(Path::new(name))?;
                         return Ok((directory, name.to_owned()));
                     }
                     directory
@@ -137,6 +201,7 @@ impl Directory {
             }
             pending = remaining;
             if pending.as_os_str().is_empty() {
+                directory.check_resolved(Path::new(""))?;
                 return Ok((directory, OsString::from(".")));
             }
         }

@@ -1043,7 +1043,7 @@ function coordinatorFixture(
         readonly backend: 'ai-sdk';
         readonly llmConnectionSlug: string;
         readonly model: string;
-        readonly permissionMode: 'ask';
+        readonly sandboxMode: 'workspace-write';
         readonly collaborationMode: 'agent';
         readonly orchestrationMode: 'default';
       }>;
@@ -1139,7 +1139,7 @@ function coordinatorFixture(
           backend: 'ai-sdk',
           llmConnectionSlug: 'default',
           model: 'gpt-5',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           collaborationMode: 'agent',
           orchestrationMode: 'default',
         })),
@@ -1174,7 +1174,7 @@ function coordinatorFixture(
           cwd: '/external',
           llmConnectionSlug: 'default',
           model: 'gpt-5',
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
         },
         [],
         { adapterId: 'codex', sourceSessionId: 'source-0' },
@@ -1245,7 +1245,7 @@ function sessionHeader(id: string, cwd: string, name: string): SessionHeader {
     llmConnectionSlug: 'default',
     connectionLocked: true,
     model: 'gpt-5',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     schemaVersion: 1,

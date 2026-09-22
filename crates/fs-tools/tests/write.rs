@@ -110,7 +110,7 @@ async fn write_contract_authority_bounds_and_inode() {
             executor
                 .invoke("Write".into(), input, CancellationToken::new())
                 .await,
-            Err(ToolError::Failed(_))
+            Err(ToolError::Failed(_) | ToolError::Io { .. })
         ));
     }
     let cancelled = CancellationToken::new();

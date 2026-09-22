@@ -42,11 +42,11 @@ describe('legacy Run header decoding', () => {
     const decoded = decodePersistedLegacyRunHeader({
       ...runHeader(),
       status: 'waiting_permission',
-      permissionMode: 'execute',
+      sandboxMode: 'execute',
       automationId: 'automation-1',
     });
     assert.equal(decoded.status, 'waiting_for_user');
-    assert.equal(decoded.permissionMode, 'ask');
+    assert.equal(decoded.sandboxMode, 'ask');
     assert.equal(decoded.legacyAutomationId, 'automation-1');
     assert.equal(Object.hasOwn(decoded, 'automationId'), false);
   });
@@ -109,7 +109,7 @@ function runHeader(): Record<string, unknown> {
     llmConnectionSlug: 'fake',
     modelId: 'fake-model',
     cwd: '/workspace',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     createdAt: 1,
     updatedAt: 1,
   };

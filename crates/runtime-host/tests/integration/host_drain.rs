@@ -23,7 +23,7 @@ use maka_event_log::{
     EventLog,
     root::{ROOT_DATABASE, RootNamespaces, RootOwner},
 };
-use maka_protocol::session::PermissionMode;
+use maka_protocol::session::SandboxMode;
 use maka_runtime_host::server::{Host, local::LocalListener};
 use maka_runtime_host::session::{PreparedSession, SessionModel};
 use maka_transport::{MessageReader, MessageWriter, TransportError};
@@ -146,7 +146,7 @@ async fn exercise(fail_write: bool, fault: Fault) {
             connection_slug: "connection".into(),
             model: "model".into(),
         },
-        PermissionMode::Explore,
+        SandboxMode::ReadOnly,
         maka_runtime::execution::ToolMode::Direct,
     );
     log.create_session("session", "fingerprint", &configuration, 1)

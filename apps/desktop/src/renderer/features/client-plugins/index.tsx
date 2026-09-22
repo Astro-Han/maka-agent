@@ -27,6 +27,7 @@ import { createServicesContext } from '../../application/contracts/feature-servi
 import type { ClientHostRef, ClientPluginServices } from './ports.js';
 import { usePublishComposerSuggestions } from './suggestions.js';
 import { ClientHostRuntime } from './host-runtime.js';
+import { parseDesktopSessionKey } from '../../../shared/runtime-host-identity.js';
 export { ComposerSuggestionsProvider, useComposerSuggestions } from './suggestions.js';
 
 export type { ClientHostRef, ClientPluginServices } from './ports.js';
@@ -97,7 +98,10 @@ export function ClientPluginComposerSlot(props: {
   readonly host: ClientHostRef;
   readonly input: ClientSdk.ClientSlots['session.composer.before'];
 }) {
-  return <ClientPluginSlot {...props} name="session.composer.before" />;
+  const session = parseDesktopSessionKey(props.input.sessionId);
+  if (session.hostId !== props.host.hostId) throw new Error('Plugin Session belongs to another Host');
+  return <ClientPluginSlot {...props} name="session.composer.before"
+    input={{ ...props.input, sessionId: session.sessionId }} />;
 }
 
 /** A workspace consumes one configured Client Entry, not a private feature RPC. */

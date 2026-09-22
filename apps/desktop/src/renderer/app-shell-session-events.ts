@@ -199,7 +199,9 @@ export function createAppShellSessionEventHandlers(options: {
   }
 
   function markDisplayReady(sessionId: string): void {
-    displayBatch.displayPendingSessions.delete(sessionId);
+    if (displayBatch.displayPendingSessions.delete(sessionId)) {
+      onExecutionBoundaryChanged?.(sessionId);
+    }
   }
 
   function canBatchDisplayEvents(sessionId: string): boolean {
@@ -342,6 +344,7 @@ export function createAppShellSessionEventHandlers(options: {
         break;
       case 'sandbox_boundary_request':
       case 'client_capability_request':
+      case 'permissions_request':
       case 'user_question_request':
       case 'form_request':
         onInteractionChanged?.(sessionId);
@@ -351,6 +354,7 @@ export function createAppShellSessionEventHandlers(options: {
       // same point its boundary sibling settles on, below.
       case 'user_question_answer_ack':
       case 'client_capability_decision_ack':
+      case 'permissions_decision_ack':
       case 'form_answer_ack':
         onInteractionChanged?.(sessionId);
         break;

@@ -18,11 +18,14 @@
  */
 
 use maka_runtime::execution::{
-    BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode,
+    BehaviorId, CollaborationMode, InvocationConfiguration, SandboxMode, ToolMode,
 };
 
 pub fn configuration(tool_mode: ToolMode) -> InvocationConfiguration {
     InvocationConfiguration {
+        workspace_origin: maka_runtime::execution::WorkspaceOrigin::Selected,
+        approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
+        boundary_revision: 0,
         workspace_identity: None,
         system_prompt: None,
         tool_composition: None,
@@ -31,7 +34,7 @@ pub fn configuration(tool_mode: ToolMode) -> InvocationConfiguration {
             .into_os_string()
             .into_string()
             .expect("UTF-8 test working directory"),
-        permission_mode: PermissionMode::Bypass,
+        sandbox_mode: SandboxMode::DangerFullAccess,
         collaboration_mode: CollaborationMode::Agent,
         orchestration_mode: BehaviorId::default(),
         tool_mode,

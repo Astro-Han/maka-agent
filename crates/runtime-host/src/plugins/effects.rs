@@ -47,8 +47,8 @@ impl Effects {
         authority: Authority,
     ) -> Result<Vec<maka_runtime::tools::ToolDefinition>, ToolError> {
         let host = self.host(&authority)?;
-        if let Some(invocation) = authority.identity.agent() {
-            host.plugin_client_catalog(self.owner.clone(), invocation)
+        if authority.identity.agent().is_some() {
+            host.plugin_client_catalog(self.owner.clone(), &authority)
                 .await
                 .map_err(failed)
         } else {
@@ -109,18 +109,12 @@ impl maka_plugins::filesystem::Files for Effects {
     ) -> BoxFuture<'_, Result<Output, ToolError>> {
         Box::pin(self.owned(call, move |host, owner, call, cancellation| {
             Box::pin(async move {
-                if let Some(invocation) = call.identity.agent() {
+                if call.identity.agent().is_some() {
                     let entries = matches!(&operation, Operation::Entries(_));
                     let output = host
-                        .plugin_file(
-                            owner,
-                            invocation.clone(),
-                            call.identity.operation_id().map(str::to_owned),
-                            operation,
-                            cancellation,
-                        )
+                        .plugin_file(owner, call, operation, cancellation)
                         .await
-                        .map_err(failed)?
+                        .map_err(ToolError::from)?
                         .await?;
                     if entries {
                         serde_json::from_value(output)
@@ -133,6 +127,21 @@ impl maka_plugins::filesystem::Files for Effects {
                     host.plugin_resource_file(owner, call, operation, cancellation)
                         .await
                 }
+            })
+        }))
+    }
+}
+impl maka_plugins::permissions::Access for Effects {
+    fn request(
+        &self,
+        call: Authority,
+        request: maka_plugins::permissions::Request,
+    ) -> BoxFuture<'_, Result<maka_plugins::permissions::Permissions, ToolError>> {
+        Box::pin(self.owned(call, move |host, _owner, call, cancellation| {
+            Box::pin(async move {
+                host.request_plugin_permissions(&call, request, &cancellation)
+                    .await
+                    .map_err(ToolError::from)
             })
         }))
     }
@@ -158,17 +167,11 @@ impl maka_plugins::llm::Models for Effects {
     ) -> BoxFuture<'_, Result<maka_plugins::llm::ModelGeneration, ToolError>> {
         Box::pin(self.owned(call, move |host, owner, call, cancellation| {
             Box::pin(async move {
-                if let Some(invocation) = call.identity.agent() {
-                    host.plugin_model(
-                        owner,
-                        invocation.clone(),
-                        call.identity.operation_id().map(str::to_owned),
-                        input,
-                        cancellation,
-                    )
-                    .await
-                    .map_err(failed)?
-                    .await
+                if call.identity.agent().is_some() {
+                    host.plugin_model(owner, call, input, cancellation)
+                        .await
+                        .map_err(failed)?
+                        .await
                 } else {
                     host.plugin_resource_model(owner, call, input, cancellation)
                         .await
@@ -203,17 +206,11 @@ impl maka_plugins::client_capability::Clients for Effects {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(self.owned(call, move |host, owner, call, cancellation| {
             Box::pin(async move {
-                if let Some(invocation) = call.identity.agent() {
-                    host.plugin_client_call(
-                        owner,
-                        invocation.clone(),
-                        call.identity.operation_id().map(str::to_owned),
-                        input,
-                        cancellation,
-                    )
-                    .await
-                    .map_err(failed)?
-                    .await
+                if call.identity.agent().is_some() {
+                    host.plugin_client_call(owner, call, input, cancellation)
+                        .await
+                        .map_err(failed)?
+                        .await
                 } else {
                     host.plugin_resource_client(owner, call, input, cancellation)
                         .await

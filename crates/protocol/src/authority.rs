@@ -75,6 +75,7 @@ impl Operation {
                 | Self::HostDiagnosticsQuery
                 | Self::HostResourcesQuery
                 | Self::HostStatus
+                | Self::SandboxSetupQuery
                 | Self::InteractionAnswer
                 | Self::InteractionQuery
                 | Self::MemoryMutate

@@ -371,9 +371,12 @@ class RuntimeHostRunRuntime implements MakaRunRuntime {
     if (failure) throw failure.reason;
   }
 
-  async setExecutionBoundaryKind(sessionId: string, kind: 'managed' | 'bypass'): Promise<void> {
+  async setExecutionBoundaryKind(
+    sessionId: string,
+    kind: 'managed' | 'danger-full-access',
+  ): Promise<void> {
     await this.#attach(sessionId);
-    await this.#driver.setPermissionMode(kind === 'bypass' ? 'bypass' : 'ask');
+    await this.#driver.setSandboxMode(kind === 'danger-full-access' ? kind : 'workspace-write');
   }
 
   async waitForGraphCompletion(sessionId: string): Promise<void> {

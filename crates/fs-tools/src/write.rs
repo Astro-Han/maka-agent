@@ -39,6 +39,7 @@ use tokio_util::sync::CancellationToken;
 pub enum WriteScope {
     Disabled,
     Restricted { roots: Vec<PathBuf> },
+    Policy(Arc<maka_sandbox::filesystem::Compiled>),
     Unrestricted,
 }
 
@@ -60,6 +61,32 @@ enum Request {
     Patch(crate::patch::Batch),
 }
 
+/// Validate the same input accepted by the executor and describe its exact
+/// target names. This performs no mutation and grants no filesystem authority.
+pub fn mutation_paths(name: &str, input: Value, cwd: &Path) -> Result<Vec<PathBuf>, ToolError> {
+    let paths = if name == crate::patch::PATCH_NAME {
+        crate::patch::Batch::parse(input)?
+            .paths()
+            .map(Path::to_owned)
+            .collect::<Vec<_>>()
+    } else {
+        vec![PathBuf::from(Mutation::parse(name, input)?.path())]
+    };
+    let authority = Authority::new(cwd, ReadScope::Unrestricted)?;
+    paths
+        .into_iter()
+        .map(|path| {
+            if path
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+            {
+                return Err(failed("Write does not support parent (..) path components"));
+            }
+            authority.write_display_path(&path).map(PathBuf::from)
+        })
+        .collect()
+}
+
 impl MutationExecutor {
     /// Write permission is supplied by the caller; the directory cannot be
     /// replaced between the embedding's identity check and capture.
@@ -67,9 +94,12 @@ impl MutationExecutor {
         path: std::path::PathBuf,
         directory: cap_std::fs::Dir,
         coordinator: Arc<WriteCoordinator>,
+        policy: Option<Arc<maka_sandbox::filesystem::Compiled>>,
     ) -> Result<Self, ToolError> {
         Ok(Self {
-            authority: Some(Arc::new(Authority::from_directory(path, directory)?)),
+            authority: Some(Arc::new(Authority::from_directory(
+                path, directory, policy,
+            )?)),
             coordinator,
         })
     }
@@ -81,6 +111,7 @@ impl MutationExecutor {
         let read_scope = match scope {
             WriteScope::Disabled => None,
             WriteScope::Restricted { roots } => Some(ReadScope::Restricted { roots }),
+            WriteScope::Policy(policy) => Some(ReadScope::Policy(policy)),
             WriteScope::Unrestricted => Some(ReadScope::Unrestricted),
         };
         Ok(Self {

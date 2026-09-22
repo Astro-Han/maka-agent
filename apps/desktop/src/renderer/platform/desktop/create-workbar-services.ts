@@ -36,6 +36,7 @@ export type DesktopWorkbarBridge = Pick<
   | 'browser'
   | 'gitReview'
   | 'inspector'
+  | 'permissions'
   | 'sessions'
   | 'shellRuns'
   | 'transcripts'
@@ -72,6 +73,12 @@ export function createDesktopWorkbarServices(
   bridge: DesktopWorkbarBridge = window.maka,
   dependencies: DesktopWorkbarServiceDependencies = DEFAULT_DEPENDENCIES,
 ): WorkbarServices {
+  const prepareExecution = async (sessionId: string): Promise<boolean> => {
+    const session = await bridge.sessions.get(sessionId);
+    if (!session) return false;
+    return session.sandboxMode === 'danger-full-access' ||
+      await bridge.permissions.ensureSandbox({ sessionId });
+  };
   const submitSideChatFollowUp: WorkbarServices['sideChat']['submitFollowUp'] = async (
     sessionId,
     placement,
@@ -112,6 +119,7 @@ export function createDesktopWorkbarServices(
         bridge.sessions.subscribeEvents(sessionId, handler),
     },
     terminal: {
+      prepareExecution,
       start: (sessionId) => bridge.shellRuns.start(sessionId),
       stop: (input) => bridge.shellRuns.stop(input),
       attach: (input) => bridge.shellRuns.attach(input),
@@ -168,6 +176,7 @@ export function createDesktopWorkbarServices(
         }
       : {}),
     sideChat: {
+      prepareExecution,
       listSessions: () => bridge.sessions.list(),
       listTurns: (sessionId) => bridge.sessions.listTurns(sessionId),
       readSettledMessages: (sessionId, options) =>
@@ -202,8 +211,8 @@ export function createDesktopWorkbarServices(
         bridge.sessions.updateQueueEntry(sessionId, entryId, expectedQueueRevision, text),
       reorderQueueEntries: (sessionId, entryIds) =>
         bridge.sessions.reorderQueueEntries(sessionId, entryIds),
-      setPermissionMode: async (sessionId, mode) =>
-        expectSessionUpdate(await bridge.sessions.setPermissionMode(sessionId, mode)),
+      setExecutionPolicy: async (sessionId, policy) =>
+        expectSessionUpdate(await bridge.sessions.setExecutionPolicy(sessionId, policy)),
       regenerateTurn: (sessionId, input) =>
         bridge.sessions.regenerateTurn(sessionId, input),
       respondToSandboxBoundary: (sessionId, response) =>
@@ -214,6 +223,8 @@ export function createDesktopWorkbarServices(
         bridge.sessions.respondToUserQuestion(sessionId, response),
       respondToUserForm: (sessionId, response) =>
         bridge.sessions.respondToUserForm(sessionId, response),
+      respondToPermissions: (sessionId, response) =>
+        bridge.sessions.respondToPermissions(sessionId, response),
       subscribeEvents: (sessionId, handler, onSeeded, onSeedError, onExecution) =>
         bridge.sessions.subscribeEvents(sessionId, handler, (phase) => {
           if (phase === 'ready') onSeeded?.();

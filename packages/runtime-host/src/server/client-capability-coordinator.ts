@@ -1112,8 +1112,8 @@ export class HostClientCapabilityCoordinator implements ClientCapabilityService 
           const evidence = await prepared.waitUntilAccepted();
           const boundary = options.context.executionBoundary;
           if (!boundary) throw new Error('Client Capability execution boundary is unavailable');
-          if (boundary.kind !== 'bypass') {
-            if (options.context.permissionMode !== 'ask' || !options.context.runId) {
+          if (boundary.kind !== 'danger-full-access') {
+            if (options.context.sandboxMode !== 'workspace-write' || !options.context.runId) {
               throw new Error('Client Capability is unavailable in the current permission mode');
             }
             const target = managedClientCapabilityGrantTarget(

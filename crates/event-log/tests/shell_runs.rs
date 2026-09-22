@@ -32,6 +32,10 @@ fn starting(id: &str) -> ShellRun {
         source_turn_id: "turn".into(),
         source_tool_call_id: "call".into(),
         visibility: ShellVisibility::Model,
+        permissions: maka_runtime::shell_run::ShellPermissions {
+            boundary_revision: 0,
+            sandbox: maka_runtime::shell_run::Sandbox::Disabled,
+        },
         cwd: "/captured/workspace".into(),
         command: "command".into(),
         started_at: 10,

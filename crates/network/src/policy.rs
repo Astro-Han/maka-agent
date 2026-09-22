@@ -38,6 +38,12 @@ struct ProxyRoute {
 }
 
 impl Policy {
+    pub(crate) fn proxy_for(&self, host: &str) -> Option<&Url> {
+        self.0
+            .as_ref()
+            .filter(|route| !bypasses(host, &route.bypass))
+            .map(|route| &route.url)
+    }
     pub fn from_settings(settings: &NetworkProxy, password: Option<&str>) -> Result<Self, Error> {
         if !settings.enabled {
             return Ok(Self::default());

@@ -19,7 +19,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { SessionSummary } from '@maka/core/session';
+import type { DesktopSessionSummaryInput } from '../../shared/desktop-session-projection.js';
 import {
   projectDesktopExternalSessionCatalogItem,
 } from '../../preload/external-session-catalog.js';
@@ -54,7 +54,7 @@ test('projects imported Session ids into the same Desktop identity space as Sess
   assert.equal(catalogItem.importState.importedSessionIds[0], summary.id);
 });
 
-function session(id: string): SessionSummary & { revision: number } {
+function session(id: string): DesktopSessionSummaryInput {
   return {
     id,
     revision: 1,
@@ -68,6 +68,7 @@ function session(id: string): SessionSummary & { revision: number } {
     llmConnectionSlug: 'default',
     connectionLocked: false,
     model: 'gpt-5',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
   };
 }

@@ -74,7 +74,7 @@ export interface SessionConfigurationMetadataUpdate {
     readonly connectionLocked: boolean;
     readonly model: string;
     readonly thinkingLevel: SessionHeader['thinkingLevel'];
-    readonly permissionMode: SessionHeader['permissionMode'];
+    readonly sandboxMode: SessionHeader['sandboxMode'];
     readonly collaborationMode: NonNullable<SessionHeader['collaborationMode']>;
     readonly orchestrationMode: NonNullable<SessionHeader['orchestrationMode']>;
     readonly labels: readonly string[];
@@ -455,9 +455,9 @@ export interface SessionAuthorityStore extends SessionStore, MessageAdmissionSto
   ): Promise<SandboxBoundarySettlement>;
   setExecutionBoundaryKind(
     sessionId: string,
-    kind: 'managed' | 'bypass',
+    kind: 'managed' | 'danger-full-access',
     projection?: {
-      permissionMode: SessionHeader['permissionMode'];
+      sandboxMode: SessionHeader['sandboxMode'];
       labels?: readonly string[];
     },
   ): Promise<ExecutionBoundary>;

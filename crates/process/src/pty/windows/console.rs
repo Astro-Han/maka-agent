@@ -21,7 +21,7 @@ use maka_runtime::terminal::TerminalSize;
 use std::{fs::File, io, os::windows::io::AsRawHandle};
 use windows_sys::Win32::System::Console::*;
 
-pub(super) struct Console(pub HPCON);
+pub(crate) struct Console(pub HPCON);
 impl Console {
     pub fn new(size: TerminalSize, input: &File, output: &File) -> io::Result<Self> {
         let mut handle = 0;

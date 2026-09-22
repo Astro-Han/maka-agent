@@ -95,7 +95,7 @@ async fn native_create_update_delete_preserves_file_identity_and_refuses_unsafe_
     ] {
         assert!(matches!(
             apply(&executor, operation).await,
-            Err(ToolError::Failed(_))
+            Err(ToolError::Failed(_) | ToolError::Io { .. })
         ));
         assert_eq!(fs::read(&path).unwrap(), before);
     }

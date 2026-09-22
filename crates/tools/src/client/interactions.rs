@@ -25,13 +25,13 @@ use tokio_util::sync::CancellationToken;
 
 pub type ApprovalFuture = Pin<Box<dyn Future<Output = Result<(), ToolRejection>> + Send>>;
 pub type PermissionFuture = Pin<
-    Box<dyn Future<Output = Result<maka_runtime::execution::PermissionMode, ToolRejection>> + Send>,
+    Box<dyn Future<Output = Result<maka_runtime::execution::SandboxMode, ToolRejection>> + Send>,
 >;
 
 /// Host owns canonical decisions; tools supply the exact immutable call identity.
 pub trait ClientInteractions: Send + Sync {
     /// Capture the durable permission selection for this call, not its Run opening.
-    fn permission_mode(&self, context: ToolCallContext) -> PermissionFuture;
+    fn sandbox_mode(&self, context: ToolCallContext) -> PermissionFuture;
 
     fn approve(
         &self,

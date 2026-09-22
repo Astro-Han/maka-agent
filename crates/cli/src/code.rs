@@ -18,85 +18,127 @@
  */
 
 use std::io::Read;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use maka_event_log::EventLog;
+use maka_fs_tools::{
+    MutationExecutor, ReadExecutor, ReadLimits, ReadScope, WriteCoordinator, WriteScope,
+};
 use maka_js_runtime::{CellAbort, CellDiagnosticKind, CellLimits, CellResult, CodeExecutor};
 use maka_runtime::event::{EventWrite, Fact, Invocation, InvocationOutcome, RuntimeEvent};
 use maka_runtime::execution::{
-    BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode,
+    ApprovalPolicy, BehaviorId, CollaborationMode, InvocationConfiguration, SandboxMode, ToolMode,
 };
 use maka_runtime::tools::{JournaledTools, ToolError, ToolExecutor, ToolFuture};
-use serde::Deserialize;
+use maka_sandbox::{
+    Sandbox,
+    filesystem::{Access, Rule},
+};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReadInput {
-    path: String,
+#[derive(clap::Args)]
+pub(super) struct Args {
+    #[arg(long, value_name = "FILE")]
+    log: PathBuf,
+    /// Filesystem isolation: read-only, workspace-write (default), danger-full-access.
+    #[arg(long, value_parser = parse_sandbox)]
+    sandbox: Option<SandboxMode>,
+    /// Approval policy: on-request (default) or never. Code cells have no approval UI.
+    #[arg(long, value_parser = parse_approval)]
+    ask_for_approval: Option<ApprovalPolicy>,
+    /// Disable isolation and approvals. Only use for a trusted task.
+    #[arg(long, conflicts_with_all = ["sandbox", "ask_for_approval"])]
+    dangerously_bypass_approvals_and_sandbox: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WriteInput {
-    path: String,
-    content: String,
+fn parse_sandbox(value: &str) -> Result<SandboxMode, String> {
+    match value {
+        "read-only" => Ok(SandboxMode::ReadOnly),
+        "workspace-write" => Ok(SandboxMode::WorkspaceWrite),
+        "danger-full-access" => Ok(SandboxMode::DangerFullAccess),
+        _ => Err("expected read-only, workspace-write, or danger-full-access".into()),
+    }
 }
 
-struct LocalTools;
+fn parse_approval(value: &str) -> Result<ApprovalPolicy, String> {
+    match value {
+        "on-request" => Ok(ApprovalPolicy::OnRequest),
+        "never" => Ok(ApprovalPolicy::Never),
+        _ => Err("expected on-request or never".into()),
+    }
+}
+
+struct LocalTools {
+    read: ReadExecutor,
+    write: MutationExecutor,
+}
 
 impl ToolExecutor for LocalTools {
     fn names(&self) -> Vec<String> {
-        vec!["echo".into(), "read_file".into(), "write_file".into()]
+        std::iter::once("echo".into())
+            .chain(self.read.names())
+            .chain(self.write.names())
+            .collect()
     }
 
     fn invoke(&self, name: String, input: Value, cancel: CancellationToken) -> ToolFuture {
+        if self.read.names().contains(&name) {
+            return self.read.invoke(name, input, cancel);
+        }
+        if self.write.names().contains(&name) {
+            return self.write.invoke(name, input, cancel);
+        }
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || {
-                if cancel.is_cancelled() {
-                    return Err(ToolError::Failed("cancelled before effect".into()));
-                }
-                let failed = |error: serde_json::Error| ToolError::Failed(error.to_string());
-                match name.as_str() {
-                    "echo" => Ok(input),
-                    "read_file" => {
-                        let input: ReadInput = serde_json::from_value(input).map_err(failed)?;
-                        let file = std::fs::File::open(input.path)
-                            .map_err(|error| ToolError::Failed(error.to_string()))?;
-                        let mut bytes = Vec::new();
-                        file.take(1024 * 1024 + 1)
-                            .read_to_end(&mut bytes)
-                            .map_err(|error| ToolError::Failed(error.to_string()))?;
-                        if bytes.len() > 1024 * 1024 {
-                            return Err(ToolError::Failed("file read exceeds 1 MiB".into()));
-                        }
-                        let text = String::from_utf8(bytes)
-                            .map_err(|error| ToolError::Failed(error.to_string()))?;
-                        Ok(json!({"text": text}))
-                    }
-                    "write_file" => {
-                        let input: WriteInput = serde_json::from_value(input).map_err(failed)?;
-                        // OS sandboxing is deliberately deferred. A failed write
-                        // may already have changed the file: do not call it safe
-                        // to retry, and do not synthesize a known failed outcome.
-                        std::fs::write(input.path, &input.content)
-                            .map_err(|error| ToolError::OutcomeUnknown(error.to_string()))?;
-                        Ok(json!({"bytes": input.content.len()}))
-                    }
-                    _ => Err(ToolError::Failed(format!("unknown tool: {name}"))),
-                }
-            })
-            .await
-            .map_err(|error| ToolError::OutcomeUnknown(error.to_string()))?
+            match name.as_str() {
+                "echo" if !cancel.is_cancelled() => Ok(input),
+                _ => Err(ToolError::Failed(format!(
+                    "unsupported or cancelled tool: {name}"
+                ))),
+            }
         })
     }
 }
 
-pub(super) async fn run(path: &Path) -> Result<(), maka_runtime_host::server::HostError> {
-    let log = Arc::new(EventLog::open(path).await?);
+pub(super) async fn run(args: Args) -> Result<(), maka_runtime_host::server::HostError> {
+    let (sandbox_mode, approval_policy) = if args.dangerously_bypass_approvals_and_sandbox {
+        (SandboxMode::DangerFullAccess, ApprovalPolicy::Never)
+    } else {
+        (
+            args.sandbox.unwrap_or(SandboxMode::WorkspaceWrite),
+            args.ask_for_approval.unwrap_or(ApprovalPolicy::OnRequest),
+        )
+    };
+    let cwd = std::env::current_dir()?.canonicalize()?;
+    let cwd = PathBuf::from(maka_fs_tools::workspace::project::host_path(&cwd)?);
+    let log = Arc::new(EventLog::open(&args.log).await?);
+    let (mut sandbox, _) = maka_fs_tools::workspace::permissions::resolve(sandbox_mode, &cwd)?;
+    if let Sandbox::Managed { filesystem, .. } = &mut sandbox {
+        let path = args.log.canonicalize()?;
+        let path = maka_fs_tools::workspace::project::host_path(&path)?;
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            filesystem
+                .rules
+                .push(Rule::exact(format!("{path}{suffix}"), Access::Deny));
+        }
+    }
+    let (read_scope, write_scope) = match sandbox {
+        Sandbox::Managed { filesystem, .. } => {
+            let policy = Arc::new(filesystem.compile()?);
+            (
+                ReadScope::Policy(policy.clone()),
+                WriteScope::Policy(policy),
+            )
+        }
+        Sandbox::Disabled => (ReadScope::Unrestricted, WriteScope::Unrestricted),
+        Sandbox::External { .. } => unreachable!("workspace presets never delegate isolation"),
+    };
+    let local_tools = LocalTools {
+        read: ReadExecutor::new(&cwd, read_scope, ReadLimits::default())?,
+        write: MutationExecutor::new(&cwd, write_scope, Arc::new(WriteCoordinator::default()))?,
+    };
     let limits = CellLimits::default();
     let mut source = String::new();
     std::io::stdin()
@@ -116,14 +158,17 @@ pub(super) async fn run(path: &Path) -> Result<(), maka_runtime_host::server::Ho
         invocation.clone(),
         Fact::InvocationOpened {
             configuration: Some(Box::new(InvocationConfiguration {
+                workspace_origin: maka_runtime::execution::WorkspaceOrigin::Selected,
                 system_prompt: None,
                 tool_composition: None,
                 workspace_identity: None,
-                cwd: std::env::current_dir()?
+                cwd: cwd
                     .into_os_string()
                     .into_string()
                     .map_err(|_| "code working directory is not UTF-8")?,
-                permission_mode: PermissionMode::Bypass,
+                sandbox_mode,
+                approval_policy,
+                boundary_revision: 0,
                 collaboration_mode: CollaborationMode::Agent,
                 orchestration_mode: BehaviorId::default(),
                 tool_mode: ToolMode::CodeMode,
@@ -140,7 +185,7 @@ pub(super) async fn run(path: &Path) -> Result<(), maka_runtime_host::server::Ho
     let tools = Arc::new(JournaledTools::new(
         log.clone(),
         invocation.clone(),
-        Arc::new(LocalTools),
+        Arc::new(local_tools),
     ));
     let cancellation = CancellationToken::new();
     let signal_cancel = cancellation.clone();

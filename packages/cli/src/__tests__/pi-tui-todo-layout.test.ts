@@ -36,7 +36,7 @@ test('current Todo reserves one chrome row and yields to the minimum composer on
     cwd: '/repo',
     model: 'm',
     connectionSlug: 'c',
-    permissionMode: 'bypass',
+    sandboxMode: 'danger-full-access' as const,
   });
   let viewport = 0;
   const editor = {

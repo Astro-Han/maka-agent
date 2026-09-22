@@ -207,7 +207,7 @@ async fn captured_directory_survives_replacement_and_denies_escape_and_special_f
     ] {
         assert!(matches!(
             read(&executor, json!({"path":path})).await,
-            Err(ToolError::Failed(_))
+            Err(ToolError::Failed(_) | ToolError::Io { .. })
         ));
     }
     fs::rename(&root, base.join("captured")).unwrap();

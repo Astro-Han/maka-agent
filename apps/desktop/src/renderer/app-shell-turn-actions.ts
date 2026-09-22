@@ -50,6 +50,7 @@ export function createAppShellTurnActions(deps: {
   uiLocale: UiLocale;
   activeIdRef: RefBox<string | undefined>;
   captureSelection(): () => boolean;
+  checkExecutionReadiness(): Promise<boolean>;
   turnActionRegistry: {
     addKey(key: string): boolean;
     clearKey(key: string): void;
@@ -82,6 +83,7 @@ export function createAppShellTurnActions(deps: {
     if (!turnActionRegistry.addKey(key)) return;
     try {
       if (actionId === 'regenerate') {
+        if (!(await deps.checkExecutionReadiness()) || !selectionIsCurrent()) return;
         await window.maka.sessions.regenerateTurn(sessionId, {
           sourceTurnId: turnId,
         });

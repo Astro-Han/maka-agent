@@ -100,7 +100,7 @@ export async function verifyConsumption(connection, workspace, reopened) {
           connectionSlug: 'attachments',
           model: modelId,
         },
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         mode: 'bot',
       });
       const attachments = [

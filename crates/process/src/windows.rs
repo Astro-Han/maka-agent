@@ -20,7 +20,6 @@
 use crate::{
     PipeEvent, failed,
     output::{Captured, Outcome, Termination},
-    shell::ShellPlan,
     tail,
 };
 use maka_runtime::shell_run::PipeStream;
@@ -31,7 +30,6 @@ use std::{
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
         process::ExitStatusExt,
     },
-    path::PathBuf,
     process::ExitStatus,
     time::Duration,
 };
@@ -44,12 +42,10 @@ use windows_sys::Win32::{
 pub(crate) mod attributes;
 pub(crate) mod job;
 pub(crate) mod pipe;
-mod spawn;
+pub(crate) mod spawn;
 
 pub(crate) async fn run(
-    cwd: PathBuf,
-    shell: ShellPlan,
-    command: String,
+    plan: crate::Command,
     timeout_ms: Option<u64>,
     cancellation: CancellationToken,
     observer: Option<tokio::sync::mpsc::Sender<PipeEvent>>,
@@ -57,11 +53,23 @@ pub(crate) async fn run(
     if cancellation.is_cancelled() {
         return Err(failed("Shell cancelled before spawn"));
     }
+    let mut plan = plan
+        .prepare()
+        .await
+        .map_err(|error| failed(error.to_string()))?;
+    if let Some(launch) = plan.take_launch() {
+        let spawned = launch
+            .runner
+            .pipes(launch.endpoint, plan, launch.capabilities)
+            .await
+            .map_err(|error| failed(format!("Shell spawn failed: {error}")))?;
+        return capture_managed(spawned, timeout_ms, cancellation, observer).await;
+    }
     let spawn::Spawned {
         child,
         stdout,
         stderr,
-    } = spawn::spawn(&shell, &cwd, &command, &cancellation)
+    } = spawn::spawn(&plan, &cancellation)
         .await
         .map_err(|e| failed(format!("Shell spawn failed: {e}")))?;
     if let Some(observer) = &observer {
@@ -70,6 +78,58 @@ pub(crate) async fn run(
     let exited = CancellationToken::new();
     let lifecycle = async {
         let result = settle(&child, timeout_ms, cancellation).await;
+        exited.cancel();
+        result
+    };
+    let (outcome, stdout, stderr) = tokio::join!(
+        lifecycle,
+        tail::capture(
+            stdout,
+            exited.clone(),
+            observer.clone().map(|o| (o, PipeStream::Stdout))
+        ),
+        tail::capture(
+            stderr,
+            exited.clone(),
+            observer.map(|o| (o, PipeStream::Stderr))
+        )
+    );
+    Ok(Captured::new(outcome?, stdout, stderr))
+}
+
+async fn capture_managed(
+    spawned: crate::pipe::Spawned,
+    timeout: Option<u64>,
+    cancellation: CancellationToken,
+    observer: Option<tokio::sync::mpsc::Sender<PipeEvent>>,
+) -> Result<Captured, ToolError> {
+    let crate::pipe::Spawned {
+        mut child,
+        stdin,
+        stdout,
+        stderr,
+    } = spawned;
+    drop(stdin);
+    if let Some(observer) = &observer {
+        let _ = observer.try_send(PipeEvent::Started);
+    }
+    let exited = CancellationToken::new();
+    let lifecycle = async {
+        let result = async {
+            let reason = tokio::select! {
+                biased;
+                status = child.wait() => return status.map(Outcome::Exited).map_err(unknown),
+                _ = cancellation.cancelled() => Termination::Cancelled,
+                _ = crate::timeout(timeout) => Termination::Timeout,
+            };
+            child.terminate().map_err(unknown)?;
+            child.wait().await.map_err(unknown)?;
+            Ok(Outcome::Interrupted {
+                reason,
+                signal_applied: true,
+            })
+        }
+        .await;
         exited.cancel();
         result
     };

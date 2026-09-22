@@ -87,6 +87,7 @@ impl Interactions {
                             "Client Capability approval closed: {reason:?}"
                         ))),
                         InteractionOutcome::FormAnswer { .. }
+                        | InteractionOutcome::PermissionsDecision { .. }
                         | InteractionOutcome::QuestionAnswer { .. } => {
                             owner.shutdown.cancel();
                             Err(failed("Canonical approval outcome changed kind"))
@@ -159,6 +160,16 @@ impl Interactions {
             .is_some()
         {
             return Ok(None);
+        }
+        if !observation
+            .session
+            .configuration
+            .approval_policy
+            .allows(maka_sandbox::ApprovalKind::Client)
+        {
+            return Err(denied(
+                "Client Capability requires approval, but the Session approval policy forbids prompting",
+            ));
         }
         for pending in &observation.pending_interactions {
             let InteractionRequest::ClientCapability { target: other, .. } = &pending.request

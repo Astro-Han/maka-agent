@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import type { PermissionMode } from './permission.js';
+import type { SandboxMode } from './permission.js';
 import {
   isNormalizedAbsolutePath,
   pathWithinRoot,
@@ -166,7 +166,7 @@ export type ExecutionBoundary =
       readonly revision: number;
     }
   | {
-      readonly kind: 'bypass';
+      readonly kind: 'danger-full-access';
       readonly revision: number;
     }
   | {
@@ -185,7 +185,7 @@ export type ExecutionBoundarySummary =
       readonly revision: number;
     }
   | {
-      readonly kind: 'bypass';
+      readonly kind: 'danger-full-access';
       readonly revision: number;
     }
   | {
@@ -199,7 +199,7 @@ export type ExecutionBoundaryReadModel = ExecutionBoundary | ExecutionBoundarySu
  * The permission mode a boundary should be *presented* as (#1611).
  *
  * The boundary is the authority on what a session may do; a session header's
- * stored `permissionMode` is only what it was last set to and goes stale the
+ * stored `sandboxMode` is only what it was last set to and goes stale the
  * moment an approved expansion widens the boundary. Every surface that shows
  * the user which permissions are in force derives them here, so Desktop and
  * the TUI cannot drift — and so the read-only/writable distinction the
@@ -216,22 +216,22 @@ export type ExecutionBoundaryReadModel = ExecutionBoundary | ExecutionBoundarySu
  */
 export function executionBoundaryDisplayMode(
   boundary: ExecutionBoundaryReadModel,
-): PermissionMode | undefined {
+): SandboxMode | undefined {
   if (boundary.kind === 'external') return undefined;
-  if (boundary.kind === 'bypass') return 'bypass';
+  if (boundary.kind === 'danger-full-access') return 'danger-full-access';
   const readOnly =
     'profile' in boundary
       ? isReadOnlyPermissionProfile(boundary.profile)
       : boundary.access === 'read_only';
-  return readOnly ? 'explore' : 'ask';
+  return readOnly ? 'read-only' : 'workspace-write';
 }
 
-export function createGenesisExecutionBoundary(mode: PermissionMode): ExecutionBoundary {
-  if (mode === 'bypass') return { kind: 'bypass', revision: 0 };
+export function createGenesisExecutionBoundary(mode: SandboxMode): ExecutionBoundary {
+  if (mode === 'danger-full-access') return { kind: 'danger-full-access', revision: 0 };
   return {
     kind: 'managed',
     profile:
-      mode === 'explore'
+      mode === 'read-only'
         ? createReadOnlyPermissionProfile()
         : createWorkspaceWritePermissionProfile(),
     revision: 0,
@@ -246,7 +246,7 @@ export function createManagedExecutionBoundary(
 }
 
 export function createBypassExecutionBoundary(revision: number): ExecutionBoundary {
-  return { kind: 'bypass', revision };
+  return { kind: 'danger-full-access', revision };
 }
 
 export function createExternalExecutionBoundary(revision = 0): ExecutionBoundary {
@@ -258,7 +258,7 @@ export function decodeExecutionBoundary(input: unknown): ExecutionBoundary {
     throw new Error('Invalid execution boundary');
   }
   let boundary: ExecutionBoundary;
-  if (input.kind === 'bypass' || input.kind === 'external') {
+  if (input.kind === 'danger-full-access' || input.kind === 'external') {
     if (hasUnexpectedKeys(input, ['kind', 'revision'])) {
       throw new Error('Invalid execution boundary');
     }
@@ -287,7 +287,7 @@ export function executionBoundaryContains(
   parent: ExecutionBoundary,
   child: ExecutionBoundary,
 ): boolean {
-  if (parent.kind === 'bypass') return true;
+  if (parent.kind === 'danger-full-access') return true;
   if (parent.kind === 'external') return child.kind === 'external';
   if (child.kind !== 'managed') return false;
   return sandboxProfileContains(parent.profile, child.profile);

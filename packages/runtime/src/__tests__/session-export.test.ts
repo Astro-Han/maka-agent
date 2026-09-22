@@ -78,7 +78,7 @@ async function createSession(
       cwd: workspaceRoot,
       llmConnectionSlug: CONNECTION_SLUG,
       model: MODEL,
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       name: overrides?.name ?? 'Exported',
     });
     return header.id;
@@ -175,7 +175,7 @@ async function createSubagentSession(
     cwd: workspaceRoot,
     llmConnectionSlug: CONNECTION_SLUG,
     model: MODEL,
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     subagentParent: {
       kind: 'subagent' as const,
       parentSessionId,
@@ -343,13 +343,13 @@ test('exports the complete subagent subtree with per-session artifacts', async (
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const firstChild = await store.createSubagent({
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         subagentParent: {
           kind: 'subagent' as const,
           parentSessionId: parent.id,
@@ -381,7 +381,7 @@ test('exports the complete subagent subtree with per-session artifacts', async (
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         subagentParent: {
           kind: 'subagent' as const,
           parentSessionId: parent.id,
@@ -413,7 +413,7 @@ test('exports the complete subagent subtree with per-session artifacts', async (
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         subagentParent: {
           kind: 'subagent' as const,
           parentSessionId: firstChild.header.id,
@@ -569,7 +569,7 @@ test(
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
     } finally {
       store.close?.();
@@ -658,20 +658,20 @@ test(
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const branch = await store.create({
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       branchId = branch.id;
       const parent = await store.create({
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       parentId = parent.id;
       const child = await createSubagentSession(store, workspaceRoot, parent.id, 'call-1');
@@ -763,14 +763,14 @@ test(
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       parentId = parent.id;
       const child = await store.createSubagent({
         cwd: workspaceRoot,
         llmConnectionSlug: CONNECTION_SLUG,
         model: MODEL,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         subagentParent: {
           kind: 'subagent' as const,
           parentSessionId: parent.id,

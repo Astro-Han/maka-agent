@@ -63,7 +63,7 @@ import type {
 import type { UserQuestionResponse } from '@maka/core/user-question';
 import type { InteractionFormResponse } from '@maka/core/interaction';
 import type { RuntimeHostProfileKind } from '@maka/runtime-host/profile-kind';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { CollaborationMode } from '@maka/core/collaboration';
 import type { OrchestrationMode } from '@maka/core/orchestration';
 import type {
@@ -1277,6 +1277,7 @@ export interface MakaBridge {
     ): Promise<void>;
     respondToUserQuestion(sessionId: string, response: UserQuestionResponse): Promise<void>;
     respondToUserForm(sessionId: string, response: InteractionFormResponse): Promise<void>;
+    respondToPermissions(sessionId: string, response: import('@maka/core/execution-permissions').PermissionsResponse): Promise<void>;
     saveConversationToFile(input: {
       markdown: string;
       defaultName: string;
@@ -1295,7 +1296,9 @@ export interface MakaBridge {
     unarchive(sessionId: string, options?: { revisionFamily?: boolean }): Promise<void>;
     setFlagged(sessionId: string, isFlagged: boolean, options?: { revisionFamily?: boolean }): Promise<void>;
     rename(sessionId: string, name: string, options?: { revisionFamily?: boolean }): Promise<void>;
-    setPermissionMode(sessionId: string, mode: PermissionMode): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>>;
+    setSandboxMode(sessionId: string, mode: SandboxMode): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>>;
+    setApprovalPolicy(sessionId: string, policy: import('@maka/core/execution-permissions').ApprovalPolicy): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>>;
+    setExecutionPolicy(sessionId: string, policy: import('@maka/core/execution-permissions').ExecutionPolicy): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>>;
     /**
      * Enter or leave Plan — a temporary collaboration excursion Runtime ends
      * by itself once a proposal is approved or abandoned.
@@ -1581,6 +1584,7 @@ export interface MakaBridge {
     ): Promise<import('@maka/core/task-submission-readiness').TaskSubmissionReadinessSnapshot>;
   };
   permissions: {
+    ensureSandbox(target: { sessionId: string } | { host: DesktopRuntimeHostRef }): Promise<boolean>;
     getSnapshot(host?: DesktopRuntimeHostRef): Promise<PermissionSnapshot>;
     openSystemSettings(permId: string, host?: DesktopRuntimeHostRef): Promise<PermissionActionResult>;
     requestAccess(permId: string, host?: DesktopRuntimeHostRef): Promise<PermissionActionResult>;

@@ -72,7 +72,7 @@ function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
     llmConnectionSlug: 'local',
     connectionLocked: true,
     model: 'fixture-model',
-    permissionMode: 'explore',
+    sandboxMode: 'read-only',
     ...overrides,
   };
 }
@@ -203,7 +203,7 @@ describe('maka activate argument and request contracts', () => {
         '--max-steps',
         '4',
         '--permission-mode',
-        'bypass',
+        'danger-full-access',
       ]),
       {
         kind: 'activate',
@@ -212,7 +212,7 @@ describe('maka activate argument and request contracts', () => {
           input: '-',
           timeoutMs: 2500,
           maxSteps: 4,
-          permissionMode: 'bypass',
+          sandboxMode: 'danger-full-access',
         },
       },
     );

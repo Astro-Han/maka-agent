@@ -30,7 +30,7 @@ use maka_client_capability::{
     proxy_tool_name,
 };
 use maka_runtime::{
-    execution::PermissionMode, tool_call::ToolRejection, tool_output::ToolOutput, tools::ToolError,
+    execution::SandboxMode, tool_call::ToolRejection, tool_output::ToolOutput, tools::ToolError,
 };
 use serde_json::Value;
 use std::{
@@ -44,7 +44,7 @@ use tokio_util::sync::CancellationToken;
 /// Registry access is synchronous; no policy wait holds its mutation gate.
 #[derive(Clone)]
 pub struct ClientTools {
-    permission_ceiling: Option<PermissionMode>,
+    permission_ceiling: Option<SandboxMode>,
     snapshot: Arc<Snapshot>,
     registry: Arc<Mutex<Registry>>,
     broker: Arc<Broker>,
@@ -121,7 +121,7 @@ impl ClientTools {
     }
 
     /// Invocation-bound SDK calls cannot widen their originally admitted mode.
-    pub fn with_permission_ceiling(mut self: Arc<Self>, mode: PermissionMode) -> Arc<Self> {
+    pub fn with_permission_ceiling(mut self: Arc<Self>, mode: SandboxMode) -> Arc<Self> {
         Arc::make_mut(&mut self).permission_ceiling = Some(mode);
         self
     }
@@ -176,28 +176,30 @@ impl ToolPreparer for ClientTools {
                 .map(|pending| (pending, registration, *offer_index, *tool_index))
                 .map_err(rejected)
         })();
-        let permission = self.interactions.permission_mode(context.clone());
+        let permission = self.interactions.sandbox_mode(context.clone());
         let ceiling = self.permission_ceiling;
         let snapshot = self.snapshot.clone();
         let interactions = self.interactions.clone();
         Box::pin(async move {
             let mode = match (permission.await?, ceiling) {
-                (PermissionMode::Explore, _) | (_, Some(PermissionMode::Explore)) => {
-                    PermissionMode::Explore
+                (SandboxMode::ReadOnly, _) | (_, Some(SandboxMode::ReadOnly)) => {
+                    SandboxMode::ReadOnly
                 }
-                (PermissionMode::Ask, _) | (_, Some(PermissionMode::Ask)) => PermissionMode::Ask,
+                (SandboxMode::WorkspaceWrite, _) | (_, Some(SandboxMode::WorkspaceWrite)) => {
+                    SandboxMode::WorkspaceWrite
+                }
                 (mode, _) => mode,
             };
             let (pending, registration, offer_index, tool_index) = pending?;
             let accepted = pending.accepted().await.map_err(rejected)?;
             match mode {
-                PermissionMode::Explore => {
+                SandboxMode::ReadOnly => {
                     return Err(ToolRejection::PolicyDenied {
                         message: "Explore mode does not allow Client Capability tools".into(),
                     });
                 }
-                PermissionMode::Bypass => {}
-                PermissionMode::Ask => {
+                SandboxMode::DangerFullAccess => {}
+                SandboxMode::WorkspaceWrite => {
                     let offer = &snapshot.offers()[offer_index];
                     let tool = &offer.offer().tools[tool_index];
                     let target = offer

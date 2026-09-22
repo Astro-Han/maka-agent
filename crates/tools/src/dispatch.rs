@@ -167,9 +167,14 @@ impl<'a> RequestTools<'a> {
             },
             cancellation,
         };
-        let mut prompt = maka_plugins::prompt::resolve(self.captured.as_ref(), base, request)
-            .await
-            .map_err(|error| ToolError::Failed(error.to_string()))?;
+        let mut prompt = maka_plugins::prompt::resolve(
+            self.captured.as_ref(),
+            base,
+            request,
+            self.catalog.workspace(),
+        )
+        .await
+        .map_err(|error| ToolError::Failed(error.to_string()))?;
         if prompt
             .contexts
             .iter()

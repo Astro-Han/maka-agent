@@ -46,7 +46,7 @@ export function invocationOpening(
     },
     configuration: {
       cwd: '/tmp/cwd',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
       orchestrationSource: 'session',

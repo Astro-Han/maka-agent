@@ -18,6 +18,7 @@
  */
 
 import type { DailyReviewSummary } from '@maka/core/daily-review';
+import type { ApprovalPolicy } from '@maka/core/execution-permissions';
 import type {
   AttachmentRef,
   MessageContent,
@@ -31,6 +32,8 @@ import type { RuntimeHostProfileKind } from '@maka/runtime-host/profile-kind';
 import { desktopSessionKey, parseDesktopSessionKey, type DesktopHostRef } from './runtime-host-identity.js';
 
 export interface DesktopSessionSummary extends SessionSummary {
+  /** Shared read-only projections do not disclose execution authority. */
+  readonly approvalPolicy: ApprovalPolicy | null;
   /** Client cache is readable history, not evidence of current Host execution. */
   readonly localState?: 'pending' | 'cached';
   readonly localCreatedAt?: number;
@@ -46,7 +49,7 @@ export interface DesktopSessionSummary extends SessionSummary {
   readonly shared?: true;
 }
 
-export type DesktopSessionSummaryInput = SessionSummary & { readonly revision: number; readonly localState?: 'pending' | 'cached'; readonly localCreatedAt?: number };
+export type DesktopSessionSummaryInput = SessionSummary & { readonly approvalPolicy: ApprovalPolicy | null; readonly revision: number; readonly localState?: 'pending' | 'cached'; readonly localCreatedAt?: number };
 
 export type DesktopSessionUpdateFailureCode =
   | 'session_busy'

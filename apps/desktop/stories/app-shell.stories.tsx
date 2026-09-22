@@ -36,6 +36,8 @@ import {
   deriveTitlebarProjectName,
   TitlebarSessionIdentity,
   ToastProvider,
+  useToast,
+  useUiLocale,
 } from '@maka/ui';
 import type { ChatModelChoice, SessionViewMode, TurnViewModel, LiveTurnBuffer } from '@maka/ui';
 import { SessionRail, type SessionRailStoryProps } from '../../../packages/ui/stories/session-rail-harness.js';
@@ -66,6 +68,12 @@ import {
 import { AppShell as AstryxAppShell } from '@astryxdesign/core/AppShell';
 import { Button } from '@astryxdesign/core';
 import { GoalDialog } from '../src/renderer/features/goals/testing';
+import type { ExecutionPolicy } from '@maka/core/execution-permissions';
+import { confirmBypassPermission } from '../src/renderer/locales/shell-copy';
+import {
+  SessionSettingsServicesProvider,
+  useSessionSettingIntent,
+} from '../src/renderer/features/session-settings';
 
 const NOW = Date.UTC(2026, 6, 1, 9, 30, 0);
 
@@ -136,7 +144,7 @@ function makeSession(input: {
     llmConnectionSlug: 'anthropic-main',
     connectionLocked: false,
     model: 'claude-sonnet-4-5',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     ...(input.projectId ? { projectId: input.projectId } : {}),
     ...(input.cwd ? { cwd: input.cwd } : {}),
   };
@@ -267,8 +275,8 @@ const baseComposerProps: ComposerProps = {
   // Production always wires this (app-shell.tsx); without it ChatModelSwitcher
   // renders disabled, so every shell story understated the composer.
   onModelChange: noop,
-  permissionMode: 'ask',
-  onPermissionModeChange: noop,
+  sandboxMode: 'workspace-write',
+  onSandboxModeChange: noop,
   // Fidelity: production app-shell always wires these (app-shell.tsx
   // ~1851-1960), so the daily composer renders the upload button, the
   // mode controls (Plan / orchestration), and the Skills picker. Omitting them
@@ -1271,7 +1279,7 @@ export const WaitingForPermission: Story = {
     <ComposedShell
       session={{ status: 'waiting_for_user', blockedReason: 'permission_required' }}
       composer={{
-        permissionModeDisabledReason: '当前有工具调用正在等待确认，处理后再切换权限模式。',
+        sandboxModeDisabledReason: '当前有工具调用正在等待确认，处理后再切换权限模式。',
       }}
     />
   ),
@@ -1299,18 +1307,58 @@ export const EmptyHome: Story = {
 // no other story, so without this one nothing renders the picker a user meets
 // before their first send.
 export const NewChatComposer: Story = {
-  render: () => (
+  render: () => <ToastProvider><NewChatComposerSettings /></ToastProvider>,
+};
+
+function NewChatComposerSettings() {
+  const unavailable = async (): Promise<never> => { throw new Error('A new draft has no Session'); };
+  return (
+    <SessionSettingsServicesProvider services={{
+      setExecutionPolicy: unavailable,
+      setModelConfiguration: unavailable,
+      setOrchestrationMode: unavailable,
+      setCollaborationMode: unavailable,
+      abandonPlanProposal: unavailable,
+    }}>
+      <NewChatComposerDraft />
+    </SessionSettingsServicesProvider>
+  );
+}
+
+function NewChatComposerDraft() {
+  const [policy, setPolicy] = useState<ExecutionPolicy>({
+    sandboxMode: 'workspace-write', approvalPolicy: { kind: 'on-request' },
+  });
+  const toast = useToast();
+  const locale = useUiLocale();
+  const intent = useSessionSettingIntent({
+    catalogRevision: 0, sessions: [], isActiveSession: () => false,
+    newTaskExecutionPolicy: policy, setNewTaskExecutionPolicy: setPolicy,
+    refreshCatalog: async () => {}, saveComposerDefaults: noop,
+    writeFailureCopy: () => ({ title: 'Unexpected Session write', description: '' }),
+    showSessionError: noop, planMode: { write: async () => false },
+    captureOwner: () => ({}), isOwnerActive: () => true,
+    confirmBypass: (all) => confirmBypassPermission(toast, locale, all),
+  });
+  return (
     <ComposedShell
       session={null}
       chat={{ messages: [] }}
       composer={{
+        sandboxMode: policy.sandboxMode,
+        onSandboxModeChange: async (mode) => { await intent.setSandboxMode(mode); },
+        approval: {
+          policy: policy.approvalPolicy,
+          onChange: async (value) => { await intent.setApprovalPolicy(value); },
+          onDisableProtections: async () => { await intent.disableProtections(); },
+        },
         newChatModel: { llmConnectionId: 'connection-anthropic-main', llmConnectionSlug: 'anthropic-main', model: 'claude-sonnet-4-5' },
         onPickNewChatModel: noop,
         onOpenModelSettings: noop,
       }}
     />
-  ),
-};
+  );
+}
 
 // A ready Local Host with no registered Projects must still expose its two
 // bootstrap actions while another Host owns the draft.

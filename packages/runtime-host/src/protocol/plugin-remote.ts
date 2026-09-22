@@ -20,7 +20,7 @@
 import {
   requireEncodedByteLimit,
   requireExactRecord,
-  requireId,
+  requireEntityId,
   requireRecord,
   requireString,
 } from './codec.js';
@@ -166,7 +166,7 @@ function binding(value: unknown): PluginRemoteBinding {
   return {
     client: decodePluginClientIdentity(row.client),
     method: identity(row.method),
-    sessionId: row.sessionId === null ? null : requireId(row.sessionId, 'Remote Session'),
+    sessionId: row.sessionId === null ? null : requireEntityId(row.sessionId, 'Remote Session'),
   };
 }
 export function decodePluginClientIdentity(value: unknown): PluginRemoteClient {

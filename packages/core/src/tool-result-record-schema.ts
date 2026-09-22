@@ -21,7 +21,7 @@ import {
   decodeCanonicalShellToolResultContent,
   isSandboxDenialSignal,
 } from './shell-run-result.js';
-import { decodePersistedPermissionMode, isPermissionMode } from './permission.js';
+import { decodePersistedSandboxMode, isSandboxMode } from './permission.js';
 import type { PersistedValue } from './persisted-value.js';
 import { isStorageRef, type ToolResultContent } from './events.js';
 import { validateSandboxBoundaryExpansion } from './sandbox-boundary.js';
@@ -86,7 +86,7 @@ const WEB_SEARCH_ERROR_SHAPE = defineObjectShape<Result<'web_search_error'>>()(
   ['query', 'credentialSource'],
 );
 const SUBAGENT_SHAPE = defineObjectShape<Result<'subagent'>>()(
-  ['kind', 'agentName', 'turnId', 'status', 'permissionMode', 'summary', 'artifactIds'],
+  ['kind', 'agentName', 'turnId', 'status', 'sandboxMode', 'summary', 'artifactIds'],
   [
     'childSessionId',
     'agentId',
@@ -197,8 +197,8 @@ export function decodePersistedToolResultContent(
   if (!isRecord(value) || value.kind !== 'subagent') {
     return decodeCanonicalToolResultContent(value);
   }
-  const permissionMode = decodePersistedPermissionMode(value.permissionMode);
-  return decodeCanonicalToolResultContent({ ...value, permissionMode });
+  const sandboxMode = decodePersistedSandboxMode(value.sandboxMode);
+  return decodeCanonicalToolResultContent({ ...value, sandboxMode });
 }
 
 function firstNonEmptyString(...values: Array<string | undefined>): string | undefined {
@@ -315,7 +315,7 @@ function hasValidSubagentResultFields(value: Record<string, unknown>): boolean {
     typeof value.agentName === 'string' &&
     typeof value.turnId === 'string' &&
     isOptionalString(value.runId) &&
-    isPermissionMode(value.permissionMode) &&
+    isSandboxMode(value.sandboxMode) &&
     typeof value.summary === 'string' &&
     isStringArray(value.artifactIds) &&
     isOptionalFiniteNumber(value.startedAt) &&

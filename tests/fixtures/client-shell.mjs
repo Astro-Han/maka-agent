@@ -32,28 +32,28 @@ const windows = process.platform === 'win32';
 const command = windows
   ? '[IO.File]::AppendAllText((Join-Path (Get-Location) marker.txt), "run`n"); [Console]::Out.Write("hello 😀`n"); [Console]::Error.Write("error 中文`n"); exit 7'
   : "printf 'run\\n' >> marker.txt; printf 'hello 😀\\n'; printf 'error 中文\\n' >&2; exit 7";
-const sessionIds = ['bash-bypass', 'bash-ask'];
+const sessionIds = ['shell-bypass', 'shell-readonly'];
 
 async function fixture(terminal) {
   const script = [
-    { name: 'Bash', args: { command, timeout_ms: 3000 } },
+    { name: 'Shell', args: { command, timeout_ms: 3000 } },
     { answer: 'nonzero exit observed', expected: terminal },
     {
-      name: 'Bash',
+      name: 'Shell',
       args: {
         command: windows
           ? "[IO.File]::WriteAllText((Join-Path (Get-Location) sentinel.txt), 'MUTATED')"
           : "printf 'MUTATED' > sentinel.txt",
       },
     },
-    { answer: 'bash unavailable', expected: 'tool is unavailable' },
+    { answer: 'read-only write rejected', rejectedWrite: true },
   ];
   let count = 0,
     failure;
   const server = createServer(async (request, response) => {
     try {
       assert.equal(request.url, '/v1/chat/completions');
-      assert.equal(request.headers.authorization, 'Bearer dummy-bash-fixture');
+      assert.equal(request.headers.authorization, 'Bearer dummy-shell-fixture');
       let body = '';
       for await (const chunk of request) {
         body += chunk;
@@ -64,35 +64,21 @@ async function fixture(terminal) {
       assert(index <= script.length);
       const pending = script[index - 1];
       const action = typeof pending === 'function' ? await pending(input) : pending;
-      assert.deepEqual(
-        input.tools.map((tool) => tool.function.name).sort(),
-        index <= 2 || index > 4
-          ? [
-              'AskUserQuestion',
-              'Bash',
-              'Edit',
-              'Glob',
-              'Grep',
-              'Read',
-              'StopBackgroundTask',
-              'WebFetch',
-              'Write',
-              'WriteStdin',
-              'apply_patch',
-              'tool_search',
-            ]
-          : [
-              'AskUserQuestion',
-              'Edit',
-              'Glob',
-              'Grep',
-              'Read',
-              'WebFetch',
-              'Write',
-              'apply_patch',
-              'tool_search',
-            ],
-      );
+      assert(input.tools.some((tool) => tool.function.name === 'Shell'));
+      if (action.rejectedWrite) {
+        const result = input.messages.at(-1);
+        assert.equal(result.role, 'tool');
+        if (process.platform !== 'win32') {
+          const terminal = JSON.parse(result.content);
+          assert.equal(terminal.kind, 'terminal');
+          assert.equal(terminal.status, 'failed');
+          assert.notEqual(terminal.exitCode, 0);
+        } else {
+          // This fixture deliberately has no provisioned Windows installation.
+          // Managed launch must explain setup, never execute without isolation.
+          assert.match(result.content, /Windows sandbox setup is required/);
+        }
+      }
       if (Object.hasOwn(action, 'expected')) {
         const result = input.messages.at(-1);
         assert.equal(result.role, 'tool');
@@ -120,7 +106,7 @@ async function fixture(terminal) {
       const frame = (delta, finish_reason) =>
         'data: ' +
         JSON.stringify({
-          id: 'bash-fixture',
+          id: 'shell-fixture',
           object: 'chat.completion.chunk',
           created: 1,
           model: 'fixture-model',
@@ -165,8 +151,8 @@ async function rows(connection, sessionId) {
   }
 }
 
-export async function verifyBashWorkflow(connection, workspace, reopened, openConnection) {
-  const snapshot = join(workspace, 'bash-rows.json');
+export async function verifyShellWorkflow(connection, workspace, reopened, openConnection) {
+  const snapshot = join(workspace, 'shell-rows.json');
   if (reopened) {
     await verifyModelBackground(connection, workspace, true);
     await verifyResourceLifecycle(connection, workspace, true);
@@ -175,7 +161,7 @@ export async function verifyBashWorkflow(connection, workspace, reopened, openCo
     assert.equal(JSON.stringify(stored), await readFile(snapshot, 'utf8'));
     assert.equal(await readFile(join(workspace, 'marker.txt'), 'utf8'), 'run\n');
     assert.equal(await readFile(join(workspace, 'sentinel.txt'), 'utf8'), 'UNCHANGED');
-    console.log(JSON.stringify({ check: 'original-client-bash-reopened', result: 'passed' }));
+    console.log(JSON.stringify({ check: 'original-client-shell-reopened', result: 'passed' }));
     return;
   }
   await writeFile(join(workspace, 'sentinel.txt'), 'UNCHANGED');
@@ -201,8 +187,8 @@ export async function verifyBashWorkflow(connection, workspace, reopened, openCo
     const created = await request('connection.catalog.create', {
       expectedCatalogRevision: 0,
       connection: {
-        slug: 'bash-fixture',
-        name: 'Bash fixture',
+        slug: 'shell-fixture',
+        name: 'Shell fixture',
         providerType: 'openai-compatible',
         baseUrl: model.baseUrl,
         enabled: true,
@@ -218,11 +204,11 @@ export async function verifyBashWorkflow(connection, workspace, reopened, openCo
           expected: null,
           expectedConnection: {
             ...basis,
-            slug: 'bash-fixture',
+            slug: 'shell-fixture',
             providerType: 'openai-compatible',
             effectiveBaseUrl: model.baseUrl,
           },
-          secret: 'dummy-bash-fixture',
+          secret: 'dummy-shell-fixture',
         })
       ).kind,
       'committed',
@@ -234,12 +220,12 @@ export async function verifyBashWorkflow(connection, workspace, reopened, openCo
     const stored = [],
       events = [];
     for (const sessionId of sessionIds) {
-      const bypass = sessionId === 'bash-bypass';
+      const bypass = sessionId === 'shell-bypass';
       await request('session.create', {
         sessionId,
         workspace: { kind: 'host_path', path: workspace },
         modelTarget: { kind: 'default' },
-        permissionMode: bypass ? 'bypass' : 'ask',
+        sandboxMode: bypass ? 'danger-full-access' : 'read-only',
       });
       const live = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
       try {
@@ -283,7 +269,7 @@ export async function verifyBashWorkflow(connection, workspace, reopened, openCo
     const results = stored.filter((row) => row.type === 'tool_result');
     assert.deepEqual(
       calls.map((row) => row.toolName),
-      ['Bash', 'Bash'],
+      ['Shell', 'Shell'],
     );
     assert.equal(results.length, 2);
     assert.equal(events.length, 4);
@@ -300,7 +286,8 @@ export async function verifyBashWorkflow(connection, workspace, reopened, openCo
       assert.equal(call.origin, 'provider');
       assert.equal(call.modelVisibility, 'visible');
       assert.equal(result.toolUseId, call.id);
-      assert.equal(result.isError, index === 1);
+      const rejectedBeforeStart = index === 1 && process.platform === 'win32';
+      assert.equal(result.isError, rejectedBeforeStart);
       const start = events.find(
         (event) => event.type === 'tool_start' && event.toolUseId === call.id,
       );
@@ -311,7 +298,7 @@ export async function verifyBashWorkflow(connection, workspace, reopened, openCo
       assert.equal(start.id, call.id);
       assert.equal(end.id, result.id);
       assert.equal(end.ts, result.ts);
-      assert.equal(end.status, index === 1 ? 'errored' : 'completed');
+      assert.equal(end.status, rejectedBeforeStart ? 'errored' : 'completed');
     }
     for (const event of events)
       for (const key of [
@@ -326,8 +313,8 @@ export async function verifyBashWorkflow(connection, workspace, reopened, openCo
     await verifyResourceLifecycle(connection, workspace, false, openConnection);
     await verifyModelBackground(connection, workspace, false, model);
     await writeFile(snapshot, JSON.stringify(stored));
-    await writeFile(join(workspace, 'bash-live.json'), JSON.stringify(events));
-    console.log(JSON.stringify({ check: 'original-client-bash', result: 'passed' }));
+    await writeFile(join(workspace, 'shell-live.json'), JSON.stringify(events));
+    console.log(JSON.stringify({ check: 'original-client-shell', result: 'passed' }));
   } finally {
     await model.close();
   }

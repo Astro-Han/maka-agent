@@ -20,7 +20,8 @@
 import { randomUUID } from 'node:crypto';
 import { isCollaborationMode } from '@maka/core/collaboration';
 import { isOrchestrationMode } from '@maka/core/orchestration';
-import { isPermissionMode } from '@maka/core/permission';
+import { isSandboxMode } from '@maka/core/permission';
+import { decodeApprovalPolicy, type ApprovalPolicy } from '@maka/core/execution-permissions';
 import { isThinkingLevel, type ThinkingLevel } from '@maka/core/model-thinking';
 import { type CreateSessionRequestInput, type SessionListFilter } from '@maka/core/runtime-inputs';
 import { type SessionChangedEvent, type SessionChangedReason, type SessionCatalogSummary } from '@maka/core/session';
@@ -65,6 +66,7 @@ type RuntimeHostSessionCatalogClient = Pick<
 >;
 
 export interface DesktopHostSessionSummary extends SessionCatalogSummary {
+  approvalPolicy: ApprovalPolicy;
   revision: number;
   labelsTruncated: boolean;
   shared?: true;
@@ -172,9 +174,25 @@ export function registerRuntimeHostSessionCatalogIpc(
       }
     },
   );
-  ipcMain.handle('sessions:setPermissionMode', async (_event, sessionId: string, mode: unknown) => {
-    if (!isPermissionMode(mode)) throw new Error(`Invalid permission mode: ${String(mode)}`);
-    return updateConfiguration(deps, sessionId, { permissionMode: mode }, 'mode-change');
+  ipcMain.handle('sessions:setSandboxMode', async (_event, sessionId: string, mode: unknown) => {
+    if (!isSandboxMode(mode)) throw new Error(`Invalid permission mode: ${String(mode)}`);
+    return updateConfiguration(deps, sessionId, { sandboxMode: mode }, 'mode-change');
+  });
+  ipcMain.handle('sessions:setApprovalPolicy', async (_event, sessionId: string, policy: unknown) =>
+    updateConfiguration(deps, sessionId, { approvalPolicy: decodeApprovalPolicy(policy) }, 'mode-change'),
+  );
+  ipcMain.handle('sessions:setExecutionPolicy', async (_event, sessionId: string, value: unknown) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('Invalid execution policy');
+    }
+    const policy = value as Record<string, unknown>;
+    if (Object.keys(policy).length !== 2 || !isSandboxMode(policy.sandboxMode)) {
+      throw new Error('Invalid execution policy');
+    }
+    return updateConfiguration(deps, sessionId, {
+      sandboxMode: policy.sandboxMode,
+      approvalPolicy: decodeApprovalPolicy(policy.approvalPolicy),
+    }, 'mode-change');
   });
   // Two fields, two channels, one field each. Plan is a temporary
   // collaboration excursion that Runtime ends by itself on approval or
@@ -346,7 +364,8 @@ export function resolveDesktopSessionCreateInput(input: CreateSessionRequestInpu
     ...(request.labels === undefined ? {} : { labels: request.labels }),
     ...(executorId ? { executorId } : { modelTarget: normalizeModelTarget(input) }),
     ...normalizeCreateThinkingLevel(input?.thinkingLevel),
-    ...(request.mode !== undefined || request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
+    ...(request.mode !== undefined || request.sandboxMode === undefined ? {} : { sandboxMode: request.sandboxMode }),
+    ...(request.approvalPolicy === undefined ? {} : { approvalPolicy: request.approvalPolicy }),
     collaborationMode: request.collaborationMode,
     orchestrationMode: request.orchestrationMode,
   };
@@ -404,6 +423,7 @@ export function toDesktopHostSessionSummary(
 ): DesktopHostSessionSummary {
   return {
     ...projectSessionCatalogSummary(session),
+    approvalPolicy: session.approvalPolicy,
     revision: session.revision,
     labelsTruncated: session.labelsTruncated,
   };

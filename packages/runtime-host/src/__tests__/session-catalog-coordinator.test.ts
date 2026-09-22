@@ -83,7 +83,7 @@ const context: ConnectionContext = {
 test('projects only bounded execution boundary presentation facts', async () => {
   const fixture = createFixture({
     stores: {
-      readExecutionBoundary: async () => createGenesisExecutionBoundary('explore'),
+      readExecutionBoundary: async () => createGenesisExecutionBoundary('read-only'),
     },
   });
 
@@ -626,7 +626,7 @@ test('WorkHub model authority preserves its execution policy and uses versioned 
       id: WORKHUB_COORDINATION_SESSION_ID,
       role: WORKHUB_COORDINATION_SESSION_ROLE,
       toolProfile: 'workhub-coordination-v2',
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
       orchestrationMode: 'default',
       model: 'old-model',
     },
@@ -644,7 +644,7 @@ test('WorkHub model authority preserves its execution policy and uses versioned 
   const outcome = await fixture.coordinator.configureWorkHubModel(input);
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
   assert.equal(fixture.header().model, 'model-1');
-  assert.equal(fixture.header().permissionMode, 'bypass');
+  assert.equal(fixture.header().sandboxMode, 'bypass');
   assert.equal(fixture.header().toolProfile, 'workhub-coordination-v2');
   assert.equal(fixture.header().orchestrationMode, 'default');
   const stale = await fixture.coordinator.configureWorkHubModel(input);
@@ -661,7 +661,7 @@ test('WorkHub thinking level persists, clears to default and rejects unsupported
       id: WORKHUB_COORDINATION_SESSION_ID,
       role: WORKHUB_COORDINATION_SESSION_ROLE,
       toolProfile: 'workhub-coordination-v2',
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     },
     connection: {
       providerType: 'openai-compatible',
@@ -688,7 +688,7 @@ test('WorkHub thinking level persists, clears to default and rejects unsupported
   assert.equal(fixture.header().thinkingLevel, 'high');
   assert.equal((await set(null)).ok, true);
   assert.equal(fixture.header().thinkingLevel, undefined);
-  assert.equal(fixture.header().permissionMode, 'bypass');
+  assert.equal(fixture.header().sandboxMode, 'bypass');
   assert.equal(fixture.header().toolProfile, 'workhub-coordination-v2');
 });
 
@@ -1135,7 +1135,7 @@ test('creation rejects explore permission without a declared mode', async () => 
       sessionId: fixture.sessionId,
       workspace: { kind: 'host_path', path: process.cwd() },
       modelTarget: { kind: 'default' },
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
     },
     context,
   );
@@ -1160,7 +1160,7 @@ test('new tasks snapshot the current global Code Mode setting', async () => {
         revision: 1,
         policy: {
           ...createDefaultRuntimePolicy(),
-          chatDefaults: { permissionMode: 'ask', codeModeEnabled: enabled },
+          chatDefaults: { sandboxMode: 'workspace-write', codeModeEnabled: enabled },
         },
       }),
     },
@@ -1241,7 +1241,7 @@ test('creation materializes Deep Research semantics inside the Host transaction'
       name: 'Caller override',
       labels: ['customer-label'],
       modelTarget: { kind: 'default' },
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     },
     context,
   );
@@ -1250,7 +1250,7 @@ test('creation materializes Deep Research semantics inside the Host transaction'
   assert.ok(created);
   assert.equal(created.input.name, DEEP_RESEARCH_SESSION_NAME);
   assert.deepEqual(created.input.labels, ['customer-label', DEEP_RESEARCH_SESSION_LABEL]);
-  assert.equal(created.input.permissionMode, 'explore');
+  assert.equal(created.input.sandboxMode, 'explore');
   assert.equal(fixture.drainRequests(), 0);
 });
 
@@ -1284,7 +1284,7 @@ test('bot mode grants explore while keeping the Bot-supplied Session name', asyn
   assert.ok(created);
   assert.equal(created.input.name, '飞书 任务');
   assert.deepEqual(created.input.labels, ['bot', 'feishu', 'mode:bot']);
-  assert.equal(created.input.permissionMode, 'explore');
+  assert.equal(created.input.sandboxMode, 'explore');
   assert.equal(fixture.drainRequests(), 0);
 });
 
@@ -1319,15 +1319,15 @@ test('permission-only Host updates select the live boundary transition path', as
   const fixture = createFixture({
     manager: {
       transitionSessionConfiguration: async (_sessionId, input) => {
-        observed.push(input.permissionModeOnly);
-        if (!input.permissionModeOnly) {
+        observed.push(input.sandboxModeOnly);
+        if (!input.sandboxModeOnly) {
           throw new SessionConfigurationTransitionError(
             'session_busy',
             'Session configuration cannot change while a linked Turn is active',
           );
         }
         return headerSnapshot(
-          { ...fixture.header(), permissionMode: input.configuration.permissionMode },
+          { ...fixture.header(), sandboxMode: input.configuration.sandboxMode },
           fixture.revision() + 1,
         );
       },
@@ -1338,7 +1338,7 @@ test('permission-only Host updates select the live boundary transition path', as
     {
       sessionId: fixture.sessionId,
       expectedRevision: fixture.revision(),
-      patch: { permissionMode: 'bypass' },
+      patch: { sandboxMode: 'danger-full-access' },
     },
     context,
   );
@@ -1346,7 +1346,7 @@ test('permission-only Host updates select the live boundary transition path', as
     {
       sessionId: fixture.sessionId,
       expectedRevision: fixture.revision(),
-      patch: { permissionMode: 'bypass', collaborationMode: 'plan' },
+      patch: { sandboxMode: 'danger-full-access', collaborationMode: 'plan' },
     },
     context,
   );
@@ -1401,7 +1401,7 @@ test('identity-free configuration patch fails closed for a legacy Session', asyn
     {
       sessionId: fixture.sessionId,
       expectedRevision: fixture.revision(),
-      patch: { permissionMode: 'bypass' },
+      patch: { sandboxMode: 'danger-full-access' },
     },
     context,
   );
@@ -1414,7 +1414,7 @@ test('identity-free configuration patch fails closed for a legacy Session', asyn
     },
   });
   assert.equal(fixture.header().llmConnectionId, undefined);
-  assert.notEqual(fixture.header().permissionMode, 'bypass');
+  assert.notEqual(fixture.header().sandboxMode, 'bypass');
 });
 
 test('only an explicit exact target recovers a legacy Session account binding', async () => {
@@ -2042,7 +2042,7 @@ function createFixture(
     }),
     probeStableSessionCreate: async () => ({ kind: 'absent' }),
     readCatalogRecord: async () => catalogRecord(header, revision),
-    readExecutionBoundary: async () => createGenesisExecutionBoundary('ask'),
+    readExecutionBoundary: async () => createGenesisExecutionBoundary('workspace-write'),
     readHeaderRecordSnapshot: async () => headerSnapshot(header, revision),
     updateHeaderVersioned: async (_sessionId, patch, expectedRevision) => {
       if (expectedRevision !== revision) {
@@ -2263,7 +2263,7 @@ function configurationInput(
         model: 'model-1',
       },
       thinkingLevel: null,
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       collaborationMode: 'agent',
       orchestrationMode: 'graph',
     },
@@ -2289,7 +2289,7 @@ function sessionHeader(sessionId: string, labels: readonly string[]): SessionHea
     llmConnectionSlug: 'test',
     connectionLocked: true,
     model: 'model-1',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     collaborationMode: 'agent',
     orchestrationMode: 'default',
     schemaVersion: 1,

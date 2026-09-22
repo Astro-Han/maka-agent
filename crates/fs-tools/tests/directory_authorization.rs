@@ -18,7 +18,9 @@
  */
 
 use maka_fs_tools::{MutationExecutor, ReadExecutor, ReadLimits, WriteCoordinator, directory};
-use maka_runtime::{read::ReadInput, tools::ToolExecutor};
+#[cfg(unix)]
+use maka_runtime::read::ReadInput;
+use maka_runtime::tools::ToolExecutor;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -35,12 +37,14 @@ async fn directory_consent_does_not_mark_workspaces_or_follow_replacements() {
         location.clone(),
         handle.try_clone().unwrap(),
         ReadLimits::default(),
+        None,
     )
     .unwrap();
     let write = MutationExecutor::from_directory(
         location.clone(),
         handle,
         Arc::new(WriteCoordinator::default()),
+        None,
     )
     .unwrap();
     write

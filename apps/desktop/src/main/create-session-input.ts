@@ -20,19 +20,6 @@
 /**
  * What a `sessions:create` request resolves to.
  *
- * #1433: these fields used to be derived in two places. `sessions:create`
- * took them from the renderer, and a second IPC (`quickChat:start`, built for
- * the first-run Quick Chat panel) derived them from a product `mode`. The
- * panel is gone, and what remained of the second IPC was a duplicate of the
- * first — same readiness gate, same connection resolution, same
- * `emitSessionsChanged('created')` — so only the derivation survived.
- *
- * It lives here as a pure function rather than inside the handler because the
- * handler is an `ipcMain.handle` closure no test can call. The invariants
- * below — the refusal of a directly-requested `explore`, and leaving an
- * omitted mode omitted — would otherwise only be assertable by regex over the
- * handler's source.
- *
  * The permission mode a session actually starts in is resolved by the Runtime
  * Host from its own `chatDefaults`, so an omitted mode stays omitted here.
  */
@@ -41,12 +28,13 @@ import type { CollaborationMode } from '@maka/core/collaboration';
 
 import type { OrchestrationMode } from '@maka/core/orchestration';
 
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
+import { decodeApprovalPolicy, type ApprovalPolicy } from '@maka/core/execution-permissions';
 
 import type { SessionStartMode } from '@maka/core/session-start-mode';
 import { DEFAULT_SESSION_NAME } from '@maka/core/session-name';
 
-import { isChatDefaultPermissionMode } from '@maka/core/settings';
+import { isChatDefaultSandboxMode } from '@maka/core/settings';
 
 import { isCollaborationMode } from '@maka/core/collaboration';
 
@@ -62,7 +50,8 @@ import { isSessionStartMode } from '@maka/core/session-start-mode';
  */
 export interface CreateSessionRequest {
   mode?: SessionStartMode;
-  permissionMode?: PermissionMode;
+  sandboxMode?: SandboxMode;
+  approvalPolicy?: ApprovalPolicy;
   collaborationMode?: CollaborationMode;
   orchestrationMode?: OrchestrationMode;
   name?: string;
@@ -71,7 +60,8 @@ export interface CreateSessionRequest {
 
 export interface ResolvedCreateSessionRequest {
   mode?: SessionStartMode;
-  permissionMode?: PermissionMode;
+  sandboxMode?: SandboxMode;
+  approvalPolicy?: ApprovalPolicy;
   collaborationMode: CollaborationMode;
   orchestrationMode: OrchestrationMode;
   name: string;
@@ -89,15 +79,14 @@ export function resolveCreateSessionRequest(
   if (!isOrchestrationMode(orchestrationMode)) {
     throw new TypeError('Invalid orchestration mode.');
   }
-  // `explore` is a boundary a product mode confers, not one a caller may
-  // request directly. Existing Sessions use a separate deliberate mutation.
-  if (input?.permissionMode !== undefined && !isChatDefaultPermissionMode(input.permissionMode)) {
+  if (input?.sandboxMode !== undefined && !isChatDefaultSandboxMode(input.sandboxMode)) {
     throw new TypeError('Invalid permission mode.');
   }
 
   return {
     ...(isSessionStartMode(input?.mode) ? { mode: input.mode } : {}),
-    ...(input?.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+    ...(input?.sandboxMode === undefined ? {} : { sandboxMode: input.sandboxMode }),
+    ...(input?.approvalPolicy === undefined ? {} : { approvalPolicy: decodeApprovalPolicy(input.approvalPolicy) }),
     collaborationMode,
     orchestrationMode,
     name: input?.name ?? DEFAULT_SESSION_NAME,

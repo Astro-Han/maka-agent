@@ -25,6 +25,13 @@ import {
 } from './permission.js';
 import { defineObjectShape, hasExactShape } from './record-schema.js';
 import {
+  decodeAccessRequest,
+  decodePermissionDecision,
+  permissionDecisionsEqual,
+  type AccessRequest,
+  type PermissionDecision,
+} from './execution-permissions.js';
+import {
   InteractionPermissionProjectionError,
   decodeInteractionPermissionPrompt,
   projectInteractionReviewText,
@@ -182,12 +189,20 @@ export interface InteractionClientCapabilityRequest {
   readonly target: ClientCapabilityGrantTarget;
 }
 
+export interface InteractionPermissionsRequest {
+  readonly kind: 'permissions';
+  readonly toolUseId: string | null;
+  readonly baseRevision: number;
+  readonly request: AccessRequest;
+}
+
 export type InteractionRequest =
   | InteractionPermissionRequest
   | InteractionQuestionRequest
   | InteractionFormRequest
   | InteractionSandboxBoundaryRequest
-  | InteractionClientCapabilityRequest;
+  | InteractionClientCapabilityRequest
+  | InteractionPermissionsRequest;
 
 export type InteractionPermissionDecisionFields =
   | { readonly decision: 'allow'; readonly rememberForTurn: boolean }
@@ -225,12 +240,18 @@ export interface InteractionClientCapabilityAnswer {
   readonly decision: 'allow' | 'deny';
 }
 
+export interface InteractionPermissionsAnswer {
+  readonly kind: 'permissions';
+  readonly decision: PermissionDecision;
+}
+
 export type InteractionAnswer =
   | InteractionPermissionAnswer
   | InteractionQuestionAnswer
   | InteractionFormAnswer
   | InteractionSandboxBoundaryAnswer
-  | InteractionClientCapabilityAnswer;
+  | InteractionClientCapabilityAnswer
+  | InteractionPermissionsAnswer;
 
 export type InteractionCanonicalPermissionOutcome = {
   readonly kind: 'permission_answer';
@@ -272,6 +293,12 @@ export interface InteractionCanonicalClientCapabilityOutcome {
   readonly committedAt: number;
 }
 
+export interface InteractionCanonicalPermissionsOutcome {
+  readonly kind: 'permissions_decision';
+  readonly decision: PermissionDecision;
+  readonly committedAt: number;
+}
+
 export interface InteractionCanonicalClosureOutcome {
   readonly kind: 'closure';
   readonly reason: InteractionClosureReason;
@@ -284,6 +311,7 @@ export type InteractionCanonicalOutcome =
   | InteractionCanonicalFormOutcome
   | InteractionCanonicalSandboxBoundaryOutcome
   | InteractionCanonicalClientCapabilityOutcome
+  | InteractionCanonicalPermissionsOutcome
   | InteractionCanonicalClosureOutcome;
 
 export type InteractionQuestionProjectionInput = Pick<
@@ -319,6 +347,18 @@ const CLIENT_CAPABILITY_REQUEST_SHAPE = defineObjectShape<InteractionClientCapab
 );
 const PERMISSION_ANSWER_SHAPE = defineObjectShape<InteractionPermissionAnswer>()(
   ['kind', 'decision', 'rememberForTurn'],
+  [],
+);
+const PERMISSIONS_REQUEST_SHAPE = defineObjectShape<InteractionPermissionsRequest>()(
+  ['kind', 'toolUseId', 'baseRevision', 'request'],
+  [],
+);
+const PERMISSIONS_ANSWER_SHAPE = defineObjectShape<InteractionPermissionsAnswer>()(
+  ['kind', 'decision'],
+  [],
+);
+const PERMISSIONS_OUTCOME_SHAPE = defineObjectShape<InteractionCanonicalPermissionsOutcome>()(
+  ['kind', 'decision', 'committedAt'],
   [],
 );
 const QUESTION_ANSWER_SHAPE = defineObjectShape<InteractionQuestionAnswer>()(
@@ -459,6 +499,26 @@ export function decodeInteractionRequest(value: unknown): InteractionRequest {
       toolUseId: boundedString(record.toolUseId, 'toolUseId', INTERACTION_ID_MAX_BYTES),
       target: decodeClientCapabilityGrantTarget(record.target),
     };
+  } else if (record.kind === 'permissions') {
+    exact(record, PERMISSIONS_REQUEST_SHAPE, 'permissions request');
+    request = {
+      kind: 'permissions',
+      toolUseId:
+        record.toolUseId === null
+          ? null
+          : boundedString(record.toolUseId, 'toolUseId', INTERACTION_ID_MAX_BYTES),
+      baseRevision: safeInteger(record.baseRevision, 'baseRevision', false),
+      request: decodeAccessRequest(record.request),
+    };
+    serializedLimit(
+      {
+        kind: 'permissions_decision',
+        decision: { decision: 'allow', permissions: request.request.permissions, scope: 'session' },
+        committedAt: Number.MAX_SAFE_INTEGER,
+      },
+      INTERACTION_OUTCOME_SERIALIZED_MAX_BYTES,
+      'permissions outcome',
+    );
   } else {
     throw new Error('Invalid Interaction request kind');
   }
@@ -506,6 +566,18 @@ export function decodeInteractionAnswer(value: unknown): InteractionAnswer {
       kind: 'client_capability',
       decision: oneOf(record.decision, ['allow', 'deny'] as const, 'decision'),
     };
+  } else if (record.kind === 'permissions') {
+    exact(record, PERMISSIONS_ANSWER_SHAPE, 'permissions answer');
+    answer = { kind: 'permissions', decision: decodePermissionDecision(record.decision) };
+    serializedLimit(
+      {
+        kind: 'permissions_decision',
+        decision: answer.decision,
+        committedAt: Number.MAX_SAFE_INTEGER,
+      },
+      INTERACTION_OUTCOME_SERIALIZED_MAX_BYTES,
+      'permissions outcome',
+    );
   } else {
     throw new Error('Invalid Interaction answer kind');
   }
@@ -617,6 +689,13 @@ export function decodeInteractionCanonicalOutcome(value: unknown): InteractionCa
     outcome = {
       kind: 'client_capability_decision',
       decision: oneOf(record.decision, ['allow', 'deny'] as const, 'decision'),
+      committedAt: safeInteger(record.committedAt, 'committedAt', false),
+    };
+  } else if (record.kind === 'permissions_decision') {
+    exact(record, PERMISSIONS_OUTCOME_SHAPE, 'permissions outcome');
+    outcome = {
+      kind: 'permissions_decision',
+      decision: decodePermissionDecision(record.decision),
       committedAt: safeInteger(record.committedAt, 'committedAt', false),
     };
   } else if (record.kind === 'closure') {
@@ -804,7 +883,9 @@ export function interactionOutcomeMatchesRequestKind(
           ? outcome.kind === 'form_answer'
           : request.kind === 'sandbox_boundary'
             ? outcome.kind === 'sandbox_boundary_decision'
-            : outcome.kind === 'client_capability_decision')
+            : request.kind === 'permissions'
+              ? outcome.kind === 'permissions_decision'
+              : outcome.kind === 'client_capability_decision')
   );
 }
 
@@ -844,6 +925,13 @@ export function isInteractionAnswerValidForRequest(
   }
   if (answer.kind === 'sandbox_boundary') return request.kind === 'sandbox_boundary';
   if (answer.kind === 'client_capability') return request.kind === 'client_capability';
+  if (answer.kind === 'permissions')
+    return (
+      request.kind === 'permissions' &&
+      (answer.decision.decision === 'deny' ||
+        answer.decision.scope !== 'once' ||
+        request.toolUseId !== null)
+    );
   return interactionRememberForTurnIsEligible(request, answer);
 }
 
@@ -881,6 +969,13 @@ export function isInteractionCanonicalOutcomeValidForRequest(
   if (outcome.kind === 'client_capability_decision') {
     return request.kind === 'client_capability';
   }
+  if (outcome.kind === 'permissions_decision')
+    return (
+      request.kind === 'permissions' &&
+      (outcome.decision.decision === 'deny' ||
+        outcome.decision.scope !== 'once' ||
+        request.toolUseId !== null)
+    );
   return request.kind === 'sandbox_boundary';
 }
 
@@ -905,6 +1000,9 @@ export function interactionCanonicalOutcomesEquivalent(
   }
   if (left.kind === 'client_capability_decision' && right.kind === 'client_capability_decision') {
     return left.decision === right.decision;
+  }
+  if (left.kind === 'permissions_decision' && right.kind === 'permissions_decision') {
+    return permissionDecisionsEqual(left.decision, right.decision);
   }
   return left.kind === 'closure' && right.kind === 'closure' && left.reason === right.reason;
 }

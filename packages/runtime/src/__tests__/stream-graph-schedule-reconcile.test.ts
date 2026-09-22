@@ -1123,7 +1123,7 @@ class MemoryScheduleExecutor implements AgentGraphIntentExecutor {
       agentName: 'Local Read',
       profile: 'local_read',
       status: this.status,
-      permissionMode: 'explore' as const,
+      sandboxMode: 'read-only' as const,
       summary: this.status,
       artifactIds: [],
       startedAt: 1,

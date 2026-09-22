@@ -22,6 +22,7 @@ import { afterEach, test } from 'node:test';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
+import type { ExecutionPolicy } from '@maka/core/execution-permissions';
 import {
   SessionSettingsServicesProvider,
   type SessionSettingsServices,
@@ -49,18 +50,19 @@ afterEach(async () => {
   Object.assign(globalThis, originalGlobals);
 });
 
-test('rejects non-chat permission modes before confirmation or persistence', async () => {
+test('selects read-only for a new task without confirming or changing another Session', async () => {
   let permissionWrites = 0;
   let draftWrites = 0;
   let confirmations = 0;
   const { controller } = await mountController({
     services: createServices({
-      setPermissionMode: async () => {
+      setExecutionPolicy: async () => {
         permissionWrites += 1;
         return {} as DesktopSessionSummary;
       },
     }),
-    setNewTaskPermissionMode: () => {
+    setNewTaskExecutionPolicy: (policy) => {
+      assert.deepEqual(policy, { sandboxMode: 'read-only', approvalPolicy: { kind: 'on-request' } });
       draftWrites += 1;
     },
     confirmBypass: async () => {
@@ -71,34 +73,83 @@ test('rejects non-chat permission modes before confirmation or persistence', asy
 
   let accepted = true;
   await act(async () => {
-    accepted = await controller().setPermissionMode('explore');
+    accepted = await controller().setSandboxMode('read-only');
   });
 
-  assert.equal(accepted, false);
+  assert.equal(accepted, true);
   assert.equal(permissionWrites, 0);
-  assert.equal(draftWrites, 0);
+  assert.equal(draftWrites, 1);
   assert.equal(confirmations, 0);
 });
 
-test('rejects non-chat permission modes before writing an existing Session', async () => {
+test('writes a read-only selection to the owning Session', async () => {
   let permissionWrites = 0;
   const { controller } = await mountController({
     owner: { sessionId: 'session-1' },
+    sessions: [{ id: 'session-1', sandboxMode: 'workspace-write', approvalPolicy: { kind: 'on-request' }, revision: 1 } as DesktopSessionSummary],
     services: createServices({
-      setPermissionMode: async () => {
+      setExecutionPolicy: async (sessionId, policy) => {
+        assert.equal(sessionId, 'session-1');
+        assert.deepEqual(policy, { sandboxMode: 'read-only', approvalPolicy: { kind: 'on-request' } });
         permissionWrites += 1;
-        return {} as DesktopSessionSummary;
+        return { ...policy, revision: 2 } as DesktopSessionSummary;
       },
     }),
   });
 
   let accepted = true;
   await act(async () => {
-    accepted = await controller().setPermissionMode('explore');
+    accepted = await controller().setSandboxMode('read-only');
   });
 
-  assert.equal(accepted, false);
-  assert.equal(permissionWrites, 0);
+  assert.equal(accepted, true);
+  assert.equal(permissionWrites, 1);
+});
+
+test('full bypass commits both protections together only while the confirmed owner remains active', async () => {
+  const session = {
+    id: 'session-1', sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' }, revision: 1,
+  } as DesktopSessionSummary;
+  const writes: unknown[] = [];
+  let confirmed = false;
+  let ownerActive = true;
+  let confirmations = 0;
+  const { controller } = await mountController({
+    owner: { sessionId: session.id },
+    sessions: [session],
+    isOwnerActive: () => ownerActive,
+    confirmBypass: async (allProtections) => {
+      assert.equal(allProtections, true);
+      confirmations += 1;
+      return confirmed;
+    },
+    services: createServices({
+      setExecutionPolicy: async (sessionId, policy) => {
+        writes.push({ sessionId, policy });
+        return { ...session, ...policy, revision: 2 };
+      },
+    }),
+  });
+
+  await act(async () => {
+    assert.equal(await controller().disableProtections(), false);
+  });
+  confirmed = true;
+  ownerActive = false;
+  await act(async () => {
+    assert.equal(await controller().disableProtections(), false);
+  });
+  assert.deepEqual(writes, []);
+  ownerActive = true;
+  await act(async () => {
+    assert.equal(await controller().disableProtections(), true);
+  });
+  assert.equal(confirmations, 3);
+  assert.deepEqual(writes, [{
+    sessionId: session.id,
+    policy: { sandboxMode: 'danger-full-access', approvalPolicy: { kind: 'never' } },
+  }]);
 });
 
 test('persists a model selection as one compound configuration and saves its default', async () => {
@@ -309,7 +360,7 @@ test('retires Permission and Orchestration overlays by their committed Session r
       activityAt: 10,
       model: 'model-a',
     }),
-    permissionMode: 'ask' as const,
+    sandboxMode: 'workspace-write' as const,
     orchestrationMode: 'default' as const,
   };
   const otherHostSession = desktopSession({
@@ -323,7 +374,7 @@ test('retires Permission and Orchestration overlays by their committed Session r
   const targetAfterPermission = {
     ...targetBeforeWrite,
     revision: 2,
-    permissionMode: 'bypass' as const,
+    sandboxMode: 'danger-full-access' as const,
   };
   const targetAfterOrchestration = {
     ...targetAfterPermission,
@@ -337,7 +388,7 @@ test('retires Permission and Orchestration overlays by their committed Session r
         SessionSettingsServicesProvider,
         {
           services: createServices({
-            setPermissionMode: async () => targetAfterPermission,
+            setExecutionPolicy: async () => targetAfterPermission,
             setOrchestrationMode: async () => targetAfterOrchestration,
           }),
         },
@@ -354,10 +405,10 @@ test('retires Permission and Orchestration overlays by their committed Session r
 
   await render(0, [targetBeforeWrite, otherHostSession]);
   await act(async () => {
-    assert.equal(await controller!.setPermissionMode('bypass'), true);
+    assert.equal(await controller!.setSandboxMode('danger-full-access'), true);
     assert.equal(await controller!.setOrchestrationMode('session-a', 'swarm'), true);
   });
-  assert.equal(controller!.overlays.permissionMode['session-a'], 'bypass');
+  assert.equal(controller!.overlays.executionPolicy['session-a']?.sandboxMode, 'danger-full-access');
   assert.equal(controller!.overlays.orchestrationMode['session-a'], 'swarm');
 
   const partialCatalog = reconcileRuntimeHostSessionCatalog(
@@ -369,11 +420,11 @@ test('retires Permission and Orchestration overlays by their committed Session r
     },
   );
   await render(1, partialCatalog);
-  assert.equal(controller!.overlays.permissionMode['session-a'], 'bypass');
+  assert.equal(controller!.overlays.executionPolicy['session-a']?.sandboxMode, 'danger-full-access');
   assert.equal(controller!.overlays.orchestrationMode['session-a'], 'swarm');
 
   await render(2, [targetAfterPermission, otherHostSession]);
-  assert.equal(controller!.overlays.permissionMode['session-a'], undefined);
+  assert.equal(controller!.overlays.executionPolicy['session-a'], undefined);
   assert.equal(controller!.overlays.orchestrationMode['session-a'], 'swarm');
 
   await render(3, [targetAfterOrchestration, otherHostSession]);
@@ -412,8 +463,9 @@ async function mountController(overrides: {
   services?: SessionSettingsServices;
   owner?: { sessionId?: string };
   sessions?: readonly DesktopSessionSummary[];
-  setNewTaskPermissionMode?(mode: 'ask' | 'bypass'): void;
-  confirmBypass?(): Promise<boolean>;
+  setNewTaskExecutionPolicy?(policy: ExecutionPolicy): void;
+  confirmBypass?(allProtections?: boolean): Promise<boolean>;
+  isOwnerActive?(): boolean;
   saveComposerDefaults?(model: {
     llmConnectionId: string;
     llmConnectionSlug: string;
@@ -444,8 +496,9 @@ async function mountController(overrides: {
         },
         owner: overrides.owner ?? {},
         sessions: overrides.sessions ?? [],
-        setNewTaskPermissionMode: overrides.setNewTaskPermissionMode ?? (() => {}),
+        setNewTaskExecutionPolicy: overrides.setNewTaskExecutionPolicy ?? (() => {}),
         confirmBypass: overrides.confirmBypass ?? (async () => true),
+        isOwnerActive: overrides.isOwnerActive ?? (() => true),
         saveComposerDefaults: overrides.saveComposerDefaults ?? (() => {}),
       }),
     ));
@@ -463,8 +516,9 @@ function Harness(props: {
   capture(controller: Controller): void;
   owner: { sessionId?: string };
   sessions: readonly DesktopSessionSummary[];
-  setNewTaskPermissionMode(mode: 'ask' | 'bypass'): void;
-  confirmBypass(): Promise<boolean>;
+  setNewTaskExecutionPolicy(policy: ExecutionPolicy): void;
+  confirmBypass(allProtections?: boolean): Promise<boolean>;
+  isOwnerActive(): boolean;
   saveComposerDefaults(model: {
     llmConnectionId: string;
     llmConnectionSlug: string;
@@ -475,15 +529,15 @@ function Harness(props: {
     catalogRevision: 0,
     isActiveSession: () => true,
     sessions: props.sessions,
-    newTaskPermissionMode: 'ask',
+    newTaskExecutionPolicy: { sandboxMode: 'workspace-write', approvalPolicy: { kind: 'on-request' } },
     refreshCatalog: async () => {},
     saveComposerDefaults: props.saveComposerDefaults,
     writeFailureCopy: () => ({ title: 'failed', description: 'failed' }),
     showSessionError: () => {},
     planMode: { write: async () => true },
     captureOwner: () => props.owner,
-    isOwnerActive: () => true,
-    setNewTaskPermissionMode: props.setNewTaskPermissionMode,
+    isOwnerActive: props.isOwnerActive,
+    setNewTaskExecutionPolicy: props.setNewTaskExecutionPolicy,
     confirmBypass: props.confirmBypass,
   });
   props.capture(controller);
@@ -499,7 +553,7 @@ function CausalRetirementHarness(props: {
     catalogRevision: props.catalogRevision,
     isActiveSession: () => true,
     sessions: props.sessions,
-    newTaskPermissionMode: 'ask',
+    newTaskExecutionPolicy: { sandboxMode: 'workspace-write', approvalPolicy: { kind: 'on-request' } },
     refreshCatalog: async () => {},
     saveComposerDefaults: () => {},
     writeFailureCopy: () => ({ title: 'failed', description: 'failed' }),
@@ -507,7 +561,7 @@ function CausalRetirementHarness(props: {
     planMode: { write: async () => true },
     captureOwner: () => ({ sessionId: 'session-a' }),
     isOwnerActive: () => true,
-    setNewTaskPermissionMode: () => {},
+    setNewTaskExecutionPolicy: () => {},
     confirmBypass: async () => true,
   });
   props.capture(controller);
@@ -533,6 +587,8 @@ function desktopSession(input: {
     llmConnectionId: 'connection-a',
     llmConnectionSlug: 'openai',
     model: input.model,
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
   } as DesktopSessionSummary;
 }
 
@@ -540,8 +596,8 @@ function createServices(
   overrides: Partial<SessionSettingsServices> = {},
 ): SessionSettingsServices {
   return {
+    setExecutionPolicy: async () => ({} as DesktopSessionSummary),
     setModelConfiguration: async () => ({} as DesktopSessionSummary),
-    setPermissionMode: async () => ({} as DesktopSessionSummary),
     setOrchestrationMode: async () => ({} as DesktopSessionSummary),
     setCollaborationMode: async () => ({} as DesktopSessionSummary),
     abandonPlanProposal: async () => {},

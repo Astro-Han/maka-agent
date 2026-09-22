@@ -96,7 +96,7 @@ pub(crate) async fn workspace(
     request(
         peer,
         "path-request",
-        json!({"path":path,"permissionMode":"ask",
+        json!({"path":path,"sandboxMode":"workspace-write",
         "collaborationMode":"agent","request":input}),
     )
     .await

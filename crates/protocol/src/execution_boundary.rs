@@ -36,7 +36,8 @@ pub enum ExecutionBoundarySummary {
         access: ManagedAccess,
         revision: u64,
     },
-    Bypass {
+    #[serde(rename = "danger-full-access")]
+    DangerFullAccess {
         revision: u64,
     },
     External {

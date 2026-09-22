@@ -18,6 +18,7 @@
  */
 
 import { Markdown, visibleWidth } from '@earendil-works/pi-tui';
+import type { SandboxMode } from '@maka/core/permission';
 import { resolveReadInput } from '@maka/runtime/read-page';
 import type {
   ProviderRetryEvent,
@@ -213,7 +214,7 @@ export interface MakaPiTranscriptMetadata {
   cwd: string;
   model: string;
   connectionSlug: string;
-  permissionMode: string;
+  sandboxMode: SandboxMode;
   orchestrationMode?: OrchestrationMode;
   thinkingLevel?: ThinkingLevel;
   thinkingLevels?: readonly ThinkingLevel[];
@@ -1650,16 +1651,10 @@ function transcriptEntrySignature(entry: MakaPiTranscriptEntry, width: number): 
   }
 }
 
-/**
- * The one CLI label for a permission mode, shared by the status line, the
- * picker header, and the mode-change notice (#1611). `explore` is a real
- * boundary a resumed session can be in, so it must be nameable here; legacy
- * `execute` has no boundary of its own and reads as Auto, as does anything
- * else this metadata ever carries.
- */
-export function permissionModeLabel(mode: string): string {
-  if (mode === 'bypass') return 'Full access';
-  if (mode === 'explore') return 'Read only';
+/** Shared by the status line, picker header, and mode-change notice. */
+export function sandboxModeLabel(mode: SandboxMode): string {
+  if (mode === 'danger-full-access') return 'Full access';
+  if (mode === 'read-only') return 'Read only';
   return 'Auto';
 }
 
@@ -1681,9 +1676,9 @@ export function renderMakaPiStatusLine(metadata: MakaPiTranscriptMetadata, width
       shortenedText: ansi.bold(fitLine(metadata.title, 7)),
     },
     {
-      text: ansi.dim(permissionModeLabel(metadata.permissionMode)),
+      text: ansi.dim(sandboxModeLabel(metadata.sandboxMode)),
       compactRank: 4,
-      shortenedText: ansi.dim(compactPermissionModeLabel(metadata.permissionMode)),
+      shortenedText: ansi.dim(compactSandboxModeLabel(metadata.sandboxMode)),
     },
     {
       text: ansi.dim(metadata.model),
@@ -1852,9 +1847,9 @@ function fitStatusLine(segments: MakaPiStatusLineSegment[], sep: string, width: 
   return fitLine(kept.map((segment) => segment.text).join(activeSep), width);
 }
 
-function compactPermissionModeLabel(mode: string): string {
-  if (mode === 'bypass') return 'Full';
-  if (mode === 'explore') return 'Read';
+function compactSandboxModeLabel(mode: SandboxMode): string {
+  if (mode === 'danger-full-access') return 'Full';
+  if (mode === 'read-only') return 'Read';
   return 'Auto';
 }
 

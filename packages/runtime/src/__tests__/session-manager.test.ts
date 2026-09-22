@@ -45,7 +45,7 @@ import type {
   RuntimeInvocationLineage,
   RuntimeInvocationRootAuthority,
 } from '@maka/core/runtime-event';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { PersistedBackendKind } from '@maka/core/session';
 import type { ToolMode } from '@maka/core/tool-mode';
 import { setTimeout as timerDelay } from 'node:timers/promises';
@@ -509,7 +509,7 @@ describe('SessionManager Plan control boundaries', () => {
       manager.transitionSessionConfiguration(child.id, {
         expectedRevision: 1,
         clearConnectionBlock: false,
-        permissionModeOnly: false,
+        sandboxModeOnly: false,
         configuration: {
           backend: child.backend,
           llmConnectionId: 'test-connection-id',
@@ -517,7 +517,7 @@ describe('SessionManager Plan control boundaries', () => {
           connectionLocked: true,
           model: child.model,
           thinkingLevel: child.thinkingLevel,
-          permissionMode: child.permissionMode,
+          sandboxMode: child.sandboxMode,
           collaborationMode: 'plan',
           orchestrationMode: child.orchestrationMode ?? 'default',
         },
@@ -712,7 +712,7 @@ describe('SessionManager graph operator provisioning', () => {
       newId: nextId(),
       now: nextNow(10),
     });
-    const parent = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const parent = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     const parentTurn = manager
       .sendMessage(parent.id, { turnId: 'supervisor-turn', text: 'schedule graph work' })
       [Symbol.asyncIterator]();
@@ -774,7 +774,7 @@ describe('SessionManager graph operator provisioning', () => {
         resumeSession() {},
       } as never,
     });
-    const parent = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const parent = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
     await seedInvocationFromHeader(
       runStore,
       makeRunHeader({
@@ -811,7 +811,7 @@ describe('SessionManager graph operator provisioning', () => {
       .transitionSessionConfiguration(parent.id, {
         expectedRevision: 1,
         clearConnectionBlock: false,
-        permissionModeOnly: false,
+        sandboxModeOnly: false,
         configuration: {
           backend: parent.backend,
           llmConnectionId: 'test-connection-id',
@@ -819,7 +819,7 @@ describe('SessionManager graph operator provisioning', () => {
           connectionLocked: true,
           model: parent.model,
           thinkingLevel: parent.thinkingLevel,
-          permissionMode: 'ask',
+          sandboxMode: 'workspace-write',
           collaborationMode: parent.collaborationMode ?? 'agent',
           orchestrationMode: parent.orchestrationMode ?? 'default',
         },
@@ -841,8 +841,8 @@ describe('SessionManager graph operator provisioning', () => {
     if (transitionResult.ok) throw new Error('Configuration transition unexpectedly committed');
     assert.ok(transitionResult.error instanceof SessionConfigurationTransitionError);
     assert.strictEqual(transitionResult.error.code, 'operation_conflict');
-    assert.strictEqual((await store.readHeader(parent.id)).permissionMode, 'bypass');
-    assert.strictEqual(provisioned.header.permissionMode, 'bypass');
+    assert.strictEqual((await store.readHeader(parent.id)).sandboxMode, 'danger-full-access');
+    assert.strictEqual(provisioned.header.sandboxMode, 'danger-full-access');
   });
 
   test('snapshots a catalog agent into a metadata-only child with reserved activation ids', async () => {
@@ -863,7 +863,7 @@ describe('SessionManager graph operator provisioning', () => {
         llmConnectionSlug: 'graph-connection',
         model: 'graph-model',
         thinkingLevel: 'medium',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       }),
     );
     await seedInvocationFromHeader(
@@ -904,7 +904,7 @@ describe('SessionManager graph operator provisioning', () => {
       operatorId: `graph_operator_${'2'.repeat(32)}`,
     });
     assert.strictEqual(result.header.subagentRuntime?.agentId, LOCAL_READ_AGENT_ID);
-    assert.strictEqual(result.header.permissionMode, 'explore');
+    assert.strictEqual(result.header.sandboxMode, 'read-only');
     assert.strictEqual(result.provision.initialTurnId, result.header.subagentSpawn?.initialTurnId);
     assert.strictEqual(result.provision.initialRunId, result.header.subagentSpawn?.initialRunId);
     assert.deepStrictEqual(await runStore.listSessionInvocations(result.header.id), []);
@@ -972,7 +972,7 @@ describe('SessionManager graph operator provisioning', () => {
       newId: nextId(),
       now: nextNow(90),
     });
-    const parent = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const parent = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     await seedInvocationFromHeader(
       runStore,
       makeRunHeader({
@@ -1188,7 +1188,7 @@ describe('SessionManager graph operator provisioning', () => {
       makeInput({
         cwd: '/tmp/project',
         projectId: 'project-1',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       }),
     );
     await seedInvocationFromHeader(
@@ -1218,7 +1218,7 @@ describe('SessionManager graph operator provisioning', () => {
 
     assert.strictEqual(provisioned.length, 1);
     assert.strictEqual(result.header.projectId, 'project-1');
-    assert.strictEqual(result.header.permissionMode, 'ask');
+    assert.strictEqual(result.header.sandboxMode, 'workspace-write');
     assert.strictEqual(
       result.header.subagentRuntime
         ? 'permissionCeiling' in result.header.subagentRuntime
@@ -1259,7 +1259,7 @@ describe('SessionManager graph operator provisioning', () => {
     const { header: child } = await store.createSubagent(
       makeInput({
         cwd: binding.worktreePath,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         subagentParent: {
           kind: 'subagent',
           parentSessionId: parent.id,
@@ -1299,7 +1299,7 @@ describe('SessionManager graph operator provisioning', () => {
         completedAt: 20,
         updatedAt: 20,
         cwd: binding.worktreePath,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         agentId: IMPLEMENTATION_AGENT_ID,
         agentName: IMPLEMENTATION_AGENT_DEFINITION.name,
       }),
@@ -1373,7 +1373,7 @@ describe('SessionManager graph operator provisioning', () => {
         completedAt: 60,
         updatedAt: 60,
         cwd: binding.worktreePath,
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         agentId: IMPLEMENTATION_AGENT_ID,
         agentName: IMPLEMENTATION_AGENT_DEFINITION.name,
         resumedFromRunId: 'child-run',
@@ -1724,7 +1724,7 @@ describe('SessionManager claimed graph intent execution', () => {
         turnId: claim.targetTurnId,
         status: 'completed',
         completedAt: 34,
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         agentId: LOCAL_READ_AGENT_ID,
         agentName: LOCAL_READ_AGENT_DEFINITION.name,
       }),
@@ -2294,7 +2294,7 @@ describe('SessionManager claimed graph intent execution', () => {
         runId: claim.targetRunId,
         turnId: claim.targetTurnId,
         status: 'running',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         agentId: LOCAL_READ_AGENT_ID,
         agentName: LOCAL_READ_AGENT_DEFINITION.name,
       }),
@@ -2433,7 +2433,7 @@ describe('SessionManager claimed graph intent execution', () => {
         runId: 'different-run',
         turnId: claim.targetTurnId,
         status: 'completed',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         completedAt: 101,
         agentId: LOCAL_READ_AGENT_ID,
         agentName: LOCAL_READ_AGENT_DEFINITION.name,
@@ -2605,7 +2605,7 @@ describe('SessionManager child-session runtime primitive', () => {
         llmConnectionSlug: 'connection-1',
         model: 'model-1',
         thinkingLevel: 'medium',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       }),
     );
     const parentTurn = manager
@@ -2639,7 +2639,7 @@ describe('SessionManager child-session runtime primitive', () => {
     assert.strictEqual(childHeader.llmConnectionSlug, 'connection-1');
     assert.strictEqual(childHeader.model, 'model-1');
     assert.strictEqual(childHeader.thinkingLevel, 'medium');
-    assert.strictEqual(childHeader.permissionMode, 'explore');
+    assert.strictEqual(childHeader.sandboxMode, 'read-only');
     assert.strictEqual(childHeader.connectionLocked, true);
     assert.deepStrictEqual(childHeader.subagentParent, {
       kind: 'subagent',
@@ -3005,7 +3005,7 @@ describe('SessionManager child-session runtime primitive', () => {
       return (
         await store.createSubagent(
           makeInput({
-            permissionMode: 'explore',
+            sandboxMode: 'read-only',
             collaborationMode: 'agent',
             orchestrationMode: 'default',
             subagentParent: {
@@ -3345,7 +3345,7 @@ describe('SessionManager child-session runtime primitive', () => {
     const { header: child } = await store.createSubagent(
       makeInput({
         name: 'Stale child',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         subagentParent: {
@@ -3384,7 +3384,7 @@ describe('SessionManager child-session runtime primitive', () => {
         runId: 'stale-child-run',
         turnId: 'stale-child-turn',
         status: 'running',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         agentId: LOCAL_READ_AGENT_ID,
         agentName: LOCAL_READ_AGENT_DEFINITION.name,
       }),
@@ -3689,7 +3689,7 @@ describe('SessionManager child-session runtime primitive', () => {
       makeInput({
         name: 'Interrupted child',
         status: 'running',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         subagentParent: {
           kind: 'subagent',
           parentSessionId: parent.id,
@@ -3726,7 +3726,7 @@ describe('SessionManager child-session runtime primitive', () => {
         runId: 'child-run',
         turnId: 'child-turn',
         status: 'running',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         agentId: LOCAL_READ_AGENT_ID,
         agentName: 'Local Read',
       }),
@@ -3786,7 +3786,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       now: nextNow(10_000),
     });
     const session = await manager.createSession(
-      makeInput({ permissionMode: 'bypass', llmConnectionId: 'connection-compact' }),
+      makeInput({ sandboxMode: 'danger-full-access', llmConnectionId: 'connection-compact' }),
     );
 
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
@@ -3950,7 +3950,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(13_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
 
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'first '.repeat(400) }));
     await drain(manager.sendMessage(session.id, { turnId: 'turn-2', text: 'second' }));
@@ -3988,7 +3988,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(12_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
 
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
     await drain(manager.compactSession(session.id, { turnId: 'turn-compact' }));
@@ -4016,7 +4016,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(12_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
 
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
     await drain(manager.compactSession(session.id, { turnId: 'turn-compact' }));
@@ -4052,7 +4052,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(12_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
 
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
     let threw = false;
@@ -4098,7 +4098,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(15_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
 
     blockPriorRead = true;
@@ -4173,8 +4173,12 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(15_500),
     });
-    const cancelledSession = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
-    const abortErrorSession = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const cancelledSession = await manager.createSession(
+      makeInput({ sandboxMode: 'danger-full-access' }),
+    );
+    const abortErrorSession = await manager.createSession(
+      makeInput({ sandboxMode: 'danger-full-access' }),
+    );
     const cancelledStart = makeGate();
     const abortErrorStart = makeGate();
     factoryStarts.set(cancelledSession.id, cancelledStart);
@@ -4222,7 +4226,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(17_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
     const readStarted = makeGate();
     const releaseRead = makeGate();
     store.nextReadHeaderGate = { started: readStarted, release: releaseRead };
@@ -4277,7 +4281,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(20_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
 
     const compactPromise = collectSessionEvents(
@@ -4330,7 +4334,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(25_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
 
     const sendPromise = (async () => {
       for await (const _event of manager.sendMessage(session.id, {
@@ -4374,7 +4378,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       runtimeKernel: kernel,
     });
     const session = await manager.createSession(
-      makeInput({ permissionMode: 'bypass', orchestrationMode: 'default' }),
+      makeInput({ sandboxMode: 'danger-full-access', orchestrationMode: 'default' }),
     );
     const baseConfiguration = {
       backend: session.backend,
@@ -4383,7 +4387,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       connectionLocked: true,
       model: session.model,
       thinkingLevel: session.thinkingLevel,
-      permissionMode: session.permissionMode,
+      sandboxMode: session.sandboxMode,
       collaborationMode: session.collaborationMode ?? 'agent',
       orchestrationMode: 'graph' as const,
     };
@@ -4393,7 +4397,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       manager.transitionSessionConfiguration(session.id, {
         expectedRevision: 1,
         clearConnectionBlock: false,
-        permissionModeOnly: false,
+        sandboxModeOnly: false,
         configuration: baseConfiguration,
       }),
       (error: unknown) => {
@@ -4408,7 +4412,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
     const committed = await manager.transitionSessionConfiguration(session.id, {
       expectedRevision: 1,
       clearConnectionBlock: false,
-      permissionModeOnly: false,
+      sandboxModeOnly: false,
       configuration: baseConfiguration,
     });
     assert.equal(committed.revision, 2);
@@ -4419,7 +4423,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       manager.transitionSessionConfiguration(session.id, {
         expectedRevision: 1,
         clearConnectionBlock: false,
-        permissionModeOnly: false,
+        sandboxModeOnly: false,
         configuration: baseConfiguration,
       }),
       (error: unknown) => {
@@ -4434,10 +4438,10 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       manager.transitionSessionConfiguration(session.id, {
         expectedRevision: 2,
         clearConnectionBlock: false,
-        permissionModeOnly: true,
+        sandboxModeOnly: true,
         configuration: {
           ...baseConfiguration,
-          permissionMode: 'explore',
+          sandboxMode: 'read-only',
         },
       }),
       (error: unknown) => {
@@ -4469,7 +4473,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       connectionLocked: true,
       model: session.model,
       thinkingLevel: session.thinkingLevel,
-      permissionMode: session.permissionMode,
+      sandboxMode: session.sandboxMode,
       collaborationMode: session.collaborationMode ?? 'agent',
       orchestrationMode: session.orchestrationMode ?? 'default',
     };
@@ -4477,7 +4481,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
     const preserved = await manager.transitionSessionConfiguration(session.id, {
       expectedRevision: 1,
       clearConnectionBlock: false,
-      permissionModeOnly: false,
+      sandboxModeOnly: false,
       configuration,
     });
     assert.equal(preserved.header.blockedReason, 'NO_REAL_CONNECTION');
@@ -4486,7 +4490,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
     const recovered = await manager.transitionSessionConfiguration(session.id, {
       expectedRevision: 2,
       clearConnectionBlock: true,
-      permissionModeOnly: false,
+      sandboxModeOnly: false,
       configuration,
     });
     assert.equal(recovered.header.blockedReason, undefined);
@@ -4581,7 +4585,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       .transitionSessionConfiguration(session.id, {
         expectedRevision: 1,
         clearConnectionBlock: false,
-        permissionModeOnly: false,
+        sandboxModeOnly: false,
         configuration: {
           backend: session.backend,
           llmConnectionId: 'test-connection-id',
@@ -4589,7 +4593,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
           connectionLocked: true,
           model: session.model,
           thinkingLevel: session.thinkingLevel,
-          permissionMode: session.permissionMode,
+          sandboxMode: session.sandboxMode,
           collaborationMode: session.collaborationMode ?? 'agent',
           orchestrationMode: 'graph',
         },
@@ -4635,7 +4639,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
     const transition = manager.transitionSessionConfiguration(session.id, {
       expectedRevision: 1,
       clearConnectionBlock: false,
-      permissionModeOnly: false,
+      sandboxModeOnly: false,
       configuration: {
         backend: session.backend,
         llmConnectionId: 'test-connection-id',
@@ -4643,7 +4647,7 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
         connectionLocked: true,
         model: 'new-model',
         thinkingLevel: session.thinkingLevel,
-        permissionMode: session.permissionMode,
+        sandboxMode: session.sandboxMode,
         collaborationMode: session.collaborationMode ?? 'agent',
         orchestrationMode: session.orchestrationMode ?? 'default',
       },
@@ -4910,11 +4914,11 @@ describe('SessionManager permission mode updates', () => {
           },
         } as never,
       });
-      const session = await manager.createSession(makeInput({ permissionMode: 'explore' }));
+      const session = await manager.createSession(makeInput({ sandboxMode: 'read-only' }));
       const update = (bypass: boolean) =>
         route === 'direct'
-          ? manager.setExecutionBoundaryKind(session.id, bypass ? 'bypass' : 'managed')
-          : manager.setPermissionMode(session.id, bypass ? 'bypass' : 'ask');
+          ? manager.setExecutionBoundaryKind(session.id, bypass ? 'danger-full-access' : 'managed')
+          : manager.setSandboxMode(session.id, bypass ? 'danger-full-access' : 'workspace-write');
       const turn = manager
         .sendMessage(session.id, { turnId: 'turn-racing', text: 'keep running' })
         [Symbol.asyncIterator]();
@@ -4932,10 +4936,10 @@ describe('SessionManager permission mode updates', () => {
         assert.ok(conflict.reason instanceof SessionConfigurationTransitionError);
         assert.strictEqual(conflict.reason.code, 'operation_conflict');
         assert.deepStrictEqual(await store.readExecutionBoundary(session.id), {
-          kind: 'bypass',
+          kind: 'danger-full-access',
           revision: 1,
         });
-        assert.strictEqual((await store.readHeader(session.id)).permissionMode, 'bypass');
+        assert.strictEqual((await store.readHeader(session.id)).sandboxMode, 'danger-full-access');
         assert.deepStrictEqual(manager.runningTurnIds(session.id), ['turn-racing']);
         assert.strictEqual(backend?.stopCalls, 0);
         assert.deepStrictEqual(calls, []);
@@ -4951,7 +4955,7 @@ describe('SessionManager permission mode updates', () => {
       }
       // The conflict released the mutation lane; idle narrowing still revokes shells.
       await update(false);
-      assert.strictEqual((await store.readHeader(session.id)).permissionMode, 'ask');
+      assert.strictEqual((await store.readHeader(session.id)).sandboxMode, 'workspace-write');
       assert.deepStrictEqual(calls, [`terminate:${session.id}`, 'commit', `resume:${session.id}`]);
     });
   }
@@ -4967,16 +4971,16 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(979),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'explore' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'read-only' }));
     await assert.rejects(
-      manager.setExecutionBoundaryKind(session.id, 'bypass'),
+      manager.setExecutionBoundaryKind(session.id, 'danger-full-access'),
       (error: unknown) => {
         assert.ok(error instanceof SessionConfigurationTransitionError);
         assert.strictEqual(error.code, 'operation_unavailable');
         return true;
       },
     );
-    assert.strictEqual((await store.readHeader(session.id)).permissionMode, 'explore');
+    assert.strictEqual((await store.readHeader(session.id)).sandboxMode, 'read-only');
     assert.strictEqual((await store.readExecutionBoundary(session.id)).kind, 'managed');
     assert.deepStrictEqual(kernel.disposed, []);
   });
@@ -5004,7 +5008,7 @@ describe('SessionManager permission mode updates', () => {
         activationStarted.release();
         await releaseActivation.promise;
       };
-      const builds: PermissionMode[] = [];
+      const builds: SandboxMode[] = [];
       const dispatched: Array<{ tools: string[]; prompt: string }> = [];
       const instances: TestBackend[] = [];
       const backends = new BackendRegistry();
@@ -5016,12 +5020,12 @@ describe('SessionManager permission mode updates', () => {
           }
           return {
             async build(ctx) {
-              builds.push(ctx.header.permissionMode);
+              builds.push(ctx.header.sandboxMode);
               if (checkpoint === 'build' && builds.length === 1) {
                 activationStarted.release();
                 await releaseActivation.promise;
               }
-              const fullAccess = ctx.header.permissionMode === 'bypass';
+              const fullAccess = ctx.header.sandboxMode === 'danger-full-access';
               const composition = {
                 tools: selectCollaborationTools({
                   mode: 'plan',
@@ -5063,7 +5067,7 @@ describe('SessionManager permission mode updates', () => {
         },
       });
       const session = await manager.createSession(
-        makeInput({ permissionMode: 'ask', collaborationMode: 'plan' }),
+        makeInput({ sandboxMode: 'workspace-write', collaborationMode: 'plan' }),
       );
       if (checkpoint === 'header') {
         const readHeader = store.readHeader.bind(store);
@@ -5096,10 +5100,12 @@ describe('SessionManager permission mode updates', () => {
         await manager.transitionSessionConfiguration(session.id, {
           expectedRevision: current.revision,
           clearConnectionBlock: false,
-          permissionModeOnly: true,
-          configuration: configurationForHeader(current.header, { permissionMode: 'bypass' }),
+          sandboxModeOnly: true,
+          configuration: configurationForHeader(current.header, {
+            sandboxMode: 'danger-full-access',
+          }),
         });
-        assert.strictEqual((await store.readHeader(session.id)).permissionMode, 'bypass');
+        assert.strictEqual((await store.readHeader(session.id)).sandboxMode, 'danger-full-access');
         assert.strictEqual(store.disposeCount, 0);
         if (checkpoint === 'activation_gate') {
           // A policy mutation owns the gate and refreshes before releasing it.
@@ -5120,7 +5126,7 @@ describe('SessionManager permission mode updates', () => {
       assert.strictEqual(store.disposeCount, 1);
 
       await drain(manager.sendMessage(session.id, { turnId: 'turn-fresh', text: 'write now' }));
-      assert.deepStrictEqual(builds, ['ask', 'bypass']);
+      assert.deepStrictEqual(builds, ['workspace-write', 'danger-full-access']);
       assert.deepStrictEqual(
         dispatched.map((input) => input.tools),
         [['Read'], ['Read', 'Write']],
@@ -5173,10 +5179,10 @@ describe('SessionManager permission mode updates', () => {
       const store = new VersionedConfigurationMemorySessionStore();
       const admissionStarted = makeGate();
       const releaseAdmission = makeGate();
-      const builds: PermissionMode[] = [];
+      const builds: SandboxMode[] = [];
       const backends = new BackendRegistry();
       backends.register('ai-sdk', (ctx) => {
-        builds.push(ctx.header.permissionMode);
+        builds.push(ctx.header.sandboxMode);
         return new TestBackend(ctx);
       });
       const manager = new SessionManager({ store, backends, newId: nextId(), now: nextNow(981) });
@@ -5204,8 +5210,10 @@ describe('SessionManager permission mode updates', () => {
         await manager.transitionSessionConfiguration(session.id, {
           expectedRevision: current.revision,
           clearConnectionBlock: false,
-          permissionModeOnly: true,
-          configuration: configurationForHeader(current.header, { permissionMode: 'bypass' }),
+          sandboxModeOnly: true,
+          configuration: configurationForHeader(current.header, {
+            sandboxMode: 'danger-full-access',
+          }),
         });
       } finally {
         releaseAdmission.release();
@@ -5214,7 +5222,7 @@ describe('SessionManager permission mode updates', () => {
       await manager.refreshIdleBackends();
       await drain(manager.sendMessage(session.id, { turnId: 'retry', text: 'retry' }));
       await drain(manager.sendMessage(session.id, { turnId: 'reuse', text: 'reuse' }));
-      assert.deepStrictEqual(builds, ['bypass']);
+      assert.deepStrictEqual(builds, ['danger-full-access']);
       assert.strictEqual(store.disposeCount, 0);
     });
   }
@@ -5223,10 +5231,10 @@ describe('SessionManager permission mode updates', () => {
     const store = new VersionedConfigurationMemorySessionStore();
     const buildStarted = makeGate();
     const releaseBuild = makeGate();
-    const builds: PermissionMode[] = [];
+    const builds: SandboxMode[] = [];
     const backends = new BackendRegistry();
     backends.register('ai-sdk', async (ctx) => {
-      builds.push(ctx.header.permissionMode);
+      builds.push(ctx.header.sandboxMode);
       if (builds.length === 1) {
         buildStarted.release();
         await releaseBuild.promise;
@@ -5235,7 +5243,7 @@ describe('SessionManager permission mode updates', () => {
       return new TestBackend(ctx);
     });
     const manager = new SessionManager({ store, backends, newId: nextId(), now: nextNow(982) });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     const firstTurn = assert.rejects(
       drain(manager.sendMessage(session.id, { turnId: 'turn-failing', text: 'start' })),
       /injected activation failure/,
@@ -5245,8 +5253,8 @@ describe('SessionManager permission mode updates', () => {
     await manager.transitionSessionConfiguration(session.id, {
       expectedRevision: current.revision,
       clearConnectionBlock: false,
-      permissionModeOnly: true,
-      configuration: configurationForHeader(current.header, { permissionMode: 'bypass' }),
+      sandboxModeOnly: true,
+      configuration: configurationForHeader(current.header, { sandboxMode: 'danger-full-access' }),
     });
     let refreshed = false;
     const refresh = manager.refreshIdleBackends().then(() => {
@@ -5261,7 +5269,7 @@ describe('SessionManager permission mode updates', () => {
     await firstTurn;
     await refresh;
     await drain(manager.sendMessage(session.id, { turnId: 'turn-retry', text: 'retry' }));
-    assert.deepStrictEqual(builds, ['ask', 'bypass']);
+    assert.deepStrictEqual(builds, ['workspace-write', 'danger-full-access']);
   });
 
   test('revokes background shell authority before narrowing Auto to Explore', async () => {
@@ -5288,14 +5296,14 @@ describe('SessionManager permission mode updates', () => {
         },
       } as never,
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     const current = await store.readHeaderRecordSnapshot(session.id);
 
     await manager.transitionSessionConfiguration(session.id, {
       expectedRevision: current.revision,
       clearConnectionBlock: false,
-      permissionModeOnly: true,
-      configuration: configurationForHeader(current.header, { permissionMode: 'explore' }),
+      sandboxModeOnly: true,
+      configuration: configurationForHeader(current.header, { sandboxMode: 'read-only' }),
     });
 
     assert.deepStrictEqual(calls, [`terminate:${session.id}`, 'commit', `resume:${session.id}`]);
@@ -5334,7 +5342,7 @@ describe('SessionManager permission mode updates', () => {
         },
       } as never,
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     store.forceBoundary(session.id, {
       kind: 'managed',
       profile: applySandboxBoundaryExpansion(createReadOnlyPermissionProfile(), {
@@ -5353,22 +5361,22 @@ describe('SessionManager permission mode updates', () => {
     const narrowing = {
       expectedRevision: current.revision,
       clearConnectionBlock: false,
-      permissionModeOnly: true,
-      configuration: configurationForHeader(current.header, { permissionMode: 'explore' }),
+      sandboxModeOnly: true,
+      configuration: configurationForHeader(current.header, { sandboxMode: 'read-only' }),
     } as const;
     await expectRejects(
       manager.transitionSessionConfiguration(session.id, narrowing),
       /linked Turn is active/,
     );
     assert.deepStrictEqual(calls, []);
-    assert.strictEqual((await store.readHeader(session.id)).permissionMode, 'ask');
+    assert.strictEqual((await store.readHeader(session.id)).sandboxMode, 'workspace-write');
 
     gate.release();
     while (!(await activeTurn.next()).done) {}
 
     await manager.transitionSessionConfiguration(session.id, narrowing);
     assert.deepStrictEqual(calls, [`terminate:${session.id}`, 'commit', `resume:${session.id}`]);
-    assert.strictEqual((await store.readHeader(session.id)).permissionMode, 'explore');
+    assert.strictEqual((await store.readHeader(session.id)).sandboxMode, 'read-only');
   });
 
   for (const route of ['configuration', 'boundary'] as const) {
@@ -5411,15 +5419,15 @@ describe('SessionManager permission mode updates', () => {
         const workspaceRoot = join(root, 'workspace');
         const outsidePath = join(root, 'approved', 'input.txt');
         const session = await manager.createSession(
-          makeInput({ permissionMode: 'explore', cwd: workspaceRoot }),
+          makeInput({ sandboxMode: 'read-only', cwd: workspaceRoot }),
         );
-        const updatePermissionMode = async (permissionMode: PermissionMode) => {
+        const updateSandboxMode = async (sandboxMode: SandboxMode) => {
           const current = await store.readHeaderRecordSnapshot(session.id);
           return manager.transitionSessionConfiguration(session.id, {
             expectedRevision: current.revision,
             clearConnectionBlock: false,
-            permissionModeOnly: true,
-            configuration: configurationForHeader(current.header, { permissionMode }),
+            sandboxModeOnly: true,
+            configuration: configurationForHeader(current.header, { sandboxMode }),
           });
         };
         await store.createSandboxBoundaryRequest({
@@ -5441,10 +5449,10 @@ describe('SessionManager permission mode updates', () => {
           decision: 'allow',
         });
         assert.strictEqual(settlement.request.status, 'approved');
-        if (route === 'configuration') await updatePermissionMode('ask');
+        if (route === 'configuration') await updateSandboxMode('workspace-write');
         const restoreExplore = () =>
           route === 'configuration'
-            ? updatePermissionMode('explore')
+            ? updateSandboxMode('read-only')
             : manager.setExecutionBoundaryKind(session.id, 'managed');
         const expanded = await store.readExecutionBoundary(session.id);
         assert.strictEqual(expanded.kind, 'managed');
@@ -5478,8 +5486,8 @@ describe('SessionManager permission mode updates', () => {
           });
           assert.deepStrictEqual(await store.readExecutionBoundary(session.id), expanded);
           assert.strictEqual(
-            (await store.readHeader(session.id)).permissionMode,
-            route === 'configuration' ? 'ask' : 'explore',
+            (await store.readHeader(session.id)).sandboxMode,
+            route === 'configuration' ? 'workspace-write' : 'read-only',
           );
           assert.deepStrictEqual(calls, []);
         } finally {
@@ -5501,7 +5509,7 @@ describe('SessionManager permission mode updates', () => {
           canReadPath(narrowed.profile, outsidePath, { workspaceRoots: [workspaceRoot] }),
           false,
         );
-        assert.strictEqual((await store.readHeader(session.id)).permissionMode, 'explore');
+        assert.strictEqual((await store.readHeader(session.id)).sandboxMode, 'read-only');
       });
     }
   }
@@ -5533,10 +5541,10 @@ describe('SessionManager permission mode updates', () => {
         },
       } as never,
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
     const child = await manager.createSession(
       makeInput({
-        permissionMode: 'bypass',
+        sandboxMode: 'danger-full-access',
         subagentParent: {
           kind: 'subagent',
           parentSessionId: session.id,
@@ -5567,7 +5575,7 @@ describe('SessionManager permission mode updates', () => {
     );
     const grandchild = await manager.createSession(
       makeInput({
-        permissionMode: 'bypass',
+        sandboxMode: 'danger-full-access',
         subagentParent: {
           kind: 'subagent',
           parentSessionId: child.id,
@@ -5633,7 +5641,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(4_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
 
     const first = manager
       .sendMessage(session.id, { turnId: 'turn-1', text: 'first' })
@@ -5663,19 +5671,22 @@ describe('SessionManager permission mode updates', () => {
     const widened = await manager.transitionSessionConfiguration(session.id, {
       expectedRevision: current.revision,
       clearConnectionBlock: false,
-      permissionModeOnly: true,
-      configuration: configurationForHeader(current.header, { permissionMode: 'bypass' }),
+      sandboxModeOnly: true,
+      configuration: configurationForHeader(current.header, { sandboxMode: 'danger-full-access' }),
     });
-    assert.strictEqual(widened.header.permissionMode, 'bypass');
-    assert.strictEqual((await manager.readExecutionBoundary(session.id)).kind, 'bypass');
+    assert.strictEqual(widened.header.sandboxMode, 'danger-full-access');
+    assert.strictEqual(
+      (await manager.readExecutionBoundary(session.id)).kind,
+      'danger-full-access',
+    );
     // Narrowing still requires quiescence: that is what lets it terminate the
     // lineage's shells safely.
     await expectRejects(
       manager.transitionSessionConfiguration(session.id, {
         expectedRevision: widened.revision,
         clearConnectionBlock: false,
-        permissionModeOnly: true,
-        configuration: configurationForHeader(widened.header, { permissionMode: 'explore' }),
+        sandboxModeOnly: true,
+        configuration: configurationForHeader(widened.header, { sandboxMode: 'read-only' }),
       }),
       /linked Turn is active/,
     );
@@ -5692,30 +5703,30 @@ describe('SessionManager permission mode updates', () => {
         ['turn-2', 'completed'],
       ],
     );
-    const summary = await manager.setPermissionMode(session.id, 'bypass');
-    assert.strictEqual(summary.permissionMode, 'bypass');
+    const summary = await manager.setSandboxMode(session.id, 'danger-full-access');
+    assert.strictEqual(summary.sandboxMode, 'danger-full-access');
   });
 
-  test('the setPermissionMode wrapper delegates deep research cleanup to configuration authority', async () => {
+  test('the setSandboxMode wrapper delegates deep research cleanup to configuration authority', async () => {
     const store = new VersionedConfigurationMemorySessionStore();
     const backends = new BackendRegistry();
     backends.register('ai-sdk', (ctx) => new TestBackend(ctx));
     const manager = new SessionManager({ store, backends, newId: nextId(), now: nextNow(6_000) });
     const session = await manager.createSession(
       makeInput({
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         labels: [DEEP_RESEARCH_SESSION_LABEL, 'kept'],
       }),
     );
 
-    const summary = await manager.setPermissionMode(session.id, 'ask');
+    const summary = await manager.setSandboxMode(session.id, 'workspace-write');
 
-    assert.strictEqual(summary.permissionMode, 'ask');
+    assert.strictEqual(summary.sandboxMode, 'workspace-write');
     assert.deepStrictEqual(summary.labels, ['kept']);
     assert.deepStrictEqual((await store.readHeader(session.id)).labels, ['kept']);
   });
 
-  test('temporarily preserves setPermissionMode for legacy SessionStore implementations', async () => {
+  test('temporarily preserves setSandboxMode for legacy SessionStore implementations', async () => {
     const store = new MemorySessionStore();
     const manager = new SessionManager({
       store,
@@ -5723,13 +5734,13 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_100),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
 
-    const summary = await manager.setPermissionMode(session.id, 'bypass');
+    const summary = await manager.setSandboxMode(session.id, 'danger-full-access');
 
-    assert.strictEqual(summary.permissionMode, 'bypass');
-    assert.strictEqual((await store.readHeader(session.id)).permissionMode, 'bypass');
-    assert.strictEqual((await store.readExecutionBoundary(session.id)).kind, 'bypass');
+    assert.strictEqual(summary.sandboxMode, 'danger-full-access');
+    assert.strictEqual((await store.readHeader(session.id)).sandboxMode, 'danger-full-access');
+    assert.strictEqual((await store.readExecutionBoundary(session.id)).kind, 'danger-full-access');
   });
 
   test('starts a new turn without workspace identity when safety inspection fails', async () => {
@@ -6482,7 +6493,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_525),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
 
     const events = await collectSessionEvents(
       manager.sendMessage(session.id, {
@@ -6669,7 +6680,7 @@ describe('SessionManager permission mode updates', () => {
       llmConnectionSlug: header.llmConnectionSlug,
       modelId: header.model,
       cwd: header.cwd,
-      permissionMode: header.permissionMode,
+      sandboxMode: header.sandboxMode,
       orchestrationMode: 'swarm',
       orchestrationSource: 'turn_override',
       agentSwarmAuthorization: 'turn_override',
@@ -6957,7 +6968,7 @@ describe('SessionManager permission mode updates', () => {
         llmConnectionId: 'connection-a',
         llmConnectionSlug: 'anthropic-a',
         model: 'claude-a',
-        permissionMode: 'bypass',
+        sandboxMode: 'danger-full-access',
       }),
     );
     const sourceRunId = 'source-run-cross-route';
@@ -6977,7 +6988,7 @@ describe('SessionManager permission mode updates', () => {
       modelId: 'claude-a',
       cwd: '/tmp/cwd',
       workspaceIdentity: 'workspace-1',
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
       orchestrationMode: 'default',
       orchestrationSource: 'session',
       toolMode: 'code_mode',
@@ -7692,7 +7703,7 @@ describe('SessionManager permission mode updates', () => {
       llmConnectionSlug: header.llmConnectionSlug,
       modelId: header.model,
       cwd: header.cwd,
-      permissionMode: header.permissionMode,
+      sandboxMode: header.sandboxMode,
       createdAt: 1,
       updatedAt: 2,
       completedAt: 2,
@@ -8769,7 +8780,7 @@ describe('SessionManager permission mode updates', () => {
         makeInput({
           llmConnectionSlug: 'anthropic',
           model: 'claude-test',
-          permissionMode: 'bypass',
+          sandboxMode: 'danger-full-access',
         }),
       );
       await store.updateHeader(session.id, {
@@ -9744,7 +9755,7 @@ describe('SessionManager permission mode updates', () => {
       session.id,
       header.runId,
       runtimeEvent({
-        id: 'active-permission-request',
+        id: 'active-permission_request',
         sessionId: session.id,
         runId: header.runId,
         turnId: header.turnId,
@@ -9932,7 +9943,7 @@ describe('SessionManager permission mode updates', () => {
       id: 'legacy-note',
       ts: 104,
       kind: 'mode_change',
-      data: { from: 'ask', to: 'bypass' },
+      data: { from: 'workspace-write', to: 'danger-full-access' },
     };
     await store.appendMessage(session.id, legacyNote);
 
@@ -10500,7 +10511,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_845),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     const active = manager
       .sendMessage(session.id, { turnId: 'active-parent-turn', text: 'hold active' })
       [Symbol.asyncIterator]();
@@ -10568,7 +10579,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_845),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     const turn = manager
       .sendMessage(session.id, {
         turnId: 'stop-owned-build-reject',
@@ -10618,7 +10629,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_845),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     const turn = manager
       .sendMessage(session.id, {
         turnId: 'cooperative-factory-stop',
@@ -10659,7 +10670,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_845),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     const turn = manager
       .sendMessage(session.id, {
         turnId: 'native-abort-wrapper-stop',
@@ -10714,7 +10725,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_845),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     const turn = manager
       .sendMessage(session.id, {
         turnId: 'ignored-factory-stop',
@@ -10778,7 +10789,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_845),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     const turn = manager
       .sendMessage(session.id, {
         turnId: 'late-disposal-failure',
@@ -11167,7 +11178,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_848),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     await seedRuntimeRun(
       runStore,
       makeRunHeader({
@@ -11216,7 +11227,7 @@ describe('SessionManager permission mode updates', () => {
         parentRunId: 'parent-run',
         agentId: LOCAL_READ_AGENT_ID,
         agentName: 'Researcher',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
       }),
       [
         runtimeEvent({
@@ -11359,7 +11370,7 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(6_900),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const session = await manager.createSession(makeInput({ sandboxMode: 'workspace-write' }));
     await seedRuntimeRun(
       runStore,
       makeRunHeader({
@@ -11394,7 +11405,7 @@ describe('SessionManager permission mode updates', () => {
         parentRunId: 'parent-run',
         agentId: LOCAL_READ_AGENT_ID,
         agentName: 'Researcher',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
       }),
       [
         runtimeEvent({
@@ -11457,7 +11468,7 @@ describe('SessionManager permission mode updates', () => {
       parentRunId: 'parent-run',
       agentId: LOCAL_READ_AGENT_ID,
       agentName: 'Researcher',
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
     });
     await seedInvocationFromHeader(runStore, header);
     for (let index = 0; index < 25; index += 1) {
@@ -11539,7 +11550,7 @@ describe('SessionManager permission mode updates', () => {
         parentRunId: 'parent-run',
         agentId: LOCAL_READ_AGENT_ID,
         agentName: 'Researcher',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
       }),
     );
     runStore.seedRuntimeEvent(
@@ -11679,8 +11690,11 @@ describe('SessionManager permission mode updates', () => {
     assert.strictEqual((await store.readHeader(session.id)).status, 'waiting_for_user');
     const [run] = await runStore.listSessionInvocations(session.id);
     assert.strictEqual(run?.terminalEvent, undefined);
-    await expectRejects(manager.setPermissionMode(session.id, 'bypass'), /pending Interaction/);
-    assert.strictEqual((await store.readHeader(session.id)).permissionMode, 'ask');
+    await expectRejects(
+      manager.setSandboxMode(session.id, 'danger-full-access'),
+      /pending Interaction/,
+    );
+    assert.strictEqual((await store.readHeader(session.id)).sandboxMode, 'workspace-write');
 
     await manager.respondToSandboxBoundary(session.id, {
       requestId: 'boundary-1',
@@ -12265,7 +12279,7 @@ describe('SessionManager permission mode updates', () => {
       llmConnectionSlug: 'fake',
       modelId: 'fake-model',
     });
-    assert.strictEqual(run?.opening.configuration.permissionMode, 'ask');
+    assert.strictEqual(run?.opening.configuration.sandboxMode, 'workspace-write');
     assert.strictEqual(run && runtimeInvocationOutcome(run), 'completed');
     const events = await runStore.readEvents(session.id, run!.runId);
     assert.ok(events.map((event) => event.type).includes('model_stream_started'));
@@ -13058,7 +13072,7 @@ async function steeringDeliverySession(
     now: nextNow(1_000),
   };
   manager = new SessionManager(managerDeps);
-  const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+  const session = await manager.createSession(makeInput({ sandboxMode: 'danger-full-access' }));
   sessionId = session.id;
   return { manager, session, store };
 }
@@ -14385,7 +14399,7 @@ class MemorySessionStore implements SessionStore {
       connectionLocked: input.subagentParent !== undefined,
       model: input.model ?? 'fake-model',
       ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
-      permissionMode: input.permissionMode,
+      sandboxMode: input.sandboxMode,
       ...(input.toolMode !== undefined ? { toolMode: input.toolMode } : {}),
       collaborationMode: input.collaborationMode ?? 'agent',
       orchestrationMode: input.orchestrationMode ?? 'default',
@@ -14398,32 +14412,32 @@ class MemorySessionStore implements SessionStore {
       header.id,
       initialBoundary
         ? { ...initialBoundary, revision: 0 }
-        : createGenesisExecutionBoundary(header.permissionMode),
+        : createGenesisExecutionBoundary(header.sandboxMode),
     );
     return header;
   }
 
   async setExecutionBoundaryKind(
     sessionId: string,
-    kind: 'managed' | 'bypass',
+    kind: 'managed' | 'danger-full-access',
     projection?: {
-      permissionMode: SessionHeader['permissionMode'];
+      sandboxMode: SessionHeader['sandboxMode'];
       labels?: readonly string[];
     },
   ) {
     const current = await this.readHeader(sessionId);
-    const permissionMode =
-      projection?.permissionMode ??
-      (kind === 'bypass'
-        ? 'bypass'
-        : current.permissionMode === 'bypass'
-          ? 'ask'
-          : current.permissionMode);
+    const sandboxMode =
+      projection?.sandboxMode ??
+      (kind === 'danger-full-access'
+        ? 'danger-full-access'
+        : current.sandboxMode === 'danger-full-access'
+          ? 'workspace-write'
+          : current.sandboxMode);
     await this.updateHeader(sessionId, {
-      permissionMode,
+      sandboxMode,
       ...(projection?.labels ? { labels: [...projection.labels] } : {}),
     });
-    const boundary = createGenesisExecutionBoundary(permissionMode);
+    const boundary = createGenesisExecutionBoundary(sandboxMode);
     this.executionBoundaries.set(sessionId, boundary);
     return boundary;
   }
@@ -14633,9 +14647,9 @@ class VersionedConfigurationMemorySessionStore extends MemorySessionStore {
     }
     await super.setExecutionBoundaryKind(
       sessionId,
-      input.configuration.permissionMode === 'bypass' ? 'bypass' : 'managed',
+      input.configuration.sandboxMode === 'danger-full-access' ? 'danger-full-access' : 'managed',
       {
-        permissionMode: input.configuration.permissionMode,
+        sandboxMode: input.configuration.sandboxMode,
         labels: input.configuration.labels,
       },
     );
@@ -14674,10 +14688,10 @@ class AtomicBoundaryMemorySessionStore extends MemorySessionStore {
   failAppends = false;
   readonly boundaryCalls: Array<{
     sessionId: string;
-    kind: 'managed' | 'bypass';
+    kind: 'managed' | 'danger-full-access';
     projection:
       | {
-          permissionMode: SessionHeader['permissionMode'];
+          sandboxMode: SessionHeader['sandboxMode'];
           labels?: readonly string[];
         }
       | undefined;
@@ -14695,32 +14709,32 @@ class AtomicBoundaryMemorySessionStore extends MemorySessionStore {
 
   async setExecutionBoundaryKind(
     sessionId: string,
-    kind: 'managed' | 'bypass',
+    kind: 'managed' | 'danger-full-access',
     projection?: {
-      permissionMode: SessionHeader['permissionMode'];
+      sandboxMode: SessionHeader['sandboxMode'];
       labels?: readonly string[];
     },
   ) {
     this.boundaryCalls.push({ sessionId, kind, projection });
     const current = await this.readHeader(sessionId);
-    const permissionMode =
-      projection?.permissionMode ??
-      (kind === 'bypass'
-        ? 'bypass'
-        : current.permissionMode === 'bypass'
-          ? 'ask'
-          : current.permissionMode);
+    const sandboxMode =
+      projection?.sandboxMode ??
+      (kind === 'danger-full-access'
+        ? 'danger-full-access'
+        : current.sandboxMode === 'danger-full-access'
+          ? 'workspace-write'
+          : current.sandboxMode);
     this.projectingBoundary = true;
     try {
       await super.updateHeader(sessionId, {
-        permissionMode,
+        sandboxMode,
         ...(projection?.labels ? { labels: [...projection.labels] } : {}),
       });
     } finally {
       this.projectingBoundary = false;
     }
     const boundary = {
-      ...createGenesisExecutionBoundary(permissionMode),
+      ...createGenesisExecutionBoundary(sandboxMode),
       revision: 1,
     };
     this.boundaries.set(sessionId, boundary);
@@ -14731,8 +14745,8 @@ class AtomicBoundaryMemorySessionStore extends MemorySessionStore {
     sessionId: string,
     patch: Partial<SessionHeader>,
   ): Promise<SessionHeader> {
-    if (!this.projectingBoundary && Object.hasOwn(patch, 'permissionMode')) {
-      throw new Error('permissionMode must be projected by the boundary transition');
+    if (!this.projectingBoundary && Object.hasOwn(patch, 'sandboxMode')) {
+      throw new Error('sandboxMode must be projected by the boundary transition');
     }
     return super.updateHeader(sessionId, patch);
   }
@@ -15373,7 +15387,7 @@ function makeInput(overrides: Partial<CreateSessionInput> = {}): CreateSessionIn
     cwd: '/tmp/cwd',
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     name: 'Session',
     labels: [],
     ...overrides,
@@ -15391,7 +15405,7 @@ function configurationForHeader(
     connectionLocked: header.connectionLocked,
     model: header.model,
     thinkingLevel: header.thinkingLevel,
-    permissionMode: header.permissionMode,
+    sandboxMode: header.sandboxMode,
     collaborationMode: header.collaborationMode ?? 'agent',
     orchestrationMode: header.orchestrationMode ?? 'default',
     ...overrides,
@@ -15405,7 +15419,7 @@ function createGraphOperatorSession(
   return store.create(
     makeInput({
       name: 'Graph operator',
-      permissionMode: 'explore',
+      sandboxMode: 'read-only',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
       subagentParent: {
@@ -15610,7 +15624,7 @@ function makeRunHeader(overrides: Partial<TestRunHeader> = {}): TestRunHeader {
     llmConnectionSlug: 'fake',
     modelId: 'fake-model',
     cwd: '/tmp/cwd',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     createdAt: 10,
     updatedAt: 10,
     ...overrides,
@@ -15637,7 +15651,7 @@ interface TestRunHeader {
   providerStateIdentity?: `sha256:${string}`;
   cwd: string;
   workspaceIdentity?: string;
-  permissionMode: PermissionMode;
+  sandboxMode: SandboxMode;
   collaborationMode?: 'agent' | 'plan';
   orchestrationMode?: 'default' | 'graph' | 'swarm';
   orchestrationSource?: 'session' | 'turn_override';
@@ -15736,7 +15750,7 @@ function testInvocationOpening(header: TestRunHeader): RuntimeEventInvocationOpe
           },
     configuration: {
       cwd: header.cwd,
-      permissionMode: header.permissionMode,
+      sandboxMode: header.sandboxMode,
       collaborationMode: header.collaborationMode ?? 'agent',
       orchestrationMode: header.orchestrationMode ?? 'default',
       orchestrationSource: header.orchestrationSource ?? 'session',
@@ -16155,7 +16169,7 @@ async function seedCanonicalPermissionRun(
     ...(includeLedgerRequest
       ? [
           runtimeEvent({
-            id: 'permission-request-canonical',
+            id: 'permission_request-canonical',
             sessionId: header.sessionId,
             runId: header.runId,
             turnId: header.turnId,

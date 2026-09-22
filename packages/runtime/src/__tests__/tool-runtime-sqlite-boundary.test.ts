@@ -161,7 +161,7 @@ describe('ToolRuntime with real SQLite boundary', () => {
         header: header(),
         connection: connection(),
         modelId: 'model-1',
-        readExecutionBoundary: async () => createGenesisExecutionBoundary('ask'),
+        readExecutionBoundary: async () => createGenesisExecutionBoundary('workspace-write'),
         newId: nextId(),
         now: nextNow(),
         getPermissionPauseTarget: () => null,
@@ -707,7 +707,7 @@ function header(): SessionHeader {
     llmConnectionSlug: 'connection-1',
     connectionLocked: true,
     model: 'model-1',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     schemaVersion: 1,
   };
 }

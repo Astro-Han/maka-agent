@@ -186,7 +186,7 @@ export async function verifyCapabilityHost(connection, workspace, reopened, open
       sessionId,
       workspace: { kind: 'host_path', path: workspace },
       modelTarget: { kind: 'default' },
-      permissionMode: 'bypass',
+      sandboxMode: 'danger-full-access',
     });
     registrations.set(
       1,

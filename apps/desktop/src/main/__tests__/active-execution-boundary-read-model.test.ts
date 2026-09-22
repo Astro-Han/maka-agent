@@ -63,12 +63,12 @@ describe('Active execution boundary read model', () => {
     // Why the reload below has to exist: the two boundaries differ only in
     // revision + profile, and they drive different labels.
     assert.equal(
-      deriveDesktopExecutionBoundarySurface('session-a', readOnly, 'ask').permissionMode,
-      'explore',
+      deriveDesktopExecutionBoundarySurface('session-a', readOnly, 'workspace-write').sandboxMode,
+      'read-only',
     );
     assert.equal(
-      deriveDesktopExecutionBoundarySurface('session-a', widened, 'ask').permissionMode,
-      'ask',
+      deriveDesktopExecutionBoundarySurface('session-a', widened, 'workspace-write').sandboxMode,
+      'workspace-write',
     );
   });
 });
@@ -173,9 +173,9 @@ describe('A boundary read that fails (#1629)', () => {
       deriveDesktopExecutionBoundarySurface(
         'session-a',
         activeExecutionBoundaryOf(failed, 'session-a'),
-        'ask',
+        'workspace-write',
       ),
-      { permissionMode: undefined, localInteractionAvailable: false },
+      { sandboxMode: undefined, localInteractionAvailable: false },
     );
   });
 
@@ -234,7 +234,7 @@ describe('Only the newest boundary read may commit', () => {
   });
 
   // The shape CI reproduced from the first cut of this fix: changing the
-  // permission mode re-runs the read (permissionMode is one of its triggers),
+  // permission mode re-runs the read (sandboxMode is one of its triggers),
   // and the previous generation's answer landed afterwards and put the old
   // boundary back. The composer's label then still read 只读 right after the
   // user chose 自动 — the read model's own state, not anything main said.
@@ -311,6 +311,11 @@ describe('Boundary decisions notify the read model', () => {
     // field changes, so without this signal the surface would keep rendering
     // the permissions the session had before the user granted more.
     assert.deepEqual(boundaryChanges, ['session-a']);
+    handlers.markDisplayPending('session-a');
+    assert.deepEqual(boundaryChanges, ['session-a'], 'no reads while transport is unavailable');
+    handlers.markDisplayReady('session-a');
+    handlers.markDisplayReady('session-a');
+    assert.deepEqual(boundaryChanges, ['session-a', 'session-a'], 'one fresh read when observation recovers');
   });
 
   it('does not re-read on events that cannot move a boundary', () => {

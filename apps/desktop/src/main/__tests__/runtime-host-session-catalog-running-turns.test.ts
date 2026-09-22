@@ -120,7 +120,8 @@ function session(id: string): SessionCatalogProjection {
     llmConnectionSlug: 'fake',
     connectionLocked: true,
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: {kind: 'on-request'},
     collaborationMode: 'agent',
     orchestrationMode: 'default',
   };

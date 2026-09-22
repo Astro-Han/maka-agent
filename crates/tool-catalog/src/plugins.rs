@@ -178,6 +178,7 @@ impl ToolCatalog {
             entries: Arc::new(entries),
             discovery: self.discovery,
             plugins: None,
+            workspace: self.workspace.clone(),
         })
     }
 }

@@ -229,7 +229,16 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         .unwrap();
     assert_eq!(active_landmark.len(), 1);
     assert_eq!(active_landmark[0].sequence, active * 256);
-    assert_eq!(active_landmark[0].last_sequence, active * 256);
+    assert_eq!(active_landmark[0].last_sequence, active * 256 + 1);
+    let active_turn = pages(&log, active_fence, 128)
+        .await
+        .into_iter()
+        .find(|turn| turn.turn_id == "active")
+        .unwrap();
+    assert_eq!(
+        active_turn.latest_state.unwrap().message.status,
+        maka_presentation::navigation::TurnStatus::Running
+    );
     assert_eq!(pages(&log, fence, 1).await, initial);
     end(&log, "active", "active").await;
     open(&log, "successor", "shared", "successor").await;

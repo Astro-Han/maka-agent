@@ -50,7 +50,7 @@ function session(id: string) {
     llmConnectionSlug: 'default',
     connectionLocked: false,
     model: 'model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     collaborationMode: 'agent',
     orchestrationMode: 'default',
   };

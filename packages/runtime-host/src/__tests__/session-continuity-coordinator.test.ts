@@ -2375,7 +2375,7 @@ function previewEvent() {
       agentName: 'Local Read',
       turnId: 'child-turn',
       status: 'running' as const,
-      permissionMode: 'explore' as const,
+      sandboxMode: 'read-only' as const,
     },
   };
 }

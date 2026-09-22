@@ -76,7 +76,7 @@
         "baseUrl": "https://api.deepseek.com",
         "model": "deepseek-v4-flash",
         "thinkingLevel": "max",
-        "permissionMode": "bypass",
+        "sandboxMode": "danger-full-access",
         "collaborationMode": "agent",
         "orchestrationMode": "default",
         "toolProfile": "headless-coding-v1"

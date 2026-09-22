@@ -61,7 +61,7 @@ impl Executions {
         session_id: Option<&str>,
         connection_id: uuid::Uuid,
         cwd: &str,
-        mode: maka_protocol::session::PermissionMode,
+        mode: maka_protocol::session::SandboxMode,
         profile: Option<maka_protocol::session::SessionToolProfile>,
     ) -> Result<maka_tools::ToolCatalog> {
         let mut additional = self
@@ -83,19 +83,25 @@ impl Executions {
                 )
             })?;
         additional.push(self.interactions.question_tool());
-        let native = self.native_tools(cwd, profile);
-        let ceiling = match session_id {
+        let (ceiling, origin) = match session_id {
             Some(id) => {
-                self.log
+                let configuration = self
+                    .log
                     .get_session::<crate::session::SessionConfiguration>(id)
                     .await
                     .map_err(internal)?
                     .ok_or_else(|| failure(Code::NotFound, "Session does not exist"))?
-                    .configuration
-                    .bound_tools
+                    .configuration;
+                let origin = if configuration.workspace.host_cwd == cwd {
+                    configuration.workspace_origin
+                } else {
+                    maka_runtime::execution::WorkspaceOrigin::Selected
+                };
+                (configuration.bound_tools, origin)
             }
-            None => None,
+            None => (None, maka_runtime::execution::WorkspaceOrigin::Selected),
         };
+        let native = self.native_tools(cwd, profile, origin).await?;
         let native_ceiling = ceiling.clone();
         let prepared = tokio::task::spawn_blocking(move || {
             super::catalog(native, mode, additional, native_ceiling.as_ref())

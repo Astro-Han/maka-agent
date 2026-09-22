@@ -19,7 +19,8 @@
 
 import { isCollaborationMode, type CollaborationMode } from '@maka/core/collaboration';
 import { isOrchestrationMode, type OrchestrationMode } from '@maka/core/orchestration';
-import { isPermissionMode, type PermissionMode } from '@maka/core/permission';
+import { isSandboxMode, type SandboxMode } from '@maka/core/permission';
+import { decodeApprovalPolicy, type ApprovalPolicy } from '@maka/core/execution-permissions';
 import { isSessionStartMode, type SessionStartMode } from '@maka/core/session-start-mode';
 import {
   isSessionBlockedReason,
@@ -106,7 +107,8 @@ const PROJECTION_REQUIRED_FIELDS = [
   'llmConnectionSlug',
   'connectionLocked',
   'model',
-  'permissionMode',
+  'sandboxMode',
+  'approvalPolicy',
   'collaborationMode',
   'orchestrationMode',
 ] as const;
@@ -162,7 +164,8 @@ export interface SessionCreateInput {
   readonly executorId?: string;
   readonly thinkingLevel?: ThinkingLevel;
   readonly toolProfile?: SessionToolProfile;
-  readonly permissionMode?: PermissionMode;
+  readonly sandboxMode?: SandboxMode;
+  readonly approvalPolicy?: ApprovalPolicy;
   readonly collaborationMode?: CollaborationMode;
   readonly orchestrationMode?: OrchestrationMode;
 }
@@ -182,7 +185,8 @@ export interface SessionMetadataUpdateInput {
 export interface SessionConfigurationPatch {
   readonly modelTarget?: Extract<SessionModelTarget, { readonly kind: 'explicit' }>;
   readonly thinkingLevel?: ThinkingLevel | null;
-  readonly permissionMode?: PermissionMode;
+  readonly sandboxMode?: SandboxMode;
+  readonly approvalPolicy?: ApprovalPolicy;
   readonly collaborationMode?: CollaborationMode;
   readonly orchestrationMode?: OrchestrationMode;
 }
@@ -247,7 +251,8 @@ export interface SessionCatalogProjection {
   readonly connectionLocked: boolean;
   readonly model: string;
   readonly thinkingLevel?: ThinkingLevel;
-  readonly permissionMode: PermissionMode;
+  readonly sandboxMode: SandboxMode;
+  readonly approvalPolicy: ApprovalPolicy;
   readonly collaborationMode: CollaborationMode;
   readonly orchestrationMode: OrchestrationMode;
 }
@@ -467,7 +472,7 @@ export function decodeExecutionBoundarySummary(value: unknown): ExecutionBoundar
       revision: requireCount(exact.revision, 'Execution boundary revision'),
     };
   }
-  if (boundary.kind === 'bypass' || boundary.kind === 'external') {
+  if (boundary.kind === 'danger-full-access' || boundary.kind === 'external') {
     const exact = requireExactRecord(boundary, 'Execution boundary summary', ['kind', 'revision']);
     return {
       kind: boundary.kind,
@@ -519,7 +524,8 @@ export function decodeSessionCreateInput(value: unknown): SessionCreateInput {
       'executorId',
       'thinkingLevel',
       'toolProfile',
-      'permissionMode',
+      'sandboxMode',
+      'approvalPolicy',
       'collaborationMode',
       'orchestrationMode',
     ],
@@ -545,8 +551,9 @@ export function decodeSessionCreateInput(value: unknown): SessionCreateInput {
     ...(Object.hasOwn(input, 'toolProfile')
       ? { toolProfile: sessionToolProfile(input.toolProfile) }
       : {}),
-    ...(Object.hasOwn(input, 'permissionMode')
-      ? { permissionMode: permissionMode(input.permissionMode) }
+    ...(Object.hasOwn(input, 'sandboxMode') ? { sandboxMode: sandboxMode(input.sandboxMode) } : {}),
+    ...(Object.hasOwn(input, 'approvalPolicy')
+      ? { approvalPolicy: approvalPolicy(input.approvalPolicy) }
       : {}),
     ...(Object.hasOwn(input, 'collaborationMode')
       ? { collaborationMode: collaborationMode(input.collaborationMode) }
@@ -607,7 +614,14 @@ export function decodeSessionConfigurationUpdateInput(
     input.patch,
     'Session configuration patch',
     [],
-    ['modelTarget', 'thinkingLevel', 'permissionMode', 'collaborationMode', 'orchestrationMode'],
+    [
+      'modelTarget',
+      'thinkingLevel',
+      'sandboxMode',
+      'approvalPolicy',
+      'collaborationMode',
+      'orchestrationMode',
+    ],
   );
   if (Object.keys(patch).length === 0) {
     throw invalidProtocolFrame('Session configuration patch is empty');
@@ -624,8 +638,11 @@ export function decodeSessionConfigurationUpdateInput(
             thinkingLevel: patch.thinkingLevel === null ? null : thinkingLevel(patch.thinkingLevel),
           }
         : {}),
-      ...(Object.hasOwn(patch, 'permissionMode')
-        ? { permissionMode: permissionMode(patch.permissionMode) }
+      ...(Object.hasOwn(patch, 'sandboxMode')
+        ? { sandboxMode: sandboxMode(patch.sandboxMode) }
+        : {}),
+      ...(Object.hasOwn(patch, 'approvalPolicy')
+        ? { approvalPolicy: approvalPolicy(patch.approvalPolicy) }
         : {}),
       ...(Object.hasOwn(patch, 'collaborationMode')
         ? { collaborationMode: collaborationMode(patch.collaborationMode) }
@@ -780,7 +797,8 @@ export function decodeSessionCatalogProjection(value: unknown): SessionCatalogPr
     connectionLocked: boolean(record.connectionLocked, 'Session connection lock'),
     model: requireUtf8String(record.model, 'Session model', SESSION_CATALOG_MODEL_MAX_BYTES),
     ...optionalThinkingLevel(record),
-    permissionMode: permissionMode(record.permissionMode),
+    sandboxMode: sandboxMode(record.sandboxMode),
+    approvalPolicy: approvalPolicy(record.approvalPolicy),
     collaborationMode: collaborationMode(record.collaborationMode),
     orchestrationMode: orchestrationMode(record.orchestrationMode),
   };
@@ -1012,9 +1030,17 @@ function thinkingLevel(value: unknown): ThinkingLevel {
   return value;
 }
 
-function permissionMode(value: unknown): PermissionMode {
-  if (!isPermissionMode(value)) throw invalidProtocolFrame('Invalid Session permission mode');
+function sandboxMode(value: unknown): SandboxMode {
+  if (!isSandboxMode(value)) throw invalidProtocolFrame('Invalid Session permission mode');
   return value;
+}
+
+function approvalPolicy(value: unknown): ApprovalPolicy {
+  try {
+    return decodeApprovalPolicy(value);
+  } catch {
+    throw invalidProtocolFrame('Invalid Session approval policy');
+  }
 }
 
 function collaborationMode(value: unknown): CollaborationMode {

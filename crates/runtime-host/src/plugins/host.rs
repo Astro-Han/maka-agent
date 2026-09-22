@@ -75,14 +75,16 @@ impl Provider for Issuer {
                 credentials: storage,
                 executions: executions.clone(),
                 authorizations: executions,
+                permissions: effects.clone(),
                 files: effects.clone(),
                 models: effects.clone(),
                 clients: effects.clone(),
                 sessions: effects.clone(),
-                history: effects,
+                history: effects.clone(),
                 http: Arc::new(super::http::Http::new(
                     self.executions.clone(),
                     owner.clone(),
+                    effects,
                 )),
                 processes: Arc::new(super::process::Processes::new(
                     self.executions.clone(),

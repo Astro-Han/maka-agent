@@ -79,7 +79,7 @@ function sessionInput(cwd: string, projectId: string) {
     backend: 'fake' as const,
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask' as const,
+    sandboxMode: 'workspace-write' as const,
   };
 }
 

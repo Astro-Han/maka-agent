@@ -27,6 +27,7 @@ export * from './components.js';
 export type { ComposerProps } from './components.js';
 export type { SandboxBoundaryPromptProps } from './sandbox-boundary-prompt.js';
 export type { ClientCapabilityPromptProps } from './client-capability-prompt.js';
+export { PermissionsPrompt, type PermissionsPromptProps } from './permissions-prompt.js';
 export type {
   ProjectRowActions,
   SessionHistoryGroup,

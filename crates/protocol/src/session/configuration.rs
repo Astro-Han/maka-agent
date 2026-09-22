@@ -18,7 +18,7 @@
  */
 
 use super::{
-    BehaviorId, CollaborationMode, PermissionMode, SessionModelTarget, SessionUpdateResult,
+    BehaviorId, CollaborationMode, SandboxMode, SessionModelTarget, SessionUpdateResult,
     ThinkingLevel, WorkspaceTarget, mutation, validation,
 };
 use crate::{ProtocolError, Result};
@@ -34,7 +34,9 @@ pub struct SessionConfigurationPatch {
     #[serde(default, skip_serializing_if = "Patch::is_keep")]
     pub thinking_level: Patch<ThinkingLevel>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<PermissionMode>,
+    pub sandbox_mode: Option<SandboxMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_policy: Option<super::ApprovalPolicy>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub collaboration_mode: Option<CollaborationMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,7 +96,8 @@ pub fn decode_session_configuration_update_input(
     let patch = &input.patch;
     if patch.model_target.is_none()
         && patch.thinking_level.is_keep()
-        && patch.permission_mode.is_none()
+        && patch.sandbox_mode.is_none()
+        && patch.approval_policy.is_none()
         && patch.collaboration_mode.is_none()
         && patch.orchestration_mode.is_none()
     {

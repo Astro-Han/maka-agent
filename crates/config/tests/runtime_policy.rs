@@ -190,7 +190,7 @@ async fn defaults_are_read_only_and_cas_is_durable_even_for_same_value() {
             .unwrap()
     );
     let value = ChatDefaults {
-        permission_mode: ChatDefaultPermissionMode::Bypass,
+        sandbox_mode: maka_runtime::execution::SandboxMode::ReadOnly,
         code_mode_enabled: true,
         thinking_level: Some(ThinkingLevel::High),
     };

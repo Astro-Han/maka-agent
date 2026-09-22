@@ -43,7 +43,7 @@ import { List, ListItem } from '@astryxdesign/core/List';
 import { Section } from '@astryxdesign/core/Section';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { Tab, TabList } from '@astryxdesign/core/TabList';
-import type { SessionSummary } from '@maka/core/session';
+import type { SideChatSession } from '../ports.js';
 import type { WorkBoardItem, WorkBoardLinkedSession } from '@maka/core/work-board';
 import { QuoteCompanionPanel } from '../tools/side-chat/quote-companion-panel';
 import {
@@ -405,13 +405,13 @@ export function WorkbarSurface(props: {
   onPromptAccepted?: (panelId: string, prompt: string) => void;
   onActivityStateChange?: (panelId: string, active: boolean) => void;
   activeSideChatPanelIds?: ReadonlySet<string>;
-  sourceSession?: SessionSummary;
+  sourceSession?: SideChatSession;
   modelChoices?: readonly ChatModelChoice[];
   onStartWorkBoardTask?: (item: WorkBoardItem) => void;
   resolveWorkBoardStartTask?: (item: WorkBoardItem) => { ok: boolean; message?: string };
   onOpenWorkBoardSession?: (link: WorkBoardLinkedSession) => void;
   workBoardStartTaskEnabled?: boolean;
-  confirmBypass: () => Promise<boolean>;
+  confirmBypass: (allProtections?: boolean) => Promise<boolean>;
 }) {
   const { inspector } = useWorkbarServices();
   const locale = useUiLocale();

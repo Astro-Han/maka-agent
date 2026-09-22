@@ -207,7 +207,7 @@ describe('composer first-send cleanup', () => {
     // `chatDefaults`. Sending the offered default back as an explicit override
     // would make a cached snapshot the authority and could create a full-access
     // Session from a value another client already lowered.
-    assert.ok(!('permissionMode' in (createInput as Record<string, unknown>)));
+    assert.ok(!('sandboxMode' in (createInput as Record<string, unknown>)));
   });
 
   it('sends a composer permission choice once without writing it to the Host default', async () => {
@@ -238,7 +238,9 @@ describe('composer first-send cleanup', () => {
     try {
       const deps = {
         ...createActionsDeps(),
-        newChatPermissionChoice: 'bypass' as const,
+        newChatExecutionChoice: {
+          sandboxMode: 'danger-full-access' as const, approvalPolicy: { kind: 'never' as const },
+        },
       };
       assert.equal(await createAppShellChatActions(deps).send('hello'), true);
     } finally {
@@ -248,7 +250,8 @@ describe('composer first-send cleanup', () => {
     // An explicit choice for this draft is a per-Session override: it reaches
     // the created Session, and it does not become the Host's default for every
     // later task. Only the Settings surface writes `chatDefaults`.
-    assert.equal((createInput as { permissionMode?: unknown }).permissionMode, 'bypass');
+    assert.equal((createInput as { sandboxMode?: unknown }).sandboxMode, 'danger-full-access');
+    assert.deepEqual((createInput as { approvalPolicy?: unknown }).approvalPolicy, { kind: 'never' });
     assert.equal(settingsUpdates, 0);
   });
 
@@ -276,20 +279,20 @@ describe('composer first-send cleanup', () => {
     });
 
     try {
-      let choice: 'ask' | undefined = 'ask';
+      let choice: 'workspace-write' | undefined = 'workspace-write';
       const deps = () => ({
         ...createActionsDeps(),
-        newChatPermissionChoice: choice,
-        clearNewChatPermissionChoice: () => {
+        newChatExecutionChoice: choice ? { sandboxMode: choice, approvalPolicy: { kind: 'never' as const } } : undefined,
+        clearNewChatExecutionChoice: () => {
           cleared += 1;
           choice = undefined;
         },
       });
       assert.equal(await createAppShellChatActions(deps()).send('task A'), false);
-      assert.equal(choice, 'ask');
+      assert.equal(choice, 'workspace-write');
       assert.deepEqual(removed, ['session-1']);
       assert.equal(await createAppShellChatActions(deps()).send('retry task A'), false);
-      assert.equal(choice, 'ask');
+      assert.equal(choice, 'workspace-write');
       assert.deepEqual(removed, ['session-1', 'session-2']);
       assert.equal(await createAppShellChatActions(deps()).send('retry task A again'), true);
       assert.equal(choice, undefined);
@@ -299,10 +302,11 @@ describe('composer first-send cleanup', () => {
     }
 
     assert.equal(cleared, 1);
-    assert.equal((createInputs[0] as { permissionMode?: unknown }).permissionMode, 'ask');
-    assert.equal((createInputs[1] as { permissionMode?: unknown }).permissionMode, 'ask');
-    assert.equal((createInputs[2] as { permissionMode?: unknown }).permissionMode, 'ask');
-    assert.ok(!('permissionMode' in (createInputs[3] as Record<string, unknown>)));
+    assert.equal((createInputs[0] as { sandboxMode?: unknown }).sandboxMode, 'workspace-write');
+    assert.equal((createInputs[1] as { sandboxMode?: unknown }).sandboxMode, 'workspace-write');
+    assert.equal((createInputs[2] as { sandboxMode?: unknown }).sandboxMode, 'workspace-write');
+    assert.ok(!('sandboxMode' in (createInputs[3] as Record<string, unknown>)));
+    assert.ok(!('approvalPolicy' in (createInputs[3] as Record<string, unknown>)));
   });
 
   it('creates the first session on the selected Runtime Host and project', async () => {
@@ -537,7 +541,7 @@ describe('composer first-send cleanup', () => {
     assert.equal(submissions, 0);
     assert.deepEqual(removed, ['session-1']);
     assert.equal(activeIdRef.current, undefined);
-    assert.deepEqual(errors, ['The message could not be sent. Try again later.']);
+    assert.deepEqual(errors, ['Request timed out']);
   });
 
   it('leaves an EXISTING session alone when its send rejects', async () => {

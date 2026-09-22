@@ -24,6 +24,7 @@ import {
   ChatSurfaceLayout,
   Composer,
   ClientCapabilityPrompt,
+  PermissionsPrompt,
   finalAssistantReplyText,
   FormInteractionPrompt,
   SandboxBoundaryPrompt,
@@ -33,7 +34,7 @@ import {
   type ChatModelChoice,
   type ComposerHandle,
 } from '@maka/ui';
-import type { SessionSummary } from '@maka/core/session';
+import type { SideChatSession } from '../../ports.js';
 import { generalizedErrorMessageForLocale } from '@maka/core/redaction';
 import { useQuoteCompanion } from './use-quote-companion';
 import { useComposerAttachments } from '@maka/ui/use-composer-attachments';
@@ -73,10 +74,10 @@ export function QuoteCompanionPanel(props: {
   /** Excerpts staged for the next send (accumulated as the user adds more). */
   quotes: readonly StagedCompanionQuote[];
   initialPrompt?: string;
-  sourceSession: SessionSummary | undefined;
+  sourceSession: SideChatSession | undefined;
   /** Shared global choice list, only used to render the inherited model's label. */
   modelChoices: readonly ChatModelChoice[];
-  confirmBypass: () => Promise<boolean>;
+  confirmBypass: (allProtections?: boolean) => Promise<boolean>;
   onQuotesConsumed: (snapshot: CompanionQuoteSnapshot) => void;
   onRemoveQuote?: (target: CompanionQuoteTarget) => void;
   onForkVisibilityChange?: (event: CompanionForkVisibilityEvent) => void;
@@ -282,6 +283,9 @@ export function QuoteCompanionPanel(props: {
                     onRespond={companion.respondToClientCapability}
                   />
                 )}
+                {companion.activePermissions && (
+                  <PermissionsPrompt request={companion.activePermissions} onRespond={companion.respondToPermissions} />
+                )}
                 {companion.activeQuestion && (
                   <UserQuestionPrompt
                     request={companion.activeQuestion}
@@ -397,12 +401,17 @@ export function QuoteCompanionPanel(props: {
               // No activeSession / onModelChange → the model shows as a read-only chip
               // (the companion has no independent picker; it inherits the source model).
               modelLabel={activeModelLabel}
-              permissionMode={companion.permissionMode}
-              permissionModeDisabledReason={
+              sandboxMode={companion.sandboxMode}
+              approval={companion.approvalPolicy ? {
+                policy: companion.approvalPolicy,
+                onChange: async (policy) => { await companion.setApprovalPolicy(policy); },
+                onDisableProtections: async () => { await companion.disableProtections(); },
+              } : undefined}
+              sandboxModeDisabledReason={
                 companion.streaming ? copy.permissionStreaming : undefined
               }
-              onPermissionModeChange={(mode) => {
-                void companion.setPermissionMode(mode);
+              onSandboxModeChange={(mode) => {
+                void companion.setSandboxMode(mode);
               }}
             />
           </>

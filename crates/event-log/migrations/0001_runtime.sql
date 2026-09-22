@@ -59,6 +59,10 @@ CREATE TABLE interaction_requests (
 
 CREATE INDEX interaction_session_pending ON interaction_requests(session_id, created_at, request_id);
 
+CREATE INDEX interaction_permission_basis ON interaction_requests(
+    session_id, json_extract(record_json, '$.request.baseRevision'), created_at, request_id
+) WHERE json_extract(record_json, '$.request.kind') = 'permissions';
+
 CREATE TABLE interaction_outcomes (
     request_id TEXT PRIMARY KEY REFERENCES interaction_requests(request_id),
     outcome_json TEXT NOT NULL CHECK(length(CAST(outcome_json AS BLOB)) <= 8192)

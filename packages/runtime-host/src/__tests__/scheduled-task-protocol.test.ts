@@ -207,7 +207,7 @@ function agentRunEffect(projectId: string | null | undefined): ScheduledTaskEffe
       llmConnectionId: 'connection-openai',
       llmConnectionSlug: 'openai',
       model: 'gpt-5',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
     },

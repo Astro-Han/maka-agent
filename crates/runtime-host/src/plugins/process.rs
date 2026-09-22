@@ -31,15 +31,6 @@ use std::{
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
-pub(super) fn prepare(input: &Command, cwd: &str) -> Result<maka_process::Command, String> {
-    input.validate().map_err(message)?;
-    let mut command = maka_process::Command::new(&input.executable, cwd);
-    command.args(&input.args);
-    for (key, value) in &input.env {
-        command.env(key, value);
-    }
-    Ok(command)
-}
 #[derive(Clone)]
 enum State {
     Starting,
@@ -48,6 +39,8 @@ enum State {
 }
 struct Handle {
     target: crate::execution::ResourceTarget,
+    boundary: maka_plugins::authorization::Boundary,
+    sandbox: maka_sandbox::Sandbox,
     input: mpsc::Sender<Option<Vec<u8>>>,
     output: tokio::sync::Mutex<mpsc::Receiver<Chunk>>,
     state: watch::Receiver<State>,
@@ -79,11 +72,12 @@ impl Processes {
     pub async fn spawn(&self, authority: Authority, input: Command) -> Result<String, api::Error> {
         let _lease = self.0.owner.admit().map_err(|_| api::Error::Denied)?;
         let host = self.host(&authority)?;
-        let (cwd, admission) = host
-            .admit_plugin_process(&authority)
+        let prepared = host
+            .admit_plugin_process(&authority, &input)
             .await
             .map_err(api::Error::from)?;
-        let command = prepare(&input, &cwd).map_err(api::Error::Invalid)?;
+        let command = prepared.command;
+        let admission = prepared.gate;
         let ticket = match input.lifetime {
             Lifetime::Invocation => Some(authority.resources.reserve().map_err(failed)?),
             Lifetime::Instance => None,
@@ -94,6 +88,8 @@ impl Processes {
         let stop = CancellationToken::new();
         let unclaimed = stop.clone().drop_guard();
         let handle = Arc::new(Handle {
+            boundary: prepared.boundary,
+            sandbox: prepared.sandbox,
             target: host
                 .plugin_resource_target(&authority)
                 .map_err(api::Error::from)?,
@@ -218,13 +214,23 @@ impl Processes {
     }
     async fn get(&self, authority: &Authority, id: &str) -> Result<Arc<Handle>, api::Error> {
         let handle = self.handle(authority, id)?;
-        self.host(authority)?
-            .plugin_resource_workspace(
-                authority,
-                maka_plugins::authorization::Capability::Processes,
-            )
+        let host = self.host(authority)?;
+        let current = host
+            .plugin_process_boundary(authority)
             .await
             .map_err(api::Error::from)?;
+        if current != handle.boundary {
+            return Err(api::Error::Denied);
+        }
+        if !host
+            .plugin_process_sandbox(authority, &current)
+            .await
+            .map_err(api::Error::from)?
+            .contains(&handle.sandbox)
+            .map_err(failed)?
+        {
+            return Err(api::Error::Denied);
+        }
         Ok(handle)
     }
     pub async fn write(
@@ -236,6 +242,8 @@ impl Processes {
         if bytes.len() > 64 * 1024 {
             return Err(api::Error::Invalid("process input exceeds 64 KiB".into()));
         }
+        let host = self.host(authority)?;
+        let _gate = host.lock_admission().await;
         self.get(authority, id)
             .await?
             .input
@@ -243,6 +251,8 @@ impl Processes {
             .map_err(failed)
     }
     pub async fn end_input(&self, authority: &Authority, id: &str) -> Result<(), api::Error> {
+        let host = self.host(authority)?;
+        let _gate = host.lock_admission().await;
         self.get(authority, id)
             .await?
             .input

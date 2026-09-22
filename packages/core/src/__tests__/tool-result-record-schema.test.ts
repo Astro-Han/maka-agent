@@ -154,21 +154,21 @@ describe('retired permission modes in stored subagent results', () => {
     agentName: 'Explore',
     turnId: 'turn-1',
     status: 'completed',
-    permissionMode: 'execute',
+    sandboxMode: 'execute',
     summary: 'done',
     artifactIds: [],
   } as const;
 
   test('folds a legacy mode to its live equivalent instead of returning it verbatim', () => {
     const decoded = decodePersistedToolResultContent(markPersisted<ToolResultContent>(stored));
-    assert.equal(decoded.kind === 'subagent' ? decoded.permissionMode : undefined, 'ask');
-    assert.deepEqual(decoded, { ...stored, permissionMode: 'ask' });
+    assert.equal(decoded.kind === 'subagent' ? decoded.sandboxMode : undefined, 'workspace-write');
+    assert.deepEqual(decoded, { ...stored, sandboxMode: 'workspace-write' });
   });
 
   test('folds through the stored-message decoder as well', () => {
     assert.deepEqual(toolResultContent(decodePersistedMessage(storedToolResult(stored))), {
       ...stored,
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     });
   });
 
@@ -181,13 +181,13 @@ describe('retired permission modes in stored subagent results', () => {
   });
 
   test('leaves a live mode untouched', () => {
-    const live = { ...stored, permissionMode: 'bypass' } as const;
+    const live = { ...stored, sandboxMode: 'danger-full-access' } as const;
     assert.deepEqual(decodeCanonicalToolResultContent(live), live);
   });
 
   test('still rejects a mode that never existed', () => {
     assert.throws(
-      () => decodeCanonicalToolResultContent({ ...stored, permissionMode: 'nonsense' }),
+      () => decodeCanonicalToolResultContent({ ...stored, sandboxMode: 'nonsense' }),
       /Invalid tool result content/,
     );
   });

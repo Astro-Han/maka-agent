@@ -77,6 +77,10 @@ pub(crate) struct Batch {
 }
 
 impl Batch {
+    pub(crate) fn paths(&self) -> impl Iterator<Item = &std::path::Path> {
+        self.operations.iter().map(operation_path)
+    }
+
     pub(crate) fn parse(input: Value) -> Result<Self, ToolError> {
         let batch = if let Value::String(patch) = input {
             Self {

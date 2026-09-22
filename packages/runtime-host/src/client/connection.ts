@@ -496,7 +496,7 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
     timeoutScope: RequestTimeoutScope,
   ): Promise<Result> {
     const boundedTimeoutMs =
-      timeoutMs === undefined ? undefined : requireTimeout(timeoutMs, 'timeoutMs');
+      timeoutMs === undefined ? undefined : requireTimeout(timeoutMs, 'timeoutMs', 2_147_483_647);
     const spec = HOST_OPERATION_SPECS[operation] as OperationSpec<
       OperationInput<K>,
       OperationOutput<K>,
@@ -1765,9 +1765,11 @@ function connectionFailure(
   };
 }
 
-function requireTimeout(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value < 1 || value > 120_000) {
-    throw new RangeError(`${label} must be an integer between 1 and 120000`);
+// Connection phases stay short; explicit operation observers (for example
+// administrative consent) may live longer, up to the Node timer's integer limit.
+function requireTimeout(value: number, label: string, maximum = 120_000): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+    throw new RangeError(`${label} must be an integer between 1 and ${maximum}`);
   }
   return value;
 }

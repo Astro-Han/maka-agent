@@ -88,7 +88,7 @@ async fn handoff_claim_preserves_turn_and_frozen_ancestry_without_releasing_rese
             };
             match mutation {
                 0 => pause.remaining_steps = NonZeroU16::new(20).unwrap(),
-                1 => configuration.as_mut().unwrap().permission_mode = PermissionMode::Bypass,
+                1 => configuration.as_mut().unwrap().sandbox_mode = SandboxMode::DangerFullAccess,
                 2 => claim.source.digest = digest('d'),
                 3 => claim.id = "not-reserved".into(),
                 _ => changed.invocation.turn_id = "new-turn".into(),
@@ -196,7 +196,8 @@ async fn handoff_claim_preserves_turn_and_frozen_ancestry_without_releasing_rese
                 event: target.clone()
             })
             .unwrap()
-            .is_empty(),
+            .iter()
+            .all(|row| !matches!(row.message.content, maka_presentation::Content::User { .. })),
             "a successor does not invent another user message"
         );
         source = target;

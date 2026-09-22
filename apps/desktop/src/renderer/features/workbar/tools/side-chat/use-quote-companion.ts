@@ -46,8 +46,10 @@ import type {
 } from '@maka/core/events';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
 import type { ClientCapabilityResponse } from '@maka/core/client-capability-grant';
-import type { PermissionMode } from '@maka/core/permission';
-import type { SessionSummary, StoredMessage } from '@maka/core/session';
+import type { SandboxMode } from '@maka/core/permission';
+import { executionPoliciesEqual, type ExecutionPolicy, type ApprovalPolicy } from '@maka/core/execution-permissions';
+import type { StoredMessage } from '@maka/core/session';
+import type { SideChatSession } from '../../ports.js';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type { ChatModelChoice } from '@maka/core/chat-model-choice';
 import type { UserQuestionResponse } from '@maka/core/user-question';
@@ -83,7 +85,7 @@ import {
 } from './quote-companion-panel-state.js';
 import type { CompanionForkVisibilityEvent } from './quote-companion-visibility.js';
 
-type QuoteCompanionSettingValues = { permissionMode: PermissionMode };
+type QuoteCompanionSettingValues = { executionPolicy: ExecutionPolicy };
 
 type PendingAdmission = {
   messageId: string;
@@ -133,14 +135,14 @@ export interface UseQuoteCompanionInput {
   /** The main session the panel is attached to. The companion FORKS from it (via
    *  branchFromTurn) so it inherits the full conversation context + model / cwd —
    *  Codex `/side` style. */
-  sourceSession: SessionSummary | undefined;
+  sourceSession: SideChatSession | undefined;
   /** Latest Host-authorized choices used to validate both source and fork. */
   modelChoices: readonly ChatModelChoice[];
   locale: UiLocale;
   /** Called once a send has consumed the staged quotes, so the host clears them. */
   onQuotesConsumed: (snapshot: CompanionQuoteSnapshot) => void;
   /** Confirms the destructive Full access permission mode before it is written. */
-  confirmBypass: () => Promise<boolean>;
+  confirmBypass: (allProtections?: boolean) => Promise<boolean>;
   /** Reports creation and authoritative cleanup so the host can keep every
    *  ephemeral fork hidden for its complete lifetime. */
   onForkVisibilityChange?: (event: CompanionForkVisibilityEvent) => void;
@@ -155,17 +157,8 @@ export interface UseQuoteCompanionInput {
   onContextCompactionError?: (sessionId: string, error: unknown) => void;
 }
 
-export async function requestPermissionModeWithConfirmation(
-  mode: PermissionMode,
-  confirmBypass: () => Promise<boolean>,
-  write: () => Promise<boolean>,
-): Promise<boolean> {
-  if (mode === 'bypass' && !(await confirmBypass())) return false;
-  return write();
-}
-
 export interface UseQuoteCompanionResult {
-  companionSession: SessionSummary | undefined;
+  companionSession: SideChatSession | undefined;
   /** True after this temporary conversation has accepted at least one turn. */
   hasContent: boolean;
   /** The companion's OWN turns only — the forked parent history is context for
@@ -185,7 +178,10 @@ export interface UseQuoteCompanionResult {
   processing: boolean;
   /** Whether the source and any committed companion can execute their exact model. */
   modelReady: boolean;
-  permissionMode: PermissionMode | undefined;
+  sandboxMode: SandboxMode | undefined;
+  approvalPolicy: ApprovalPolicy | undefined;
+  setApprovalPolicy: (policy: ApprovalPolicy) => Promise<boolean>;
+  disableProtections: () => Promise<boolean>;
   regeneratePendingTurnId: string | null;
   /** A localized, retryable error (fork setup, run error, or a rejected send). */
   error: string | null;
@@ -194,6 +190,7 @@ export interface UseQuoteCompanionResult {
   /** Pending sandbox-boundary / question / form prompt raised by the companion's run. */
   activeSandboxBoundary: SandboxBoundaryRequestEvent | undefined;
   activeClientCapability: ClientCapabilityRequestEvent | undefined;
+  activePermissions: import('@maka/core/events').PermissionsRequestEvent | undefined;
   activeQuestion: UserQuestionRequestEvent | undefined;
   activeForm: FormRequestEvent | undefined;
   /** Runs `/compact` against the committed companion fork when it is idle. */
@@ -225,11 +222,12 @@ export interface UseQuoteCompanionResult {
   ) => Promise<void>;
   deleteQueuedEntry: (entryId: string) => Promise<void>;
   reorderQueuedEntries: (entryIds: readonly string[]) => Promise<void>;
-  setPermissionMode: (mode: PermissionMode) => Promise<boolean>;
+  setSandboxMode: (mode: SandboxMode) => Promise<boolean>;
   regenerate: (turnId: string) => Promise<boolean>;
   stop: () => Promise<void>;
   respondToSandboxBoundary: (response: SandboxBoundaryResponse) => Promise<void>;
   respondToClientCapability: (response: ClientCapabilityResponse) => Promise<void>;
+  respondToPermissions: (response: import('@maka/core/execution-permissions').PermissionsResponse) => Promise<void>;
   respondToUserQuestion: (response: UserQuestionResponse) => Promise<void>;
   respondToUserForm: (response: InteractionFormResponse) => Promise<void>;
 }
@@ -283,8 +281,8 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     onContextCompactionError,
   } = input;
   const copy = getDesktopConversationCopy(locale).quoteCompanion;
-  const [companion, setCompanion] = useState<SessionSummary | undefined>(undefined);
-  const companionRef = useRef<SessionSummary | undefined>(undefined);
+  const [companion, setCompanion] = useState<SideChatSession | undefined>(undefined);
+  const companionRef = useRef<SideChatSession | undefined>(undefined);
   const companionIdRef = useRef<string | null>(null);
   // A created fork is hidden immediately, but is not considered usable until
   // onForkCommitted promotes it.
@@ -351,6 +349,8 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const processing = pendingAdmission !== null;
   const streaming = processing || Boolean(activeHostTurn(execution));
   const turnInFlight = streaming;
+  const turnInFlightRef = useRef(turnInFlight);
+  turnInFlightRef.current = turnInFlight;
   const [regeneratePendingTurnId, setRegeneratePendingTurnId] = useState<string | null>(
     null,
   );
@@ -360,10 +360,10 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const [error, setError] = useState<string | null>(null);
   // A permission mode the user picked before the fork exists. Applied to the
   // fork once the first send creates it; until then it drives the read-only chip.
-  const [stagedPermissionMode, setStagedPermissionMode] = useState<PermissionMode | undefined>(
+  const [stagedExecutionPolicy, setStagedExecutionPolicy] = useState<ExecutionPolicy | undefined>(
     undefined,
   );
-  const pendingPermissionModeRef = useRef<PermissionMode | undefined>(undefined);
+  const pendingExecutionPolicyRef = useRef<ExecutionPolicy | undefined>(undefined);
   // Bumped whenever the own-turn set changes so the render picks up the new
   // filter result (the set lives in a ref to stay stable for the event handler).
   const [, setOwnTurnTick] = useState(0);
@@ -374,7 +374,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const mountedRef = useMountedRef();
   const dismissalGuardRef = useRef(createCompanionDismissalGuard());
   const [permissionCatalogRevision, setPermissionCatalogRevision] = useState(0);
-  const permissionModeIntent = useSessionSettingIntent<QuoteCompanionSettingValues>({
+  const executionPolicyIntent = useSessionSettingIntent<QuoteCompanionSettingValues>({
     catalogRevision: permissionCatalogRevision,
     refreshCatalog: async () => {
       const sessionId = companionIdRef.current;
@@ -387,14 +387,17 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       setPermissionCatalogRevision((revision) => revision + 1);
     },
     channels: {
-      permissionMode: {
-        write: async (sessionId, mode) => {
-          const next = await sideChat.setPermissionMode(sessionId, mode);
+      executionPolicy: {
+        isEqual: executionPoliciesEqual,
+        write: async (sessionId, policy) => {
+          const next = await sideChat.setExecutionPolicy(sessionId, policy);
           if (mountedRef.current && companionIdRef.current === sessionId) {
             companionRef.current = next;
             setCompanion(next);
           }
-          return next.permissionMode === mode;
+          return next.approvalPolicy !== null && executionPoliciesEqual({
+            sandboxMode: next.sandboxMode, approvalPolicy: next.approvalPolicy,
+          }, policy);
         },
         onWriteError: () => {
           if (mountedRef.current) setError(copyRef.current.errors.respondFailed);
@@ -402,12 +405,12 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       },
     },
   });
-  const requestPermissionMode = useCallback(
-    (sessionId: string, mode: PermissionMode) =>
-      permissionModeIntent.request('permissionMode', sessionId, mode),
-    [permissionModeIntent.request],
+  const requestExecutionPolicy = useCallback(
+    (sessionId: string, policy: ExecutionPolicy) =>
+      executionPolicyIntent.request('executionPolicy', sessionId, policy),
+    [executionPolicyIntent.request],
   );
-  const clearPermissionModeIntent = permissionModeIntent.clear;
+  const clearExecutionPolicyIntent = executionPolicyIntent.clear;
 
   const setPendingAdmission = useCallback((admission: PendingAdmission | null) => {
     pendingAdmissionRef.current = admission;
@@ -871,7 +874,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   ]);
 
   const commitFork = useCallback(
-    (session: SessionSummary) => {
+    (session: SideChatSession) => {
       pendingForkIdRef.current = null;
       companionIdRef.current = session.id;
       companionRef.current = session;
@@ -920,7 +923,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
           subscriptionReadyRef.current = Promise.resolve();
           companionIdRef.current = null;
           companionRef.current = undefined;
-          clearPermissionModeIntent(existing.id);
+          clearExecutionPolicyIntent(existing.id);
           setCompanion(undefined);
           allMessagesRef.current = [];
           setAllMessages([]);
@@ -1005,7 +1008,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       forkSetupPromiseRef.current = promise;
       return promise;
     },
-    [clearPermissionModeIntent, commitFork, mountedRef, panelId, sideChat],
+    [clearExecutionPolicyIntent, commitFork, mountedRef, panelId, sideChat],
   );
 
   // A committed side conversation with its own content is blocked when its
@@ -1106,6 +1109,16 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     }
   }, [mountedRef, sideChat]);
 
+  const prepareExecution = useCallback(async (sessionId: string): Promise<boolean> => {
+    try {
+      return await sideChat.prepareExecution(sessionId) && mountedRef.current &&
+        companionIdRef.current === sessionId;
+    } catch {
+      if (mountedRef.current) setError(copyRef.current.errors.sendFailed);
+      return false;
+    }
+  }, [sideChat, mountedRef]);
+
   const send = useCallback(
     async (
       text: string,
@@ -1186,14 +1199,16 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       // write fails, abort the send rather than run under the (possibly wider)
       // inherited mode; keep the staged mode and draft so the user can retry.
       if (
-        pendingPermissionModeRef.current &&
-        pendingPermissionModeRef.current !== fork.session.permissionMode
+        pendingExecutionPolicyRef.current &&
+        (!fork.session.approvalPolicy || !executionPoliciesEqual(pendingExecutionPolicyRef.current, {
+          sandboxMode: fork.session.sandboxMode, approvalPolicy: fork.session.approvalPolicy,
+        }))
       ) {
         let applied = false;
         try {
-          applied = await requestPermissionMode(
+          applied = await requestExecutionPolicy(
             fork.session.id,
-            pendingPermissionModeRef.current,
+            pendingExecutionPolicyRef.current,
           );
         } catch {
           applied = false;
@@ -1208,8 +1223,8 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
           return false;
         }
       }
-      pendingPermissionModeRef.current = undefined;
-      setStagedPermissionMode(undefined);
+      pendingExecutionPolicyRef.current = undefined;
+      setStagedExecutionPolicy(undefined);
       try {
         await subscriptionReadyRef.current;
       } catch {
@@ -1221,7 +1236,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         abandonOptimisticSend();
         return false;
       }
-      if (!mountedRef.current) {
+      if (!(await prepareExecution(fork.session.id))) {
         abandonOptimisticSend();
         return false;
       }
@@ -1325,6 +1340,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       pendingQuotes,
       onQuotesConsumed,
       ensureFork,
+      prepareExecution,
       mountedRef,
       sideChat,
       bindAdmittedTurn,
@@ -1336,7 +1352,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       resolveAdmission,
       setPendingAdmission,
       setSubmitLocked,
-      requestPermissionMode,
+      requestExecutionPolicy,
     ],
   );
 
@@ -1413,6 +1429,8 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     ) {
       return false;
     }
+    if (!(await prepareExecution(id)) || !turnInFlightRef.current ||
+        (placement === 'current_turn' && pendingAdmissionRef.current !== null)) return false;
     const admissionId = crypto.randomUUID();
     const admission: PendingAdmission = {
       messageId: admissionId,
@@ -1498,6 +1516,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     }
   }, [
     addPendingUserMessage,
+    prepareExecution,
     bindAdmittedTurn,
     dropOptimisticUserMessage,
     mountedRef,
@@ -1565,31 +1584,23 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     [runQueueEntryAction, sideChat],
   );
 
-  const setPermissionMode = useCallback(
-    (mode: PermissionMode): Promise<boolean> => {
+  const setExecutionPolicy = useCallback(
+    async (policy: ExecutionPolicy, confirmation: 'none' | 'sandbox' | 'all'): Promise<boolean> => {
       const id = companionIdRef.current;
-      if (turnInFlight) return Promise.resolve(false);
+      const sourceId = sourceSessionIdRef.current;
+      if (turnInFlight || submitLockRef.current || !mountedRef.current) return false;
       setError(null);
+      if (confirmation !== 'none' && !(await confirmBypassRef.current(confirmation === 'all'))) return false;
+      if (!mountedRef.current || companionIdRef.current !== id || sourceSessionIdRef.current !== sourceId
+          || submitLockRef.current || pendingAdmissionRef.current !== null || turnInFlightRef.current) return false;
       if (!id) {
-        // No fork yet — confirm the destructive mode, then stage it so the
-        // first send applies it instead of silently inheriting the source mode.
-        return requestPermissionModeWithConfirmation(
-          mode,
-          () => confirmBypassRef.current(),
-          () => {
-            pendingPermissionModeRef.current = mode;
-            setStagedPermissionMode(mode);
-            return Promise.resolve(true);
-          },
-        );
+        pendingExecutionPolicyRef.current = policy;
+        setStagedExecutionPolicy(policy);
+        return true;
       }
-      return requestPermissionModeWithConfirmation(
-        mode,
-        () => confirmBypassRef.current(),
-        () => requestPermissionMode(id, mode),
-      );
+      return requestExecutionPolicy(id, policy);
     },
-    [requestPermissionMode, turnInFlight],
+    [requestExecutionPolicy, turnInFlight, mountedRef],
   );
 
   const regenerate = useCallback(
@@ -1598,13 +1609,14 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       if (!id || turnInFlight || regeneratePendingTurnId) return false;
       setRegeneratePendingTurnId(turnId);
       const regenerationTurnId = crypto.randomUUID();
-      stopRequestRef.current = null;
-      activeTurnIdRef.current = regenerationTurnId;
-      setError(null);
-      setLiveTurns((previous) => retainLiveTurn(previous, armLiveTurn(regenerationTurnId)));
-      ownTurnIdsRef.current.add(regenerationTurnId);
-      setOwnTurnTick((tick) => tick + 1);
       try {
+        if (!(await prepareExecution(id)) || turnInFlightRef.current) return false;
+        stopRequestRef.current = null;
+        activeTurnIdRef.current = regenerationTurnId;
+        setError(null);
+        setLiveTurns((previous) => retainLiveTurn(previous, armLiveTurn(regenerationTurnId)));
+        ownTurnIdsRef.current.add(regenerationTurnId);
+        setOwnTurnTick((tick) => tick + 1);
         await sideChat.regenerateTurn(id, {
           sourceTurnId: turnId,
           turnId: regenerationTurnId,
@@ -1621,7 +1633,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         if (mountedRef.current) setRegeneratePendingTurnId(null);
       }
     },
-    [mountedRef, regeneratePendingTurnId, sideChat, turnInFlight],
+    [mountedRef, prepareExecution, regeneratePendingTurnId, sideChat, turnInFlight],
   );
 
   const respondToSandboxBoundary = useCallback(
@@ -1663,6 +1675,15 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     [mountedRef, sideChat],
   );
 
+  const respondToPermissions = useCallback(
+    async (response: import('@maka/core/execution-permissions').PermissionsResponse): Promise<void> => {
+      const id = companionIdRef.current;
+      if (!mountedRef.current || !id) throw new Error('Session is no longer active');
+      await sideChat.respondToPermissions(id, response);
+    },
+    [mountedRef, sideChat],
+  );
+
   const respondToUserForm = useCallback(
     async (response: InteractionFormResponse): Promise<void> => {
       const id = companionIdRef.current;
@@ -1689,14 +1710,25 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       ? { llmConnectionSlug: sourceSession.llmConnectionSlug, model: sourceSession.model }
       : undefined;
   const companionPermissionOverlay = companion?.id
-    ? permissionModeIntent.overlayByChannel.permissionMode[companion.id]
+    ? executionPolicyIntent.overlayByChannel.executionPolicy[companion.id]
     : undefined;
   // A staged mode (chosen before the fork, not yet applied) outranks the fork's
   // inherited mode so a fail-closed first send still shows the user's choice.
-  const permissionMode = (companionPermissionOverlay ??
-    stagedPermissionMode ??
-    companion?.permissionMode ??
-    sourceSession?.permissionMode) as PermissionMode | undefined;
+  const policySession = companion ?? sourceSession;
+  const executionPolicy = companionPermissionOverlay ?? stagedExecutionPolicy ??
+    (policySession?.approvalPolicy ? {
+      sandboxMode: policySession.sandboxMode, approvalPolicy: policySession.approvalPolicy,
+    } : undefined);
+  const sandboxMode = executionPolicy?.sandboxMode;
+  const setSandboxMode = (mode: SandboxMode) => executionPolicy
+    ? setExecutionPolicy({ ...executionPolicy, sandboxMode: mode }, mode === 'danger-full-access' ? 'sandbox' : 'none')
+    : Promise.resolve(false);
+  const setApprovalPolicy = (approvalPolicy: ApprovalPolicy) => executionPolicy
+    ? setExecutionPolicy({ ...executionPolicy, approvalPolicy }, 'none')
+    : Promise.resolve(false);
+  const disableProtections = () => executionPolicy
+    ? setExecutionPolicy({ sandboxMode: 'danger-full-access', approvalPolicy: { kind: 'never' } }, 'all')
+    : Promise.resolve(false);
   const activeInteraction = companionIdRef.current
     ? activeInteractionFor(interactions, companionIdRef.current)
     : undefined;
@@ -1704,6 +1736,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     activeInteraction?.type === 'sandbox_boundary_request' ? activeInteraction : undefined;
   const activeClientCapability =
     activeInteraction?.type === 'client_capability_request' ? activeInteraction : undefined;
+  const activePermissions = activeInteraction?.type === 'permissions_request' ? activeInteraction : undefined;
   const activeQuestion =
     activeInteraction?.type === 'user_question_request' ? activeInteraction : undefined;
   const activeForm = activeInteraction?.type === 'form_request' ? activeInteraction : undefined;
@@ -1720,12 +1753,16 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     streaming,
     processing,
     modelReady: sourceModelReady && companionModelReady,
-    permissionMode,
+    sandboxMode,
+    approvalPolicy: executionPolicy?.approvalPolicy,
+    setApprovalPolicy,
+    disableProtections,
     regeneratePendingTurnId,
     error,
     activeModel,
     activeSandboxBoundary,
     activeClientCapability,
+    activePermissions,
     activeQuestion,
     activeForm,
     compact,
@@ -1736,11 +1773,12 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     updateQueuedEntry,
     deleteQueuedEntry,
     reorderQueuedEntries,
-    setPermissionMode,
+    setSandboxMode,
     regenerate,
     stop,
     respondToSandboxBoundary,
     respondToClientCapability,
+    respondToPermissions,
     respondToUserQuestion,
     respondToUserForm,
   };

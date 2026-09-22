@@ -558,9 +558,9 @@ class SqliteSessionStore implements SessionAuthorityStore {
 
   async setExecutionBoundaryKind(
     sessionId: string,
-    kind: 'managed' | 'bypass',
+    kind: 'managed' | 'danger-full-access',
     projection?: {
-      permissionMode: SessionHeader['permissionMode'];
+      sandboxMode: SessionHeader['sandboxMode'];
       labels?: readonly string[];
     },
   ): Promise<ExecutionBoundary> {

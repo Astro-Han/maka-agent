@@ -428,7 +428,7 @@ function header(): SessionHeader {
     llmConnectionSlug: 'openai-main',
     connectionLocked: true,
     model: 'mock-computer-model',
-    permissionMode: 'bypass',
+    sandboxMode: 'danger-full-access',
     schemaVersion: 1,
   };
 }

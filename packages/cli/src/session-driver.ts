@@ -20,7 +20,7 @@
 import { realpath } from 'node:fs/promises';
 import type { SessionEvent, ShellRunStateResult, ShellRunUpdate } from '@maka/core/events';
 import type { OrchestrationMode } from '@maka/core/orchestration';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
 import type { SessionSummary, StoredMessage } from '@maka/core/session';
 import type { SessionTodoItem } from '@maka/core/session-todo';
@@ -157,7 +157,7 @@ export interface MakaSessionDriver {
   respondToUserForm?(response: InteractionFormResponse): Promise<void>;
   setModel(model: string, connectionSlug?: string, connectionId?: string): Promise<void>;
   setThinkingLevel(level: ThinkingLevel | undefined): Promise<void>;
-  setPermissionMode(mode: PermissionMode): Promise<void>;
+  setSandboxMode(mode: SandboxMode): Promise<void>;
   setOrchestrationMode?(mode: OrchestrationMode): Promise<void>;
   renameSession(name: string): Promise<string | void>;
   moveSession?(cwd: string): Promise<MakaSessionMoveResult>;
@@ -228,7 +228,7 @@ export interface MakaSessionDriver {
    * render something choose their own stand-in rather than being handed an
    * invented mode here.
    */
-  getPermissionMode?(): PermissionMode | undefined;
+  getSandboxMode?(): SandboxMode | undefined;
 }
 
 /**
@@ -241,8 +241,8 @@ export interface MakaSessionDriver {
  * choice", and it is the only way the configured default can apply — sending
  * a literal would silently override it.
  */
-export type CreateSessionRequest = Omit<CreateSessionInput, 'permissionMode'> & {
-  permissionMode?: PermissionMode;
+export type CreateSessionRequest = Omit<CreateSessionInput, 'sandboxMode'> & {
+  sandboxMode?: SandboxMode;
 };
 
 export type MakaTranscriptReplacementReason = 'reconcile' | 'reconnect';

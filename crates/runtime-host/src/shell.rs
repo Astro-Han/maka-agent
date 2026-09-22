@@ -240,7 +240,7 @@ impl ShellResources {
     pub fn start_pipes(
         &self,
         record: ShellRun,
-        executor: maka_process::ShellExecutor,
+        command: maka_process::Command,
     ) -> Result<ShellHandle> {
         use futures_util::FutureExt;
         record.validate().map_err(ShellError::Rejected)?;
@@ -266,11 +266,7 @@ impl ShellResources {
             return Err(ShellError::Rejected("background pipe capacity exhausted"));
         }
         let cancellation = self.shutdown.child_token();
-        let process = executor.observe(
-            record.command.clone(),
-            record.timeout_ms,
-            cancellation.clone(),
-        )?;
+        let process = command.observe(record.timeout_ms, cancellation.clone())?;
         let (updates, snapshot) = watch::channel(None);
         let stop = Arc::default();
         let handle = ShellHandle {

@@ -127,7 +127,7 @@ function testHeader(): SessionHeader {
     llmConnectionSlug: 'test',
     connectionLocked: true,
     model: 'test-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     schemaVersion: 1,
   };
 }

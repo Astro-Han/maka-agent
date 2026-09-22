@@ -1161,7 +1161,7 @@ describe('SessionManager terminal ledger invariants', () => {
             llmConnectionSlug: 'fake',
             connectionLocked: false,
             model: 'fake-model',
-            permissionMode: 'ask',
+            sandboxMode: 'workspace-write',
             schemaVersion: 1,
           },
           userInput: { turnId: 'turn-1', text: 'hello' },
@@ -2297,7 +2297,7 @@ class TinySessionStore implements SessionStore {
       llmConnectionSlug: input.llmConnectionSlug,
       connectionLocked: false,
       model: input.model ?? 'fake-model',
-      permissionMode: input.permissionMode,
+      sandboxMode: input.sandboxMode,
       schemaVersion: 1,
     };
     this.headers.set(header.id, header);
@@ -2331,7 +2331,7 @@ class TinySessionStore implements SessionStore {
       backend: header.backend,
       llmConnectionSlug: header.llmConnectionSlug,
       model: header.model,
-      permissionMode: header.permissionMode,
+      sandboxMode: header.sandboxMode,
     }));
   }
 
@@ -2604,7 +2604,7 @@ function makeInput(overrides: Partial<CreateSessionInput> = {}): CreateSessionIn
     cwd: '/tmp/cwd',
     llmConnectionSlug: 'fake',
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     name: 'Session',
     labels: [],
     ...overrides,

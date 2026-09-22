@@ -29,7 +29,7 @@ import type { RuntimeExecutionConnection } from '@maka/core/llm-connections';
 import { generalizedErrorMessage } from '@maka/core/redaction';
 import { emptyPlanSessionState } from '@maka/core/plan';
 import { readLogicalRuntimeExecutionForRun } from '@maka/core/runtime-logical-execution';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import {
   runtimeInvocationOutcome,
   type RuntimeInvocationRecord,
@@ -731,7 +731,7 @@ export async function createExecutionRuntimeHostComposition(
       | ((
           previewSessionId: string,
           collaborationMode: 'agent' | 'plan',
-          permissionMode: PermissionMode,
+          sandboxMode: SandboxMode,
           initiatingConnectionId: string,
         ) => Promise<string[]>)
       | undefined;
@@ -1111,7 +1111,7 @@ export async function createExecutionRuntimeHostComposition(
         }
         const tools = buildToolsForAgentDefinition(childAgentTools.childTools, {
           id: header.subagentRuntime.agentId,
-          permissionMode: header.permissionMode,
+          sandboxMode: header.sandboxMode,
           tools: header.subagentRuntime.toolNames,
         });
         if (tools.length !== header.subagentRuntime.toolNames.length) {
@@ -1160,7 +1160,7 @@ export async function createExecutionRuntimeHostComposition(
             store: planStore,
             state: planState,
             mode: header.collaborationMode ?? 'agent',
-            permissionMode: header.permissionMode,
+            sandboxMode: header.sandboxMode,
           },
           ...(isDeepResearchSession(header.labels)
             ? {
@@ -1177,7 +1177,7 @@ export async function createExecutionRuntimeHostComposition(
     resolveNewSessionToolNames = async (
       previewSessionId,
       collaborationMode,
-      permissionMode,
+      sandboxMode,
       initiatingConnectionId,
     ) => {
       const preview = await requireClientCapabilities(
@@ -1224,7 +1224,7 @@ export async function createExecutionRuntimeHostComposition(
               store: planStore,
               state: emptyPlanSessionState(previewSessionId),
               mode: collaborationMode,
-              permissionMode,
+              sandboxMode,
             },
           }).tools.map((tool) => tool.name);
         } finally {
@@ -2156,8 +2156,8 @@ export async function createExecutionRuntimeHostComposition(
                             }
                           : ({ kind: 'default' } as const),
                       }),
-                  ...(input.create.defaults?.permissionMode
-                    ? { permissionMode: input.create.defaults.permissionMode }
+                  ...(input.create.defaults?.sandboxMode
+                    ? { sandboxMode: input.create.defaults.sandboxMode }
                     : {}),
                   collaborationMode: 'agent',
                   orchestrationMode: 'default',
@@ -2297,7 +2297,7 @@ export async function createExecutionRuntimeHostComposition(
       resolveCreateTarget: async () => {
         const { projectId: _projectId, ...target } =
           await sessionCatalog.resolveDefaultCreateTarget();
-        return { ...target, permissionMode: 'explore' };
+        return { ...target, sandboxMode: 'read-only' };
       },
       requestDrain: context.requestDrain,
     });
@@ -3051,14 +3051,14 @@ function requireNewSessionToolNameResolver(
     | ((
         previewSessionId: string,
         collaborationMode: 'agent' | 'plan',
-        permissionMode: PermissionMode,
+        sandboxMode: SandboxMode,
         initiatingConnectionId: string,
       ) => Promise<string[]>)
     | undefined,
 ): (
   previewSessionId: string,
   collaborationMode: 'agent' | 'plan',
-  permissionMode: PermissionMode,
+  sandboxMode: SandboxMode,
   initiatingConnectionId: string,
 ) => Promise<string[]> {
   if (!resolver) throw new Error('Runtime Host new Session tool resolver is not composed');

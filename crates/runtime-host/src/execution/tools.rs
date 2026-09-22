@@ -27,7 +27,7 @@ use maka_fs_tools::{
     glob_schema, grep_schema, patch_schema, write_schema,
 };
 use maka_process::{SHELL_NAME, ShellExecutor};
-use maka_protocol::session::PermissionMode;
+use maka_protocol::session::SandboxMode;
 use maka_protocol::{OperationError, OperationErrorCode};
 use maka_tools::{
     ToolCatalog, ToolDefinition, ToolHandler, ToolNesting, ToolRegistration, ToolSemantics,
@@ -35,6 +35,7 @@ use maka_tools::{
 use std::{path::PathBuf, sync::Arc};
 
 mod live;
+mod permissions;
 mod preview;
 pub(super) use live::NativeTools;
 pub(super) use preview::validate_pending_tools;
@@ -72,21 +73,37 @@ pub(super) fn reserve_core_names(
 /// the current durable permission boundary during preparation, before T1.
 pub(super) fn catalog(
     native: NativeTools,
-    mode: PermissionMode,
+    mode: SandboxMode,
     additional_tools: Vec<ToolRegistration>,
     ceiling: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<ToolCatalog, OperationError> {
-    let mut registrations = native.registrations(mode)?;
+    let workspace = super::permissions::read_root(
+        mode,
+        std::path::Path::new(&native.cwd),
+        &native.state_root,
+        native.workspace_origin,
+    )
+    .map_err(unavailable)?;
+    let mut registrations = native.registrations(mode, 0)?;
     let set = native.set;
-    let live = Arc::new(live::LiveTools::new(native, &registrations, mode));
+    let live = Arc::new(live::LiveTools::new(native, &registrations));
     for registration in &mut registrations {
         registration.handler = ToolHandler::Prepared(live.clone());
+        if matches!(
+            registration.definition.name.as_str(),
+            WRITE_NAME | EDIT_NAME | PATCH_NAME
+        ) {
+            registration.definition.description.push_str(
+                " When a target needs additional write access, the Host requests approval for the exact files before making changes. If approval is refused or unavailable, no files are changed; do not bypass the refusal using another tool.",
+            );
+        }
     }
     registrations.extend(additional_tools);
     if let Some(ceiling) = ceiling {
         registrations.retain(|tool| ceiling.contains(&tool.definition.name));
     }
     ToolCatalog::new(registrations)
+        .map(|catalog| catalog.with_workspace(workspace))
         .map(|catalog| {
             if set == maka_runtime::execution::NativeToolSet::Workspace {
                 catalog.with_discovery()
@@ -99,7 +116,9 @@ pub(super) fn catalog(
 
 fn registrations(
     native: &NativeTools,
-    mode: PermissionMode,
+    mode: SandboxMode,
+    revision: u64,
+    grants: &[maka_event_log::interactions::PermissionGrant],
 ) -> Result<Vec<ToolRegistration>, OperationError> {
     if native.set == maka_runtime::execution::NativeToolSet::Attachments {
         return Ok(vec![ToolRegistration {
@@ -120,29 +139,33 @@ fn registrations(
         ));
     }
     let cwd = PathBuf::from(&native.cwd);
-    let (read_scope, write_scope) = match mode {
-        PermissionMode::Explore => (
-            ReadScope::Restricted {
-                roots: vec![cwd.clone()],
-            },
-            None,
-        ),
-        PermissionMode::Ask => {
-            let roots = vec![cwd.clone(), std::env::temp_dir()];
-            #[cfg(unix)]
-            let roots = {
-                let mut roots = roots;
-                roots.push(PathBuf::from("/tmp"));
-                roots
-            };
+    let (mut sandbox, ceiling) =
+        super::permissions::resolve(mode, &cwd, &native.state_root, native.workspace_origin)
+            .map_err(unavailable)?;
+    for grant in grants {
+        sandbox = sandbox
+            .with_grant(&grant.permissions, &ceiling)
+            .map_err(unavailable)?;
+    }
+    let writes = mode != SandboxMode::ReadOnly
+        || grants.iter().any(|grant| {
+            grant
+                .permissions
+                .filesystem
+                .iter()
+                .any(|rule| rule.access.can_write())
+        });
+    let (read_scope, write_scope) = match &sandbox {
+        maka_sandbox::Sandbox::Managed { filesystem, .. } => {
+            let policy = Arc::new(filesystem.compile().map_err(unavailable)?);
             (
-                ReadScope::Restricted {
-                    roots: roots.clone(),
-                },
-                Some(WriteScope::Restricted { roots }),
+                ReadScope::Policy(policy.clone()),
+                writes.then_some(WriteScope::Policy(policy)),
             )
         }
-        PermissionMode::Bypass => (ReadScope::Unrestricted, Some(WriteScope::Unrestricted)),
+        maka_sandbox::Sandbox::Disabled | maka_sandbox::Sandbox::External { .. } => {
+            (ReadScope::Unrestricted, Some(WriteScope::Unrestricted))
+        }
     };
     let executor =
         ReadExecutor::new(&cwd, read_scope, ReadLimits::default()).map_err(unavailable)?;
@@ -199,12 +222,21 @@ fn registrations(
             });
         }
     }
-    // No OS sandbox is implemented. A working directory does not constrain a
-    // shell, so only an explicit unrestricted Session may receive this tool.
-    if mode == PermissionMode::Bypass {
-        let executor = ShellExecutor::trusted_unrestricted(&cwd).map_err(unavailable)?;
+    // Platform preparation must enforce the captured policy or fail closed;
+    // a restricted command is never retried as an unrestricted process.
+    {
+        let executor = ShellExecutor::new(&cwd, sandbox)
+            .map_err(unavailable)?
+            .with_network_route(native.network_route.clone());
+        #[cfg(target_os = "linux")]
+        let executor = executor.with_network_helper(std::env::current_exe().map_err(unavailable)?);
+        #[cfg(windows)]
+        let executor = executor.with_backend(Arc::new(crate::sandbox::windows::Backend::new(
+            &native.state_root,
+            &std::env::current_exe().map_err(unavailable)?,
+        )));
         let description = format!(
-            "{} Set run_in_background=true for a persistent background task; use Read with its returned ref as path to observe output. Set pty=true for terminal-dependent programs (requires background mode). Background tasks have no default timeout; foreground defaults to 120 seconds and allows at most 600 seconds.",
+            "{} If the command needs additional access, supply additional_permissions and justification before executing; request only the necessary paths or network access. A failed command is not automatically retried with broader permissions and may have partial effects. Set run_in_background=true for a persistent background task; use Read with its returned ref as path to observe output. Set pty=true for terminal-dependent programs (requires background mode). Background tasks have no default timeout; foreground defaults to 120 seconds and allows at most 600 seconds.",
             executor.description()
         );
         let handler = Arc::new(shell::SessionShell::new(
@@ -212,6 +244,9 @@ fn registrations(
             native.shells.clone(),
             native.log.clone(),
             native.controllers.clone(),
+            native.interactions.clone(),
+            ceiling,
+            revision,
         ));
         registrations.push(ToolRegistration {
             definition: ToolDefinition {

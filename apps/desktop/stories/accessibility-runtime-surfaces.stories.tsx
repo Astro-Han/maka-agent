@@ -108,6 +108,7 @@ export const ActiveTerminal: Story = {
   decorators: [
     withWorkbarServices({
       terminal: {
+        prepareExecution: async () => true,
         recover: async () => ({ resources: [], closes: [] }),
         subscribeCloseChanges: () => () => undefined,
         subscribeUpdates: () => () => undefined,

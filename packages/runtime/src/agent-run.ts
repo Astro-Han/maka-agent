@@ -1446,7 +1446,7 @@ export class AgentRun {
       route: runtimeInvocationRouteForHeader(this.header, providerStateIdentity),
       configuration: {
         cwd: this.header.cwd,
-        permissionMode: this.header.permissionMode,
+        sandboxMode: this.header.sandboxMode,
         collaborationMode: this.header.collaborationMode ?? 'agent',
         orchestrationMode: this.effectiveOrchestration.mode,
         orchestrationSource: this.effectiveOrchestration.source,

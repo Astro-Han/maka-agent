@@ -150,7 +150,7 @@ describe('shell run sandbox denial projection', () => {
         cwd: '/workspace',
         llmConnectionSlug: 'fake',
         model: 'fake-model',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
       });
       const content = terminalContent({
         ...failedShellRun(),

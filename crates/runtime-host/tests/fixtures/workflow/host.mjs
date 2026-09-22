@@ -70,7 +70,8 @@ export default async function activate(ctx) {
           managed: true,
           settings: {
             target: { kind: 'executor', executorId: executor },
-            permissionMode: 'explore',
+            sandboxMode: 'read-only',
+            approvalPolicy: { kind: 'on-request' },
             toolMode: 'direct',
             collaborationMode: 'agent',
             behavior: 'default',

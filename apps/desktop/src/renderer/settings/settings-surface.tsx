@@ -45,7 +45,7 @@ import type {
   AppSettings,
   RuntimeHostAppSettings,
   RuntimeHostSettingsUpdateGuard,
-  ChatDefaultPermissionMode,
+  ChatDefaultSandboxMode,
   SettingsSection,
   ThemePalette,
   ThemePreference,
@@ -162,7 +162,7 @@ type SettingsSurfaceProps = {
   onUiLocalePreferenceChange(preference: UiLocalePreference): void;
   uiLocaleUpdateGate: UiLocaleUpdateGate;
   onUserLabelChange?(label: string): void;
-  onDefaultPermissionModeChange(mode: ChatDefaultPermissionMode): void;
+  onDefaultSandboxModeChange(mode: ChatDefaultSandboxMode): void;
   request?: { readonly section?: SettingsSection; readonly profileId?: string };
   openProviderCatalog?: boolean;
   initialConnectionSlug?: string;
@@ -648,8 +648,8 @@ function SettingsSurfaceContent(
         runtimeHostRequestAuthority.acceptsSettingsWrite(hostTicket),
       );
       if (acceptedHostUpdate && host?.profileId === defaultRuntimeHostProfileIdRef.current) {
-        if (patch.chatDefaults?.permissionMode !== undefined) {
-          props.onDefaultPermissionModeChange(result.settings.chatDefaults.permissionMode);
+        if (patch.chatDefaults?.sandboxMode !== undefined) {
+          props.onDefaultSandboxModeChange(result.settings.chatDefaults.sandboxMode);
         }
         props.onUserLabelChange?.(result.settings.personalization.displayName);
       }

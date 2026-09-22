@@ -72,7 +72,7 @@ test('WorkHub model configuration accepts thinking levels without widening its a
     { expectedRevision: input.expectedRevision, modelTarget: input.modelTarget },
     { ...input, thinkingLevel: undefined },
     { ...input, sessionId: 'another-session' },
-    { ...input, permissionMode: 'bypass' },
+    { ...input, sandboxMode: 'danger-full-access' },
     { ...input, thinkingLevel: 'extreme' },
     { ...input, expectedRevision: -1 },
     { ...input, modelTarget: { kind: 'default' } },
@@ -90,7 +90,7 @@ test('WorkHub model actions cannot supply user authority or attachment locators'
     proposal: { disposition: 'create_new', title: 'Login audit' },
     delegationText: 'Inspect the login retries',
     create: { workspace: { kind: 'project', projectId: 'maka' } },
-    newWorkDefaults: { permissionMode: 'ask' },
+    newWorkDefaults: { sandboxMode: 'workspace-write' },
   };
   assert.deepEqual(decodeWorkHubCoordinationActFromTurnInput(input), input);
   for (const extra of [
@@ -123,7 +123,7 @@ test('WorkHub new Sessions accept a plugin executor as their creation default', 
     proposal: { disposition: 'create_new', title: 'External audit' },
     delegationText: 'Inspect the login retries',
     create: { workspace: { kind: 'project', projectId: 'maka' } },
-    newWorkDefaults: { executorId: 'codex.app-server', permissionMode: 'ask' },
+    newWorkDefaults: { executorId: 'codex.app-server', sandboxMode: 'workspace-write' },
   };
   assert.deepEqual(decodeWorkHubCoordinationActFromTurnInput(input), input);
   for (const newWorkDefaults of [
@@ -209,7 +209,7 @@ test('model actions retain closed task inputs and bounded answer content', () =>
     {
       proposal: { disposition: 'create_new', title: 'Audit' },
       create: { workspace },
-      newWorkDefaults: { permissionMode: 'ask' },
+      newWorkDefaults: { sandboxMode: 'workspace-write' },
     },
     {
       proposal: {
@@ -238,7 +238,7 @@ test('model actions retain closed task inputs and bounded answer content', () =>
     {
       proposal: { disposition: 'create_new', title: 'Audit' },
       create: { workspace },
-      newWorkDefaults: { permissionMode: 'invented' },
+      newWorkDefaults: { sandboxMode: 'invented' },
     },
     {
       proposal: {

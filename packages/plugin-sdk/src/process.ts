@@ -47,7 +47,7 @@ export interface Process {
   close(): Promise<void>;
 }
 export interface Processes {
-  /** Requires this call's current Bypass permission and uses its frozen workspace. */
+  /** Uses this call's authorized workspace and OS sandbox. Unsupported isolation fails before spawn. */
   spawn(command: ProcessCommand): Promise<Process>;
   /** Rebinds an instance process to this invocation; old call handles stay revoked. */
   open(id: string): Process;

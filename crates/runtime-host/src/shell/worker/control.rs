@@ -61,7 +61,7 @@ impl Worker {
         if let Some(size) = control.size {
             let result = async {
                 if size != terminal.snapshot.size {
-                    child.resize(size)?;
+                    child.resize(size).await?;
                     resize_changed = true;
                 }
                 resized = true;

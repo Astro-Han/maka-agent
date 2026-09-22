@@ -61,7 +61,7 @@ const activeSession: SessionSummary = {
   llmConnectionSlug: 'anthropic',
   connectionLocked: false,
   model: 'claude-sonnet-4-5',
-  permissionMode: 'ask',
+  sandboxMode: 'workspace-write',
 };
 
 function turnMessages(): StoredMessage[] {

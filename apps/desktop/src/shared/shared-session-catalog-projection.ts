@@ -21,6 +21,7 @@ import type { SessionCatalogSummary } from '@maka/core/session';
 import type { SharedSessionCatalogProjection } from '@maka/runtime-host/protocol';
 
 export interface DesktopSharedSessionSummary extends SessionCatalogSummary {
+  readonly approvalPolicy: null;
   readonly labelsTruncated: false;
   readonly revision: number;
   readonly shared: true;
@@ -30,6 +31,7 @@ export function projectDesktopSharedSessionSummary(
   session: SharedSessionCatalogProjection,
 ): DesktopSharedSessionSummary {
   return {
+    approvalPolicy: null,
     id: session.id,
     revision: session.revision,
     name: session.name,
@@ -55,7 +57,7 @@ export function projectDesktopSharedSessionSummary(
     llmConnectionSlug: '',
     connectionLocked: true,
     model: '',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
     shared: true,
   };
 }

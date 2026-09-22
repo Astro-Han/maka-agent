@@ -4298,11 +4298,13 @@ dependencies = [
  "flate2",
  "libc",
  "maka-event-log",
+ "maka-fs-tools",
  "maka-js-runtime",
  "maka-process",
  "maka-protocol",
  "maka-runtime",
  "maka-runtime-host",
+ "maka-sandbox",
  "maka-transport",
  "reqwest",
  "semver",
@@ -4367,6 +4369,7 @@ dependencies = [
  "maka-plugins",
  "maka-presentation",
  "maka-runtime",
+ "maka-sandbox",
  "rusqlite",
  "serde",
  "serde_json",
@@ -4398,6 +4401,7 @@ dependencies = [
  "imagesize",
  "libc",
  "maka-runtime",
+ "maka-sandbox",
  "rustix 1.1.4",
  "schemars",
  "serde",
@@ -4482,14 +4486,24 @@ dependencies = [
 name = "maka-network"
 version = "0.2.0"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "maka-runtime",
+ "maka-sandbox",
+ "percent-encoding",
  "reqwest",
+ "rustls-platform-verifier",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tokio-rustls",
+ "tokio-socks",
  "tokio-tungstenite",
+ "tokio-util",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4499,9 +4513,11 @@ dependencies = [
  "base64 0.22.1",
  "cap-fs-ext",
  "cap-std",
+ "dunce",
  "futures-util",
  "libc",
  "maka-runtime",
+ "maka-sandbox",
  "rustix 1.1.4",
  "serde",
  "serde_json",
@@ -4531,7 +4547,9 @@ version = "0.2.0"
 dependencies = [
  "dunce",
  "libc",
+ "maka-network",
  "maka-runtime",
+ "maka-sandbox",
  "rustix 1.1.4",
  "schemars",
  "serde",
@@ -4564,6 +4582,7 @@ name = "maka-runtime"
 version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
+ "maka-sandbox",
  "regress",
  "ryu-js",
  "schemars",
@@ -4608,6 +4627,7 @@ dependencies = [
  "maka-process",
  "maka-protocol",
  "maka-runtime",
+ "maka-sandbox",
  "maka-scheduler",
  "maka-skills",
  "maka-tools",
@@ -4630,6 +4650,26 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "maka-sandbox"
+version = "0.2.0"
+dependencies = [
+ "globset",
+ "libc",
+ "regex-syntax",
+ "schemars",
+ "seccompiler",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "unicode-normalization",
+ "url",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5824,6 +5864,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "futures-core",
+ "futures-util",
  "http",
  "http-body",
  "http-body-util",
@@ -5843,12 +5884,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
 ]
 
@@ -6211,6 +6254,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "seccompiler"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4ae55de56877481d112a559bbc12667635fdaf5e005712fd4e2b2fa50ffc884"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "security-framework"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6422,6 +6474,12 @@ dependencies = [
  "digest 0.10.7",
  "sha1 0.10.7",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
 
 [[package]]
 name = "sha2"
@@ -7564,6 +7622,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 
@@ -7724,6 +7783,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81941cd78d0c92026c33e5e01312845a4cb1e9af3407f9134b100dd03144103e"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

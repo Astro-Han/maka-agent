@@ -159,7 +159,8 @@ export async function preflightDeclaredSandboxBoundary(
     });
   }
   const boundary = ctx.executionBoundary;
-  if (!boundary || boundary.kind === 'bypass' || boundary.kind === 'external') return normalized;
+  if (!boundary || boundary.kind === 'danger-full-access' || boundary.kind === 'external')
+    return normalized;
   const assessment = assessSandboxBoundaryExpansion(boundary.profile, normalized, {
     root: ctx.cwd,
     workspaceRoots: [ctx.cwd],

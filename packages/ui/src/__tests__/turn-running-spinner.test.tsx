@@ -28,7 +28,7 @@ import type { TurnViewModel } from '../materialize.js';
 function statusHasSpinner(toolStatuses: readonly ('running' | 'completed')[]): boolean {
   const tools = toolStatuses.map((status, index) => ({
     toolUseId: `tool-${index + 1}`,
-    toolName: 'Bash',
+    toolName: 'Shell',
     status,
     args: {},
   } as const));

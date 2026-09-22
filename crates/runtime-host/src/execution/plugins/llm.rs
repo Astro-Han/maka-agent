@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Error, Executions, SessionConfiguration, storage};
+use super::{Error, Executions};
 use crate::execution::provider;
 use maka_model::{ModelExecutor, ModelRequest, StepBuilder, prompt::Message};
 use maka_plugins::{
@@ -25,7 +25,6 @@ use maka_plugins::{
     llm::{Generate, ModelGeneration},
 };
 use maka_runtime::{
-    event::Invocation,
     model::{ModelEvent, ModelPart, TextKind},
     tool_call::{ToolCallIdentity, ToolOrigin},
     tool_output::ToolOutput,
@@ -90,8 +89,7 @@ impl Executions {
     pub(crate) async fn plugin_model(
         self: &Arc<Self>,
         owner: Context,
-        invocation: Invocation,
-        parent_operation_id: Option<String>,
+        call: maka_plugins::call::Scope,
         input: Generate,
         cancellation: CancellationToken,
     ) -> Result<impl Future<Output = Result<ModelGeneration, ToolError>> + Send + 'static, Error>
@@ -105,21 +103,10 @@ impl Executions {
         if !self.accepting() || cancellation.is_cancelled() {
             return Err(Error::Revoked);
         }
-        let frozen = self
-            .log
-            .invocation_configuration(&invocation)
-            .await
-            .map_err(storage)?
-            .ok_or(Error::Denied)?;
-        let current = self
-            .log
-            .get_session::<SessionConfiguration>(&invocation.session_id)
-            .await
-            .map_err(storage)?
-            .ok_or(Error::NotFound)?;
-        if current.archived {
-            return Err(Error::Denied);
-        }
+        let evidence = self.plugin_agent_evidence(&call).await?;
+        let frozen = &evidence.invocation;
+        let invocation = call.identity.agent().ok_or(Error::Denied)?.clone();
+        let parent_operation_id = call.identity.operation_id().map(str::to_owned);
         let model = frozen
             .model
             .as_ref()

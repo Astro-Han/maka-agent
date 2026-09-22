@@ -105,6 +105,7 @@ async fn scenario() {
     let mut accepted = Value::Null;
     let mut root_grant = Value::Null;
     let mut root_result = Value::Null;
+    let mut network_grant = Value::Null;
     for reopened in [false, true] {
         let host = Host::open(fixture.owner()).await.unwrap();
         #[cfg(unix)]
@@ -150,7 +151,7 @@ async fn scenario() {
         )["document"]
             .clone();
         if !reopened {
-            success(peer.rpc("session.create", json!({"sessionId":"background-session", "workspace":{"kind":"host_path","path":fixture.workspace}, "executorId":"example.background","permissionMode":"bypass"})).await);
+            success(peer.rpc("session.create", json!({"sessionId":"background-session", "workspace":{"kind":"host_path","path":fixture.workspace}, "executorId":"example.background","sandboxMode":"danger-full-access"})).await);
         }
         let mut publication = super::plugin_clients::publication("desktop", "inspect");
         publication["services"] = json!([{"serviceId":"maka_notifications","version":"1"}]);
@@ -180,6 +181,36 @@ async fn scenario() {
         }}})).await)["grant"].clone();
         notification_call(&mut peer, &client, &document, &notification_grant).await;
         foreign.close().await;
+        if !reopened {
+            network_grant = success(peer.rpc("plugin.authorization", json!({
+                "client":client,"scope":"profile","command":{"kind":"approve","request":{
+                    "operationId":uuid::Uuid::new_v4(),"title":"HTTP without file or process access",
+                    "target":{"kind":"plugin_workspace","sandboxMode":"read-only"},
+                    "capabilities":["network"]
+                }}
+            })).await)["grant"].clone();
+        }
+        let network_input = json!({"grant":network_grant["id"],"operation":"network-only"});
+        assert_eq!(
+            remote(
+                &mut peer,
+                &client,
+                &document,
+                "network",
+                network_input.clone()
+            )
+            .await,
+            true
+        );
+        if reopened {
+            success(peer.rpc("plugin.authorization", json!({
+                "client":client,"scope":"profile","command":{"kind":"revoke","id":network_grant["id"]}
+            })).await);
+            assert_eq!(
+                remote(&mut peer, &client, &document, "network", network_input).await,
+                false
+            );
+        }
         if !reopened {
             assert_eq!(
                 remote(
@@ -237,7 +268,7 @@ async fn scenario() {
             root_grant = success(peer.rpc("plugin.authorization", json!({
                 "client":client,"scope":"profile","command":{"kind":"approve","request":{
                     "operationId":uuid::Uuid::new_v4(),"title":"Create independent Sessions",
-                    "target":{"kind":"plugin_workspace","permissionMode":"explore"},
+                    "target":{"kind":"plugin_workspace","sandboxMode":"read-only"},
                     "capabilities":["executions"]
                 }}
             })).await)["grant"].clone();
@@ -284,7 +315,7 @@ async fn scenario() {
         assert_ne!(private_workspace, fixture.workspace.canonicalize().unwrap());
         let ordinary = peer.rpc("session.configuration.update", json!({
             "sessionId":created["root"]["sessionId"], "expectedRevision":managed["revision"],
-            "patch":{"permissionMode":"bypass"}
+            "patch":{"sandboxMode":"danger-full-access"}
         })).await;
         assert_eq!(ordinary["ok"], false, "{ordinary}");
         if reopened {
@@ -318,7 +349,7 @@ async fn scenario() {
             );
             success(peer.rpc("session.configuration.update", json!({
                 "sessionId":"background-session", "expectedRevision":session["session"]["revision"],
-                "patch":{"permissionMode":"ask"}
+                "patch":{"sandboxMode":"workspace-write"}
             })).await);
             // An approval reply is an inert receipt, not renewed authority. A
             // lost-reply retry must survive revocation and target narrowing.

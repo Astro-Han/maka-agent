@@ -49,7 +49,9 @@ pub struct SessionCreateInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_profile: Option<SessionToolProfile>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<PermissionMode>,
+    pub sandbox_mode: Option<SandboxMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_policy: Option<ApprovalPolicy>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub collaboration_mode: Option<CollaborationMode>,
     #[serde(skip_serializing_if = "Option::is_none")]

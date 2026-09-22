@@ -39,6 +39,10 @@ async fn admitted_output_leaves_room_for_recovery_and_first_observation() {
         source_turn_id: "turn".into(),
         source_tool_call_id: "call".into(),
         visibility: ShellVisibility::User,
+        permissions: maka_runtime::shell_run::ShellPermissions {
+            boundary_revision: 0,
+            sandbox: maka_runtime::shell_run::Sandbox::Disabled,
+        },
         cwd: "/workspace".into(),
         command: "command".into(),
         started_at: 1,

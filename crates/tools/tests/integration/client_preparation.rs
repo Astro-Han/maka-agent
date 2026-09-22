@@ -25,7 +25,7 @@ use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_runtime::{
     capability::{AdmissionEvidence, CallResult, ClientFrame, HostFrame},
     event::Fact,
-    execution::{BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode},
+    execution::{BehaviorId, CollaborationMode, InvocationConfiguration, SandboxMode, ToolMode},
     interaction::GrantTarget,
     model::ModelToolCall,
     tool_call::{ToolOrigin, ToolRejection},
@@ -47,7 +47,7 @@ use crate::support::model_fixture;
 const TOOL: &str = "mcp__client__effect";
 
 struct Approval {
-    mode: PermissionMode,
+    mode: SandboxMode,
     requests: tokio::sync::mpsc::UnboundedSender<(
         GrantTarget,
         ToolCallContext,
@@ -57,7 +57,7 @@ struct Approval {
     )>,
 }
 impl ClientInteractions for Approval {
-    fn permission_mode(&self, _: ToolCallContext) -> maka_tools::PermissionFuture {
+    fn sandbox_mode(&self, _: ToolCallContext) -> maka_tools::PermissionFuture {
         let mode = self.mode;
         Box::pin(async move { Ok(mode) })
     }
@@ -145,19 +145,22 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
     let log = Arc::new(EventLog::open(&path).await.unwrap());
     let invocation = model_fixture::invocation();
     let configuration = InvocationConfiguration {
+        workspace_origin: maka_runtime::execution::WorkspaceOrigin::Selected,
+        approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
+        boundary_revision: 0,
         workspace_identity: None,
         system_prompt: None,
         tool_composition: None,
         cwd: directory.path().to_str().unwrap().into(),
-        permission_mode: if cut == Cut::Explore {
-            PermissionMode::Explore
+        sandbox_mode: if cut == Cut::Explore {
+            SandboxMode::ReadOnly
         } else if matches!(
             cut,
             Cut::Success | Cut::Denied | Cut::ManagedAllow | Cut::ManagedDeny | Cut::Settings
         ) {
-            PermissionMode::Ask
+            SandboxMode::WorkspaceWrite
         } else {
-            PermissionMode::Bypass
+            SandboxMode::DangerFullAccess
         },
         collaboration_mode: CollaborationMode::Agent,
         orchestration_mode: BehaviorId::default(),
@@ -223,9 +226,9 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
         requests,
         // The successful call uses a grant newer than its immutable Run opening.
         mode: if cut == Cut::Success {
-            PermissionMode::Bypass
+            SandboxMode::DangerFullAccess
         } else {
-            configuration.permission_mode
+            configuration.sandbox_mode
         },
     });
     let catalog = ToolCatalog::new(

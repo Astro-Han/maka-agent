@@ -73,7 +73,9 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
 
     const initialSettings = await settingsSnapshot(request);
     assert.equal(initialSettings.policy.revision, 0);
-    assert.deepEqual(initialSettings.policy.policy.chatDefaults, { permissionMode: 'bypass' });
+    assert.deepEqual(initialSettings.policy.policy.chatDefaults, {
+      sandboxMode: 'workspace-write',
+    });
     assert.equal(initialSettings.proxy.status.configured, false);
     await barrier();
     assert.deepEqual(notices, []);
@@ -89,16 +91,20 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
     );
 
     const sessions = [];
-    const create = async (id, permissionMode) => {
-      const input = createInput(workspace, id, permissionMode);
+    const create = async (id, sandboxMode) => {
+      const input = createInput(workspace, id, sandboxMode);
       const snapshot = await request('session.create', input);
       sessions.push({ input, snapshot });
       return snapshot;
     };
-    const old = await create('runtime-policy-old', 'ask');
-    modelDefault(old, 'ask');
+    const old = await create('runtime-policy-old');
+    modelDefault(old, 'workspace-write');
 
-    const value = { permissionMode: 'bypass', thinkingLevel: 'high', codeModeEnabled: true };
+    const value = {
+      sandboxMode: 'danger-full-access',
+      thinkingLevel: 'high',
+      codeModeEnabled: true,
+    };
     const beforeRace = notices.length;
     const raced = await Promise.all([mutate(0, value), mutate(0, value, other)]);
     const committed = raced.filter((result) => result.kind === 'committed');
@@ -128,9 +134,9 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
     await barrier();
     assert.equal(notices.length, beforeSame + 1, 'same-value legal mutation still commits');
     const inherited = await create('runtime-policy-inherited');
-    modelDefault(inherited, 'bypass');
-    const explicit = await create('runtime-policy-explicit', 'ask');
-    modelDefault(explicit, 'ask');
+    modelDefault(inherited, 'danger-full-access');
+    const explicit = await create('runtime-policy-explicit', 'workspace-write');
+    modelDefault(explicit, 'workspace-write');
     assert.deepEqual(await querySession(request, old.id), old);
 
     const beforeUnavailable = notices.length;
@@ -149,7 +155,7 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
     await barrier();
     assert.equal(notices.length, beforeUnavailable, 'unavailable mutation must not notify');
 
-    const changed = await mutate(2, { permissionMode: 'ask', thinkingLevel: 'low' });
+    const changed = await mutate(2, { sandboxMode: 'workspace-write', thinkingLevel: 'low' });
     assert.deepEqual(changed, { kind: 'committed', revision: 3 });
     for (const { input, snapshot } of sessions) {
       assert.deepEqual(await querySession(request, input.sessionId), snapshot);
@@ -159,11 +165,13 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
         'default changes never alter existing or exactly retried Sessions',
       );
     }
-    const cleared = await mutate(3, { permissionMode: 'bypass' });
+    const cleared = await mutate(3, { sandboxMode: 'danger-full-access' });
     assert.deepEqual(cleared, { kind: 'committed', revision: 4 });
     const finalSettings = await settingsSnapshot(request);
     assert.equal(finalSettings.policy.revision, 4);
-    assert.deepEqual(finalSettings.policy.policy.chatDefaults, { permissionMode: 'bypass' });
+    assert.deepEqual(finalSettings.policy.policy.chatDefaults, {
+      sandboxMode: 'danger-full-access',
+    });
     assert.equal(
       Object.hasOwn(finalSettings.policy.policy.chatDefaults, 'thinkingLevel'),
       false,

@@ -23,8 +23,8 @@ use maka_runtime::terminal::TerminalSize;
 use std::{io, os::windows::io::OwnedHandle, process::ExitStatus, sync::Arc, time::Duration};
 use tokio::{net::windows::named_pipe::NamedPipeServer, task::JoinHandle};
 
-mod console;
-mod spawn;
+pub(crate) mod console;
+pub(crate) mod spawn;
 use console::Console;
 
 pub struct PtyChild {
@@ -38,10 +38,25 @@ pub struct PtyChild {
 }
 
 enum ConsoleState {
-    Open(Console),
-    Closing(JoinHandle<()>),
+    Open(ConsoleOwner),
+    Closing(JoinHandle<io::Result<()>>),
     Closed,
     Failed(String),
+}
+
+enum ConsoleOwner {
+    Native(Console),
+    Runner(crate::bootstrap::terminal::Remote),
+}
+impl ConsoleOwner {
+    async fn close(self, terminated: bool) -> io::Result<()> {
+        match self {
+            Self::Native(console) => tokio::task::spawn_blocking(move || drop(console))
+                .await
+                .map_err(io::Error::other),
+            Self::Runner(console) => console.close(terminated).await,
+        }
+    }
 }
 
 pub struct PtyIo {
@@ -52,6 +67,13 @@ pub struct PtyIo {
 pub async fn spawn(mut plan: PtyCommand, size: TerminalSize) -> io::Result<(PtyChild, PtyIo)> {
     plan.env("TERM", "xterm-256color")
         .env("COLORTERM", "truecolor");
+    let mut plan = plan.prepare().await?;
+    if let Some(launch) = plan.take_launch() {
+        return launch
+            .runner
+            .terminal(launch.endpoint, plan, launch.capabilities, size)
+            .await;
+    }
     let (output, output_peer) = pipe::pty_output().await?;
     let (input, input_peer) = pipe::pty_input().await?;
     let output = Arc::new(output);
@@ -76,7 +98,7 @@ pub async fn spawn(mut plan: PtyCommand, size: TerminalSize) -> io::Result<(PtyC
             job,
             pid,
             output: output.clone(),
-            console: ConsoleState::Open(console),
+            console: ConsoleState::Open(ConsoleOwner::Native(console)),
             status: None,
             terminated: false,
         },
@@ -84,14 +106,38 @@ pub async fn spawn(mut plan: PtyCommand, size: TerminalSize) -> io::Result<(PtyC
     ))
 }
 
+pub(crate) fn from_runner(
+    process: OwnedHandle,
+    pid: u32,
+    job: Job,
+    input: NamedPipeServer,
+    output: NamedPipeServer,
+    console: crate::bootstrap::terminal::Remote,
+) -> (PtyChild, PtyIo) {
+    let output = Arc::new(output);
+    (
+        PtyChild {
+            process,
+            job,
+            pid,
+            output: output.clone(),
+            console: ConsoleState::Open(ConsoleOwner::Runner(console)),
+            status: None,
+            terminated: false,
+        },
+        PtyIo { output, input },
+    )
+}
+
 impl PtyChild {
     pub fn id(&self) -> u32 {
         self.pid
     }
 
-    pub fn resize(&mut self, size: TerminalSize) -> io::Result<()> {
+    pub async fn resize(&mut self, size: TerminalSize) -> io::Result<()> {
         match &self.console {
-            ConsoleState::Open(console) => console.resize(size),
+            ConsoleState::Open(ConsoleOwner::Native(console)) => console.resize(size),
+            ConsoleState::Open(ConsoleOwner::Runner(console)) => console.resize(size).await,
             _ => Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "console is closing",
@@ -118,7 +164,9 @@ impl PtyChild {
             while !self.job.is_empty()? {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-        } else {
+        } else if matches!(self.console, ConsoleState::Open(ConsoleOwner::Native(_))) {
+            // A managed runner owns the complete sandbox tree. Only explicit
+            // Host background admission may extend that resource lifetime.
             self.job.preserve_descendants()?;
         }
         self.status = Some(status);
@@ -135,12 +183,14 @@ impl PtyChild {
             && let ConsoleState::Open(console) =
                 std::mem::replace(&mut self.console, ConsoleState::Closed)
         {
-            self.console =
-                ConsoleState::Closing(tokio::task::spawn_blocking(move || drop(console)));
+            self.console = ConsoleState::Closing(tokio::spawn(console.close(self.terminated)));
         }
         if let ConsoleState::Closing(closing) = &mut self.console {
             self.console = match closing.await {
-                Ok(()) => ConsoleState::Closed,
+                Ok(Ok(())) => ConsoleState::Closed,
+                Ok(Err(error)) => {
+                    ConsoleState::Failed(format!("console close outcome unknown: {error}"))
+                }
                 Err(error) => {
                     ConsoleState::Failed(format!("console close outcome unknown: {error}"))
                 }

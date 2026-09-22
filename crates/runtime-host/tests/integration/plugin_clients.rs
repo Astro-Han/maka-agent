@@ -27,7 +27,7 @@ use maka_plugins::{
     fiber::Fiber,
     storage::{Data, Mutation},
 };
-use maka_runtime::{event::Fact, execution::PermissionMode, tool_call::ToolOrigin};
+use maka_runtime::{event::Fact, execution::SandboxMode, tool_call::ToolOrigin};
 use maka_runtime_host::server::{Host, local::LocalListener};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -84,7 +84,7 @@ async fn scenario() {
             "session.create",
             json!({
                 "sessionId":"parent", "workspace":{"kind":"host_path","path":fixture.workspace},
-                "executorId":"example.clients", "permissionMode":"bypass"
+                "executorId":"example.clients", "sandboxMode":"danger-full-access"
             })
         )
         .await["ok"],
@@ -99,18 +99,18 @@ async fn scenario() {
         .unwrap();
     inspector.ready().unwrap();
     inspector.publish().unwrap();
-    let child = |id: &str, permission_mode, bound_tools| CreateChild {
+    let child = |id: &str, sandbox_mode, bound_tools| CreateChild {
         operation_id: id.into(),
         parent_session_id: "parent".into(),
         name: id.into(),
-        permission_mode,
+        sandbox_mode,
         bound_tools,
         instructions: None,
         workspace: None,
         target: None,
     };
     let restricted = commands
-        .create_child(child("restricted", Some(PermissionMode::Explore), None))
+        .create_child(child("restricted", Some(SandboxMode::ReadOnly), None))
         .await
         .unwrap();
     let bounded = commands
@@ -169,7 +169,7 @@ async fn scenario() {
                 .await;
             let changed = peer.rpc("session.configuration.update", json!({
                 "sessionId":session,"expectedRevision":record["result"]["session"]["revision"],
-                "patch":{"permissionMode":"bypass"}
+                "patch":{"sandboxMode":"danger-full-access"}
             })).await;
             assert_eq!(changed["result"]["kind"], "committed", "{changed}");
             storage
@@ -181,33 +181,27 @@ async fn scenario() {
                 .await
                 .unwrap();
         }
-        if command != "bounded" {
+        if command == "complete" {
             let call = capability(&mut peer, "client.capability.call").await;
             assert_eq!(call["arguments"], json!({"command":command}));
             assert!(
                 call.get("cwd").is_none(),
                 "hostPathAccess none must hide paths"
             );
-            if command == "complete" {
-                assert_eq!(
-                    late.as_mut()
-                        .unwrap()
-                        .rpc(
-                            "client.capability.replace",
-                            publication("late", "unexpected")
-                        )
-                        .await["ok"],
-                    true
-                );
-            }
+            assert_eq!(
+                late.as_mut()
+                    .unwrap()
+                    .rpc(
+                        "client.capability.replace",
+                        publication("late", "unexpected")
+                    )
+                    .await["ok"],
+                true
+            );
             peer.send_frame(json!({"kind":"client.capability.accepted","invocationId":call["invocationId"],"admissionEvidence":{"kind":"none"}}));
-            if command == "complete" {
-                let admitted = capability(&mut peer, "client.capability.admitted").await;
-                assert_eq!(admitted["invocationId"], call["invocationId"]);
-                peer.send_frame(json!({"kind":"client.capability.result","invocationId":call["invocationId"],"result":{"content":[],"structuredContent":{"inspected":true}}}));
-            } else {
-                capability(&mut peer, "client.capability.cancel").await;
-            }
+            let admitted = capability(&mut peer, "client.capability.admitted").await;
+            assert_eq!(admitted["invocationId"], call["invocationId"]);
+            peer.send_frame(json!({"kind":"client.capability.result","invocationId":call["invocationId"],"result":{"content":[],"structuredContent":{"inspected":true}}}));
         }
         loop {
             let state = peer

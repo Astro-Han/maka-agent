@@ -87,7 +87,7 @@ describe('host-managed agent graph coordinator', () => {
           llmConnectionSlug: 'fake',
           modelId: 'fake',
         },
-        configuration: { cwd: '/workspace', permissionMode: 'explore' },
+        configuration: { cwd: '/workspace', sandboxMode: 'read-only' },
       }),
       terminalEvent: {
         id: 'source-terminal',
@@ -314,7 +314,7 @@ describe('host-managed agent graph coordinator', () => {
       const rootSession = await manager.createSession({
         cwd: root,
         llmConnectionSlug: 'fake',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         name: 'Graph supervisor',
       });
       const sourceTurnId = randomUUID();
@@ -1188,7 +1188,7 @@ describe('host-managed agent graph coordinator', () => {
       const rootSession = await manager.createSession({
         cwd: root,
         llmConnectionSlug: 'fake',
-        permissionMode: 'ask',
+        sandboxMode: 'workspace-write',
         orchestrationMode: 'swarm',
         name: 'Failure recovery supervisor',
       });
@@ -1496,7 +1496,7 @@ describe('host-managed agent graph coordinator', () => {
           llmConnectionSlug: 'fake',
           modelId: 'fake',
         },
-        configuration: { cwd: '/workspace', permissionMode: 'explore' },
+        configuration: { cwd: '/workspace', sandboxMode: 'read-only' },
       }),
     };
     const runningEvent: RuntimeEvent = {

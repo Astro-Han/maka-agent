@@ -48,7 +48,14 @@ export function installConsoleDiagnosticLogCapture(
       } catch {
         // Diagnostic capture must not change console behavior.
       }
-      original(...args);
+      try {
+        original(...args);
+      } catch (error) {
+        // A GUI process can outlive the launcher that owned its output pipe.
+        // The diagnostic buffer still owns this entry; losing that optional
+        // console sink must not become an uncaught main-process exception.
+        if (!(error instanceof Error && 'code' in error && error.code === 'EPIPE')) throw error;
+      }
     };
   }
 }

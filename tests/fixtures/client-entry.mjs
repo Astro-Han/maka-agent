@@ -39,7 +39,7 @@ import { verifyCapabilityHost } from './client-capability-host.mjs';
 import { verifyManagedApproval } from './client-managed-approval.mjs';
 import { verifyForms } from './client-form.mjs';
 import { verifyQuestions } from './client-question.mjs';
-import { verifyBashWorkflow } from './client-bash.mjs';
+import { verifyShellWorkflow } from './client-shell.mjs';
 import { verifyPatchWorkflow } from './client-patch.mjs';
 import { verifyOpenaiOptions } from './client-openai-options.mjs';
 import { verifyAnthropicOptions } from './client-anthropic-options.mjs';
@@ -102,7 +102,7 @@ async function main() {
       'message-submit-workspace': { type: 'string' },
       'message-interrupt-workspace': { type: 'string' },
       'message-interrupt-failure-workspace': { type: 'string' },
-      'bash-workspace': { type: 'string' },
+      'shell-workspace': { type: 'string' },
       'patch-workspace': { type: 'string' },
       'openai-options-workspace': { type: 'string' },
       'anthropic-options-workspace': { type: 'string' },
@@ -169,7 +169,7 @@ async function main() {
           ? 45000 // Includes 1,030 serial durable commands; each request still has its own deadline.
           : values['large-output-workspace']
             ? 120000
-            : values['bash-workspace']
+            : values['shell-workspace']
               ? 30000
               : selected.length
                 ? 15000
@@ -241,10 +241,10 @@ async function main() {
     if (values['patch-workspace']) {
       await verifyPatchWorkflow(connection, values['patch-workspace'], values.reopened);
     }
-    if (values['bash-workspace']) {
-      await verifyBashWorkflow(
+    if (values['shell-workspace']) {
+      await verifyShellWorkflow(
         connection,
-        values['bash-workspace'],
+        values['shell-workspace'],
         values.reopened,
         async () => (await openClient(values, input)).connection,
       );

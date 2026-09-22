@@ -256,7 +256,8 @@ function sessionProjection(id: string): SessionCatalogProjection {
     llmConnectionSlug: 'fake',
     connectionLocked: false,
     model: 'fake-model',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
     collaborationMode: 'agent',
     orchestrationMode: 'default',
   };

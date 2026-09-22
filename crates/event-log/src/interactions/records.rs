@@ -58,6 +58,12 @@ pub(super) fn authority_key(session: &str, target: &GrantTarget) -> Result<Strin
 pub(super) fn equivalent(left: &InteractionOutcome, right: &InteractionOutcome) -> bool {
     match (left, right) {
         (
+            InteractionOutcome::PermissionsDecision { decision: left, .. },
+            InteractionOutcome::PermissionsDecision {
+                decision: right, ..
+            },
+        ) => left == right,
+        (
             InteractionOutcome::QuestionAnswer { answers: left, .. },
             InteractionOutcome::QuestionAnswer { answers: right, .. },
         ) => left == right,

@@ -30,6 +30,10 @@ pub struct Operations;
 
 impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if maka_protocol::sandbox_setup::supports(operation) {
+            maka_protocol::sandbox_setup::decode_input(value)?;
+            return Ok(value.clone());
+        }
         if maka_protocol::plugin::supports(operation) {
             maka_protocol::plugin::decode_input(operation, value)?;
             return Ok(value.clone());
@@ -107,6 +111,10 @@ impl OperationRegistry for Operations {
         }
     }
     fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if maka_protocol::sandbox_setup::supports(operation) {
+            maka_protocol::sandbox_setup::decode_output(value)?;
+            return Ok(value.clone());
+        }
         if maka_protocol::plugin::supports(operation) {
             return maka_protocol::plugin::decode_output(operation, value);
         }
@@ -179,6 +187,9 @@ impl OperationRegistry for Operations {
         }
     }
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
+        if maka_protocol::sandbox_setup::supports(operation) {
+            return Some(maka_protocol::sandbox_setup::ERRORS);
+        }
         if maka_protocol::plugin::supports(operation) {
             return Some(maka_protocol::plugin::ERRORS);
         }

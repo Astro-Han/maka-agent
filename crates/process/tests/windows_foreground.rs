@@ -51,7 +51,7 @@ async fn invoke(executor: &ShellExecutor, command: &str) -> Value {
 #[tokio::test]
 async fn powershell_preserves_unicode_script_boundaries_exit_codes_and_bounded_tails() {
     let dir = tempfile::tempdir().unwrap();
-    let executor = ShellExecutor::trusted_unrestricted(dir.path()).unwrap();
+    let executor = ShellExecutor::new(dir.path(), maka_sandbox::Sandbox::Disabled).unwrap();
     assert!(
         executor.description().contains("PowerShell"),
         "Windows installation must provide its standard PowerShell"
@@ -157,7 +157,7 @@ impl Drop for LiveProcess {
 async fn cancellation_timeout_and_dropped_caller_terminate_the_owned_job() {
     for mode in ["cancel", "timeout", "drop"] {
         let dir = tempfile::tempdir().unwrap();
-        let executor = ShellExecutor::trusted_unrestricted(dir.path()).unwrap();
+        let executor = ShellExecutor::new(dir.path(), maka_sandbox::Sandbox::Disabled).unwrap();
         let token = CancellationToken::new();
         let task = tokio::spawn(executor.invoke(
             SHELL_NAME.into(),
@@ -202,7 +202,7 @@ async fn cancellation_timeout_and_dropped_caller_terminate_the_owned_job() {
 #[tokio::test]
 async fn normal_shell_exit_preserves_background_descendants_but_bounds_pipe_drain() {
     let dir = tempfile::tempdir().unwrap();
-    let executor = ShellExecutor::trusted_unrestricted(dir.path()).unwrap();
+    let executor = ShellExecutor::new(dir.path(), maka_sandbox::Sandbox::Disabled).unwrap();
     let task = tokio::spawn(executor.invoke(
         SHELL_NAME.into(),
         json!({

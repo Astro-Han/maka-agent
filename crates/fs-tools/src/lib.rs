@@ -37,7 +37,7 @@ pub use mutation::{
     EDIT_DESCRIPTION, EDIT_NAME, WRITE_DESCRIPTION, WRITE_NAME, edit_schema, write_schema,
 };
 pub use patch::{PATCH_DESCRIPTION, PATCH_NAME, patch_schema};
-pub use write::{MutationExecutor, WriteCoordinator, WriteScope};
+pub use write::{MutationExecutor, WriteCoordinator, WriteScope, mutation_paths};
 
 use maka_runtime::{
     read::{ReadInput, ReadPage, ReadRequest},
@@ -61,6 +61,7 @@ pub fn read_schema() -> Value {
 /// Directory capabilities enforce reads; this is not an OS process sandbox.
 pub enum ReadScope {
     Restricted { roots: Vec<PathBuf> },
+    Policy(Arc<maka_sandbox::filesystem::Compiled>),
     Unrestricted,
 }
 
@@ -96,12 +97,13 @@ impl ReadExecutor {
         path: PathBuf,
         directory: cap_std::fs::Dir,
         limits: ReadLimits,
+        policy: Option<Arc<maka_sandbox::filesystem::Compiled>>,
     ) -> Result<Self, ToolError> {
         if limits.max_source_bytes == 0 || limits.max_source_bytes.checked_add(1).is_none() {
             return Err(failed("Read byte limits must be positive and bounded"));
         }
         Ok(Self {
-            authority: Arc::new(scoped::Authority::from_directory(path, directory)?),
+            authority: Arc::new(scoped::Authority::from_directory(path, directory, policy)?),
             limits,
         })
     }

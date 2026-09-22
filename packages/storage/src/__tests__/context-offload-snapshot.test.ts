@@ -65,13 +65,13 @@ async function fixture(t: TestContext) {
     cwd: base,
     llmConnectionSlug: 'fake',
     model: 'fake',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   });
   const other = await sessions.create({
     cwd: base,
     llmConnectionSlug: 'fake',
     model: 'fake',
-    permissionMode: 'ask',
+    sandboxMode: 'workspace-write',
   });
   const writer = await openInteractiveContextOffloadStoreForWrite(owner.lease, { limits });
   const bytes = Buffer.from('snapshot bytes that cannot be recovered from the changed workspace');

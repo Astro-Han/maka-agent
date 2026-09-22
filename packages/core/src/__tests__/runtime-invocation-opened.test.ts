@@ -47,7 +47,7 @@ function opening(
     },
     configuration: {
       cwd: '/repo',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
       orchestrationSource: 'session',

@@ -119,9 +119,15 @@ impl Executions {
         }
         additional.retain(|tool| !proof.private_clients.contains(&tool.definition.name));
         additional.push(self.interactions.question_tool());
-        let mut native = self.native_tools(&configuration.cwd, record.configuration.tool_profile);
+        let mut native = self
+            .native_tools(
+                &configuration.cwd,
+                record.configuration.tool_profile,
+                configuration.workspace_origin,
+            )
+            .await?;
         native.set = proof.native_tools;
-        let mode = configuration.permission_mode;
+        let mode = configuration.sandbox_mode;
         let ceiling = proof.bound_tools.clone();
         let tools = tokio::task::spawn_blocking(move || {
             super::super::tools::catalog(native, mode, additional, ceiling.as_ref())
@@ -163,6 +169,11 @@ impl Executions {
 }
 
 impl PreparedHandoff {
+    pub(super) fn owns_workspace(&self, session: &crate::session::SessionConfiguration) -> bool {
+        self.configuration.cwd == session.workspace.host_cwd
+            && self.configuration.workspace_origin == session.workspace_origin
+    }
+
     /// Caller has rechecked the canonical owner under execution admission.
     pub(super) async fn start(self, executions: &Arc<Executions>) -> Result<bool> {
         self.directory

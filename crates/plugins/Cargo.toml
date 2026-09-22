@@ -25,6 +25,8 @@ publish.workspace = true
 
 [dependencies]
 maka-runtime.workspace = true
+maka-sandbox.workspace = true
+dunce = "1.0.5"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

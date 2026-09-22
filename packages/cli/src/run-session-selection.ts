@@ -18,7 +18,7 @@
  */
 
 import type { ThinkingLevel } from '@maka/core/model-thinking';
-import type { PermissionMode } from '@maka/core/permission';
+import type { SandboxMode } from '@maka/core/permission';
 import type { SessionSummary } from '@maka/core/session';
 
 export interface MakaRunSessionSelectionInput {
@@ -31,7 +31,7 @@ export interface MakaRunSessionSelectionInput {
   explicitModel?: string;
   thinkingSpecified: boolean;
   explicitThinking?: ThinkingLevel;
-  explicitPermissionMode?: Exclude<PermissionMode, 'ask'>;
+  explicitSandboxMode?: Exclude<SandboxMode, 'ask'>;
 }
 
 export type MakaRunSessionSelection =
@@ -119,7 +119,7 @@ function assertExplicitConfigurationCompatible(
     | 'explicitModel'
     | 'thinkingSpecified'
     | 'explicitThinking'
-    | 'explicitPermissionMode'
+    | 'explicitSandboxMode'
   >,
 ): void {
   if (
@@ -135,8 +135,8 @@ function assertExplicitConfigurationCompatible(
     throw new Error(`--thinking conflicts with resumed session ${session.id}`);
   }
   if (
-    input.explicitPermissionMode !== undefined &&
-    input.explicitPermissionMode !== session.permissionMode
+    input.explicitSandboxMode !== undefined &&
+    input.explicitSandboxMode !== session.sandboxMode
   ) {
     throw new Error(`--permission-mode conflicts with resumed session ${session.id}`);
   }

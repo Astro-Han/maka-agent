@@ -217,7 +217,7 @@ describe('TranscriptViewerOverlay', () => {
       cwd: '/repo',
       model: 'model',
       connectionSlug: 'connection',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     }));
 
     const renderDocument = transcript.createDocumentRenderer();
@@ -299,7 +299,7 @@ describe('TranscriptViewerOverlay', () => {
       cwd: '/repo',
       model: 'model',
       connectionSlug: 'connection',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     }));
     const render = transcript.createDocumentRenderer();
     assert.match(plain(render(80, true).lines).join('\n'), /private reasoning/);
@@ -316,7 +316,7 @@ describe('TranscriptViewerOverlay', () => {
       cwd: '/repo',
       model: 'model',
       connectionSlug: 'connection',
-      permissionMode: 'ask',
+      sandboxMode: 'workspace-write',
     }));
 
     assert.ok(plain(transcript.render(40)).some((line) => line.includes('settled text')));

@@ -174,7 +174,7 @@ export async function verifyAutoContext(connection, workspace, reopened) {
         sessionId: saved.sessionId,
         workspace: { kind: 'host_path', path: workspace },
         mode: 'bot',
-        permissionMode: 'explore',
+        sandboxMode: 'read-only',
         modelTarget: {
           kind: 'explicit',
           connectionId: basis.connectionId,

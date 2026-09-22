@@ -75,6 +75,7 @@ async fn admission_orders_domain_invalidation_and_retirement_without_executing_c
         tools: Default::default(),
         cancellation: Default::default(),
     };
+    let workspace = maka_plugins::filesystem::ReadRoot::capture(".").unwrap();
     assert!(
         prepare(
             &catalog,
@@ -82,15 +83,21 @@ async fn admission_orders_domain_invalidation_and_retirement_without_executing_c
             Request {
                 content: "replace attachment".into(),
                 ..request.clone()
-            }
+            },
+            &workspace,
         )
         .await
         .is_err(),
         "native preparation cannot rewrite user attachments"
     );
-    let first = prepare(&catalog, &Scope::Session("session".into()), request.clone())
-        .await
-        .unwrap();
+    let first = prepare(
+        &catalog,
+        &Scope::Session("session".into()),
+        request.clone(),
+        &workspace,
+    )
+    .await
+    .unwrap();
     assert_eq!(first.content.preparation[0].source.package_id, "example");
     let accepted = serde_json::to_vec(&first.content).unwrap();
     let admission = first.admit().unwrap().unwrap();
@@ -111,9 +118,14 @@ async fn admission_orders_domain_invalidation_and_retirement_without_executing_c
         first.admit().unwrap().is_none(),
         "stale preparation must be repeated"
     );
-    let fresh = prepare(&catalog, &Scope::Session("session".into()), request)
-        .await
-        .unwrap();
+    let fresh = prepare(
+        &catalog,
+        &Scope::Session("session".into()),
+        request,
+        &workspace,
+    )
+    .await
+    .unwrap();
     let admitted = fresh.admit().unwrap().unwrap();
     let stopping = owner.shutdown(tokio::time::Instant::now() + Duration::from_secs(1));
     tokio::pin!(stopping);

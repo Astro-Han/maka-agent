@@ -304,6 +304,9 @@
     processes: processes(authority),
     terminals: terminals(authority),
     http: http(authority),
+    permissions: Object.freeze({
+      request: (request) => host('permissions.request', { authority, request }),
+    }),
     files: files(authority),
     llm: Object.freeze({ generate: (input) => host('llm.generate', { authority, input }) }),
     clients: Object.freeze({

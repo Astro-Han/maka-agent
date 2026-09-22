@@ -94,7 +94,7 @@ describe('filesystem worker client permission snapshots', () => {
     await client.execute({
       operation: { kind: 'apply_patch', path: link, action: 'delete' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: { dev: String(linkMeta.dev), ino: String(linkMeta.ino) },
     });
 
@@ -112,7 +112,7 @@ describe('filesystem worker client permission snapshots', () => {
     assert.equal(typeof forwarded.ino, 'string');
   });
 
-  for (const kind of ['bypass', 'external'] as const) {
+  for (const kind of ['danger-full-access', 'external'] as const) {
     test(`rejects an authoritative ${kind} boundary instead of falling back to legacy mode`, async () => {
       const workspace = await temporaryDirectory(`maka-worker-client-${kind}-`);
       const { client, requests } = fakeClient();
@@ -122,7 +122,7 @@ describe('filesystem worker client permission snapshots', () => {
           operation: { kind: 'write', path: 'allowed-by-legacy-mode.txt', content: kind },
           cwd: workspace,
           executionBoundary: { kind, revision: 1 },
-          mode: 'ask',
+          mode: 'workspace-write',
           expectedIdentity: 'unchecked',
         }),
         (error: unknown) => {
@@ -176,7 +176,7 @@ describe('filesystem worker client permission snapshots', () => {
       client.execute({
         operation: { kind: 'write', path: 'blocked.txt', content: 'blocked' },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         permissionProfile: createReadOnlyPermissionProfile(),
         expectedIdentity: 'unchecked',
       }),
@@ -206,7 +206,7 @@ describe('filesystem worker client permission snapshots', () => {
       client.execute({
         operation: { kind: 'write', path: target, content: 'blocked' },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         permissionProfile: profile,
         expectedIdentity: 'unchecked',
       }),
@@ -235,7 +235,7 @@ describe('filesystem worker client permission snapshots', () => {
       client.execute({
         operation: { kind: 'read', path: target },
         cwd: workspace,
-        mode: 'explore',
+        mode: 'read-only',
         expectedIdentity: 'unchecked',
       }),
       isPathDenied,
@@ -243,7 +243,7 @@ describe('filesystem worker client permission snapshots', () => {
     const result = await client.execute({
       operation: { kind: 'read', path: target },
       cwd: workspace,
-      mode: 'explore',
+      mode: 'read-only',
       permissionProfile: profile,
       expectedIdentity: 'unchecked',
     });
@@ -277,7 +277,7 @@ describe('filesystem worker client Grep target scope', () => {
     const result = await client.execute({
       operation: grepOperation(target),
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
 
@@ -301,7 +301,7 @@ describe('filesystem worker client Grep target scope', () => {
     await client.execute({
       operation: grepOperation(directory),
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
 
@@ -420,7 +420,7 @@ describe('filesystem worker operation-scoped Seatbelt profile', () => {
     await client.execute({
       operation: { kind: 'write', path: target, content: 'target' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
 
@@ -453,7 +453,7 @@ describe('filesystem worker operation-scoped Seatbelt profile', () => {
       client.execute({
         operation: grepOperation(target),
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) => {
@@ -477,7 +477,7 @@ describe('filesystem worker operation-scoped Seatbelt profile', () => {
       client.execute({
         operation: grepOperation(target),
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) => {
@@ -539,7 +539,7 @@ describe('filesystem worker Linux path context', () => {
       client.execute({
         operation: { kind: 'glob', path: target, pattern: '*.ts', limit: 20 },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) => {
@@ -560,7 +560,7 @@ describe('filesystem worker Linux path context', () => {
     await client.execute({
       operation: { kind: 'read', path: target },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
 
@@ -583,7 +583,7 @@ describe('filesystem worker Linux path context', () => {
     await client.execute({
       operation: { kind: 'write', path: target, content: 'new' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       // T0 observed no target (a create), so the T0 marker is 'missing'.
       expectedIdentity: 'missing',
     });
@@ -813,7 +813,7 @@ describe('filesystem worker client dispatch classification', () => {
       client.execute({
         operation: { kind: 'write', path: '/tmp/maka-dispatch-incomplete.txt', content: 'x' },
         cwd: '/tmp',
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) => {
@@ -831,7 +831,7 @@ describe('filesystem worker client dispatch classification', () => {
       client.execute({
         operation: { kind: 'write', path: '/tmp/maka-dispatch-spawn.txt', content: 'x' },
         cwd: '/tmp',
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) => {
@@ -850,7 +850,7 @@ describe('filesystem worker client dispatch classification', () => {
       client.execute({
         operation: { kind: 'write', path: '/tmp/maka-dispatch-noflag.txt', content: 'x' },
         cwd: '/tmp',
-        mode: 'ask',
+        mode: 'workspace-write',
         expectedIdentity: 'unchecked',
       }),
       (error: unknown) => {
@@ -914,7 +914,7 @@ describe('filesystem worker client dispatch classification', () => {
     await client.execute({
       operation: { kind: 'write', path: target, content: 'new' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: { dev: String(stale.dev), ino: String(stale.ino) },
     });
 
@@ -955,7 +955,7 @@ describe('filesystem worker client dispatch classification', () => {
       client.execute({
         operation: { kind: 'write', path: target, content: 'new' },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
         // T0 approved the target as missing; it appeared by T1 — the
         // "created while queued" race, which must stay path_changed.
         expectedIdentity: 'missing',
@@ -981,7 +981,7 @@ describe('filesystem worker client dispatch classification', () => {
     await client.execute({
       operation: { kind: 'write', path: target, content: 'new' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'unchecked',
     });
 
@@ -998,7 +998,7 @@ describe('filesystem worker client dispatch classification', () => {
     await client.execute({
       operation: { kind: 'write', path: target, content: 'new' },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       expectedIdentity: 'missing',
     });
 
@@ -1016,7 +1016,7 @@ describe('filesystem worker client dispatch classification', () => {
     await client.execute({
       operation: { kind: 'read', path: target },
       cwd: workspace,
-      mode: 'ask',
+      mode: 'workspace-write',
       // No expectedIdentity: reads never participate in CAS, and the client
       // must not reject or silently omit the wire field — a plain-JavaScript
       // caller that bypasses TypeScript has no way to get this wrong.
@@ -1047,7 +1047,7 @@ describe('filesystem worker client dispatch classification', () => {
       client.execute({
         operation: { kind: 'write', path: target, content: 'new' },
         cwd: workspace,
-        mode: 'ask',
+        mode: 'workspace-write',
       }),
       (error: unknown) => {
         assert.ok(error instanceof FilesystemWorkerClientError);

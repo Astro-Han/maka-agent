@@ -18,7 +18,7 @@
  */
 
 //! Skills domain contracts shared by native adapters and plugin consumers.
-use maka_runtime::execution::{CollaborationMode, PermissionMode, WorkspaceTarget};
+use maka_runtime::execution::{CollaborationMode, SandboxMode, WorkspaceTarget};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_PAGE_BYTES: usize = 48 * 1024;
@@ -57,7 +57,7 @@ pub enum InvocableTarget {
     NewSession {
         context: WorkspaceContext,
         collaboration_mode: CollaborationMode,
-        permission_mode: PermissionMode,
+        sandbox_mode: SandboxMode,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
