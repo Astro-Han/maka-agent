@@ -235,6 +235,11 @@ export type GeneralizedErrorClass =
 export function classifyGeneralizedError(error: unknown): GeneralizedErrorClass | undefined {
   const message = error instanceof Error ? error.message : String(error);
   const lower = redactSecrets(message).toLowerCase();
+  // A provider response takes precedence over incidental transport wording.
+  const status = Number(lower.match(/\bhttp\s+(\d{3})\b/u)?.[1]);
+  if (status === 401 || status === 403) return 'auth_failed';
+  if (status === 429) return 'rate_limited';
+  if (status >= 500 && status < 600) return 'provider_error';
   if (/\b(?:timeout|timed[\s-]+out|etimedout)\b/u.test(lower)) return 'timeout';
   if (lower.includes('429') || lower.includes('rate')) return 'rate_limited';
   if (lower.includes('401') || lower.includes('403') || isAuthenticationErrorText(lower))
