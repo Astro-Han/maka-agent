@@ -23,7 +23,7 @@ import {
   ASSET_LICENSED_RENDERER_PACKAGES,
   bareCssImportSpecifiers,
   collectWorkspaceClosure,
-  WORKSPACE_PREFIX,
+  isWorkspacePackage,
 } from './third-party-closure.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '..');
@@ -145,6 +145,7 @@ const MIT_COPYRIGHT_OVERRIDES = new Map([
   ['@astryxdesign/core@0.5.0', 'Copyright (c) 2026 Meta Platforms, Inc.'],
   ['@astryxdesign/core@0.5.2', 'Copyright (c) 2026 Meta Platforms, Inc.'],
   ['@astryxdesign/core@0.6.1', 'Copyright (c) 2026 Meta Platforms, Inc.'],
+  ['@astryxdesign/core@0.6.2', 'Copyright (c) 2026 Meta Platforms, Inc.'],
   ['@stylexjs/stylex@0.19.0', 'Copyright (c) Meta Platforms, Inc. and affiliates.'],
   ['@wecom/aibot-node-sdk@1.0.7', 'Copyright (c) WeComTeam contributors'],
   [
@@ -327,7 +328,7 @@ function validateFirstPartyCssImports(closureNames) {
   for (const root of FIRST_PARTY_STYLE_ROOTS) {
     for (const path of firstPartyStylesheets(join(repoRoot, root))) {
       for (const name of bareCssImportSpecifiers(readFileSync(path, 'utf8'))) {
-        if (name.startsWith(WORKSPACE_PREFIX) || closureNames.has(name)) continue;
+        if (isWorkspacePackage(name) || closureNames.has(name)) continue;
         undeclared.set(name, path);
       }
     }

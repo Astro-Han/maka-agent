@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@maka-agent/plugin-sdk": "1.0.0",
-    "@astryxdesign/core": "0.6.1",
+    "@astryxdesign/core": "0.6.2",
     "@maka/core": "0.1.0",
     "clsx": "^2.1.1",
     "katex": "0.18.7",

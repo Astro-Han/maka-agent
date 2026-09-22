@@ -30,7 +30,15 @@ import { npmSpawnOptions } from './npm-spawn.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 
-export const WORKSPACE_PREFIX = '@maka/';
+const workspaceNames = new Set(
+  JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')).workspaces.map(
+    (directory) => JSON.parse(readFileSync(join(repoRoot, directory, 'package.json'), 'utf8')).name,
+  ),
+);
+
+export function isWorkspacePackage(name) {
+  return workspaceNames.has(name);
+}
 
 export function npmWorkspaceTree(workspaceName, omitDev) {
   const tree = JSON.parse(
@@ -52,7 +60,7 @@ export function npmWorkspaceTree(workspaceName, omitDev) {
 function collectInto(packages, dependencies) {
   for (const [name, dependency] of Object.entries(dependencies ?? {})) {
     if (!dependency || typeof dependency !== 'object') continue;
-    if (!name.startsWith(WORKSPACE_PREFIX) && typeof dependency.version === 'string') {
+    if (!isWorkspacePackage(name) && typeof dependency.version === 'string') {
       packages.set(`${name}@${dependency.version}`, { name, version: dependency.version });
     }
     collectInto(packages, dependency.dependencies);
@@ -106,7 +114,7 @@ export function collectWorkspaceClosure({ workspaceName, manifestPath }) {
     const full = npmWorkspaceTree(workspaceName, false).dependencies ?? {};
     for (const [name, dependency] of Object.entries(full)) {
       if (!roots.has(name) || !dependency || typeof dependency !== 'object') continue;
-      if (name.startsWith(WORKSPACE_PREFIX)) {
+      if (isWorkspacePackage(name)) {
         // A workspace root's slot in the full tree carries its dev edges too
         // (`@maka/ui` declares @types/* and linkedom for its tests), and none
         // of those are bundle inputs. Its own production closure is what the

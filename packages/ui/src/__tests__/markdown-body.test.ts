@@ -31,6 +31,7 @@ import {
 import { AstryxLocaleProvider } from '../astryx-i18n.js';
 import { MakaUriContext, Markdown } from '../markdown.js';
 import { LocaleProvider } from '../locale-context.js';
+import { createMarkdownMathCache, prepareMarkdownMath } from '../markdown-math.js';
 import {
   createMermaidConfig,
   MAX_MERMAID_EDGES,
@@ -81,6 +82,31 @@ it('keeps URL, email, and Markdown markers atomic inside math', () => {
   assert.equal((markup.match(/class="katex"/g) ?? []).length, 3);
   assert.doesNotMatch(markup, /<a\b|mailto:/);
   assert.doesNotMatch(markup, /\\\(|\\\)/);
+});
+
+it('keeps math opaque to table and URL parsing, including streamed input', () => {
+  const text = [
+    'See https://example.com/?$from$=$to$ now',
+    '',
+    '| probability | cost |',
+    '| --- | --- |',
+    '| \\(P(A|B)\\) | \\(5\\$\\) |',
+  ].join('\n');
+  const cache = createMarkdownMathCache();
+  for (let length = 0; length <= text.length; length++) {
+    const prefix = text.slice(0, length);
+    assert.equal(
+      prepareMarkdownMath(prefix, cache),
+      prepareMarkdownMath(prefix, createMarkdownMathCache()),
+    );
+  }
+  const markup = renderToStaticMarkup(createElement(LocaleProvider, {
+    locale: 'en',
+    children: createElement(MarkdownBody, { text }),
+  }));
+  assert.match(markup, /href="https:\/\/example\.com\/\?\$from\$=\$to\$"/);
+  assert.equal((markup.match(/<td\b/g) ?? []).length, 2);
+  assert.equal((markup.match(/class="maka-math maka-math-inline"/g) ?? []).length, 2);
 });
 
 it('falls back to ordinary Markdown for an empty formula', () => {

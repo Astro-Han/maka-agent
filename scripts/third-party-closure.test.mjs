@@ -19,7 +19,14 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { bareCssImportSpecifiers } from './third-party-closure.mjs';
+import { bareCssImportSpecifiers, isWorkspacePackage } from './third-party-closure.mjs';
+
+test('first-party identity comes from workspace manifests, not an npm scope', () => {
+  assert.equal(isWorkspacePackage('@maka-agent/plugin-sdk'), true);
+  assert.equal(isWorkspacePackage('@maka/ui'), true);
+  assert.equal(isWorkspacePackage('@maka/unregistered'), false);
+  assert.equal(isWorkspacePackage('@astryxdesign/core'), false);
+});
 
 // The bundle recorder cannot see a package reached only through a CSS
 // `@import` of pure rules — Vite inlines it at transform time, so it never
