@@ -84,31 +84,71 @@ export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
       void session(sessionId).then(open.onOpenSession).catch((error: unknown) => report({ error }));
     },
   } : composerInput;
-  return <div className={props.className ?? (props.name.endsWith('.composer.before') ? 'maka-composer-plugin-slot' : undefined)}>
+  return <>
     {failure ? <div role="status" className="clientPluginFailure">
       {props.input.locale === 'zh-CN' ? '部分扩展未能加载。' :
         props.input.locale === 'zh-TW' ? '部分擴充功能未能載入。' : 'Some extensions could not load.'}
     </div> : null}
     {runtime ? <ClientSlot store={runtime.slots} name={props.name} entryId={props.entryId} input={input}
+      className={props.className ?? (props.name.endsWith('.composer.before') ? 'maka-composer-plugin-slot' : undefined)}
       onError={(identity, error) => report({ identity, error })} /> : null}
-  </div>;
+  </>;
 }
 
-export function ClientPluginComposerSlot(props: {
+export function ClientPluginSessionSlot<K extends 'session.composer.before' | 'session.header.actions' | 'turn.footer'>(props: {
   readonly host: ClientHostRef;
-  readonly input: ClientSdk.ClientSlots['session.composer.before'];
+  readonly name: K;
+  readonly className?: string;
+  readonly input: ClientSdk.ClientSlots[K];
 }) {
   const session = parseDesktopSessionKey(props.input.sessionId);
   if (session.hostId !== props.host.hostId) throw new Error('Plugin Session belongs to another Host');
-  return <ClientPluginSlot {...props} name="session.composer.before"
+  return <ClientPluginSlot {...props}
     input={{ ...props.input, sessionId: session.sessionId }} />;
 }
 
-/** A workspace consumes one configured Client Entry, not a private feature RPC. */
-export function usePluginSession(entryId: string, enabled: boolean, locale: 'en' | 'zh-CN' | 'zh-TW') {
+/** Keep product anchors together and preserve each Turn component across streaming renders. */
+export function ClientPluginSurfaces(input: {
+  session?: { readonly profileId: string; readonly runtimeHostId: string };
+  sessionId?: string;
+  locale: ClientSdk.ClientSlots['turn.footer']['locale'];
+  onOpenSession(sessionId: string): void;
+  composer: React.RefObject<{ appendText(text: string): void; focus(): void } | null>;
+  readOnly: boolean;
+  children(slots: { header: React.ReactNode; composer: React.ReactNode; TurnFooter?: React.ComponentType<{ turnId: string }> }): React.ReactNode;
+}) {
+  const { sessionId, locale } = input;
+  const profileId = input.session?.profileId;
+  const hostId = input.session?.runtimeHostId;
+  const origin = profileId && hostId ? { profileId, hostId } : undefined;
+  const TurnFooter = React.useMemo(() => {
+    if (!sessionId || !profileId || !hostId) return undefined;
+    const host = { profileId, hostId };
+    return function PluginTurnFooter({ turnId }: { turnId: string }) {
+      return <ClientPluginSessionSlot host={host} name="turn.footer" input={{ sessionId, turnId, locale }} />;
+    };
+  }, [sessionId, locale, profileId, hostId]);
+  return <>{input.children({
+    TurnFooter,
+    header: origin && sessionId ? <ClientPluginSessionSlot host={origin}
+      name="session.header.actions" className="clientPluginHeaderActions" input={{ sessionId, locale }} /> : null,
+    composer: origin && sessionId ? <ClientPluginSessionSlot host={origin}
+      name="session.composer.before" input={{ sessionId, locale,
+        onOpenSession: input.onOpenSession, appendText: input.readOnly ? undefined : (text) => {
+          input.composer.current?.appendText(text);
+          input.composer.current?.focus();
+        } }} /> : null,
+  })}<ClientApplicationOverlay locale={locale} /></>;
+}
+
+function ClientApplicationOverlay({ locale }: { locale: ClientSdk.ClientSlots['application.overlay']['locale'] }) {
+  const origin = useDefaultPluginHost(true);
+  return origin?.host ? <ClientPluginSlot host={origin.host} name="application.overlay" input={{ locale }} /> : null;
+}
+
+function useDefaultPluginHost(enabled: boolean) {
   const { services } = useServices();
   const [origin, setOrigin] = React.useState<{ host?: ClientHostRef; error?: string }>();
-  const [resolved, setResolved] = React.useState<{ host: ClientHostRef; sessionId?: string; error?: string }>();
   React.useEffect(() => {
     if (!enabled) { setOrigin(undefined); return; }
     const lifetime = new AbortController();
@@ -130,6 +170,13 @@ export function usePluginSession(entryId: string, enabled: boolean, locale: 'en'
     refresh();
     return () => { lifetime.abort(); request?.abort(); unsubscribe(); };
   }, [services, enabled]);
+  return origin;
+}
+
+/** A workspace consumes one configured Client Entry, not a private feature RPC. */
+export function usePluginSession(entryId: string, enabled: boolean, locale: 'en' | 'zh-CN' | 'zh-TW') {
+  const origin = useDefaultPluginHost(enabled);
+  const [resolved, setResolved] = React.useState<{ host: ClientHostRef; sessionId?: string; error?: string }>();
   const host = origin?.host;
   const onResolving = React.useCallback(() => { setResolved(undefined); }, []);
   const onResolved = React.useCallback((sessionId: string) => {

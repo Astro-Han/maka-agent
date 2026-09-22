@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import { ICON_SIZE, Ban, ChevronRight, GitBranch, Pencil, RefreshCcw, Timer } from './icons.js';
 import { useClipboardCopyFeedback } from './clipboard-feedback.js';
 import { Markdown } from './markdown.js';
@@ -400,6 +400,7 @@ export const TurnView = memo(function TurnView(props: {
    */
   footerActions?: ReadonlyArray<TurnFooterActionMeta>;
   onFooterAction?: (turnId: string, actionId: TurnFooterActionMeta['id']) => void;
+  FooterExtension?: ComponentType<{ turnId: string }>;
   /**
    * PR109e-d: pre-translated Chinese phrase for a failed turn's
    * `errorClass`. Caller computes via `describeTurnErrorClass()`.
@@ -840,6 +841,7 @@ export const TurnView = memo(function TurnView(props: {
           </Fragment>
         );
       })}
+      {props.FooterExtension ? <props.FooterExtension key="turn-extension" turnId={turn.turnId} /> : null}
     </section>
   );
 });

@@ -26,6 +26,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ComponentType,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -232,6 +233,8 @@ export function ChatView(props: {
    */
   deriveTurnPresentation?: TurnPresentationDeriver;
   onTurnFooterAction?: (turnId: string, actionId: TurnFooterActionMeta['id']) => void;
+  /** Product-owned extension anchor; mounted once per visible durable Turn. */
+  TurnFooterExtension?: ComponentType<{ turnId: string }>;
   /**
    * Edit-and-resend for a user turn. Desktop owns revision draft creation
    * (branch-before + composer refill); ChatView only forwards the click.
@@ -838,6 +841,7 @@ export function ChatView(props: {
                           userLabel={props.userLabel}
                           footerActions={turnPresentation?.footerActionsByTurn[turn.turnId]}
                           onFooterAction={stableTurnFooterAction}
+                          FooterExtension={props.TurnFooterExtension}
                           onEditUserMessage={props.onEditUserMessage ? stableEditUserMessage : undefined}
                           editUserMessageTransformed={transformedUserTurnIds.has(turn.turnId)}
                           editUserMessageDisabled={props.activeTurn !== undefined}

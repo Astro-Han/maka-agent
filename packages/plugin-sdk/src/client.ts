@@ -56,6 +56,16 @@ export interface ClientDescriptor extends ClientIdentity {
 
 /** Augment this interface for slots agreed upon by a product and its plugins. */
 export interface ClientSlots {
+  'application.overlay': { readonly locale: 'en' | 'zh-CN' | 'zh-TW' };
+  'session.header.actions': {
+    readonly sessionId: string;
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+  };
+  'turn.footer': {
+    readonly sessionId: string;
+    readonly turnId: string;
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+  };
   'application.manage': {
     readonly section: string;
     readonly locale: 'en' | 'zh-CN' | 'zh-TW';

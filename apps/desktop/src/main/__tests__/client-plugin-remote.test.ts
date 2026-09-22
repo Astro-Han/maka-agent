@@ -26,7 +26,7 @@ import type { IpcMainInvokeEvent, WebContents } from 'electron';
 import type { IpcHandler } from '../ipc-reconnect-policy.js';
 import { registerClientPluginRemoteIpc } from '../client-plugin-remote-ipc.js';
 import { clientPluginRemote } from '../../renderer/platform/desktop/client-plugin-remote.js';
-import { ClientPluginComposerSlot } from '../../renderer/features/client-plugins/index.js';
+import { ClientPluginSessionSlot } from '../../renderer/features/client-plugins/index.js';
 import { desktopSessionKey } from '../../shared/runtime-host-identity.js';
 
 function renderer() {
@@ -119,9 +119,12 @@ test('reconnecting to the same Host revokes old Remote leases without fencing th
   const sessionId = randomUUID();
   const host = { profileId: 'origin', hostId: 'host' };
   const input = { sessionId: desktopSessionKey({ hostId: host.hostId, sessionId }), locale: 'en' as const, onOpenSession() {} };
-  const composer = ClientPluginComposerSlot({ host, input });
+  const composer = ClientPluginSessionSlot({ host, input, name: 'session.composer.before' });
   assert.equal(composer.props.input.sessionId, sessionId);
-  assert.throws(() => ClientPluginComposerSlot({ host: { ...host, hostId: 'other' }, input }), /another Host/);
+  assert.throws(() => ClientPluginSessionSlot({ host: { ...host, hostId: 'other' }, input, name: 'session.composer.before' }), /another Host/);
+  const footer = ClientPluginSessionSlot({ host, name: 'turn.footer', input: { sessionId: input.sessionId, turnId: 'turn-1', locale: 'en' } });
+  assert.equal(footer.props.input.sessionId, composer.props.input.sessionId);
+  assert.equal(footer.props.input.turnId, 'turn-1');
   const register = () => registerClientPluginRemoteIpc({
     ipcMain: { handle: (name, handler) => { handlers.set(name, handler); } },
     ownsRenderer: contents => contents === owner.emitter as unknown as WebContents,

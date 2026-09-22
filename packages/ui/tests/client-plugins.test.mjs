@@ -22,7 +22,9 @@ import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { test } from 'node:test';
 import { parseHTML } from 'linkedom';
-import { ClientRuntime } from '../dist/client-plugins/index.js';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ClientRuntime, ClientSlot } from '../dist/client-plugins/index.js';
 
 function documentHarness() {
   const { document, window } = parseHTML('<html><head></head><body></body></html>');
@@ -122,6 +124,9 @@ test('independent Hosts load exact bytes, revoke stale UI, retry the same revisi
   };
   const one = new ClientRuntime(options);
   const two = new ClientRuntime(options);
+  assert.equal(renderToStaticMarkup(createElement(ClientSlot, {
+    store: one.slots, name: 'turn.footer', input: { sessionId: 's', turnId: 't', locale: 'en' }, onError() {},
+  })), '', 'an unpopulated anchor must not create an empty layout item');
   try {
     await Promise.all([
       one.reconcile({ revision: 'one', entries: [first] }),

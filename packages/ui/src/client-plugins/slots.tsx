@@ -49,16 +49,19 @@ export function ClientSlot<K extends keyof ClientSlots>(props: {
   readonly store: ClientSlotStore;
   readonly name: K;
   readonly entryId?: string;
+  readonly className?: string;
   readonly input: ClientSlots[K];
   readonly onError: (owner: ClientIdentity, error: unknown) => void;
 }): ReactNode {
   const entries = useSyncExternalStore(props.store.subscribe, props.store.snapshot, props.store.snapshot);
-  return entries.filter((entry) => entry.slot === props.name &&
-    (!props.entryId || entry.owner.entryId === props.entryId)).map((entry) => (
+  const matching = entries.filter((entry) => entry.slot === props.name &&
+    (!props.entryId || entry.owner.entryId === props.entryId));
+  if (!matching.length) return null;
+  return <div className={props.className}>{matching.map((entry) => (
     <SlotBoundary key={`${entry.owner.activation}/${entry.key}`} owner={entry.owner} onError={props.onError}>
       {entry.render(props.input as never)}
     </SlotBoundary>
-  ));
+  ))}</div>;
 }
 
 class SlotBoundary extends Component<{

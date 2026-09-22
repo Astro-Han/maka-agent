@@ -72,7 +72,7 @@ import { useTaskSubmissionReadiness } from './use-task-submission-readiness';
 import { useAppShellSessionUiReads } from './use-app-shell-session-ui-reads';
 import * as Conversation from './features/conversation';
 import { deriveWorkspaceReadinessRecovery } from './workspace-readiness-recovery';
-import { ClientPluginComposerSlot, ClientPluginSlot, usePluginSession } from './features/client-plugins/index.js';
+import { ClientPluginSurfaces, ClientPluginSlot, usePluginSession } from './features/client-plugins/index.js';
 import type { ClientWorkspace } from '@maka-agent/plugin-sdk/client';
 import { ChatComposerRegion } from './chat-composer-region';
 import { selectLatestRequestUsage } from '@maka/ui/context-usage';
@@ -2119,7 +2119,11 @@ function AppShellContent({
     // readers. Composer mentions still wrap the frame so one projection serves
     // every composer, including side-chat panels, without rebuilding the frame
     // on catalog moves.
-    <Goals.GoalProvider
+    <ClientPluginSurfaces
+      session={sessionsSelected ? activeCatalogSession : undefined}
+      sessionId={ownerActiveId} locale={uiLocale}
+      onOpenSession={openSessionInChat} composer={composerRef} readOnly={sharedSessionActive}>
+    {(sessionPlugins) => <Goals.GoalProvider
       activeSessionId={ownerActiveId}
       canOpenDialog={activeBoundarySurface.localInteractionAvailable}
       reportError={showSessionError}
@@ -2246,6 +2250,7 @@ function AppShellContent({
             )}
           </>
         )}
+        {!settingsOpen && !workHubActive && sessionPlugins.header}
       </header>
       <AstryxAppShell
         className="app maka-shell-astryx agents-layout-body"
@@ -2339,21 +2344,7 @@ function AppShellContent({
                         onOpenSession={openSessionInChat}
                       />
                     ) : null}
-                    {sessionsSelected && ownerActiveId && activeCatalogSession ? (
-                      <ClientPluginComposerSlot
-                        key={activeCatalogSession.profileId + '/' + activeCatalogSession.runtimeHostId}
-                        host={{ profileId: activeCatalogSession.profileId, hostId: activeCatalogSession.runtimeHostId }}
-                        input={{
-                          sessionId: ownerActiveId,
-                          locale: uiLocale,
-                          onOpenSession: openSessionInChat,
-                          appendText: sharedSessionActive ? undefined : (text) => {
-                            composerRef.current?.appendText(text);
-                            composerRef.current?.focus();
-                          },
-                        }}
-                      />
-                    ) : null}
+                    {sessionPlugins.composer}
                     {sessionsSelected && !ownerActiveId && newTaskHost && pluginWorkspace ? (
                       <ClientPluginSlot host={newTaskHost} name="workspace.composer.before"
                         input={{ ...pluginWorkspace, locale: uiLocale, appendText: (text) => {
@@ -2554,6 +2545,7 @@ function AppShellContent({
                   <ChatMessageSurface
                 sessionUiController={sessionUiController}
                 activeSessionId={activeId}
+                TurnFooterExtension={sessionPlugins.TurnFooter}
                 activeTurn={Conversation.chatTurnActivity(activeExecution)}
                 hasEarlierHistory={activeTranscriptRange?.hasOlder}
                 onLoadEarlierHistory={() => transcriptReadingCommands.current?.loadEarlier()}
@@ -2754,6 +2746,7 @@ function AppShellContent({
     </SessionCollaboration.SessionTurnRequestInboxProvider>
     </ComposerMentionsProvider>
     </ModuleHub.ModuleHubProvider>
-    </Goals.GoalProvider>
+    </Goals.GoalProvider>}
+    </ClientPluginSurfaces>
   );
 }

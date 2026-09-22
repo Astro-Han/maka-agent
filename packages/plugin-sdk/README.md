@@ -112,6 +112,8 @@ Slots include `session.composer.before`, `workspace.composer.before`, `workspace
 
 Optional `ctx.localFiles.pick()` / `open(path)` use Desktop-local paths only. They are unavailable for remote Host files. Desktop validates the published Client identity before native actions and discards picker results after navigation or retirement.
 
+`application.overlay` mounts on the application's default Host. `session.header.actions` and `turn.footer` mount on the viewed Session's Host with canonical `sessionId`; the footer also receives `turnId`, once per visible Turn even after steering. They add UI without replacing native actions. Session and Turn props identify observations, not execution permission.
+
 `ctx.events.subscribe({ kind: 'session.changed' }, listener, onError?)` observes originating-Host invalidations. `session.event` and `tool.activity` also require `sessionId`, always canonical on that Host. The listener receives a discriminated `ClientProductEvent`; event-specific payloads remain open product projections. These observations include live deltas and replayed seeds, not durable `LogEvent`s or exactly-once receipts. Subscriptions publish with the instance and stop immediately on disposal or retirement; they never follow a replacement connection. Plugin-owned domain changes use public Remote streams.
 
 Desktop supplies `@maka/ui/plugin` as a shared UI module (currently `Button`). Import supported components from this entry instead of bundling another component-library instance. It is not the internal UI package's complete API.

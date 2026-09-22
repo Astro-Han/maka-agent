@@ -98,6 +98,29 @@ function renderTurn(
   }) as unknown as Promise<void>;
 }
 
+test('turn extensions stay anchored once across conversation segments and do not replace native actions', async () => {
+  const { root, container } = domRoot();
+  const steered = turnWith([
+    { kind: 'text', text: 'first answer', messageId: 'answer-1', live: false },
+    { kind: 'user', messageId: 'steer-1', message: { id: 'steer-1', role: 'user', text: 'continue', ts: 2 } },
+    { kind: 'text', text: 'second answer', messageId: 'answer-2', live: false },
+  ]);
+  const Extension = ({ turnId }: { turnId: string }) => <button data-extension-turn={turnId}>Inspect turn</button>;
+  const render = (extension: typeof Extension | undefined, turn = turnWith([steered.timeline[0]!])) => act(() => root.render(
+    <LocaleProvider locale="en"><TurnView turn={turn} FooterExtension={extension}
+      footerActions={[{ id: 'copy', label: 'Copy', enabled: true }]} /></LocaleProvider>,
+  ));
+  await render(Extension);
+  const initial = container.querySelector('[data-extension-turn="turn-1"]');
+  await render(Extension, steered);
+  assert.equal(container.querySelectorAll('[data-extension-turn="turn-1"]').length, 1);
+  assert.equal(container.querySelector('[data-extension-turn="turn-1"]'), initial, 'steering preserves the mounted extension');
+  assert.ok(container.querySelector('[data-action="copy"]'));
+  await render(undefined);
+  assert.equal(container.querySelectorAll('[data-extension-turn]').length, 0);
+  assert.ok(container.querySelector('[data-action="copy"]'));
+});
+
 const ANSWER: TurnTimelineItem = {
   kind: 'text',
   text: 'the answer',
