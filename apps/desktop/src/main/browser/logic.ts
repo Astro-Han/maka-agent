@@ -73,6 +73,28 @@ export function viewportBounds(rect: BrowserViewRect | null): BrowserViewRect | 
   return { x: Math.max(0, Math.round(rect.x)), y: Math.max(0, Math.round(rect.y)), width, height };
 }
 
+/** Convert a renderer CSS-pixel rect to native View bounds in window DIP. */
+export function viewportBoundsAtScale(
+  rect: BrowserViewRect | null,
+  scaleFactor: number,
+): BrowserViewRect | null {
+  if (!rect || ![rect.x, rect.y, rect.width, rect.height, scaleFactor].every(Number.isFinite)
+    || rect.width <= 0 || rect.height <= 0 || scaleFactor <= 0) return null;
+  const left = Math.max(0, rect.x);
+  const top = Math.max(0, rect.y);
+  const x = Math.round(left * scaleFactor);
+  const y = Math.round(top * scaleFactor);
+  // Scale the far edges, then subtract the scaled origin. Scaling width and
+  // height independently can leave a one-DIP seam after rounding.
+  // Preserve fractional CSS coordinates until conversion; rounding them first
+  // introduces another seam at non-default UI zoom.
+  const right = Math.round((left + rect.width) * scaleFactor);
+  const bottom = Math.round((top + rect.height) * scaleFactor);
+  const width = right - x;
+  const height = bottom - y;
+  return viewportBounds({ x, y, width, height });
+}
+
 /** What a browser action does to the page, for the visible-lease gate below. */
 export type BrowserActionKind = 'observe' | 'mutate' | 'navigate';
 

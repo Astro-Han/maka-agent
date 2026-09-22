@@ -22,7 +22,7 @@ import { isWorkHubCoordinationSessionId } from '@maka/core/session';
 import { createBrowserViewHost } from './browser/automation-host.js';
 import { provideBrowserViewHost } from './browser/browser-host.js';
 import { releaseBrowserSession, revokeHiddenBrowserActions } from './browser/session.js';
-import type { BrowserViewRect } from './browser/logic.js';
+import { type BrowserViewRect, viewportBoundsAtScale } from './browser/logic.js';
 import type { createMainWindowController } from './main-window.js';
 import {
   desktopSessionResourceKey,
@@ -272,7 +272,7 @@ export function registerBrowserIpc(deps: BrowserIpcDeps): BrowserIpcController {
     if (!view || !parent) return;
     if (input.rect) {
       view.setParent(parent);
-      view.setViewport(input.rect);
+      view.setViewport(viewportBoundsAtScale(input.rect, contents.getZoomFactor()));
     } else if (view.hasParent(parent)) {
       view.park();
     }

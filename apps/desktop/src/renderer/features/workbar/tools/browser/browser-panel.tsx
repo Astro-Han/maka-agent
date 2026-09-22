@@ -129,7 +129,7 @@ export function BrowserPanel(props: { sessionId: string; hidden: boolean }) {
   // Mirror the strip's on-screen rect to main every animation frame while it is
   // showable. Position shifts on window resize and sidebar drags even when the
   // size is unchanged, which a ResizeObserver would miss; a getBoundingClientRect
-  // per frame is negligible and the IPC only fires when the rect changes.
+  // per frame is negligible and IPC fires only when geometry or scale changes.
   const showView = !hidden && state.hasPage;
   useEffect(() => {
     // Capture the injected capability because this passive cleanup may run
@@ -149,10 +149,10 @@ export function BrowserPanel(props: { sessionId: string; hidden: boolean }) {
     const tick = () => {
       const r = el.getBoundingClientRect();
       const rect = {
-        x: Math.round(r.left),
-        y: Math.round(r.top),
-        width: Math.round(r.width),
-        height: Math.round(r.height),
+        x: r.left,
+        y: r.top,
+        width: r.width,
+        height: r.height,
       };
       const occluded = isNativeSurfaceOccluded(r, el.ownerDocument);
       if (occluded !== covered) {
@@ -171,7 +171,9 @@ export function BrowserPanel(props: { sessionId: string; hidden: boolean }) {
         last = '';
       }
       if (occluded) { raf = requestAnimationFrame(tick); return; }
-      const key = `${rect.x},${rect.y},${rect.width},${rect.height}`;
+      // Page zoom can change while a fixed CSS rect stays identical. DPR is
+      // only an invalidation signal; main converts CSS px using its zoom factor.
+      const key = `${rect.x},${rect.y},${rect.width},${rect.height},${el.ownerDocument.defaultView?.devicePixelRatio}`;
       if (key !== last) {
         last = key;
         browser.setViewport({ sessionId, rect });
