@@ -117,7 +117,7 @@ pub(super) async fn observe_binding(
         })?;
     let facts = model_catalog::provider_facts(&row.provider_type)
         .map_err(|_| unavailable("Provider facts are unavailable"))?;
-    if facts.retired || facts.broken_model_ids.contains(&target.model) {
+    if facts.retired {
         return Err(unavailable("Provider or model is retired or unavailable"));
     }
     let models = model_catalog::resolve(row, None)

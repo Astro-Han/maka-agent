@@ -47,7 +47,6 @@ pub struct ProviderFacts {
     pub runtime_adapter: RuntimeAdapter,
     pub protocol_adapters: BTreeMap<ApiProtocol, RuntimeAdapter>,
     pub retired: bool,
-    pub broken_model_ids: Vec<String>,
     pub supports_model_discovery: bool,
     pub model_discovery: ModelDiscovery,
     pub fallback_models: Vec<String>,
@@ -140,16 +139,8 @@ pub fn resolve(
     let Some(provider) = facts()?.get(&row.provider_type) else {
         return Ok(vec![]);
     };
-    let broken = |id: &str| provider.broken_model_ids.iter().any(|item| item == id);
-    let default = default
-        .map(str::trim)
-        .filter(|id| !id.is_empty() && !broken(id));
-    let mut models: Vec<ModelInfo> = row
-        .models
-        .iter()
-        .filter(|model| !broken(&model.id))
-        .cloned()
-        .collect();
+    let default = default.map(str::trim).filter(|id| !id.is_empty());
+    let mut models = row.models.clone();
     if !provider.supports_model_discovery {
         let mut baseline: Vec<ModelInfo> = provider
             .fallback_models
@@ -191,9 +182,6 @@ pub fn resolve(
         .iter()
         .chain(row.model_overrides.iter().flat_map(|values| values.keys()))
     {
-        if broken(id) {
-            continue;
-        }
         let id = id.trim();
         if !id.is_empty() && seen.insert(id.to_owned()) {
             models.push(ModelInfo::new(id));

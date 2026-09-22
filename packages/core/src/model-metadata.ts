@@ -34,12 +34,6 @@ export interface ModelMetadata {
   knowledgeCutoff?: string;
   structuredOutput?: boolean;
   lastUpdated?: string;
-  /**
-   * models.dev prices the model at zero input cost. Marks free-tier
-   * candidates (e.g. opencode-free); display names are not a contract for
-   * this, several free models carry no "Free" suffix.
-   */
-  isFree?: boolean;
   capabilities?: ModelInfo['capabilities'];
   modalities?: ModelInfo['modalities'];
   /**
@@ -103,7 +97,6 @@ function activeMetadata(): ModelsDevMetadata {
 /** Access paths that serve a canonical provider's model catalog. */
 const GENERATED_METADATA_PROVIDER_ALIASES: Partial<Record<ProviderType, ProviderType>> = {
   'xai-oauth': 'xai',
-  'opencode-free': 'opencode',
   'openai-codex': 'openai',
 };
 
@@ -133,12 +126,7 @@ export function lookupModelMetadata(providerType: ProviderType, modelId: string)
     providerType === 'openai-codex' ? withoutInputLimit(generated) : generated;
   const statics = staticModelMetadata();
   const override =
-    statics[providerType]?.[id] ??
-    (providerType === 'xai-oauth'
-      ? statics.xai?.[id]
-      : providerType === 'opencode-free'
-        ? statics.opencode?.[id]
-        : undefined);
+    statics[providerType]?.[id] ?? (providerType === 'xai-oauth' ? statics.xai?.[id] : undefined);
   if (!providerMetadata) return override ?? {};
   if (!override) return providerMetadata;
   return {

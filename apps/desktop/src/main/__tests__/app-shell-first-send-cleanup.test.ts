@@ -208,7 +208,7 @@ describe('composer first-send cleanup', () => {
         ...createActionsDeps(),
         newChatModel: {
           llmConnectionId: 'connection-1',
-          llmConnectionSlug: 'opencode-free',
+          llmConnectionSlug: 'configured-model',
           model: 'mimo-v2.5-free',
         },
       };
@@ -219,7 +219,7 @@ describe('composer first-send cleanup', () => {
 
     assert.equal(
       (createInput as { llmConnectionSlug?: unknown }).llmConnectionSlug,
-      'opencode-free',
+      'configured-model',
     );
     assert.equal((createInput as { model?: unknown }).model, 'mimo-v2.5-free');
     // Ordinary creation carries no permission mode: the Host applies its own

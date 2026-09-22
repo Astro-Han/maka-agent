@@ -774,7 +774,7 @@ export const EmptyProviders: Story = {
   render: () => <ProviderStory bridge={createBridge({ connections: [] })} />,
   play: async ({ canvasElement }) => {
     await waitFor(() => {
-      expect(canvasElement.querySelector('.providerCatalogRow[data-provider="opencode-free"]')).not.toBeNull();
+      expect(canvasElement.querySelector('.providerCatalogRow[data-provider="openai-codex"]')).not.toBeNull();
     }, { timeout: 5_000 });
     expect(canvasElement.querySelector('[data-maka-contract="provider-catalog"]')).toBeNull();
   },

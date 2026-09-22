@@ -61,7 +61,6 @@ pub fn provider_default_base_url(provider: &str) -> Result<&'static str, String>
         "zenmux" => Ok("https://zenmux.ai/api/v1"),
         "opencode" => Ok("https://opencode.ai/zen/v1"),
         "opencode-go" => Ok("https://opencode.ai/zen/go/v1"),
-        "opencode-free" => Ok("https://opencode.ai/zen/v1"),
         "togetherai" => Ok("https://api.together.ai/v1"),
         "fireworks-ai" => Ok("https://api.fireworks.ai/inference/v1/"),
         "nvidia" => Ok("https://integrate.api.nvidia.com/v1"),
@@ -105,7 +104,7 @@ pub fn provider_auth_kind(provider: &str) -> Result<ProviderAuthKind, String> {
         "xai-oauth" | "github-copilot" | "claude-subscription" | "openai-codex" => {
             ProviderAuthKind::OauthToken
         }
-        "ollama" | "lm-studio" | "opencode-free" => ProviderAuthKind::None,
+        "ollama" | "lm-studio" => ProviderAuthKind::None,
         "localai" => ProviderAuthKind::OptionalApiKey,
         _ => ProviderAuthKind::ApiKey,
     })

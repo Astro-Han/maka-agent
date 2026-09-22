@@ -47,7 +47,6 @@ export function outputProviderFacts() {
           runtimeAdapter: defaults.runtimeAdapter,
           protocolAdapters: defaults.protocolAdapters ?? {},
           retired: defaults.retired === true,
-          brokenModelIds: defaults.brokenModelIds ?? [],
           supportsModelDiscovery: providerSupportsModelDiscovery(providerType),
           modelDiscovery: defaults.modelDiscovery,
           fallbackModels,
@@ -138,14 +137,6 @@ export function oracleFixtures() {
       ],
     },
     ...Object.keys(PROVIDER_REGISTRY).map((providerType) => ({ providerType, models: [] })),
-    ...Object.entries(PROVIDER_REGISTRY).flatMap(([providerType, defaults]) =>
-      (defaults.brokenModelIds ?? []).map((id) => ({
-        providerType,
-        models: [{ id }],
-        defaultModel: id,
-        enabledModelIds: [id],
-      })),
-    ),
     {
       providerType: 'openai',
       models: [{ id: ' custom ' }, { id: 'custom', displayName: 'ignored' }],
