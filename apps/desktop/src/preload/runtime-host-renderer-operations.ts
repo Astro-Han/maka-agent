@@ -21,6 +21,7 @@ import type { OperationSpecMap } from '@maka/runtime-host/protocol';
 
 export const RENDERER_RUNTIME_HOST_QUERY_OPERATIONS = [
   'plugin.client.query',
+  'executor.catalog.query',
   // Read-only, session-scoped, and already the owner of "what is the context
   // made of" for `/context` (#1580, #2323). Admitted on the same terms as the
   // inspect query beside it: it reads a projection and writes nothing.

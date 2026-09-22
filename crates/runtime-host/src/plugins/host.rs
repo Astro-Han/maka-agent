@@ -78,6 +78,7 @@ impl Provider for Issuer {
                 permissions: effects.clone(),
                 files: effects.clone(),
                 models: effects.clone(),
+                executors: effects.clone(),
                 clients: effects.clone(),
                 sessions: effects.clone(),
                 history: effects.clone(),

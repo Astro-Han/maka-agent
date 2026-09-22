@@ -124,6 +124,17 @@ async fn retirement_cancels_exact_executor_and_keeps_settlement_lease_or_fences_
             )
             .unwrap();
         let registration = catalog.register(&fiber.context(), staged).unwrap();
+        assert_eq!(
+            maka_plugins::executor::search(
+                &catalog,
+                &Scope::Session("session".into()),
+                Default::default()
+            )
+            .unwrap()
+            .executors
+            .len(),
+            1
+        );
         let contribution = catalog
             .snapshot::<Executor>(&Scope::Session("session".into()))
             .entries
@@ -155,6 +166,16 @@ async fn retirement_cancels_exact_executor_and_keeps_settlement_lease_or_fences_
         let run = tokio::spawn(call.execute(sink.clone(), CancellationToken::new()));
         started.acquire().await.unwrap().forget();
         drop(registration);
+        assert!(
+            maka_plugins::executor::search(
+                &catalog,
+                &Scope::Session("session".into()),
+                Default::default()
+            )
+            .unwrap()
+            .executors
+            .is_empty()
+        );
         assert!(matches!(binding.admit(request), Err(Error::Retired)));
         let settlement = tokio::time::timeout(Duration::from_secs(7), run)
             .await

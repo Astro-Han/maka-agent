@@ -19,6 +19,9 @@
 
 @import 'katex/dist/katex.min.css';
 
+.maka-executor-selection, .maka-executor-selection label { display: flex; flex-direction: column; gap: 8px; }
+.maka-executor-selection input, .maka-executor-selection select { box-sizing: border-box; width: 100%; padding: 8px; color: inherit; background: var(--background); border: 1px solid var(--border); border-radius: 6px; }
+
 .maka-model-wheel-anchor { display: inline-flex; min-width: 0; max-width: 100%; }
 .maka-model-wheel-anchor > button { min-width: 0; max-width: 100%; }
 .maka-model-wheel-anchor[data-open='true'] > button { visibility: hidden; }

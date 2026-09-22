@@ -19,6 +19,7 @@
 
 import { WorkHubControlOverlay, WorkHubDock, WorkHubMainNavigation, WorkHubReturnButton } from './features/workhub';
 import { RuntimeHostAvailabilityNotice, useRuntimeHostAvailability } from './runtime-host-availability.js';
+import { ExecutorTaskPicker, type ExecutorTarget } from './executor-task-picker.js';
 import {
   useCallback,
   useEffect,
@@ -415,6 +416,8 @@ function AppShellContent({
   const [newChatOrchestrationMode, setNewChatOrchestrationMode] = useState<OrchestrationMode>('default');
   const [newTaskExecutionChoice, setNewTaskExecutionPolicy, clearNewTaskExecutionChoice] =
     useNewTaskChoice<ExecutionPolicy>(currentNewTaskDraftKey);
+  const [newTaskExecutor, setNewTaskExecutor, clearNewTaskExecutor] =
+    useNewTaskChoice<ExecutorTarget>(currentNewTaskDraftKey);
   const transcriptReadingCommands = useRef<Conversation.TranscriptReadingPositionCommands>(null);
   const [transcriptTurnIndex, setTranscriptTurnIndex] = useState<Conversation.TranscriptTurnIndex>();
   const [petCompletionNonce, setPetCompletionNonce] = useState(0);
@@ -1143,6 +1146,7 @@ function AppShellContent({
   // Where a NEW chat starts. Built unconditionally and handed to the composer,
   // which renders it only while no session owns it — the project is fixed once
   // the first message creates one, so there is nothing to pick after that.
+  const usesPluginExecutor = activeSession ? activeSession.backend === 'plugin-executor' : newTaskExecutor !== undefined;
   const taskReadinessWorkspace = activeSession?.cwd ?? taskEntry.selectors.projectPath;
   const taskReadinessRequest = {
     ...Conversation.resolveTaskReadinessModelTarget(activeSession, activeSessionSendOutcome, newChatModel),
@@ -1417,6 +1421,8 @@ function AppShellContent({
     showModelSetupToast,
     toastApi,
     newChatModel: newChatModel ?? null,
+    newChatExecutor: newTaskExecutor,
+    clearNewChatExecutor: clearNewTaskExecutor,
     pendingNewChatThinkingLevel,
     newChatExecutionChoice: newTaskExecutionChoice,
     clearNewChatExecutionChoice: clearNewTaskExecutionChoice,
@@ -2431,7 +2437,23 @@ function AppShellContent({
                           composerRef.current?.focus();
                         } }} />
                     ) : null}
-                    {!sharedSessionActive && sessionsSelected ? <PlanExecutionPanel planMode={planMode} /> : null}
+                    {!sharedSessionActive && sessionsSelected && !usesPluginExecutor ? <PlanExecutionPanel planMode={planMode} /> : null}
+                    {sessionsSelected && !activeId && taskEntry.selectors.target ? <ExecutorTaskPicker
+                      key={currentNewTaskDraftKey} target={{ kind: 'new', host: taskEntry.selectors.target }} locale={uiLocale}
+                      value={newTaskExecutor} disabled={newTaskSendPending}
+                      onChange={(value) => value ? setNewTaskExecutor(value) : clearNewTaskExecutor()}
+                    /> : null}
+                    {sessionsSelected && activeId && !sharedSessionActive && activeSession?.backend === 'plugin-executor' ? <ExecutorTaskPicker
+                      key={activeId} target={{ kind: 'session', sessionId: activeId }} locale={uiLocale}
+                      value={activeSession.executorId ? { kind: 'executor', executorId: activeSession.executorId, settings: activeSession.executorSettings } : undefined}
+                      disabled={activeMessageSubmitting || turnActive}
+                      onChange={async (value) => {
+                        if (!value) return;
+                        const result = await window.maka.sessions.setExecutorConfiguration(activeId, { executorId: value.executorId, settings: value.settings ?? {} });
+                        if (!result.ok) throw new Error(result.code);
+                        await refreshSessions();
+                      }}
+                    /> : null}
                     <WorkHubReturnButton
                       visible={workHubEnabled && Boolean(activeId) && !onboardingComposerHidden}
                       onReturn={openWorkHub}
@@ -2498,7 +2520,7 @@ function AppShellContent({
                   onPasteAsQuote={canStageComposerContext ? addQuote : undefined}
                   onPickAttachments={contextPickEnabled ? pickAttachments : undefined}
                   onAttachFilePaths={contextPickEnabled ? attachFilePaths : undefined}
-                  modelLabel={activeModelLabel ?? newChatModelLabel}
+                  modelLabel={newTaskExecutor && !activeId ? newTaskExecutor.settings?.model ?? newTaskExecutor.executorId : activeModelLabel ?? newChatModelLabel}
                   activeSession={activeSessionForView}
                   activeModelConnectionId={activeSessionForModelControls?.llmConnectionId}
                   activeModelConnectionSlug={activeSessionForModelControls?.llmConnectionSlug}
@@ -2509,21 +2531,21 @@ function AppShellContent({
                   onOpenContextUsage={() => commands.toggleTool('inspector')}
                   LiveContextUsageProbe={LiveContextUsageProbe}
                   contextUsageSessionId={ownerActiveId}
-                  modelChoices={chatModelChoices}
+                  modelChoices={(!activeId && newTaskExecutor) || activeSession?.backend === 'plugin-executor' ? [] : chatModelChoices}
                   modelSwitchHasHistory={modelSwitchHasHistory}
                   hideUnavailableCurrentModel={sessionHealthNotice?.onClickTarget === 'model_picker'}
                   renderProviderMark={(type) => <ProviderBrandMark type={type} />}
-                  onModelChange={(input) => activeId ? void setSessionModel(activeId, input) : undefined}
+                  onModelChange={activeSession?.backend === 'plugin-executor' ? undefined : (input) => activeId ? void setSessionModel(activeId, input) : undefined}
                   {...{ modelSwitchAvailability, activeThinkingLevels, activeThinkingLevel }}
-                  onThinkingLevelChange={(level) => {
+                  onThinkingLevelChange={activeSession?.backend === 'plugin-executor' ? undefined : (level) => {
                     if (activeId) void setSessionThinkingLevel(activeId, level ?? null);
                   }}
                   {...{ newChatModel, newChatProviderType, newChatThinkingLevels, newChatThinkingLevel }}
-                  onPickNewChatModel={(input) => {
+                  onPickNewChatModel={newTaskExecutor ? undefined : (input) => {
                     setPendingNewChatModel(input);
                     if (modelSettingsOwnsComposerHost) saveComposerDefaults({ model: input });
                   }}
-                  onNewChatThinkingLevelChange={(level) => setPendingNewChatThinkingLevel(level ?? null)}
+                  onNewChatThinkingLevelChange={newTaskExecutor ? undefined : (level) => setPendingNewChatThinkingLevel(level ?? null)}
                   onOpenModelSettings={modelSettingsOwnsComposerHost
                     ? () => openSettingsSection('models')
                     : undefined}
@@ -2569,16 +2591,16 @@ function AppShellContent({
                         }
                       : undefined
                   }
-                  planModeActive={activePlanMode}
+                  planModeActive={!usesPluginExecutor && activePlanMode}
                   // No pending-keyed disable while a toggle commits: the
                   // pending registries already swallow re-entrant toggles, and
                   // a reason here would gray the row mid-click — the blink
                   // this control had. The rows repaint when the write lands.
                   planModeDisabledReason={modeChangeDisabledReason}
-                  onPlanModeChange={(active) => void setPlanMode(active)}
+                  onPlanModeChange={usesPluginExecutor ? undefined : (active) => void setPlanMode(active)}
                   orchestrationMode={activeOrchestrationMode}
                   orchestrationModeDisabledReason={modeChangeDisabledReason}
-                  onOrchestrationModeChange={(mode) => void setOrchestrationMode(mode)}
+                  onOrchestrationModeChange={usesPluginExecutor ? undefined : (mode) => void setOrchestrationMode(mode)}
                   goalDisabledReason={
                     activeStreamingLive || (activeId && turnActive)
                       ? shellCopy.goalTurnActive
@@ -2620,7 +2642,7 @@ function AppShellContent({
                 activeProviderType={activeConnection?.providerType}
                 renderProviderMark={(type) => <ProviderLogo type={type} compact />}
                 modelChoices={chatModelChoices}
-                onModelChange={sharedSessionActive ? undefined : (input) => {
+                onModelChange={sharedSessionActive || usesPluginExecutor ? undefined : (input) => {
                   if (activeId) void setSessionModel(activeId, input);
                 }}
                 userLabel={userLabel}
@@ -2690,12 +2712,12 @@ function AppShellContent({
                     });
                   });
                 }}
-                sessionHealthNotice={sessionHealthNotice}
+                sessionHealthNotice={usesPluginExecutor ? undefined : sessionHealthNotice}
                 sessionHealthModelPickerAvailable={
                   activeBoundarySurface.localInteractionAvailable
                 }
                 workspaceReadinessRecovery={workspaceReadinessRecovery}
-                taskReadinessNotice={taskReadinessNotice}
+                taskReadinessNotice={usesPluginExecutor ? undefined : taskReadinessNotice}
                 onTaskReadinessAction={
                   taskReadinessNotice?.action === 'workspace_picker'
                     ? activeSession

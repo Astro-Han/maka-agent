@@ -166,6 +166,24 @@ describe('composer first-send cleanup', () => {
     }
   });
 
+  it('keeps executor settings separate from native model and orchestration drafts on first send', async () => {
+    let createInput: unknown;
+    const restoreWindow = installWindow({
+      newTasks: { create: async (_target: unknown, input: unknown) => { createInput = input; return { id: 'session-1' }; } },
+      sessions: { submitMessage: async () => ({ ok: true, attachments: [], preparation: [] }) },
+    });
+    try {
+      const deps = createActionsDeps();
+      const actions = createAppShellChatActions({ ...deps,
+        newChatModel: { llmConnectionId: 'native', llmConnectionSlug: 'native', model: 'native-model' },
+        pendingNewChatThinkingLevel: 'high', newChatCollaborationMode: 'plan', newChatOrchestrationMode: 'swarm',
+        newChatExecutor: { kind: 'executor', executorId: 'external.worker', settings: { model: 'executor-model', thinkingLevel: 'low' } },
+      });
+      assert.equal(await actions.send('hello'), true);
+      assert.deepEqual(createInput, { name: 'New Chat', executorId: 'external.worker', executorSettings: { model: 'executor-model', thinkingLevel: 'low' } });
+    } finally { restoreWindow(); }
+  });
+
   it('passes the effective offered model when creating the first session', async () => {
     let createInput: unknown;
     const restoreWindow = installWindow({

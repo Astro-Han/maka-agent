@@ -1743,6 +1743,9 @@ const makaBridge = {
     },
   },
   newTasks: {
+    async searchExecutors(target, query) {
+      return scopedRuntimeHost(await runtimeHostScope(target)).query('executor.catalog.query', query);
+    },
     getCatalog(): Promise<DesktopNewTaskCatalog> {
       return loadNewTaskCatalog();
     },
@@ -2367,6 +2370,13 @@ const makaBridge = {
     },
     abandonPlanExecution(sessionId: string, executionId: string): Promise<PlanControlIpcResult<PlanSessionState>> {
       return invokeProjectedSessionRuntimeHost('plan-mode:abandonExecution', sessionId, executionId);
+    },
+    async searchExecutors(sessionId, query) {
+      const session = await runtimeHostSessionRef(sessionId);
+      return scopedRuntimeHost(session.scope).query('executor.catalog.query', { ...query, scope: `session:${session.sessionId}` });
+    },
+    setExecutorConfiguration(sessionId, input) {
+      return invokeSessionUpdate('sessions:setExecutorConfiguration', sessionId, input);
     },
     setModelConfiguration(sessionId: string, input: {
       llmConnectionId: string;

@@ -79,6 +79,7 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 - `resume({ operationId, source })` 恢复一个精确、已封口的模型 Run。重试和 Host 重启后均返回同一规范开场回执；选择恢复哪个来源属于插件业务。准备期间不持有 Host 准入锁。
 - `configure({ sessionId, expectedRevision, target })` 用 CAS 修改空闲 Session 的模型／Executor，不改变权限、工作区或行为。`createRoot({ managed: true, ... })` 声明包的管理所有权，不增加资源权限；`plugin_workspace` 授权选择与包数据目录分离的私有工作区。
 - Executor 目标接受 `settings: { model?, thinkingLevel? }`；省略表示使用执行器默认值，不指向 Host 模型连接。配置对象整体替换旧选择，回调通过 `request.settings` 接收；这些设置与精确执行器身份在派发前一起提交，配置修改只影响后续执行。
+- `ctx.executors.search({ query? })` 发现插件作用域内已注册执行器的 ID、显示名称和声明能力。单页最多 50 项／48 KiB；`complete: false` 时需缩小查询范围。发现不授予执行权限；执行器退休后不再出现在后续查询中。
 - `submit` 在接受工作前冻结输入准备。被阻止的输入不创建回执；接受的内容和稳定回执原子提交。Remote 提交使用真实认证连接，不接受插件指定的连接 ID。
 - `enqueue({ operationId, messageId, invocation, content, placement })` 向精确的活动 Run 排队，回执跨插件替换和 Host 重启保留。`message(operationId)` 返回待投递、已取消或真实投递归属，并说明是否独占 Turn；`retract(operationId)` 不停止已投递或共享的执行。
 - `offerInteraction({ operationId, invocation, prompt })` 发布包范围的问题／表单，Host 标记请求者身份。`waitInteraction` 取消不撤回请求，`closeInteraction` 不能覆盖已提交的回答；该接口不提供权限审批。

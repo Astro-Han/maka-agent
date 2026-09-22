@@ -187,6 +187,7 @@ operations! {
     PluginPackageReload => ("plugin.package.reload", Command, Ready),
     PluginPackageUninstall => ("plugin.package.uninstall", Command, Ready),
     PluginPlatformQuery => ("plugin.platform.query", Query, Ready),
+    ExecutorCatalogQuery => ("executor.catalog.query", Query, Ready),
     PluginPlatformReconcile => ("plugin.platform.reconcile", Command, Ready),
     PricingMutate => ("pricing.mutate", Command, Ready),
     PricingQuery => ("pricing.query", Query, Ready),

@@ -184,6 +184,16 @@ export interface ExecutorDefinition {
   displayName: string;
   capabilities?: { thinking?: boolean; toolActivity?: boolean; attachments?: boolean };
 }
+export type ExecutorChoice = {
+  id: string;
+  displayName: string;
+  capabilities: { thinking: boolean; toolActivity: boolean; attachments: boolean };
+};
+export type ExecutorChoices = {
+  revision: number;
+  executors: readonly ExecutorChoice[];
+  complete: boolean;
+};
 export interface ExecutorRequest {
   settings: ExecutorSettings;
   invocation: Invocation;
@@ -344,6 +354,8 @@ export interface HostContext {
   readonly modelAdapters: import('./models.js').ModelAdapters;
   readonly modelProviders: import('./providers.js').ModelProviders;
   readonly executors: {
+    /** Scope-visible choices, not execution permission. Refine the query when incomplete. */
+    search(query?: { query?: string }): Promise<ExecutorChoices>;
     register(
       definition: ExecutorDefinition,
       execute: (request: ExecutorRequest, call: ExecutorContext) => Awaitable<ExecutorOutcome>,

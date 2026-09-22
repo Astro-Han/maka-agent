@@ -39,6 +39,92 @@ pub struct Capabilities {
     pub attachments: bool,
 }
 
+/// Non-secret choices visible in the plugin's scope; discovery grants no execution authority.
+pub trait Executors: Send + Sync {
+    fn search(&self, query: Search) -> BoxFuture<'_, Result<Choices, crate::Error>>;
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Search {
+    #[serde(default)]
+    pub query: String,
+}
+impl Search {
+    pub fn validate(&self) -> Result<(), crate::Error> {
+        if self.query.len() > 512 || self.query.chars().any(char::is_control) {
+            return Err(crate::Error::Invalid(
+                "invalid executor search query".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Choice {
+    pub id: ExecutorId,
+    pub display_name: String,
+    pub capabilities: Capabilities,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Choices {
+    pub revision: u64,
+    pub executors: Vec<Choice>,
+    pub complete: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Query {
+    #[serde(default)]
+    pub scope: crate::composition::Scope,
+    #[serde(default)]
+    pub query: String,
+}
+
+/// Embedding query; plugins receive `Executors` bound to their own scope.
+pub fn search(
+    catalog: &crate::contributions::Catalog,
+    scope: &crate::composition::Scope,
+    query: Search,
+) -> Result<Choices, crate::Error> {
+    query.validate()?;
+    let snapshot = catalog.snapshot::<Executor>(scope);
+    let query = query.query.to_lowercase();
+    let terms: Vec<_> = query.split_whitespace().collect();
+    let mut page = Choices {
+        revision: snapshot.revision,
+        executors: Vec::new(),
+        complete: true,
+    };
+    let mut bytes = 0;
+    for entry in snapshot.entries.into_values() {
+        let executor = &entry.value;
+        let haystack = format!("{} {}", executor.id.as_str(), executor.display_name).to_lowercase();
+        if !terms.iter().all(|term| haystack.contains(term)) {
+            continue;
+        }
+        let choice = Choice {
+            id: executor.id.clone(),
+            display_name: executor.display_name.clone(),
+            capabilities: executor.capabilities,
+        };
+        bytes += serde_json::to_vec(&choice)
+            .map_err(|error| crate::Error::Invalid(error.to_string()))?
+            .len();
+        if page.executors.len() == 50 || bytes > 48 * 1024 - 1024 {
+            page.complete = false;
+            break;
+        }
+        page.executors.push(choice);
+    }
+    Ok(page)
+}
+
 #[derive(Clone)]
 pub struct Request {
     pub invocation: Invocation,

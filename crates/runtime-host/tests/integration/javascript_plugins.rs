@@ -263,6 +263,11 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
             let executors = peer.rpc("plugin.platform.query", json!({"view":"executors"})).await;
             assert_eq!(executors["ok"], true, "{executors}");
             assert!(executors["result"]["items"].as_array().unwrap().iter().any(|executor| executor["id"] == "example.external"));
+            let choices = peer.rpc("executor.catalog.query", json!({"query":"external acceptance"})).await;
+            assert_eq!(choices["ok"], true, "{choices}");
+            assert_eq!(choices["result"]["executors"], json!([{"id":"example.external","displayName":"External acceptance",
+                "capabilities":{"thinking":true,"toolActivity":true,"attachments":false}}]));
+            assert_eq!(choices["result"]["complete"], true);
             let mut external_runs = vec![("executor-session", false), (external_child.session_id.as_str(), false)];
             if !reopened { external_runs.push((external_child.session_id.as_str(), true)); }
             for (session_id, waiting) in external_runs {

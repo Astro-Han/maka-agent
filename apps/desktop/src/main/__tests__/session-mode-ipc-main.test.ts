@@ -160,6 +160,16 @@ test('compound model configuration requires an explicit thinking level', async (
   assert.deepEqual(patches, []);
 });
 
+test('executor configuration stays one typed patch and rejects mixed native fields', async () => {
+  const patches: DesktopSessionConfigurationPatch[] = [];
+  const ipc = harness(patches);
+  const input = { executorId: 'external.worker', settings: { model: 'worker-model', thinkingLevel: 'max' } };
+  await ipc.invoke('sessions:setExecutorConfiguration', 'session-1', input);
+  assert.deepEqual(patches, [{ executorTarget: input }]);
+  await assert.rejects(ipc.invoke('sessions:setExecutorConfiguration', 'session-1', { ...input, model: 'native' }) as Promise<unknown>);
+  assert.equal(patches.length, 1);
+});
+
 test('a Plan Session keeps the orchestration default it was carrying', async () => {
   const patches: DesktopSessionConfigurationPatch[] = [];
   const ipc = harness(patches);

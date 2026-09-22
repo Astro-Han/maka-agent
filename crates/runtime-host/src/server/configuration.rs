@@ -75,6 +75,7 @@ pub(super) fn supports(operation: Operation) -> bool {
     matches!(
         operation,
         Operation::ModelProviderCatalogQuery
+            | Operation::ExecutorCatalogQuery
             | Operation::ConnectionCatalogQuery
             | Operation::ConnectionRequestHeadersQuery
             | Operation::ConnectionRequestHeadersReplace
@@ -96,6 +97,13 @@ pub(super) fn supports(operation: Operation) -> bool {
 
 pub(super) fn decode_input(operation: Operation, value: &Value) -> Result<Value> {
     match operation {
+        Operation::ExecutorCatalogQuery => {
+            let query = serde_json::from_value::<maka_plugins::executor::Query>(value.clone())
+                .map_err(|error| ProtocolError::invalid(error.to_string()))?;
+            maka_plugins::executor::Search { query: query.query }
+                .validate()
+                .map_err(|error| ProtocolError::invalid(error.to_string()))?;
+        }
         Operation::ModelProviderCatalogQuery => {
             serde_json::from_value::<maka_plugins::provider::catalog::Query>(value.clone())
                 .map_err(|_| ProtocolError::invalid("Invalid model provider query"))?;
@@ -155,6 +163,10 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> Result<Value>
 
 pub(super) fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
     match operation {
+        Operation::ExecutorCatalogQuery => {
+            serde_json::from_value::<maka_plugins::executor::Choices>(value.clone())
+                .map_err(|error| ProtocolError::invalid(error.to_string()))?;
+        }
         Operation::ModelProviderCatalogQuery => {
             serde_json::from_value::<maka_plugins::provider::catalog::Page>(value.clone())
                 .map_err(|_| ProtocolError::invalid("Invalid model provider directory"))?;
@@ -204,6 +216,19 @@ pub(super) async fn execute(
     operation: Operation,
     value: &Value,
 ) -> std::result::Result<Output, OperationError> {
+    if operation == Operation::ExecutorCatalogQuery {
+        let input: maka_plugins::executor::Query = serde_json::from_value(value.clone())
+            .map_err(|error| failure(maka_config::ConfigError::Json(error)))?;
+        let result = maka_plugins::executor::search(
+            &host.executions.plugin_catalog,
+            &input.scope,
+            maka_plugins::executor::Search { query: input.query },
+        )
+        .map_err(|error| failure(maka_config::ConfigError::Invalid(error.to_string())))?;
+        return serde_json::to_value(result)
+            .map(Output::Catalog)
+            .map_err(|error| failure(maka_config::ConfigError::Json(error)));
+    }
     if operation == Operation::ModelProviderCatalogQuery {
         let input = serde_json::from_value(value.clone()).map_err(|_| {
             failure(maka_config::ConfigError::Invalid(

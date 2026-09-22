@@ -43,6 +43,7 @@ pub(super) fn publish(
         ("creation-template", Action::Template),
         ("resolve", Action::Resolve),
         ("models", Action::Models),
+        ("executors", Action::Executors),
         ("select-coordinator-model", Action::SelectModel),
         ("query", Action::Query),
         ("candidates", Action::Candidates),
@@ -81,6 +82,7 @@ enum Action {
     Template,
     Resolve,
     Models,
+    Executors,
     SelectModel,
     Query,
     Candidates,
@@ -144,12 +146,20 @@ impl Method for Call {
                         .target
                         .validate()
                         .map_err(|error| Error::Invalid(error.to_string()))?;
+                    let collaboration_mode = if matches!(
+                        request.target,
+                        maka_plugins::execution::Target::Executor { .. }
+                    ) {
+                        maka_runtime::execution::CollaborationMode::Agent
+                    } else {
+                        request.collaboration_mode
+                    };
                     encode(crate::decision::Creation {
                         settings: maka_plugins::execution::RootSettings {
                             target: request.target,
                             sandbox_mode: *sandbox_mode,
                             approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
-                            collaboration_mode: request.collaboration_mode,
+                            collaboration_mode,
                             behavior: Default::default(),
                             bound_tools: None,
                             instructions: None,
@@ -170,6 +180,13 @@ impl Method for Call {
                     manager
                         .coordinator
                         .models
+                        .search(decode(input)?)
+                        .await
+                        .map_err(|error| Error::Provider(error.to_string()))?,
+                ),
+                Action::Executors => encode(
+                    manager
+                        .executor_choices
                         .search(decode(input)?)
                         .await
                         .map_err(|error| Error::Provider(error.to_string()))?,

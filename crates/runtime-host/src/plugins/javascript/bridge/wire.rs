@@ -83,6 +83,8 @@ pub(super) enum Request {
     ResolveModel(maka_plugins::llm::Selection),
     #[serde(rename = "models.search")]
     SearchModels(maka_plugins::llm::Search),
+    #[serde(rename = "executors.search")]
+    SearchExecutors(maka_plugins::executor::Search),
     #[serde(rename = "llm.generate")]
     Generate(ModelRequest),
     #[serde(rename = "clients.tools")]

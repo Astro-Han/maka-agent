@@ -24,6 +24,8 @@ import { requireExactRecord, requireId, requireRecord, requireString } from './c
 import { CONNECTION_EFFECT_OPERATION_SPECS } from './connection-effects.js';
 import { CONFIGURATION_OPERATION_SPECS } from './configuration.js';
 import { MODEL_PROVIDER_OPERATION_SPECS } from './model-provider.js';
+import { EXECUTOR_CATALOG_OPERATION_SPECS } from './executor-catalog.js';
+export type { ExecutorCatalogQuery } from './executor-catalog.js';
 export type { ModelProviderCatalogQuery, ModelProviderCatalogResult } from './model-provider.js';
 import { DEEP_RESEARCH_OPERATION_SPECS } from './deep-research.js';
 import { DAILY_REVIEW_OPERATION_SPECS } from './daily-review.js';
@@ -200,6 +202,7 @@ export * from './workspace.js';
 
 export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
   MODEL_PROVIDER_OPERATION_SPECS,
+  EXECUTOR_CATALOG_OPERATION_SPECS,
   HOST_BOOTSTRAP_OPERATION_SPECS,
   HOST_RESOURCE_OPERATION_SPECS,
   PEER_MESH_OPERATION_SPECS,
@@ -277,6 +280,7 @@ export const REMOTE_OWNER_OPERATION_GRANTS = Object.freeze([
   'collaboration.turn-request.query',
   'connection.catalog.create',
   'connection.catalog.query',
+  'executor.catalog.query',
   'connection.catalog.remove',
   'connection.catalog.set-default-target',
   'connection.catalog.update',

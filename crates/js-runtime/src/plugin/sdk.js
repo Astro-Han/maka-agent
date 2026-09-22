@@ -371,6 +371,7 @@
             }),
         }),
         executors: Object.freeze({
+          search: (query = {}) => host('executors.search', query),
           register: (definition, execute) => register('executor', definition, execute),
         }),
         modelProviders: Object.freeze({

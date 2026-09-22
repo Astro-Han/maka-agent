@@ -17,15 +17,15 @@
  * under the License.
  */
 
-import { useState } from 'react';
-import { Button } from '@maka/ui/plugin';
+import { useMemo, useState } from 'react';
+import { Button, ExecutorSelection } from '@maka/ui/plugin';
 import type {
   AuthorizationRequest,
   ClientContext,
   ClientSlots,
 } from '@maka-agent/plugin-sdk/client';
-import type { Executions } from '@maka-agent/plugin-sdk/host';
-import { ModelSelection, type ModelTarget } from './model-selection.js';
+import type { Executions, ExecutionTarget, ExecutorChoices } from '@maka-agent/plugin-sdk/host';
+import { ModelSelection } from './model-selection.js';
 
 type Target = AuthorizationRequest['target'];
 type Creation = {
@@ -56,37 +56,74 @@ export async function authorize(
 export function registerAccess(context: ClientContext): void {
   context.slots.register('workspace.manage', 'new-work', function Workspace(props) {
     const zh = props.locale !== 'en';
+    const [backend, setBackend] = useState<'model' | 'executor'>('model');
+    const [busy, setBusy] = useState(false);
+    const search = useMemo(
+      () => context.remote.method<{ query: string }, ExecutorChoices>('executors'),
+      [],
+    );
+    const onSelect = async (model: ExecutionTarget) => {
+      setBusy(true);
+      try {
+        const target: Target = {
+          kind: 'workspace',
+          workspace: props.workspace,
+          sandboxMode: props.sandboxMode,
+        };
+        await authorize(
+          context,
+          target,
+          zh ? '允许 WorkHub 在此工作区执行任务' : 'Allow WorkHub work in this workspace',
+        );
+        const creation = await context.remote.method<
+          {
+            authorization: Target;
+            collaborationMode: ClientSlots['workspace.manage']['collaborationMode'];
+            target: ExecutionTarget;
+          },
+          Creation
+        >('creation-template')({
+          authorization: target,
+          collaborationMode: props.collaborationMode,
+          target: model,
+        });
+        await context.remote.method<Creation, null>('configure-creation')(creation);
+      } finally {
+        setBusy(false);
+      }
+    };
+    const label = zh ? '使用此工作区创建 WorkHub 任务' : 'Create WorkHub tasks in this workspace';
     return (
-      <ModelSelection
-        context={context}
-        locale={props.locale}
-        label={zh ? '使用此工作区创建 WorkHub 任务' : 'Create WorkHub tasks in this workspace'}
-        onSelect={async (model) => {
-          const target: Target = {
-            kind: 'workspace',
-            workspace: props.workspace,
-            sandboxMode: props.sandboxMode,
-          };
-          await authorize(
-            context,
-            target,
-            zh ? '允许 WorkHub 在此工作区执行任务' : 'Allow WorkHub work in this workspace',
-          );
-          const creation = await context.remote.method<
-            {
-              authorization: Target;
-              collaborationMode: ClientSlots['workspace.manage']['collaborationMode'];
-              target: ModelTarget;
-            },
-            Creation
-          >('creation-template')({
-            authorization: target,
-            collaborationMode: props.collaborationMode,
-            target: model,
-          });
-          await context.remote.method<Creation, null>('configure-creation')(creation);
-        }}
-      />
+      <div className="workhub-model-selection">
+        <label>
+          {zh ? '执行方式' : 'Execution backend'}
+          <select
+            value={backend}
+            disabled={busy}
+            onChange={(event) =>
+              setBackend(event.target.value === 'executor' ? 'executor' : 'model')
+            }
+          >
+            <option value="model">{zh ? '模型' : 'Model'}</option>
+            <option value="executor">{zh ? '插件执行器' : 'Plugin executor'}</option>
+          </select>
+        </label>
+        {backend === 'model' ? (
+          <ModelSelection
+            context={context}
+            locale={props.locale}
+            label={label}
+            onSelect={onSelect}
+          />
+        ) : (
+          <ExecutorSelection
+            locale={props.locale}
+            label={label}
+            search={search}
+            onSelect={onSelect}
+          />
+        )}
+      </div>
     );
   });
   context.slots.register('session.composer.before', 'target-access', function Session(props) {

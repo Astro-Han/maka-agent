@@ -44,6 +44,7 @@ struct State {
     responses: Mutex<BTreeMap<String, HttpResponse>>,
     files: Arc<dyn maka_plugins::filesystem::Files>,
     models: Arc<dyn maka_plugins::llm::Models>,
+    executors: Arc<dyn maka_plugins::executor::Executors>,
     clients: Arc<dyn maka_plugins::client_capability::Clients>,
     terminals: Arc<dyn maka_plugins::terminal::Terminals>,
     calls: Arc<super::invocation::Calls>,
@@ -84,6 +85,7 @@ impl HostBridge {
             responses: Default::default(),
             files: host.files,
             models: host.models,
+            executors: host.executors,
             clients: host.clients,
             processes: host.processes,
             terminals: host.terminals,
@@ -284,6 +286,7 @@ impl State {
             }
             Request::ResolveModel(input) => encode(self.models.resolve(input).await?),
             Request::SearchModels(input) => encode(self.models.search(input).await?),
+            Request::SearchExecutors(input) => encode(self.executors.search(input).await?),
             Request::Revision(input) => {
                 let _lease = self.context.lifecycle.resource_call()?;
                 Ok(self.calls.revisions.call(input).await?)

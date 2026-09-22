@@ -36,6 +36,7 @@ pub struct Services {
     pub permissions: Arc<dyn crate::permissions::Access>,
     pub files: Arc<dyn crate::filesystem::Files>,
     pub models: Arc<dyn crate::llm::Models>,
+    pub executors: Arc<dyn crate::executor::Executors>,
     pub clients: Arc<dyn crate::client_capability::Clients>,
     pub http: Arc<dyn crate::http::Client>,
     pub processes: Arc<dyn crate::process::Processes>,

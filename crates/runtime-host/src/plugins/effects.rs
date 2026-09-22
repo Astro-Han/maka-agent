@@ -101,6 +101,19 @@ impl Effects {
             .map_err(|_| ToolError::CleanupUnconfirmed("SDK effect worker disappeared".into()))?
     }
 }
+impl maka_plugins::executor::Executors for Effects {
+    fn search(
+        &self,
+        query: maka_plugins::executor::Search,
+    ) -> BoxFuture<'_, Result<maka_plugins::executor::Choices, maka_plugins::Error>> {
+        Box::pin(async move {
+            let _lease = self.owner.resource_call()?;
+            let scope = self.owner.identity()?.scope;
+            let host = self.host.upgrade().ok_or(maka_plugins::Error::Retired)?;
+            maka_plugins::executor::search(&host.plugin_catalog, &scope, query)
+        })
+    }
+}
 impl maka_plugins::filesystem::Files for Effects {
     fn invoke(
         &self,

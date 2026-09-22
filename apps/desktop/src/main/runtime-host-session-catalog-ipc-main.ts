@@ -23,7 +23,7 @@ import { isOrchestrationMode } from '@maka/core/orchestration';
 import { isSandboxMode } from '@maka/core/permission';
 import { decodeApprovalPolicy, type ApprovalPolicy } from '@maka/core/execution-permissions';
 import { isThinkingLevel, type ThinkingLevel } from '@maka/core/model-thinking';
-import { isExecutorSettings } from '@maka/core/executor-id';
+import { isExecutorId, isExecutorSettings } from '@maka/core/executor-id';
 import { type CreateSessionRequestInput, type SessionListFilter } from '@maka/core/runtime-inputs';
 import { type SessionChangedEvent, type SessionChangedReason, type SessionCatalogSummary } from '@maka/core/session';
 import { RuntimeHostOperationError, projectSessionCatalogSummary } from '@maka/runtime-host/client';
@@ -227,6 +227,13 @@ export function registerRuntimeHostSessionCatalogIpc(
       return updateConfiguration(deps, sessionId, { modelTarget, thinkingLevel }, 'updated');
     },
   );
+  ipcMain.handle('sessions:setExecutorConfiguration', async (_event, sessionId: string, input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid executor settings');
+    const row = input as Record<string, unknown>;
+    if (Object.keys(row).some((key) => key !== 'executorId' && key !== 'settings') ||
+        !isExecutorId(row.executorId) || !isExecutorSettings(row.settings)) throw new Error('Invalid executor settings');
+    return updateConfiguration(deps, sessionId, { executorTarget: { executorId: row.executorId, settings: row.settings } }, 'updated');
+  });
   ipcMain.handle('sessions:setThinkingLevel', async (_event, sessionId: string, level: unknown) => {
     if (level !== undefined && level !== null && !isThinkingLevel(level)) {
       throw new Error(`Invalid thinking level: ${String(level)}`);

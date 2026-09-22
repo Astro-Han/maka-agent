@@ -48,6 +48,7 @@ impl Operation {
                 | Self::CollaborationTurnRequestQuery
                 | Self::ConnectionCatalogCreate
                 | Self::ConnectionCatalogQuery
+                | Self::ExecutorCatalogQuery
                 | Self::ConnectionCatalogRemove
                 | Self::ConnectionCatalogSetDefaultTarget
                 | Self::ConnectionCatalogUpdate

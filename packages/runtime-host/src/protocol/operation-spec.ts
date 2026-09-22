@@ -73,12 +73,13 @@ type OperationSpecMapIntersection<Maps extends OperationSpecMaps> = UnionToInter
 type DuplicateOperationKeys<
   Maps extends readonly OperationSpecMap[],
   Seen = never,
+  Duplicates = never,
 > = Maps extends readonly [
   infer Head extends OperationSpecMap,
   ...infer Tail extends OperationSpecMap[],
 ]
-  ? Extract<keyof Head, Seen> | DuplicateOperationKeys<Tail, Seen | keyof Head>
-  : never;
+  ? DuplicateOperationKeys<Tail, Seen | keyof Head, Duplicates | Extract<keyof Head, Seen>>
+  : Duplicates;
 type RequireDisjointOperationKeys<Maps extends OperationSpecMaps> = [
   DuplicateOperationKeys<Maps>,
 ] extends [never]

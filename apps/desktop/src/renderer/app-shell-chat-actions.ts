@@ -183,6 +183,8 @@ export function createAppShellChatActions(deps: {
   ) => void;
   toastApi: ToastApi;
   newChatModel: PendingNewChatModel;
+  newChatExecutor?: Extract<import('@maka-agent/plugin-sdk/host').ExecutionTarget, { kind: 'executor' }>;
+  clearNewChatExecutor?: () => void;
   pendingNewChatThinkingLevel: PendingNewChatThinkingLevel;
   /**
    * The user's explicit choice for this draft, or undefined when they made
@@ -223,6 +225,8 @@ export function createAppShellChatActions(deps: {
     showModelSetupToast,
     toastApi,
     newChatModel,
+    newChatExecutor,
+    clearNewChatExecutor,
     pendingNewChatThinkingLevel,
     newChatExecutionChoice,
     clearNewChatExecutionChoice,
@@ -380,17 +384,18 @@ export function createAppShellChatActions(deps: {
         if (pending?.length) preflightAttachmentItems(pending);
         const session = await window.maka.newTasks.create(newTaskTarget, {
           name: DEFAULT_SESSION_NAME,
-          ...(newChatModel
+          ...(newChatExecutor
+            ? { executorId: newChatExecutor.executorId, executorSettings: newChatExecutor.settings }
+            : newChatModel
             ? {
                 llmConnectionId: newChatModel.llmConnectionId,
                 llmConnectionSlug: newChatModel.llmConnectionSlug,
                 model: newChatModel.model,
               }
             : {}),
-          ...(pendingNewChatThinkingLevel === undefined ? {} : { thinkingLevel: pendingNewChatThinkingLevel }),
+          ...(newChatExecutor || pendingNewChatThinkingLevel === undefined ? {} : { thinkingLevel: pendingNewChatThinkingLevel }),
           ...newChatExecutionChoice,
-          collaborationMode: newChatCollaborationMode,
-          orchestrationMode: newChatOrchestrationMode,
+          ...(newChatExecutor ? {} : { collaborationMode: newChatCollaborationMode, orchestrationMode: newChatOrchestrationMode }),
         });
         unsentSessionId = session.id;
         // Creation can also yield while a same-target New Task is reopened.
@@ -428,6 +433,7 @@ export function createAppShellChatActions(deps: {
         // survive for retry. Clear only while this Session still owns the UI.
         if (newChatExecutionChoice && activeIdRef.current === session.id)
           clearNewChatExecutionChoice();
+        if (newChatExecutor && activeIdRef.current === session.id) clearNewChatExecutor?.();
         // The callback fires only when this send's first message projected;
         // an unreconciled first message stays unreported.
         if (submitted.kind === 'projected')

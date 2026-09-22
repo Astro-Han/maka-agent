@@ -167,6 +167,17 @@ export default async function (ctx) {
       capabilities: { thinking: true, toolActivity: true },
     },
     async (request, context) => {
+      const executors = await ctx.executors.search({ query: 'external acceptance' });
+      const advertised = executors.executors[0];
+      if (
+        !executors.complete ||
+        executors.executors.length !== 1 ||
+        advertised?.id !== 'example.external' ||
+        !advertised.capabilities.thinking ||
+        !advertised.capabilities.toolActivity ||
+        advertised.capabilities.attachments
+      )
+        throw new Error('executor discovery lost the effective registration or its capabilities');
       if (request.content.quotes?.[0]?.text !== 'Prepared by an external input provider')
         throw new Error('executor lost provider-prepared structured content');
       const session = request.invocation.session_id;
