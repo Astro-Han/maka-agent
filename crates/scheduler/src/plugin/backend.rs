@@ -125,7 +125,6 @@ impl Backend {
             approval_policy: view.approval_policy,
             collaboration_mode: view.collaboration_mode,
             orchestration_mode: view.behavior,
-            tool_mode: view.tool_mode,
         })
     }
     pub async fn remember_grant(&self, id: Id) -> Result<Grant, Error> {
@@ -318,7 +317,6 @@ impl Backend {
                             },
                             sandbox_mode: execution.sandbox_mode,
                             approval_policy: execution.approval_policy,
-                            tool_mode: execution.tool_mode,
                             collaboration_mode: execution.collaboration_mode,
                             behavior: execution.orchestration_mode.clone(),
                             bound_tools: None,

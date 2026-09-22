@@ -80,8 +80,7 @@ mod tests {
     use maka_runtime::{
         event::{EventWrite, Fact, Invocation, InvocationInput, RuntimeEvent},
         execution::{
-            ApprovalPolicy, BehaviorId, CollaborationMode, ToolMode, WorkspaceProjection,
-            WorkspaceTarget,
+            ApprovalPolicy, BehaviorId, CollaborationMode, WorkspaceProjection, WorkspaceTarget,
         },
         tool_call::{ToolCallIdentity, ToolOrigin},
         tools::{ToolCallContext, ToolJournal},
@@ -123,7 +122,6 @@ mod tests {
             tool_profile: None,
             bound_tools: None,
             instructions: None,
-            tool_mode: ToolMode::Direct,
             sandbox_mode: SandboxMode::DangerFullAccess,
             approval_policy: ApprovalPolicy::Never,
             boundary_revision: 0,

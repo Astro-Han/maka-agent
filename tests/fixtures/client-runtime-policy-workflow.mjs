@@ -103,7 +103,6 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
     const value = {
       sandboxMode: 'danger-full-access',
       thinkingLevel: 'high',
-      codeModeEnabled: true,
     };
     const beforeRace = notices.length;
     const raced = await Promise.all([mutate(0, value), mutate(0, value, other)]);

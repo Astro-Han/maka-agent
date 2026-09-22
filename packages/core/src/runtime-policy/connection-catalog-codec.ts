@@ -267,6 +267,8 @@ export function decodeModelOverridesTable(value: unknown): Readonly<Record<strin
       [
         'thinkingLevels',
         'vision',
+        'codeMode',
+        'applyPatch',
         'contextWindow',
         'serviceTier',
         'compactionThreshold',
@@ -282,6 +284,10 @@ export function decodeModelOverridesTable(value: unknown): Readonly<Record<strin
       [],
     );
     const declared: { -readonly [K in keyof ModelOverride]: ModelOverride[K] } = {};
+    for (const field of ['codeMode', 'applyPatch'] as const) {
+      if (entry[field] !== undefined)
+        declared[field] = booleanValue(entry[field], `model ${field}`);
+    }
     if (entry.thinkingLevels !== undefined) {
       if (!Array.isArray(entry.thinkingLevels) || entry.thinkingLevels.length === 0) {
         throw domainError(`declared thinking levels for ${modelId} must be a non-empty array`);

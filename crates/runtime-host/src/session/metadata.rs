@@ -89,7 +89,6 @@ mod tests {
                 },
             },
             SandboxMode::ReadOnly,
-            maka_runtime::execution::ToolMode::Direct,
         )
     }
 

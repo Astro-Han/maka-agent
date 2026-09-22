@@ -128,10 +128,5 @@ pub(crate) async fn resolve(
     let default_permission = policy.policy.chat_defaults.sandbox_mode;
     // Thinking defaults are applied by the client composer. Omission here also
     // represents its explicit "model default" choice and must remain unchanged.
-    let tool_mode = if policy.policy.chat_defaults.code_mode_enabled {
-        maka_runtime::execution::ToolMode::CodeMode
-    } else {
-        maka_runtime::execution::ToolMode::Direct
-    };
-    Ok(prepared.bind(workspace, target, default_permission, tool_mode))
+    Ok(prepared.bind(workspace, target, default_permission))
 }

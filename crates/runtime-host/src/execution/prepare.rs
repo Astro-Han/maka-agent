@@ -188,7 +188,13 @@ impl Executions {
             &session,
         )
         .await?;
-        let tools = model.tools;
+        configuration.tool_mode = provider.tool_mode;
+        configuration
+            .tool_composition
+            .as_mut()
+            .expect("prepared composition")
+            .editing_tools = provider.editing_tools;
+        let tools = tools::select_editing(model.tools, provider.editing_tools);
         let max_steps = usize::try_from(input.max_steps.unwrap_or(64)).map_err(internal)?;
         Ok(PreparedRun::Model(Box::new(RunInput {
             invocation: invocation.clone(),

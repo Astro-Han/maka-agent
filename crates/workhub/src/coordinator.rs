@@ -24,7 +24,7 @@ use maka_plugins::{
     llm::{Models, Selection},
     session::View,
 };
-use maka_runtime::execution::{CollaborationMode, SandboxMode, ToolMode};
+use maka_runtime::execution::{CollaborationMode, SandboxMode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -76,7 +76,6 @@ impl Coordinator {
                             },
                             sandbox_mode: SandboxMode::WorkspaceWrite,
                             approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
-                            tool_mode: ToolMode::Direct,
                             collaboration_mode: CollaborationMode::Agent,
                             behavior: self.behavior.clone(),
                             bound_tools: Some(self.tools.clone()),

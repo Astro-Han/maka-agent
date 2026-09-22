@@ -134,6 +134,7 @@ impl Executions {
         })
         .await
         .map_err(internal)??;
+        let tools = super::super::tools::select_editing(tools, proof.editing_tools);
         if tools.digest() != pause.execution.tools.catalog_digest {
             return Err(unavailable("Handoff tool catalog changed"));
         }

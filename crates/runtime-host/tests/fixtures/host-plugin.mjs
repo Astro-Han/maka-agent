@@ -111,7 +111,6 @@ export default async function (ctx) {
       throw new Error('wrong behavior Session');
     return {
       instructions: 'External behavior instructions',
-      toolMode: 'direct',
       basis: await behaviorRevision.capture(),
     };
   });
@@ -297,7 +296,7 @@ export default async function (ctx) {
       const preferences = await ctx.preferences.read();
       if (
         Object.keys(preferences).sort().join(',') !==
-        'personalization,privacy,revision,toolMode,workspaceInstructions'
+        'personalization,privacy,revision,workspaceInstructions'
       )
         throw new Error('preferences exposed unrelated Host configuration');
       return `JavaScript plugin acceptance: ${JSON.stringify(preferences)}`;

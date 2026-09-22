@@ -215,7 +215,6 @@ mod tests {
                 model: "fixture".into(),
             },
             maka_protocol::session::SandboxMode::ReadOnly,
-            maka_runtime::execution::ToolMode::Direct,
         );
         log.create_session("session", "create", &configuration, 1)
             .await

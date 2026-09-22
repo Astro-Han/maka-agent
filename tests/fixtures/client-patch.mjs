@@ -159,6 +159,7 @@ export async function verifyPatchWorkflow(connection, workspace, reopened) {
       expectedCatalogRevision: 0,
       connection: {
         slug: 'patch-fixture',
+        modelOverrides: { 'fixture-model': { applyPatch: true } },
         name: 'Patch fixture',
         providerType: 'openai-compatible',
         baseUrl: model.baseUrl,

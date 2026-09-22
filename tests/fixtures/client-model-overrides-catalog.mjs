@@ -35,6 +35,8 @@ export const inputPin = {
 export function fullPin(patch = {}) {
   return {
     displayName: 'Configured model',
+    codeMode: false,
+    applyPatch: true,
     description: 'Configured description',
     apiProtocol: 'openai-chat',
     contextWindow: 64000,

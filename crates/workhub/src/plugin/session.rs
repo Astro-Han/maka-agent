@@ -81,7 +81,6 @@ impl Behavior for Manager {
                 return Err("WorkHub behavior requires its owned coordinator".into());
             }
             Ok(Preparation {
-                tool_mode: Some(self.preferences.read().await.map_err(error)?.tool_mode),
                 native_tools: NativeToolSet::Attachments,
                 required_clients: Some(ClientTools {
                     required: CLIENT_TOOLS.into_iter().map(str::to_owned).collect(),

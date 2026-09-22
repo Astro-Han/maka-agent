@@ -214,7 +214,7 @@ async fn scenario() {
                 "effect":{"kind":"agent_run","execution":{
                     "cwd":fixture.workspace,"llmConnectionId":model.connection_id,
                     "llmConnectionSlug":model.connection_slug,"model":model.model,
-                    "sandboxMode":"workspace-write","approvalPolicy":{"kind":"on-request"},"toolMode":"direct","collaborationMode":"agent","orchestrationMode":"default"
+                    "sandboxMode":"workspace-write","approvalPolicy":{"kind":"on-request"},"collaborationMode":"agent","orchestrationMode":"default"
                 }}
             }})).await;
         }

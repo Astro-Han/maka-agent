@@ -100,7 +100,7 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         (
             "/policy/chatDefaults",
             json!({"sandboxMode":"workspace-write","codeModeEnabled":true}),
-            true,
+            false,
         ),
         (
             "/policy/chatDefaults",
@@ -201,12 +201,12 @@ fn policy_wire_matches_current_source_and_domain_normalization() {
         (
             "set_chat_defaults",
             json!({"sandboxMode":"workspace-write","codeModeEnabled":true}),
-            true,
+            false,
         ),
         (
             "set_chat_defaults",
             json!({"sandboxMode":"workspace-write","codeModeEnabled":false}),
-            true,
+            false,
         ),
         (
             "set_chat_defaults",

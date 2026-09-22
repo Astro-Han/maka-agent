@@ -22,7 +22,6 @@ use maka_runtime::{
     artifact::content_digest,
     continuation::{REPLAY_VERSION, ReplayEvidence},
     event::{EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent},
-    execution::ToolMode,
     handoff::{HandoffExecution, HandoffIntent, HandoffPause, HandoffTools},
 };
 use maka_runtime_host::{
@@ -54,7 +53,6 @@ async fn cooperative_retirement_recovers_frozen_step_without_repeating_effects()
         },
         model,
         SandboxMode::DangerFullAccess,
-        ToolMode::Direct,
     );
     let log = fixture.log().await;
     log.create_session("session", "fixture", &configuration, 1)
@@ -413,7 +411,6 @@ async fn stop_sealed_turn_uses_public_identity_without_provider_and_survives_res
             },
             model,
             SandboxMode::ReadOnly,
-            ToolMode::Direct,
         );
         log.create_session("session", "fixture", &configuration, 1)
             .await

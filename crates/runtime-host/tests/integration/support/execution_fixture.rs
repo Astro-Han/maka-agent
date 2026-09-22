@@ -115,7 +115,6 @@ pub async fn fixture() -> (
             model: "fixture-model".into(),
         },
         SandboxMode::ReadOnly,
-        maka_runtime::execution::ToolMode::Direct,
     );
     log.create_session("session", "fingerprint", &session, 1)
         .await

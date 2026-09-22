@@ -279,7 +279,6 @@ impl BoundCommands {
                     || current.workspace_origin != expected.workspace_origin
                     || current.sandbox_mode != expected.sandbox_mode
                     || current.approval_policy != expected.approval_policy
-                    || current.tool_mode != expected.tool_mode
                     || current.collaboration_mode != expected.collaboration_mode
                     || current.orchestration_mode != expected.orchestration_mode
                     || current.instructions != expected.instructions
@@ -380,12 +379,7 @@ async fn configuration(
         orchestration_mode: Some(settings.behavior.clone()),
     })
     .map_err(|error| Error::Invalid(error.to_string()))?;
-    let mut config = prepared.bind(
-        approval.workspace.clone(),
-        bound,
-        settings.sandbox_mode,
-        settings.tool_mode,
-    );
+    let mut config = prepared.bind(approval.workspace.clone(), bound, settings.sandbox_mode);
     config.bound_tools = settings.bound_tools.clone();
     config.workspace_origin = approval.workspace_origin;
     config.instructions = settings.instructions.clone();

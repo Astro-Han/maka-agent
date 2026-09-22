@@ -241,8 +241,10 @@ fn model_override(value: &Value) -> Result<Value> {
             result["thinkingLevels"] = json!(levels);
         }
     }
-    if value["vision"].is_boolean() {
-        result["vision"] = value["vision"].clone();
+    for field in ["vision", "codeMode", "applyPatch"] {
+        if value[field].is_boolean() {
+            result[field] = value[field].clone();
+        }
     }
     for field in [
         "contextWindow",

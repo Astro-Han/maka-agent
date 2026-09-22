@@ -160,6 +160,11 @@ impl ToolCatalog {
             .map(|entry| &entry.registration.definition)
     }
 
+    /// Narrow registered Host tools without changing plugin scope or authority.
+    pub fn excluding(&self, names: &[&str]) -> Self {
+        self.select(|name| !names.contains(&name))
+    }
+
     pub fn nested(&self) -> Self {
         Self {
             entries: Arc::new(

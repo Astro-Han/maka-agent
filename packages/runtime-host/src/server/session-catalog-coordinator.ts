@@ -350,7 +350,7 @@ export class HostSessionCatalogCoordinator {
       llmConnectionSlug: model.connectionSlug,
       model: model.model,
       sandboxMode: policy.policy.chatDefaults.sandboxMode,
-      toolMode: policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct',
+      toolMode: 'direct',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
     };
@@ -389,7 +389,7 @@ export class HostSessionCatalogCoordinator {
           ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }),
           ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
           sandboxMode: prepared.sandboxMode ?? policy.policy.chatDefaults.sandboxMode,
-          toolMode: policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct',
+          toolMode: 'direct',
           collaborationMode: input.collaborationMode ?? 'agent',
           orchestrationMode: input.orchestrationMode ?? 'default',
         },
@@ -623,8 +623,7 @@ export class HostSessionCatalogCoordinator {
               ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }),
               ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
               sandboxMode: prepared.sandboxMode ?? policy.policy.chatDefaults.sandboxMode,
-              toolMode:
-                toolMode ?? (policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct'),
+              toolMode: toolMode ?? 'direct',
               collaborationMode: input.collaborationMode ?? 'agent',
               orchestrationMode: input.orchestrationMode ?? 'default',
             };

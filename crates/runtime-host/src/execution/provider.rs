@@ -34,6 +34,8 @@ mod options;
 mod output;
 
 pub(super) struct PreparedProvider {
+    pub tool_mode: maka_runtime::execution::ToolMode,
+    pub editing_tools: maka_runtime::execution::EditingTools,
     pub config: ProviderConfig,
     pub options: Value,
     pub supports_vision: bool,
@@ -130,6 +132,20 @@ pub(super) async fn observe_binding(
         return Err(unavailable("Session thinking level is no longer supported"));
     }
     let route = provider_route::resolve(row, facts, &target.model)?;
+    let overrides = row
+        .model_overrides
+        .as_ref()
+        .and_then(|models| models.get(&target.model));
+    let tool_mode = maka_runtime::execution::ToolMode::for_model(
+        &target.model,
+        &route.base_url,
+        overrides.and_then(|value| value.code_mode),
+    );
+    let editing_tools = maka_runtime::execution::EditingTools::for_model(
+        &target.model,
+        &route.base_url,
+        overrides.and_then(|value| value.apply_patch),
+    );
     route.check_execution()?;
     let options = options::resolve(row, facts, &target.model, thinking_level, &route)?;
     let main_output_limit = output::resolve(row, facts, &target.model, route.wire, &options)?;
@@ -195,6 +211,8 @@ pub(super) async fn observe_binding(
         }),
     };
     Ok(PreparedProvider {
+        tool_mode,
+        editing_tools,
         binding,
         config,
         options,

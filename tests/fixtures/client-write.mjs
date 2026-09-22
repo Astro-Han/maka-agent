@@ -65,7 +65,7 @@ async function fixture(writeResult) {
       assert(index <= script.length);
       const action = script[index - 1];
       assert(input.tools.some((tool) => tool.function.name === 'Read'));
-      for (const name of ['Write', 'Edit', 'apply_patch']) {
+      for (const name of ['Write', 'Edit']) {
         assert.equal(
           input.tools.some((tool) => tool.function.name === name),
           index <= 6,

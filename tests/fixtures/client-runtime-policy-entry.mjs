@@ -26,7 +26,6 @@ import { FramedTransport } from '../../packages/runtime-host/src/transport/frame
 import {
   INTERACTIVE_RUNTIME_HOST_COMPOSITION_ID,
   RUNTIME_HOST_PROTOCOL_VERSION,
-  RUNTIME_HOST_COMPATIBILITY_EPOCH,
 } from '../../packages/runtime-host/src/protocol/index.ts';
 import { verifyRuntimePolicy } from './client-runtime-policy-workflow.mjs';
 
@@ -38,7 +37,6 @@ const { values } = parseArgs({
     reopened: { type: 'boolean' },
   },
 });
-assert.equal(RUNTIME_HOST_COMPATIBILITY_EPOCH, 165);
 const clients = [];
 async function connectClient() {
   const socket = connect(values.socket);

@@ -46,8 +46,8 @@
       "electron": "Git changes re-read on native window focus; native PTY ownership survives Session navigation and renderer replacement, while Stop/exit cross preload/main into the terminal view; Side Chat owns a Host fork lifecycle; first send reaches the Host; the composer usage entry opens a workbar whose per-Session visibility survives renderer reload."
     },
     "settings.spec.ts": {
-      "tests": 2,
-      "electron": "Code Mode reads back Host settings through IPC; opening Settings commits a pending title rename to the Host, with workbar hide/restore asserted in that same Session."
+      "tests": 1,
+      "electron": "Opening Settings commits a pending title rename to the Host, with workbar hide/restore asserted in that same Session."
     },
     "sidebar-project-reload.spec.ts": {
       "tests": 1,

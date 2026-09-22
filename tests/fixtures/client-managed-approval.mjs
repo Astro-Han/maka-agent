@@ -141,6 +141,7 @@ export async function verifyManagedApproval(connection, workspace, reopened, ope
         baseUrl,
         enabled: true,
         enabledModelIds: ['gpt-5.2'],
+        modelOverrides: { 'gpt-5.2': { codeMode: false } },
       },
     });
     assert.equal(created.kind, 'committed');

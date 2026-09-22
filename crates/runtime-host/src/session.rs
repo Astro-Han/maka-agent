@@ -106,8 +106,6 @@ pub struct SessionConfiguration {
     pub bound_tools: Option<std::collections::BTreeSet<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
-    /// Frozen at creation.
-    pub tool_mode: maka_runtime::execution::ToolMode,
     pub sandbox_mode: SandboxMode,
     pub approval_policy: ApprovalPolicy,
     /// Revision of the enforced policy, independent of unrelated catalog changes.
@@ -142,7 +140,6 @@ impl SessionConfiguration {
             approval_policy: self.approval_policy,
             collaboration_mode: self.collaboration_mode,
             behavior: self.orchestration_mode.clone(),
-            tool_mode: self.tool_mode,
             bound_tools: self.bound_tools.clone(),
         }
     }
@@ -172,7 +169,8 @@ impl SessionConfiguration {
             boundary_revision: self.boundary_revision,
             collaboration_mode: self.collaboration_mode,
             orchestration_mode: self.orchestration_mode.clone(),
-            tool_mode: self.tool_mode,
+            // Model presentation is resolved from the actual route at admission.
+            tool_mode: maka_runtime::execution::ToolMode::Direct,
             model: self.target.model().cloned(),
             thinking_level: self.thinking_level,
         }
@@ -311,7 +309,6 @@ impl PreparedSession {
         workspace: WorkspaceProjection,
         target: impl Into<SessionTarget>,
         default_permission: SandboxMode,
-        tool_mode: maka_runtime::execution::ToolMode,
     ) -> SessionConfiguration {
         SessionConfiguration {
             workspace_origin: maka_runtime::execution::WorkspaceOrigin::Selected,
@@ -327,7 +324,6 @@ impl PreparedSession {
             tool_profile: self.tool_profile,
             bound_tools: None,
             instructions: None,
-            tool_mode,
             sandbox_mode: self.sandbox_mode.unwrap_or(default_permission),
             approval_policy: self.approval_policy,
             boundary_revision: 0,

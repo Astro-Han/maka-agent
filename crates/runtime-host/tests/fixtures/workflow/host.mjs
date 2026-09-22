@@ -72,7 +72,6 @@ export default async function activate(ctx) {
             target: { kind: 'executor', executorId: executor },
             sandboxMode: 'read-only',
             approvalPolicy: { kind: 'on-request' },
-            toolMode: 'direct',
             collaborationMode: 'agent',
             behavior: 'default',
           },

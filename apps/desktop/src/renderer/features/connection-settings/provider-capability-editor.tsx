@@ -66,6 +66,23 @@ export function CapabilityEditor(props: {
   return (
     <FormLayout direction="vertical" defaultOptionality="optional">
       {props.children}
+      {(['codeMode', 'applyPatch'] as const).map((field) => (
+        <Selector
+          key={field}
+          label={field === 'codeMode' ? 'Code Mode' : 'apply_patch'}
+          labelTooltip={copy[`${field}Help`]}
+          size="sm"
+          width="100%"
+          options={[
+            { value: 'auto', label: copy.toolAuto },
+            { value: 'enabled', label: copy.toolEnabled },
+            { value: 'disabled', label: copy.toolDisabled },
+          ]}
+          value={declared?.[field] === undefined ? 'auto' : declared[field] ? 'enabled' : 'disabled'}
+          onChange={(value) => props.onChange({ [field]: value === 'auto' ? undefined : value === 'enabled' })}
+          isDisabled={props.disabled}
+        />
+      ))}
       <TextInput
         size="sm"
         width="100%"

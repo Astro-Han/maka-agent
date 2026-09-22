@@ -102,7 +102,6 @@ async fn startup_consumes_reserved_and_queued_work_once_without_replaying_unknow
             },
             model,
             SandboxMode::ReadOnly,
-            maka_runtime::execution::ToolMode::Direct,
         );
         log.create_session(session, "fixture", &configuration, 1)
             .await

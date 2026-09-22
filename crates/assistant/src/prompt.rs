@@ -103,7 +103,6 @@ mod tests {
             revision: 7,
             personalization: RuntimePolicy::default().personalization,
             workspace_instructions: true,
-            tool_mode: maka_runtime::execution::ToolMode::Direct,
         };
         let base = compose(snapshot.clone());
         assert_eq!(base.text, MAIN);

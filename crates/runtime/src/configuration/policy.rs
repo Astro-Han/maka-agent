@@ -33,8 +33,6 @@ pub const MAX_POLICY_SNAPSHOT_BYTES: usize = 48 * 1024;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChatDefaults {
     pub sandbox_mode: SandboxMode,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub code_mode_enabled: bool,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -47,7 +45,6 @@ impl Default for ChatDefaults {
     fn default() -> Self {
         Self {
             sandbox_mode: SandboxMode::WorkspaceWrite,
-            code_mode_enabled: false,
             thinking_level: None,
         }
     }

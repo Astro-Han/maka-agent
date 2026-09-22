@@ -26,6 +26,11 @@ Catalogs, permissions and execution facts remain authoritative outside JavaScrip
 
 ## Code Mode
 
+Configure Code Mode and `apply_patch` in each connection's model parameters.
+Auto follows the Host's model defaults; explicit choices apply to new Runs.
+Resume and handoff retain the admitted choices. Enabling `apply_patch` replaces
+`Edit` and `Write`; disabling it exposes those structured editing tools instead.
+
 `exec({code, yield_time_ms?, max_output_tokens?})` starts a fresh bounded V8 cell.
 `wait({cell_id, yield_time_ms?, max_output_tokens?, terminate?})` observes it.
 Results distinguish `running`, `completed` and `terminated`; observations contain

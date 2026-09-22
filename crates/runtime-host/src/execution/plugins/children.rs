@@ -184,7 +184,6 @@ impl BoundCommands {
                                     child.target =
                                         crate::session::SessionTarget::Executor { executor_id };
                                     child.thinking_level = None;
-                                    child.tool_mode = maka_runtime::execution::ToolMode::Direct;
                                 }
                             }
                         }

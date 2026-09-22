@@ -148,7 +148,6 @@ export interface RuntimePolicy {
   readonly chatDefaults: {
     readonly sandboxMode: ChatDefaultSandboxMode;
     readonly thinkingLevel?: ThinkingLevel;
-    readonly codeModeEnabled?: boolean;
   };
   readonly shell: ShellSettings;
   readonly externalAgents: { readonly antigravity: { readonly executable: string } };

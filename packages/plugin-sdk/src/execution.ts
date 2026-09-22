@@ -150,7 +150,6 @@ export interface SessionConfiguration {
   approvalPolicy: ApprovalPolicy;
   collaborationMode: 'agent' | 'plan';
   behavior: string;
-  toolMode: 'direct' | 'code_mode';
   boundTools: readonly string[] | null;
 }
 export interface CreateChild {
@@ -219,7 +218,6 @@ export interface Executions {
       target: ExecutionTarget;
       sandboxMode: SandboxMode;
       approvalPolicy: ApprovalPolicy;
-      toolMode: 'direct' | 'code_mode';
       collaborationMode: 'agent' | 'plan';
       behavior: string;
       boundTools?: readonly string[] | null;

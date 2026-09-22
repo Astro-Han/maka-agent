@@ -42,6 +42,20 @@ pub enum ModelModality {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelOverride {
+    /// Omitted means model-specific defaults; false is an explicit opt-out.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub code_mode: Option<bool>,
+    /// Independent of Code Mode: select patch editing or structured Edit/Write.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub apply_patch: Option<bool>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

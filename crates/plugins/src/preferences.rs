@@ -29,7 +29,6 @@ pub struct Snapshot {
     pub privacy: maka_runtime::configuration::policy::PrivacyPolicy,
     pub personalization: Personalization,
     pub workspace_instructions: bool,
-    pub tool_mode: maka_runtime::execution::ToolMode,
 }
 
 /// This view is not configuration authority: it grants no filesystem or

@@ -61,26 +61,6 @@ test('normalizes policy input while canonical policy decode rejects producer dri
   );
 });
 
-test('Code Mode is opt-in and survives policy decoding', () => {
-  const policy = createDefaultRuntimePolicy();
-  assert.notEqual(decodeCanonicalRuntimePolicy(policy).chatDefaults.codeModeEnabled, true);
-  assert.equal(
-    decodeCanonicalRuntimePolicy({
-      ...policy,
-      chatDefaults: { ...policy.chatDefaults, codeModeEnabled: true },
-    }).chatDefaults.codeModeEnabled,
-    true,
-  );
-  assert.throws(
-    () =>
-      decodeCanonicalRuntimePolicy({
-        ...policy,
-        chatDefaults: { ...policy.chatDefaults, codeModeEnabled: 'true' },
-      }),
-    RuntimePolicyDomainDecodeError,
-  );
-});
-
 test('preserves a valid default thinking level and rejects unknown levels', () => {
   const policy = {
     ...createDefaultRuntimePolicy(),
@@ -433,6 +413,17 @@ test('relay model profiles round-trip canonical entries and drafts, strictly', (
     { 'disabled-model': { vision: true } },
   );
 
+  assert.deepEqual(
+    decodeModelOverridesTable({
+      codeOnly: { codeMode: true, applyPatch: false },
+      patchOnly: { codeMode: false, applyPatch: true },
+    }),
+    {
+      codeOnly: { codeMode: true, applyPatch: false },
+      patchOnly: { codeMode: false, applyPatch: true },
+    },
+  );
+
   // Model ids are relay-supplied strings; __proto__/constructor/toString
   // must survive the table as ordinary own keys — the decode builds the
   // table with fromEntries precisely so '__proto__' cannot poison the result
@@ -456,6 +447,8 @@ test('relay model profiles round-trip canonical entries and drafts, strictly', (
     { m: { thinkingLevels: ['low', 'low'] } }, // duplicate
     { m: { thinkingLevels: [] } }, // empty level list
     { m: { vision: 'yes' } },
+    { m: { codeMode: 'true' } },
+    { m: { applyPatch: null } },
     { m: { contextWindow: 0 } },
     { m: { contextWindow: 1.5 } },
     { m: { contextWindow: 2 ** 60 } }, // not within 1..MAX_SAFE_INTEGER

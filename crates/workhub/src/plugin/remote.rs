@@ -150,12 +150,6 @@ impl Method for Call {
                             },
                             sandbox_mode: *sandbox_mode,
                             approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
-                            tool_mode: manager
-                                .preferences
-                                .read()
-                                .await
-                                .map_err(|e| Error::Provider(e.to_string()))?
-                                .tool_mode,
                             collaboration_mode: request.collaboration_mode,
                             behavior: Default::default(),
                             bound_tools: None,

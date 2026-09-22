@@ -150,7 +150,6 @@ export default async function (ctx) {
           target: { kind: 'executor', executorId: 'example.background' },
           sandboxMode: 'read-only',
           approvalPolicy: { kind: 'on-request' },
-          toolMode: 'direct',
           collaborationMode: 'agent',
           behavior: 'default',
         },

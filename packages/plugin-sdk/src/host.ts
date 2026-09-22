@@ -243,7 +243,6 @@ export interface PreparationRevision extends Registration {
 export interface BehaviorPreparation {
   basis?: PreparationBasis;
   instructions?: string;
-  toolMode?: 'direct' | 'code_mode';
   nativeTools?: 'workspace' | 'attachments';
   requiredClients?: {
     required: readonly string[];
@@ -382,7 +381,6 @@ export interface HostContext {
       personalization: { displayName: string; assistantTone: string };
       workspaceInstructions: boolean;
       privacy: { incognitoActive: boolean };
-      toolMode: 'direct' | 'code_mode';
     }>;
   };
   readonly executions: {

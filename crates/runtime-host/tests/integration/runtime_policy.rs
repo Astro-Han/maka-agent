@@ -23,30 +23,20 @@ use maka_runtime_host::session::SessionConfiguration;
 use serde_json::Value;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tool_mode_is_frozen_at_creation_and_survives_host_reopen() {
+async fn model_tool_preferences_freeze_each_run_and_survive_reopen() {
     use super::support::{
         message_recovery::{Provider, configure},
         peer::Peer,
     };
-    use maka_runtime::event::Fact;
+    use maka_runtime::{event::Fact, execution::EditingTools};
     use maka_runtime_host::server::{Host, local::LocalListener};
     use serde_json::json;
     use tokio_util::sync::CancellationToken;
 
-    let fixture = ClientFixture::new("maka-tool-mode-");
-    let provider = Provider::start().await;
+    let fixture = ClientFixture::new("maka-model-tools-");
+    let (provider, mut requests) = Provider::controlled().await;
     let model = configure(&fixture, &provider.base_url).await;
-    let create = |id| {
-        json!({"sessionId":id, "workspace":{"kind":"host_path","path":fixture.workspace},
-        "modelTarget":{"kind":"explicit","connectionId":model.connection_id,
-            "connectionSlug":model.connection_slug,"model":model.model}})
-    };
-    let sessions = [
-        ("old", ToolMode::Direct),
-        ("enabled", ToolMode::CodeMode),
-        ("disabled", ToolMode::Direct),
-    ];
-    let mut saved = Vec::new();
+    let mut expected = Vec::new();
     for reopened in [false, true] {
         let host = Host::open(fixture.owner()).await.unwrap();
         #[cfg(unix)]
@@ -60,33 +50,110 @@ async fn tool_mode_is_frozen_at_creation_and_survives_host_reopen() {
                 .unwrap()
                 .serve(host.clone(), cancel.clone()),
         );
-        let mut peer = Peer::new(host.clone(), "policy-client").await;
-        for (index, (id, _)) in sessions.iter().enumerate() {
-            if !reopened && index > 0 {
-                let result = peer.rpc("runtime.policy.mutate", json!({"expectedRevision":index-1,
-                    "operation":{"kind":"set_chat_defaults","value":{"sandboxMode":"workspace-write","codeModeEnabled":index == 1}}})).await;
-                assert_eq!(result["result"]["kind"], "committed", "{result}");
-            }
-            let result = peer.rpc("session.create", create(id)).await;
-            assert_eq!(result["ok"], true, "{result}");
-        }
-        // Both turns run after the global switch was turned back off.
-        let started = peer
+        let mut peer = Peer::new(host.clone(), "model-tools").await;
+        let created = peer
             .rpc(
-                "turn.start",
-                json!({"sessionId":"enabled", "turnId":if reopened {"second"} else {"first"},
-            "content":{"text":"hello"},"maxSteps":1}),
+                "session.create",
+                json!({
+                    "sessionId":"tools", "workspace":{"kind":"host_path","path":fixture.workspace},
+                    "modelTarget":{"kind":"explicit","connectionId":model.connection_id,
+                        "connectionSlug":model.connection_slug,"model":model.model}
+                }),
             )
             .await;
-        assert_eq!(started["ok"], true, "{started}");
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            loop {
-                let turn = peer.rpc("turn.query", json!({"sessionId":"enabled", "turnId":if reopened {"second"} else {"first"}})).await;
-                if turn["result"]["status"] == "completed" { break; }
-                assert_ne!(turn["result"]["status"], "failed", "{turn}");
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert_eq!(created["ok"], true, "{created}");
+        if !reopened {
+            set_model_tools(
+                &mut peer,
+                &model.connection_id,
+                &provider.base_url,
+                1,
+                true,
+                false,
+            )
+            .await;
+        }
+        for index in 0..if reopened { 1 } else { 2 } {
+            let code = !reopened && index == 0;
+            let turn = format!("{reopened}-{index}");
+            let started = peer.rpc("turn.start",json!({"sessionId":"tools","turnId":turn,"content":{"text":"hello"},"maxSteps":2})).await;
+            assert_eq!(started["ok"], true, "{started}");
+            let request = tokio::time::timeout(std::time::Duration::from_secs(10), requests.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let names = |body: &Value| {
+                body["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            };
+            let surface = names(&request.body);
+            assert_eq!(surface.contains(&"exec".to_owned()), code);
+            if code {
+                let prompt = request.body["tools"].to_string();
+                assert!(prompt.contains("Write"));
+                assert!(!prompt.contains("apply_patch"));
+                // Change both preferences while the first model request is still in flight.
+                set_model_tools(
+                    &mut peer,
+                    &model.connection_id,
+                    &provider.base_url,
+                    2,
+                    false,
+                    true,
+                )
+                .await;
+                request.reply.send(json!({"index":0,"delta":{"tool_calls":[{"index":0,"id":"cell","type":"function","function":{"name":"exec","arguments":"{\"code\":\"return 1;\"}"}}]},"finish_reason":"tool_calls"})).unwrap();
+                let next =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), requests.recv())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(names(&next.body), surface);
+                assert!(!next.body["tools"].to_string().contains("apply_patch"));
+                next.reply
+                    .send(json!({"index":0,"delta":{"content":"done"},"finish_reason":"stop"}))
+                    .unwrap();
+            } else {
+                assert!(surface.contains(&"apply_patch".to_owned()));
+                assert!(!surface.contains(&"Write".to_owned()));
+                assert!(!surface.contains(&"Edit".to_owned()));
+                assert!(surface.contains(&"Read".to_owned()));
+                request
+                    .reply
+                    .send(json!({"index":0,"delta":{"content":"done"},"finish_reason":"stop"}))
+                    .unwrap();
             }
-        }).await.unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let state = peer
+                        .rpc("turn.query", json!({"sessionId":"tools","turnId":turn}))
+                        .await;
+                    if state["result"]["status"] == "completed" {
+                        break;
+                    }
+                    assert_ne!(state["result"]["status"], "failed", "{state}");
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            expected.push((
+                if code {
+                    ToolMode::CodeMode
+                } else {
+                    ToolMode::Direct
+                },
+                if code {
+                    EditingTools::Structured
+                } else {
+                    EditingTools::ApplyPatch
+                },
+            ));
+        }
         peer.close().await;
         cancel.cancel();
         tokio::time::timeout(std::time::Duration::from_secs(10), server)
@@ -96,48 +163,43 @@ async fn tool_mode_is_frozen_at_creation_and_survives_host_reopen() {
             .unwrap();
         drop(host);
         let log = fixture.log().await;
-        for (index, (id, mode)) in sessions.iter().enumerate() {
-            let record = log
-                .get_session::<SessionConfiguration>(id)
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(record.configuration.tool_mode, *mode);
-            if reopened {
-                assert_eq!(record.configuration, saved[index]);
-            } else {
-                saved.push(record.configuration);
-            }
-        }
         let prefix = log.prefix(100, 1024 * 1024).await.unwrap();
-        let openings: Vec<_> = prefix
+        let actual = prefix
             .events
             .iter()
             .filter_map(|event| match &event.event.fact {
                 Fact::InvocationOpened {
-                    configuration: Some(configuration),
+                    configuration: Some(config),
                     ..
-                } => Some(configuration.tool_mode),
+                } => Some((
+                    config.tool_mode,
+                    config.tool_composition.as_ref().unwrap().editing_tools,
+                )),
                 _ => None,
             })
-            .collect();
+            .collect::<Vec<_>>();
         assert_eq!(
-            openings,
-            vec![ToolMode::CodeMode; if reopened { 2 } else { 1 }]
+            actual, expected,
+            "later edits must not rewrite admitted choices"
         );
         log.close().await.unwrap();
     }
-    let requests = provider.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    for request in requests.iter() {
-        assert!(
-            request["tools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|tool| tool["function"]["name"] == "exec")
-        );
-    }
+}
+
+async fn set_model_tools(
+    peer: &mut super::support::peer::Peer,
+    connection: &str,
+    endpoint: &str,
+    revision: u64,
+    code: bool,
+    patch: bool,
+) {
+    let updated = peer.rpc("connection.catalog.update",serde_json::json!({
+        "expected":{"connectionId":connection,"revision":revision},
+        "changes":{"name":"Recovery fixture","baseUrl":endpoint,"enabled":true,"enabledModelIds":["fixture-model"],
+            "modelOverrides":{"fixture-model":{"codeMode":code,"applyPatch":patch}}}
+    })).await;
+    assert_eq!(updated["result"]["kind"], "committed", "{updated}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -165,14 +227,6 @@ async fn original_client_settings_cas_preserves_session_defaults_and_exact_reope
             .unwrap()
             .unwrap();
         assert_eq!(record.configuration.sandbox_mode, permission);
-        assert_eq!(
-            record.configuration.tool_mode,
-            if id == "runtime-policy-old" {
-                ToolMode::Direct
-            } else {
-                ToolMode::CodeMode
-            }
-        );
         assert_eq!(record.configuration.thinking_level, None);
         records.push(record);
     }

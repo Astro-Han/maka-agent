@@ -306,7 +306,6 @@ export function GeneralSettingsPage(props: {
           onRefresh={props.onRefreshConnections}
           sandboxMode={props.settings.chatDefaults.sandboxMode}
           thinkingLevel={props.settings.chatDefaults.thinkingLevel}
-          codeModeEnabled={props.settings.chatDefaults.codeModeEnabled === true}
           onUpdate={props.onUpdate}
         />
       ) : null}
@@ -503,7 +502,6 @@ function GeneralDefaultsCard(props: {
   onRefresh(): Promise<void>;
   sandboxMode: ChatDefaultSandboxMode;
   thinkingLevel?: ThinkingLevel;
-  codeModeEnabled: boolean;
   onUpdate(
     patch: Parameters<typeof window.maka.settings.update>[0],
   ): Promise<UpdateAppSettingsResult>;
@@ -652,40 +650,11 @@ function GeneralDefaultsCard(props: {
     }
   }
 
-  async function persistCodeMode(codeModeEnabled: boolean) {
-    if (!props.settingsInteractive) return;
-    try {
-      await props.onUpdate({ chatDefaults: { codeModeEnabled } });
-    } catch (error) {
-      if (mountedRef.current) {
-        toast.error(copy.updateFailed, settingsActionErrorMessage(error, locale), undefined,
-          host ? { profileId: host.profileId } : undefined);
-      }
-    }
-  }
-
   return (
     <SettingsSection
       title={sections.chatDefaults}
       description={sections.chatDefaultsHelp}
     >
-      {props.settingsAvailable ? (
-        <SettingsRow
-          label="Code Mode"
-          description={copy.codeModeHelp}
-          end={
-            <Switch
-              label="Code Mode"
-              isLabelHidden
-              value={props.codeModeEnabled}
-              isDisabled={!props.settingsInteractive}
-              changeAction={persistCodeMode}
-            />
-          }
-        />
-      ) : props.showSettingsPlaceholder ? (
-        <SettingsRowSkeleton label="Code Mode" description={copy.codeModeHelp} width="3rem" />
-      ) : null}
       {props.connectionsAvailable ? (
         <SettingsRow
           label={copy.defaultModel}

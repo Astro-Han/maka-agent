@@ -391,6 +391,12 @@ async fn file_approvals_are_exact_call_scoped_and_refuse_partial_or_protected_mu
         denied.reply.send(done()).unwrap();
         finish(&mut peer, "files").await;
 
+        let patched = peer.rpc("connection.catalog.update",json!({
+            "expected":{"connectionId":model.connection_id,"revision":1},
+            "changes":{"name":"Recovery fixture","baseUrl":provider.base_url,"enabled":true,
+                "enabledModelIds":["fixture-model"],"modelOverrides":{"fixture-model":{"applyPatch":true}}}
+        })).await;
+        assert_eq!(patched["result"]["kind"],"committed","{patched}");
         start(&mut peer, "partial").await;
         request(&mut requests).await.reply.send(call("patch", "apply_patch", json!({
             "callId":"patch","operation":{"type":"create_file","path":next,"diff":"+must not appear"}
@@ -402,8 +408,8 @@ async fn file_approvals_are_exact_call_scoped_and_refuse_partial_or_protected_mu
         let refused = request(&mut requests).await;
         assert!(tool_messages(&refused.body).last().unwrap().contains("Not all target files were approved"));
         assert!(!next.exists());
-        refused.reply.send(call("protected", "Write", json!({
-            "path":fixture.workspace.join(".agents/protected"),"content":"must not appear"
+        refused.reply.send(call("protected", "apply_patch", json!({
+            "callId":"protected","operation":{"type":"create_file","path":fixture.workspace.join(".agents/protected"),"diff":"+must not appear"}
         }))).unwrap();
         let protected = request(&mut requests).await;
         assert!(tool_messages(&protected.body).last().unwrap().contains("Host-protected files"));
@@ -413,7 +419,7 @@ async fn file_approvals_are_exact_call_scoped_and_refuse_partial_or_protected_mu
         let revision = revision(&mut peer).await;
         assert_eq!(update(&mut peer, revision, json!({"approvalPolicy":{"kind":"never"}})).await["result"]["kind"], "committed");
         start(&mut peer, "never").await;
-        request(&mut requests).await.reply.send(call("never", "Write", json!({"path":next,"content":"must not appear"}))).unwrap();
+        request(&mut requests).await.reply.send(call("never", "apply_patch", json!({"callId":"never","operation":{"type":"create_file","path":next,"diff":"+must not appear"}}))).unwrap();
         let refused = request(&mut requests).await;
         assert!(tool_messages(&refused.body).last().unwrap().contains("forbids prompting"));
         refused.reply.send(done()).unwrap();

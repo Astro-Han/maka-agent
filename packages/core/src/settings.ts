@@ -495,8 +495,6 @@ export function isChatDefaultSandboxMode(value: unknown): value is ChatDefaultSa
 /** Seeds new sessions' starting permission mode (Settings → 通用 → 默认权限模式). */
 export interface ChatDefaultsSettings {
   sandboxMode: ChatDefaultSandboxMode;
-  /** Applies only when a new task is created. */
-  codeModeEnabled?: boolean;
   /**
    * Seeds new sessions' thinking level. `undefined` means "whatever the model
    * does on its own" — the absence of a preference, not a level.
@@ -1113,7 +1111,6 @@ export function defaultChatDefaultsSettings(): ChatDefaultsSettings {
 
 function normalizeChatDefaultsSettings(settings: ChatDefaultsSettings): ChatDefaultsSettings {
   return {
-    ...(settings.codeModeEnabled === true ? { codeModeEnabled: true } : {}),
     thinkingLevel: isThinkingLevel(settings.thinkingLevel) ? settings.thinkingLevel : undefined,
     sandboxMode: isChatDefaultSandboxMode(settings.sandboxMode)
       ? settings.sandboxMode

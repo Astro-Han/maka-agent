@@ -147,7 +147,6 @@ async fn exercise(fail_write: bool, fault: Fault) {
             model: "model".into(),
         },
         SandboxMode::ReadOnly,
-        maka_runtime::execution::ToolMode::Direct,
     );
     log.create_session("session", "fingerprint", &configuration, 1)
         .await

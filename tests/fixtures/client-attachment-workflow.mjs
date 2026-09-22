@@ -70,7 +70,7 @@ export async function verifyConsumption(connection, workspace, reopened) {
         enabledModelIds: ['text-model', 'gpt-4o'],
         modelOverrides: {
           'text-model': { vision: false },
-          'gpt-4o': { vision: true },
+          'gpt-4o': { vision: true, codeMode: false },
         },
       },
     });

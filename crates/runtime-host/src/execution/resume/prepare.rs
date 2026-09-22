@@ -51,6 +51,8 @@ impl Executions {
             }
         };
         let mut configuration = session.observed_configuration(workspace);
+        let mut editing = provider.editing_tools;
+        configuration.tool_mode = provider.tool_mode;
         if let Some(source) = self
             .log
             .invocation_configuration(&source.invocation)
@@ -58,6 +60,11 @@ impl Executions {
             .map_err(internal)?
         {
             configuration.orchestration_mode = source.orchestration_mode;
+            configuration.tool_mode = source.tool_mode;
+            editing = source
+                .tool_composition
+                .map(|value| value.editing_tools)
+                .unwrap_or_default();
         }
         let (tools, system_prompt) = match mode {
             Mode::Prepared(environment) => {
@@ -84,6 +91,10 @@ impl Executions {
                 (tools, system_prompt)
             }
         };
+        let tools = super::super::tools::select_editing(tools, editing);
+        if let Some(composition) = &mut configuration.tool_composition {
+            composition.editing_tools = editing;
+        }
         configuration.system_prompt = system_prompt;
         Ok(RunInput {
             invocation: Invocation {

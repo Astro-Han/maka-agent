@@ -179,6 +179,7 @@ impl Executions {
                 composition: maka_runtime::execution::ToolComposition {
                     clients: bindings.composition(),
                     native_tools: Default::default(),
+                    editing_tools: Default::default(),
                     private_clients: Default::default(),
                     bound_tools: session.bound_tools.clone(),
                 },
@@ -235,9 +236,6 @@ impl Executions {
             };
             (preparation, Some(basis))
         };
-        if let Some(mode) = behavior.tool_mode {
-            session.tool_mode = mode;
-        }
         let (bindings, mut additional) = match &behavior.required_clients {
             Some(clients) => self.capabilities.prepare_required_tools(
                 session_id,
@@ -312,6 +310,7 @@ impl Executions {
             composition: maka_runtime::execution::ToolComposition {
                 clients: bindings.composition(),
                 native_tools: behavior.native_tools,
+                editing_tools: Default::default(),
                 private_clients,
                 bound_tools: ceiling,
             },

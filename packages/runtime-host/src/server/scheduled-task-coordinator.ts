@@ -747,7 +747,7 @@ export class HostScheduledTaskCoordinator implements ScheduledTaskToolAuthority 
         collaborationMode: execution.collaborationMode,
         orchestrationMode: execution.orchestrationMode,
       },
-      execution.toolMode ?? DEFAULT_TOOL_MODE,
+      DEFAULT_TOOL_MODE,
     );
   }
 
@@ -957,7 +957,6 @@ function executionTemplateFromHeader(header: SessionHeader): ScheduledTaskExecut
     sandboxMode: header.sandboxMode,
     collaborationMode: header.collaborationMode ?? 'agent',
     orchestrationMode: header.orchestrationMode ?? 'default',
-    toolMode: header.toolMode ?? DEFAULT_TOOL_MODE,
   };
 }
 

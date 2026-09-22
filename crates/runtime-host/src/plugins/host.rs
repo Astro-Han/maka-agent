@@ -123,11 +123,6 @@ impl maka_plugins::preferences::Preferences for Preferences {
                 privacy: snapshot.policy.privacy,
                 personalization: snapshot.policy.personalization,
                 workspace_instructions: snapshot.policy.workspace_instructions.enabled,
-                tool_mode: if snapshot.policy.chat_defaults.code_mode_enabled {
-                    maka_runtime::execution::ToolMode::CodeMode
-                } else {
-                    maka_runtime::execution::ToolMode::Direct
-                },
             })
         })
     }

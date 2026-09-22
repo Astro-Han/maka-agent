@@ -40,6 +40,18 @@ mod preview;
 pub(super) use live::NativeTools;
 pub(super) use preview::validate_pending_tools;
 
+pub(super) fn select_editing(
+    catalog: ToolCatalog,
+    editing: maka_runtime::execution::EditingTools,
+) -> ToolCatalog {
+    match editing {
+        maka_runtime::execution::EditingTools::ApplyPatch => {
+            catalog.excluding(&[EDIT_NAME, WRITE_NAME])
+        }
+        maka_runtime::execution::EditingTools::Structured => catalog.excluding(&[PATCH_NAME]),
+    }
+}
+
 pub(super) fn reserve_core_names(
     catalog: &maka_plugins::contributions::Catalog,
 ) -> Result<(), maka_plugins::Error> {

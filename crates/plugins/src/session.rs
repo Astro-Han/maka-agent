@@ -39,7 +39,6 @@ pub struct View {
     pub approval_policy: maka_runtime::execution::ApprovalPolicy,
     pub collaboration_mode: maka_runtime::execution::CollaborationMode,
     pub behavior: maka_runtime::execution::BehaviorId,
-    pub tool_mode: maka_runtime::execution::ToolMode,
     pub bound_tools: Option<BTreeSet<String>>,
 }
 
@@ -62,8 +61,6 @@ pub struct SessionBehavior(pub Arc<dyn Behavior>);
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Preparation {
     pub instructions: String,
-    /// A behavior may select its invocation presentation; it never widens tools.
-    pub tool_mode: Option<maka_runtime::execution::ToolMode>,
     pub native_tools: maka_runtime::execution::NativeToolSet,
     pub required_clients: Option<ClientTools>,
     pub tool_ceiling: Option<BTreeSet<String>>,

@@ -140,6 +140,7 @@ export async function verifyForms(connection, workspace, reopened, openClient, d
         baseUrl,
         enabled: true,
         enabledModelIds: ['gpt-5.2'],
+        modelOverrides: { 'gpt-5.2': { codeMode: false } },
       },
     });
     assert.equal(created.kind, 'committed');

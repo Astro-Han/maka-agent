@@ -119,6 +119,9 @@ function deriveThinkingChoices(options: ThinkingOptions | undefined): readonly T
 
 /** A connection-scoped user model record. An empty record preserves a manually added id. */
 export interface ModelOverride {
+  /** Independent model-level preferences; omitted follows the Host default. */
+  readonly codeMode?: boolean;
+  readonly applyPatch?: boolean;
   readonly knowledgeCutoff?: string;
   readonly capabilities?: Omit<NonNullable<ModelInfo['capabilities']>, 'vision'>;
   readonly modalities?: ModelInfo['modalities'];
@@ -145,6 +148,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function normalizeModelOverride(entry: unknown): ModelOverride | undefined {
   if (!isRecord(entry)) return undefined;
   const declared: {
+    codeMode?: boolean;
+    applyPatch?: boolean;
     knowledgeCutoff?: string;
     capabilities?: ModelOverride['capabilities'];
     modalities?: ModelOverride['modalities'];
@@ -180,6 +185,9 @@ function normalizeModelOverride(entry: unknown): ModelOverride | undefined {
     }
   }
   if (typeof entry.vision === 'boolean') declared.vision = entry.vision;
+  for (const field of ['codeMode', 'applyPatch'] as const) {
+    if (typeof entry[field] === 'boolean') declared[field] = entry[field];
+  }
   for (const field of [
     'contextWindow',
     'compactionThreshold',

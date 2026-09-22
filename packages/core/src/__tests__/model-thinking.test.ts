@@ -160,6 +160,8 @@ test('isRelayProviderType only accepts the two custom OpenAI relay providers', (
 
 test('normalizeModelOverrides sanitizes write-side tables', () => {
   const sanitized = normalizeModelOverrides({
+    codeOnly: { codeMode: true, applyPatch: false },
+    patchOnly: { codeMode: false, applyPatch: true },
     reasoner: { thinkingLevels: ['high', 'low', 'turbo'], vision: true, contextWindow: 200_000 },
     empty: {},
     junk: 'not-an-entry',
@@ -168,6 +170,8 @@ test('normalizeModelOverrides sanitizes write-side tables', () => {
     [`${'x'.repeat(513)}`]: { vision: true },
   });
   assert.deepEqual(sanitized, {
+    codeOnly: { codeMode: true, applyPatch: false },
+    patchOnly: { codeMode: false, applyPatch: true },
     empty: {},
     huge: {},
     reasoner: { thinkingLevels: ['low', 'high'], vision: true, contextWindow: 200_000 },

@@ -191,7 +191,6 @@ async fn defaults_are_read_only_and_cas_is_durable_even_for_same_value() {
     );
     let value = ChatDefaults {
         sandbox_mode: maka_runtime::execution::SandboxMode::ReadOnly,
-        code_mode_enabled: true,
         thinking_level: Some(ThinkingLevel::High),
     };
     let (a, b) = tokio::join!(
@@ -225,7 +224,6 @@ async fn defaults_are_read_only_and_cas_is_durable_even_for_same_value() {
     );
     let clear = ChatDefaults {
         thinking_level: None,
-        code_mode_enabled: false,
         ..value
     };
     assert_eq!(

@@ -26,6 +26,10 @@ under the License.
 
 ## Code Mode
 
+在连接的模型参数中设置 Code Mode 和 `apply_patch`。自动采用 Host 的模型默认值；
+明确选择从新 Run 生效，续跑和交接保留已准入的选择。
+开启 `apply_patch` 时替代 `Edit`、`Write`，关闭时使用这两个结构化编辑工具。
+
 `exec({code, yield_time_ms?, max_output_tokens?})` 创建新的有界 V8 cell；
 `wait({cell_id, yield_time_ms?, max_output_tokens?, terminate?})` 继续观察。
 结果区分 `running`、`completed`、`terminated`，每次只返回新增输出。

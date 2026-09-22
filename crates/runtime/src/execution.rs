@@ -29,6 +29,8 @@ pub enum CollaborationMode {
 
 mod behavior;
 pub use behavior::BehaviorId;
+mod tool_policy;
+pub use tool_policy::EditingTools;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -113,6 +115,8 @@ pub struct ToolComposition {
     pub clients: crate::capability::ClientComposition,
     #[serde(default)]
     pub native_tools: NativeToolSet,
+    #[serde(default)]
+    pub editing_tools: EditingTools,
     /// Frozen Client capabilities usable by Host services, not advertised to the model.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub private_clients: std::collections::BTreeSet<String>,

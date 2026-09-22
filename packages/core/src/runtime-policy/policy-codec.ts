@@ -387,7 +387,7 @@ function normalizeChatDefaults(value: unknown): RuntimePolicy['chatDefaults'] {
   const item = exactRecord(
     value,
     'chat defaults',
-    ['sandboxMode', 'thinkingLevel', 'codeModeEnabled'],
+    ['sandboxMode', 'thinkingLevel'],
     ['sandboxMode'],
   );
   if (!(CHAT_DEFAULT_SANDBOX_MODES as readonly unknown[]).includes(item.sandboxMode)) {
@@ -396,12 +396,8 @@ function normalizeChatDefaults(value: unknown): RuntimePolicy['chatDefaults'] {
   if (item.thinkingLevel !== undefined && !isThinkingLevel(item.thinkingLevel)) {
     throw domainError('chat default thinking level is invalid');
   }
-  if (item.codeModeEnabled !== undefined && typeof item.codeModeEnabled !== 'boolean') {
-    throw domainError('chat default code mode is invalid');
-  }
   return {
     sandboxMode: item.sandboxMode as RuntimePolicy['chatDefaults']['sandboxMode'],
-    ...(item.codeModeEnabled === true ? { codeModeEnabled: true } : {}),
     ...(item.thinkingLevel === undefined ? {} : { thinkingLevel: item.thinkingLevel }),
   };
 }

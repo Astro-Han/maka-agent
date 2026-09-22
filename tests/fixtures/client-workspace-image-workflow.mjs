@@ -135,7 +135,7 @@ export async function verifyWorkspaceImage(connection, workspace, reopened) {
           baseUrl: model.baseUrl,
           enabled: true,
           enabledModelIds: ['gpt-4o'],
-          modelOverrides: { 'gpt-4o': { vision: true } },
+          modelOverrides: { 'gpt-4o': { vision: true, codeMode: false } },
         },
       });
       assert.equal(created.kind, 'committed');

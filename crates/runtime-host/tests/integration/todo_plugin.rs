@@ -59,7 +59,6 @@ async fn scenario() {
         .set_chat_defaults(
             0,
             ChatDefaults {
-                code_mode_enabled: false,
                 ..Default::default()
             },
         )

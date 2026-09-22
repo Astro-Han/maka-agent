@@ -38,6 +38,11 @@ type WidenCopy<T> = T extends string
 // form deliberately carries no declaration controls (capabilities are edited
 // after the connection exists).
 const zhCapabilitiesCopy = {
+  codeModeHelp: '通过 JavaScript 编排工具。修改从下一次运行生效。',
+  applyPatchHelp: '使用 apply_patch 替代 Edit、Write。修改从下一次运行生效。',
+  toolAuto: '自动',
+  toolEnabled: '开启',
+  toolDisabled: '关闭',
   capabilities: '能力',
   modelDisplayName: '显示名称',
   modelDisplayNameHelp: '仅用于显示；请求仍使用模型 ID。',
@@ -67,6 +72,11 @@ const zhCapabilitiesCopy = {
 };
 
 const zhTwCapabilitiesCopy = {
+  codeModeHelp: '透過 JavaScript 編排工具。修改從下一次執行生效。',
+  applyPatchHelp: '使用 apply_patch 取代 Edit、Write。修改從下一次執行生效。',
+  toolAuto: '自動',
+  toolEnabled: '開啟',
+  toolDisabled: '關閉',
   capabilities: '能力',
   modelDisplayName: '顯示名稱',
   modelDisplayNameHelp: '僅供顯示；請求仍使用模型 ID。',
@@ -95,6 +105,11 @@ const zhTwCapabilitiesCopy = {
   fastEnabled: 'Fast',
 };
 const enCapabilitiesCopy = {
+  codeModeHelp: 'Compose tools in JavaScript. Changes apply to new runs.',
+  applyPatchHelp: 'Use apply_patch instead of Edit and Write. Changes apply to new runs.',
+  toolAuto: 'Auto',
+  toolEnabled: 'Enabled',
+  toolDisabled: 'Disabled',
   capabilities: 'Capabilities',
   modelDisplayName: 'Display name',
   modelDisplayNameHelp: 'A label for this model. Requests still use the exact model ID.',
