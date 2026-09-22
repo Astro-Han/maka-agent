@@ -18,7 +18,6 @@
  */
 
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
-import type { ProjectRecord } from '@maka/core/project';
 import type { SessionSummary } from '@maka/core/session';
 import { runtimeHostProfileUsesHostWorkspace } from '@maka/runtime-host/profile-kind';
 import {
@@ -28,6 +27,7 @@ import {
   type SessionRailSelection,
 } from '@maka/ui';
 import { useExternalStoreSelector } from '../../../use-external-store-selector.js';
+import { runtimeHostProjectKey } from '../../../application/contracts/runtime-host-project-key.js';
 import { deriveSessionNavigationGroups } from '../model/session-navigation-groups.js';
 import { deriveWorktreeSessionIds } from '../model/session-project-grouping.js';
 import type { SessionRailProjection } from '../model/session-rail.js';
@@ -36,7 +36,11 @@ import {
   sessionRailLayoutStore,
   type SessionRailLayoutState,
 } from '../model/session-rail-layout-store.js';
-import type { SessionNavigationPorts, SessionNavigationSession } from '../ports.js';
+import type {
+  SessionNavigationPorts,
+  SessionNavigationProjectScope,
+  SessionNavigationSession,
+} from '../ports.js';
 import { useSessionNavigationServices } from '../services-context.js';
 import {
   createSessionNavigationRowActions,
@@ -51,7 +55,7 @@ export interface UseSessionNavigationControllerInput {
    * derivations of one reading.
    */
   rail: SessionRailProjection<SessionNavigationSession>;
-  projects: readonly ProjectRecord[];
+  projectScopes: readonly SessionNavigationProjectScope[];
   ports: SessionNavigationPorts;
 }
 
@@ -123,8 +127,9 @@ export function useSessionNavigationController(
   );
 
   const groups = useMemo(
-    () => deriveSessionNavigationGroups(rail.sessions, input.projects, locale),
-    [locale, input.projects, rail.sessions],
+    () =>
+      deriveSessionNavigationGroups(rail.sessions, input.projectScopes, locale),
+    [locale, input.projectScopes, rail.sessions],
   );
   const worktreeSessionIds = useMemo(
     () =>
@@ -132,9 +137,11 @@ export function useSessionNavigationController(
         rail.sessions.filter(
           (session) => !runtimeHostProfileUsesHostWorkspace(session.profileKind),
         ),
-        input.projects,
+        input.projectScopes
+          .filter((scope) => scope.profileKind === 'local')
+          .map((scope) => scope.project),
       ),
-    [input.projects, rail.sessions],
+    [input.projectScopes, rail.sessions],
   );
   const sessionById = useMemo(
     () => new Map(rail.sessions.map((session) => [session.id, session])),
@@ -142,21 +149,28 @@ export function useSessionNavigationController(
   );
   const projectNameByIdentity = useMemo(() => {
     const names = new Map<string, string>();
-    for (const project of input.projects) {
-      names.set(project.id, project.name);
-      for (const alias of project.aliases ?? []) names.set(alias, project.name);
+    for (const scope of input.projectScopes) {
+      names.set(runtimeHostProjectKey(scope.hostId, scope.project.id), scope.project.name);
+      for (const alias of scope.project.aliases ?? []) {
+        names.set(runtimeHostProjectKey(scope.hostId, alias), scope.project.name);
+      }
     }
     return names;
-  }, [input.projects]);
+  }, [input.projectScopes]);
   const sessionProjectName = useCallback(
-    (session: SessionSummary): string | undefined =>
-      deriveTitlebarProjectName({
-        projectName: session.projectId
-          ? projectNameByIdentity.get(session.projectId)
-          : undefined,
+    (session: SessionSummary): string | undefined => {
+      const hostId = sessionById.get(session.id)?.runtimeHostId;
+      return deriveTitlebarProjectName({
+        projectName:
+          session.projectId && hostId
+            ? projectNameByIdentity.get(
+                runtimeHostProjectKey(hostId, session.projectId),
+              )
+            : undefined,
         projectPath: session.cwd,
-      }),
-    [projectNameByIdentity],
+      });
+    },
+    [projectNameByIdentity, sessionById],
   );
   const sessionMeta = useCallback(
     (session: SessionSummary): string | undefined => {

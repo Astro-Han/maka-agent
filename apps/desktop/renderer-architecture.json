@@ -50,6 +50,7 @@
     "src/renderer/desktop-execution-boundary-surface.ts",
     "src/renderer/desktop-slash-command.ts",
     "src/renderer/error-boundary.tsx",
+    "src/renderer/executor-task-picker.tsx",
     "src/renderer/follow-up-submit-routing.ts",
     "src/renderer/interrupted-resume.ts",
     "src/renderer/live-content-seed.ts",
@@ -79,7 +80,6 @@
     "src/renderer/locales/settings-tasks-copy.ts",
     "src/renderer/locales/settings-test-result-copy.ts",
     "src/renderer/locales/settings-usage-copy.ts",
-    "src/renderer/locales/settings-web-search-copy.ts",
     "src/renderer/locales/shell-copy.ts",
     "src/renderer/locales/shell-remaining-copy.ts",
     "src/renderer/locales/task-readiness-copy.ts",
@@ -186,7 +186,6 @@
     "src/renderer/settings/use-connection-detail.ts",
     "src/renderer/settings/use-oauth-login-flow.ts",
     "src/renderer/settings/use-optimistic-settings-draft.ts",
-    "src/renderer/settings/web-search-settings-page.tsx",
     "src/renderer/settled-message-merge.ts",
     "src/renderer/shell-chat-model-selection.ts",
     "src/renderer/shell-run-update-state.ts",
@@ -320,7 +319,7 @@
           "@maka/ui": 1
         },
         "importSpecifiers": 10,
-        "nonTriviaTokens": 3605
+        "nonTriviaTokens": 3674
       },
       "src/renderer/app-shell-chrome-actions.tsx": {
         "importDeclarations": 4,
@@ -484,7 +483,7 @@
           "react": 1
         },
         "importSpecifiers": 18,
-        "nonTriviaTokens": 3655
+        "nonTriviaTokens": 3666
       },
       "src/renderer/app-shell-overlays.tsx": {
         "importDeclarations": 5,
@@ -591,7 +590,7 @@
           "@maka/ui": 1
         },
         "importSpecifiers": 7,
-        "nonTriviaTokens": 2687
+        "nonTriviaTokens": 2703
       },
       "src/renderer/app-shell-session-start-actions.ts": {
         "importDeclarations": 2,
@@ -667,7 +666,7 @@
           "./session-workspace-errors.js": 1
         },
         "importSpecifiers": 3,
-        "nonTriviaTokens": 620
+        "nonTriviaTokens": 648
       },
       "src/renderer/app-shell-turn-view-model.ts": {
         "importDeclarations": 6,
@@ -693,7 +692,7 @@
         "nonTriviaTokens": 1273
       },
       "src/renderer/app-shell.tsx": {
-        "importDeclarations": 64,
+        "importDeclarations": 65,
         "bridgePaths": {
           "window.maka.attachments": 1,
           "window.maka.attachments.readBytes": 1,
@@ -702,13 +701,16 @@
           "window.maka.diagnostics.takePreviousMainProcessInterruption": 1,
           "window.maka.notifications.runEnded": 1,
           "window.maka.onboarding.setMilestone": 1,
+          "window.maka.permissions.ensureSandbox": 1,
           "window.maka.sessions.compact": 1,
+          "window.maka.sessions.get": 1,
           "window.maka.sessions.getPlanState": 1,
           "window.maka.sessions.listActiveInteractions": 1,
           "window.maka.sessions.listTurnLandmarks": 1,
           "window.maka.sessions.promoteQueueEntry": 1,
           "window.maka.sessions.reorderQueueEntries": 1,
           "window.maka.sessions.retractQueueEntry": 1,
+          "window.maka.sessions.setExecutorConfiguration": 1,
           "window.maka.sessions.subscribeActiveInteractions": 1,
           "window.maka.sessions.updateQueueEntry": 1,
           "window.maka.settings.getClient": 1,
@@ -734,7 +736,7 @@
           "useComposerAttachments": 1,
           "useEffect": 7,
           "useLayoutEffect": 2,
-          "useNewTaskChoice": 1,
+          "useNewTaskChoice": 2,
           "useOnboardingSnapshot": 1,
           "usePlanModeState": 1,
           "usePluginSession": 1,
@@ -785,6 +787,7 @@
           "./desktop-execution-boundary-surface": 1,
           "./desktop-slash-command": 1,
           "./error-boundary": 1,
+          "./executor-task-picker.js": 1,
           "./features/app-update/index.js": 1,
           "./features/client-plugins/index.js": 1,
           "./features/conversation": 1,
@@ -844,11 +847,11 @@
           "@maka/ui/context-usage": 1,
           "react": 1
         },
-        "importSpecifiers": 100,
-        "nonTriviaTokens": 13314
+        "importSpecifiers": 101,
+        "nonTriviaTokens": 13949
       },
       "src/renderer/use-app-shell-composer-quotes.ts": {
-        "importDeclarations": 2,
+        "importDeclarations": 3,
         "bridgePaths": {},
         "environmentCapabilities": {},
         "hookCalls": {
@@ -859,10 +862,11 @@
         "actionFactories": [],
         "dependencyPaths": {
           "./pending-items.js": 1,
+          "@maka/core/session-reference": 1,
           "react": 1
         },
-        "importSpecifiers": 5,
-        "nonTriviaTokens": 360
+        "importSpecifiers": 6,
+        "nonTriviaTokens": 412
       },
       "src/renderer/use-app-shell-session-list.ts": {
         "importDeclarations": 6,
@@ -1086,6 +1090,7 @@
           "./locales/shell-copy.js": 1,
           "./settings/settings-nav.js": 1,
           "@maka/core/provider-registry": 1,
+          "@maka/core/settings": 1,
           "@maka/ui/icons": 1
         }
       },
@@ -1278,6 +1283,23 @@
           "@maka/core/diagnostic-log": 1,
           "@maka/ui": 1,
           "@maka/ui/icons": 1,
+          "react": 1
+        }
+      },
+      "src/renderer/executor-task-picker.tsx": {
+        "bridgePaths": {
+          "window.maka.newTasks.searchExecutors": 1,
+          "window.maka.sessions.searchExecutors": 1
+        },
+        "environmentCapabilities": {},
+        "hookCalls": {
+          "useState": 1
+        },
+        "lifecycleMethods": {},
+        "unresolvedDependencies": 0,
+        "actionFactories": [],
+        "dependencyPaths": {
+          "@maka/ui/plugin": 1,
           "react": 1
         }
       },
@@ -1534,15 +1556,6 @@
         "actionFactories": [],
         "dependencyPaths": {}
       },
-      "src/renderer/locales/settings-web-search-copy.ts": {
-        "bridgePaths": {},
-        "environmentCapabilities": {},
-        "hookCalls": {},
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [],
-        "dependencyPaths": {}
-      },
       "src/renderer/locales/shell-copy.ts": {
         "bridgePaths": {},
         "environmentCapabilities": {},
@@ -1553,7 +1566,8 @@
         "dependencyPaths": {
           "@maka/core/attachments": 1,
           "@maka/core/redaction": 1,
-          "@maka/core/ui-locale": 1
+          "@maka/core/ui-locale": 1,
+          "@maka/ui": 1
         }
       },
       "src/renderer/locales/shell-remaining-copy.ts": {
@@ -2462,8 +2476,7 @@
           "./use-action-guard": 1,
           "./use-optimistic-settings-draft": 1,
           "@maka/core/chat-model-choice": 1,
-          "@maka/core/model-thinking": 1,
-          "@maka/ui": 2,
+          "@maka/ui": 1,
           "react": 1
         }
       },
@@ -3390,7 +3403,6 @@
           "./settings-snapshot-cache.js": 1,
           "./tasks-settings-page": 1,
           "./usage-settings-page": 1,
-          "./web-search-settings-page": 1,
           "@astryxdesign/core": 1,
           "@maka/core/settings": 1,
           "@maka/ui": 1,
@@ -3540,40 +3552,6 @@
         "dependencyPaths": {
           "./optimistic-settings-draft-controller": 1,
           "@maka/ui": 1,
-          "react": 1
-        }
-      },
-      "src/renderer/settings/web-search-settings-page.tsx": {
-        "bridgePaths": {
-          "window.maka.webSearch.query": 1,
-          "window.maka.webSearch.test": 1
-        },
-        "environmentCapabilities": {},
-        "hookCalls": {
-          "useKeyedActionGuard": 1,
-          "useMountedRef": 1,
-          "useRef": 1,
-          "useRuntimeHostSettingsErrorReporter": 1,
-          "useRuntimeHostSettingsTarget": 1,
-          "useState": 8,
-          "useToast": 1,
-          "useUiLocale": 1
-        },
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [],
-        "dependencyPaths": {
-          "../locales/settings-shared-copy.js": 1,
-          "../locales/settings-web-search-copy": 1,
-          "./password-input": 1,
-          "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
-          "./settings-section": 1,
-          "./use-action-guard": 1,
-          "@astryxdesign/core": 1,
-          "@maka/core/search": 1,
-          "@maka/core/web-search": 1,
-          "@maka/ui": 2,
           "react": 1
         }
       },
@@ -3828,7 +3806,7 @@
         },
         "environmentCapabilities": {},
         "hookCalls": {
-          "useState": 6
+          "useState": 5
         },
         "lifecycleMethods": {},
         "unresolvedDependencies": 0,
