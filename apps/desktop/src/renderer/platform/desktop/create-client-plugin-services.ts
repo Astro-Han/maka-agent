@@ -46,6 +46,25 @@ export function createDesktopClientPluginServices(
       let connectionEpoch: string | undefined;
       let localFiles = false;
       return {
+        events(_identity, signal) {
+          if (!connectionEpoch) throw new Error('Client catalog has no connection identity');
+          const epoch = connectionEpoch;
+          return {
+            subscribe(request, listener, onError) {
+              signal.throwIfAborted();
+              const fail = (error: Error) => { if (!signal.aborted) onError?.(error); };
+              const release = bridge.clientPlugins.subscribeEvents(host, epoch, request, (event) => {
+                if (!signal.aborted) listener(event);
+              }, fail);
+              const abort = () => { void release().catch(fail); };
+              signal.addEventListener('abort', abort, { once: true });
+              return async () => {
+                signal.removeEventListener('abort', abort);
+                await release();
+              };
+            },
+          };
+        },
         subscribeContext: (listener) => bridge.clientPlugins.subscribeContext(host, listener),
         async session(sessionId) {
           if (!connectionEpoch) throw new Error('Client catalog has no connection identity');

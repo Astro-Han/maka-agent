@@ -19,4 +19,4 @@
 
 export { ClientRuntime, type ClientRuntimeOptions, type ClientSnapshot, type ClientDiagnostic } from './runtime.js';
 export { ClientSlot, ClientSlotStore } from './slots.js';
-export type { ClientRemoteFactory, ClientFilesFactory, ClientAuthorizationFactory } from './instance.js';
+export type { ClientRemoteFactory, ClientFilesFactory, ClientAuthorizationFactory, ClientEventsFactory } from './instance.js';

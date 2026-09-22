@@ -112,6 +112,8 @@ Slots include `session.composer.before`, `workspace.composer.before`, `workspace
 
 Optional `ctx.localFiles.pick()` / `open(path)` use Desktop-local paths only. They are unavailable for remote Host files. Desktop validates the published Client identity before native actions and discards picker results after navigation or retirement.
 
+`ctx.events.subscribe({ kind: 'session.changed' }, listener, onError?)` observes originating-Host invalidations. `session.event` and `tool.activity` also require `sessionId`, always canonical on that Host. The listener receives a discriminated `ClientProductEvent`; event-specific payloads remain open product projections. These observations include live deltas and replayed seeds, not durable `LogEvent`s or exactly-once receipts. Subscriptions publish with the instance and stop immediately on disposal or retirement; they never follow a replacement connection. Plugin-owned domain changes use public Remote streams.
+
 Desktop supplies `@maka/ui/plugin` as a shared UI module (currently `Button`). Import supported components from this entry instead of bundling another component-library instance. It is not the internal UI package's complete API.
 
 Host plugins publish `ctx.remote.method(name, callback)` or `ctx.remote.stream(name, open)`. Client plugins obtain a callable with `ctx.remote.method<Input, Output>(name, sessionId?)` or an async-iterable factory with `ctx.remote.stream<Input, Output>(name, sessionId?)`. Calls start only after UI publication. Handles retain their original Host connection and backend registration; replacement never redirects them. Breaking iteration closes its stream; retiring UI or navigating closes its document. Remote callers are not Agent invocations and receive no implicit process permission.

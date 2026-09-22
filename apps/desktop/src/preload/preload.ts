@@ -40,6 +40,7 @@ import { AttachmentIngestBlockedError } from '@maka/core/attachments';
 import { encodeIngestItems } from './attachment-ingest-payload.js';
 import { createThreadSearchClient } from './multi-host-thread-search.js';
 import { releaseSessionObservation } from './session-observation-release.js';
+import { subscribeClientEvents } from './client-plugin-events.js';
 import type {
   MakaBridge,
   OnboardingSnapshot,
@@ -1268,6 +1269,28 @@ const makaBridge = {
   workHubControl: workHubControlBridge,
   workHubPresentation: workHubPresentationBridge,
   clientPlugins: {
+    subscribeEvents(host, connectionEpoch, request, listener, onError) {
+      return subscribeClientEvents(async () => {
+        const scope = await runtimeHostScope(host);
+        const connection = await invokeWhenReady('plugins:connection', scope, browserDocumentId) as { epoch: string };
+        if (connection.epoch !== connectionEpoch) throw new Error('Client connection has retired');
+        const current = () => {
+          const latest = runtimeHostScopes.get(runtimeHostScopeKey(scope));
+          return latest?.hostId === scope.hostId && latest.targetEpoch === scope.targetEpoch;
+        };
+        return {
+          current,
+          onRetire: (retire) => {
+            const changed = () => { if (!current()) retire(); };
+            ipcRenderer.on('runtime-host-profiles:changed', changed);
+            return () => ipcRenderer.off('runtime-host-profiles:changed', changed);
+          },
+          subscribe: (channel, handler) => subscribeRuntimeHostEvent(channel, scope, handler),
+          observe: (sessionId, observerId) => invokeWhenReady('sessions:observe', scope, sessionId, observerId),
+          unobserve: (observerId) => invokeWhenReady('sessions:unobserve', observerId),
+        };
+      }, request, listener, onError);
+    },
     async authorization(host, connectionEpoch, input, registerCancellation) {
       const requestId = crypto.randomUUID();
       let cancelled = false;

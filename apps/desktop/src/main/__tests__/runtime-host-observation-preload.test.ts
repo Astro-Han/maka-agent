@@ -252,13 +252,14 @@ test('terminal recovery keeps Host scope and rejects a different Turn identity',
 
 async function preloadHarness(invoke: (channel: string, ...args: unknown[]) => Promise<unknown>) {
   const events = new EventEmitter();
+  const unobserved: string[] = [];
   const ipcRenderer = {
     on: events.on.bind(events), off: events.off.bind(events), send() {},
     async invoke(channel: string, ...args: unknown[]) {
       if (channel === 'app:bootstrapReady') return;
       if (channel === 'runtime-host:activeIdentity') return owner;
       if (channel === 'runtime-host:identities') return [owner];
-      if (channel === 'sessions:unobserve') return;
+      if (channel === 'sessions:unobserve') { unobserved.push(args[0] as string); return; }
       return invoke(channel, ...args);
     },
   };
@@ -279,5 +280,57 @@ async function preloadHarness(invoke: (channel: string, ...args: unknown[]) => P
     crypto: globalThis.crypto,
   });
   assert.ok(bridge);
-  return { bridge, events };
+  return { bridge, events, unobserved };
 }
+
+test('Client events retain canonical identity, ordered seeds and the original connection', async () => {
+  const invoked = deferred<string>();
+  const connection = deferred<{ epoch: string }>();
+  let observed = 0;
+  const { bridge, events, unobserved } = await preloadHarness(async (channel, ...args) => {
+    if (channel === 'plugins:connection') return connection.promise;
+    if (channel === 'sessions:observe') {
+      assert.equal(args[1], 'session-1');
+      observed++;
+      invoked.resolve(args[2] as string);
+      return { kind: 'ready' };
+    }
+    throw new Error('Unexpected channel: ' + channel);
+  });
+  const values: import('@maka-agent/plugin-sdk/client').ClientProductEvent[] = [];
+  const errors: Error[] = [];
+  const subscribe = (request: import('@maka-agent/plugin-sdk/client').ClientEventRequest) =>
+    bridge.clientPlugins.subscribeEvents(owner, 'client-one', request, (value) => {
+      values.push(value);
+      if (values.length === 1) throw new Error('plugin listener failed');
+    }, (error) => errors.push(error));
+  const cancelled = subscribe({ kind: 'session.event', sessionId: 'session-1' });
+  await cancelled();
+  connection.resolve({ epoch: 'client-one' });
+  const release = subscribe({ kind: 'tool.activity', sessionId: 'session-1' });
+  const observerId = await invoked.promise;
+  assert.equal(observed, 1, 'retirement before binding must not start observation');
+  const tool = { type: 'tool_progress', id: 'tool-event', turnId: 'turn-1', ts: 1,
+    toolUseId: 'tool-1', sessionId: 'session-1', message: 'working' };
+  const emit = (event: unknown, scope = owner) => events.emit('sessions:event:session-1', {}, scope, event);
+  emit({ type: 'host_observation_seed', observerIds: ['another-observer'], events: [tool] });
+  emit({ type: 'host_observation_seed', observerIds: [observerId], events: [
+    { type: 'text_delta', id: 'text', turnId: 'turn-1', ts: 1, text: 'not a tool' }, tool, tool,
+  ] });
+  assert.equal(values.length, 2, 'listener exceptions must not truncate a seed; IDs can replay');
+  assert.equal(errors.length, 1);
+  assert.equal(values[0]!.sessionId, 'session-1');
+  assert.equal(values[0]!.kind === 'tool.activity' && values[0]!.event.payload.toolUseId, 'tool-1');
+  emit(tool, { ...owner, hostId: 'foreign-host' });
+  events.emit('runtime-host-profiles:changed', {}, {
+    ...owner, epoch: 'replacement-epoch', isDefault: true,
+  });
+  emit(tool);
+  emit(tool, { ...owner, targetEpoch: 'replacement-epoch' });
+  assert.equal(values.length, 2, 'old Client instances cannot follow a target replacement');
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.ok(unobserved.includes(observerId), 'connection retirement must release even without a successful catalog refresh');
+  await release();
+  await release();
+  assert.equal(events.listenerCount('sessions:event:session-1'), 0);
+});

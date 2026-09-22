@@ -95,7 +95,7 @@ export class ClientHostRuntime {
       else this.options.report(diagnostic);
     };
     const runtime = this.create({ ...this.options, source: transport.source,
-      remote: transport.remote, localFiles: transport.localFiles, authorization: transport.authorization, report });
+      remote: transport.remote, localFiles: transport.localFiles, authorization: transport.authorization, events: transport.events, report });
     let revision = 0;
     let retry = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;

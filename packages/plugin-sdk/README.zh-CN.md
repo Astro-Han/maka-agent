@@ -108,6 +108,8 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 
 ## Client SDK
 
+`ctx.events.subscribe({ kind: 'session.changed' }, listener, onError?)` 观察来源 Host 的失效通知。`session.event` 和 `tool.activity` 还须指定该 Host 的 canonical `sessionId`。回调接收可判别的 `ClientProductEvent`；事件 payload 是需自行收窄的开放产品投影。观察流包括实时增量和可能重放的 seed，不是持久 `LogEvent` 或恰好一次回执。订阅随实例发布，释放或退休立即停止投递，不跟随替代连接。插件领域变化使用公共 Remote 流。
+
 Client SDK API **1** 使用 Desktop 提供的 React。导出来自 `@maka-agent/plugin-sdk/client` 的 `ClientPlugin`；其 `activate(ctx, config)` 暂存带 key 的 Slot 注册和 Effect。初始化结束后关闭 Slot 注册；`ctx.effect` 和 `ctx.style` 在激活后仍可注册，释放函数幂等。异步清理在结算前始终归原实例所有，即使已主动释放；清理失败时，该 Entry 必须等待页面重载，不能自动重新激活。
 
 用 `@maka-agent/plugin-sdk/build` 的 `buildClient({ packageId, entryPoint })` 构建（作者的构建环境需安装 esbuild）。保存返回的 JavaScript，并在 manifest 中声明 `client: { entry: "client.js", sdkVersion: 1 }`。加载器在执行前校验字节和 SDK 版本。插件共享可信 Renderer，不是沙箱，也不提供 Node 兼容层。

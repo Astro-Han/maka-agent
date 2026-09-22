@@ -19,6 +19,7 @@
 
 import type { ClientContext, ClientDescriptor, ClientIdentity, ClientPlugin, ClientRemote, ClientLocalFiles, ClientAuthorization } from '@maka-agent/plugin-sdk/client';
 import type { Json } from '@maka-agent/plugin-sdk/host';
+import type { ClientEvents } from '@maka-agent/plugin-sdk/client';
 import type { SlotEntry } from './slots.js';
 import { createElement } from 'react';
 
@@ -35,6 +36,9 @@ export type ClientRemoteFactory = (identity: ClientIdentity, signal: AbortSignal
 };
 export type ClientFilesFactory = (identity: ClientIdentity, signal: AbortSignal) => ClientLocalFiles | undefined;
 export type ClientAuthorizationFactory = (identity: ClientIdentity, signal: AbortSignal) => ClientAuthorization;
+export type ClientEventsFactory = (identity: ClientIdentity, signal: AbortSignal) => {
+  subscribe(...args: Parameters<ClientEvents['subscribe']>): Cleanup;
+};
 
 export class ClientInstance {
   readonly lifetime = new AbortController();
@@ -48,8 +52,9 @@ export class ClientInstance {
   readonly #identity: ClientIdentity;
   readonly #files?: ClientLocalFiles;
   readonly #authorization?: ClientAuthorization;
+  readonly #events?: ReturnType<ClientEventsFactory>;
 
-  constructor(readonly descriptor: ClientDescriptor, onError: (error: unknown) => void, remote?: ClientRemoteFactory, files?: ClientFilesFactory, readonly hostEpoch?: string, authorization?: ClientAuthorizationFactory) {
+  constructor(readonly descriptor: ClientDescriptor, onError: (error: unknown) => void, remote?: ClientRemoteFactory, files?: ClientFilesFactory, readonly hostEpoch?: string, authorization?: ClientAuthorizationFactory, events?: ClientEventsFactory) {
     this.#onError = onError;
     this.#identity = Object.freeze({
       entryId: descriptor.entryId, extensionId: descriptor.extensionId,
@@ -59,6 +64,7 @@ export class ClientInstance {
     this.#remote = remote?.(this.#identity, this.lifetime.signal);
     this.#files = files?.(this.#identity, this.lifetime.signal);
     this.#authorization = authorization?.(this.#identity, this.lifetime.signal);
+    this.#events = events?.(this.#identity, this.lifetime.signal);
   }
 
   initialize(plugin: ClientPlugin, document: Document): Promise<void> {
@@ -71,6 +77,24 @@ export class ClientInstance {
       identity: this.#identity,
       hostEpoch: this.hostEpoch,
       signal: this.lifetime.signal,
+      events: {
+        subscribe: (request, listener, onError) => {
+          let listening = true;
+          const fail = (error: Error) => {
+            if (!listening || this.lifetime.signal.aborted) return;
+            try { if (onError) onError(error); else this.#onError(error); }
+            catch (failure) { this.#onError(failure); }
+          };
+          const release = context.effect(() => {
+            if (!this.#events) throw new Error('Client events are unavailable');
+            return this.#events.subscribe(request, (event) => {
+              if (!listening || this.lifetime.signal.aborted) return;
+              try { listener(event); } catch (error) { this.#onError(error); }
+            }, fail);
+          });
+          return () => { listening = false; release(); };
+        },
+      },
       authorization: {
         approve: async (scope, request) => {
           this.#assertActive();

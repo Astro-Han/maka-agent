@@ -20,6 +20,14 @@
 import type { ComponentType } from 'react';
 import type { Awaitable, Json } from './host.js';
 import type { ClientAuthorization } from './authorization.js';
+import type { ClientEvents } from './client-events.js';
+export type {
+  ClientEvents,
+  ClientEventRequest,
+  ClientProductEvent,
+  ClientObservedEvent,
+  ClientToolEventType,
+} from './client-events.js';
 export type {
   ClientAuthorization,
   AuthorizationCapability,
@@ -141,6 +149,7 @@ export interface ClientContext {
   readonly hostEpoch?: string;
   readonly signal: AbortSignal;
   readonly remote: ClientRemote;
+  readonly events: ClientEvents;
   readonly authorization: ClientAuthorization;
   /** Optional desktop-local paths; never interpreted as paths on a remote Host. */
   readonly localFiles?: ClientLocalFiles;

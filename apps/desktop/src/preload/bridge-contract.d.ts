@@ -837,6 +837,7 @@ export interface MakaBridge {
   };
 
   clientPlugins: {
+    subscribeEvents(host: DesktopRuntimeHostRef, connectionEpoch: string, request: import('@maka-agent/plugin-sdk/client').ClientEventRequest, listener: (event: import('@maka-agent/plugin-sdk/client').ClientProductEvent) => void, onError: (error: Error) => void): () => Promise<void>;
     authorization(host: DesktopRuntimeHostRef, connectionEpoch: string, input: OperationInput<'plugin.authorization'>, registerCancellation: (cancel: () => void) => void): Promise<OperationOutput<'plugin.authorization'>>;
     file(host: DesktopRuntimeHostRef, connectionEpoch: string, identity: ClientIdentity, input: ClientFileRequest): Promise<string | null>;
     connection(host: DesktopRuntimeHostRef): Promise<{ epoch: string; hostEpoch: string; localFiles: boolean }>;

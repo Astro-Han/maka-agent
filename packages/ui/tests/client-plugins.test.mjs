@@ -61,6 +61,44 @@ function deferred() {
   return { promise, resolve };
 }
 
+test('public events publish with their instance and immediately stop delivery on disposal or retirement', async () => {
+  const fixture = { initializing: deferred(), context: undefined, release: undefined, values: [] };
+  const source = bundle(`
+    const f = require('fixture'); f.context = ctx;
+    f.release = ctx.events.subscribe({kind:'session.changed'}, event => f.values.push(event));
+    await f.initializing.promise;
+  `);
+  const callbacks = [];
+  const errors = [];
+  let cleaned = 0;
+  const runtime = new ClientRuntime({
+    document: documentHarness(), modules: { fixture }, source: async () => source,
+    report: ({ error }) => errors.push(error),
+    events: () => ({ subscribe(_request, listener) {
+      callbacks.push(listener);
+      return async () => { cleaned++; };
+    } }),
+  });
+  const publishing = runtime.reconcile({ revision: 'one', entries: [descriptor(source, 'one')] });
+  fixture.initializing.resolve();
+  assert.equal(callbacks.length, 0);
+  await publishing;
+  assert.equal(callbacks.length, 1);
+  const event = { kind: 'session.changed', sessionId: 's', reason: 'updated', ts: 1 };
+  callbacks[0](event);
+  fixture.release(); fixture.release();
+  callbacks[0](event);
+  assert.equal(fixture.values.length, 1, 'stop before deferred effect cleanup runs');
+  fixture.context.events.subscribe({ kind: 'session.changed' }, () => { throw new Error('listener failed'); });
+  callbacks[1](event);
+  assert.match(errors[0].message, /listener failed/);
+  const closing = runtime.close();
+  callbacks[1](event);
+  await closing;
+  assert.equal(errors.length, 1);
+  assert.equal(cleaned, 2);
+});
+
 test('independent Hosts load exact bytes, revoke stale UI, retry the same revision and release scripts/effects', async () => {
   const document = documentHarness();
   const events = [];
