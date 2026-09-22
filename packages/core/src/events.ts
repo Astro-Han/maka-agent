@@ -127,6 +127,15 @@ export interface QuoteRef {
   label?: string;
   /** Provenance: the transcript turn the excerpt was selected from. */
   sourceTurnId?: string;
+  /** Frozen display provenance; does not grant access to the source Session. */
+  source?: SessionQuoteSource;
+}
+
+export interface SessionQuoteSource {
+  sessionId: string;
+  sessionName: string;
+  capturedAt: number;
+  truncated: boolean;
 }
 
 /**
@@ -195,7 +204,14 @@ const ATTACHMENT_REF_SHAPE = defineObjectShape<AttachmentRef>()(
   ['kind', 'name', 'mimeType', 'bytes', 'ref'],
   [],
 );
-const QUOTE_REF_SHAPE = defineObjectShape<QuoteRef>()(['text'], ['label', 'sourceTurnId']);
+const QUOTE_REF_SHAPE = defineObjectShape<QuoteRef>()(
+  ['text'],
+  ['label', 'sourceTurnId', 'source'],
+);
+const SESSION_QUOTE_SOURCE_SHAPE = defineObjectShape<SessionQuoteSource>()(
+  ['sessionId', 'sessionName', 'capturedAt', 'truncated'],
+  [],
+);
 const INLINE_REFERENCE_SHAPE = defineObjectShape<InlineReference>()(
   ['kind', 'value', 'label', 'start'],
   [],
@@ -243,6 +259,7 @@ export function normalizeMessageContent(content: MessageContent): MessageContent
             text: quote.text,
             ...(quote.label !== undefined ? { label: quote.label } : {}),
             ...(quote.sourceTurnId !== undefined ? { sourceTurnId: quote.sourceTurnId } : {}),
+            ...(quote.source !== undefined ? { source: { ...quote.source } } : {}),
           })),
         }
       : {}),
@@ -352,7 +369,25 @@ export function isQuoteRef(value: unknown): value is QuoteRef {
     hasExactShape(value, QUOTE_REF_SHAPE) &&
     typeof value.text === 'string' &&
     (value.label === undefined || typeof value.label === 'string') &&
-    (value.sourceTurnId === undefined || typeof value.sourceTurnId === 'string')
+    (value.sourceTurnId === undefined || typeof value.sourceTurnId === 'string') &&
+    (value.source === undefined || isSessionQuoteSource(value.source))
+  );
+}
+
+export function isSessionQuoteSource(value: unknown): value is SessionQuoteSource {
+  return (
+    isRecord(value) &&
+    hasExactShape(value, SESSION_QUOTE_SOURCE_SHAPE) &&
+    typeof value.sessionId === 'string' &&
+    /^[A-Za-z0-9_-]{1,128}$/.test(value.sessionId) &&
+    typeof value.sessionName === 'string' &&
+    value.sessionName.length > 0 &&
+    value.sessionName.length <= 200 &&
+    typeof value.capturedAt === 'number' &&
+    Number.isFinite(value.capturedAt) &&
+    value.capturedAt >= 0 &&
+    value.capturedAt <= 8_640_000_000_000_000 &&
+    typeof value.truncated === 'boolean'
   );
 }
 
@@ -514,7 +549,11 @@ function quoteRefsEqual(left: QuoteRef, right: QuoteRef): boolean {
   return (
     left.text === right.text &&
     left.label === right.label &&
-    left.sourceTurnId === right.sourceTurnId
+    left.sourceTurnId === right.sourceTurnId &&
+    left.source?.sessionId === right.source?.sessionId &&
+    left.source?.sessionName === right.source?.sessionName &&
+    left.source?.capturedAt === right.source?.capturedAt &&
+    left.source?.truncated === right.source?.truncated
   );
 }
 

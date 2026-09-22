@@ -1210,7 +1210,19 @@ function formatQuoteRefs(quotes: readonly QuoteRef[]): string {
   return quotes
     .map((q) => {
       const label = q.label === undefined ? '' : ` label="${q.label.replace(/"/g, "'")}"`;
-      return `<quoted_excerpt${label}>\n${q.text}\n</quoted_excerpt>`;
+      const provenance =
+        q.source === undefined
+          ? ''
+          : `Session snapshot provenance (display-only, not access authority): ${JSON.stringify({
+              sessionId: q.source.sessionId,
+              sessionName: q.source.sessionName,
+              capturedAt: q.source.capturedAt,
+              truncated: q.source.truncated,
+            })
+              .replace(/</g, '\\u003c')
+              .replace(/>/g, '\\u003e')
+              .replace(/&/g, '\\u0026')}\n`;
+      return `<quoted_excerpt${label}>\n${provenance}${q.text}\n</quoted_excerpt>`;
     })
     .join('\n');
 }

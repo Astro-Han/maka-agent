@@ -22,4 +22,6 @@ import type { DesktopSessionLocalBridge } from '../../../shared/session-local-co
 export type ConversationServices = Pick<
   DesktopSessionLocalBridge,
   'listMessages' | 'cancelMessage' | 'reconcileMessage' | 'subscribeChanges'
->;
+> & {
+  readSessionQuote(sessionId: string): Promise<import('@maka/core/session-reference').SessionQuote>;
+};

@@ -14398,7 +14398,7 @@ class MemorySessionStore implements SessionStore {
       llmConnectionSlug: input.llmConnectionSlug,
       connectionLocked: input.subagentParent !== undefined,
       model: input.model ?? 'fake-model',
-      ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
+      ...(input.thinkingLevel != null ? { thinkingLevel: input.thinkingLevel } : {}),
       sandboxMode: input.sandboxMode,
       ...(input.toolMode !== undefined ? { toolMode: input.toolMode } : {}),
       collaborationMode: input.collaborationMode ?? 'agent',

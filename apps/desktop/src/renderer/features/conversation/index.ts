@@ -42,6 +42,7 @@ export {
 export * from './model/session-ui-state.js';
 export type { ConversationServices } from './ports.js';
 export { ConversationServicesProvider } from './services.js';
+export { SessionReferencePicker } from './ui/session-reference-picker.js';
 export { SessionLocalMessages } from './controller/session-local-messages.js';
 export { createConversationDisplayFrameScheduler } from './controller/display-frame-scheduler.js';
 export {

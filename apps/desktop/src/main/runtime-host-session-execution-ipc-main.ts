@@ -18,6 +18,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { createSessionQuote } from '@maka/core/session-reference';
 import type { IpcMainInvokeEvent } from "electron";
 import {
   AttachmentIngestBlockedError,
@@ -109,6 +110,7 @@ type RuntimeHostSessionExecutionClient = Pick<
   | "compactContext"
   | "copySession"
   | "getSession"
+  | 'openSession'
   | "ingestAttachment"
   | "interruptTurn"
   | 'listSessionTurns'
@@ -383,6 +385,21 @@ export function registerRuntimeHostSessionExecutionIpc(
   handleReconnectableRead(ipcMain, 'sessions:listTurns', async (_event, sessionId: unknown) =>
     deps.client.listSessionTurns(requiredId(sessionId, 'Session')),
   );
+  handleReconnectableRead(ipcMain, 'sessions:readQuote', async (_event, sessionId: unknown) => {
+    const id = requiredId(sessionId, 'Session');
+    const opened = await deps.client.openSession(id);
+    try {
+      if (opened.snapshot.session.isArchived) throw new Error('Cannot reference an archived Session');
+      const page = await opened.decodeTranscriptPage(opened.transcriptBootstrap.durable);
+      const current = await deps.client.getSession(id);
+      if (!current || current.isArchived) throw new Error('Source Session is no longer available');
+      return createSessionQuote(page.messages.map((entry) => entry.message), {
+        sessionId: id, sessionName: current.name, capturedAt: Date.now(),
+      }, page.nextCursor !== null);
+    } finally {
+      await opened.close();
+    }
+  });
   handleReconnectableRead(
     ipcMain,
     'sessions:listTurnLandmarks',

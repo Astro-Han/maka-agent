@@ -27,6 +27,7 @@
     "./execution-log-coverage": "./dist/execution-log-coverage.js",
     "./execution-inspect": "./dist/execution-inspect.js",
     "./events": "./dist/events.js",
+    "./session-reference": "./dist/session-reference.js",
     "./provider-retry-countdown": "./dist/provider-retry-countdown.js",
     "./interaction": "./dist/interaction.js",
     "./session": "./dist/session.js",

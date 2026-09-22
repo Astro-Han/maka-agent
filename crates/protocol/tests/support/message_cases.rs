@@ -25,6 +25,32 @@ pub fn inputs(add: &mut impl FnMut(Operation, &str, Value)) {
     let submit = json!({"originHostEpoch":"epoch","sessionId":"session","messageId":"message",
         "content":{"text":"hello😀","displayText":"hello😀","attachments":[]},"placement":"current_turn"});
     let query = json!({"sessionId":"session","messageIds":["message"]});
+    let source = json!({"sessionId":"origin", "sessionName":"Research", "capturedAt":1234.5, "truncated":true});
+    let mut snapshot = submit.clone();
+    snapshot["content"]["quotes"] = json!([{"text":"User: prior work", "source":source}]);
+    add(TurnMessageSubmit, "input", snapshot.clone());
+    for (key, value) in [
+        ("capturedAt", json!(-1)),
+        ("capturedAt", json!(8_640_000_000_000_001_u64)),
+        ("capturedAt", json!("now")),
+        ("truncated", Value::Null),
+        ("sessionId", json!("other/host")),
+        ("sessionName", json!("x".repeat(201))),
+        ("sessionName", json!("")),
+        ("extra", json!(true)),
+    ] {
+        let mut invalid = snapshot.clone();
+        invalid["content"]["quotes"][0]["source"][key] = value;
+        add(TurnMessageSubmit, "input", invalid);
+    }
+    for key in ["sessionId", "sessionName", "capturedAt", "truncated"] {
+        let mut partial = snapshot.clone();
+        partial["content"]["quotes"][0]["source"]
+            .as_object_mut()
+            .unwrap()
+            .remove(key);
+        add(TurnMessageSubmit, "input", partial);
+    }
     let entries = vec![
         (TurnMessageSubmit, submit.clone()),
         (TurnMessageQuery, query.clone()),

@@ -2133,6 +2133,9 @@ const makaBridge = {
       ) as TurnRecord[];
       return turns.map((turn) => projectDesktopTurnRecord(session.scope, turn));
     },
+    readQuote(sessionId) {
+      return invokeSessionRuntimeHost('sessions:readQuote', sessionId);
+    },
     listTurnLandmarks(sessionId, turnId = null) {
       return invokeProjectedSessionRuntimeHost('sessions:listTurnLandmarks', sessionId, turnId);
     },

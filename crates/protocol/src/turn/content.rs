@@ -118,6 +118,10 @@ impl MessageContent {
                 if let Some(id) = &quote.source_turn_id {
                     entity(id)?;
                 }
+                if let Some(source) = &quote.source {
+                    entity(&source.session_id)?;
+                    text(&source.session_name, 200)?;
+                }
             }
         }
         if let Some(refs) = &self.inline_references {

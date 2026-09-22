@@ -25,6 +25,7 @@ import type {
 } from '@maka/core/runtime-inputs';
 import {
   isDirectoryReference,
+  isSessionQuoteSource,
   DIRECTORY_REFERENCE_MAX_COUNT,
   type DirectoryReference,
   type QuoteRef,
@@ -358,6 +359,9 @@ function normalizeOptionalQuotes(input: unknown): { quotes?: QuoteRef[] } {
   }
   const quotes = input.map((entry) => {
     const value = requireObject(entry, 'Invalid send quote');
+    if (value.source !== undefined && !isSessionQuoteSource(value.source)) {
+      throw new Error('Invalid send quote source');
+    }
     const label =
       value.label === undefined
         ? undefined
@@ -374,6 +378,7 @@ function normalizeOptionalQuotes(input: unknown): { quotes?: QuoteRef[] } {
       text: normalizeRequiredString(value.text, 'Invalid send quote text', MAX_QUOTE_TEXT_LENGTH),
       ...(label ? { label } : {}),
       ...(sourceTurnId ? { sourceTurnId } : {}),
+      ...(value.source !== undefined ? { source: { ...value.source } } : {}),
     };
   });
   return quotes.length > 0 ? { quotes } : {};

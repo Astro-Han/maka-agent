@@ -152,14 +152,26 @@ pub fn assert_start_output_for_input(
     Ok(())
 }
 
-// All numeric fields in these contracts are safe nonnegative integers. Normalize
-// JSON exponent/decimal spellings before serde's integer deserialization.
+// Normalize integral JSON spellings for serde's integer fields. Fractional
+// timestamps retain their precision; integer fields still reject fractions.
 fn normalize(value: &Value) -> Result<Value> {
     match value {
         Value::Null => Err(ProtocolError::invalid(
             "Optional fields must be omitted, not null",
         )),
-        Value::Number(_) => Ok(Value::from(codec::count(value, "count")?)),
+        Value::Number(number) => {
+            let number = number
+                .as_f64()
+                .filter(|number| {
+                    number.is_finite() && (0.0..=codec::MAX_SAFE_INTEGER as f64).contains(number)
+                })
+                .ok_or_else(|| ProtocolError::invalid("Invalid number"))?;
+            Ok(if number.fract() == 0.0 {
+                Value::from(number as u64)
+            } else {
+                value.clone()
+            })
+        }
         Value::Array(a) => Ok(Value::Array(
             a.iter().map(normalize).collect::<Result<_>>()?,
         )),

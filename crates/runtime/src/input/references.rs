@@ -33,6 +33,44 @@ pub struct QuoteRef {
     pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_turn_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<SessionQuoteSource>,
+}
+
+/// Display provenance of an immutable excerpt, never authority to read its source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionQuoteSource {
+    pub session_id: String,
+    pub session_name: String,
+    pub captured_at: CaptureTime,
+    pub truncated: bool,
+}
+
+/// JavaScript epoch milliseconds, preserving fractional timestamps within Date's range.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "serde_json::Number", into = "serde_json::Number")]
+pub struct CaptureTime(serde_json::Number);
+
+impl TryFrom<serde_json::Number> for CaptureTime {
+    type Error = &'static str;
+
+    fn try_from(value: serde_json::Number) -> Result<Self, Self::Error> {
+        if value
+            .as_f64()
+            .is_some_and(|value| (0.0..=8_640_000_000_000_000.0).contains(&value))
+        {
+            Ok(Self(value))
+        } else {
+            Err("invalid Session quote capture time")
+        }
+    }
+}
+
+impl From<CaptureTime> for serde_json::Number {
+    fn from(value: CaptureTime) -> Self {
+        value.0
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

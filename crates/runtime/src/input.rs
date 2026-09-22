@@ -21,7 +21,10 @@ use crate::attachment::AttachmentRef;
 use serde::{Deserialize, Serialize};
 mod references;
 mod selections;
-pub use references::{DirectoryReference, InlineReference, InlineReferenceKind, QuoteRef};
+pub use references::{
+    CaptureTime, DirectoryReference, InlineReference, InlineReferenceKind, QuoteRef,
+    SessionQuoteSource,
+};
 pub use selections::{Selections, validate_selections};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +123,9 @@ impl MessageInput {
                 std::iter::once(quote.text.as_str())
                     .chain(quote.label.as_deref())
                     .chain(quote.source_turn_id.as_deref())
+                    .chain(quote.source.iter().flat_map(|source| {
+                        [source.session_id.as_str(), source.session_name.as_str()]
+                    }))
             }))
             .chain(
                 self.directory_references

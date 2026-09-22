@@ -48,6 +48,47 @@ import { RuntimeHostSessionObservationRegistry } from '../runtime-host-session-o
 import { RuntimeHostSessionObserver } from "../runtime-host-session-observer.js";
 import { runtimeHostSessionFixture } from "./runtime-host-session-test-fixture.js";
 
+test('Session quote reads only the bounded committed tail and closes on source loss or decode failure', async () => {
+  const ipc = ipcHarness();
+  let archived = false;
+  let broken = false;
+  let closed = 0;
+  const snapshot = {
+    schemaVersion: SESSION_CONTINUITY_SCHEMA_VERSION,
+    session: { sessionId: 'source', metadataRevision: 1, status: 'active' as const, createdAt: 1, isArchived: false },
+    projectionRevision: 1, rootTurn: null, goal: null,
+    queue: { hostEpoch: 'epoch', queueRevision: 0, steering: [], followup: [] },
+    interactions: { pending: [] },
+  };
+  registerExecutionIpc({ client: executionClient({
+    getSession: async () => ({ ...session('/workspace', 'source'), isArchived: archived }),
+    openSession: async (id) => {
+      assert.equal(id, 'source');
+      return runtimeHostSessionFixture({ snapshot,
+        transcript: Promise.resolve([]), events: (async function* () {})(),
+        decodeTranscriptPage: async () => {
+          if (broken) throw new Error('Unreadable committed page');
+          return {
+            messages: [{ identity: 1, message: { type: 'user', id: 'message', turnId: 'turn', ts: 1.5, text: 'Committed text' } }],
+            nextCursor: 'older',
+          };
+        },
+        close: async () => { closed++; },
+      });
+    },
+  }) }, ipc);
+  const quote = await ipc.invoke('sessions:readQuote', 'source') as import('@maka/core/session-reference').SessionQuote;
+  assert.equal(quote.text, 'User: Committed text');
+  assert.equal(quote.source.sessionId, 'source');
+  assert.equal(quote.source.truncated, true);
+  archived = true;
+  await assert.rejects(ipc.invoke('sessions:readQuote', 'source'), /no longer available/);
+  broken = true;
+  await assert.rejects(ipc.invoke('sessions:readQuote', 'source'), /Unreadable committed page/);
+  assert.equal(closed, 3);
+  assert.ok(ipc.reconnectableChannels.has('sessions:readQuote'));
+});
+
 test('registers Session observation as one reconnectable operation', () => {
   const ipc = ipcHarness();
   registerRuntimeHostSessionObservationIpc(
@@ -2247,6 +2288,7 @@ function executionClient(overrides: Partial<ExecutionClient>): ExecutionClient {
     compactContext: unavailable,
     copySession: unavailable,
     getSession: unavailable,
+    openSession: unavailable,
     ingestAttachment: unavailable,
     interruptTurn: unavailable,
     listSessionTurns: unavailable,

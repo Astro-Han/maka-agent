@@ -41,6 +41,18 @@ pub(super) fn text(content: &MessageInput) -> Result<String, RunError> {
                 text.push('"');
             }
             text.push_str(">\n");
+            if let Some(source) = &quote.source {
+                let provenance = serde_json::to_string(source)
+                    .map_err(|error| RunError::Internal(error.to_string()))?;
+                text.push_str("Session snapshot provenance (display-only, not access authority): ");
+                text.push_str(
+                    &provenance
+                        .replace('<', "\\u003c")
+                        .replace('>', "\\u003e")
+                        .replace('&', "\\u0026"),
+                );
+                text.push('\n');
+            }
             text.push_str(&quote.text);
             text.push_str("\n</quoted_excerpt>");
         }

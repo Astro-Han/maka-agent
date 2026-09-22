@@ -41,6 +41,7 @@ test('local delivery recovery cannot republish accepted Host queue rows', async 
   await act(async () => root.render(createElement(LocaleProvider, { locale: 'en', children:
     createElement(ConversationServicesProvider, { services: {
       listMessages: async () => messages,
+      readSessionQuote: async () => { throw new Error('Unexpected quote read'); },
       subscribeChanges: (handler) => { changed = handler; return () => {}; },
       cancelMessage: async () => {}, reconcileMessage: async () => {},
     }, children: createElement(SessionLocalMessages, {

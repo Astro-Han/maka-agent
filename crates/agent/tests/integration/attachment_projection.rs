@@ -55,7 +55,9 @@ async fn attachment_references_remain_structured_and_match_the_original_model_fo
         let input: MessageInput = serde_json::from_value(json!({
             "text":"original question", "display_text":"visible chips",
             "attachments":attachments,
-            "quotes":[{"text":"quoted <data>","label":"label"}],
+            "quotes":[{"text":"quoted <data>","label":"label", "source": {
+                "sessionId":"source", "sessionName":"Research <&> 😀", "capturedAt":1234.5, "truncated":true
+            }}],
             "directory_references":[{"hostId":"root","path":"/tmp/<folder>"}],
             "inline_references":[]
         }))

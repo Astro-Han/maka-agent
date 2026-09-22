@@ -2438,6 +2438,12 @@ function AppShellContent({
                         } }} />
                     ) : null}
                     {!sharedSessionActive && sessionsSelected && !usesPluginExecutor ? <PlanExecutionPanel planMode={planMode} /> : null}
+                    {sessionsSelected && contextPickEnabled && !sharedSessionActive ? <Conversation.SessionReferencePicker
+                      key={activeId ?? currentNewTaskDraftKey} sessions={sessions} currentSessionId={activeId}
+                      hostId={activeId ? activeCatalogSession?.runtimeHostId : taskEntry.selectors.target?.hostId}
+                      locale={uiLocale} disabled={newTaskSendPending || activeMessageSubmitting}
+                      onAttach={addQuote}
+                    /> : null}
                     {sessionsSelected && !activeId && taskEntry.selectors.target ? <ExecutorTaskPicker
                       key={currentNewTaskDraftKey} target={{ kind: 'new', host: taskEntry.selectors.target }} locale={uiLocale}
                       value={newTaskExecutor} disabled={newTaskSendPending}

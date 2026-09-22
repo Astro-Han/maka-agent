@@ -300,6 +300,12 @@ Each Session holds up to 200 items of 200 characters each. Completion is reporte
 by the model, not verified execution evidence. Disabling the plugin withdraws its
 tools and UI without deleting the checklist; re-enabling or restarting restores it.
 
+## Session references
+
+Desktop can attach a previewed, committed text snapshot from another Session on the same Host.
+Quotes preserve the source name, capture time and truncation marker through storage and model history.
+They are immutable excerpts, not live links or authorization to read the source.
+
 ## Conversation recall
 
 `maka.recall` publishes lazy `Recall`, `RecallMore` and `RecallMaterial` through public history

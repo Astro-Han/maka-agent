@@ -190,7 +190,8 @@ describe('permission response IPC boundary', () => {
         ],
         turnOrchestration: { mode: 'swarm', source: 'slash_command', ignored: true },
         quotes: [
-          { text: 'the excerpt', label: '  Assistant  ', sourceTurnId: 'turn-9', extra: true },
+          { text: 'the excerpt', label: '  Assistant  ', sourceTurnId: 'turn-9', extra: true,
+            source: { sessionId: 'source', sessionName: 'Research', capturedAt: 1234.5, truncated: true } },
         ],
         workspaceFileReferences: [
           {
@@ -223,7 +224,8 @@ describe('permission response IPC boundary', () => {
           },
         ],
         turnOrchestration: { mode: 'swarm', source: 'slash_command' },
-        quotes: [{ text: 'the excerpt', label: 'Assistant', sourceTurnId: 'turn-9' }],
+        quotes: [{ text: 'the excerpt', label: 'Assistant', sourceTurnId: 'turn-9',
+          source: { sessionId: 'source', sessionName: 'Research', capturedAt: 1234.5, truncated: true } }],
         workspaceFileReferences: [
           {
             value: '@packages/ui/src/chat turn.tsx',

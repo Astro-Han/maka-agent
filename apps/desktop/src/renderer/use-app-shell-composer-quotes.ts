@@ -19,6 +19,7 @@
 
 import { useState } from 'react';
 import type { QuoteRef } from '@maka/core/events';
+import { boundReferenceText } from '@maka/core/session-reference';
 import {
   appendPending,
   clearPending,
@@ -42,14 +43,15 @@ export function useAppShellComposerQuotes(options: { draftKey: string }) {
   const [pendingByKey, setPendingByKey] = useState<PendingByKey<QuoteRef>>({});
   const pendingQuotes = selectPending(pendingByKey, options.draftKey);
 
-  function addQuote(input: { text: string; turnId?: string; label?: string }): void {
-    const text = input.text.slice(0, MAX_QUOTE_CHARS).trim();
+  function addQuote(input: { text: string; turnId?: string; label?: string; source?: QuoteRef['source'] }): void {
+    const text = boundReferenceText(input.text, MAX_QUOTE_CHARS).trim();
     if (!text) return;
     const ownerKey = options.draftKey;
     const quote: QuoteRef = {
       text,
       ...(input.label ? { label: input.label } : {}),
       ...(input.turnId ? { sourceTurnId: input.turnId } : {}),
+      ...(input.source ? { source: { ...input.source, truncated: input.source.truncated || text.length !== input.text.length } } : {}),
     };
     setPendingByKey((map) => appendPending(map, ownerKey, [quote]));
   }
