@@ -235,6 +235,21 @@ test('cancelled transcript open rejects and removes its preload listener', async
   }
 });
 
+test('terminal recovery keeps Host scope and rejects a different Turn identity', async () => {
+  let returnedTurnId = 'compact-turn';
+  const { bridge } = await preloadHarness(async (channel, scope, operation, input) => {
+    assert.equal(channel, 'runtime-host:query');
+    assert.equal(JSON.stringify(scope), JSON.stringify(owner));
+    assert.equal(operation, 'turn.query');
+    assert.equal(JSON.stringify(input), JSON.stringify({ sessionId: 'session-1', turnId: 'compact-turn' }));
+    return { sessionId: 'session-1', turnId: returnedTurnId, status: 'completed', terminalEventId: 'done' };
+  });
+  const sessionId = JSON.stringify([owner.hostId, 'session-1']);
+  assert.equal((await bridge.sessions.queryTurn(sessionId, 'compact-turn')).sessionId, sessionId);
+  returnedTurnId = 'unrelated-turn';
+  await assert.rejects(bridge.sessions.queryTurn(sessionId, 'compact-turn'), /identity changed/);
+});
+
 async function preloadHarness(invoke: (channel: string, ...args: unknown[]) => Promise<unknown>) {
   const events = new EventEmitter();
   const ipcRenderer = {

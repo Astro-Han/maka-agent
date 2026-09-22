@@ -129,6 +129,8 @@ function admissionOutcomeForMessage(
 export interface UseQuoteCompanionInput {
   /** Stable owner for the currently mounted panel generation. */
   panelId: string;
+  /** Visibility owns observation, not the lifetime of accepted work. */
+  active: boolean;
   /** Excerpts staged for the next send; accumulates as the user adds more from
    *  the main transcript. Attached to the next turn, then cleared by the host. */
   pendingQuotes: readonly StagedCompanionQuote[];
@@ -270,6 +272,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const { sideChat } = useWorkbarServices();
   const {
     panelId,
+    active,
     locale,
     sourceSession,
     modelChoices,
@@ -297,6 +300,8 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const sourceSessionId = sourceSession?.id;
   const sourceSessionIdRef = useRef(sourceSession?.id);
   sourceSessionIdRef.current = sourceSessionId;
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const forkSetupPromiseRef = useRef<Promise<EnsureCompanionForkResult> | null>(null);
   const stopRequestRef = useRef<{ promise: Promise<unknown>; turnId?: string } | null>(null);
   const activeTurnIdRef = useRef<string | null>(null);
@@ -320,6 +325,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const ownTurnIdsRef = useRef<Set<string>>(new Set());
   const compactionRequestInFlightRef = useRef(false);
   const compactionTurnIdRef = useRef<string | null>(null);
+  const compactionNeedsRecoveryRef = useRef(false);
   const pendingCompactionTerminalRef = useRef<PendingCompactionTerminal | null>(null);
   const [allMessages, setAllMessages] = useState<StoredMessage[]>([]);
   const allMessagesRef = useRef(allMessages);
@@ -511,6 +517,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       if (terminal) {
         if (compactionTurnIdRef.current === terminal.turnId) {
           compactionTurnIdRef.current = null;
+          compactionNeedsRecoveryRef.current = false;
           compactionRequestInFlightRef.current = false;
           if (terminal.kind === 'outcome') {
             onContextCompactionOutcomeRef.current?.(forkId, terminal.turnId, terminal.outcome);
@@ -740,10 +747,38 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     return true;
   }, [mergeDurableMessages, mountedRef, recordOwnedTurn, sideChat]);
 
+  const recoverCompaction = useCallback(async (forkId: string) => {
+    const turnId = compactionTurnIdRef.current;
+    if (!turnId || !compactionRequestInFlightRef.current) return;
+    compactionNeedsRecoveryRef.current = true;
+    try {
+      const turn = await sideChat.queryTurn(forkId, turnId);
+      if (turn.sessionId !== forkId || turn.turnId !== turnId) throw new Error('Compaction query identity changed');
+      if (!mountedRef.current || companionIdRef.current !== forkId ||
+          compactionTurnIdRef.current !== turnId) return;
+      if (turn.status !== 'completed' && turn.status !== 'failed' && turn.status !== 'cancelled') return;
+      compactionNeedsRecoveryRef.current = false;
+      compactionTurnIdRef.current = null;
+      compactionRequestInFlightRef.current = false;
+      pendingCompactionTerminalRef.current = null;
+      if (turn.status === 'completed' && turn.contextCompactionOutcome) {
+        onContextCompactionOutcomeRef.current?.(forkId, turnId, turn.contextCompactionOutcome);
+      } else {
+        onContextCompactionErrorRef.current?.(forkId, new Error(
+          turn.status === 'failed' ? turn.failureMessage ?? turn.failureClass
+            : turn.status === 'cancelled' ? turn.abortSource : 'Compaction outcome is unavailable',
+        ));
+      }
+    } catch {
+      if (mountedRef.current && companionIdRef.current === forkId) setError(copyRef.current.errors.settlementFailed);
+    }
+  }, [sideChat, mountedRef]);
+
   // Subscribe to the fork's event stream + load its transcript. Called
   // synchronously the moment the fork is committed, BEFORE the run starts, so
   // no boundary request / complete can be missed (the stream has no replay).
   const subscribeToFork = useCallback((forkId: string): Promise<void> => {
+    setInteractions({});
     let resolveReady!: () => void;
     let rejectReady!: (error: unknown) => void;
     let readySettled = false;
@@ -767,6 +802,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     const observationSeeded = () => {
       if (disposed || !mountedRef.current) return;
       resolveReady();
+      void recoverCompaction(forkId);
       void sideChat.readSettledMessages(forkId)
         .then(({ messages }) => {
           if (!mountedRef.current || companionIdRef.current !== forkId) return;
@@ -849,10 +885,12 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         activeTurnIdRef.current = activeHostTurn(projection)?.turnId ?? null;
         setExecution(projection);
       },
+      () => { if (!disposed && mountedRef.current) setInteractions({}); },
     );
     unsubscribeRef.current = () => {
       if (disposed) return;
       disposed = true;
+      if (compactionRequestInFlightRef.current) compactionNeedsRecoveryRef.current = true;
       unsubscribe();
       // A send waiting for observation readiness must finish when the panel is
       // disposed; its mounted check below then turns this into a clean no-op.
@@ -869,6 +907,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     projectMessageQueue,
     reconcilePendingMessageExecutions,
     reconcileUnknownAdmission,
+    recoverCompaction,
     resolveAdmission,
     sideChat,
   ]);
@@ -879,10 +918,22 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       companionIdRef.current = session.id;
       companionRef.current = session;
       setCompanion(session);
-      subscriptionReadyRef.current = subscribeToFork(session.id);
+      subscriptionReadyRef.current = activeRef.current ? subscribeToFork(session.id) : Promise.resolve();
     },
     [subscribeToFork],
   );
+
+  useEffect(() => {
+    if (!active) {
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
+      return;
+    }
+    const forkId = companionIdRef.current;
+    if (forkId && unsubscribeRef.current === null) {
+      subscriptionReadyRef.current = subscribeToFork(forkId);
+    }
+  }, [active, subscribeToFork]);
 
   const ensureFork = useCallback(
     (name: string): Promise<EnsureCompanionForkResult> => {
@@ -1054,6 +1105,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
 
   const compact = useCallback(async (): Promise<boolean> => {
     const fork = companionRef.current;
+    if (fork && compactionNeedsRecoveryRef.current) await recoverCompaction(fork.id);
     if (
       !mountedRef.current ||
       !fork ||
@@ -1075,6 +1127,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       if (!mountedRef.current) return false;
       awaitingTerminal = result.kind === 'started';
       compactionTurnIdRef.current = result.turn.turnId;
+      if (awaitingTerminal && compactionNeedsRecoveryRef.current && activeRef.current) void recoverCompaction(fork.id);
       onContextCompactionResultRef.current?.(fork.id, result);
       const pendingTerminal = readMutableRef(pendingCompactionTerminalRef);
       if (pendingTerminal?.turnId === result.turn.turnId) {
@@ -1107,7 +1160,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         if (!awaitingTerminal) compactionTurnIdRef.current = null;
       }
     }
-  }, [mountedRef, sideChat]);
+  }, [mountedRef, recoverCompaction, sideChat]);
 
   const prepareExecution = useCallback(async (sessionId: string): Promise<boolean> => {
     try {
@@ -1127,6 +1180,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     ): Promise<boolean> => {
       const trimmed = text.trim();
       if (isExactCompactCommand(trimmed)) return compact();
+      if (companionIdRef.current && compactionNeedsRecoveryRef.current) await recoverCompaction(companionIdRef.current);
       // A structured-only Message (empty text carrying a quote or an attachment)
       // is a valid send since the admission widening (#4804), so the guard
       // rejects only when nothing at all is staged.
@@ -1228,7 +1282,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       try {
         await subscriptionReadyRef.current;
       } catch {
-        if (mountedRef.current) {
+        if (mountedRef.current && activeRef.current) {
           unsubscribeRef.current?.();
           subscriptionReadyRef.current = subscribeToFork(fork.session.id);
           setError(copyRef.current.errors.sendFailed);
@@ -1345,6 +1399,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       sideChat,
       bindAdmittedTurn,
       compact,
+      recoverCompaction,
       addPendingUserMessage,
       dropOptimisticUserMessage,
       mergeDurableMessages,

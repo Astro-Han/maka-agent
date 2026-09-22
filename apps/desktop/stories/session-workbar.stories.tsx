@@ -883,6 +883,7 @@ function bridge(options: {
         },
       ],
       readSettledMessages: async () => ({ messages: [], settled: true }),
+      queryTurn: async () => { throw new Error('No pending Turn in this story'); },
       branchFromTurn: async () => ({ ok: true, session: SIDE_CHAT_SESSION }),
       cleanupSessionCopy: async () => undefined,
       abandonSessionCopy: async () => undefined,

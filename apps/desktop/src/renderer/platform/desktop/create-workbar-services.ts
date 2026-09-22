@@ -179,6 +179,7 @@ export function createDesktopWorkbarServices(
       prepareExecution,
       listSessions: () => bridge.sessions.list(),
       listTurns: (sessionId) => bridge.sessions.listTurns(sessionId),
+      queryTurn: (sessionId, turnId) => bridge.sessions.queryTurn(sessionId, turnId),
       readSettledMessages: (sessionId, options) =>
         dependencies.readSettledMessages(bridge, sessionId, options),
       branchFromTurn: (sessionId, input) =>
@@ -225,9 +226,10 @@ export function createDesktopWorkbarServices(
         bridge.sessions.respondToUserForm(sessionId, response),
       respondToPermissions: (sessionId, response) =>
         bridge.sessions.respondToPermissions(sessionId, response),
-      subscribeEvents: (sessionId, handler, onSeeded, onSeedError, onExecution) =>
+      subscribeEvents: (sessionId, handler, onSeeded, onSeedError, onExecution, onReset) =>
         bridge.sessions.subscribeEvents(sessionId, handler, (phase) => {
           if (phase === 'ready') onSeeded?.();
+          else onReset?.();
         }, onSeedError, onExecution),
       subscribeSessionChanges: (handler) => bridge.sessions.subscribeChanges(handler),
     },

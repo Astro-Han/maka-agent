@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { Fragment, memo, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import { ICON_SIZE, Ban, ChevronRight, GitBranch, Pencil, RefreshCcw, Timer } from './icons.js';
 import { useClipboardCopyFeedback } from './clipboard-feedback.js';
 import { Markdown } from './markdown.js';
@@ -60,7 +60,7 @@ import {
   type TurnTimelineItem,
   type TurnViewModel,
 } from './materialize.js';
-import { foldTimeline, type FoldedTimelineChild, type FoldedTimelineEntry } from './timeline-fold.js';
+import { foldTimeline, reconcileFoldedEntries, type FoldedTimelineChild, type FoldedTimelineEntry } from './timeline-fold.js';
 import { AttachmentKindIcon } from './attachment-kinds.js';
 import { QuoteRefChip } from './quote-ref-chip.js';
 import { Marker, markerVariants } from './primitives/chat.js';
@@ -479,7 +479,11 @@ export const TurnView = memo(function TurnView(props: {
   const { turn } = props;
   // Derive disclosure entries and reply identity together, only when this
   // turn's timeline changes. Rendering and copy share the original reply item.
-  const { entries: foldedTimeline, finalReply } = useMemo(() => foldTimeline(turn.timeline), [turn.timeline]);
+  const folded = useMemo(() => foldTimeline(turn.timeline), [turn.timeline]);
+  const foldedEntriesRef = useRef(folded.entries);
+  foldedEntriesRef.current = reconcileFoldedEntries(foldedEntriesRef.current, folded.entries);
+  const foldedTimeline = foldedEntriesRef.current;
+  const finalReply = folded.finalReply;
   const forwardBadges = props.lineageBadges?.filter((b) => b.direction === 'forward') ?? [];
   const reverseBadges = props.lineageBadges?.filter((b) => b.direction === 'reverse') ?? [];
   const answerContext = accessibleActionContext(
@@ -496,6 +500,11 @@ export const TurnView = memo(function TurnView(props: {
     !!props.liveStreaming ||
     (turn.user !== undefined && turn.statusSource === 'recorded' && turn.status !== 'running');
   const runningToolLabel = computerRunningLabel(turn.tools, locale);
+  const activity = useMemo(() => ({ startedAt: turn.startedAt, label: runningToolLabel }), [turn.startedAt, runningToolLabel]);
+  const switchToBypassAndRetry = useCallback(
+    () => props.onSwitchToBypassAndRetry?.(turn.turnId),
+    [props.onSwitchToBypassAndRetry, turn.turnId],
+  );
   const conversationSegments = useMemo(
     () => splitTimelineAtUserMessages(foldedTimeline, showAssistantMessage),
     [foldedTimeline, showAssistantMessage],
@@ -702,7 +711,7 @@ export const TurnView = memo(function TurnView(props: {
                   running={!!props.liveStreaming || turn.status === 'running'}
                   durationMs={turn.durationMs}
                   activity={props.liveStreaming?.runningStatus && !props.liveStreaming.providerRetry
-                    ? { startedAt: turn.startedAt, label: runningToolLabel }
+                    ? activity
                     : undefined}
                 />
               )}
@@ -717,13 +726,13 @@ export const TurnView = memo(function TurnView(props: {
                     activity={index === activityProcessIndex
                       && props.liveStreaming?.runningStatus
                       && !props.liveStreaming.providerRetry
-                      ? { startedAt: turn.startedAt, label: runningToolLabel }
+                      ? activity
                       : undefined}
                     onStreamingSettled={props.liveStreaming?.onStreamingSettled}
                     onOpenLinkedSession={props.onOpenLinkedSession}
                     onSwitchToBypassAndRetry={
                       props.onSwitchToBypassAndRetry
-                        ? () => props.onSwitchToBypassAndRetry?.(turn.turnId)
+                        ? switchToBypassAndRetry
                         : undefined
                     }
                     initialLiveContent={props.liveStreaming?.initialLiveContent}
@@ -737,7 +746,7 @@ export const TurnView = memo(function TurnView(props: {
                     onOpenLinkedSession={props.onOpenLinkedSession}
                     onSwitchToBypassAndRetry={
                       props.onSwitchToBypassAndRetry
-                        ? () => props.onSwitchToBypassAndRetry?.(turn.turnId)
+                        ? switchToBypassAndRetry
                         : undefined
                     }
                     initialLiveContent={props.liveStreaming?.initialLiveContent}
@@ -1282,7 +1291,7 @@ function timelineEntryKey(item: TurnTimelineItem, index: number): string {
 }
 
 /** Render one timeline entry: reasoning disclosure / answer bubble / tool group. */
-function TurnTimelineEntry(props: {
+const TurnTimelineEntry = memo(function TurnTimelineEntry(props: {
   activityObserved?: boolean;
   item: Exclude<TurnTimelineItem, { kind: 'user' }>;
   onStreamingSettled?: (messageId?: string) => void;
@@ -1323,9 +1332,9 @@ function TurnTimelineEntry(props: {
       onSettled={() => props.onStreamingSettled?.(item.messageId)}
     />
   );
-}
+});
 
-export function ProcessingBlock(props: {
+export const ProcessingBlock = memo(function ProcessingBlock(props: {
   activityObserved?: boolean;
   entries: FoldedTimelineChild[];
   running: boolean;
@@ -1387,7 +1396,7 @@ export function ProcessingBlock(props: {
       </div></div>
     </details>
   );
-}
+});
 
 function DeepThinking(props: { text: string; live: boolean; settledText?: string; truncated?: boolean }) {
   const copy = getConversationCopy(useUiLocale()).messages;

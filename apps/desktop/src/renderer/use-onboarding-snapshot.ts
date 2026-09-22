@@ -17,37 +17,14 @@
  * under the License.
  */
 
-/**
- * `useOnboardingSnapshot` — renderer hook over the PR110b IPC.
- *
- * @kenji + @xuan PR110c review gates:
- *   1. Renderer NEVER re-derives provider readiness; only consumes
- *      `onboarding:getSnapshot()`. Connections, secrets, default
- *      slugs etc. are not touched.
- *   2. Invalidation uses ONLY existing event channels —
- *      `sessions:changed` and `connections:event`. No new event bus
- *      for PR110c.
- *   3. `refresh()` is provided for action-driven re-pulls (e.g.
- *      "the user just clicked '打开设置 · 模型' so re-pull when the
- *      modal closes").
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { generalizedErrorMessageForLocale } from '@maka/core/redaction';
 import { type UiLocale } from '@maka/core/ui-locale';
 import { hasSettledInitialOnboarding } from '@maka/core/onboarding-milestone';
-import { useUiLocale } from '@maka/ui';
+import { useUiLocale, valuesEqual } from '@maka/ui';
 import type { OnboardingSnapshot } from '../preload/bridge-contract.js';
 import { getOnboardingCopy } from './locales/onboarding-copy.js';
 
-/**
- * Hook return type — `snapshot` is `null` while the initial getSnapshot
- * IPC is still in flight, then settles to the latest derived value.
- * `error` carries a generalized Chinese message if the IPC ever fails
- * (`onboarding:getSnapshot` is best-effort; main treats it as
- * non-throwing in current implementations, but we surface the slot
- * defensively).
- */
 export interface UseOnboardingSnapshotResult {
   snapshot: OnboardingSnapshot | null;
   error: string | null;
@@ -89,16 +66,6 @@ export function getOnboardingActivationCandidate(
   };
 }
 
-/**
- * Pure-deps form. Renderer code uses `useOnboardingSnapshot()` (no
- * args); tests pass injected `deps` to drive the hook with fakes
- * (no IPC required).
- *
- * The hook is a thin React shell over `createOnboardingSnapshotPoller`
- * — the React-less helper that owns the ticket-based stale-response
- * defense. Tests target the pure poller directly so they don't need
- * a DOM / React runtime.
- */
 export function useOnboardingSnapshotImpl(
   deps: UseOnboardingSnapshotDeps,
 ): UseOnboardingSnapshotResult {
@@ -112,7 +79,7 @@ export function useOnboardingSnapshotImpl(
   if (pollerRef.current === null) {
     pollerRef.current = createOnboardingSnapshotPoller(deps, {
       onSnapshot: (next) => {
-        setSnapshot(next);
+        setSnapshot((previous) => previous && onboardingSnapshotProjectionEqual(previous, next) ? previous : next);
         setError(null);
       },
       onError: (message) => {
@@ -146,13 +113,7 @@ export function useOnboardingSnapshotImpl(
   };
 }
 
-/**
- * React-less poller. Tracks an inflight ticket so older getSnapshot
- * responses can't overwrite newer state, and owns a lifecycle gate so
- * pending IPC responses cannot write after the first-run surface
- * unmounts. Extracted from `useOnboardingSnapshotImpl` so the stale
- * response defense is testable without a DOM / React.
- */
+/** Serializes invalidations and fences responses across effect lifetimes. */
 export interface OnboardingSnapshotPollerCallbacks {
   onSnapshot(snapshot: OnboardingSnapshot): void;
   onError(message: string): void;
@@ -174,6 +135,8 @@ export function createOnboardingSnapshotPoller(
 ): OnboardingSnapshotPoller {
   let inflightTicket = 0;
   let active = true;
+  let inflight: Promise<void> | null = null;
+  let pullAgain = false;
 
   function emitSnapshot(snapshot: OnboardingSnapshot): void {
     if (!active) return;
@@ -185,21 +148,34 @@ export function createOnboardingSnapshotPoller(
     callbacks.onError(message);
   }
 
+  async function runPull(): Promise<void> {
+    const ticket = ++inflightTicket;
+    try {
+      const next = await deps.getSnapshot();
+      if (!active || ticket !== inflightTicket) return;
+      emitSnapshot(next);
+    } catch (err) {
+      if (!active || ticket !== inflightTicket) return;
+      emitError(onboardingSnapshotErrorMessage(err, getLocale()));
+    }
+  }
+
   return {
-    activate(): void {
-      active = true;
-    },
-    async pull(): Promise<void> {
-      if (!active) return;
-      const ticket = ++inflightTicket;
-      try {
-        const next = await deps.getSnapshot();
-        if (!active || ticket !== inflightTicket) return; // newer pull won or unmounted
-        emitSnapshot(next);
-      } catch (err) {
-        if (!active || ticket !== inflightTicket) return;
-        emitError(onboardingSnapshotErrorMessage(err, getLocale()));
+    activate(): void { active = true; },
+    pull(): Promise<void> {
+      if (!active) return Promise.resolve();
+      if (inflight !== null) {
+        pullAgain = true;
+        return inflight;
       }
+      inflight = (async () => {
+        do {
+          pullAgain = false;
+          await runPull();
+        } while (active && pullAgain);
+        inflight = null;
+      })();
+      return inflight;
     },
     dispose(): void {
       active = false;
@@ -213,21 +189,14 @@ export function onboardingSnapshotErrorMessage(error: unknown, locale: UiLocale)
   return generalizedErrorMessageForLocale(error, fallback, locale);
 }
 
-/**
- * Default renderer binding: subscribes to BOTH `sessions:changed`
- * and `connections:event` so any session lifecycle (create / delete /
- * archive / rebound / message-appended) or any connection change
- * (verified / disabled / removed) invalidates the snapshot.
- *
- * Settings changes are NOT subscribed: there is no existing
- * settings-wide event channel and PR110c is not inventing one. If a
- * settings write changes onboarding state (e.g. user picks a default
- * connection via the connection store IPCs), the resulting
- * `connections:event` should fire and cover this.
- *
- * Callers that need a re-pull on a specific UI action (e.g. modal
- * close) should call `refresh()` from the returned object.
- */
+/** Session rows belong to the catalog; every other field participates by default. */
+export function onboardingSnapshotProjectionEqual(a: OnboardingSnapshot, b: OnboardingSnapshot): boolean {
+  const { sessions: _a, ...left } = a;
+  const { sessions: _b, ...right } = b;
+  return valuesEqual(left, right);
+}
+
+/** Host events invalidate readiness; explicit actions can also request a refresh. */
 export function useOnboardingSnapshot(): UseOnboardingSnapshotResult {
   return useOnboardingSnapshotImpl(LIVE_DEPS);
 }

@@ -1987,6 +1987,12 @@ const makaBridge = {
     },
   } satisfies import('../shared/session-local-contract.js').DesktopSessionLocalBridge,
   sessions: {
+    async queryTurn(sessionId: string, turnId: string) {
+      const session = await runtimeHostSessionRef(sessionId);
+      const turn = await scopedRuntimeHost(session.scope).query('turn.query', { sessionId: session.sessionId, turnId });
+      if (turn.sessionId !== session.sessionId || turn.turnId !== turnId) throw new Error('Turn query identity changed');
+      return { ...turn, sessionId };
+    },
     async get(sessionId: string) {
       const session = await runtimeHostSessionRef(sessionId);
       return projectSessionSummary(session.scope, await invokeWhenReady('sessions:get', session.scope, session.sessionId));

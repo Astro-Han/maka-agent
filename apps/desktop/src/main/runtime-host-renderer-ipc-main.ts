@@ -90,6 +90,7 @@ function request(
   switch (operation) {
     case 'plugin.client.query':
     case 'executor.catalog.query':
+    case 'turn.query':
       return client.request(operation, HOST_OPERATION_SPECS[operation].decodeInput(value));
     case 'context.diagnostics.query':
       return client.request(operation, HOST_OPERATION_SPECS[operation].decodeInput(value));

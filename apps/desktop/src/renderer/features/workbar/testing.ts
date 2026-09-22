@@ -132,6 +132,7 @@ export function createFakeWorkbarServices(
       prepareExecution: async () => true,
       listSessions: async () => [],
       listTurns: async () => [],
+      queryTurn: async () => { throw new Error('Fake sideChat.queryTurn is not configured'); },
       readSettledMessages: async () => ({ messages: [], settled: true }),
       branchFromTurn: async () => {
         throw new Error('Fake sideChat.branchFromTurn is not configured');

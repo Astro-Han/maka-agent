@@ -202,6 +202,7 @@ export interface SideChatSessionPort {
   prepareExecution(sessionId: string): Promise<boolean>;
   listSessions(): Promise<SideChatSession[]>;
   listTurns(sessionId: string): Promise<TurnRecord[]>;
+  queryTurn(sessionId: string, turnId: string): Promise<import('@maka/runtime-host/protocol').TurnSnapshot>;
   readSettledMessages(
     sessionId: string,
     options?: { requiredAssistantMessageId?: string; requiredTurnId?: string },
@@ -284,6 +285,8 @@ export interface SideChatSessionPort {
     onReady?: () => void,
     onSeedError?: (error: unknown) => void,
     onExecution?: (projection: import('../../../shared/session-execution-projection.js').SessionExecutionProjection | undefined) => void,
+    /** Discard obsolete control requests before a replacement observation seed. */
+    onReset?: () => void,
   ): WorkbarUnsubscribe;
   subscribeSessionChanges(handler: (event: SessionChangedEvent) => void): WorkbarUnsubscribe;
 }

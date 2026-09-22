@@ -83,6 +83,9 @@ export function BrowserPanel(props: { sessionId: string; hidden: boolean }) {
   const editingRef = useRef(false);
   const browserPanelMountedRef = useMountedRef();
   const browserPanelSessionIdRef = useRef(sessionId);
+  // Which session the held `state`/`address` describe — a hidden stretch must
+  // not wipe them, and a session switch while hidden must still reset on show.
+  const stateSessionRef = useRef<string | undefined>(undefined);
 
   browserPanelSessionIdRef.current = sessionId;
 
@@ -90,29 +93,38 @@ export function BrowserPanel(props: { sessionId: string; hidden: boolean }) {
     return browserPanelMountedRef.current && browserPanelSessionIdRef.current === ownerSessionId;
   }, []);
 
-  // Subscribe to this session's state pushes + seed the initial state.
+  // Subscribe to this session's state pushes + seed the current state only
+  // while the panel is shown: hidden pushes are missed on purpose, and the
+  // getState reseed on the way back catches up.
   useEffect(() => {
+    if (hidden) return;
     let alive = true;
-    editingRef.current = false;
-    setState(EMPTY_STATE);
-    setAddress('');
+    if (stateSessionRef.current !== sessionId) {
+      stateSessionRef.current = sessionId;
+      editingRef.current = false;
+      setState(EMPTY_STATE);
+      setAddress('');
+    }
     const apply = (next: BrowserState) => {
       if (!alive) return;
       setState(next);
       if (!editingRef.current) setAddress(next.url);
     };
+    let pushed = false;
+    const off = browser.subscribeState((payload) => {
+      if (payload.sessionId !== sessionId) return;
+      pushed = true;
+      apply(payload.state);
+    });
     void browser
       .getState(sessionId)
-      .then((s) => apply(s ?? EMPTY_STATE))
-      .catch(() => apply(EMPTY_STATE));
-    const off = browser.subscribeState((payload) => {
-      if (payload.sessionId === sessionId) apply(payload.state);
-    });
+      .then((s) => { if (!pushed) apply(s ?? EMPTY_STATE); })
+      .catch(() => { if (!pushed) apply(EMPTY_STATE); });
     return () => {
       alive = false;
       off();
     };
-  }, [browser, sessionId]);
+  }, [browser, sessionId, hidden]);
 
   // Mirror the strip's on-screen rect to main every animation frame while it is
   // showable. Position shifts on window resize and sidebar drags even when the

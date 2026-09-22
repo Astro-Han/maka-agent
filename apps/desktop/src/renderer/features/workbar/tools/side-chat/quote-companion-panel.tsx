@@ -125,6 +125,7 @@ export function QuoteCompanionPanel(props: {
   });
   const companion = useQuoteCompanion({
     panelId: props.panelId,
+    active: props.active,
     pendingQuotes: props.quotes,
     sourceSession: props.sourceSession,
     modelChoices: props.modelChoices,

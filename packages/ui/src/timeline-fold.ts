@@ -75,3 +75,38 @@ export function foldTimeline(items: readonly TurnTimelineItem[]): {
   flush();
   return { entries: out, finalReply };
 }
+
+/**
+ * Keep the previous fold object for every entry whose content is unchanged.
+ * foldTimeline rebuilds every fold on each re-run, but its inputs are the
+ * reconciled timeline items, so equality is cheap here: leaf entries are the
+ * same objects, and a processing fold is unchanged iff its children are the
+ * same objects in the same order. Fold `id` (the preceding boundary's
+ * messageId) survives mid-timeline inserts, so matching by it rather than
+ * position keeps entries after a steering message stable too.
+ */
+export function reconcileFoldedEntries(
+  previous: FoldedTimelineEntry[],
+  next: FoldedTimelineEntry[],
+): FoldedTimelineEntry[] {
+  if (previous.length === 0) return next;
+  const processingById = new Map<string, ProcessingFold>();
+  for (const entry of previous) {
+    if (entry.kind === 'processing') processingById.set(entry.id, entry);
+  }
+  const reconciled = next.map((entry) => {
+    if (entry.kind !== 'processing') return entry;
+    const prior = processingById.get(entry.id);
+    if (
+      prior !== undefined
+      && prior.children.length === entry.children.length
+      && prior.children.every((child, index) => child === entry.children[index])
+    ) {
+      return prior;
+    }
+    return entry;
+  });
+  return reconciled.length === previous.length && reconciled.every((entry, index) => entry === previous[index])
+    ? previous
+    : reconciled;
+}

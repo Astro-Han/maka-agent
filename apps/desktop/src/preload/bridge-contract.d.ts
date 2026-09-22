@@ -1264,6 +1264,7 @@ export interface MakaBridge {
       }) => void,
     ): () => void;
     listTurns(sessionId: string): Promise<TurnRecord[]>;
+    queryTurn(sessionId: string, turnId: string): Promise<OperationOutput<'turn.query'>>;
     readQuote(sessionId: string): Promise<import('@maka/core/session-reference').SessionQuote>;
     /** Sampled prompt-rail landmarks, or where the one Turn `turnId` sits. */
     listTurnLandmarks(

@@ -1659,6 +1659,74 @@ test('releases a queued Side Conversation admission from the Host queue retract'
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
 });
 
+test('hidden Side Chat releases observation and reseeds without cancelling accepted work', async () => {
+  const listeners: Array<(event: SessionEvent) => void> = [];
+  const resets: Array<() => void> = [];
+  let projection!: ReturnType<typeof useQuoteCompanion>;
+  const activeQuestion = () => projection.activeQuestion;
+  let releases = 0;
+  let reads = 0;
+  let sends = 0;
+  let compactionReads = 0;
+  let send!: (text: string) => Promise<boolean>;
+  const { container, root, services } = await renderProbe({
+    subscribeEvents: (_id, handler, onSeeded, _onError, _onExecution, onReset) => {
+      listeners.push(handler);
+      resets.push(() => onReset?.());
+      onSeeded?.();
+      return () => { releases++; };
+    },
+    readSettledMessages: async () => { reads++; return { messages: [], settled: true }; },
+    send: async () => { sends++; return { ok: true, turnId: 'accepted-turn' }; },
+    compact: async (sessionId) => ({ kind: 'started', turn: {
+      sessionId, turnId: 'hidden-compact', runId: 'compact-run', status: 'running',
+    } }),
+    queryTurn: async (sessionId, turnId) => {
+      if (++compactionReads === 1) throw new Error('temporary read failure');
+      return { sessionId, turnId, runId: 'compact-run', status: 'completed',
+        terminalEventId: 'compact-done', contextCompactionOutcome: { kind: 'unchanged', reason: 'already_current' } };
+    },
+    stop: async () => { assert.fail('visibility must not cancel accepted work'); },
+  }, { ownership: true, onSend: (value) => { send = value; }, onProjection: (value) => { projection = value; } });
+  await act(async () => { assert.equal(await send('keep working'), true); });
+  await act(async () => { listeners[0]!(completeEvent('accepted-done', 'accepted-turn', 1)); });
+  await act(async () => { assert.equal(await send('/compact'), true); });
+  const question: SessionEvent = {
+    type: 'user_question_request', id: 'question', turnId: 'accepted-turn', ts: 4,
+    requestId: 'pending-question', toolUseId: 'question-tool', questions: [{ question: 'Continue?', options: [] }],
+  };
+  await act(async () => { listeners[0]!(question); });
+  assert.equal(activeQuestion()?.requestId, 'pending-question');
+  const renderVisible = (active: boolean) => act(async () => {
+    root.render(createElement(WorkbarServicesProvider, {
+      services,
+      children: createElement(QuoteCompanionOwnershipProbe, {
+        active, onSend: (value) => { send = value; }, onProjection: (value) => { projection = value; },
+      }),
+    }));
+  });
+  await renderVisible(false);
+  assert.equal(releases, 1);
+  const hiddenText = container.firstElementChild?.getAttribute('data-live-text');
+  await act(async () => { listeners[0]!(textDeltaEvent('late', 'accepted-turn', 2, 'hidden')); });
+  assert.equal(container.firstElementChild?.getAttribute('data-live-text'), hiddenText);
+  const hiddenReads = reads;
+  await renderVisible(true);
+  assert.equal(listeners.length, 2);
+  assert.equal(activeQuestion(), undefined, 'a replacement seed must not retain interactions resolved while hidden');
+  await act(async () => { listeners[1]!(question); });
+  assert.equal(activeQuestion()?.requestId, 'pending-question');
+  await act(async () => { resets[1]!(); });
+  assert.equal(activeQuestion(), undefined, 'reconnection replaces interaction state too');
+  assert.ok(reads > hiddenReads, 'returning reconciles the durable transcript');
+  assert.equal(sends, 1, 'reseed must not replay the accepted input');
+  assert.equal(compactionReads, 1, 'returning checks the missed compaction by its exact Turn identity');
+  await act(async () => { listeners[1]!(textDeltaEvent('returned', 'accepted-turn', 3, 'visible')); });
+  assert.equal(container.firstElementChild?.getAttribute('data-live-text'), 'visible');
+  await act(async () => { assert.equal(await send('after compaction'), true); });
+  assert.equal(compactionReads, 2, 'explicit input can retry a failed terminal read instead of remaining locked');
+});
+
 test('keeps the same Side Conversation admission across an observation failure', async () => {
   let subscriptionCount = 0;
   const pendingSend = deferred<{ ok: true; turnId: string }>();
@@ -3367,6 +3435,7 @@ function QuoteCompanionProbe(props: {
   const sourceSession = props.sourceSession ?? SOURCE_SESSION;
   const companion = useQuoteCompanion({
     panelId: 'retry-panel',
+    active: true,
     pendingQuotes: [],
     sourceSession,
     modelChoices: props.modelChoices ?? [choiceFor(sourceSession)],
@@ -3382,6 +3451,7 @@ function QuoteCompanionProbe(props: {
 }
 
 function QuoteCompanionOwnershipProbe(props: {
+  active?: boolean;
   onSend: (send: (text: string) => Promise<boolean>) => void;
   onProjection?: (companion: ReturnType<typeof useQuoteCompanion>) => void;
   onQueue?: (queue: (text: string) => Promise<boolean>) => void;
@@ -3399,6 +3469,7 @@ function QuoteCompanionOwnershipProbe(props: {
   const sourceSession = props.sourceSession ?? SOURCE_SESSION;
   const companion = useQuoteCompanion({
     panelId: 'ownership-panel',
+    active: props.active ?? true,
     pendingQuotes: props.pendingQuotes ?? [],
     sourceSession,
     modelChoices: props.modelChoices ?? [choiceFor(sourceSession)],
