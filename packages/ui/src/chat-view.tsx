@@ -75,6 +75,7 @@ import { useChatScroll, useTranscriptStartMargin } from './use-chat-scroll.js';
 import type { TranscriptViewportNavigation } from './transcript-viewport-navigation.js';
 import { placeChatConversationItems } from './chat-conversation-items.js';
 import { useUiLocale } from './locale-context.js';
+import type { ToolDetailExtension } from './tool-activity.js';
 import { getConversationCopy } from './conversation-copy.js';
 import { SessionContextLayer, type SessionContextGoal } from './session-context-layer.js';
 import {
@@ -235,6 +236,7 @@ export function ChatView(props: {
   onTurnFooterAction?: (turnId: string, actionId: TurnFooterActionMeta['id']) => void;
   /** Product-owned extension anchor; mounted once per visible durable Turn. */
   TurnFooterExtension?: ComponentType<{ turnId: string }>;
+  ToolDetailExtension?: ToolDetailExtension;
   /**
    * Edit-and-resend for a user turn. Desktop owns revision draft creation
    * (branch-before + composer refill); ChatView only forwards the click.
@@ -842,6 +844,7 @@ export function ChatView(props: {
                           footerActions={turnPresentation?.footerActionsByTurn[turn.turnId]}
                           onFooterAction={stableTurnFooterAction}
                           FooterExtension={props.TurnFooterExtension}
+                          DetailExtension={props.ToolDetailExtension}
                           onEditUserMessage={props.onEditUserMessage ? stableEditUserMessage : undefined}
                           editUserMessageTransformed={transformedUserTurnIds.has(turn.turnId)}
                           editUserMessageDisabled={props.activeTurn !== undefined}

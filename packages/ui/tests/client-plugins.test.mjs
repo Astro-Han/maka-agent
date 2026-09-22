@@ -22,9 +22,12 @@ import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { test } from 'node:test';
 import { parseHTML } from 'linkedom';
-import { createElement } from 'react';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ClientRuntime, ClientSlot } from '../dist/client-plugins/index.js';
+import { ToolCallDetail, ToolDetailScope } from '../dist/tool-activity.js';
+import { LocaleProvider } from '../dist/locale-context.js';
 
 function documentHarness() {
   const { document, window } = parseHTML('<html><head></head><body></body></html>');
@@ -62,6 +65,76 @@ function deferred() {
   const promise = new Promise((complete) => { resolve = complete; });
   return { promise, resolve };
 }
+
+test('tool renderers select exact names, retain native boundaries and recover on failure or retirement', async () => {
+  const document = documentHarness();
+  const previous = { document: globalThis.document, window: globalThis.window,
+    getComputedStyle: globalThis.getComputedStyle,
+    IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT };
+  Object.assign(globalThis, { document, window: document.defaultView, IS_REACT_ACT_ENVIRONMENT: true });
+  document.defaultView.getComputedStyle = () => ({ direction: 'ltr', writingMode: 'horizontal-tb', getPropertyValue() { return ''; } });
+  const fixture = { fail: false };
+  const errors = [];
+  const source = bundle(`
+    const {createElement: h} = require('react'), f = require('fixture');
+    ctx.slots.register('tool.detail', 'Shell', props => {
+      if (f.fail && config.label === 'first') throw new Error('broken tool renderer');
+      return h('p', {'data-tool-renderer': config.label}, props.sessionId + '/' + props.turnId + '/' + props.toolUseId + '/' + props.status);
+    }, {order: config.order});
+  `);
+  const entries = ['first', 'second'].map((label, order) => ({ ...descriptor(source, 'same'), entryId: label, config: { label, order } }));
+  const runtime = new ClientRuntime({ document, modules: { react: { createElement }, fixture }, source: async () => source,
+    report: ({ error }) => errors.push(error) });
+  const root = createRoot(document.body, { onCaughtError() {} });
+  let item = { toolUseId: 'call', toolName: 'Shell', status: 'completed', args: {}, result: { kind: 'text', text: 'native evidence' } };
+  let nested = false;
+  const Extension = ({ turnId, item, children }) => createElement(ClientSlot, {
+    store: runtime.slots, name: 'tool.detail', fallback: children,
+    input: { sessionId: 'session', turnId, locale: 'en', ...item },
+    onError: (_identity, error) => errors.push(error),
+  });
+  const render = () => act(() => {
+    const detail = createElement(ToolCallDetail, { item, onSwitchToBypassAndRetry() {} });
+    root.render(createElement(LocaleProvider, { locale: 'en' },
+      createElement(ToolDetailScope, { turnId: 'turn', Extension },
+        nested ? createElement(ToolDetailScope, { turnId: 'nested' }, detail) : detail)));
+  });
+  try {
+    await runtime.reconcile({ revision: 'one', entries });
+    await render();
+    assert.equal(document.querySelectorAll('[data-tool-renderer]').length, 1);
+    assert.equal(document.querySelector('[data-tool-renderer]')?.textContent, 'session/turn/call/completed');
+    nested = true;
+    await render();
+    assert.equal(document.querySelector('[data-tool-renderer]'), null, 'a nested Turn cannot inherit another view');
+    assert.match(document.body.textContent, /native evidence/);
+    nested = false;
+    item = { ...item, toolName: 'ShellExtra' };
+    await render();
+    assert.equal(document.querySelector('[data-tool-renderer]'), null, 'matching is exact');
+    item = { ...item, toolName: 'Shell', status: 'errored', result: { kind: 'text', text: '',
+      sandboxFailure: { reason: 'requires_bypass', source: 'client_capability' } } };
+    await render();
+    assert.ok(document.querySelector('[data-tool-renderer]'));
+    assert.match(document.body.textContent, /Bypass mode required/);
+    assert.match(document.body.textContent, /Switch and retry/);
+    item = { ...item, status: 'completed', result: { kind: 'text', text: 'native evidence' } };
+    fixture.fail = true;
+    await render();
+    assert.equal(errors.length, 1);
+    assert.equal(document.querySelector('[data-tool-renderer]'), null);
+    assert.match(document.body.textContent, /native evidence/);
+    await act(async () => { await runtime.reconcile({ revision: 'two', entries: entries.slice(1) }); });
+    assert.equal(document.querySelector('[data-tool-renderer]')?.getAttribute('data-tool-renderer'), 'second',
+      'failure state belongs to the exact Entry, not another provider with the same activation/key');
+    await act(async () => { await runtime.close(); });
+    assert.equal(document.querySelector('[data-tool-renderer]'), null);
+    assert.match(document.body.textContent, /native evidence/);
+  } finally {
+    await act(async () => { root.unmount(); await runtime.close(); });
+    Object.assign(globalThis, previous);
+  }
+});
 
 test('public events publish with their instance and immediately stop delivery on disposal or retirement', async () => {
   const fixture = { initializing: deferred(), context: undefined, release: undefined, values: [] };

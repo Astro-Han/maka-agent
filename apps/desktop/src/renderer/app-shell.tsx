@@ -2545,7 +2545,7 @@ function AppShellContent({
                   <ChatMessageSurface
                 sessionUiController={sessionUiController}
                 activeSessionId={activeId}
-                TurnFooterExtension={sessionPlugins.TurnFooter}
+                {...sessionPlugins.chat}
                 activeTurn={Conversation.chatTurnActivity(activeExecution)}
                 hasEarlierHistory={activeTranscriptRange?.hasOlder}
                 onLoadEarlierHistory={() => transcriptReadingCommands.current?.loadEarlier()}

@@ -52,16 +52,22 @@ export function ClientSlot<K extends keyof ClientSlots>(props: {
   readonly entryId?: string;
   readonly entryKey?: string;
   readonly className?: string;
+  readonly fallback?: ReactNode;
   readonly input: ClientSlots[K];
   readonly onError: (owner: ClientIdentity, error: unknown) => void;
 }): ReactNode {
   const entries = useSyncExternalStore(props.store.subscribe, props.store.snapshot, props.store.snapshot);
-  const matching = entries.filter((entry) => entry.slot === props.name &&
+  let matching = entries.filter((entry) => entry.slot === props.name &&
     (!props.entryId || entry.owner.entryId === props.entryId) &&
     (!props.entryKey || entry.key === props.entryKey));
-  if (!matching.length) return null;
+  if (props.name === 'tool.detail') {
+    const { toolName } = props.input as ClientSlots['tool.detail'];
+    matching = matching.filter((entry) => entry.key === toolName).slice(0, 1);
+  }
+  if (!matching.length) return props.fallback ?? null;
   return <div className={props.className}>{matching.map((entry) => (
-    <SlotBoundary key={`${entry.owner.activation}/${entry.key}`} owner={entry.owner} onError={props.onError}>
+    <SlotBoundary key={JSON.stringify([entry.owner.entryId, entry.owner.activation, entry.key])}
+      owner={entry.owner} onError={props.onError} fallback={props.fallback}>
       {entry.render(props.input as never)}
     </SlotBoundary>
   ))}</div>;
@@ -71,11 +77,12 @@ class SlotBoundary extends Component<{
   readonly owner: ClientIdentity;
   readonly onError: (owner: ClientIdentity, error: unknown) => void;
   readonly children: ReactNode;
+  readonly fallback?: ReactNode;
 }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError(): { failed: boolean } { return { failed: true }; }
   componentDidCatch(error: unknown): void { this.props.onError(this.props.owner, error); }
-  render(): ReactNode { return this.state.failed ? null : this.props.children; }
+  render(): ReactNode { return this.state.failed ? this.props.fallback ?? null : this.props.children; }
 }
 
 function compare(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }

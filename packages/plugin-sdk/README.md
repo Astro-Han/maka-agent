@@ -104,6 +104,8 @@ The installed SDK must recognize the descriptor as provider-executed. Unknown ID
 
 ## Client SDK
 
+`ctx.slots.register('tool.detail', toolName, Component, { order? })` replaces the detail body for an exact tool name. The first registration in slot order wins. Props identify the canonical Session, Turn and tool call and carry observed arguments, result and bounded output; open payloads require narrowing. Native sandbox/recovery controls remain outside the extension. Missing, retired or failed renderers fall back to native details.
+
 `ctx.slots.register('settings.page', key, Component, { label, order? })` publishes a page and its navigation entry together on the selected Settings Host. `label` is a string or an `en`/`zh-CN`/`zh-TW` translation map; the component receives `locale` and `page` (the registration key). Selection expires on Host, connection or registration replacement. Native settings remain available while plugins reconnect. Other slots accept optional `{ order }`.
 
 Client SDK API **1** uses React supplied by Desktop. Export a `ClientPlugin` from `@maka-agent/plugin-sdk/client`; its `activate(ctx, config)` stages keyed Slot registrations and effects. Slot registration closes after initialization. `ctx.effect` and `ctx.style` remain available while active; their disposer is idempotent. Async cleanup stays owned until settlement, including after explicit disposal. Cleanup failure requires reloading the document before that Entry can activate again.

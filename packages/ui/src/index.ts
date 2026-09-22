@@ -93,6 +93,7 @@ export { DiffCodePreview } from './tool-activity/diff-code-preview.js';
 export { syntaxLanguageForPath } from './tool-activity/diff-syntax.js';
 export { MarkdownBody } from './markdown-body.js';
 export { ToolResultPreview } from './tool-activity/tool-result-preview.js';
+export type { ToolDetailExtension } from './tool-activity.js';
 export { formatTurnDuration } from './chat-display-helpers.js';
 export * from './primitives/stat-tile.js';
 // PR-USE-SHADCN-BASE-UI-BADGE: the canonical pill Badge primitive. #520 PR9

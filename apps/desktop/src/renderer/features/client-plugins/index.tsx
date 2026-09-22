@@ -18,7 +18,7 @@
  */
 
 import * as React from 'react';
-import { useUiLocale } from '@maka/ui';
+import { useUiLocale, type ToolDetailExtension } from '@maka/ui';
 import type * as ClientSdk from '@maka-agent/plugin-sdk/client';
 import { ClientSlot } from '@maka/ui/client-plugins';
 import type { ClientHostRef } from './ports.js';
@@ -93,7 +93,8 @@ export function ClientPluginSurfaces(input: {
   onOpenSession(sessionId: string): void;
   composer: React.RefObject<{ appendText(text: string): void; focus(): void } | null>;
   readOnly: boolean;
-  children(slots: { header: React.ReactNode; composer: React.ReactNode; TurnFooter?: React.ComponentType<{ turnId: string }> }): React.ReactNode;
+  children(slots: { header: React.ReactNode; composer: React.ReactNode;
+    chat: { TurnFooterExtension?: React.ComponentType<{ turnId: string }>; ToolDetailExtension?: ToolDetailExtension } }): React.ReactNode;
 }) {
   const { sessionId, locale } = input;
   const profileId = input.session?.profileId;
@@ -106,8 +107,17 @@ export function ClientPluginSurfaces(input: {
       return <ClientPluginSessionSlot host={host} name="turn.footer" input={{ sessionId, turnId, locale }} />;
     };
   }, [sessionId, locale, profileId, hostId]);
+  const ToolDetail = React.useMemo(() => {
+    if (!sessionId || !profileId || !hostId) return undefined;
+    const host = { profileId, hostId };
+    const canonical = parseDesktopSessionKey(sessionId);
+    if (canonical.hostId !== hostId) throw new Error('Plugin Session belongs to another Host');
+    return function PluginToolDetail(props: React.ComponentProps<ToolDetailExtension>) {
+      return <ClientToolDetail host={host} sessionId={canonical.sessionId} locale={locale} {...props} />;
+    };
+  }, [sessionId, locale, profileId, hostId]);
   return <>{input.children({
-    TurnFooter,
+    chat: { TurnFooterExtension: TurnFooter, ToolDetailExtension: ToolDetail },
     header: origin && sessionId ? <ClientPluginSessionSlot host={origin}
       name="session.header.actions" className="clientPluginHeaderActions" input={{ sessionId, locale }} /> : null,
     composer: origin && sessionId ? <ClientPluginSessionSlot host={origin}
@@ -117,6 +127,17 @@ export function ClientPluginSurfaces(input: {
           input.composer.current?.focus();
         } }} /> : null,
   })}<ClientApplicationOverlay locale={locale} /></>;
+}
+
+function ClientToolDetail({ host, sessionId, locale, turnId, item, children }: React.ComponentProps<ToolDetailExtension> & {
+  host: ClientHostRef; sessionId: string; locale: ClientSdk.ClientSlots['tool.detail']['locale'];
+}) {
+  const { runtime, report } = useClientHost(host);
+  return runtime ? <ClientSlot store={runtime.slots} name="tool.detail" fallback={children}
+    input={{ sessionId, turnId, locale, toolUseId: item.toolUseId, toolName: item.toolName,
+      status: item.status, args: item.args ?? item.argsPreview, result: item.result,
+      output: item.outputChunks, outputTruncated: item.outputTruncated === true }}
+    onError={(identity, error) => report({ identity, error })} /> : children;
 }
 
 function ClientApplicationOverlay({ locale }: { locale: ClientSdk.ClientSlots['application.overlay']['locale'] }) {

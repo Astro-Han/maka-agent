@@ -108,6 +108,8 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 
 ## Client SDK
 
+`ctx.slots.register('tool.detail', toolName, Component, { order? })` 替换精确工具名对应的详情内容，使用 Slot 排序中的首个注册。参数包含 canonical Session、Turn、工具调用身份，以及观察到的参数、结果和有界输出；开放 payload 需自行收窄。原生沙箱／恢复操作保留在扩展之外。渲染器缺失、退出或失败时回退到原生详情。
+
 `ctx.slots.register('settings.page', key, Component, { label, order? })` 在设置页选中的 Host 上同时发布页面与导航项。`label` 是字符串或包含 `en`/`zh-CN`/`zh-TW` 的翻译表；组件接收 `locale` 和注册 key 对应的 `page`。切换 Host、连接或注册后，旧选择失效。插件重连不影响原生设置。其他 Slot 接受可选的 `{ order }`。
 
 `application.overlay` 挂载于应用默认 Host；`session.header.actions` 和 `turn.footer` 挂载于所查看 Session 的 Host，接收 canonical `sessionId`。页脚另含 `turnId`，同一可见 Turn 即使包含多次 steering 也只挂载一次，不替换原生操作。Session／Turn 参数用于定位观察，不授予执行权限。

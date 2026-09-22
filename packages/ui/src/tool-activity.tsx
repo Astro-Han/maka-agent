@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { countDiffLineStats } from '@maka/core/unified-diff';
 import { isInFlightToolStatus } from '@maka/core/tool-result-status';
 import { type ToolResultContent } from '@maka/core/events';
@@ -178,6 +178,20 @@ function loadToolGroupIcon(kind: LoadToolGroupKind): LucideIcon {
  * row's expansion state internally — this panel is the seam where the product
  * decides what a result looks like, and it is asserted directly.
  */
+export type ToolDetailExtension = ComponentType<{ turnId: string; item: ToolActivityItem; children: ReactNode }>;
+const DetailContext = createContext<{ turnId: string; Extension?: ToolDetailExtension } | undefined>(undefined);
+
+/** Every Turn binds its own view, including Turns without an extension. */
+export function ToolDetailScope(props: { turnId: string; Extension?: ToolDetailExtension; children: ReactNode }) {
+  const value = useMemo(() => ({ turnId: props.turnId, Extension: props.Extension }), [props.turnId, props.Extension]);
+  return <DetailContext value={value}>{props.children}</DetailContext>;
+}
+
+function ToolDetailBody({ item, children }: { item: ToolActivityItem; children: ReactNode }) {
+  const scope = useContext(DetailContext);
+  return scope?.Extension ? <scope.Extension turnId={scope.turnId} item={item}>{children}</scope.Extension> : children;
+}
+
 export function ToolCallDetail({
   item,
   activityObserved = true,
@@ -249,6 +263,7 @@ export function ToolCallDetail({
       {requiresBypass && (
         <RequiresBypassBanner onSwitchToBypassAndRetry={onSwitchToBypassAndRetry} />
       )}
+      <ToolDetailBody item={item}>
       {showResult && ownsPanel && displayResult && (
         isConnectorTool(item.toolName) && displayResult.kind === 'json' ? (
           <LoadToolResultPreview
@@ -322,6 +337,7 @@ export function ToolCallDetail({
           })()}
         </div>
       )}
+      </ToolDetailBody>
     </div>
   );
 }

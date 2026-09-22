@@ -56,6 +56,23 @@ export interface ClientDescriptor extends ClientIdentity {
 
 /** Augment this interface for slots agreed upon by a product and its plugins. */
 export interface ClientSlots {
+  /** Registration key is the exact tool name; the first ordered match renders the body. */
+  'tool.detail': {
+    readonly sessionId: string;
+    readonly turnId: string;
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly toolUseId: string;
+    readonly toolName: string;
+    readonly status: 'running' | 'completed' | 'errored' | 'interrupted';
+    readonly args: unknown;
+    readonly result?: unknown;
+    readonly output?: readonly {
+      readonly seq: number;
+      readonly stream: 'stdout' | 'stderr';
+      readonly text: string;
+    }[];
+    readonly outputTruncated: boolean;
+  };
   'settings.page': {
     readonly locale: 'en' | 'zh-CN' | 'zh-TW';
     readonly page: string;

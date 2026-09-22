@@ -64,7 +64,7 @@ import { foldTimeline, reconcileFoldedEntries, type FoldedTimelineChild, type Fo
 import { AttachmentKindIcon } from './attachment-kinds.js';
 import { QuoteRefChip } from './quote-ref-chip.js';
 import { Marker, markerVariants } from './primitives/chat.js';
-import { ToolTrow } from './tool-activity.js';
+import { ToolTrow, ToolDetailScope, type ToolDetailExtension } from './tool-activity.js';
 import { formatBytes } from './tool-activity/preview-utils.js';
 import { useUiLocale } from './locale-context.js';
 import type { UiLocale } from '@maka/core/ui-locale';
@@ -401,6 +401,7 @@ export const TurnView = memo(function TurnView(props: {
   footerActions?: ReadonlyArray<TurnFooterActionMeta>;
   onFooterAction?: (turnId: string, actionId: TurnFooterActionMeta['id']) => void;
   FooterExtension?: ComponentType<{ turnId: string }>;
+  DetailExtension?: ToolDetailExtension;
   /**
    * PR109e-d: pre-translated Chinese phrase for a failed turn's
    * `errorClass`. Caller computes via `describeTurnErrorClass()`.
@@ -511,6 +512,7 @@ export const TurnView = memo(function TurnView(props: {
     [foldedTimeline, showAssistantMessage],
   );
   return (
+    <ToolDetailScope turnId={turn.turnId} Extension={props.DetailExtension}>
     <section
       className="maka-turn"
       data-maka-contract="markdown-flow"
@@ -843,6 +845,7 @@ export const TurnView = memo(function TurnView(props: {
       })}
       {props.FooterExtension ? <props.FooterExtension key="turn-extension" turnId={turn.turnId} /> : null}
     </section>
+    </ToolDetailScope>
   );
 });
 
