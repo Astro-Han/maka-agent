@@ -68,6 +68,11 @@ pub enum SessionCreateTarget {
     },
     Executor {
         executor_id: maka_runtime::executor::ExecutorId,
+        #[serde(
+            default,
+            skip_serializing_if = "maka_runtime::executor::Settings::is_empty"
+        )]
+        executor_settings: maka_runtime::executor::Settings,
     },
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -151,7 +156,18 @@ macro_rules! decoder {
         }
     };
 }
-decoder!(decode_session_create_input, SessionCreateInput);
+pub fn decode_session_create_input(value: &Value) -> Result<SessionCreateInput> {
+    let input: SessionCreateInput = validation::decode(value)?;
+    if let SessionCreateTarget::Executor {
+        executor_settings, ..
+    } = &input.target
+    {
+        executor_settings
+            .validate()
+            .map_err(ProtocolError::invalid)?;
+    }
+    Ok(input)
+}
 decoder!(decode_session_catalog_query_input, SessionCatalogQueryInput);
 decoder!(decode_session_catalog_projection, SessionCatalogProjection);
 decoder!(

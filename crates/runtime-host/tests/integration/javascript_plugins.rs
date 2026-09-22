@@ -155,11 +155,27 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
                 assert_eq!(result["ok"], true, "{result}");
                 let external = peer.rpc("session.create", json!({
                     "sessionId":"executor-session", "workspace":{"kind":"host_path","path":fixture.workspace},
-                    "executorId":"example.external", "sandboxMode":"danger-full-access"
+                    "executorId":"example.external", "sandboxMode":"danger-full-access",
+                    "executorSettings":{"model":"initial-model", "thinkingLevel":"high"}
                 })).await;
                 assert_eq!(external["ok"], true, "{external}");
                 assert_eq!(external["result"]["backend"], "plugin-executor", "{external}");
                 assert_eq!(external["result"]["executorId"], "example.external", "{external}");
+                assert_eq!(external["result"]["model"], "initial-model");
+                assert_eq!(external["result"]["thinkingLevel"], "high");
+                let native = peer.rpc("session.configuration.update", json!({
+                    "sessionId":"executor-session", "expectedRevision":external["result"]["revision"],
+                    "patch":{"modelTarget":{"kind":"explicit", "connectionId":model.connection_id, "connectionSlug":model.connection_slug, "model":model.model}}
+                })).await;
+                assert_eq!(native["ok"], true, "{native}");
+                assert_eq!(native["result"]["session"]["backend"], "ai-sdk", "{native}");
+                assert!(native["result"]["session"].get("executorSettings").is_none());
+                let configured = peer.rpc("session.configuration.update", json!({
+                    "sessionId":"executor-session", "expectedRevision":native["result"]["session"]["revision"],
+                    "patch":{"executorTarget":{"executorId":"example.external", "settings":{"model":"host-model", "thinkingLevel":"max"}}}
+                })).await;
+                assert_eq!(configured["ok"], true, "{configured}");
+                assert_eq!(configured["result"]["session"]["model"], "host-model", "{configured}");
                 let parent = peer.rpc("session.create", json!({
                     "sessionId":"executor-parent", "workspace":{"kind":"host_path","path":fixture.workspace},
                     "sandboxMode":"danger-full-access",
@@ -175,10 +191,21 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
                 workspace: None,
                 operation_id: "external-child".into(), parent_session_id: "executor-parent".into(), name: "External worker".into(),
                 sandbox_mode: None, bound_tools: None, instructions: Some("Executor child instructions".into()),
-                target: Some(maka_plugins::execution::Target::Executor { executor_id: "example.external".to_owned().try_into().unwrap() }),
+                target: Some(maka_plugins::execution::Target::Executor { executor_id: "example.external".to_owned().try_into().unwrap(), settings: maka_runtime::executor::Settings { model:Some("child-model".into()), thinking_level:Some(maka_runtime::execution::ThinkingLevel::Low) } }),
             };
             let external_child = commands.create_child(child_request.clone()).await.unwrap();
             assert_eq!(commands.create_child(child_request).await.unwrap(), external_child);
+            if !reopened {
+                let session = commands.session(external_child.session_id.clone()).await.unwrap();
+                let configured = commands.configure(maka_plugins::execution::Configure {
+                    session_id:session.session_id, expected_revision:session.revision,
+                    target:maka_plugins::execution::Target::Executor {
+                        executor_id:"example.external".to_owned().try_into().unwrap(),
+                        settings:maka_runtime::executor::Settings { model:Some("plugin-model".into()), thinking_level:Some(maka_runtime::execution::ThinkingLevel::Medium) },
+                    }
+                }).await.unwrap();
+                assert!(matches!(configured, maka_plugins::execution::Configured::Committed { .. }));
+            }
             let inspector = Fiber::new("example.consumer", "inspector", Scope::Profile).unwrap();
             inspector.begin_loading().unwrap();
             let storage = host.plugin_storage(inspector.context()).unwrap();

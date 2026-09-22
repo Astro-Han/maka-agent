@@ -38,9 +38,24 @@ fn create_accepts_wire_options_without_materializing_defaults() {
         let value = json!({"sessionId":"s1","workspace":{"kind":"host_path","path":"/work"},"executorId":executor});
         let decoded = decode_session_create_input(&value).unwrap();
         assert!(
-            matches!(&decoded.target, SessionCreateTarget::Executor { executor_id } if executor_id.as_str() == executor)
+            matches!(&decoded.target, SessionCreateTarget::Executor { executor_id, .. } if executor_id.as_str() == executor)
         );
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        let mut configured = value;
+        configured["executorSettings"] = json!({"model":"custom/model", "thinkingLevel":"max"});
+        assert_eq!(
+            serde_json::to_value(decode_session_create_input(&configured).unwrap()).unwrap(),
+            configured
+        );
+        for settings in [
+            json!({"model":" "}),
+            json!({"model":"x".repeat(513)}),
+            json!({"model":"bad\nmodel"}),
+            json!({"thinkingLevel":"automatic"}),
+        ] {
+            configured["executorSettings"] = settings;
+            assert!(decode_session_create_input(&configured).is_err());
+        }
     }
     let decoded = decode_session_create_input(&create()).unwrap();
     assert_eq!(decoded.name, None);

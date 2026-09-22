@@ -93,6 +93,7 @@ pub enum ToolOutcome {
 pub enum Fact {
     ExecutorStarted {
         binding: crate::executor::Binding,
+        settings: crate::executor::Settings,
     },
     ExecutorObserved {
         output: crate::executor::Output,

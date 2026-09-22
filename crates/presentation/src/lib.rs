@@ -187,7 +187,7 @@ impl InvocationView {
                     return Err(ProjectionError::Invalid("invocation identity changed"));
                 }
                 match fact {
-                    Fact::ExecutorStarted { binding } => {
+                    Fact::ExecutorStarted { binding, .. } => {
                         if step.is_some() || self.executor.is_some() {
                             return Err(ProjectionError::Invalid("overlapping execution backends"));
                         }

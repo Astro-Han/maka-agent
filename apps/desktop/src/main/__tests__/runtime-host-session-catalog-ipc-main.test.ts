@@ -81,10 +81,14 @@ test('session creation forwards a plugin executor without a model target', async
   const ipc = ipcHarness();
   registerRuntimeHostSessionCatalogIpc(createDeps(creates), ipc as unknown as IpcMain);
 
-  await ipc.invoke('sessions:create', { executorId: 'codex.app-server' });
+  const executorSettings = { model: 'executor-model', thinkingLevel: 'max' };
+  await ipc.invoke('sessions:create', { executorId: 'codex.app-server', executorSettings });
 
   assert.equal(creates[0]?.executorId, 'codex.app-server');
   assert.equal(creates[0]?.modelTarget, undefined);
+  assert.deepEqual(creates[0]?.executorSettings, executorSettings);
+  assert.equal(creates[0]?.thinkingLevel, undefined);
+  await assert.rejects(ipc.invoke('sessions:create', { executorSettings }), /Invalid plugin executor settings/);
   await assert.rejects(
     ipc.invoke('sessions:create', {
       executorId: 'codex',

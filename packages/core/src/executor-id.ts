@@ -17,6 +17,27 @@
  * under the License.
  */
 
+import { isThinkingLevel, type ThinkingLevel } from './model-thinking.js';
+
+export interface ExecutorSettings {
+  readonly model?: string;
+  readonly thinkingLevel?: ThinkingLevel;
+}
+
+export function isExecutorSettings(value: unknown): value is ExecutorSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    Object.keys(row).every((key) => key === 'model' || key === 'thinkingLevel') &&
+    (row.model === undefined ||
+      (typeof row.model === 'string' &&
+        row.model.trim().length > 0 &&
+        new TextEncoder().encode(row.model).length <= 512 &&
+        !/[\u0000-\u001f\u007f-\u009f]/u.test(row.model))) &&
+    (row.thinkingLevel === undefined || isThinkingLevel(row.thinkingLevel))
+  );
+}
+
 export const EXECUTOR_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/u;
 
 export function isExecutorId(value: unknown): value is string {

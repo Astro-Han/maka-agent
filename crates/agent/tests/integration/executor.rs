@@ -52,6 +52,11 @@ impl Provider for Adapter {
         let started = self.started.clone();
         let retained = self.retained.clone();
         Box::pin(async move {
+            assert_eq!(request.settings.model.as_deref(), Some("executor-model"));
+            assert_eq!(
+                request.settings.thinking_level,
+                Some(maka_runtime::execution::ThinkingLevel::Max)
+            );
             context
                 .output
                 .emit(Output::ThinkingDelta {
@@ -128,6 +133,10 @@ async fn external_backend_uses_canonical_admission_settlement_and_never_enters_m
                     invocation_id: id.into(),
                 },
                 conversation_key: "session".into(),
+                settings: maka_runtime::executor::Settings {
+                    model: Some("executor-model".into()),
+                    thinking_level: Some(maka_runtime::execution::ThinkingLevel::Max),
+                },
                 content: id.into(),
                 cwd: configuration.cwd.clone(),
                 instructions: None,
@@ -170,6 +179,15 @@ async fn external_backend_uses_canonical_admission_settlement_and_never_enters_m
         .unwrap();
     engine.drain().await;
     let prefix = log.prefix(100, 1024 * 1024).await.unwrap();
+    for row in &prefix.events {
+        if let Fact::ExecutorStarted { settings, .. } = &row.event.fact {
+            assert_eq!(settings.model.as_deref(), Some("executor-model"));
+            assert_eq!(
+                settings.thinking_level,
+                Some(maka_runtime::execution::ThinkingLevel::Max)
+            );
+        }
+    }
     assert_eq!(
         prefix
             .events

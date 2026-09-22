@@ -172,6 +172,12 @@ impl Executions {
                         content: prepared_content,
                         cwd: configuration.cwd.clone(),
                         instructions: environment.prompt.map(|prompt| prompt.text),
+                        settings: match &session.target {
+                            crate::session::SessionTarget::Executor { settings, .. } => {
+                                settings.clone()
+                            }
+                            _ => unreachable!("prepared executor Session"),
+                        },
                     },
                     binding,
                     configuration,

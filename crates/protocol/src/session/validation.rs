@@ -58,6 +58,17 @@ fn validate(value: &mut Value, field: &str) -> Result<()> {
             {
                 return Err(invalid());
             }
+            if projection && map.contains_key("executorSettings") {
+                if !map.contains_key("executorId") {
+                    return Err(invalid());
+                }
+                serde_json::from_value::<maka_runtime::executor::Settings>(
+                    map["executorSettings"].clone(),
+                )
+                .map_err(|_| invalid())?
+                .validate()
+                .map_err(|_| invalid())?;
+            }
             if projection && !map.contains_key("llmConnectionId")
                 || page && !map.contains_key("nextCursor")
                 || map.get("kind").and_then(Value::as_str) == Some("session")

@@ -87,6 +87,8 @@ pub struct SessionCatalogProjection {
     pub backend: Backend,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub executor_id: Option<maka_runtime::executor::ExecutorId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor_settings: Option<maka_runtime::executor::Settings>,
     pub llm_connection_id: Option<String>,
     pub llm_connection_slug: String,
     pub connection_locked: bool,

@@ -164,7 +164,7 @@ mod tests {
                 target: maka_protocol::session::WorkspaceTarget::HostPath { path: cwd.clone() },
                 host_cwd: cwd,
             },
-            crate::session::SessionTarget::Executor { executor_id: "fixture".to_owned().try_into().unwrap() },
+            crate::session::SessionTarget::Executor { executor_id: "fixture".to_owned().try_into().unwrap(), settings: Default::default() },
             maka_protocol::session::SandboxMode::ReadOnly,
         );
         host.log

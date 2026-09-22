@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import type { Executions, Invocation, MessageContent } from './execution.js';
+import type { Executions, ExecutorSettings, Invocation, MessageContent } from './execution.js';
 import type { Processes } from './process.js';
 import type { Terminals } from './terminal.js';
 import type { Credentials } from './credentials.js';
@@ -185,6 +185,7 @@ export interface ExecutorDefinition {
   capabilities?: { thinking?: boolean; toolActivity?: boolean; attachments?: boolean };
 }
 export interface ExecutorRequest {
+  settings: ExecutorSettings;
   invocation: Invocation;
   conversationKey: string;
   content: MessageContent;

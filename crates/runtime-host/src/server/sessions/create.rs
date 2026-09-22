@@ -89,7 +89,7 @@ pub(super) async fn create(
             }
             error
         })?;
-        if let SessionCreateTarget::Executor { executor_id } = prepared.target() {
+        if let SessionCreateTarget::Executor { executor_id, .. } = prepared.target() {
             host.executions.executor_binding(&id, executor_id)?;
         }
         let config = resolve(&host.configuration, prepared, thinking, workspace).await?;
@@ -117,8 +117,12 @@ pub(crate) async fn resolve(
         SessionCreateTarget::Model { model_target } => SessionTarget::Model {
             model: super::model::resolve(configuration, model_target, thinking).await?,
         },
-        SessionCreateTarget::Executor { executor_id } => SessionTarget::Executor {
+        SessionCreateTarget::Executor {
+            executor_id,
+            executor_settings,
+        } => SessionTarget::Executor {
             executor_id: executor_id.clone(),
+            settings: executor_settings.clone(),
         },
     };
     let policy = configuration

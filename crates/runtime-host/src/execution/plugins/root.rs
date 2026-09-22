@@ -346,7 +346,10 @@ async fn configuration(
                 *thinking_level,
             )
         }
-        Target::Executor { executor_id } => {
+        Target::Executor {
+            executor_id,
+            settings,
+        } => {
             if resolve_target {
                 host.executor_binding(id, executor_id)
                     .map_err(|error| Error::Invalid(error.message))?;
@@ -354,9 +357,11 @@ async fn configuration(
             (
                 SessionCreateTarget::Executor {
                     executor_id: executor_id.clone(),
+                    executor_settings: settings.clone(),
                 },
                 crate::session::SessionTarget::Executor {
                     executor_id: executor_id.clone(),
+                    settings: settings.clone(),
                 },
                 None,
             )

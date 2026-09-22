@@ -32,7 +32,7 @@ import {
   type SessionToolProfile,
 } from '@maka/core/session';
 import { isThinkingLevel, type ThinkingLevel } from '@maka/core/model-thinking';
-import { isExecutorId } from '@maka/core/executor-id';
+import { isExecutorId, isExecutorSettings, type ExecutorSettings } from '@maka/core/executor-id';
 import type { ExecutionBoundarySummary } from '@maka/core/sandbox-boundary';
 export type { ExecutionBoundarySummary } from '@maka/core/sandbox-boundary';
 import {
@@ -127,6 +127,7 @@ const PROJECTION_FIELDS = [
   'revisionIndex',
   'revisionState',
   'executorId',
+  'executorSettings',
   'thinkingLevel',
   'lastReadMessageId',
   'liveRunState',
@@ -162,6 +163,7 @@ export interface SessionCreateInput {
   readonly modelTarget?: SessionModelTarget;
   /** Named black-box executor contributed by a Host plugin. */
   readonly executorId?: string;
+  readonly executorSettings?: ExecutorSettings;
   readonly thinkingLevel?: ThinkingLevel;
   readonly toolProfile?: SessionToolProfile;
   readonly sandboxMode?: SandboxMode;
@@ -184,6 +186,7 @@ export interface SessionMetadataUpdateInput {
 
 export interface SessionConfigurationPatch {
   readonly modelTarget?: Extract<SessionModelTarget, { readonly kind: 'explicit' }>;
+  readonly executorTarget?: { readonly executorId: string; readonly settings?: ExecutorSettings };
   readonly thinkingLevel?: ThinkingLevel | null;
   readonly sandboxMode?: SandboxMode;
   readonly approvalPolicy?: ApprovalPolicy;
@@ -246,6 +249,7 @@ export interface SessionCatalogProjection {
   readonly revisionState?: 'preparing' | 'committed';
   readonly backend: PersistedBackendKind;
   readonly executorId?: string;
+  readonly executorSettings?: ExecutorSettings;
   readonly llmConnectionId: string | null;
   readonly llmConnectionSlug: string;
   readonly connectionLocked: boolean;
@@ -522,6 +526,7 @@ export function decodeSessionCreateInput(value: unknown): SessionCreateInput {
       'labels',
       'modelTarget',
       'executorId',
+      'executorSettings',
       'thinkingLevel',
       'toolProfile',
       'sandboxMode',
@@ -537,6 +542,8 @@ export function decodeSessionCreateInput(value: unknown): SessionCreateInput {
   if ((executorId === undefined) === (target === undefined)) {
     throw invalidProtocolFrame('Session creation requires exactly one model target or executor id');
   }
+  if (input.executorSettings !== undefined && executorId === undefined)
+    throw invalidProtocolFrame('Executor settings require an executor target');
   return {
     sessionId: requireEntityId(input.sessionId, 'sessionId'),
     workspace: decodeWorkspaceTarget(input.workspace),
@@ -545,6 +552,9 @@ export function decodeSessionCreateInput(value: unknown): SessionCreateInput {
     ...(Object.hasOwn(input, 'labels') ? { labels: labels(input.labels) } : {}),
     ...(target ? { modelTarget: target } : {}),
     ...(executorId ? { executorId } : {}),
+    ...(Object.hasOwn(input, 'executorSettings')
+      ? { executorSettings: executorSettings(input.executorSettings) }
+      : {}),
     ...(Object.hasOwn(input, 'thinkingLevel')
       ? { thinkingLevel: thinkingLevel(input.thinkingLevel) }
       : {}),
@@ -616,6 +626,7 @@ export function decodeSessionConfigurationUpdateInput(
     [],
     [
       'modelTarget',
+      'executorTarget',
       'thinkingLevel',
       'sandboxMode',
       'approvalPolicy',
@@ -626,12 +637,20 @@ export function decodeSessionConfigurationUpdateInput(
   if (Object.keys(patch).length === 0) {
     throw invalidProtocolFrame('Session configuration patch is empty');
   }
+  if (
+    Object.hasOwn(patch, 'executorTarget') &&
+    (Object.hasOwn(patch, 'modelTarget') || Object.hasOwn(patch, 'thinkingLevel'))
+  )
+    throw invalidProtocolFrame('Executor settings cannot include native model settings');
   return {
     sessionId: requireEntityId(input.sessionId, 'sessionId'),
     expectedRevision: positiveRevision(input.expectedRevision, 'expected Session revision'),
     patch: {
       ...(Object.hasOwn(patch, 'modelTarget')
         ? { modelTarget: explicitModelTarget(patch.modelTarget) }
+        : {}),
+      ...(Object.hasOwn(patch, 'executorTarget')
+        ? { executorTarget: executorTarget(patch.executorTarget) }
         : {}),
       ...(Object.hasOwn(patch, 'thinkingLevel')
         ? {
@@ -785,6 +804,9 @@ export function decodeSessionCatalogProjection(value: unknown): SessionCatalogPr
     ...optionalRevisionState(record),
     backend: backend(record.backend),
     ...optionalExecutorId(record),
+    ...(Object.hasOwn(record, 'executorSettings')
+      ? { executorSettings: executorSettings(record.executorSettings) }
+      : {}),
     llmConnectionId:
       record.llmConnectionId === null
         ? null
@@ -805,6 +827,8 @@ export function decodeSessionCatalogProjection(value: unknown): SessionCatalogPr
   if ((projection.backend === 'plugin-executor') !== (projection.executorId !== undefined)) {
     throw invalidProtocolFrame('Session executor identity does not match its backend');
   }
+  if (projection.executorSettings !== undefined && projection.executorId === undefined)
+    throw invalidProtocolFrame('Executor settings require a plugin executor');
   requireEncodedByteLimit(
     projection,
     'Session catalog projection',
@@ -1010,6 +1034,17 @@ function backend(value: unknown): SessionCatalogProjection['backend'] {
   return value;
 }
 
+function executorSettings(value: unknown): ExecutorSettings {
+  if (!isExecutorSettings(value)) throw invalidProtocolFrame('Invalid executor settings');
+  return value;
+}
+function executorTarget(value: unknown): { executorId: string; settings: ExecutorSettings } {
+  const row = requireShapedRecord(value, 'Executor target', ['executorId'], ['settings']);
+  return {
+    executorId: executorIdValue(row.executorId),
+    settings: Object.hasOwn(row, 'settings') ? executorSettings(row.settings) : {},
+  };
+}
 function executorIdValue(value: unknown): string {
   const id = requireUtf8String(value, 'Executor id', 128);
   if (!isExecutorId(id)) {

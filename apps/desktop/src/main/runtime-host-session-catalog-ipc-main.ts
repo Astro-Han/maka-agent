@@ -23,6 +23,7 @@ import { isOrchestrationMode } from '@maka/core/orchestration';
 import { isSandboxMode } from '@maka/core/permission';
 import { decodeApprovalPolicy, type ApprovalPolicy } from '@maka/core/execution-permissions';
 import { isThinkingLevel, type ThinkingLevel } from '@maka/core/model-thinking';
+import { isExecutorSettings } from '@maka/core/executor-id';
 import { type CreateSessionRequestInput, type SessionListFilter } from '@maka/core/runtime-inputs';
 import { type SessionChangedEvent, type SessionChangedReason, type SessionCatalogSummary } from '@maka/core/session';
 import { RuntimeHostOperationError, projectSessionCatalogSummary } from '@maka/runtime-host/client';
@@ -349,11 +350,14 @@ function normalizeSessionListFilter(value: unknown): SessionListFilter | undefin
 export function resolveDesktopSessionCreateInput(input: CreateSessionRequestInput | undefined, sessionId: string, workspace: WorkspaceTarget): SessionCreateInput {
   const request = resolveCreateSessionRequest(input);
   const executorId = normalizeOptionalString(input?.executorId, 'executor id');
+  const executorSettings = input?.executorSettings;
+  if (executorSettings !== undefined && (!executorId || !isExecutorSettings(executorSettings)))
+    throw new Error('Invalid plugin executor settings');
   if (
     executorId &&
     (input?.llmConnectionId !== undefined ||
       input?.llmConnectionSlug !== undefined ||
-      input?.model !== undefined)
+      input?.model !== undefined || input?.thinkingLevel !== undefined)
   ) {
     throw new Error('Plugin executor selection cannot include a model target');
   }
@@ -363,6 +367,7 @@ export function resolveDesktopSessionCreateInput(input: CreateSessionRequestInpu
     name: request.name,
     ...(request.labels === undefined ? {} : { labels: request.labels }),
     ...(executorId ? { executorId } : { modelTarget: normalizeModelTarget(input) }),
+    ...(executorSettings === undefined ? {} : { executorSettings }),
     ...normalizeCreateThinkingLevel(input?.thinkingLevel),
     ...(request.mode !== undefined || request.sandboxMode === undefined ? {} : { sandboxMode: request.sandboxMode }),
     ...(request.approvalPolicy === undefined ? {} : { approvalPolicy: request.approvalPolicy }),

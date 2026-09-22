@@ -75,6 +75,7 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
         .is_err()
     );
     let started = event(Fact::ExecutorStarted {
+        settings: Default::default(),
         binding: Binding {
             executor_id: "example".to_owned().try_into().unwrap(),
             package_id: "example".into(),

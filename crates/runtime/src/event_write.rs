@@ -55,8 +55,9 @@ impl ProjectionArtifactWrite {
 impl EventWrite {
     pub fn plain(event: RuntimeEvent) -> Result<Self, CommitError> {
         match &event.fact {
-            Fact::ExecutorStarted { binding } => binding
+            Fact::ExecutorStarted { binding, settings } => binding
                 .validate()
+                .and_then(|()| settings.validate())
                 .map_err(|reason| CommitError::Rejected(reason.into()))?,
             Fact::ExecutorObserved { output } => output
                 .validate()

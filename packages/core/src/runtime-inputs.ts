@@ -56,6 +56,7 @@ export interface CreateSessionInput {
   name?: string;
   /** Named plugin executor. When present, model fields are retained only as display placeholders. */
   executorId?: string;
+  executorSettings?: import('./executor-id.js').ExecutorSettings;
   /** Immutable Connection entity identity. Omitted only while copying legacy state. */
   llmConnectionId?: string;
   llmConnectionSlug: string;

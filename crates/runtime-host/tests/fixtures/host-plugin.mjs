@@ -155,6 +155,15 @@ export default async function (ctx) {
       if (request.content.quotes?.[0]?.text !== 'Prepared by an external input provider')
         throw new Error('executor lost provider-prepared structured content');
       const session = request.invocation.session_id;
+      const expected =
+        session === 'executor-session'
+          ? { model: 'host-model', thinkingLevel: 'max' }
+          : { model: 'plugin-model', thinkingLevel: 'medium' };
+      if (
+        request.settings.model !== expected.model ||
+        request.settings.thinkingLevel !== expected.thinkingLevel
+      )
+        throw new Error('executor model settings were lost during configuration or restart');
       if (
         session !== 'executor-session' &&
         !request.instructions?.includes('Executor child instructions')

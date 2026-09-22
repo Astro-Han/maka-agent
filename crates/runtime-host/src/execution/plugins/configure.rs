@@ -63,7 +63,10 @@ impl BoundCommands {
                 next.thinking_level = thinking_level;
                 next.connection_locked = true;
             }
-            Target::Executor { executor_id } => {
+            Target::Executor {
+                executor_id,
+                settings,
+            } => {
                 if next.bound_tools.is_some() || next.tool_profile.is_some() {
                     return Err(Error::Invalid(
                         "Executor cannot enforce native tool constraints".into(),
@@ -71,7 +74,10 @@ impl BoundCommands {
                 }
                 host.executor_binding(&input.session_id, &executor_id)
                     .map_err(|e| Error::Invalid(e.message))?;
-                next.target = SessionTarget::Executor { executor_id };
+                next.target = SessionTarget::Executor {
+                    executor_id,
+                    settings,
+                };
                 next.thinking_level = None;
                 next.connection_locked = false;
             }

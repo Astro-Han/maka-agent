@@ -168,7 +168,10 @@ impl BoundCommands {
                                     .into();
                                     child.thinking_level = thinking_level;
                                 }
-                                maka_plugins::execution::Target::Executor { executor_id } => {
+                                maka_plugins::execution::Target::Executor {
+                                    executor_id,
+                                    settings,
+                                } => {
                                     if child.tool_profile.is_some()
                                         || child.bound_tools.is_some()
                                         || request.bound_tools.is_some()
@@ -181,8 +184,10 @@ impl BoundCommands {
                                     worker
                                         .executor_binding(&id, &executor_id)
                                         .map_err(|e| Error::Invalid(e.message))?;
-                                    child.target =
-                                        crate::session::SessionTarget::Executor { executor_id };
+                                    child.target = crate::session::SessionTarget::Executor {
+                                        executor_id,
+                                        settings,
+                                    };
                                     child.thinking_level = None;
                                 }
                             }

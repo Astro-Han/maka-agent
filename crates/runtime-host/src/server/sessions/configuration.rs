@@ -56,11 +56,18 @@ async fn apply(host: &Host, input: SessionConfigurationUpdateInput) -> Result<Se
             "Archived Session configuration cannot be changed",
         ));
     }
-    let mut next = merge(host, &current.configuration, input.patch.clone()).await?;
+    let mut next = merge(
+        host,
+        &input.session_id,
+        &current.configuration,
+        input.patch.clone(),
+    )
+    .await?;
     if next != current.configuration {
         let permission_only = (input.patch.sandbox_mode.is_some()
             || input.patch.approval_policy.is_some())
             && input.patch.model_target.is_none()
+            && input.patch.executor_target.is_none()
             && input.patch.thinking_level.is_keep()
             && input.patch.collaboration_mode.is_none()
             && input.patch.orchestration_mode.is_none();
@@ -140,12 +147,14 @@ async fn apply(host: &Host, input: SessionConfigurationUpdateInput) -> Result<Se
 
 async fn merge(
     host: &Host,
+    session_id: &str,
     current: &SessionConfiguration,
     patch: SessionConfigurationPatch,
 ) -> Result<SessionConfiguration> {
-    if current.target.model().is_none()
-        && (patch.model_target.is_some()
-            || !patch.thinking_level.is_keep()
+    let executor_selected = patch.executor_target.is_some()
+        || (current.target.model().is_none() && patch.model_target.is_none());
+    if executor_selected
+        && (!patch.thinking_level.is_keep()
             || patch
                 .orchestration_mode
                 .as_ref()
@@ -160,8 +169,29 @@ async fn merge(
         ));
     }
     let mut next = current.clone();
+    if let Some(target) = &patch.executor_target {
+        if next.bound_tools.is_some()
+            || next.tool_profile.is_some()
+            || next.orchestration_mode != BehaviorId::default()
+            || next.collaboration_mode != CollaborationMode::Agent
+        {
+            return Err(failure(
+                Code::OperationUnavailable,
+                "Executor cannot enforce native tool or orchestration constraints",
+            ));
+        }
+        // The caller holds admission: no replacement may pass this check unnoticed.
+        host.executions
+            .executor_binding(session_id, &target.executor_id)?;
+        next.target = crate::session::SessionTarget::Executor {
+            executor_id: target.executor_id.clone(),
+            settings: target.settings.clone(),
+        };
+        next.thinking_level = None;
+        next.connection_locked = false;
+    }
     next.thinking_level = match patch.thinking_level {
-        Patch::Keep => current.thinking_level,
+        Patch::Keep => next.thinking_level,
         Patch::Clear => None,
         Patch::Set(level) => Some(level),
     };

@@ -86,6 +86,7 @@ impl Provider for Executor {
                 .map_err(|error| Error::Provider(error.to_string()))?;
             let input = json!({
                 "invocation":request.invocation, "conversationKey":request.conversation_key,
+                "settings":request.settings,
                 "content":request.content, "cwd":request.cwd, "instructions":request.instructions,
             });
             let result = invoke(

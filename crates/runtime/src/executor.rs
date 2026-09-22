@@ -21,6 +21,29 @@ use serde::{Deserialize, Serialize};
 mod output;
 pub use output::Output;
 
+/// Executor-owned model selection, independent of Host model connections.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Settings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<crate::execution::ThinkingLevel>,
+}
+impl Settings {
+    pub fn is_empty(&self) -> bool {
+        self.model.is_none() && self.thinking_level.is_none()
+    }
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.model.as_ref().is_some_and(|model| {
+            model.trim().is_empty() || model.len() > 512 || model.chars().any(char::is_control)
+        }) {
+            return Err("executor model must contain 1–512 UTF-8 bytes without control characters");
+        }
+        Ok(())
+    }
+}
+
 /// The concrete implementation accepted for an external execution.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -222,6 +222,7 @@ impl Definitions {
             }
             Some(ExecutionTarget::Executor {
                 executor_id: executor.clone().try_into().map_err(super::error)?,
+                settings: Default::default(),
             })
         } else {
             selected

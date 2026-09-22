@@ -300,6 +300,7 @@ export interface SessionHeader {
   backend: PersistedBackendKind;
   /** Named black-box executor contributed by a plugin. Present exactly for plugin-executor. */
   executorId?: string;
+  executorSettings?: import('./executor-id.js').ExecutorSettings;
   /** Immutable Connection entity identity. Optional only on legacy Session records. */
   llmConnectionId?: string;
   llmConnectionSlug: string;
@@ -412,6 +413,7 @@ export interface SessionSummary {
   revisionState?: 'preparing' | 'committed';
   backend: PersistedBackendKind;
   executorId?: string;
+  executorSettings?: import('./executor-id.js').ExecutorSettings;
   /** Immutable Connection entity identity. Optional only on legacy summaries. */
   llmConnectionId?: string;
   llmConnectionSlug: string;

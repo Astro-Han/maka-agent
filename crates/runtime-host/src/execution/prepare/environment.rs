@@ -117,7 +117,7 @@ impl Executions {
                 "Plan execution is not installed",
             ));
         }
-        if let crate::session::SessionTarget::Executor { executor_id } = &session.target {
+        if let crate::session::SessionTarget::Executor { executor_id, .. } = &session.target {
             let (bindings, _) = self
                 .capabilities
                 .prepare_tools(

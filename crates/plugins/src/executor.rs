@@ -46,6 +46,7 @@ pub struct Request {
     pub content: MessageInput,
     pub cwd: String,
     pub instructions: Option<String>,
+    pub settings: maka_runtime::executor::Settings,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -185,6 +186,10 @@ impl Binding {
         })
     }
     pub fn admit(&self, request: Request) -> Result<Call, Error> {
+        request
+            .settings
+            .validate()
+            .map_err(|error| Error::Invalid(error.into()))?;
         if request.invocation.session_id != self.session
             || request.conversation_key.is_empty()
             || request.conversation_key.len() > 256

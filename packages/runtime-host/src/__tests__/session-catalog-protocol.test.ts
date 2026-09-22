@@ -277,6 +277,7 @@ describe('Session catalog protocol', () => {
           sessionId: 'session-executor',
           workspace: { kind: 'project', projectId: 'project-1' },
           executorId: 'codex.app-server',
+          executorSettings: { model: 'custom/model', thinkingLevel: 'max' },
         },
       }),
       {
@@ -286,11 +287,24 @@ describe('Session catalog protocol', () => {
           sessionId: 'session-executor',
           workspace: { kind: 'project', projectId: 'project-1' },
           executorId: 'codex.app-server',
+          executorSettings: { model: 'custom/model', thinkingLevel: 'max' },
         },
       },
     );
 
     for (const input of [
+      {
+        sessionId: 'bad-executor-model',
+        workspace: { kind: 'project', projectId: 'project-1' },
+        executorId: 'codex',
+        executorSettings: { model: ' ' },
+      },
+      {
+        sessionId: 'ambiguous-settings',
+        workspace: { kind: 'project', projectId: 'project-1' },
+        modelTarget: { kind: 'default' },
+        executorSettings: { model: 'custom/model' },
+      },
       {
         sessionId: 'session-missing-route',
         workspace: { kind: 'project', projectId: 'project-1' },

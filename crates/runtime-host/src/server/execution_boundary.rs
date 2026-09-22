@@ -116,6 +116,7 @@ mod tests {
             title_is_manual: false,
             target: crate::session::SessionTarget::Executor {
                 executor_id: "fixture".to_owned().try_into().unwrap(),
+                settings: Default::default(),
             },
             connection_locked: false,
             thinking_level: None,

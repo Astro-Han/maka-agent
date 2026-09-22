@@ -31,6 +31,8 @@ use serde_json::Value;
 pub struct SessionConfigurationPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_target: Option<SessionModelTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor_target: Option<SessionExecutorTarget>,
     #[serde(default, skip_serializing_if = "Patch::is_keep")]
     pub thinking_level: Patch<ThinkingLevel>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -41,6 +43,14 @@ pub struct SessionConfigurationPatch {
     pub collaboration_mode: Option<CollaborationMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub orchestration_mode: Option<BehaviorId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionExecutorTarget {
+    pub executor_id: maka_runtime::executor::ExecutorId,
+    #[serde(default)]
+    pub settings: maka_runtime::executor::Settings,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -95,6 +105,7 @@ pub fn decode_session_configuration_update_input(
     }
     let patch = &input.patch;
     if patch.model_target.is_none()
+        && patch.executor_target.is_none()
         && patch.thinking_level.is_keep()
         && patch.sandbox_mode.is_none()
         && patch.approval_policy.is_none()
@@ -109,6 +120,14 @@ pub fn decode_session_configuration_update_input(
         return Err(ProtocolError::invalid(
             "Session configuration model target must be explicit",
         ));
+    }
+    if let Some(target) = &patch.executor_target {
+        if patch.model_target.is_some() || !patch.thinking_level.is_keep() {
+            return Err(ProtocolError::invalid(
+                "Executor settings cannot include native model settings",
+            ));
+        }
+        target.settings.validate().map_err(ProtocolError::invalid)?;
     }
     Ok(input)
 }

@@ -145,6 +145,7 @@ async fn retirement_cancels_exact_executor_and_keeps_settlement_lease_or_fences_
                 invocation_id: "invocation".into(),
             },
             conversation_key: "session".into(),
+            settings: Default::default(),
             content: "work".into(),
             cwd: std::env::temp_dir().to_string_lossy().into_owned(),
             instructions: None,

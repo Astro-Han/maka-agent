@@ -135,7 +135,13 @@ export type ExecutionTarget =
       model: { connection_id: string; connection_slug: string; model: string };
       thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
     }
-  | { kind: 'executor'; executorId: string };
+  | { kind: 'executor'; executorId: string; settings?: ExecutorSettings };
+
+/** Selection belongs to the executor; no Host model connection is implied. */
+export interface ExecutorSettings {
+  model?: string;
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+}
 export interface SessionConfiguration {
   sessionId: string;
   revision: number;

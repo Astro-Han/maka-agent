@@ -160,6 +160,8 @@ pub enum Target {
     },
     Executor {
         executor_id: maka_runtime::executor::ExecutorId,
+        #[serde(default)]
+        settings: maka_runtime::executor::Settings,
     },
 }
 impl Target {
@@ -168,6 +170,11 @@ impl Target {
             name(&model.connection_id)?;
             name(&model.connection_slug)?;
             name(&model.model)?;
+        }
+        if let Self::Executor { settings, .. } = self {
+            settings
+                .validate()
+                .map_err(|error| Error::Invalid(error.into()))?;
         }
         Ok(())
     }

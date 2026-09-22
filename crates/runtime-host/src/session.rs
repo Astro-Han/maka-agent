@@ -68,6 +68,7 @@ pub enum SessionTarget {
     },
     Executor {
         executor_id: maka_runtime::executor::ExecutorId,
+        settings: maka_runtime::executor::Settings,
     },
 }
 impl SessionTarget {
@@ -125,8 +126,12 @@ impl SessionConfiguration {
                 model: model.clone(),
                 thinking_level: self.thinking_level,
             },
-            SessionTarget::Executor { executor_id } => maka_plugins::execution::Target::Executor {
+            SessionTarget::Executor {
+                executor_id,
+                settings,
+            } => maka_plugins::execution::Target::Executor {
                 executor_id: executor_id.clone(),
+                settings: settings.clone(),
             },
         };
         maka_plugins::session::View {
@@ -195,6 +200,14 @@ pub struct PreparedSession {
 
 impl PreparedSession {
     pub fn new(input: SessionCreateInput) -> Result<Self> {
+        if let SessionCreateTarget::Executor {
+            executor_settings, ..
+        } = &input.target
+        {
+            executor_settings
+                .validate()
+                .map_err(ProtocolError::invalid)?;
+        }
         if matches!(input.target, SessionCreateTarget::Executor { .. })
             && (input.thinking_level.is_some()
                 || input.tool_profile.is_some()
@@ -267,7 +280,10 @@ impl PreparedSession {
             WorkspaceTarget::Project { project_id } => json!(["project", project_id]),
         };
         let model = match &self.target {
-            SessionCreateTarget::Executor { executor_id } => json!(["executor", executor_id]),
+            SessionCreateTarget::Executor {
+                executor_id,
+                executor_settings,
+            } => json!(["executor", executor_id, executor_settings]),
             SessionCreateTarget::Model {
                 model_target: SessionModelTarget::Default,
             } => json!(["default"]),
@@ -354,6 +370,14 @@ pub fn metadata_projection(
             labels.push(label);
         }
     }
+    let thinking_level = match &config.target {
+        SessionTarget::Executor { settings, .. } => settings.thinking_level,
+        SessionTarget::Model { .. } => config.thinking_level,
+    };
+    let executor_settings = match &config.target {
+        SessionTarget::Executor { settings, .. } => Some(settings.clone()),
+        SessionTarget::Model { .. } => None,
+    };
     let (backend, executor_id, connection_id, connection_slug, model) = match config.target {
         SessionTarget::Model { model } => (
             Backend::AiSdk,
@@ -362,14 +386,17 @@ pub fn metadata_projection(
             model.connection_slug,
             model.model,
         ),
-        SessionTarget::Executor { executor_id } => {
+        SessionTarget::Executor {
+            executor_id,
+            settings,
+        } => {
             let name = executor_id.as_str().to_owned();
             (
                 Backend::PluginExecutor,
                 Some(executor_id),
                 None,
                 format!("executor:{name}"),
-                name,
+                settings.model.unwrap_or(name),
             )
         }
     };
@@ -388,6 +415,7 @@ pub fn metadata_projection(
         status: SessionStatus::Active,
         backend,
         executor_id,
+        executor_settings,
         llm_connection_id: connection_id,
         llm_connection_slug: connection_slug,
         connection_locked: config.connection_locked,
@@ -396,7 +424,7 @@ pub fn metadata_projection(
         approval_policy: config.approval_policy,
         collaboration_mode: config.collaboration_mode,
         orchestration_mode: config.orchestration_mode,
-        thinking_level: config.thinking_level,
+        thinking_level,
         last_message_at: None,
         last_message_preview: None,
         blocked_reason: None,

@@ -80,7 +80,10 @@ impl Engine {
                             source_messages: input.source_messages,
                         },
                     },
-                    Fact::ExecutorStarted { binding: identity },
+                    Fact::ExecutorStarted {
+                        binding: identity,
+                        settings: input.request.settings,
+                    },
                 ]
                 .into_iter()
                 .map(|fact| EventWrite::plain(RuntimeEvent::new(invocation.clone(), fact)))
