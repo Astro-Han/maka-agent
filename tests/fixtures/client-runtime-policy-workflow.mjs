@@ -102,7 +102,6 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
 
     const value = {
       sandboxMode: 'danger-full-access',
-      thinkingLevel: 'high',
     };
     const beforeRace = notices.length;
     const raced = await Promise.all([mutate(0, value), mutate(0, value, other)]);
@@ -154,7 +153,7 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
     await barrier();
     assert.equal(notices.length, beforeUnavailable, 'unavailable mutation must not notify');
 
-    const changed = await mutate(2, { sandboxMode: 'workspace-write', thinkingLevel: 'low' });
+    const changed = await mutate(2, { sandboxMode: 'workspace-write' });
     assert.deepEqual(changed, { kind: 'committed', revision: 3 });
     for (const { input, snapshot } of sessions) {
       assert.deepEqual(await querySession(request, input.sessionId), snapshot);
@@ -164,18 +163,13 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
         'default changes never alter existing or exactly retried Sessions',
       );
     }
-    const cleared = await mutate(3, { sandboxMode: 'danger-full-access' });
-    assert.deepEqual(cleared, { kind: 'committed', revision: 4 });
+    const restored = await mutate(3, { sandboxMode: 'danger-full-access' });
+    assert.deepEqual(restored, { kind: 'committed', revision: 4 });
     const finalSettings = await settingsSnapshot(request);
     assert.equal(finalSettings.policy.revision, 4);
     assert.deepEqual(finalSettings.policy.policy.chatDefaults, {
       sandboxMode: 'danger-full-access',
     });
-    assert.equal(
-      Object.hasOwn(finalSettings.policy.policy.chatDefaults, 'thinkingLevel'),
-      false,
-      'set_chat_defaults replaces the whole object; omission clears thinking',
-    );
     await barrier();
     assert.equal(notices.length, beforeUnavailable + 2);
     const catalog = await request('connection.catalog.query', { kind: 'start' });
@@ -189,7 +183,7 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
       raced,
       sameValue,
       changed,
-      cleared,
+      restored,
       configurationNotices: notices,
     };
     await writeFile(path, JSON.stringify(saved));
