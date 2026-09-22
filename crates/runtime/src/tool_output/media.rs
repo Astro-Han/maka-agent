@@ -44,6 +44,18 @@ enum ToolSuccessValue {
         bytes: Vec<u8>,
         mime_type: String,
     },
+    Content {
+        output: ToolOutput,
+        parts: Vec<ToolContent>,
+    },
+}
+
+/// Ordered explicit output, normalized to immutable evidence at settlement.
+#[derive(Clone, Debug)]
+pub enum ToolContent {
+    Text(String),
+    Image(ImageOutput),
+    Media(crate::capability::ContentBlock),
 }
 
 pub(crate) struct NormalizedToolSuccess {
@@ -64,6 +76,9 @@ impl From<Value> for ToolSuccess {
 }
 
 impl ToolSuccess {
+    pub fn content(output: ToolOutput, parts: Vec<ToolContent>) -> Self {
+        Self(ToolSuccessValue::Content { output, parts })
+    }
     /// Freeze an executor-owned model view alongside the unmodified raw result.
     /// Invalid projections become projection failures, not failed tool effects.
     pub fn projected(output: ToolOutput, projection: DurableToolProjection) -> Self {
@@ -87,6 +102,73 @@ impl ToolSuccess {
         invocation: &Invocation,
     ) -> Result<NormalizedToolSuccess, &'static str> {
         let (output, pending_image) = match self.0 {
+            ToolSuccessValue::Content { output, parts } => {
+                if parts.len() > 64 {
+                    return Ok(NormalizedToolSuccess {
+                        output,
+                        projection: DurableToolProjection::Failure,
+                        artifacts: Vec::new(),
+                    });
+                }
+                let mut projection = Vec::new();
+                let mut artifacts = Vec::new();
+                let mut valid = true;
+                for (index, part) in parts.into_iter().enumerate() {
+                    match part {
+                        ToolContent::Text(text) => {
+                            projection.push(super::ProjectionPart::Text { text })
+                        }
+                        ToolContent::Image(image) => {
+                            projection.push(super::ProjectionPart::Artifact { image })
+                        }
+                        ToolContent::Media(content) => {
+                            let result = crate::capability::CallResult {
+                                content: vec![content],
+                                structured_content: None,
+                            };
+                            let Some((media, writes)) = super::mcp::project(
+                                &result,
+                                &format!("{id}:{index}"),
+                                time,
+                                invocation,
+                            ) else {
+                                valid = false;
+                                break;
+                            };
+                            if let DurableToolProjection::Content { parts } = media {
+                                projection.extend(parts);
+                            }
+                            artifacts.extend(writes);
+                        }
+                    }
+                }
+                let mut projection = if projection
+                    .iter()
+                    .all(|part| matches!(part, super::ProjectionPart::Text { .. }))
+                {
+                    DurableToolProjection::Text {
+                        text: projection
+                            .into_iter()
+                            .filter_map(|part| match part {
+                                super::ProjectionPart::Text { text } => Some(text),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    }
+                } else {
+                    DurableToolProjection::Content { parts: projection }
+                };
+                if !valid || projection.validate(&invocation.session_id).is_err() {
+                    projection = DurableToolProjection::Failure;
+                    artifacts.clear();
+                }
+                return Ok(NormalizedToolSuccess {
+                    output,
+                    projection,
+                    artifacts,
+                });
+            }
             ToolSuccessValue::Output(output) => (output, None),
             ToolSuccessValue::Projected { output, projection } => {
                 let projection = if projection.validate(&invocation.session_id).is_ok() {

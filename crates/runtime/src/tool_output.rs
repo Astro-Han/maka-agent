@@ -30,7 +30,7 @@ pub use durable::{
     DURABLE_TOOL_PROJECTION_FAILURE_MESSAGE, DurableToolProjection, MAX_RAW_TOOL_RESULT_BYTES,
     MAX_RAW_TOOL_RESULT_JSON_DEPTH, ProjectionPart, RawToolResultRef, decode_raw_tool_result,
 };
-pub use media::ToolSuccess;
+pub use media::{ToolContent, ToolSuccess};
 
 /// Live successful output. Durable evidence and projection are encoded separately.
 /// JSON with MCP-looking fields is still JSON unless its executor says otherwise.

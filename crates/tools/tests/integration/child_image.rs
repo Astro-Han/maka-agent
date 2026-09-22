@@ -110,7 +110,7 @@ impl ToolPreparer for ImageTools {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn nested_image_is_committed_before_js_and_parent_stays_json() {
+async fn nested_image_is_committed_before_js_and_explicit_output_projects_it() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("events.sqlite");
     let log = Arc::new(EventLog::open(&path).await.unwrap());
@@ -134,7 +134,7 @@ async fn nested_image_is_committed_before_js_and_parent_stays_json() {
     let call = support::call(
         "exec",
         "exec",
-        json!({"code":"const image = await tools.read({}); return await tools.verify(image);"}),
+        json!({"code":"const result = await tools.read({}); image(result); return await tools.verify(result);"}),
     );
     support::accepted(&log, &invocation, std::slice::from_ref(&call)).await;
     let run = RunTools::new(
@@ -152,15 +152,15 @@ async fn nested_image_is_committed_before_js_and_parent_stays_json() {
         .invoke(&call, CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(result["ok"], true);
-    assert_eq!(result["value"]["kind"], "image");
+    assert_eq!(result["result"]["ok"], true);
+    assert_eq!(result["result"]["value"]["kind"], "image");
     let prefix = log.prefix(32, 64 * 1024).await.unwrap();
     assert!(
         matches!(&prefix.events.last().unwrap().event.fact, Fact::ToolSettled {
-        outcome: ToolOutcome::Succeeded { model_projection: DurableToolProjection::Json { value }, .. }, ..
-    } if value == &result)
+        outcome: ToolOutcome::Succeeded { model_projection: DurableToolProjection::Content { parts }, .. }, ..
+    } if parts.iter().any(|part| matches!(part, ProjectionPart::Artifact { .. })))
     );
-    let artifact_id = result["value"]["ref"]["relativePath"]
+    let artifact_id = result["result"]["value"]["ref"]["relativePath"]
         .as_str()
         .unwrap()
         .to_owned();

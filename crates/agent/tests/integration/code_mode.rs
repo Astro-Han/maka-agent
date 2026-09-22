@@ -109,7 +109,7 @@ async fn streamed_exec_journals_parallel_children_and_reopens_without_reexecutio
                     }
                 })
                 .collect();
-            assert_eq!(dispatches.len(), 3);
+            assert_eq!(dispatches.len(), 4);
             let (parent_t1, parent_operation, parent_call, parent_name, parent_input) =
                 dispatches[0];
             assert_eq!(parent_name, "exec");
@@ -135,7 +135,7 @@ async fn streamed_exec_journals_parallel_children_and_reopens_without_reexecutio
                     }
                 })
                 .collect();
-            assert_eq!(settlements.len(), 3);
+            assert_eq!(settlements.len(), 4);
             let (parent_t2, _, parent_outcome) = settlements
                 .iter()
                 .copied()
@@ -146,25 +146,30 @@ async fn streamed_exec_journals_parallel_children_and_reopens_without_reexecutio
                 log.resolve_tool_result("session", &prefix.events[parent_t2].event.id)
                     .await
                     .unwrap()
-                    .into_json(),
+                    .into_json()["result"],
                 envelope
             );
             let mut ids = HashSet::new();
+            let (cell_t1, cell_operation, cell_call, _, _) = dispatches[1];
+            assert_eq!(cell_call.origin, ToolOrigin::CodeCell {
+                parent_operation_id: parent_operation.clone(), parent_tool_call_id: parent_call.tool_call_id.clone(),
+            });
+            let cell_t2 = settlements.iter().find(|(_, operation, _)| *operation == cell_operation).unwrap().0;
             for (t1, operation, call, name, input) in &dispatches {
                 assert!(ids.insert(operation.as_str()));
                 assert!(
                     ids.insert(call.tool_call_id.as_str()),
                     "operation IDs and call IDs are distinct"
                 );
-                if *name == "exec" {
+                if matches!(name.as_str(), "exec" | "code_cell") {
                     continue;
                 }
                 assert!(matches!(name.as_str(), "left" | "right"));
                 assert_eq!(
                     call.origin,
                     ToolOrigin::CodeMode {
-                        parent_operation_id: parent_operation.clone(),
-                        parent_tool_call_id: parent_call.tool_call_id.clone(),
+                        parent_operation_id: cell_operation.clone(),
+                        parent_tool_call_id: cell_call.tool_call_id.clone(),
                     }
                 );
                 let (t2, _, outcome) = settlements
@@ -172,7 +177,7 @@ async fn streamed_exec_journals_parallel_children_and_reopens_without_reexecutio
                     .copied()
                     .find(|(_, settled, _)| settled == operation)
                     .unwrap();
-                assert!(parent_t1 < *t1 && *t1 < t2 && t2 < parent_t2);
+                assert!(parent_t1 < cell_t1 && cell_t1 < *t1 && *t1 < t2 && t2 < cell_t2 && cell_t2 < parent_t2);
                 assert!(matches!(outcome, ToolOutcome::Succeeded { .. }));
                 assert_eq!(
                     log.resolve_tool_result("session", &prefix.events[t2].event.id)
@@ -260,12 +265,13 @@ async fn streamed_exec_journals_parallel_children_and_reopens_without_reexecutio
                 .iter()
                 .map(|tool| tool["name"].as_str().unwrap())
                 .collect();
-            assert_eq!(names, HashSet::from(["exec"]));
+            assert_eq!(names, HashSet::from(["exec", "wait"]));
             let description = functions[0]["description"].as_str().unwrap();
-            assert!(description.contains("\"name\":\"left\""));
-            assert!(description.contains("\"name\":\"right\""));
+            assert!(description.contains("\"left\"(input:"));
+            assert!(description.contains("\"right\"(input:"));
             let schema = &functions[0]["parameters"];
-            assert_eq!(schema["properties"], json!({"code":{"type":"string"}}));
+            assert_eq!(schema["properties"]["code"]["type"], "string");
+            assert!(schema["properties"].get("yield_time_ms").is_some());
             assert_eq!(schema["required"], json!(["code"]));
             assert_eq!(schema["additionalProperties"], false);
         }
@@ -288,7 +294,7 @@ async fn streamed_exec_journals_parallel_children_and_reopens_without_reexecutio
         assert_eq!(second[2]["role"], "tool");
         assert_eq!(second[2]["tool_call_id"], "exec-provider");
         assert_eq!(
-            serde_json::from_str::<Value>(second[2]["content"].as_str().unwrap()).unwrap(),
+            serde_json::from_str::<Value>(second[2]["content"].as_str().unwrap()).unwrap()["result"],
             envelope
         );
         let reopened = requests[2]["messages"].as_array().unwrap();

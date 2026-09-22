@@ -216,6 +216,10 @@ async fn check_boundary(boundary: Boundary) {
             .into_step("step")
             .invoke(&call, CancellationToken::new())
             .await;
+        assert!(matches!(
+            run.shutdown().await,
+            Err(ToolError::Persistence(_))
+        ));
         match boundary {
             Boundary::ChildDispatch => assert!(matches!(result, Err(ToolError::Persistence(_)))),
             Boundary::ChildSettlement => {
@@ -237,9 +241,10 @@ async fn check_boundary(boundary: Boundary) {
                     Fact::ToolDispatched {
                         operation_id, call, ..
                     } if matches!(call.origin, ToolOrigin::CodeMode { .. }) => {
-                        assert!(matches!(&call.origin, ToolOrigin::CodeMode {
-                    parent_operation_id, parent_tool_call_id
-                } if parent_operation_id == PARENT && parent_tool_call_id == "parent"));
+                        let ToolOrigin::CodeMode { parent_operation_id, .. } = &call.origin else { unreachable!() };
+                        assert!(attempts.iter().any(|event| matches!(&event.fact,
+                            Fact::ToolDispatched {operation_id,call,..} if operation_id==parent_operation_id
+                                && matches!(&call.origin,ToolOrigin::CodeCell {parent_operation_id,..} if parent_operation_id==PARENT))));
                         Some(operation_id.clone())
                     }
                     _ => None,
@@ -247,7 +252,7 @@ async fn check_boundary(boundary: Boundary) {
                 .expect("real JS invoked the child")
         };
         let prefix = log.prefix(32, 64 * 1024).await.unwrap();
-        assert_eq!(prefix.events.len(), 4 + expected_effects);
+        assert_eq!(prefix.events.len(), 5 + expected_effects);
         assert!(
             !prefix
                 .events
@@ -255,6 +260,19 @@ async fn check_boundary(boundary: Boundary) {
                 .any(|stored| matches!(stored.event.fact, Fact::ToolSettled { .. }))
         );
         let mut uncertain = vec![PARENT.to_string()];
+        uncertain.extend(
+            prefix
+                .events
+                .iter()
+                .filter_map(|event| match &event.event.fact {
+                    Fact::ToolDispatched {
+                        operation_id, call, ..
+                    } if matches!(call.origin, ToolOrigin::CodeCell { .. }) => {
+                        Some(operation_id.clone())
+                    }
+                    _ => None,
+                }),
+        );
         if expected_effects == 1 {
             uncertain.push(child);
         }

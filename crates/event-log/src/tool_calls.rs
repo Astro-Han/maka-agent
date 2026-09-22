@@ -63,6 +63,7 @@ pub(crate) async fn validate(
             let provider_step = match &call.origin {
                 ToolOrigin::Provider { step_id } => Some(step_id.as_str()),
                 ToolOrigin::CodeMode { .. }
+                | ToolOrigin::CodeCell { .. }
                 | ToolOrigin::HostSdk { .. }
                 | ToolOrigin::Standalone => None,
             };
@@ -118,6 +119,10 @@ pub(crate) async fn validate(
                     }
                 }
                 ToolOrigin::CodeMode {
+                    parent_operation_id,
+                    parent_tool_call_id,
+                }
+                | ToolOrigin::CodeCell {
                     parent_operation_id,
                     parent_tool_call_id,
                 } => {

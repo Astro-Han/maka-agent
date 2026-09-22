@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use crate::{CellDiagnostic, CellDiagnosticKind};
+use crate::{CellDiagnostic, CellDiagnosticKind, ToolMetadata};
 use deno_core::{JsRuntime, v8};
 use serde::Deserialize;
 use serde_json::Value;
@@ -27,15 +27,22 @@ pub(crate) async fn evaluate(
     source: &str,
     names: &[String],
     max_bytes: usize,
+    metadata: &[ToolMetadata],
 ) -> Result<Value, CellDiagnostic> {
     let execution = |error: String| CellDiagnostic::new(CellDiagnosticKind::ExecutionError, error);
     let names = serde_json::to_string(names).unwrap();
+    let metadata = serde_json::to_string(metadata).unwrap();
     runtime
         .execute_script(
             "maka:code/bootstrap",
             format!(
                 r#"(() => {{
         const call = Deno.core.ops.op_maka_tool;
+        const emit = Deno.core.ops.op_maka_emit;
+        const yieldOutput = Deno.core.ops.op_maka_yield;
+        const save = Deno.core.ops.op_maka_store;
+        const read = Deno.core.ops.op_maka_load;
+        const sleep = Deno.core.ops.op_maka_sleep;
         const diagnostics = new WeakMap();
         const remember = diagnostics.set.bind(diagnostics);
         const lookup = diagnostics.get.bind(diagnostics);
@@ -43,6 +50,72 @@ pub(crate) async fn evaluate(
         const describe = String;
         const hasOwn = Object.hasOwn;
         const ErrorClass = Error;
+        const exitSignal = Object.freeze({{}});
+        const check = (diagnostic) => {{
+            if (!diagnostic) return;
+            const error = new ErrorClass(diagnostic.message);
+            remember(error, diagnostic);
+            throw error;
+        }};
+        const text = (value) => {{
+            const content = typeof value === "string" ? value : stringify(value);
+            check(emit({{kind:"text",text:content === undefined ? "undefined" : content}}));
+        }};
+        const timers = new Map();
+        let nextTimer = 0;
+        let pendingTimers = 0;
+        const media = (type, value) => {{
+            if (typeof value === "string") {{
+                const match = /^data:([^;,]+);base64,([A-Za-z0-9+/]*={{0,2}})$/.exec(value);
+                if (!match || !match[1].startsWith(type + "/")) throw new ErrorClass("expected a base64 data URL");
+                value = {{type, mimeType:match[1],data:match[2]}};
+            }}
+            if (!value || value.type !== type) throw new ErrorClass("expected a " + type + " content block");
+            check(emit({{kind:"media",content:{{type,data:value.data,mimeType:value.mimeType}}}}));
+        }};
+        const helpers = {{
+            text,
+            exit: () => {{ throw exitSignal; }},
+            image: (value) => {{
+                if (!value?.ref) {{ media("image", value?.image_url ?? value); return; }}
+                const {{mimeType, ref}} = value;
+                check(emit({{kind:"image",image:{{mimeType,ref}}}}));
+            }},
+            audio: (value) => media("audio", value?.audio_url ?? value),
+            generatedImage: (value) => {{ media("image", value.image_url); if (value.output_hint) text(value.output_hint); }},
+            notify: (value) => {{ text(value); yieldOutput(); }},
+            yield_control: async () => {{ yieldOutput(); await sleep(0); }},
+            store: (key, value) => {{
+                if (typeof key !== "string") throw new ErrorClass("store key must be a string");
+                const json = stringify(value);
+                if (json === undefined) throw new ErrorClass("stored value must be JSON");
+                check(save(key, JSON.parse(json)));
+            }},
+            load: (key) => {{
+                if (typeof key !== "string") throw new ErrorClass("load key must be a string");
+                const result = read(key);
+                return result.found ? result.value : undefined;
+            }},
+            setTimeout: (callback, millis = 0) => {{
+                if (typeof callback !== "function" || !Number.isFinite(millis) || millis < 0 || millis > 86400000)
+                    throw new ErrorClass("invalid timer");
+                if (pendingTimers >= 128) throw new ErrorClass("timer limit exceeded");
+                const id = ++nextTimer;
+                pendingTimers++;
+                timers.set(id, callback);
+                sleep(Math.trunc(millis)).then(() => {{
+                    pendingTimers--;
+                    const callback = timers.get(id);
+                    timers.delete(id);
+                    if (callback) callback();
+                }});
+                return id;
+            }},
+            clearTimeout: (id) => {{ timers.delete(id); }},
+            ALL_TOOLS: Object.freeze({metadata}.map(Object.freeze)),
+        }};
+        for (const [name, value] of Object.entries(helpers))
+            Object.defineProperty(globalThis, name, {{value}});
         const invoke = async (name, input) => {{
             const outcome = await call(name, input);
             if (outcome.ok) return outcome.value;
@@ -69,6 +142,7 @@ pub(crate) async fn evaluate(
                 if (json === undefined) throw new ErrorClass("result is not JSON");
                 return stringify({{kind: "success", json}});
             }} catch (error) {{
+                if (error === exitSignal) return stringify({{kind:"success", json:"null"}});
                 const diagnostic = lookup(error);
                 return stringify({{kind: "failure", error: diagnostic ?? {{
                     kind: "execution_error", message: describe(error)

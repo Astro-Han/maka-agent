@@ -246,12 +246,15 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
     let cancellation = CancellationToken::new();
     let cancel = cancellation.clone();
     let execution = tokio::spawn(async move {
-        run.capture(".", tokio_util::sync::CancellationToken::new())
+        let result = run
+            .capture(".", tokio_util::sync::CancellationToken::new())
             .await
             .unwrap()
             .into_step("step")
             .invoke(&call, cancel)
-            .await
+            .await;
+        run.shutdown().await?;
+        result
     });
     let HostFrame::Call {
         invocation_id: id,
@@ -363,9 +366,17 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
             mode == ToolMode::Direct
         );
         if mode == ToolMode::CodeMode {
-            assert!(
-                matches!(&call.origin,ToolOrigin::CodeMode{parent_operation_id,parent_tool_call_id} if parent_operation_id=="step:provider:parent" && parent_tool_call_id=="provider:parent")
-            );
+            let ToolOrigin::CodeMode {
+                parent_operation_id,
+                parent_tool_call_id,
+            } = &call.origin
+            else {
+                panic!("nested tool provenance")
+            };
+            assert!(prefix.events.iter().any(|e| matches!(&e.event.fact,
+                Fact::ToolDispatched { operation_id, call, .. } if operation_id == parent_operation_id
+                    && call.tool_call_id == *parent_tool_call_id
+                    && matches!(&call.origin, ToolOrigin::CodeCell {parent_operation_id,..} if parent_operation_id=="step:provider:parent"))));
         }
         std::fs::write(directory.path().join("effect"), "once").unwrap();
         if cut == Cut::Lost {

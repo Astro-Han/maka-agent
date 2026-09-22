@@ -23,8 +23,7 @@ use maka_js_runtime::CodeExecutor;
 use maka_runtime::event::{EventSink, Invocation};
 use maka_runtime::model::ModelToolCall;
 use maka_runtime::tool_call::{ToolCallIdentity, ToolRejection};
-use maka_runtime::tool_output::ToolSuccess;
-use maka_runtime::tools::{ToolError, ToolExecutor, ToolJournal};
+use maka_runtime::tools::{ToolError, ToolJournal};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -40,6 +39,13 @@ pub struct RunTools {
     availability: Availability,
     mode: ToolMode,
     cells: CodeExecutor,
+    code: cell::Cells,
+}
+
+impl Drop for RunTools {
+    fn drop(&mut self) {
+        self.code.cancel();
+    }
 }
 
 impl RunTools {
@@ -56,11 +62,21 @@ impl RunTools {
             availability: Availability::new(catalog),
             mode,
             cells,
+            code: cell::Cells::default(),
         }
     }
 
     pub fn clear_loaded(&self) {
         self.availability.clear();
+        self.code.clear_store();
+    }
+
+    pub async fn shutdown(&self) -> Result<(), ToolError> {
+        self.code.shutdown().await
+    }
+
+    pub fn code_idle(&self) -> bool {
+        self.code.is_idle()
     }
 
     pub fn with_model(mut self, model: maka_runtime::tools::ModelToolContext) -> Self {
@@ -85,6 +101,7 @@ impl RunTools {
         cwd: &str,
         cancellation: CancellationToken,
     ) -> Result<RequestTools<'_>, ToolError> {
+        self.code.check()?;
         let (current, captured, context) = self
             .availability
             .capture(
@@ -218,10 +235,9 @@ impl<'a> RequestTools<'a> {
         if self.run.mode == ToolMode::CodeMode {
             let mut exec = cell::definition();
             exec.description.push_str("\nUse this tool for JavaScript and nested functions. Other advertised tools must be called directly. After searching, return its result and use the refreshed catalog in the next exec call. Available nested functions:\n");
-            exec.description.push_str(
-                &serde_json::to_string(&definitions).expect("function definitions are JSON"),
-            );
+            exec.description.push_str(&cell::declarations(&definitions));
             std::iter::once(exec)
+                .chain(std::iter::once(cell::wait_definition()))
                 .chain(self.direct.definitions().cloned())
                 .collect()
         } else {
@@ -280,6 +296,7 @@ impl StepTools<'_> {
         cancellation: CancellationToken,
     ) -> Result<Value, ToolError> {
         let run = self.request.run;
+        run.code.check()?;
         let operation_id = format!("{}:{}", self.step_id, call.id);
         let identity = ToolCallIdentity::provider(self.step_id.into(), call.id.clone());
         let catalog = if run.mode == ToolMode::CodeMode {
@@ -302,15 +319,18 @@ impl StepTools<'_> {
                     operation_id.clone(),
                     call.id.clone(),
                 );
+                let code = run.code.clone();
                 let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
-                    Box::pin(async move {
-                        executor
-                            .invoke("exec".into(), Value::Null, cancellation)
-                            .await
-                            .map(ToolSuccess::from)
-                    })
+                    Box::pin(async move { code.start(executor, cancellation).await })
                 });
                 Ok(effect)
+            } else if call.name == "wait" && run.mode == ToolMode::CodeMode {
+                self.admission.admit(ToolSemantics::ExclusiveStep)?;
+                let input = cell::wait_input(&call.input)?;
+                let code = run.code.clone();
+                Ok(PreparedEffect::new(move |cancellation| {
+                    Box::pin(async move { code.observe(input, cancellation).await })
+                }))
             } else if run.mode == ToolMode::Direct
                 && call.name == SEARCH
                 && self.request.availability.enabled()

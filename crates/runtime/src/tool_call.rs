@@ -82,6 +82,13 @@ pub enum ToolOrigin {
         parent_operation_id: String,
         parent_tool_call_id: String,
     },
+    /// An independently running cell accepted by an exec control call.
+    /// Its parent may settle once startup/observation completes; its own nested
+    /// tool effects must still drain before the cell's canonical settlement.
+    CodeCell {
+        parent_operation_id: String,
+        parent_tool_call_id: String,
+    },
     Standalone,
     /// Explicit Host SDK work, never dispatch inferred from executor observations.
     HostSdk {

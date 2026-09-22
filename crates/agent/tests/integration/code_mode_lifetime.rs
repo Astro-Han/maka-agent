@@ -131,11 +131,11 @@ async fn dropping_caller_keeps_unawaited_child_session_and_cell_owned_until_drai
                     .iter()
                     .filter(|event| matches!(event.event.fact, Fact::ToolDispatched { .. }))
                     .count(),
-                2
+                3
             );
             assert!(!held.events.iter().any(|event| matches!(
                 event.event.fact,
-                Fact::ToolSettled { .. } | Fact::InvocationEnded { .. }
+                Fact::InvocationEnded { .. }
             )));
             assert!(matches!(
                 engine
@@ -151,10 +151,7 @@ async fn dropping_caller_keeps_unawaited_child_session_and_cell_owned_until_drai
             // Explicitly poll the contender while the cancelled effect remains
             // blocked on release. Cancellation must not free the shared permit.
             assert!(poll!(&mut next).is_pending());
-            assert_eq!(
-                log.prefix(100, 128 * 1024).await.unwrap().high_water,
-                held.high_water
-            );
+            assert_eq!(log.prefix(100, 128 * 1024).await.unwrap().project_invocation("invocation-aborted").terminal, None);
             assert_eq!(requests_seen.load(Ordering::SeqCst), 1);
             effect.release.notify_one();
             assert_eq!(
@@ -172,54 +169,20 @@ async fn dropping_caller_keeps_unawaited_child_session_and_cell_owned_until_drai
                 .iter()
                 .filter(|event| !matches!(event.event.fact, Fact::ModelObserved { .. }))
                 .collect();
+            let operation = |expected| boundaries.iter().find_map(|event| match &event.event.fact {
+                Fact::ToolDispatched { operation_id, name, .. } if name == expected => Some(operation_id.clone()),
+                _ => None,
+            }).unwrap();
+            let child = operation("slow");
+            let cell = operation("code_cell");
+            let child_t2 = boundaries.iter().position(|event| matches!(&event.event.fact,
+                Fact::ToolSettled { operation_id, outcome: ToolOutcome::Succeeded { .. } } if operation_id == &child)).unwrap();
+            let cell_t2 = boundaries.iter().position(|event| matches!(&event.event.fact,
+                Fact::ToolSettled { operation_id, outcome: ToolOutcome::Failed { .. } } if operation_id == &cell)).unwrap();
+            assert!(child_t2 < cell_t2 && cell_t2 < boundaries.len() - 1);
+            assert_eq!(log.resolve_tool_result(&boundaries[child_t2].event.invocation.session_id, &boundaries[child_t2].event.id).await.unwrap().into_json(), json!({"value":42}));
             assert_eq!(
-                boundaries
-                    .iter()
-                    .map(|event| event.event.fact.kind())
-                    .collect::<Vec<_>>(),
-                [
-                    "invocation_opened",
-                    "model_requested",
-                    "model_completed",
-                    "tool_dispatched",
-                    "tool_dispatched",
-                    "tool_settled",
-                    "tool_settled",
-                    "invocation_ended"
-                ]
-            );
-            let Fact::ToolDispatched {
-                operation_id: parent,
-                name,
-                ..
-            } = &boundaries[3].event.fact
-            else {
-                panic!("parent T1")
-            };
-            assert_eq!(name, "exec");
-            let Fact::ToolDispatched {
-                operation_id: child,
-                name,
-                ..
-            } = &boundaries[4].event.fact
-            else {
-                panic!("child T1")
-            };
-            assert_eq!(name, "slow");
-            assert!(matches!(&boundaries[5].event.fact,
-                Fact::ToolSettled { operation_id, outcome: ToolOutcome::Succeeded { .. } } if operation_id == child));
-            assert_eq!(log.resolve_tool_result(&boundaries[5].event.invocation.session_id, &boundaries[5].event.id).await.unwrap().into_json(), json!({"value":42}));
-            assert_eq!(
-                boundaries[6].event.fact,
-                Fact::ToolSettled {
-                    operation_id: parent.clone(),
-                    outcome: ToolOutcome::Failed {
-                        message: "code execution cancelled".into()
-                    },
-                }
-            );
-            assert_eq!(
-                boundaries[7].event.fact,
+                boundaries.last().unwrap().event.fact,
                 Fact::InvocationEnded {
                     outcome: InvocationOutcome::Cancelled {
                         source: "runtime_cancellation".into()
@@ -277,7 +240,7 @@ async fn dropping_caller_keeps_unawaited_child_session_and_cell_owned_until_drai
         assert_eq!(history.len(), 4);
         assert_eq!(history[2]["role"], "tool");
         assert_eq!(history[2]["tool_call_id"], "exec-slow");
-        assert_eq!(history[2]["content"], "code execution cancelled");
+        assert_eq!(history[2]["content"], "cell observation cancelled");
         assert_eq!(
             history[3],
             json!({"role":"user","content":"question reopened"})

@@ -63,6 +63,8 @@ pub(super) fn reserve_core_names(
         "AskUserQuestion",
         "tool_search",
         "exec",
+        "wait",
+        "code_cell",
     ] {
         catalog.reserve::<maka_tools::plugins::PluginTool>(name)?;
     }

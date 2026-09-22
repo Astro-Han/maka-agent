@@ -103,7 +103,7 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
                 (
                     call("exec", "exec", json!({"code":1})),
                     Some(ToolRejection::InvalidInput {
-                        message: "exec requires exactly one string field: code".into(),
+                        message: "invalid type: integer `1`, expected a string".into(),
                     }),
                 ),
                 (
@@ -155,7 +155,7 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
             if mode == ToolMode::Direct {
                 vec!["direct", "echo"]
             } else {
-                vec!["exec", "direct"]
+                vec!["exec", "wait", "direct"]
             }
         );
         let token = CancellationToken::new();
@@ -192,7 +192,12 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
                 } else {
                     call.input
                 };
-                assert_eq!(value, expected);
+                if call.name == "exec" {
+                    assert_eq!(value["state"], "completed");
+                    assert_eq!(value["result"], expected);
+                } else {
+                    assert_eq!(value, expected);
+                }
                 assert!(matches!(
                     facts.last().unwrap(),
                     Fact::ToolSettled {
@@ -206,7 +211,7 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
                         .await
                         .unwrap()
                         .into_json(),
-                    expected
+                    value
                 );
             }
         }
@@ -273,11 +278,11 @@ async fn nested_preflight_is_effect_free_and_diagnostics_are_successful_parent_v
             .invoke(&call, CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!(value["ok"], false);
-        assert_eq!(value["error"]["kind"], kind);
-        assert_eq!(value["toolCalls"], calls);
-        assert!(value.get("value").is_none());
-        assert_eq!(value.as_object().unwrap().len(), 3);
+        assert_eq!(value["state"], "completed");
+        assert_eq!(value["result"]["ok"], false);
+        assert_eq!(value["result"]["error"]["kind"], kind);
+        assert_eq!(value["result"]["toolCalls"], calls);
+        assert!(value["result"].get("value").is_none());
         let prefix = log.prefix(200, 1024 * 1024).await.unwrap();
         let effects: Vec<_> = prefix
             .events
@@ -290,7 +295,10 @@ async fn nested_preflight_is_effect_free_and_diagnostics_are_successful_parent_v
             .collect();
         assert_eq!(
             effects,
-            [format!("{}:exec", invocation.invocation_id)],
+            [
+                format!("{}:exec", invocation.invocation_id),
+                value["cell_id"].as_str().unwrap().to_string()
+            ],
             "invalid child arguments must not claim T1"
         );
         assert!(matches!(

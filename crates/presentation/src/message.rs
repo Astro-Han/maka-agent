@@ -52,6 +52,10 @@ impl ToolMetadata {
             ToolOrigin::CodeMode {
                 parent_operation_id,
                 ..
+            }
+            | ToolOrigin::CodeCell {
+                parent_operation_id,
+                ..
             } => Ok(Self::CodeMode {
                 model_visibility: Hidden::Hidden,
                 parent_tool_call_id: tool_message_id(invocation, parent_operation_id),

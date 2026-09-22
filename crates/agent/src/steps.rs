@@ -42,106 +42,88 @@ pub(super) async fn run(
         inner.cells.clone(),
     )
     .with_model(input.provider.tool_context());
-    use maka_runtime::handoff::CompactionBudget;
-    let mut compaction = CompactionBudget::Available;
-    // This tracks work after this physical opening, not after the logical root.
-    // A successor may compact the sealed prefix with a PreTurn boundary.
-    let mut completed_step = false;
-    if let crate::RunWork::Handoff { pause, .. } = &input.work {
-        tools.restore(&pause.execution.tools)?;
-        compaction = pause.execution.compaction;
-    }
-    for step in 0..max_steps {
-        if cancellation.is_cancelled() {
-            return Err(RunError::Cancelled);
+    let result = std::panic::AssertUnwindSafe(async {
+        use maka_runtime::handoff::CompactionBudget;
+        let mut compaction = CompactionBudget::Available;
+        // This tracks work after this physical opening, not after the logical root.
+        // A successor may compact the sealed prefix with a PreTurn boundary.
+        let mut completed_step = false;
+        if let crate::RunWork::Handoff { pause, .. } = &input.work {
+            tools.restore(&pause.execution.tools)?;
+            compaction = pause.execution.compaction;
         }
-        inner.log.commit_pending_steering(&input.invocation).await?;
-        if let Some(pause) = handoff
-            .boundary(cancellation, |intent| async {
-                let source = inner
-                    .log
-                    .read_model_context(
-                        &input.invocation.session_id,
-                        Some(&input.invocation.invocation_id),
-                        10_000,
-                        8 * 1024 * 1024,
+        for step in 0..max_steps {
+            if cancellation.is_cancelled() {
+                return Err(RunError::Cancelled);
+            }
+            inner.log.commit_pending_steering(&input.invocation).await?;
+            if let Some(pause) = handoff
+                .boundary(cancellation, |intent| async {
+                    // Live cells retain the current step's capabilities and effects.
+                    // A handoff can seal only after those independent jobs settle.
+                    if !tools.code_idle() {
+                        return None;
+                    }
+                    let source = inner
+                        .log
+                        .read_model_context(
+                            &input.invocation.session_id,
+                            Some(&input.invocation.invocation_id),
+                            10_000,
+                            8 * 1024 * 1024,
+                        )
+                        .await
+                        .ok()?;
+                    // Read the live source, but project from the successor's point of
+                    // view: manual replay cuts distinguish current from inherited work.
+                    let prompt = model_attempt::prompt(
+                        inner,
+                        input,
+                        &source,
+                        ModelPurpose::Main,
+                        cancellation,
+                        continuation_base,
+                        &intent.successor_invocation_id,
                     )
                     .await
                     .ok()?;
-                // Read the live source, but project from the successor's point of
-                // view: manual replay cuts distinguish current from inherited work.
-                let prompt = model_attempt::prompt(
-                    inner,
-                    input,
-                    &source,
-                    ModelPurpose::Main,
-                    cancellation,
-                    continuation_base,
-                    &intent.successor_invocation_id,
-                )
-                .await
-                .ok()?;
-                let replay = crate::continuation::replay(
-                    input,
-                    prompt,
-                    tools.handoff_definitions(),
-                    cancellation,
-                )
-                .ok()?;
-                let pause = maka_runtime::handoff::HandoffPause {
-                    intent,
-                    remaining_steps: std::num::NonZeroU16::new((max_steps - step) as u16)
-                        .expect("validated step budget"),
-                    execution: Box::new(maka_runtime::handoff::HandoffExecution {
-                        replay,
-                        context: input.context.clone(),
-                        provider_options: input.provider_options.clone(),
-                        main_output_limit: input.main_output_limit,
-                        supports_vision: input.supports_vision,
-                        tools: tools.checkpoint(),
-                        compaction,
-                        replay_base: continuation_base,
-                    }),
-                };
-                inner
-                    .log
-                    .check_handoff(&input.invocation, &pause)
-                    .await
+                    let replay = crate::continuation::replay(
+                        input,
+                        prompt,
+                        tools.handoff_definitions(),
+                        cancellation,
+                    )
                     .ok()?;
-                Some(pause)
-            })
-            .await
-        {
-            return Ok(maka_runtime::event::InvocationOutcome::HandoffPaused { pause });
-        }
-        if cancellation.is_cancelled() {
-            return Err(RunError::Cancelled);
-        }
-        let mut source = inner
-            .log
-            .read_model_context(
-                &input.invocation.session_id,
-                Some(&input.invocation.invocation_id),
-                10_000,
-                8 * 1024 * 1024,
-            )
-            .await?;
-        if compaction == CompactionBudget::Available && auto_context::due(input, &source) {
-            compaction = CompactionBudget::Failed;
-            if auto_context::attempt(
-                inner,
-                input,
-                &source,
-                completed_step,
-                cancellation,
-                continuation_base,
-            )
-            .await?
+                    let pause = maka_runtime::handoff::HandoffPause {
+                        intent,
+                        remaining_steps: std::num::NonZeroU16::new((max_steps - step) as u16)
+                            .expect("validated step budget"),
+                        execution: Box::new(maka_runtime::handoff::HandoffExecution {
+                            replay,
+                            context: input.context.clone(),
+                            provider_options: input.provider_options.clone(),
+                            main_output_limit: input.main_output_limit,
+                            supports_vision: input.supports_vision,
+                            tools: tools.checkpoint(),
+                            compaction,
+                            replay_base: continuation_base,
+                        }),
+                    };
+                    inner
+                        .log
+                        .check_handoff(&input.invocation, &pause)
+                        .await
+                        .ok()?;
+                    Some(pause)
+                })
+                .await
             {
-                compaction = CompactionBudget::Reshaped;
-                tools.clear_loaded();
+                return Ok(maka_runtime::event::InvocationOutcome::HandoffPaused { pause });
             }
-            source = inner
+            if cancellation.is_cancelled() {
+                return Err(RunError::Cancelled);
+            }
+            let mut source = inner
                 .log
                 .read_model_context(
                     &input.invocation.session_id,
@@ -150,48 +132,8 @@ pub(super) async fn run(
                     8 * 1024 * 1024,
                 )
                 .await?;
-        }
-        let request_tools = tools
-            .capture(&input.configuration.cwd, cancellation.clone())
-            .await?;
-        let surface = Arc::new(
-            crate::request_composition::Surface::capture(&request_tools, input, cancellation)
-                .await?,
-        );
-        let prompt = model_attempt::prompt(
-            inner,
-            input,
-            &source,
-            ModelPurpose::Main,
-            cancellation,
-            continuation_base,
-            &input.invocation.invocation_id,
-        )
-        .await?;
-        let result = model_attempt::execute(
-            inner,
-            input,
-            &source,
-            surface.apply(prompt),
-            request_tools.definitions(),
-            model_attempt::Attempt::Main {
-                lane: lane.clone(),
-                continuation_base,
-                surface: surface.clone(),
-            },
-            cancellation,
-        )
-        .await;
-        let (step_id, output) = match result {
-            Ok(output) => output,
-            Err(
-                error @ RunError::Model(maka_model::ModelError::ContextOverflow {
-                    observed_output: false,
-                }),
-            ) if compaction == CompactionBudget::Available
-                && step + 1 < max_steps
-                && !cancellation.is_cancelled() =>
-            {
+            if compaction == CompactionBudget::Available && auto_context::due(input, &source) {
+                compaction = CompactionBudget::Failed;
                 if auto_context::attempt(
                     inner,
                     input,
@@ -204,54 +146,25 @@ pub(super) async fn run(
                 {
                     compaction = CompactionBudget::Reshaped;
                     tools.clear_loaded();
-                    continue;
                 }
-                return Err(error);
+                source = inner
+                    .log
+                    .read_model_context(
+                        &input.invocation.session_id,
+                        Some(&input.invocation.invocation_id),
+                        10_000,
+                        8 * 1024 * 1024,
+                    )
+                    .await?;
             }
-            Err(error) => return Err(error),
-        };
-        if compaction == CompactionBudget::Reshaped {
-            compaction = CompactionBudget::Available;
-        }
-        let local_calls: Vec<_> = output
-            .tool_calls()
-            .filter(|call| !call.provider_executed)
-            .collect();
-        if local_calls.is_empty() {
-            return Ok(maka_runtime::event::InvocationOutcome::Completed);
-        }
-        let mut step_tools = request_tools.into_step(&step_id);
-        for call in &local_calls {
-            let result = std::panic::AssertUnwindSafe(async {
-                step_tools.invoke(call, cancellation.clone()).await
-            })
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|_| Err(ToolError::CleanupUnconfirmed("tool panicked".into())));
-            match result {
-                Ok(_)
-                | Err(ToolError::Failed(_) | ToolError::Io { .. } | ToolError::OutcomeUnknown(_)) =>
-                    {}
-                Err(error) => return Err(error.into()),
-            }
-        }
-        // Drain and persist all tool outcomes before rewriting the next model view.
-        // Bound the view before either Responses confirmation or compaction reads it.
-        prune::run(inner, input, cancellation).await?;
-        if step_tools.finished() {
-            return Ok(maka_runtime::event::InvocationOutcome::Completed);
-        }
-        if step + 1 < max_steps && !cancellation.is_cancelled() && lane.needs_confirmation() {
-            let source = inner
-                .log
-                .read_model_context(
-                    &input.invocation.session_id,
-                    Some(&input.invocation.invocation_id),
-                    10_000,
-                    8 * 1024 * 1024,
-                )
+            let request_tools = tools
+                .capture(&input.configuration.cwd, cancellation.clone())
                 .await?;
-            let replay = model_attempt::prompt(
+            let surface = Arc::new(
+                crate::request_composition::Surface::capture(&request_tools, input, cancellation)
+                    .await?,
+            );
+            let prompt = model_attempt::prompt(
                 inner,
                 input,
                 &source,
@@ -261,14 +174,114 @@ pub(super) async fn run(
                 &input.invocation.invocation_id,
             )
             .await?;
-            let ids: Vec<_> = local_calls.iter().map(|call| call.id.as_str()).collect();
-            lane.confirm(&surface.apply(replay), &ids, output.response_id.as_deref());
+            let result = model_attempt::execute(
+                inner,
+                input,
+                &source,
+                surface.apply(prompt),
+                request_tools.definitions(),
+                model_attempt::Attempt::Main {
+                    lane: lane.clone(),
+                    continuation_base,
+                    surface: surface.clone(),
+                },
+                cancellation,
+            )
+            .await;
+            let (step_id, output) = match result {
+                Ok(output) => output,
+                Err(
+                    error @ RunError::Model(maka_model::ModelError::ContextOverflow {
+                        observed_output: false,
+                    }),
+                ) if compaction == CompactionBudget::Available
+                    && step + 1 < max_steps
+                    && !cancellation.is_cancelled() =>
+                {
+                    if auto_context::attempt(
+                        inner,
+                        input,
+                        &source,
+                        completed_step,
+                        cancellation,
+                        continuation_base,
+                    )
+                    .await?
+                    {
+                        compaction = CompactionBudget::Reshaped;
+                        tools.clear_loaded();
+                        continue;
+                    }
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            };
+            if compaction == CompactionBudget::Reshaped {
+                compaction = CompactionBudget::Available;
+            }
+            let local_calls: Vec<_> = output
+                .tool_calls()
+                .filter(|call| !call.provider_executed)
+                .collect();
+            if local_calls.is_empty() {
+                return Ok(maka_runtime::event::InvocationOutcome::Completed);
+            }
+            let mut step_tools = request_tools.into_step(&step_id);
+            for call in &local_calls {
+                let result = std::panic::AssertUnwindSafe(async {
+                    step_tools.invoke(call, cancellation.clone()).await
+                })
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|_| Err(ToolError::CleanupUnconfirmed("tool panicked".into())));
+                match result {
+                    Ok(_)
+                    | Err(
+                        ToolError::Failed(_) | ToolError::Io { .. } | ToolError::OutcomeUnknown(_),
+                    ) => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            // Bound settled tool output before Responses confirmation or compaction.
+            // Independent cells may still run; their pending effects remain canonical.
+            prune::run(inner, input, cancellation).await?;
+            if step_tools.finished() {
+                return Ok(maka_runtime::event::InvocationOutcome::Completed);
+            }
+            if step + 1 < max_steps && !cancellation.is_cancelled() && lane.needs_confirmation() {
+                let source = inner
+                    .log
+                    .read_model_context(
+                        &input.invocation.session_id,
+                        Some(&input.invocation.invocation_id),
+                        10_000,
+                        8 * 1024 * 1024,
+                    )
+                    .await?;
+                let replay = model_attempt::prompt(
+                    inner,
+                    input,
+                    &source,
+                    ModelPurpose::Main,
+                    cancellation,
+                    continuation_base,
+                    &input.invocation.invocation_id,
+                )
+                .await?;
+                let ids: Vec<_> = local_calls.iter().map(|call| call.id.as_str()).collect();
+                lane.confirm(&surface.apply(replay), &ids, output.response_id.as_deref());
+            }
+            completed_step = true;
         }
-        completed_step = true;
-    }
-    if cancellation.is_cancelled() {
-        Err(RunError::Cancelled)
-    } else {
-        Err(RunError::StepLimit)
-    }
+        if cancellation.is_cancelled() {
+            Err(RunError::Cancelled)
+        } else {
+            Err(RunError::StepLimit)
+        }
+    })
+    .catch_unwind()
+    .await
+    .unwrap_or_else(|_| Err(RunError::Internal("model step worker panicked".into())));
+    tools.shutdown().await?;
+    result
 }

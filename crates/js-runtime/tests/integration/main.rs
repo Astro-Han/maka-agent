@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod cell_context;
 mod code_mode;
 mod plugin_vm;
 mod result_contract;

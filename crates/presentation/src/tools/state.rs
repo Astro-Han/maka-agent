@@ -65,6 +65,10 @@ impl Tools {
         if let ToolOrigin::CodeMode {
             parent_operation_id,
             parent_tool_call_id,
+        }
+        | ToolOrigin::CodeCell {
+            parent_operation_id,
+            parent_tool_call_id,
         } = &identity.origin
         {
             let parent = self

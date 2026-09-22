@@ -25,7 +25,10 @@ use maka_event_log::EventLog;
 use maka_fs_tools::{
     MutationExecutor, ReadExecutor, ReadLimits, ReadScope, WriteCoordinator, WriteScope,
 };
-use maka_js_runtime::{CellAbort, CellDiagnosticKind, CellLimits, CellResult, CodeExecutor};
+use maka_js_runtime::{
+    CellAbort, CellContext, CellDiagnosticKind, CellLimits, CellResult, CellStore, CodeExecutor,
+    ToolMetadata,
+};
 use maka_runtime::event::{EventWrite, Fact, Invocation, InvocationOutcome, RuntimeEvent};
 use maka_runtime::execution::{
     ApprovalPolicy, BehaviorId, CollaborationMode, InvocationConfiguration, SandboxMode, ToolMode,
@@ -194,7 +197,21 @@ pub(super) async fn run(args: Args) -> Result<(), maka_runtime_host::server::Hos
             signal_cancel.cancel();
         }
     });
-    let result = engine.execute(source, tools, cancellation).await;
+    let context = CellContext::new(
+        CellStore::default(),
+        engine.limits().max_value_bytes,
+        tools
+            .names()
+            .into_iter()
+            .map(|name| ToolMetadata {
+                name,
+                description: String::new(),
+            })
+            .collect(),
+    );
+    let result = engine
+        .execute_with_context(source, tools, cancellation, context.clone())
+        .await;
     signal.abort();
     let outcome = match &result {
         Ok(CellResult::Success { .. }) => InvocationOutcome::Completed,
@@ -230,7 +247,10 @@ pub(super) async fn run(args: Args) -> Result<(), maka_runtime_host::server::Hos
     log.shutdown().await?;
     match result {
         Ok(output) => {
-            println!("{}", json!({"invocation": invocation, "output": output}));
+            println!(
+                "{}",
+                json!({"invocation": invocation, "output": output, "content": context.take_output()})
+            );
             if let CellResult::Failure { error, .. } = output {
                 return Err(error.message.into());
             }

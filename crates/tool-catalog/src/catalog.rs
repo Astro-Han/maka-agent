@@ -83,7 +83,7 @@ impl ToolCatalog {
                 || definition.name.len() > 128
                 || matches!(
                     definition.name.as_str(),
-                    "exec" | "invalid" | "tool_search" | "maka_tool_search"
+                    "exec" | "wait" | "code_cell" | "invalid" | "tool_search" | "maka_tool_search"
                 )
                 || entries.contains_key(&definition.name)
                 || !registration.handler.names().contains(&definition.name)

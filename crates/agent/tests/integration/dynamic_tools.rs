@@ -50,24 +50,25 @@ impl ToolExecutor for Echo {
         Box::pin(async move { Ok(input) })
     }
 }
-fn visible(request: &Value, mode: ToolMode) -> Vec<ToolDefinition> {
+fn visible(request: &Value, mode: ToolMode) -> Vec<String> {
     let wire = request["tools"].as_array().unwrap();
     if mode == ToolMode::CodeMode {
-        assert_eq!(wire.len(), 1);
+        assert_eq!(wire.len(), 2);
         assert_eq!(wire[0]["function"]["name"], "exec");
         let description = wire[0]["function"]["description"].as_str().unwrap();
         let (_, definitions) = description
             .split_once("Available nested functions:\n")
             .unwrap();
-        serde_json::from_str(definitions).unwrap()
+        definitions
+            .lines()
+            .filter_map(|line| {
+                line.split_once("(input:")
+                    .and_then(|(name, _)| serde_json::from_str::<String>(name).ok())
+            })
+            .collect()
     } else {
         wire.iter()
-            .map(|t| ToolDefinition {
-                provider: None,
-                name: t["function"]["name"].as_str().unwrap().into(),
-                description: t["function"]["description"].as_str().unwrap().into(),
-                input_schema: t["function"]["parameters"].clone(),
-            })
+            .map(|t| t["function"]["name"].as_str().unwrap().into())
             .collect()
     }
 }
@@ -102,7 +103,7 @@ async fn search_activates_next_step_and_only_committed_compaction_unloads_direct
                 let server = tokio::spawn(async move {
                     let (mut socket, _) = listener.accept().await.unwrap();
                     let first = fixture::read_request(&mut socket).await;
-                    assert_eq!(visible(&first, mode).iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["tool_search"]);
+                    assert_eq!(visible(&first, mode), ["tool_search"]);
                     let calls = if mode == ToolMode::Direct {
                         vec![call("search", "tool_search", json!({"query":"echo"})),
                              call("premature", "echo", json!({"n":1}))]
@@ -113,13 +114,13 @@ async fn search_activates_next_step_and_only_committed_compaction_unloads_direct
                     let (mut socket, _) = listener.accept().await.unwrap();
                     let second = fixture::read_request(&mut socket).await;
                     let definitions = visible(&second, mode);
-                    assert!(definitions.iter().any(|d| d.name == "echo"));
+                    assert!(definitions.iter().any(|name| name == "echo"));
                     assert_eq!(observed.load(Ordering::SeqCst), 0, "search cannot widen the current step or cell");
                     if mode == ToolMode::CodeMode {
                         let result = second["messages"].as_array().unwrap().iter().find(|m| m["role"] == "tool").unwrap();
                         let envelope: Value = serde_json::from_str(result["content"].as_str().unwrap()).unwrap();
-                        assert_eq!(envelope["value"]["blocked"], true);
-                        assert_eq!(envelope["value"]["result"]["activated"], json!(["echo"]));
+                        assert_eq!(envelope["result"]["value"]["blocked"], true);
+                        assert_eq!(envelope["result"]["value"]["result"]["activated"], json!(["echo"]));
                     }
                     let call = if mode == ToolMode::Direct {
                         call("use", "echo", json!({"n":2}))
@@ -135,8 +136,8 @@ async fn search_activates_next_step_and_only_committed_compaction_unloads_direct
                     let (mut socket, _) = listener.accept().await.unwrap();
                     let final_request = fixture::read_request(&mut socket).await;
                     let definitions = visible(&final_request, mode);
-                    assert_eq!(definitions.iter().any(|d| d.name == "echo"), !compact);
-                    assert!(definitions.iter().any(|d| d.name == "tool_search"));
+                    assert_eq!(definitions.iter().any(|name| name == "echo"), !compact);
+                    assert!(definitions.iter().any(|name| name == "tool_search"));
                     fixture::respond(&mut socket, "done", "stop").await;
                 });
                 let catalog = ToolCatalog::new([ToolRegistration {

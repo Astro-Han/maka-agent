@@ -141,7 +141,7 @@ async fn midturn_waits_for_all_code_mode_results_and_replays_exact_image_anchor_
                 .iter()
                 .filter(|event| matches!(event.event.fact, Fact::ToolSettled { .. }))
                 .count(),
-            3
+            4
         );
         assert!(
             !prefix

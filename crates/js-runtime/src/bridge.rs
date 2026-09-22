@@ -18,7 +18,7 @@
  */
 
 use crate::result::diagnostic_fits;
-use crate::{CellDiagnostic, CellDiagnosticKind, CellLimits, ToolCall};
+use crate::{CellContext, CellDiagnostic, CellDiagnosticKind, CellLimits, CellOutput, ToolCall};
 use deno_core::{OpState, op2};
 use maka_runtime::tools::{ToolError, ToolExecutor};
 use serde_json::Value;
@@ -29,17 +29,19 @@ use std::{
     rc::Rc,
     sync::{Arc, Mutex},
 };
-use tokio::{runtime::Handle, sync::oneshot};
+use tokio::{
+    runtime::Handle,
+    sync::{Semaphore, oneshot},
+};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 #[derive(Default)]
 pub(crate) struct Admission {
     pub(crate) calls: Vec<ToolCall>,
-    in_flight: usize,
-    pub(crate) fatal: Option<ToolError>,
 }
 
 pub(crate) struct ToolScope {
+    pub(crate) context: CellContext,
     pub(crate) executor: Arc<dyn ToolExecutor>,
     pub(crate) names: HashSet<String>,
     pub(crate) cancellation: CancellationToken,
@@ -47,6 +49,7 @@ pub(crate) struct ToolScope {
     pub(crate) host: Handle,
     pub(crate) limits: CellLimits,
     pub(crate) admission: Mutex<Admission>,
+    pub(crate) concurrency: Arc<Semaphore>,
 }
 
 impl ToolScope {
@@ -76,15 +79,13 @@ impl ToolScope {
         }
         {
             let mut admission = self.admission.lock().unwrap();
-            if admission.fatal.is_some() || self.cancellation.is_cancelled() {
+            if self.cancellation.is_cancelled() {
                 return Err(CellDiagnostic::new(
                     CellDiagnosticKind::ExecutionError,
                     "cell cancelled",
                 ));
             }
-            if admission.calls.len() >= self.limits.max_tool_calls
-                || admission.in_flight >= self.limits.max_in_flight_tools
-            {
+            if admission.calls.len() >= self.limits.max_tool_calls {
                 return Err(CellDiagnostic::limit("tool admission limit exceeded"));
             }
             let index = admission.calls.len() + 1;
@@ -97,7 +98,6 @@ impl ToolScope {
                 return Err(CellDiagnostic::limit("tool summary byte limit exceeded"));
             }
             admission.calls = reserved;
-            admission.in_flight += 1;
         }
         let (sender, receiver) = oneshot::channel();
         let scope = self.clone();
@@ -105,6 +105,11 @@ impl ToolScope {
             async move {
                 use deno_core::futures::FutureExt;
                 let result = std::panic::AssertUnwindSafe(async {
+                    let _permit = tokio::select! {
+                        biased;
+                        _ = scope.cancellation.cancelled() => return Err(ToolError::Failed("cell cancelled before tool dispatch".into())),
+                        permit = scope.concurrency.acquire() => permit.expect("cell semaphore stays open"),
+                    };
                     scope
                         .executor
                         .invoke(name, input, scope.cancellation.clone())
@@ -117,16 +122,11 @@ impl ToolScope {
                         "tool executor panicked".into(),
                     ))
                 });
+                if let Err(error @ (ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_))) =
+                    &result
                 {
-                    let mut admission = scope.admission.lock().unwrap();
-                    admission.in_flight -= 1;
-                    if let Err(
-                        error @ (ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_)),
-                    ) = &result
-                    {
-                        admission.fatal.get_or_insert_with(|| error.clone());
-                        scope.cancellation.cancel();
-                    }
+                    scope.cancellation.cancel();
+                    scope.context.fail(error.clone());
                 }
                 // The effect is settled even if JS no longer observes its promise.
                 let result = result
@@ -177,4 +177,49 @@ fn op_maka_tool(
     }
 }
 
-deno_core::extension!(maka_code, ops = [op_maka_tool]);
+#[op2]
+#[serde]
+fn op_maka_emit(state: &mut OpState, #[serde] output: CellOutput) -> Option<CellDiagnostic> {
+    state.borrow::<CellContext>().emit(output).err()
+}
+
+#[op2(fast)]
+fn op_maka_yield(state: &mut OpState) {
+    state.borrow::<CellContext>().yield_output();
+}
+
+#[op2]
+#[serde]
+fn op_maka_store(
+    state: &mut OpState,
+    #[string] key: String,
+    #[serde] value: serde_json::Value,
+) -> Option<CellDiagnostic> {
+    state.borrow::<CellContext>().store(key, value).err()
+}
+
+#[op2]
+#[serde]
+fn op_maka_load(state: &mut OpState, #[string] key: String) -> serde_json::Value {
+    match state.borrow::<CellContext>().load(&key) {
+        Some(value) => serde_json::json!({"found":true,"value":value}),
+        None => serde_json::json!({"found":false}),
+    }
+}
+
+#[op2]
+async fn op_maka_sleep(#[number] millis: u64) {
+    tokio::time::sleep(std::time::Duration::from_millis(millis.min(86_400_000))).await;
+}
+
+deno_core::extension!(
+    maka_code,
+    ops = [
+        op_maka_tool,
+        op_maka_emit,
+        op_maka_yield,
+        op_maka_store,
+        op_maka_load,
+        op_maka_sleep
+    ]
+);

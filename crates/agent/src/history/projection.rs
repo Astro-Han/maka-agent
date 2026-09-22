@@ -252,6 +252,7 @@ pub(super) fn build<'a>(
                     }
                 }
                 ToolOrigin::CodeMode { .. }
+                | ToolOrigin::CodeCell { .. }
                 | ToolOrigin::HostSdk { .. }
                 | ToolOrigin::Standalone => {
                     if calls.contains_key(operation) {
@@ -285,6 +286,7 @@ pub(super) fn build<'a>(
                     ));
                 }
                 ToolOrigin::CodeMode { .. }
+                | ToolOrigin::CodeCell { .. }
                 | ToolOrigin::HostSdk { .. }
                 | ToolOrigin::Standalone => {
                     if calls.contains_key(operation) {

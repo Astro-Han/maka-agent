@@ -103,13 +103,13 @@ async fn child_output_limit_after_t2_preserves_raw_and_remains_catchable() {
             .invoke(&call, CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!(result["ok"], caught);
+        assert_eq!(result["result"]["ok"], caught);
         if caught {
-            assert_eq!(result["value"], "caught");
+            assert_eq!(result["result"]["value"], "caught");
         } else {
-            assert_eq!(result["error"]["kind"], "limit_exceeded");
+            assert_eq!(result["result"]["error"]["kind"], "limit_exceeded");
             assert_eq!(
-                result["error"]["message"],
+                result["result"]["error"]["message"],
                 "tool output byte limit exceeded"
             );
         }
@@ -130,8 +130,8 @@ async fn child_output_limit_after_t2_preserves_raw_and_remains_catchable() {
             .collect();
         assert_eq!(
             outcomes.len(),
-            2,
-            "child and diagnostic parent both have durable success"
+            3,
+            "child, cell and its observation have durable success"
         );
         let child = &outcomes[0].event;
         assert_eq!(

@@ -83,6 +83,10 @@ pub(super) async fn selected(
                 parent_operation_id,
                 ..
             }
+            | ToolOrigin::CodeCell {
+                parent_operation_id,
+                ..
+            }
             | ToolOrigin::HostSdk {
                 parent_operation_id: Some(parent_operation_id),
                 ..

@@ -4786,6 +4786,7 @@ dependencies = [
 name = "maka-tools"
 version = "0.2.0"
 dependencies = [
+ "futures-util",
  "maka-client-capability",
  "maka-event-log",
  "maka-js-runtime",

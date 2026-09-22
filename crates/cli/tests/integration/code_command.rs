@@ -31,7 +31,7 @@ async fn binary_runs_journaled_file_tools_and_reconstructs_the_invocation_after_
     let log_path = directory.path().join("events.sqlite");
     let file_path = directory.path().canonicalize().unwrap().join("output.txt");
     let source = format!(
-        "await tools.Write({}); return await tools.Read({});",
+        "text('writing'); await tools.Write({}); return await tools.Read({});",
         json!({"path":file_path, "content":"hello from Rust"}),
         json!({"path":file_path})
     );
@@ -59,6 +59,10 @@ async fn binary_runs_journaled_file_tools_and_reconstructs_the_invocation_after_
     let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["output"]["ok"], true);
     assert_eq!(response["output"]["value"]["content"], "hello from Rust");
+    assert_eq!(
+        response["content"],
+        json!([{"kind":"text","text":"writing"}])
+    );
     assert_eq!(
         std::fs::read_to_string(file_path).unwrap(),
         "hello from Rust"

@@ -18,6 +18,7 @@
  */
 
 mod bridge;
+mod cell_context;
 mod evaluate;
 mod execution_budget;
 pub mod plugin;
@@ -25,6 +26,7 @@ mod result;
 pub mod trusted;
 
 use bridge::{Admission, ToolScope, maka_code};
+pub use cell_context::{CellContext, CellOutput, CellStore, ToolMetadata};
 use deno_core::{JsRuntime, RuntimeOptions, v8};
 use evaluate::evaluate;
 use execution_budget::ExecutionBudget;
@@ -97,6 +99,30 @@ impl CodeExecutor {
         tools: Arc<dyn ToolExecutor>,
         cancellation: CancellationToken,
     ) -> Result<CellResult, CellAbort> {
+        let metadata = tools
+            .names()
+            .into_iter()
+            .map(|name| ToolMetadata {
+                name,
+                description: String::new(),
+            })
+            .collect();
+        let context = CellContext::new(CellStore::default(), self.limits.max_value_bytes, metadata);
+        self.execute_with_context(source, tools, cancellation, context)
+            .await
+    }
+
+    pub fn limits(&self) -> &CellLimits {
+        &self.limits
+    }
+
+    pub async fn execute_with_context(
+        &self,
+        source: String,
+        tools: Arc<dyn ToolExecutor>,
+        cancellation: CancellationToken,
+        context: CellContext,
+    ) -> Result<CellResult, CellAbort> {
         if cancellation.is_cancelled() {
             return Err(CellAbort::Cancelled);
         }
@@ -127,7 +153,14 @@ impl CodeExecutor {
                 .enable_all()
                 .build()
                 .map_err(|error| CellAbort::Internal(error.to_string()))?
-                .block_on(run_cell(source, tools, cancellation, limits, handle))
+                .block_on(run_cell(
+                    source,
+                    tools,
+                    cancellation,
+                    limits,
+                    handle,
+                    context,
+                ))
         })
         .await
         .map_err(|error| CellAbort::Internal(error.to_string()))?
@@ -140,12 +173,14 @@ async fn run_cell(
     cancellation: CancellationToken,
     limits: CellLimits,
     host: Handle,
+    context: CellContext,
 ) -> Result<CellResult, CellAbort> {
     if cancellation.is_cancelled() {
         return Err(CellAbort::Cancelled);
     }
     let names = executor.names();
     let scope = Arc::new(ToolScope {
+        context: context.clone(),
         executor,
         names: names.iter().cloned().collect(),
         cancellation: cancellation.child_token(),
@@ -153,6 +188,7 @@ async fn run_cell(
         host: host.clone(),
         limits: limits.clone(),
         admission: Mutex::new(Admission::default()),
+        concurrency: Arc::new(Semaphore::new(limits.max_in_flight_tools)),
     });
     let mut runtime = JsRuntime::try_new(RuntimeOptions {
         extensions: vec![maka_code::init()],
@@ -161,6 +197,7 @@ async fn run_cell(
     })
     .map_err(|error| CellAbort::Internal(error.to_string()))?;
     runtime.op_state().borrow_mut().put(scope.clone());
+    runtime.op_state().borrow_mut().put(context.clone());
 
     let stopped = Arc::new(Mutex::new(None));
     let isolate = runtime.v8_isolate().thread_safe_handle();
@@ -202,6 +239,7 @@ async fn run_cell(
             &source,
             &names,
             limits.max_value_bytes,
+            context.metadata(),
         ))
         .await
     {
@@ -228,7 +266,7 @@ async fn run_cell(
 
     // A caught JS exception or a concurrent cancellation cannot turn an
     // uncertain effect/commit into an ordinary successful tool result.
-    if let Some(error) = scope.admission.lock().unwrap().fatal.clone() {
+    if let Some(error) = context.failure() {
         return Err(CellAbort::Tool(error));
     }
     let result = match *stopped.lock().unwrap() {

@@ -18,6 +18,7 @@
  */
 
 mod catalog;
+mod cells;
 mod child_image;
 mod client_preparation;
 mod commit_faults;
