@@ -412,35 +412,6 @@ export type DesktopOAuthAuthorizationResult =
   | { readonly ok: true; readonly connection: DesktopOAuthConnectionIdentity }
   | Exclude<SubscriptionActionResult, { readonly ok: true }>;
 
-/**
- * Browser-assisted Command Code sign-in. Desktop-local, not Host-scoped: the
- * Studio page posts the minted key to a loopback port beside the browser, and
- * the key then travels through the ordinary `connections` path like a pasted
- * one. Mirrored by `features/connection-settings/ports.ts` on the renderer side.
- */
-export type DesktopCommandCodeLoginFailureReason =
-  | 'denied'
-  | 'timeout'
-  | 'cancelled'
-  | 'superseded'
-  | 'port_unavailable'
-  | 'browser_unavailable';
-export interface DesktopCommandCodeLoginStartInput {
-  readonly baseUrl?: string;
-}
-export type DesktopCommandCodeLoginStartResult =
-  | { readonly ok: true; readonly attemptId: string; readonly authUrl: string }
-  | {
-      readonly ok: false;
-      readonly reason: 'port_unavailable' | 'browser_unavailable' | 'superseded';
-    };
-export type DesktopCommandCodeLoginResult =
-  | {
-      readonly ok: true;
-      readonly credentials: { readonly apiKey: string; readonly userName: string; readonly keyName: string };
-    }
-  | { readonly ok: false; readonly reason: DesktopCommandCodeLoginFailureReason };
-
 export type DesktopNewTaskHostRef = DesktopRuntimeHostRef;
 
 export interface DesktopNewTaskTarget extends DesktopRuntimeHostRef {
@@ -1711,12 +1682,6 @@ export interface MakaBridge {
     getEnrollmentState(host?: DesktopRuntimeHostRef): Promise<{ enabled: boolean }>;
     refreshTokens(host: DesktopRuntimeHostRef | undefined, connectionId: string): Promise<SubscriptionActionResult>;
     logout(host: DesktopRuntimeHostRef | undefined, connectionId: string): Promise<SubscriptionActionResult>;
-  };
-  /** Desktop-local browser sign-in for Command Code; see `DesktopCommandCodeLoginResult`. */
-  commandCodeLogin: {
-    start(input: DesktopCommandCodeLoginStartInput): Promise<DesktopCommandCodeLoginStartResult>;
-    complete(attemptId: string): Promise<DesktopCommandCodeLoginResult>;
-    cancel(attemptId: string): Promise<void>;
   };
   githubCopilotSubscription: {
     connectExistingLogin(host?: DesktopRuntimeHostRef): Promise<SubscriptionActionResult>;

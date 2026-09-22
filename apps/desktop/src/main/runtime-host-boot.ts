@@ -69,8 +69,6 @@ import { createMcpConfigStore } from "@maka/storage/mcp-config-store";
 import { resolveStorageRoot } from "@maka/storage/root-authority";
 
 import { createMcpOAuthController } from "./mcp-oauth-controller.js";
-import { CommandCodeBrowserLoginController } from "./commandcode-browser-login.js";
-import { registerCommandCodeLoginIpc } from "./commandcode-login-ipc-main.js";
 import { createWorkHubControl } from './workhub-control.js';
 import { createWorkHubPresentation } from './workhub-presentation.js';
 import { createWorkHubRuntime } from './workhub-runtime.js';
@@ -478,11 +476,6 @@ function localSessionTarget(state: RuntimeHostDesktopTargetState): DesktopSessio
       ? { client: state.candidate.client, submit: (input) => state.candidate.submitLocalMessage(input) } : {}) };
 }
 const oauthPresentation = new RuntimeHostOAuthPresentation((url) => shell.openExternal(url));
-// Desktop-local by construction: the Studio page posts the key to a loopback
-// port beside the browser, so the listener cannot live in a (possibly remote) Host.
-const commandCodeLoginController = new CommandCodeBrowserLoginController({
-  openExternal: (url) => shell.openExternal(url),
-});
 const runtimeHostProfileService = createDesktopRuntimeHostProfileService({
   clientDataRoot: userDataDir,
   startup: runtimeHostStartup,
@@ -1822,7 +1815,6 @@ function registerPersistentClientIpc(): void {
     mainWindowController,
     resolveLocale: () => desktopLocale.resolve(),
   });
-  registerCommandCodeLoginIpc({ ipcMain, controller: commandCodeLoginController });
   registerDesktopRuntimeHostProfileIpc(ipcMain, runtimeHostProfileService);
   registerDesktopGuestSessionMountIpc(
     ipcMain,
@@ -2055,8 +2047,6 @@ function closeRuntimeHostDesktop(): Promise<void> {
 
 async function disposeRuntimeHostDesktop(): Promise<void> {
   ipcMain.removeHandler('runtime-host-management:native');
-  // Any in-flight browser sign-in ends here with the app; its loopback port goes with it.
-  commandCodeLoginController.dispose();
   sessionLocal.close();
   powerMonitor.off("resume", wakePeerRecoveryAfterResume);
   clientSettingsWatcher.stop();

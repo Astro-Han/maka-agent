@@ -85,11 +85,6 @@ import type {
 } from './bridge-contract.js';
 import type { ExternalSessionImportIpcResult } from './external-session-import-result.js';
 import type { RuntimeHostObservationIpcResult } from '../shared/runtime-host-observation-ipc.js';
-import type {
-  DesktopCommandCodeLoginResult,
-  DesktopCommandCodeLoginStartInput,
-  DesktopCommandCodeLoginStartResult,
-} from './bridge-contract.js';
 import {
   projectDesktopExternalSessionCatalogItem,
   type DesktopExternalSessionCatalogItem,
@@ -3196,17 +3191,6 @@ const makaBridge = {
     },
     logout(host: DesktopRuntimeHostRef | undefined, connectionId: string): Promise<SubscriptionActionResult> {
       return invokeSelectedRuntimeHost(host, 'xai-oauth:logout', connectionId);
-    },
-  },
-  commandCodeLogin: {
-    start(input: DesktopCommandCodeLoginStartInput): Promise<DesktopCommandCodeLoginStartResult> {
-      return invokeWhenReady('commandcode-login:start', input);
-    },
-    complete(attemptId: string): Promise<DesktopCommandCodeLoginResult> {
-      return invokeWhenReady('commandcode-login:complete', attemptId);
-    },
-    cancel(attemptId: string): Promise<void> {
-      return invokeWhenReady('commandcode-login:cancel', attemptId);
     },
   },
   githubCopilotSubscription: {

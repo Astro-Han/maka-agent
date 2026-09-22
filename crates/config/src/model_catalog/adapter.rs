@@ -74,7 +74,6 @@ pub enum AdapterKind {
         normalize_base_url: Option<bool>,
     },
     Cohere,
-    CommandcodeCli,
     Unavailable,
 }
 

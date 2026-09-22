@@ -40,10 +40,7 @@ fn supports(adapter: &RuntimeAdapter, wire: Wire) -> bool {
             wire == Wire::OpenaiChat || (wire == Wire::OpenaiResponses && responses.is_some())
         }
         AdapterKind::Anthropic { .. } => wire == Wire::AnthropicMessages,
-        AdapterKind::Google { .. }
-        | AdapterKind::Cohere
-        | AdapterKind::CommandcodeCli
-        | AdapterKind::Unavailable => false,
+        AdapterKind::Google { .. } | AdapterKind::Cohere | AdapterKind::Unavailable => false,
     }
 }
 
@@ -121,10 +118,7 @@ fn unavailable(message: impl Into<String>) -> OperationError {
 
 fn adapter(value: &RuntimeAdapter) -> Result<&RuntimeAdapter, OperationError> {
     match value.kind {
-        AdapterKind::Google { .. }
-        | AdapterKind::Cohere
-        | AdapterKind::CommandcodeCli
-        | AdapterKind::Unavailable => {
+        AdapterKind::Google { .. } | AdapterKind::Cohere | AdapterKind::Unavailable => {
             Err(unavailable("Provider adapter or protocol is not supported"))
         }
         _ => Ok(value),
