@@ -80,6 +80,12 @@ describe('McpClientManager OAuth E2E', () => {
     assert.ok(authorizationUrl.searchParams.get('code_challenge'));
     // Dynamic registration ran before the redirect.
     assert.ok(fixture.registrations.length >= 1);
+    const registration = fixture.registrations[0];
+    assert.ok(registration && typeof registration === 'object');
+    const body = registration as Record<string, unknown>;
+    assert.equal(body.client_uri, 'https://maka.apache.org/en/');
+    assert.equal(body.software_id, 'maka');
+    assert.equal(body.client_name, 'maka');
     // Consent disclosure material: the resolved issuer, the scope the round
     // requests, and the round's state travel back to the caller so a UI can
     // show what is being granted before a browser opens.

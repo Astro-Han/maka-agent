@@ -42,6 +42,10 @@ export async function verifyCapabilityHost(connection, workspace, reopened, open
     assert.equal(JSON.stringify(await transcript(connection)), await readFile(snapshot, 'utf8'));
     for (let index = 1; index <= 3; index++)
       assert.equal(await readFile(join(workspace, `effect-${index}`), 'utf8'), `${index}`);
+    await assert.rejects(
+      connection.replaceClientCapabilities({ offers: () => [] }, { sessionId }),
+      (error) => error.code === 'invalid_request',
+    );
     console.log('original-client-capability-host-reopened');
     return;
   }
@@ -94,7 +98,9 @@ export async function verifyCapabilityHost(connection, workspace, reopened, open
         if (frame.offerId === 'none') assert(!Object.hasOwn(frame, 'cwd'));
         else assert.equal(frame.cwd, await realpath(workspace));
         if (index === 1) {
-          const replacement = await connection.replaceClientCapabilities(provider(2), 3000);
+          const replacement = await connection.replaceClientCapabilities(provider(2), {
+            timeoutMs: 3000,
+          });
           registrations.set(2, replacement.registrationId);
           assert.notEqual(replacement.registrationId, registrations.get(1));
           assert.deepEqual(closed, [], 'old snapshot must keep its provider alive');
@@ -191,7 +197,7 @@ export async function verifyCapabilityHost(connection, workspace, reopened, open
     });
     registrations.set(
       1,
-      (await connection.replaceClientCapabilities(provider(1), 3000)).registrationId,
+      (await connection.replaceClientCapabilities(provider(1), { timeoutMs: 3000 })).registrationId,
     );
     for (const turnId of ['capability-first', 'capability-second']) {
       const live = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
@@ -209,7 +215,7 @@ export async function verifyCapabilityHost(connection, workspace, reopened, open
         await live.close();
       }
     }
-    await connection.unregisterClientCapabilities(3000);
+    await connection.unregisterClientCapabilities({ timeoutMs: 3000 });
     for (let attempt = 0; attempt < 100 && closed.length !== 2; attempt++) await delay(5);
     assert.deepEqual(closed.sort(), [1, 2]);
     model.verify();
@@ -235,6 +241,28 @@ export async function verifyCapabilityHost(connection, workspace, reopened, open
       assert.deepEqual(result.content, { kind: 'json', value: capabilityResult(index + 1) });
     }
     await writeFile(snapshot, JSON.stringify(rows));
+    const retired = [];
+    await Promise.all(
+      [sessionId, 'not-created-yet'].map((id) =>
+        connection.replaceClientCapabilities(
+          {
+            offers: () => [],
+            close: () => {
+              retired.push(id);
+            },
+          },
+          { sessionId: id },
+        ),
+      ),
+    );
+    await request('session.lifecycle.set', { sessionId, state: 'archived' });
+    for (let attempt = 0; attempt < 100 && retired.length === 0; attempt++) await delay(5);
+    assert.deepEqual(retired, [sessionId], 'archive releases only its scoped publication');
+    await assert.rejects(
+      connection.replaceClientCapabilities({ offers: () => [] }, { sessionId }),
+      (error) => error.code === 'invalid_request',
+    );
+    await connection.unregisterClientCapabilities({ sessionId: 'not-created-yet' });
     console.log('original-client-capability-host');
   } finally {
     await model.close();

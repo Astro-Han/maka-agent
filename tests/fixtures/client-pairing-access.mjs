@@ -127,7 +127,7 @@ export async function verifyPairingAccess(local, handshake, url, control, bounde
     const loser = await ready(candidate, 'pairing-losing-client');
     await assert.rejects(query(winner), { code: 'unauthorized' }, 'pending winner catalog denied');
     await assert.rejects(
-      winner.replaceClientCapabilities(capability, 3000),
+      winner.replaceClientCapabilities(capability, { timeoutMs: 3000 }),
       { code: 'unauthorized' },
       'pending winner capability publication denied',
     );
@@ -173,15 +173,15 @@ export async function verifyPairingAccess(local, handshake, url, control, bounde
       { code: 'unauthorized' },
       'associated provider catalog denied',
     );
-    await providerPeer.replaceClientCapabilities(capability, 3000);
-    await providerPeer.unregisterClientCapabilities(3000);
+    await providerPeer.replaceClientCapabilities(capability, { timeoutMs: 3000 });
+    await providerPeer.unregisterClientCapabilities({ timeoutMs: 3000 });
     await revoke(candidate);
     await bounded(bound.closed, 'bound owner revocation');
     assert.equal((await providerPeer.status(3000)).state, 'ready');
     await providerPeer.close();
     const survivingProvider = await ready(provider, 'pairing-provider-after-owner-revoke');
-    await survivingProvider.replaceClientCapabilities(capability, 3000);
-    await survivingProvider.unregisterClientCapabilities(3000);
+    await survivingProvider.replaceClientCapabilities(capability, { timeoutMs: 3000 });
+    await survivingProvider.unregisterClientCapabilities({ timeoutMs: 3000 });
     await assert.rejects(request(local, 'access.credential.issue', associated(candidate)), {
       code: 'invalid_request',
     });

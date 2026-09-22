@@ -154,6 +154,10 @@ async fn scenario() {
             success(peer.rpc("session.create", json!({"sessionId":"background-session", "workspace":{"kind":"host_path","path":fixture.workspace}, "executorId":"example.background","sandboxMode":"danger-full-access"})).await);
         }
         let mut publication = super::plugin_clients::publication("desktop", "inspect");
+        let mut scoped = publication.clone();
+        scoped["sessionId"] = json!("background-session");
+        publication["registrationId"] = json!("global-services");
+        publication["offers"] = json!([]);
         publication["services"] = json!([{"serviceId":"maka_notifications","version":"1"}]);
         let mut turn_only =
             super::plugin_clients::publication("desktop-turn", "turn_only")["offers"][0].clone();
@@ -163,6 +167,10 @@ async fn scenario() {
             .unwrap()
             .push(turn_only);
         success(peer.rpc("client.capability.replace", publication).await);
+        success(peer.rpc("client.capability.replace", scoped).await);
+        let mut unrelated = super::plugin_clients::publication("other-session", "unexpected");
+        unrelated["sessionId"] = json!("unrelated-session");
+        success(peer.rpc("client.capability.replace", unrelated).await);
         let mut foreign = Peer::new(host.clone(), "another-client").await;
         success(
             foreign

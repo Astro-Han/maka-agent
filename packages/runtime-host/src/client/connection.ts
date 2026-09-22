@@ -80,7 +80,10 @@ import {
   type RuntimeHostSessionSubscription,
 } from './session-subscription.js';
 import { ClientCapabilityChannel } from './client-capability-channel.js';
-import type { ClientCapabilityProvider } from './client-capability.js';
+import type {
+  ClientCapabilityProvider,
+  ClientCapabilityRegistrationOptions,
+} from './client-capability.js';
 import {
   readRuntimeHostProcessIdentity,
   type RuntimeHostProcessIdentity,
@@ -277,9 +280,11 @@ export interface RuntimeHostConnection {
   close(): Promise<void>;
   replaceClientCapabilities(
     provider: ClientCapabilityProvider,
-    timeoutMs?: number,
+    options?: ClientCapabilityRegistrationOptions,
   ): Promise<ClientCapabilityReplaceResult>;
-  unregisterClientCapabilities(timeoutMs?: number): Promise<ClientCapabilityUnregisterResult>;
+  unregisterClientCapabilities(
+    options?: ClientCapabilityRegistrationOptions,
+  ): Promise<ClientCapabilityUnregisterResult>;
   subscribeConfigurationChanges(listener: (revision: number) => void): () => void;
   subscribeConnectionCatalogChanges(listener: (revision: number) => void): () => void;
   subscribeProjectCatalogChanges(listener: (revision: number) => void): () => void;
@@ -700,15 +705,19 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
 
   async replaceClientCapabilities(
     provider: ClientCapabilityProvider,
-    timeoutMs = DEFAULT_HANDSHAKE_TIMEOUT_MS,
+    {
+      timeoutMs = DEFAULT_HANDSHAKE_TIMEOUT_MS,
+      sessionId,
+    }: ClientCapabilityRegistrationOptions = {},
   ): Promise<ClientCapabilityReplaceResult> {
-    return this.#clientCapabilities.replace(provider, timeoutMs);
+    return this.#clientCapabilities.replace(provider, timeoutMs, sessionId);
   }
 
-  async unregisterClientCapabilities(
+  async unregisterClientCapabilities({
     timeoutMs = DEFAULT_HANDSHAKE_TIMEOUT_MS,
-  ): Promise<ClientCapabilityUnregisterResult> {
-    return this.#clientCapabilities.unregister(timeoutMs);
+    sessionId,
+  }: ClientCapabilityRegistrationOptions = {}): Promise<ClientCapabilityUnregisterResult> {
+    return this.#clientCapabilities.unregister(timeoutMs, sessionId);
   }
 
   subscribeConfigurationChanges(listener: (revision: number) => void): () => void {

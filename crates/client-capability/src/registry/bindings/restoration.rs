@@ -21,7 +21,9 @@ use super::{
     Binding, BindingError, ProviderRef, SessionBindings, Snapshot, SnapshotOffer, snapshot::Source,
 };
 use crate::{ContractId, Identity, Registry};
-use maka_runtime::capability::{Affinity, ClientComposition, ClientOffer, PinnedAffinity};
+use maka_runtime::capability::{
+    Affinity, ClientComposition, ClientOffer, PinnedAffinity, PublicationIdentity,
+};
 use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
@@ -29,6 +31,7 @@ use std::{
 
 /// Restores only the admitted surface. It never discovers additional tools.
 pub struct RestoredBindings {
+    retirement_revision: u64,
     session_id: String,
     previous: Option<SessionBindings>,
     selected: SessionBindings,
@@ -47,13 +50,15 @@ impl Registry {
         }
         let mut identities = BTreeMap::new();
         let mut selected = SessionBindings::default();
-        for (contract, identity) in &composition.session_bindings {
-            let provider = self.restore_identity(identity, &mut identities)?;
-            let available = self.current(&provider.id).is_some_and(|r| {
-                r.available()
-                    && r.offer(contract)
-                        .is_some_and(|o| o.affinity == Affinity::Session)
-            });
+        for (contract, publication) in &composition.session_bindings {
+            let provider = self.restore_publication(session_id, publication, &mut identities)?;
+            let available = self
+                .current_scoped(&provider.id, provider.session_id.as_deref())
+                .is_some_and(|r| {
+                    r.available()
+                        && r.offer(contract)
+                            .is_some_and(|o| o.affinity == Affinity::Session)
+                });
             selected.session.insert(
                 contract.clone(),
                 if available {
@@ -71,11 +76,12 @@ impl Registry {
                 ClientOffer::Pinned {
                     contract,
                     affinity,
-                    identity,
+                    publication,
                 } => {
-                    let provider = self.restore_identity(identity, &mut identities)?;
+                    let provider =
+                        self.restore_publication(session_id, publication, &mut identities)?;
                     let registration = self
-                        .current(&provider.id)
+                        .current_scoped(&provider.id, provider.session_id.as_deref())
                         .filter(|r| r.available())
                         .ok_or(BindingError::Lost)?;
                     let offer = registration.offer(contract).ok_or(BindingError::Lost)?;
@@ -132,6 +138,7 @@ impl Registry {
         let snapshot = Snapshot { offers };
         Ok((
             RestoredBindings {
+                retirement_revision: self.retirement_revision,
                 session_id: session_id.into(),
                 previous: self.sessions.get(session_id).cloned(),
                 selected,
@@ -151,7 +158,9 @@ impl Registry {
         if self.draining {
             return Err(BindingError::Draining);
         }
-        if self.sessions.get(&restored.session_id) != restored.previous.as_ref() {
+        if self.retirement_revision != restored.retirement_revision
+            || self.sessions.get(&restored.session_id) != restored.previous.as_ref()
+        {
             return Ok(false);
         }
         for (id, identity) in &restored.identities {
@@ -170,7 +179,7 @@ impl Registry {
             if let Source::Pinned(pinned) = &entry.source
                 && (!pinned.available()
                     || !self
-                        .current(pinned.provider_id())
+                        .current_scoped(pinned.provider_id(), pinned.session_id())
                         .is_some_and(|current| Arc::ptr_eq(&current, pinned)))
             {
                 return Ok(false);
@@ -181,6 +190,7 @@ impl Registry {
                 identity,
                 residency: Arc::default(),
                 current: None,
+                scoped: Default::default(),
                 active: None,
             });
         }
@@ -212,6 +222,25 @@ impl Registry {
         Ok(ProviderRef {
             id,
             identity: stored,
+            session_id: None,
         })
+    }
+
+    fn restore_publication(
+        &self,
+        session_id: &str,
+        publication: &PublicationIdentity,
+        identities: &mut BTreeMap<String, Arc<Identity>>,
+    ) -> Result<ProviderRef, BindingError> {
+        if publication
+            .session_id
+            .as_deref()
+            .is_some_and(|id| id != session_id)
+        {
+            return Err(BindingError::InvalidComposition);
+        }
+        let mut provider = self.restore_identity(&publication.identity, identities)?;
+        provider.session_id.clone_from(&publication.session_id);
+        Ok(provider)
     }
 }

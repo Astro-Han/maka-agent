@@ -51,6 +51,17 @@ pub enum CallSource {
     },
 }
 
+impl CallSource {
+    pub fn session_id(&self) -> Option<&str> {
+        match self {
+            Self::Agent { session_id, .. } => Some(session_id),
+            Self::Remote { session_id, .. } | Self::Background { session_id, .. } => {
+                session_id.as_deref()
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all_fields = "camelCase")]
 pub enum ClientFrame {

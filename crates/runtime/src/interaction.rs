@@ -33,6 +33,7 @@ pub enum GrantCapability {
     Browser,
     ComputerUse,
     DesktopMcp,
+    Mcp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

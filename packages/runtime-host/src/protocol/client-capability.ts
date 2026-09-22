@@ -111,6 +111,7 @@ export interface ClientCapabilityOffer {
   readonly version: string;
   readonly affinity: ClientCapabilityAffinity;
   readonly hostPathAccess: ClientCapabilityHostPathAccess;
+  readonly admission?: 'mcp';
   readonly label: string;
   readonly description?: string;
   readonly tools: readonly ClientCapabilityToolDescriptor[];
@@ -123,6 +124,7 @@ export interface ClientCapabilityServiceOffer {
 
 export interface ClientCapabilityReplaceInput {
   readonly registrationId: string;
+  readonly sessionId?: string;
   readonly offers: readonly ClientCapabilityOffer[];
   readonly services?: readonly ClientCapabilityServiceOffer[];
 }
@@ -305,7 +307,7 @@ export function decodeClientCapabilityReplaceInput(value: unknown): ClientCapabi
     record,
     'Client Capability replacement',
     ['registrationId', 'offers'],
-    ['services'],
+    ['services', 'sessionId'],
   );
   if (!Array.isArray(record.offers) || record.offers.length > CLIENT_CAPABILITY_MAX_OFFERS) {
     throw invalidProtocolFrame('Invalid Client Capability offers');
@@ -314,11 +316,23 @@ export function decodeClientCapabilityReplaceInput(value: unknown): ClientCapabi
   if (!Array.isArray(serviceValues) || serviceValues.length > CLIENT_CAPABILITY_MAX_SERVICES) {
     throw invalidProtocolFrame('Invalid Client Capability services');
   }
-  if (record.offers.length === 0 && serviceValues.length === 0) {
+  const sessionId =
+    record.sessionId === undefined ? undefined : requireEntityId(record.sessionId, 'sessionId');
+  if (sessionId === undefined && record.offers.length === 0 && serviceValues.length === 0) {
     throw invalidProtocolFrame('Client Capability registration is empty');
   }
   const offers = record.offers.map((offer) => decodeClientCapabilityOffer(offer));
+  if (sessionId === undefined && offers.some((offer) => offer.admission === 'mcp')) {
+    throw invalidProtocolFrame('MCP admission requires a target Session');
+  }
   const services = serviceValues.map((service) => decodeClientCapabilityServiceOffer(service));
+  if (
+    sessionId !== undefined &&
+    (services.length !== 0 ||
+      offers.some((offer) => offer.affinity !== 'session' || offer.hostPathAccess !== 'none'))
+  ) {
+    throw invalidProtocolFrame('Session publications support only path-independent Session tools');
+  }
   const offerIds = new Set<string>();
   const serviceContracts = new Set<string>();
   const toolIdentities = new Set<string>();
@@ -349,6 +363,7 @@ export function decodeClientCapabilityReplaceInput(value: unknown): ClientCapabi
   }
   const decoded = {
     registrationId: requireEntityId(record.registrationId, 'registrationId'),
+    ...(sessionId === undefined ? {} : { sessionId }),
     offers,
     ...(record.services === undefined ? {} : { services }),
   };
@@ -741,7 +756,7 @@ function decodeClientCapabilityOffer(value: unknown): ClientCapabilityOffer {
     record,
     'Client Capability offer',
     ['offerId', 'version', 'affinity', 'hostPathAccess', 'label', 'tools'],
-    ['description'],
+    ['description', 'admission'],
   );
   if (
     !Array.isArray(record.tools) ||
@@ -750,7 +765,11 @@ function decodeClientCapabilityOffer(value: unknown): ClientCapabilityOffer {
   ) {
     throw invalidProtocolFrame('Invalid Client Capability offer tools');
   }
+  if (record.admission !== undefined && record.admission !== 'mcp') {
+    throw invalidProtocolFrame('Invalid Client Capability admission');
+  }
   return {
+    ...(record.admission === 'mcp' ? { admission: 'mcp' as const } : {}),
     offerId: requireEntityId(record.offerId, 'offerId'),
     version: requireString(record.version, 'version', 64),
     affinity: decodeClientCapabilityAffinity(record.affinity),

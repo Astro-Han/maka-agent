@@ -261,7 +261,7 @@ async function runOAuthLogin(
           const timeoutMs = remainingTimeout();
           try {
             await waitForOAuthOperation(
-              connection.replaceClientCapabilities(provider, timeoutMs),
+              connection.replaceClientCapabilities(provider, { timeoutMs }),
               timeoutMs,
               observation.signal,
             );

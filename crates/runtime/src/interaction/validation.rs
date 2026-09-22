@@ -56,7 +56,7 @@ impl GrantTarget {
             }
             (GrantCapability::ComputerUse, GrantScope::Capability {}) => {}
             (
-                GrantCapability::DesktopMcp,
+                GrantCapability::DesktopMcp | GrantCapability::Mcp,
                 GrantScope::McpTool {
                     server_id,
                     tool_name,

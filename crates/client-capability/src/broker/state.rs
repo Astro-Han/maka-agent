@@ -169,7 +169,7 @@ impl Inner {
             return;
         }
         let endpoint = invocation.registration.endpoint();
-        if endpoint.closed().is_cancelled() || endpoint.invocations().is_cancelled() {
+        if !invocation.registration.available() {
             Self::settle(&mut state, id, Err(CallError::CapabilityLost), false);
             return;
         }
@@ -209,8 +209,7 @@ impl Inner {
         let Some(invocation) = state.calls.get(id) else {
             return true;
         };
-        let endpoint = invocation.registration.endpoint();
-        if endpoint.closed().is_cancelled() || endpoint.invocations().is_cancelled() {
+        if !invocation.registration.available() {
             Self::stop_locked(state, id, CallError::CapabilityLost, false);
             true
         } else if invocation.cancellation.is_cancelled() || self.draining.is_cancelled() {

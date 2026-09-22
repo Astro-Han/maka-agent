@@ -41,7 +41,7 @@ impl Snapshot {
                         Affinity::Turn => PinnedAffinity::Turn,
                         Affinity::Call => unreachable!("Call offers are not pinned"),
                     },
-                    identity: (**registration.identity()).clone(),
+                    publication: ProviderRef::of(registration).publication(),
                 },
                 Source::Call { offer, selector } => ClientOffer::Call {
                     offer: offer.clone(),
@@ -132,8 +132,7 @@ impl SnapshotOffer {
             .iter()
             .find(|tool| tool.server_id == server_id && tool.name == tool_name)
             .ok_or(ManagedAdmissionError::UnknownTool)?;
-        let Some((capability, scope)) = crate::managed::scope(&offer.offer_id, tool, evidence)?
-        else {
+        let Some((capability, scope)) = crate::managed::scope(offer, tool, evidence)? else {
             return Ok(None);
         };
         Ok(Some(GrantTarget {
@@ -157,7 +156,7 @@ impl SnapshotOffer {
                 }
             }
             Source::Call { selector, .. } => {
-                let eligible = registry.eligible();
+                let eligible = registry.eligible(None);
                 choose(
                     eligible
                         .get(&self.contract)
@@ -190,7 +189,7 @@ impl Registry {
                     continue;
                 };
                 let registration = self
-                    .current(&provider.id)
+                    .current_scoped(&provider.id, provider.session_id.as_deref())
                     .filter(|r| r.available() && r.offer(contract).is_some())
                     .ok_or(BindingError::Lost)?;
                 if !claim_names(&registration, contract, &mut names) {
@@ -203,7 +202,7 @@ impl Registry {
             }
             for (contract, provider) in &state.turn {
                 let Some(registration) = self
-                    .current(&provider.id)
+                    .current_scoped(&provider.id, provider.session_id.as_deref())
                     .filter(|r| r.available() && r.offer(contract).is_some())
                 else {
                     continue;
@@ -216,7 +215,7 @@ impl Registry {
                 }
             }
         }
-        for (contract, candidates) in self.eligible() {
+        for (contract, candidates) in self.eligible(None) {
             let selector = state.and_then(|s| s.initiating.as_ref());
             let candidate = if selector.is_some() {
                 choose(&candidates, selector)?

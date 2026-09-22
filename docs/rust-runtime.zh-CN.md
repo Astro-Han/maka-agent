@@ -255,6 +255,11 @@ SQLx 管理的可重建文本投影避免反复解析大型 JSON 结果。
 Runtime core 不依赖 V8 或 SQLite；持久 schema 由 SQLx migration 管理。
 Client Capability 注册与反向调用所有权位于 `client-capability`，Host 负责组合执行。
 
+客户端能力分为连接级发布和有数量上限的 Session 级发布。后者仅允许不访问 Host 路径的
+Session-affinity 工具；冻结绑定在重连后仍保留发布作用域。归档 Session 会退休其全部
+发布代次，重新打开前拒绝再次注册。MCP 准入从可信的冻结发布推导精确工具授权；
+声明 MCP 准入方式不赋予提供者信任。
+
 ## 开发验证
 
 `node scripts/rust/release-cli.mjs --source <源码.tar.gz> --keys <KEYS>

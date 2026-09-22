@@ -25,7 +25,7 @@ mod form_validation;
 pub mod json;
 pub use contract::ContractId;
 mod composition;
-pub use composition::{ClientComposition, ClientOffer, PinnedAffinity};
+pub use composition::{ClientComposition, ClientOffer, PinnedAffinity, PublicationIdentity};
 mod identity;
 pub use identity::{Identity, PrincipalKind};
 mod result;
@@ -44,6 +44,8 @@ use serde_json::{Map, Value};
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub registration_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     pub offers: Vec<Offer>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub services: Option<Vec<ServiceOffer>>,
@@ -56,10 +58,18 @@ pub struct Offer {
     pub version: String,
     pub affinity: Affinity,
     pub host_path_access: HostPathAccess,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission: Option<Admission>,
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub tools: Vec<ToolDescriptor>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Admission {
+    Mcp,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

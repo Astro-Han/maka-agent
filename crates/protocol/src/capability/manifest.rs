@@ -31,9 +31,20 @@ use std::collections::HashSet;
 
 pub fn decode_replace_input(value: &Value) -> Result<Manifest> {
     let frame = record(value, "Client Capability replacement")?;
-    shaped(frame, &["registrationId", "offers"], &["services"])?;
+    shaped(
+        frame,
+        &["registrationId", "offers"],
+        &["services", "sessionId"],
+    )?;
+    let session_id = frame
+        .get("sessionId")
+        .map(|value| entity(value, "sessionId"))
+        .transpose()?;
     let values = array(&frame["offers"], MAX_OFFERS)?;
     let offers = values.iter().map(offer).collect::<Result<Vec<_>>>()?;
+    if session_id.is_none() && offers.iter().any(|o| o.admission.is_some()) {
+        return Err(invalid("MCP admission requires a target Session"));
+    }
     // The source treats explicit null as an empty services array, preserving
     // field presence in its normalized value; omission remains omission.
     let services = match frame.get("services") {
@@ -46,8 +57,18 @@ pub fn decode_replace_input(value: &Value) -> Result<Manifest> {
                 .collect::<Result<Vec<_>>>()?,
         ),
     };
-    if offers.is_empty() && services.as_ref().is_none_or(Vec::is_empty) {
+    if session_id.is_none() && offers.is_empty() && services.as_ref().is_none_or(Vec::is_empty) {
         return Err(invalid("Client Capability registration is empty"));
+    }
+    if session_id.is_some()
+        && (services.as_ref().is_some_and(|s| !s.is_empty())
+            || offers.iter().any(|o| {
+                o.affinity != Affinity::Session || o.host_path_access != HostPathAccess::None
+            }))
+    {
+        return Err(invalid(
+            "Session publications support only path-independent Session tools",
+        ));
     }
     let mut offer_ids = HashSet::new();
     let mut tool_ids = HashSet::new();
@@ -72,6 +93,7 @@ pub fn decode_replace_input(value: &Value) -> Result<Manifest> {
     }
     let manifest = Manifest {
         registration_id: entity(&frame["registrationId"], "registrationId")?,
+        session_id,
         offers,
         services,
     };
@@ -108,7 +130,7 @@ fn offer(value: &Value) -> Result<Offer> {
             "label",
             "tools",
         ],
-        &["description"],
+        &["description", "admission"],
     )?;
     let tools = array(&frame["tools"], MAX_TOOLS_PER_OFFER)?;
     if tools.is_empty() {
@@ -128,6 +150,13 @@ fn offer(value: &Value) -> Result<Offer> {
             Some("cwd") => HostPathAccess::Cwd,
             _ => return Err(invalid("Invalid Client Capability host path access")),
         },
+        admission: frame
+            .get("admission")
+            .map(|value| match value.as_str() {
+                Some("mcp") => Ok(Admission::Mcp),
+                _ => Err(invalid("Invalid Client Capability admission")),
+            })
+            .transpose()?,
         label: string(&frame["label"], "label", 128)?,
         description: optional_string(frame, "description", 1024)?,
         tools: tools.iter().map(tool).collect::<Result<_>>()?,

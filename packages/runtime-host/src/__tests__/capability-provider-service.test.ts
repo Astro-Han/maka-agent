@@ -21,7 +21,10 @@ import { deferred } from '@maka/core/test-only/async-primitives';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ClientCapabilityChannel } from '../client/client-capability-channel.js';
-import type { ClientCapabilityProvider } from '../client/client-capability.js';
+import type {
+  ClientCapabilityProvider,
+  ClientCapabilityRegistrationOptions,
+} from '../client/client-capability.js';
 import { startRuntimeHostCapabilityProviderService } from '../client/capability-provider-service.js';
 import type { ClientCapabilityReplaceInput } from '../protocol/index.js';
 import { waitFor as pollFor } from '@maka/core/test-only/async-primitives';
@@ -97,12 +100,18 @@ class FakeConnection {
 
   readonly closed = this.#closed.promise;
 
-  replaceClientCapabilities(provider: ClientCapabilityProvider, timeoutMs = 1_000) {
-    return this.#channel.replace(provider, timeoutMs);
+  replaceClientCapabilities(
+    provider: ClientCapabilityProvider,
+    { timeoutMs = 1_000, sessionId }: ClientCapabilityRegistrationOptions = {},
+  ) {
+    return this.#channel.replace(provider, timeoutMs, sessionId);
   }
 
-  unregisterClientCapabilities(timeoutMs = 1_000) {
-    return this.#channel.unregister(timeoutMs);
+  unregisterClientCapabilities({
+    timeoutMs = 1_000,
+    sessionId,
+  }: ClientCapabilityRegistrationOptions = {}) {
+    return this.#channel.unregister(timeoutMs, sessionId);
   }
 
   async close(): Promise<void> {

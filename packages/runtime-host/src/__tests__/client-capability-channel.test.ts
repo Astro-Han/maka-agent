@@ -22,6 +22,74 @@ import { test } from 'node:test';
 import { ClientCapabilityChannel } from '../client/client-capability-channel.js';
 import type { ClientCapabilityProvider } from '../client/client-capability.js';
 
+test('Session slots retire independently and reject calls from another Session', async () => {
+  const closed: string[] = [];
+  const writes: unknown[] = [];
+  const removed: string[] = [];
+  const channel = new ClientCapabilityChannel({
+    write: async (frame) => {
+      writes.push(frame);
+    },
+    replace: async (input) => ({ registrationId: input.registrationId, revision: 1 }),
+    unregister: async (input) => {
+      removed.push(input.registrationId);
+      return { registrationId: input.registrationId, revision: 2 };
+    },
+    onFailure: (error) => {
+      throw error;
+    },
+  });
+  const provider = (id: string): ClientCapabilityProvider => ({
+    offers: () => [
+      {
+        offerId: 'same',
+        version: '1',
+        affinity: 'session',
+        hostPathAccess: 'none',
+        label: 'same',
+        tools: [{ serverId: 'mcp', name: 'read', inputSchema: { type: 'object' } }],
+      },
+    ],
+    call: async () => {
+      throw new Error('cross-Session call reached provider');
+    },
+    close: () => {
+      closed.push(id);
+    },
+  });
+  const [a, b] = await Promise.all([
+    channel.replace(provider('a'), 1000, 'a'),
+    channel.replace(provider('b'), 1000, 'b'),
+  ]);
+  channel.accept({
+    kind: 'client.capability.call',
+    invocationId: 'cross-session',
+    registrationId: a.registrationId,
+    offerId: 'same',
+    serverId: 'mcp',
+    toolName: 'read',
+    arguments: {},
+    source: { kind: 'agent', sessionId: 'b', turnId: 'turn' },
+    toolCallId: 'call',
+  });
+  assert.equal((writes[0] as { kind: string }).kind, 'client.capability.rejected');
+  channel.accept({
+    kind: 'client.capability.registration_release',
+    registrationId: a.registrationId,
+  });
+  assert.deepEqual(closed, ['a']);
+  await assert.rejects(channel.unregister(1000, 'a'), /No Client Capability/);
+  await channel.unregister(1000, 'b');
+  assert.deepEqual(removed, [b.registrationId]);
+  channel.accept({
+    kind: 'client.capability.registration_release',
+    registrationId: b.registrationId,
+  });
+  assert.deepEqual(closed, ['a', 'b']);
+  channel.close(new Error('done'));
+  assert.deepEqual(closed, ['a', 'b']);
+});
+
 test('Client Capability channel closes a provider after its final registration is released', async () => {
   let closeCalls = 0;
   const replacements: string[] = [];
@@ -233,6 +301,9 @@ test('Client Capability channel forwards admitted tool progress before the resul
       await options.accept({ kind: 'none' });
       options.progress?.(1, 3);
       options.progress?.(2, 3);
+      options.progress?.(3, 3);
+      options.progress?.(2, 3);
+      options.progress?.(1, 1_025);
       return { content: [] };
     },
   };
@@ -288,7 +359,7 @@ test('Client Capability channel forwards admitted tool progress before the resul
     {
       kind: 'client.capability.progress',
       invocationId: 'progress-invocation',
-      current: 2,
+      current: 3,
       total: 3,
     },
     {

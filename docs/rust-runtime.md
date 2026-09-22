@@ -329,6 +329,13 @@ The runtime core has no V8 or SQLite dependency. SQLx migrations own persistent
 schema changes. Client Capability registration and reverse-call ownership live in
 `client-capability`; the host composes them with execution.
 
+Client capabilities have a connection-wide slot and bounded per-Session slots.
+Session publications contain only path-independent Session-affinity tools; frozen
+bindings retain their publication scope across reconnects. Archiving a Session
+retires all its publication generations and rejects later registration until reopened.
+MCP admission derives an exact tool grant from a trusted, frozen publication;
+declaring MCP admission does not grant provider trust.
+
 ## Development
 
 `node scripts/rust/release-cli.mjs --source <source.tar.gz> --keys <KEYS>

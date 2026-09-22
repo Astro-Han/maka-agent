@@ -156,6 +156,13 @@ pub(super) async fn execute(
                 .await
                 .map_err(stored)?;
             let item = item(record);
+            if input.state == SessionLifecycleState::Archived {
+                host.capabilities
+                    .registry
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .release_session(&input.session_id);
+            }
             assert_lifecycle_output_for_input(&input, &item).map_err(invalid)?;
             Ok(Output::Item(Box::new(item)))
         }

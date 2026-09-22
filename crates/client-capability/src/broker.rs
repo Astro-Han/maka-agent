@@ -111,7 +111,7 @@ impl Broker {
                     && call.pending_terminal.is_none()
                     && !call.cancellation.is_cancelled()
                     && !endpoint.closed().is_cancelled()
-                    && !endpoint.invocations().is_cancelled()
+                    && call.registration.available()
                     && call.tool.as_ref().is_some_and(|tool| {
                         tool.session_id == session
                             && tool.turn_id == turn
@@ -158,7 +158,7 @@ impl Broker {
             serde_json::to_value(&frame).map_err(|_| CallError::Invalid("JSON encoding"))?;
         decode_host_frame(&encoded).map_err(|_| CallError::Invalid("outbound wire boundary"))?;
         let endpoint = registration.endpoint().clone();
-        let provider = endpoint.invocations();
+        let provider = registration.invocations();
         let mut state = self.inner.active.lock().unwrap_or_else(|e| e.into_inner());
         if self.inner.draining.is_cancelled() || cancellation.is_cancelled() {
             return Err(CallError::Cancelled);

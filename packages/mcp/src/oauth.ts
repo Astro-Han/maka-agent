@@ -177,8 +177,8 @@ export class McpOAuthProvider implements OAuthClientProvider {
   get clientMetadata(): OAuthClientMetadata {
     return {
       client_name: this.options.clientName,
-      client_uri: 'https://github.com/maka-agent/maka-agent',
-      software_id: 'maka-desktop',
+      client_uri: 'https://maka.apache.org/en/',
+      software_id: this.options.clientName,
       software_version: this.options.clientVersion,
       redirect_uris: this.options.interactive ? [this.options.interactive.redirectUrl] : [],
       grant_types: ['authorization_code', 'refresh_token'],

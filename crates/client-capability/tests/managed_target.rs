@@ -237,7 +237,35 @@ fn managed_policy_is_exact_and_requires_trusted_resolved_publication() {
             );
         }
     }
+    for kind in [PrincipalKind::LocalOwner, PrincipalKind::RemoteOwner] {
+        let mut publication = manifest("acp_mcp", "server", &["read"], "session");
+        publication.session_id = Some("s".into());
+        publication.offers[0].admission = Some(maka_runtime::capability::Admission::Mcp);
+        let (registry, _, _) = registry(publication, kind);
+        let snapshot = registry.snapshot("s").unwrap();
+        let offer = &snapshot.offers()[0];
+        let target = offer.managed_target(
+            &offer.resolve(&registry).unwrap(),
+            "server",
+            "read",
+            &AdmissionEvidence::None,
+        );
+        if kind == PrincipalKind::RemoteOwner {
+            assert_eq!(target, Err(Error::UntrustedProvider));
+        } else {
+            let target = target.unwrap().unwrap();
+            assert_eq!(target.capability, GrantCapability::Mcp);
+            assert_eq!(
+                target.scope,
+                GrantScope::McpTool {
+                    server_id: "server".into(),
+                    tool_name: "read".into()
+                }
+            );
+        }
+    }
     for (id, server, name) in [
+        ("acp_mcp", "real_server", "read"),
         ("desktop_browser", "desktop_browser", "browser_unknown"),
         ("desktop_browser", "impostor", "browser_navigate"),
         ("impostor", "desktop_browser", "browser_navigate"),

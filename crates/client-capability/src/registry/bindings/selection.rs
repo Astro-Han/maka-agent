@@ -18,7 +18,8 @@
  */
 
 use super::{
-    Binding, BindingError, BindingMode, ProviderRef, SessionBindings, choose, claim_names,
+    Binding, BindingError, BindingMode, ProviderRef, SessionBindings, choose, choose_bound,
+    claim_names,
 };
 use crate::{PrincipalKind, Registry};
 use maka_runtime::capability::Affinity;
@@ -28,6 +29,7 @@ use uuid::Uuid;
 /// A candidate owns no Session binding. Commit verifies the same selection and
 /// publications under the registry lock before making it authoritative.
 pub struct PreparedBindings {
+    retirement_revision: u64,
     session_id: String,
     initiating: Option<Uuid>,
     mode: BindingMode,
@@ -51,7 +53,7 @@ fn composition(
         session_bindings: selected
             .session
             .iter()
-            .map(|(contract, binding)| (contract.clone(), (*binding.provider().identity).clone()))
+            .map(|(contract, binding)| (contract.clone(), binding.provider().publication()))
             .collect(),
         offers: snapshot.composition(),
     }
@@ -65,10 +67,12 @@ impl Registry {
         mode: BindingMode,
     ) -> Result<(PreparedBindings, super::Snapshot), BindingError> {
         let previous = self.sessions.get(session_id).cloned();
-        let selected = self.select_bindings(previous.as_ref(), initiating, mode)?;
+        let selected =
+            self.select_bindings(Some(session_id), previous.as_ref(), initiating, mode)?;
         let snapshot = self.snapshot_bindings(Some(&selected))?;
         Ok((
             PreparedBindings {
+                retirement_revision: self.retirement_revision,
                 session_id: session_id.into(),
                 initiating,
                 mode,
@@ -83,10 +87,13 @@ impl Registry {
 
     /// False means stale preparation; no binding was changed.
     pub fn commit_bindings(&mut self, prepared: PreparedBindings) -> Result<bool, BindingError> {
-        if self.sessions.get(&prepared.session_id) != prepared.previous.as_ref() {
+        if self.retirement_revision != prepared.retirement_revision
+            || self.sessions.get(&prepared.session_id) != prepared.previous.as_ref()
+        {
             return Ok(false);
         }
         let selected = self.select_bindings(
+            Some(&prepared.session_id),
             prepared.previous.as_ref(),
             prepared.initiating,
             prepared.mode,
@@ -122,9 +129,7 @@ impl Registry {
                 continue;
             };
             let Some(registration) = self
-                .providers
-                .get(&provider.id)
-                .and_then(|provider| provider.current.as_ref())
+                .current_scoped(&provider.id, provider.session_id.as_deref())
                 .filter(|r| r.available())
             else {
                 continue;
@@ -179,7 +184,12 @@ impl Registry {
         initiating: Option<Uuid>,
         mode: BindingMode,
     ) -> Result<bool, BindingError> {
-        let next = self.select_bindings(self.sessions.get(session_id), initiating, mode)?;
+        let next = self.select_bindings(
+            Some(session_id),
+            self.sessions.get(session_id),
+            initiating,
+            mode,
+        )?;
         let changed = self.sessions.get(session_id) != Some(&next);
         self.sessions.insert(session_id.into(), next);
         self.prune_sessions();
@@ -195,12 +205,13 @@ impl Registry {
         mode: BindingMode,
     ) -> Result<super::Snapshot, BindingError> {
         let previous = session_id.and_then(|id| self.sessions.get(id));
-        let selected = self.select_bindings(previous, initiating, mode)?;
+        let selected = self.select_bindings(session_id, previous, initiating, mode)?;
         self.snapshot_bindings(Some(&selected))
     }
 
     fn select_bindings(
         &self,
+        session_id: Option<&str>,
         previous: Option<&SessionBindings>,
         initiating: Option<Uuid>,
         mode: BindingMode,
@@ -212,7 +223,12 @@ impl Registry {
             .and_then(|id| self.connections.get(&id))
             .and_then(|connection| self.providers.get(&connection.provider_id));
         let direct = initiating
-            .and_then(|provider| provider.current.as_ref())
+            .and_then(|provider| {
+                provider
+                    .current
+                    .as_ref()
+                    .or_else(|| session_id.and_then(|id| provider.scoped.get(id)))
+            })
             .filter(|r| r.available());
         let first_associated = {
             let mut associated = self.published().filter(|r| {
@@ -223,6 +239,7 @@ impl Registry {
                 identity.credential_bound_client_instance_id.as_deref()
                     == Some(identity.client_instance_id.as_str())
                     && r.available()
+                    && r.visible_to(session_id)
                     && r.identity().trusted()
                     && r.identity().capability_owner.as_ref().is_some_and(|owner| {
                         owner.principal_id == identity.principal_id
@@ -230,11 +247,16 @@ impl Registry {
                     })
             });
             let first_associated = associated.next();
-            if direct.is_none() && first_associated.is_some() && associated.next().is_some() {
+            if direct.is_none()
+                && first_associated
+                    .is_some_and(|first| associated.any(|r| r.provider_id() != first.provider_id()))
+            {
                 return Err(BindingError::Ambiguous);
             }
             first_associated
         };
+        let first_associated =
+            first_associated.map(|r| self.providers[&r.provider_id].current.as_ref().unwrap_or(r));
         let selected = direct.or(first_associated);
         let selector = selected.map(|r| ProviderRef::of(r)).or_else(|| {
             initiating
@@ -242,6 +264,7 @@ impl Registry {
                 .map(|p| ProviderRef {
                     id: p.identity.provider_id(),
                     identity: p.identity.clone(),
+                    session_id: None,
                 })
         });
         let mut next = SessionBindings {
@@ -258,7 +281,7 @@ impl Registry {
             }),
             ..SessionBindings::default()
         };
-        let eligible = self.eligible();
+        let eligible = self.eligible(session_id);
         let contracts: BTreeSet<_> = previous
             .into_iter()
             .flat_map(|s| s.session.keys())
@@ -278,7 +301,7 @@ impl Registry {
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             let candidate = if let Some(prior) = prior {
-                match choose(candidates, Some(prior.provider()))? {
+                match choose_bound(candidates, prior.provider()) {
                     Some(candidate) => Some(candidate),
                     None if mode == BindingMode::Degrade => {
                         next.session

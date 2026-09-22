@@ -254,7 +254,11 @@ impl Executions {
         scope: &Scope,
         capability: Capability,
     ) -> Result<Vec<std::sync::Arc<maka_client_capability::Registration>>, Error> {
-        self.plugin_resource_boundary(scope, capability).await?;
+        let boundary = self.plugin_resource_boundary(scope, capability).await?;
+        let session_id = match &boundary {
+            Boundary::Session { boundary, .. } => Some(boundary.session_id.as_str()),
+            _ => None,
+        };
         let evidence = self
             .plugin_calls
             .evidence::<Evidence>(scope)
@@ -283,6 +287,7 @@ impl Executions {
             .filter(|registration| {
                 let provider = registration.identity();
                 registration.available()
+                    && registration.visible_to(session_id)
                     && (**provider == identity
                         || (provider.trusted()
                             && identity.credential_bound_client_instance_id.as_deref()

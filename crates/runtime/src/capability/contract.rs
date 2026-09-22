@@ -41,6 +41,7 @@ impl ContractId {
             "version": offer.version,
             "affinity": offer.affinity,
             "hostPathAccess": offer.host_path_access,
+            "admission": offer.admission,
             "tools": tools,
         });
         let mut canonical = String::new();

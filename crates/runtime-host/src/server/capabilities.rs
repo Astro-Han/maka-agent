@@ -232,6 +232,24 @@ pub(super) async fn execute(
             message: "Host is draining".into(),
         }));
     }
+    let manifest = if operation == Operation::ClientCapabilityReplace {
+        let manifest = capability::decode_replace_input(input)?;
+        if let Some(session_id) = &manifest.session_id
+            && host
+                .log
+                .get_session::<crate::session::SessionConfiguration>(session_id)
+                .await?
+                .is_some_and(|session| session.archived)
+        {
+            return Ok(Outcome::failure(OperationError {
+                code: Code::InvalidRequest,
+                message: "Cannot publish capabilities for an archived Session".into(),
+            }));
+        }
+        Some(manifest)
+    } else {
+        None
+    };
     let result = {
         let mut registry = host
             .capabilities
@@ -240,7 +258,7 @@ pub(super) async fn execute(
             .unwrap_or_else(|e| e.into_inner());
         match operation {
             Operation::ClientCapabilityReplace => {
-                registry.replace(connection_id, capability::decode_replace_input(input)?)
+                registry.replace(connection_id, manifest.expect("decoded replacement"))
             }
             Operation::ClientCapabilityUnregister => registry.unregister(
                 connection_id,

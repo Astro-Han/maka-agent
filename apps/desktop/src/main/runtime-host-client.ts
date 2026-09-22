@@ -41,6 +41,7 @@ import {
 import type { PricingConfig } from "@maka/core/usage-stats/types";
 import {
   type ClientCapabilityProvider,
+  type ClientCapabilityRegistrationOptions,
   type DecodedSessionTranscriptPage,
   type DirectRequestOperationKey,
   type RuntimeHostConnection,
@@ -1511,17 +1512,17 @@ export class DesktopRuntimeHostClient {
 
   replaceClientCapabilities(
     provider: ClientCapabilityProvider,
-    timeoutMs?: number,
+    options?: ClientCapabilityRegistrationOptions,
   ): Promise<ClientCapabilityReplaceResult> {
     this.#assertOpen();
-    return this.connection.replaceClientCapabilities(provider, timeoutMs);
+    return this.connection.replaceClientCapabilities(provider, options);
   }
 
   unregisterClientCapabilities(
-    timeoutMs?: number,
+    options?: ClientCapabilityRegistrationOptions,
   ): Promise<ClientCapabilityUnregisterResult> {
     this.#assertOpen();
-    return this.connection.unregisterClientCapabilities(timeoutMs);
+    return this.connection.unregisterClientCapabilities(options);
   }
 
   async openSession(sessionId: string): Promise<DesktopRuntimeHostSession> {

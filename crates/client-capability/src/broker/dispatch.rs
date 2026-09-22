@@ -87,6 +87,11 @@ impl Broker {
         timeout: Duration,
         cancellation: CancellationToken,
     ) -> Result<PendingCall, CallError> {
+        if !registration.visible_to(call.source.session_id()) {
+            return Err(CallError::Invalid(
+                "tool publication belongs to another Session",
+            ));
+        }
         let offer = registration
             .manifest()
             .offers

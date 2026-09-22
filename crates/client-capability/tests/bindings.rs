@@ -51,6 +51,161 @@ fn attach(
     (id, provider, out)
 }
 
+#[tokio::test]
+async fn scoped_publications_isolate_selection_restore_and_retire_all_pinned_generations() {
+    let mut registry = Registry::default();
+    let (one, _, _out) = attach(&mut registry, identity("desktop"));
+    let scoped = |id: &str, session: &str| {
+        let mut m = manifest(id, &["session"]);
+        m.session_id = Some(session.into());
+        m
+    };
+    registry.replace(one, scoped("a1", "a")).unwrap();
+    registry.replace(one, scoped("b1", "b")).unwrap();
+    assert!(
+        registry
+            .replace(one, manifest("collision", &["session"]))
+            .is_err()
+    );
+    assert!(
+        registry
+            .preview_bindings(None, Some(one), BindingMode::Strict)
+            .unwrap()
+            .offers()
+            .is_empty()
+    );
+    let (prepared, a1) = registry
+        .prepare_bindings("a", Some(one), BindingMode::Strict)
+        .unwrap();
+    let composition = prepared.composition();
+    assert!(registry.commit_bindings(prepared).unwrap());
+    registry
+        .bind_session("b", Some(one), BindingMode::Strict)
+        .unwrap();
+    let b = registry.snapshot("b").unwrap();
+    let broker = maka_client_capability::broker::Broker::default();
+    let call = |session: &str| maka_client_capability::broker::ToolCall {
+        offer_id: "session".into(),
+        server_id: "session".into(),
+        tool_name: "effect".into(),
+        arguments: Default::default(),
+        source: maka_runtime::capability::CallSource::Agent {
+            session_id: session.into(),
+            turn_id: "turn".into(),
+        },
+        tool_call_id: "tool".into(),
+        cwd: "/not-forwarded".into(),
+    };
+    assert!(
+        broker
+            .prepare_tool(
+                b.offers()[0].resolve(&registry).unwrap(),
+                call("a"),
+                std::time::Duration::from_secs(1),
+                Default::default()
+            )
+            .is_err()
+    );
+    let pending = broker
+        .prepare_tool(
+            b.offers()[0].resolve(&registry).unwrap(),
+            call("b"),
+            std::time::Duration::from_secs(10),
+            Default::default(),
+        )
+        .unwrap();
+    assert_eq!(a1.offers().len(), 1);
+    assert_eq!(
+        a1.offers()[0]
+            .resolve(&registry)
+            .unwrap()
+            .manifest()
+            .registration_id,
+        "a1"
+    );
+    assert_eq!(
+        b.offers()[0]
+            .resolve(&registry)
+            .unwrap()
+            .manifest()
+            .registration_id,
+        "b1"
+    );
+    assert!(matches!(
+        registry.restore_bindings("b", &composition),
+        Err(BindingError::InvalidComposition)
+    ));
+    registry.replace(one, scoped("a2", "a")).unwrap();
+    let a2 = registry.snapshot("a").unwrap();
+    assert!(
+        a1.offers()[0].resolve(&registry).is_ok(),
+        "same connection replacement keeps frozen calls"
+    );
+    let (two, _, _out2) = attach(&mut registry, identity("desktop"));
+    registry.unregister(one, "a2").unwrap();
+    assert!(a2.offers()[0].resolve(&registry).is_ok());
+    registry.replace(two, scoped("a3", "a")).unwrap();
+    assert!(a1.offers()[0].resolve(&registry).is_err());
+    assert!(a2.offers()[0].resolve(&registry).is_err());
+    assert!(
+        b.offers()[0].resolve(&registry).is_ok(),
+        "another Session keeps its original connection"
+    );
+    let (prepared, _) = registry.restore_bindings("a", &composition).unwrap();
+    assert!(registry.commit_restored_bindings(prepared).unwrap());
+    let a3 = registry.snapshot("a").unwrap();
+    registry
+        .replace(one, manifest("global", &["turn"]))
+        .unwrap();
+    registry
+        .replace(two, manifest("global-reconnected", &["turn"]))
+        .unwrap();
+    assert!(
+        b.offers()[0].resolve(&registry).is_ok(),
+        "global supersession must not cancel scoped calls"
+    );
+    registry.replace(one, scoped("b2", "b")).unwrap();
+    registry.detach(two);
+    assert!(a3.offers()[0].resolve(&registry).is_err());
+    assert!(
+        registry
+            .bind_session("a", None, BindingMode::Strict)
+            .is_err()
+    );
+    let mut empty = scoped("a-empty", "a");
+    empty.offers.clear();
+    registry.replace(one, empty).unwrap();
+    registry
+        .bind_session("a", None, BindingMode::Strict)
+        .unwrap();
+    assert!(
+        registry.snapshot("a").unwrap().offers().is_empty(),
+        "empty scoped publication clears lost contracts"
+    );
+    let (prepared, _) = registry
+        .prepare_bindings("b", Some(one), BindingMode::Strict)
+        .unwrap();
+    registry.release_session("b");
+    assert!(!registry.commit_bindings(prepared).unwrap());
+    assert!(
+        b.offers()[0].resolve(&registry).is_err(),
+        "retirement reaches pinned prior generations"
+    );
+    assert!(matches!(
+        pending.accepted().await,
+        Err(maka_client_capability::broker::CallError::CapabilityLost)
+    ));
+    broker.shutdown().await;
+    let (prepared, _) = registry
+        .prepare_bindings("new", None, BindingMode::Strict)
+        .unwrap();
+    registry.release_session("new");
+    assert!(
+        !registry.commit_bindings(prepared).unwrap(),
+        "retirement also invalidates an empty preview"
+    );
+}
+
 #[test]
 fn restart_restores_identity_ceiling_without_discovery_or_call_pinning() {
     for initiating in [false, true] {

@@ -40,7 +40,10 @@ import {
   type RuntimeHostRemoteProfileIncarnation,
   type RuntimeHostReconnectingConnection,
 } from '@maka/runtime-host/client';
-import type { ClientCapabilityProvider } from '@maka/runtime-host/client';
+import type {
+  ClientCapabilityProvider,
+  ClientCapabilityRegistrationOptions,
+} from '@maka/runtime-host/client';
 import {
   tryAcquireFileLifetimeOwner,
   type FileLifetimeOwner,
@@ -174,7 +177,10 @@ class RemoteTuiMcpPublicationTarget implements TuiMcpPublicationTarget {
     });
   }
 
-  replaceClientCapabilities(provider: ClientCapabilityProvider, timeoutMs?: number) {
+  replaceClientCapabilities(
+    provider: ClientCapabilityProvider,
+    options?: ClientCapabilityRegistrationOptions,
+  ) {
     return this.#serialize(async () => {
       if (this.#closed) throw new Error('Remote MCP publication is closed');
       let result:
@@ -183,7 +189,7 @@ class RemoteTuiMcpPublicationTarget implements TuiMcpPublicationTarget {
       const committed = await this.#deps.profiles.mutateRemoteProfileIfCurrent(
         this.#profileTarget(),
         async () => {
-          result = await this.#requireConnection().replaceClientCapabilities(provider, timeoutMs);
+          result = await this.#requireConnection().replaceClientCapabilities(provider, options);
         },
       );
       if (!committed) {
@@ -198,8 +204,8 @@ class RemoteTuiMcpPublicationTarget implements TuiMcpPublicationTarget {
     });
   }
 
-  unregisterClientCapabilities(timeoutMs?: number) {
-    return this.#requireConnection().unregisterClientCapabilities(timeoutMs);
+  unregisterClientCapabilities(options?: ClientCapabilityRegistrationOptions) {
+    return this.#requireConnection().unregisterClientCapabilities(options);
   }
 
   subscribeConnectionAvailability(

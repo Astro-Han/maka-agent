@@ -112,6 +112,14 @@ fn original_typescript_agrees_on_grants_lifecycle_identity_and_bounds() {
         add("request", value);
     }
     for (capability, scope) in [
+        (
+            "mcp",
+            json!({"kind":"mcp_tool","serverId":"server","toolName":"read"}),
+        ),
+        (
+            "mcp",
+            json!({"kind":"browser_origin","origin":"https://example.com"}),
+        ),
         ("computer_use", json!({"kind":"capability"})),
         (
             "computer_use",

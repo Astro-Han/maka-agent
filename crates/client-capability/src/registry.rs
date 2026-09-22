@@ -18,14 +18,11 @@
  */
 
 use crate::{Endpoint, Error, Identity, PrincipalKind};
-use maka_runtime::capability::{Affinity, HostPathAccess, Manifest, RegistrationResult};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
 
 mod bindings;
+mod mutation;
 mod publication;
 pub use bindings::{
     BindingError, BindingMode, PreparedBindings, RestoredBindings, Snapshot, SnapshotOffer,
@@ -37,6 +34,7 @@ struct Provider {
     identity: Arc<Identity>,
     residency: Residency,
     current: Option<Arc<Registration>>,
+    scoped: HashMap<String, Arc<Registration>>,
     active: Option<Uuid>,
 }
 
@@ -53,6 +51,7 @@ pub struct Registry {
     providers: HashMap<String, Provider>,
     connections: HashMap<Uuid, Connection>,
     revision: u64,
+    retirement_revision: u64,
     draining: bool,
     sessions: HashMap<String, bindings::SessionBindings>,
 }
@@ -96,6 +95,7 @@ impl Registry {
                     identity: Arc::new(identity),
                     residency: Arc::default(),
                     current: None,
+                    scoped: HashMap::new(),
                     active: None,
                 },
             );
@@ -111,122 +111,6 @@ impl Registry {
         Ok(provider_id)
     }
 
-    /// Input must first pass the protocol manifest decoder.
-    pub fn replace(
-        &mut self,
-        connection_id: Uuid,
-        manifest: Manifest,
-    ) -> Result<RegistrationResult, Error> {
-        if self.draining {
-            return Err(Error::Draining);
-        }
-        let connection = self
-            .connections
-            .get(&connection_id)
-            .ok_or(Error::Unavailable)?;
-        if connection.superseded || connection.endpoint.closed().is_cancelled() {
-            return Err(Error::Invalid("connection has been superseded or closed"));
-        }
-        let provider = self
-            .providers
-            .get_mut(&connection.provider_id)
-            .expect("attached provider");
-        if provider.identity.principal_kind == PrincipalKind::CapabilityProvider
-            && (manifest.services.as_ref().is_some_and(|s| !s.is_empty())
-                || manifest.offers.iter().any(|offer| {
-                    offer.affinity != Affinity::Session
-                        || offer.host_path_access != HostPathAccess::None
-                }))
-        {
-            return Err(Error::Invalid(
-                "trusted providers may publish only path-independent session tools",
-            ));
-        }
-        let revision = self
-            .revision
-            .checked_add(1)
-            .filter(|r| *r <= 9_007_199_254_740_991)
-            .ok_or(Error::Invalid("revision exhausted"))?;
-        let mut proxy_names = HashSet::new();
-        for tool in manifest.offers.iter().flat_map(|offer| &offer.tools) {
-            if !proxy_names.insert(crate::proxy_tool_name(&tool.server_id, &tool.name)) {
-                return Err(Error::Invalid("model proxy tool name collision"));
-            }
-        }
-        let mut resident = provider.residency.lock().unwrap_or_else(|e| e.into_inner());
-        if !resident.insert(manifest.registration_id.clone()) {
-            return Err(Error::Invalid("registration identity is still resident"));
-        }
-        drop(resident);
-        let registration = Arc::new(Registration {
-            provider_id: connection.provider_id.clone(),
-            connection_id,
-            identity: provider.identity.clone(),
-            contracts: manifest
-                .offers
-                .iter()
-                .enumerate()
-                .map(|(index, offer)| (crate::ContractId::of(offer), index))
-                .collect(),
-            manifest,
-            endpoint: connection.endpoint.clone(),
-            residency: provider.residency.clone(),
-        });
-        if let Some(old) = provider.active.filter(|old| *old != connection_id)
-            && let Some(connection) = self.connections.get_mut(&old)
-        {
-            connection.superseded = true;
-            connection.endpoint.supersede();
-        }
-        provider.active = Some(connection_id);
-        let result = RegistrationResult {
-            registration_id: registration.manifest.registration_id.clone(),
-            revision,
-        };
-        let previous = provider.current.replace(registration.clone());
-        self.revision = revision;
-        self.publication_changed(previous.as_deref(), &registration);
-        Ok(result)
-    }
-
-    pub fn unregister(
-        &mut self,
-        connection_id: Uuid,
-        registration_id: &str,
-    ) -> Result<RegistrationResult, Error> {
-        let connection = self
-            .connections
-            .get(&connection_id)
-            .ok_or(Error::Unavailable)?;
-        let provider = self
-            .providers
-            .get_mut(&connection.provider_id)
-            .expect("attached provider");
-        if provider.active != Some(connection_id)
-            || provider
-                .current
-                .as_ref()
-                .is_none_or(|r| r.manifest.registration_id != registration_id)
-        {
-            return Err(Error::Invalid("registration is not current"));
-        }
-        let revision = self
-            .revision
-            .checked_add(1)
-            .filter(|r| *r <= 9_007_199_254_740_991)
-            .ok_or(Error::Invalid("revision exhausted"))?;
-        let previous = provider
-            .current
-            .take()
-            .expect("validated current registration");
-        self.revision = revision;
-        self.publication_removed(&previous);
-        Ok(RegistrationResult {
-            registration_id: registration_id.into(),
-            revision,
-        })
-    }
-
     /// Disconnection marks session bindings Lost, unlike explicit unregister's
     /// removal. Inactive socket teardown cannot clear its replacement.
     pub fn detach(&mut self, id: Uuid) {
@@ -234,14 +118,26 @@ impl Registry {
             return;
         };
         connection.endpoint.close();
-        if let Some(provider) = self.providers.get_mut(&connection.provider_id)
-            && provider.active == Some(id)
-        {
-            provider.active = None;
-            if provider.current.take().is_some() {
-                self.revision += 1;
+        let mut lost = Vec::new();
+        if let Some(provider) = self.providers.get_mut(&connection.provider_id) {
+            if provider.active == Some(id) {
+                provider.active = None;
+                if let Some(r) = provider.current.take() {
+                    lost.push(r);
+                }
             }
-            self.provider_lost(&connection.provider_id);
+            provider.scoped.retain(|_, r| {
+                if r.connection_id == id {
+                    lost.push(r.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        for r in lost {
+            self.revision += 1;
+            self.provider_lost(&r);
         }
         self.prune();
     }
@@ -259,6 +155,7 @@ impl Registry {
     fn prune(&mut self) {
         self.providers.retain(|id, provider| {
             provider.current.is_some()
+                || !provider.scoped.is_empty()
                 || provider.active.is_some()
                 || Arc::strong_count(&provider.identity) > 1
                 || self

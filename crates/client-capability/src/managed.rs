@@ -18,7 +18,7 @@
  */
 
 use maka_runtime::{
-    capability::{AdmissionEvidence, ToolDescriptor},
+    capability::{Admission, AdmissionEvidence, Offer, ToolDescriptor},
     interaction::{GrantCapability, GrantScope},
 };
 
@@ -39,10 +39,23 @@ pub enum ManagedAdmissionError {
 }
 
 pub(crate) fn scope(
-    offer_id: &str,
+    offer: &Offer,
     tool: &ToolDescriptor,
     evidence: &AdmissionEvidence,
 ) -> Result<Option<(GrantCapability, GrantScope)>, ManagedAdmissionError> {
+    if offer.admission == Some(Admission::Mcp) {
+        if !matches!(evidence, AdmissionEvidence::None) {
+            return Err(ManagedAdmissionError::InvalidEvidence);
+        }
+        return Ok(Some((
+            GrantCapability::Mcp,
+            GrantScope::McpTool {
+                server_id: tool.server_id.clone(),
+                tool_name: tool.name.clone(),
+            },
+        )));
+    }
+    let offer_id = offer.offer_id.as_str();
     if offer_id == "desktop_settings"
         && tool.server_id == "desktop_settings"
         && matches!(

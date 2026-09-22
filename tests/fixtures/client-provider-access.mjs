@@ -140,7 +140,7 @@ export async function verifyProviderAccess(local, handshake, url, control, bound
     }
 
     const first = provider();
-    const registered = await peer.replaceClientCapabilities(first.value, 3000);
+    const registered = await peer.replaceClientCapabilities(first.value, { timeoutMs: 3000 });
     assert.equal(typeof registered.registrationId, 'string');
     assert(registered.registrationId.length > 0);
     for (const [invalid, code] of [
@@ -149,13 +149,15 @@ export async function verifyProviderAccess(local, handshake, url, control, bound
       [provider({ hostPathAccess: 'cwd' }), 'unauthorized'],
     ]) {
       try {
-        await assert.rejects(peer.replaceClientCapabilities(invalid.value, 3000), { code });
+        await assert.rejects(peer.replaceClientCapabilities(invalid.value, { timeoutMs: 3000 }), {
+          code,
+        });
       } finally {
         invalid.value.close();
       }
     }
     // Rejections preserve the active registration and consume no registry revisions.
-    const unregistered = await peer.unregisterClientCapabilities(3000);
+    const unregistered = await peer.unregisterClientCapabilities({ timeoutMs: 3000 });
     assert.deepEqual(unregistered, {
       registrationId: registered.registrationId,
       revision: registered.revision + 1,
@@ -164,7 +166,7 @@ export async function verifyProviderAccess(local, handshake, url, control, bound
     assert.equal(first.closeCount(), 1);
 
     const active = provider();
-    const replaced = await peer.replaceClientCapabilities(active.value, 3000);
+    const replaced = await peer.replaceClientCapabilities(active.value, { timeoutMs: 3000 });
     assert.notEqual(replaced.registrationId, registered.registrationId);
     assert.equal(replaced.revision, unregistered.revision + 1);
     assert.deepEqual(

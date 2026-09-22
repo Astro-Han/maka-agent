@@ -71,6 +71,25 @@ fn manifests_normalize_and_reject_the_same_boundaries_as_the_current_client() {
             cases.push(json!({"kind":kind,"input":input,"expected":expected}));
         };
     add("manifest", manifest());
+    let mut scoped = manifest();
+    scoped["sessionId"] = json!("session-a");
+    add("manifest", scoped.clone()); // Services cannot be scoped.
+    scoped.as_object_mut().unwrap().remove("services");
+    add("manifest", scoped.clone());
+    scoped["offers"][0]["admission"] = json!("mcp");
+    add("manifest", scoped.clone());
+    let mut global_mcp = scoped.clone();
+    global_mcp.as_object_mut().unwrap().remove("sessionId");
+    add("manifest", global_mcp);
+    scoped["offers"][0]["hostPathAccess"] = json!("cwd");
+    add("manifest", scoped.clone());
+    scoped["offers"][0]["hostPathAccess"] = json!("none");
+    scoped["offers"][0]["affinity"] = json!("turn");
+    add("manifest", scoped.clone());
+    scoped["offers"] = json!([]);
+    add("manifest", scoped.clone());
+    scoped["sessionId"] = json!("invalid.id");
+    add("manifest", scoped);
     let mut absent = manifest();
     absent.as_object_mut().unwrap().remove("services");
     add("manifest", absent);

@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 #[serde(deny_unknown_fields)]
 pub struct ClientComposition {
     /// Includes unavailable Session owners, which still constrain future binding.
-    pub session_bindings: BTreeMap<ContractId, Identity>,
+    pub session_bindings: BTreeMap<ContractId, PublicationIdentity>,
     pub offers: Vec<ClientOffer>,
 }
 
@@ -36,12 +36,20 @@ pub enum ClientOffer {
     Pinned {
         contract: ContractId,
         affinity: PinnedAffinity,
-        identity: Identity,
+        publication: PublicationIdentity,
     },
     Call {
         offer: Offer,
         selector: Option<Identity>,
     },
+}
+
+/// Authentication authority and publication scope are independent identities.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicationIdentity {
+    pub identity: Identity,
+    pub session_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

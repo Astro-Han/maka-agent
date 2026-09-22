@@ -60,12 +60,26 @@ pub enum BindingError {
 struct ProviderRef {
     id: String,
     identity: Arc<Identity>,
+    session_id: Option<String>,
 }
 impl ProviderRef {
     fn of(registration: &Registration) -> Self {
         Self {
             id: registration.provider_id().into(),
             identity: registration.identity().clone(),
+            session_id: registration.session_id().map(str::to_owned),
+        }
+    }
+
+    fn matches(&self, registration: &Registration) -> bool {
+        self.id == registration.provider_id()
+            && self.session_id.as_deref() == registration.session_id()
+    }
+
+    fn publication(&self) -> maka_runtime::capability::PublicationIdentity {
+        maka_runtime::capability::PublicationIdentity {
+            identity: (*self.identity).clone(),
+            session_id: self.session_id.clone(),
         }
     }
 }
@@ -94,9 +108,12 @@ pub(super) struct SessionBindings {
 type Candidates = BTreeMap<ContractId, Vec<Arc<Registration>>>;
 
 impl Registry {
-    fn eligible(&self) -> Candidates {
+    fn eligible(&self, session_id: Option<&str>) -> Candidates {
         let mut eligible: Candidates = BTreeMap::new();
-        for registration in self.published().filter(|r| r.available()) {
+        for registration in self
+            .published()
+            .filter(|r| r.available() && r.visible_to(session_id))
+        {
             for (contract, _) in registration.offers() {
                 eligible
                     .entry(contract.clone())
@@ -111,7 +128,26 @@ impl Registry {
     }
 
     pub fn release_session(&mut self, session_id: &str) {
+        self.retirement_revision += 1;
         self.sessions.remove(session_id);
+        for provider in self.providers.values_mut() {
+            // Include old generations still pinned by prepared or admitted work.
+            let resident: Vec<_> = provider
+                .residency
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .values()
+                .filter_map(std::sync::Weak::upgrade)
+                .collect();
+            for r in resident {
+                if r.session_id() == Some(session_id) {
+                    r.invocations.cancel();
+                }
+            }
+            if provider.scoped.remove(session_id).is_some() {
+                self.revision += 1;
+            }
+        }
         self.prune();
     }
 
@@ -126,14 +162,18 @@ impl Registry {
                     && current.offer(contract).is_none()
             };
             state.session.retain(|contract, binding| {
-                !matches!(binding, Binding::Bound(provider) if provider.id == current.provider_id() && removed(contract))
+                let provider = binding.provider();
+                !(provider.matches(current)
+                    && (removed(contract)
+                        || (matches!(binding, Binding::Lost(_))
+                            && current.offer(contract).is_none())))
             });
-            state.turn.retain(|contract, provider| {
-                provider.id != current.provider_id() || !removed(contract)
-            });
+            state
+                .turn
+                .retain(|contract, provider| !provider.matches(current) || !removed(contract));
             for (contract, binding) in &mut state.session {
                 if let Binding::Lost(provider) = binding
-                    && provider.id == current.provider_id()
+                    && provider.matches(current)
                     && current.offer(contract).is_some()
                 {
                     *binding = Binding::Bound(provider.clone());
@@ -147,25 +187,27 @@ impl Registry {
         for state in self.sessions.values_mut() {
             state.session.retain(|contract, binding| {
                 !matches!(binding, Binding::Bound(provider)
-                    if provider.id == previous.provider_id() && previous.offer(contract).is_some())
+                    if provider.matches(previous) && previous.offer(contract).is_some())
             });
             state.turn.retain(|contract, provider| {
-                provider.id != previous.provider_id() || previous.offer(contract).is_none()
+                !provider.matches(previous) || previous.offer(contract).is_none()
             });
         }
         self.prune_sessions();
     }
 
-    pub(super) fn provider_lost(&mut self, provider_id: &str) {
+    pub(super) fn provider_lost(&mut self, registration: &Registration) {
         for state in self.sessions.values_mut() {
             for binding in state.session.values_mut() {
                 if let Binding::Bound(provider) = binding
-                    && provider.id == provider_id
+                    && provider.matches(registration)
                 {
                     *binding = Binding::Lost(provider.clone());
                 }
             }
-            state.turn.retain(|_, provider| provider.id != provider_id);
+            state
+                .turn
+                .retain(|_, provider| !provider.matches(registration));
         }
         self.prune_sessions();
     }
@@ -198,6 +240,13 @@ fn choose(
         [one] => Ok(Some(one.clone())),
         _ => Err(BindingError::Ambiguous),
     }
+}
+
+fn choose_bound(
+    candidates: &[Arc<Registration>],
+    provider: &ProviderRef,
+) -> Option<Arc<Registration>> {
+    candidates.iter().find(|r| provider.matches(r)).cloned()
 }
 
 fn claim_names(

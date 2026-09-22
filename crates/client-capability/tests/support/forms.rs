@@ -59,6 +59,7 @@ pub fn setup(
         .replace(
             connection,
             Manifest {
+                session_id: None,
                 registration_id: "r".into(),
                 offers: vec![],
                 services: Some(vec![ServiceOffer {

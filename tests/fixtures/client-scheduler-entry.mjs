@@ -122,7 +122,7 @@ try {
     },
     close() {},
   };
-  await connection.replaceClientCapabilities(provider, 3000);
+  await connection.replaceClientCapabilities(provider, { timeoutMs: 3000 });
   const { grant } = await request('plugin.authorization', {
     client,
     scope: 'profile',
@@ -219,7 +219,7 @@ try {
     assert.equal(withdrawn.status, 'paused');
     assert.equal(withdrawn.fireCount, 0);
     assert.equal(calls.length, 1);
-    await connection.unregisterClientCapabilities(3000);
+    await connection.unregisterClientCapabilities({ timeoutMs: 3000 });
     for (const waitingId of ids.slice(1, 4)) {
       await mutate({ kind: 'trigger_now', taskId: waitingId });
       for (let attempt = 0; attempt < 300; attempt++) {
@@ -231,7 +231,7 @@ try {
     await mutate({ kind: 'pause', taskId: ids[1] });
     await mutate({ kind: 'snooze', taskId: ids[2], delayMs: 3600000 });
     await mutate({ kind: 'delete', taskId: ids[3] });
-    await connection.replaceClientCapabilities(provider, 3000);
+    await connection.replaceClientCapabilities(provider, { timeoutMs: 3000 });
     await delay(350);
     assert.equal(calls.length, 1, 'cancelled waiting notifications must not be admitted');
     await request('plugin.composition.apply', {
