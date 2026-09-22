@@ -18,10 +18,10 @@
  */
 
 use super::{Deployment, HostError, platform};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum Observation {
     OnDemand,
@@ -38,7 +38,7 @@ pub(crate) enum Observation {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum State {
     Stopped,

@@ -144,6 +144,8 @@ Desktop 同样先完成下载和 SSH／WSL 传输，再暂停连接。
 Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返回最多 48 KiB 的托管诊断尾部，
 `byteTruncated` 标明省略的字节。Linux 选择最近 200 条 journal 记录；macOS/Windows 读取 stderr。
 这些是诊断信息，不是执行历史；按需 Host 不捕获 stderr。
+托管启动失败会附带观察到的服务状态、可用的 PID／结果码和有界日志尾部。
+诊断读取共用启动期限，日志可能包含此前尝试的记录。
 
 `maka` 命令还提供 Desktop 启动用的 `host candidate`、从 stdin 读取 JavaScript cell 的
 `code --log <file>`，以及查看已提交执行事实的 `inspect --log <file>`。

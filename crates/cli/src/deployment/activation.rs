@@ -184,83 +184,95 @@ pub(super) async fn connect_or_launch(
     deployment.require_active()?;
     let mut child: Option<Child> = None;
     let mut service_started = false;
-    let result = tokio::time::timeout(
-        crate::operation::remaining(Duration::from_secs(30)),
-        async {
-            loop {
-                if let Ok(mut client) =
-                    HostClient::connect(&deployment.root_path, Some(&deployment.generation())).await
-                {
-                    let live = client.live_host(deployment.websocket.port()).await?;
-                    if let Some(child) = &mut child {
-                        let mut owner = child
-                            .stdin
-                            .take()
-                            .ok_or("candidate owner pipe is missing")?;
-                        owner
-                            .write_all(b"{\"kind\":\"runtime-host-launch-owner-release\"}\n")
-                            .await?;
-                    }
-                    return Ok::<_, HostError>((client, live));
-                }
+    let budget = crate::operation::remaining(Duration::from_secs(30));
+    let deadline = tokio::time::Instant::now() + budget;
+    let diagnostics_budget = if deployment.mode == Mode::Supervised {
+        (budget / 10).min(Duration::from_secs(2))
+    } else {
+        Duration::ZERO
+    };
+    let result = tokio::time::timeout_at(deadline - diagnostics_budget, async {
+        loop {
+            if let Ok(mut client) =
+                HostClient::connect(&deployment.root_path, Some(&deployment.generation())).await
+            {
+                let live = client.live_host(deployment.websocket.port()).await?;
                 if let Some(child) = &mut child {
-                    if let Some(status) = child.try_wait()? {
-                        return Err(format!("Host candidate exited before Ready: {status}").into());
-                    }
-                } else if !service_started {
-                    match RootOwner::open(
-                        &deployment.root_path,
-                        &RootNamespaces::for_current_account()?,
-                    ) {
-                        Ok(owner) => {
-                            if owner.root_id() != deployment.root_id {
-                                return Err("State Root changed before launch".into());
-                            }
-                            if deployment.mode == Mode::Supervised {
-                                super::service::start(deployment.clone(), lease.clone(), owner)
-                                    .await?;
-                                service_started = true;
-                            } else {
-                                drop(owner);
-                                child = Some(
-                                    detached::spawn(
-                                        &deployment.executable,
-                                        &[
-                                            "host",
-                                            "candidate",
-                                            "--root",
-                                            deployment
-                                                .root_path
-                                                .to_str()
-                                                .ok_or("State Root must be UTF-8")?,
-                                            "--expected-root-id",
-                                            &deployment.root_id,
-                                            "--startup-attempt-id",
-                                            &Uuid::new_v4().to_string(),
-                                            "--owner-stdin",
-                                            "--initial-connection-timeout-ms",
-                                            "30000",
-                                        ],
-                                    )
-                                    .await?,
-                                );
-                            }
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-                        Err(error) => return Err(error.into()),
-                    }
+                    let mut owner = child
+                        .stdin
+                        .take()
+                        .ok_or("candidate owner pipe is missing")?;
+                    owner
+                        .write_all(b"{\"kind\":\"runtime-host-launch-owner-release\"}\n")
+                        .await?;
                 }
-                tokio::time::sleep(Duration::from_millis(25)).await;
+                return Ok::<_, HostError>((client, live));
             }
-        },
-    )
+            if let Some(child) = &mut child {
+                if let Some(status) = child.try_wait()? {
+                    return Err(format!("Host candidate exited before Ready: {status}").into());
+                }
+            } else if !service_started {
+                match RootOwner::open(
+                    &deployment.root_path,
+                    &RootNamespaces::for_current_account()?,
+                ) {
+                    Ok(owner) => {
+                        if owner.root_id() != deployment.root_id {
+                            return Err("State Root changed before launch".into());
+                        }
+                        if deployment.mode == Mode::Supervised {
+                            super::service::start(deployment.clone(), lease.clone(), owner).await?;
+                            service_started = true;
+                        } else {
+                            drop(owner);
+                            child = Some(
+                                detached::spawn(
+                                    &deployment.executable,
+                                    &[
+                                        "host",
+                                        "candidate",
+                                        "--root",
+                                        deployment
+                                            .root_path
+                                            .to_str()
+                                            .ok_or("State Root must be UTF-8")?,
+                                        "--expected-root-id",
+                                        &deployment.root_id,
+                                        "--startup-attempt-id",
+                                        &Uuid::new_v4().to_string(),
+                                        "--owner-stdin",
+                                        "--initial-connection-timeout-ms",
+                                        "30000",
+                                    ],
+                                )
+                                .await?,
+                            );
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
     .await
-    .map_err(HostError::from)
+    .map_err(|_| HostError::from("Host did not become Ready before the activation deadline"))
     .and_then(|result| result);
 
     match result {
         Ok(connected) => Ok(connected),
         Err(error) => {
+            if deployment.mode == Mode::Supervised {
+                return Err(super::diagnostics::startup_failure(
+                    deployment,
+                    error,
+                    deadline,
+                    diagnostics_budget,
+                )
+                .await);
+            }
             if let Some(mut child) = child
                 && let Err(cleanup) =
                     stop_failed_candidate(&mut child, Duration::from_secs(5)).await

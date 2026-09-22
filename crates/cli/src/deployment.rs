@@ -21,6 +21,7 @@ mod activation;
 mod configuration;
 mod connect;
 mod control;
+mod diagnostics;
 mod entry;
 mod logs;
 mod package;

@@ -193,6 +193,30 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
             assert_eq!(log["byteTruncated"], true);
             assert_eq!(log["text"], contents[contents.len() - 48 * 1024..]);
             assert_eq!(std::fs::read_to_string(path).unwrap(), contents);
+            // The held Root prevents service launch. Diagnose the failed observation
+            // through real CLI workers without installing an account OS service.
+            let started = Instant::now();
+            let failed = Command::new(executable)
+                .args([
+                    "--operation-worker",
+                    "host",
+                    "activate",
+                    "--root-id",
+                    &fixture.root_id,
+                    "--framed",
+                    "--timeout-ms",
+                    "5000",
+                ])
+                .output()
+                .unwrap();
+            assert!(!failed.status.success(), "{failed:?}");
+            assert!(started.elapsed() < Duration::from_secs(8));
+            let frame = decode_activation(&failed.stdout);
+            let message = frame["error"]["message"].as_str().unwrap();
+            assert!(message.contains("Host did not become Ready"), "{message}");
+            assert!(message.contains("Service:"), "{message}");
+            assert!(message.ends_with("latest failure\n"), "{message}");
+            owner.validate_current().unwrap();
         }
         assert!(!fixture.root.join("runtime-rust.sqlite").exists());
         drop(owner);

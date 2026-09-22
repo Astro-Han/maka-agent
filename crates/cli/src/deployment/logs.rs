@@ -20,7 +20,7 @@
 use super::{Deployment, Mode, RootId, directory, store};
 use clap::Args;
 use maka_runtime_host::server::HostError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const LIMIT: usize = 48 * 1024;
 
@@ -30,13 +30,13 @@ pub(crate) struct Logs {
     root_id: RootId,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
-enum Output {
+pub(super) enum Output {
     NotCaptured,
     Tail {
         source: Source,
@@ -45,13 +45,13 @@ enum Output {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
-enum Source {
+pub(super) enum Source {
     #[cfg(target_os = "linux")]
     Journal { entry_limit: usize },
     #[cfg(any(target_os = "macos", windows))]

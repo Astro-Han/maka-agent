@@ -183,6 +183,9 @@ is not proof that its process stopped. `host logs --root-id <rootId>` returns up
 48 KiB of supervised diagnostics, with `byteTruncated` marking omitted bytes.
 Linux selects the latest 200 journal entries; macOS/Windows read stderr. These are
 diagnostics, not execution history. On-demand stderr is not captured.
+Supervised activation failures include the observed service state, PID/result when
+available, and a bounded recent log tail. Diagnostic reads share the activation
+deadline; the tail may include records from earlier attempts.
 
 The `maka` command also provides `host candidate` for Desktop-owned startup,
 `code --log <file>` for a JavaScript cell read from stdin, and
