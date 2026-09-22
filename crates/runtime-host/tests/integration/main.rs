@@ -58,6 +58,7 @@ mod message_interrupt;
 mod message_queue;
 mod message_recovery;
 mod message_submit;
+mod model_adapters;
 mod model_overrides;
 mod oauth;
 mod oauth_execution;

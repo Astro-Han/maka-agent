@@ -18,7 +18,7 @@
  */
 
 use super::cache::CACHE_LIMIT;
-use crate::trusted::budget;
+use crate::budget;
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};

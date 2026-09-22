@@ -4503,6 +4503,7 @@ dependencies = [
  "deno_webidl",
  "futures-util",
  "maka-network",
+ "maka-plugins",
  "maka-runtime",
  "reqwest",
  "serde",
@@ -4522,8 +4523,11 @@ dependencies = [
  "chrono",
  "deno_core",
  "futures-util",
+ "hyper",
  "maka-js-runtime",
  "maka-network",
+ "maka-plugins",
+ "maka-responses",
  "maka-runtime",
  "reqwest",
  "serde",
@@ -4632,6 +4636,24 @@ dependencies = [
  "thiserror 2.0.20",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "maka-responses"
+version = "0.2.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "futures-util",
+ "maka-plugins",
+ "maka-runtime",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

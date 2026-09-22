@@ -126,6 +126,11 @@ async fn plugin_step_surface_survives_retry_changes_only_between_steps_and_reope
         let path = directory.path().join("events.sqlite");
         let log = Arc::new(EventLog::open(&path).await.unwrap());
         let catalog = Catalog::default();
+        let models = Fiber::new("maka.models", "maka.models", Scope::Profile).unwrap();
+        models.begin_loading().unwrap(); models.ready().unwrap();
+        catalog.publish(&models, maka_model::adapters::Builtin(
+            maka_js_runtime::trusted::TrustedRuntime::default()
+        ).stage().unwrap()).unwrap();
         let count = Arc::new(AtomicUsize::new(0));
         let first = publish(&catalog, "old", count.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -179,7 +184,8 @@ async fn plugin_step_surface_survives_retry_changes_only_between_steps_and_reope
         assert_eq!(surfaces[0], surfaces[1]);
         assert_eq!(surfaces[2], surfaces[3]);
         assert_ne!(surfaces[0], surfaces[2]);
-        assert_eq!(surfaces[0].sources.len(), 4);
+        assert_eq!(surfaces[0].sources.len(), 5);
+        assert_eq!(surfaces[0].sources.iter().filter(|source| source.kind == maka_runtime::composition::SourceKind::ModelAdapter).count(), 1);
         assert_eq!(surfaces[2].system_prompt.as_deref(), Some("Plugin new"));
         second.shutdown(tokio::time::Instant::now() + Duration::from_secs(1)).await.unwrap();
         drop(engine);

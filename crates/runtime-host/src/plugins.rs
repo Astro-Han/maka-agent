@@ -26,6 +26,7 @@ pub(crate) mod graph;
 pub(crate) mod host;
 mod http;
 pub(crate) mod javascript;
+pub(crate) mod models;
 mod owner;
 mod process;
 pub(crate) mod recall;
@@ -168,6 +169,7 @@ impl Platform {
         Error,
     > {
         let catalog = kernel.catalog().clone();
+        catalog.host_only::<maka_plugins::model::Adapter>()?;
         let services_changed = kernel.subscribe_services();
         catalog
             .host_only::<maka_plugins::remote::Endpoint>()

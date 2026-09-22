@@ -415,10 +415,12 @@ test('relay model profiles round-trip canonical entries and drafts, strictly', (
 
   assert.deepEqual(
     decodeModelOverridesTable({
+      custom: { adapter: 'example.responses' },
       codeOnly: { codeMode: true, applyPatch: false },
       patchOnly: { codeMode: false, applyPatch: true },
     }),
     {
+      custom: { adapter: 'example.responses' },
       codeOnly: { codeMode: true, applyPatch: false },
       patchOnly: { codeMode: false, applyPatch: true },
     },
@@ -449,6 +451,9 @@ test('relay model profiles round-trip canonical entries and drafts, strictly', (
     { m: { vision: 'yes' } },
     { m: { codeMode: 'true' } },
     { m: { applyPatch: null } },
+    { m: { adapter: '' } },
+    { m: { adapter: 'example\nresponses' } },
+    { m: { adapter: 'x'.repeat(257) } },
     { m: { contextWindow: 0 } },
     { m: { contextWindow: 1.5 } },
     { m: { contextWindow: 2 ** 60 } }, // not within 1..MAX_SAFE_INTEGER

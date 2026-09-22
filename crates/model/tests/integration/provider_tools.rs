@@ -19,7 +19,7 @@
 
 use super::provider_stream::{read_request, request};
 use futures_util::{SinkExt, StreamExt};
-use maka_model::{ModelExecutor, ProviderKind, ResponsesLane, StepBuilder};
+use maka_model::{Conversation, ModelExecutor, ProviderKind, StepBuilder};
 use maka_runtime::{
     model::{ModelPart, ModelSource},
     tools::ProviderTool,
@@ -124,9 +124,9 @@ async fn scenario() {
                 json!({"maxUses":8})
             },
         });
-        let lane = websocket.then(ResponsesLane::default);
+        let lane = websocket.then(Conversation::default);
         let mut stream = executor
-            .stream_in_lane(input, CancellationToken::new(), lane.clone())
+            .stream_in_conversation(input, CancellationToken::new(), lane.clone())
             .await
             .unwrap();
         let mut builder = StepBuilder::for_step("native-search").unwrap();

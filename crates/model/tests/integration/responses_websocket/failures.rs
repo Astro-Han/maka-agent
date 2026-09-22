@@ -92,23 +92,23 @@ async fn cancellation_and_bad_frames_do_not_replay_or_poison_other_lanes() {
         let executor = ModelExecutor::new(4, Duration::from_secs(10)).unwrap();
         let connecting_cancel = CancellationToken::new();
         let connecting = executor
-            .stream_in_lane(
+            .stream_in_conversation(
                 request(&base, "cancel during retry"),
                 connecting_cancel.clone(),
-                Some(ResponsesLane::default()),
+                Some(Conversation::default()),
             )
             .await
             .unwrap();
         retry_received.await.unwrap();
         connecting_cancel.cancel();
         connecting.cancel_and_wait().await;
-        let healthy_lane = ResponsesLane::default();
+        let healthy_lane = Conversation::default();
         let cancel = CancellationToken::new();
         let mut stalled = executor
-            .stream_in_lane(
+            .stream_in_conversation(
                 request(&base, "cancel"),
                 cancel.clone(),
-                Some(ResponsesLane::default()),
+                Some(Conversation::default()),
             )
             .await
             .unwrap();
@@ -122,10 +122,10 @@ async fn cancellation_and_bad_frames_do_not_replay_or_poison_other_lanes() {
         }
         stalled.cancel_and_wait().await;
         let incomplete = executor
-            .stream_in_lane(
+            .stream_in_conversation(
                 request(&base, "incomplete"),
                 CancellationToken::new(),
-                Some(ResponsesLane::default()),
+                Some(Conversation::default()),
             )
             .await
             .unwrap();
@@ -133,10 +133,10 @@ async fn cancellation_and_bad_frames_do_not_replay_or_poison_other_lanes() {
         let mut streams = Vec::new();
         for _ in 0..3 {
             let stream = executor
-                .stream_in_lane(
+                .stream_in_conversation(
                     request(&base, "bad"),
                     CancellationToken::new(),
-                    Some(ResponsesLane::default()),
+                    Some(Conversation::default()),
                 )
                 .await
                 .unwrap();
@@ -148,7 +148,7 @@ async fn cancellation_and_bad_frames_do_not_replay_or_poison_other_lanes() {
         generate(&executor, &healthy_lane, request(&base, "still healthy")).await;
         generate(
             &executor,
-            &ResponsesLane::default(),
+            &Conversation::default(),
             request(&base, "after transport failure"),
         )
         .await;
@@ -205,11 +205,11 @@ async fn rejected_upgrade_falls_back_before_dispatch_and_stays_http() {
             }
         });
         let executor = ModelExecutor::new(1, Duration::from_secs(10)).unwrap();
-        let lane = ResponsesLane::default();
+        let lane = Conversation::default();
         generate(&executor, &lane, proxied_request(proxy_port, "first")).await;
         generate(&executor, &lane, proxied_request(proxy_port, "second")).await;
         drop(lane);
-        generate(&executor, &ResponsesLane::default(), proxied_request(proxy_port, "new Turn")).await;
+        generate(&executor, &Conversation::default(), proxied_request(proxy_port, "new Turn")).await;
         server.await.unwrap();
     }).await.unwrap();
 }

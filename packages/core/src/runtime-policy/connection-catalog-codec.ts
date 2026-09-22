@@ -268,6 +268,7 @@ export function decodeModelOverridesTable(value: unknown): Readonly<Record<strin
         'thinkingLevels',
         'vision',
         'codeMode',
+        'adapter',
         'applyPatch',
         'contextWindow',
         'serviceTier',
@@ -284,6 +285,17 @@ export function decodeModelOverridesTable(value: unknown): Readonly<Record<strin
       [],
     );
     const declared: { -readonly [K in keyof ModelOverride]: ModelOverride[K] } = {};
+    if (entry.adapter !== undefined) {
+      if (
+        typeof entry.adapter !== 'string' ||
+        entry.adapter.length === 0 ||
+        entry.adapter.length > 256 ||
+        /\p{Cc}/u.test(entry.adapter)
+      ) {
+        throw domainError('invalid model adapter name');
+      }
+      declared.adapter = entry.adapter;
+    }
     for (const field of ['codeMode', 'applyPatch'] as const) {
       if (entry[field] !== undefined)
         declared[field] = booleanValue(entry[field], `model ${field}`);

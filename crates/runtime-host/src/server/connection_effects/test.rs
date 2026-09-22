@@ -164,6 +164,7 @@ fn provider(
     let route = provider_route::resolve(prepared.connection(), facts, model)?;
     route.check_probe()?;
     Ok(ProviderConfig {
+        adapter: None,
         capabilities: Default::default(),
         kind: route.kind,
         model: model.to_owned(),

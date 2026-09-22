@@ -59,6 +59,7 @@ pub fn input(base: &str, attachments: Value) -> RunInput {
         invocation: identity("current"),
         request_fingerprint: None,
         provider: ProviderConfig {
+            adapter: None,
             capabilities: Default::default(),
             kind: ProviderKind::OpenaiChat,
             model: "test".into(),

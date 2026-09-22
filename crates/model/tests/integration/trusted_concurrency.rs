@@ -95,7 +95,7 @@ async fn shared_sdk_requests_progress_through_backpressure_and_cancellation() {
 
         held.cancel_and_wait().await;
         pending_http.await.unwrap();
-        // The lower-level JS API also owns cancellation if its caller disappears.
+        // An abandoned model consumer also cancels and settles its SDK request.
         let abandoned = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let abandoned_base = format!("http://{}/v1", abandoned.local_addr().unwrap());
         let (arrived, ready) = oneshot::channel();
@@ -105,12 +105,10 @@ async fn shared_sdk_requests_progress_through_backpressure_and_cancellation() {
             arrived.send(()).unwrap();
             assert_http_closed(&mut socket).await;
         });
-        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+        let abandoned_models = models.clone();
         let abandoned_call = tokio::spawn(async move {
-            runtime.model(
-                serde_json::to_value(request(ProviderKind::OpenaiChat, abandoned_base)).unwrap(),
-                sender, CancellationToken::new(), Duration::from_secs(15),
-            ).await
+            let _stream = abandoned_models.stream(request(ProviderKind::OpenaiChat, abandoned_base), CancellationToken::new()).await.unwrap();
+            std::future::pending::<()>().await;
         });
         ready.await.unwrap();
         abandoned_call.abort();

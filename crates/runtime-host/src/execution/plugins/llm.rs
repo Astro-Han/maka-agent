@@ -124,10 +124,19 @@ impl Executions {
         let evidence =
             serde_json::to_value(&input).map_err(|error| Error::Invalid(error.to_string()))?;
         let request = request(prepared, input);
+        let adapter = maka_model::adapters::resolve(
+            &self
+                .plugin_catalog
+                .capture(&maka_plugins::composition::Scope::Session(
+                    invocation.session_id.clone(),
+                )),
+            request.provider.adapter_name(),
+        )
+        .map_err(|error| Error::Invalid(error.to_string()))?;
         let models = self.models.clone();
         let effect = PreparedEffect::new(move |cancellation| {
             Box::pin(async move {
-                generate(models, request, cancellation)
+                generate(models, request, adapter, cancellation)
                     .await
                     .map(|output| ToolOutput::Model(Box::new(output)).into())
             })
@@ -206,10 +215,14 @@ pub(super) fn request(prepared: provider::PreparedProvider, input: Generate) -> 
 pub(super) async fn generate(
     models: ModelExecutor,
     request: ModelRequest,
+    adapter: maka_plugins::model::Binding,
     cancellation: CancellationToken,
 ) -> Result<ModelGeneration, ToolError> {
     let model_id = request.provider.model.clone();
-    let mut stream = models.stream(request, cancellation).await.map_err(failed)?;
+    let mut stream = models
+        .stream_with_adapter(request, cancellation, None, adapter)
+        .await
+        .map_err(failed)?;
     let result = async {
         let mut builder = StepBuilder::default();
         let mut bytes = 0usize;

@@ -167,6 +167,9 @@ pub struct RequestTools<'a> {
 }
 
 impl<'a> RequestTools<'a> {
+    pub fn captured(&self) -> Option<&maka_plugins::contributions::Captured> {
+        self.captured.as_ref()
+    }
     pub fn catalog_digest(&self) -> &str {
         &self.digest
     }

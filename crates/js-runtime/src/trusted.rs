@@ -24,10 +24,7 @@ mod engine;
 mod http;
 mod lifetime;
 mod ops;
-mod responses;
-mod responses_ops;
 mod worker;
-pub use responses::ResponsesLane;
 
 use lifetime::{Health, ModelCancellation};
 use serde_json::Value;
@@ -36,20 +33,27 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 use std::time::Duration;
-use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum TrustedError {
     #[error("model request cancelled")]
     Cancelled,
-    #[error("model stream idle timeout exceeded")]
-    TimedOut,
     #[error("trusted JavaScript runtime failed: {0}")]
     Failed(String),
 }
 
 pub(super) type Result<T> = std::result::Result<T, TrustedError>;
+
+impl From<TrustedError> for maka_runtime::model::error::ModelError {
+    fn from(error: TrustedError) -> Self {
+        match error {
+            TrustedError::Cancelled => Self::Cancelled,
+            TrustedError::Failed(message) => Self::Adapter(message),
+        }
+    }
+}
 pub(super) type Reply = oneshot::Sender<Result<()>>;
 
 /// Queued SDK output retains its share of the runtime-wide byte budget until
@@ -73,7 +77,6 @@ struct Inner {
     service: OnceLock<Result<Service>>,
     slots: Arc<Semaphore>,
     input: Arc<Semaphore>,
-    responses: Arc<responses::Shared>,
     sequence: AtomicU32,
 }
 
@@ -88,11 +91,8 @@ pub(super) enum Command {
         id: u32,
         request: Value,
         sender: mpsc::Sender<Result<ProviderEvent>>,
-        activity: Arc<Notify>,
         cancellation: CancellationToken,
-        lane: Option<ResponsesLane>,
-        network: maka_network::Policy,
-        responses: Arc<responses::Shared>,
+        network: Arc<dyn maka_plugins::model::Transport>,
         permit: OwnedSemaphorePermit,
         input: OwnedSemaphorePermit,
         reply: Reply,
@@ -106,7 +106,6 @@ impl Default for TrustedRuntime {
             service: OnceLock::new(),
             slots: Arc::new(Semaphore::new(128)),
             input: Arc::new(Semaphore::new(32 * 1024 * 1024)),
-            responses: Arc::new(responses::Shared::default()),
             sequence: AtomicU32::new(1),
         }))
     }
@@ -158,27 +157,7 @@ impl TrustedRuntime {
         request: Value,
         sender: mpsc::Sender<Result<ProviderEvent>>,
         cancellation: CancellationToken,
-        idle_timeout: Duration,
-    ) -> Result<()> {
-        self.model_in_lane(
-            request,
-            sender,
-            cancellation,
-            idle_timeout,
-            None,
-            Default::default(),
-        )
-        .await
-    }
-
-    pub async fn model_in_lane(
-        &self,
-        request: Value,
-        sender: mpsc::Sender<Result<ProviderEvent>>,
-        cancellation: CancellationToken,
-        idle_timeout: Duration,
-        lane: Option<ResponsesLane>,
-        network: maka_network::Policy,
+        network: Arc<dyn maka_plugins::model::Transport>,
     ) -> Result<()> {
         let bytes = budget::bytes(&request, 32 * 1024 * 1024)?;
         let permit = tokio::select! {
@@ -196,18 +175,14 @@ impl TrustedRuntime {
         let service = self.service()?;
         let id = self.next_id()?;
         let (reply, mut done) = oneshot::channel();
-        let activity = Arc::new(Notify::new());
         service
             .commands
             .send(Command::Model {
                 id,
                 request,
                 sender,
-                activity: activity.clone(),
                 cancellation: cancellation.clone(),
-                lane,
                 network,
-                responses: self.0.responses.clone(),
                 permit,
                 input,
                 reply,
@@ -215,19 +190,15 @@ impl TrustedRuntime {
             .map_err(|_| service.health.error())?;
         let mut cancel_on_drop =
             ModelCancellation::new(id, service.commands.clone(), cancellation.clone());
-        let cause = loop {
-            tokio::select! {
-                biased;
-                result = &mut done => {
-                    cancel_on_drop.disarm();
-                    let result = result.map_err(|_| service.health.error())?;
-                    return if cancellation.is_cancelled() { Err(TrustedError::Cancelled) } else { result };
-                },
-                _ = cancellation.cancelled() => break TrustedError::Cancelled,
-                _ = activity.notified() => {},
-                _ = tokio::time::sleep(idle_timeout) => break TrustedError::TimedOut,
-            }
-        };
+        tokio::select! {
+            biased;
+            result = &mut done => {
+                cancel_on_drop.disarm();
+                let result = result.map_err(|_| service.health.error())?;
+                return if cancellation.is_cancelled() { Err(TrustedError::Cancelled) } else { result };
+            },
+            _ = cancellation.cancelled() => {},
+        }
         cancel_on_drop.cancel();
         // Abort is request-local. Only failure to settle cleanup escalates to a
         // fatal shared-runtime failure, never silently restarts/replays work.
@@ -240,7 +211,7 @@ impl TrustedRuntime {
                 .fail("model cancellation failed to settle within 5 seconds");
             let _ = done.await;
         }
-        Err(cause)
+        Err(TrustedError::Cancelled)
     }
 }
 

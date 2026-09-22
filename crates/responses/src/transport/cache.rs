@@ -19,7 +19,7 @@
 
 use super::output::Output;
 use super::{Result, error};
-use crate::trusted::budget;
+use crate::budget;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};

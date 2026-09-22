@@ -42,6 +42,13 @@ pub enum ModelModality {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelOverride {
+    /// Public adapter contribution name; omitted selects the wire's default.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub adapter: Option<String>,
     /// Omitted means model-specific defaults; false is an explicit opt-out.
     #[serde(
         default,

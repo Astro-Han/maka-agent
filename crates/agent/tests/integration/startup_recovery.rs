@@ -295,6 +295,7 @@ async fn unknown_dispatch_stays_unknown_and_blocks_next_admission_after_reopen()
                 },
                 request_fingerprint: None,
                 provider: ProviderConfig {
+                    adapter: None,
                     capabilities: Default::default(),
                     kind: ProviderKind::OpenaiChat,
                     model: "unused".into(),

@@ -17,7 +17,10 @@
  * under the License.
  */
 
-use crate::{ModelRequest, ProviderKind, prompt::Message};
+use maka_runtime::model::{
+    prompt::Message,
+    request::{ProviderKind, Request as ModelRequest},
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
@@ -28,8 +31,8 @@ use std::{
 /// The transport is only a cache. Confirmation must come from the canonical
 /// projection after all local tool outcomes have committed.
 #[derive(Clone, Default)]
-pub struct ResponsesLane {
-    pub(crate) transport: maka_js_runtime::trusted::ResponsesLane,
+pub struct Lane {
+    pub(crate) transport: crate::transport::ResponsesLane,
     semantic: Arc<Mutex<Semantic>>,
 }
 
@@ -72,7 +75,7 @@ impl Prefix {
     }
 }
 
-impl ResponsesLane {
+impl Lane {
     /// No readback is needed when there is no completed, cached WS response.
     pub fn needs_confirmation(&self) -> bool {
         self.transport.response_id().is_some()

@@ -105,11 +105,8 @@ async fn drive(
                     id,
                     request,
                     sender,
-                    activity,
                     cancellation,
-                    lane,
                     network,
-                    responses,
                     permit,
                     input,
                     reply,
@@ -131,15 +128,6 @@ async fn drive(
                                     cancellation.clone(),
                                 )),
                                 sender,
-                                activity,
-                                responses: lane.map(|lane| {
-                                    std::rc::Rc::new(super::responses::Exchange::new(
-                                        lane,
-                                        cancellation.clone(),
-                                        network,
-                                        responses,
-                                    ))
-                                }),
                                 cancellation,
                                 endpoint,
                             },

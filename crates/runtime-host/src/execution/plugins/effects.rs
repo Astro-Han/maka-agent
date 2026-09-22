@@ -344,6 +344,12 @@ impl Executions {
         cancellation: CancellationToken,
     ) -> Result<Prepared<ModelGeneration>, ToolError> {
         input.validate().map_err(failed)?;
+        let scope = match &boundary {
+            Boundary::Session { boundary, .. } => {
+                maka_plugins::composition::Scope::Session(boundary.session_id.clone())
+            }
+            _ => maka_plugins::composition::Scope::Profile,
+        };
         let (key, model, thinking) = match boundary {
             Boundary::Session { boundary, .. } => {
                 let session = self
@@ -391,6 +397,11 @@ impl Executions {
                 .await
                 .map_err(|error| failed(error.message))?;
         let models = self.models.clone();
+        let adapter = maka_model::adapters::resolve(
+            &self.plugin_catalog.capture(&scope),
+            provider.config.adapter_name(),
+        )
+        .map_err(failed)?;
         let host = self.clone();
         Ok(Prepared {
             operation: Operation::Model {
@@ -403,8 +414,13 @@ impl Executions {
                 let provider = provider
                     .admit(&host.oauth)
                     .map_err(|error| failed(error.message))?;
-                super::llm::generate(models, super::llm::request(provider, input), cancellation)
-                    .await
+                super::llm::generate(
+                    models,
+                    super::llm::request(provider, input),
+                    adapter,
+                    cancellation,
+                )
+                .await
             }),
         })
     }

@@ -114,6 +114,7 @@ pub fn input(base: &str, suffix: &str, effects: Arc<Effects>) -> RunInput {
         },
         request_fingerprint: None,
         provider: ProviderConfig {
+            adapter: None,
             capabilities: Default::default(),
             kind: ProviderKind::OpenaiChat,
             model: "test".into(),

@@ -29,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 fn request(base_url: &str) -> ModelRequest {
     ModelRequest {
         provider: ProviderConfig {
+            adapter: None,
             capabilities: Default::default(),
             kind: ProviderKind::OpenaiCompatible {
                 name: "local-gateway".into(),

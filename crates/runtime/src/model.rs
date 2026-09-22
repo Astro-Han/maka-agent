@@ -18,6 +18,10 @@
  */
 
 use serde::{Deserialize, Serialize};
+pub mod budget;
+pub mod error;
+pub mod prompt;
+pub mod request;
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

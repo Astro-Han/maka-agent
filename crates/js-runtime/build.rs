@@ -33,13 +33,10 @@ fn main() {
 }
 
 fn bundle_providers() {
-    println!("cargo:rerun-if-changed=trusted/open-responses.js");
     println!("cargo:rerun-if-changed=trusted/adapter.js");
-    println!("cargo:rerun-if-changed=trusted/codex-auth.js");
     println!("cargo:rerun-if-changed=trusted/provider-errors.js");
     println!("cargo:rerun-if-changed=trusted/provider-fetch.js");
     println!("cargo:rerun-if-changed=trusted/compatible-transport.js");
-    println!("cargo:rerun-if-changed=trusted/responses-transport.js");
     println!("cargo:rerun-if-changed=trusted/network-fetch.js");
     println!("cargo:rerun-if-changed=../../scripts/rust/bundle-providers.mjs");
     println!("cargo:rerun-if-changed=third-party/deno-telemetry/telemetry.ts");

@@ -193,8 +193,9 @@ Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返�
   `maka.skills` 内置插件拥有发现、输入展开、启用／固定 CAS、原始字节更新预览及可恢复的创建／安装／删除／更新。
   Client bundle 提供管理、选择器和草稿建议；Desktop 提供目标绑定的 Slot 和授权原生文件操作。
   停用后新显式引用失败，普通聊天与已接受回执不受影响。Plan 模式执行属于独立领域，尚未实现。
-- Rust 管理存储、网络路由、工具和原生进程／PTY。一个惰性启动的长期 V8 并发处理模型
-  请求；原生 PTY worker 直接拥有 Alacritty 终端状态，无需 JavaScript 或跨 runtime 消息。
+- Rust 管理存储、网络路由、工具和原生进程／PTY。Responses 使用原生 Rust 适配器，其它协议
+  保留共享惰性 V8 中的 AI SDK。两者都是普通模型适配器插件贡献，每逻辑步骤冻结注册并供重试复用。
+  原生 PTY worker 直接拥有 Alacritty 终端状态，无需 JavaScript 或跨 runtime 消息。
   Code Mode 使用独立短生命周期 isolate。数量与字节限制提供背压，
   V8 heap 限制不等于进程内存隔离。
 - 插件通过目录注册和有作用域的 Host 服务接入，复用日志、权限与排空机制，不替换 Engine。

@@ -28,6 +28,7 @@ use tokio::{
 
 fn provider(kind: ProviderKind, base_url: String) -> ProviderConfig {
     ProviderConfig {
+        adapter: None,
         capabilities: Default::default(),
         kind,
         model: "Test-Model".into(),

@@ -33,7 +33,7 @@ pub(super) async fn run(
     continuation_base: Option<u64>,
     handoff: &crate::HandoffGate,
 ) -> Result<maka_runtime::event::InvocationOutcome, RunError> {
-    let lane = maka_model::ResponsesLane::default();
+    let lane = maka_model::Conversation::default();
     let tools = RunTools::new(
         inner.log.clone(),
         input.invocation.clone(),
@@ -161,8 +161,13 @@ pub(super) async fn run(
                 .capture(&input.configuration.cwd, cancellation.clone())
                 .await?;
             let surface = Arc::new(
-                crate::request_composition::Surface::capture(&request_tools, input, cancellation)
-                    .await?,
+                crate::request_composition::Surface::capture(
+                    &request_tools,
+                    &inner.model,
+                    input,
+                    cancellation,
+                )
+                .await?,
             );
             let prompt = model_attempt::prompt(
                 inner,
@@ -269,7 +274,8 @@ pub(super) async fn run(
                 )
                 .await?;
                 let ids: Vec<_> = local_calls.iter().map(|call| call.id.as_str()).collect();
-                lane.confirm(&surface.apply(replay), &ids, output.response_id.as_deref());
+                lane.confirm(&surface.apply(replay), &ids, output.response_id.as_deref())
+                    .await?;
             }
             completed_step = true;
         }

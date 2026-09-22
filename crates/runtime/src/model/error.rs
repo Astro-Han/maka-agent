@@ -17,11 +17,11 @@
  * under the License.
  */
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// A provider failure, with replay evidence captured before SDK event filtering.
-#[derive(Clone, Debug, Deserialize, thiserror::Error)]
+/// A provider failure with protocol-level evidence for safe replay.
+#[derive(Clone, Debug, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[error("provider failed ({reason:?}): {message}")]
 pub struct ProviderFailure {
@@ -31,7 +31,7 @@ pub struct ProviderFailure {
     retry_after_ms: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderFailureReason {
     Network,
@@ -41,6 +41,27 @@ pub enum ProviderFailureReason {
 }
 
 impl ProviderFailure {
+    pub fn new(
+        reason: ProviderFailureReason,
+        message: impl Into<String>,
+        replay_safe: bool,
+        retry_after_ms: Option<u64>,
+    ) -> Self {
+        let mut message = message.into();
+        if message.len() > 4096 {
+            let mut end = 4096;
+            while !message.is_char_boundary(end) {
+                end -= 1;
+            }
+            message.truncate(end);
+        }
+        Self {
+            reason,
+            message,
+            replay_safe,
+            retry_after_ms: retry_after_ms.filter(|value| (1..=2_147_483_647).contains(value)),
+        }
+    }
     pub fn reason(&self) -> ProviderFailureReason {
         self.reason
     }
@@ -53,14 +74,30 @@ impl ProviderFailure {
         self.retry_after_ms.map(Duration::from_millis)
     }
 
-    pub(crate) fn validate(&self) -> Result<(), crate::ModelError> {
+    pub fn validate(&self) -> Result<(), ModelError> {
         if self.message.len() > 4096
             || self
                 .retry_after_ms
                 .is_some_and(|delay| !(1..=2_147_483_647).contains(&delay))
         {
-            return Err(crate::events::invalid("invalid provider failure evidence"));
+            return Err(ModelError::Adapter(
+                "invalid provider failure evidence".into(),
+            ));
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, thiserror::Error)]
+pub enum ModelError {
+    #[error("model request cancelled")]
+    Cancelled,
+    #[error("model stream idle timeout exceeded")]
+    TimedOut,
+    #[error("model input exceeds provider capacity (observed output: {observed_output})")]
+    ContextOverflow { observed_output: bool },
+    #[error(transparent)]
+    Provider(ProviderFailure),
+    #[error("model adapter failed: {0}")]
+    Adapter(String),
 }

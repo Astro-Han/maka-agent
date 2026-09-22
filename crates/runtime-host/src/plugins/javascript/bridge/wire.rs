@@ -109,6 +109,8 @@ pub(super) enum Request {
     ProcessClose(Handle),
     #[serde(rename = "executor.emit")]
     ExecutorEmit(ExecutorOutput),
+    #[serde(rename = "model.io")]
+    ModelIo(super::super::model::Operation),
     #[serde(rename = "contribution.publish")]
     Publish(Vec<super::super::registration::Registration>),
     #[serde(rename = "contribution.release")]

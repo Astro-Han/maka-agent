@@ -77,23 +77,8 @@ fn check_headers(actual: &reqwest::header::HeaderMap, expected: &Value) {
         );
     }
     assert_eq!(actual["proxy-authorization"], "Basic dXNlcjpzZWNyZXQ=");
-    // The same SDK appends its actual runtime, Node for the source oracle and
-    // browser for the embedded bundle. Preserve the complete common prefix.
-    let (actual_agent, runtime) = actual["user-agent"]
-        .to_str()
-        .unwrap()
-        .rsplit_once(" runtime/")
-        .unwrap();
-    assert_eq!(runtime, "browser");
-    assert_eq!(
-        actual_agent,
-        expected["user-agent"]
-            .as_str()
-            .unwrap()
-            .rsplit_once(" runtime/")
-            .unwrap()
-            .0
-    );
+    // Native Responses identifies itself without an AI SDK runtime suffix.
+    assert_eq!(actual["user-agent"], "codex_cli_rs/0.0.0 (Maka)");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -167,7 +152,7 @@ async fn subscription_profile_matches_ts_through_proxy_ws_continuation_and_http_
         });
         let executor = ModelExecutor::new(1, Duration::from_secs(10)).unwrap();
         for (index, profile) in profiles.into_iter().enumerate() {
-            let lane = ResponsesLane::default();
+            let lane = Conversation::default();
             let token = profile["token"].as_str().unwrap();
             let mut next = codex_request(port, token);
             let step = generate_step(&executor, &lane, codex_request(port, token)).await;
@@ -176,7 +161,7 @@ async fn subscription_profile_matches_ts_through_proxy_ws_continuation_and_http_
                 let content = accepted_content(&step);
                 next.prompt.push(serde_json::from_value(json!({"role":"assistant","content":content})).unwrap());
                 assert!(lane.needs_confirmation());
-                assert!(lane.confirm(&next.prompt, &[], step.response_id.as_deref()));
+                assert!(lane.confirm(&next.prompt, &[], step.response_id.as_deref()).await.unwrap());
                 next.prompt.push(serde_json::from_value(json!({"role":"user","content":[{"type":"text","text":"second"}]})).unwrap());
                 generate(&executor, &lane, next).await;
             }

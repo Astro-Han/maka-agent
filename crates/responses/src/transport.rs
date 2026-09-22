@@ -17,22 +17,19 @@
  * under the License.
  */
 
-use deno_error::JsErrorBox;
-use futures_util::{FutureExt, SinkExt, StreamExt};
-use maka_network::{Policy, Socket};
+use futures_util::FutureExt;
+use maka_plugins::model::{Frame, Socket, Transport};
 use serde_json::Value;
-use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
     time::Instant,
 };
 use tokio::sync::Mutex as AsyncMutex;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
-type Result<T> = std::result::Result<T, JsErrorBox>;
-const LIMIT: usize = 8 * 1024 * 1024;
+type Result<T> = std::result::Result<T, crate::Error>;
 mod cache;
 mod connect;
 mod frame;
@@ -40,7 +37,7 @@ mod output;
 mod shared;
 use cache::{Baseline, Prepared};
 use frame::{ReadError, receive};
-pub(super) use shared::Shared;
+pub use shared::Shared;
 
 /// Ephemeral connection reuse, scoped to one sequential Turn. Clones are leases,
 /// not history owners; dropping the final lease closes any idle socket.
@@ -54,10 +51,10 @@ struct Lane {
     busy: bool,
 }
 struct Idle {
-    socket: Socket,
+    socket: Arc<dyn Socket>,
     url: String,
     headers: BTreeMap<String, String>,
-    policy: Policy,
+    network: u64,
     baseline: Option<Baseline>,
     route: u64,
 }
@@ -72,12 +69,12 @@ impl ResponsesLane {
     }
 }
 
-pub(super) struct Exchange {
+pub struct Exchange {
     lane: ResponsesLane,
     active: AsyncMutex<Option<Idle>>,
     cancellation: CancellationToken,
-    owns_lane: Cell<bool>,
-    policy: Policy,
+    owns_lane: AtomicBool,
+    network: Arc<dyn Transport>,
     transport: Arc<Shared>,
 }
 
@@ -85,15 +82,15 @@ impl Exchange {
     pub fn new(
         lane: ResponsesLane,
         cancellation: CancellationToken,
-        policy: Policy,
+        network: Arc<dyn Transport>,
         transport: Arc<Shared>,
     ) -> Self {
         Self {
             lane,
             active: AsyncMutex::new(None),
             cancellation: cancellation.child_token(),
-            owns_lane: Cell::new(false),
-            policy,
+            owns_lane: AtomicBool::new(false),
+            network,
             transport,
         }
     }
@@ -122,7 +119,9 @@ impl Exchange {
         headers: BTreeMap<String, String>,
         body: Value,
     ) -> Result<Option<Value>> {
-        let route = self.transport.route(&url, &headers, &self.policy);
+        let route = self
+            .transport
+            .route(&url, &headers, self.network.identity());
         let mut active = self.active.lock().await;
         if active.is_some() {
             return Err(error("Responses WebSocket request already active"));
@@ -135,43 +134,36 @@ impl Exchange {
                 return Ok(Some(Prepared::new(body, None)?.full));
             }
             lane.busy = true;
-            self.owns_lane.set(true);
+            self.owns_lane.store(true, Ordering::Release);
             lane.idle.take()
         };
         // Reconstruct before rejecting an old socket: store:false state cannot
         // be recovered by carrying its response id to another connection.
         let prepared = Prepared::new(body, idle.as_mut().and_then(|idle| idle.baseline.take()))?;
         let mut idle = idle.filter(|idle| {
-            idle.url == url && idle.headers == headers && idle.policy == self.policy
+            idle.url == url && idle.headers == headers && idle.network == self.network.identity()
         });
         // Consume an already observable idle close before deciding to reuse.
         // After send starts, failure is never retried by this transport.
-        if let Some(connection) = idle.as_mut() {
-            loop {
-                match connection.socket.next().now_or_never() {
-                    None => break,
-                    Some(Some(Ok(Message::Ping(_) | Message::Pong(_)))) => continue,
-                    _ => {
-                        idle = None;
-                        break;
-                    }
-                }
-            }
+        if let Some(connection) = idle.as_mut()
+            && connection.socket.receive().now_or_never().is_some()
+        {
+            idle = None;
         }
         let reuse = idle.is_some();
         if !reuse && self.transport.deferred(route, Instant::now()) {
             self.lane.0.lock().unwrap().busy = false;
-            self.owns_lane.set(false);
+            self.owns_lane.store(false, Ordering::Release);
             return Ok(Some(prepared.full));
         }
         let mut connection = match idle {
             Some(idle) => idle,
-            None => match connect::open(&self.policy, &url, &headers).await? {
+            None => match connect::open(self.network.as_ref(), &url, &headers).await? {
                 Some(socket) => Idle {
                     socket,
                     url,
                     headers,
-                    policy: self.policy.clone(),
+                    network: self.network.identity(),
                     baseline: None,
                     route,
                 },
@@ -182,7 +174,7 @@ impl Exchange {
                     let mut lane = self.lane.0.lock().unwrap();
                     lane.fallback = true;
                     lane.busy = false;
-                    self.owns_lane.set(false);
+                    self.owns_lane.store(false, Ordering::Release);
                     return Ok(Some(prepared.full));
                 }
             },
@@ -206,7 +198,7 @@ impl Exchange {
             serde_json::to_string(&object).map_err(|_| error("invalid Responses request"))?;
         connection
             .socket
-            .send(Message::Text(text.into()))
+            .send(Frame::Text(text))
             .await
             .map_err(|_| {
                 if !self.cancellation.is_cancelled() {
@@ -227,7 +219,7 @@ impl Exchange {
         let result = tokio::select! {
             biased;
             _ = self.cancellation.cancelled() => Err(ReadError::Cancelled),
-            result = receive(&mut connection.socket) => result,
+            result = receive(connection.socket.as_ref()) => result,
         };
         match result {
             Ok((text, terminal, reusable, mut event)) => {
@@ -244,7 +236,7 @@ impl Exchange {
                     }
                     let mut lane = self.lane.0.lock().unwrap();
                     lane.busy = false;
-                    self.owns_lane.set(false);
+                    self.owns_lane.store(false, Ordering::Release);
                     if reusable {
                         lane.idle = idle;
                     }
@@ -259,8 +251,8 @@ impl Exchange {
                 let mut lane = self.lane.0.lock().unwrap();
                 lane.busy = false;
                 lane.fallback = true;
-                self.owns_lane.set(false);
-                Err(error.into_js())
+                self.owns_lane.store(false, Ordering::Release);
+                Err(error.into_error())
             }
         }
     }
@@ -268,7 +260,7 @@ impl Exchange {
 
 impl Drop for Exchange {
     fn drop(&mut self) {
-        if self.owns_lane.get() {
+        if self.owns_lane.load(Ordering::Acquire) {
             let mut lane = self.lane.0.lock().unwrap();
             if lane.busy {
                 lane.busy = false;
@@ -279,6 +271,6 @@ impl Drop for Exchange {
     }
 }
 
-fn error(message: &'static str) -> JsErrorBox {
-    JsErrorBox::generic(message)
+fn error(message: &'static str) -> crate::Error {
+    crate::Error::Transport(message.into())
 }

@@ -48,6 +48,7 @@ struct State {
     terminals: Arc<dyn maka_plugins::terminal::Terminals>,
     calls: Arc<super::invocation::Calls>,
     outputs: Arc<super::executor::Outputs>,
+    model_calls: Arc<super::model::Calls>,
     registrations: Mutex<BTreeMap<String, maka_plugins::contributions::Registration>>,
     context: PluginContext,
     storage: Arc<dyn Store>,
@@ -88,6 +89,7 @@ impl HostBridge {
             terminals: host.terminals,
             calls: Arc::new(super::invocation::Calls::new(issuer)),
             outputs: Arc::default(),
+            model_calls: Arc::default(),
             registrations: Mutex::default(),
             context,
             storage: host.storage,
@@ -112,17 +114,28 @@ impl HostBridge {
     pub fn outputs(&self) -> &Arc<super::executor::Outputs> {
         &self.0.outputs
     }
+    pub fn model_calls(&self) -> &Arc<super::model::Calls> {
+        &self.0.model_calls
+    }
     pub fn calls(&self) -> &Arc<super::invocation::Calls> {
         &self.0.calls
     }
 }
 impl Bridge for HostBridge {
+    fn max_output_bytes(&self, method: &str) -> usize {
+        if method == "model.io" {
+            32 * 1024 * 1024
+        } else {
+            1024 * 1024
+        }
+    }
     fn max_input_bytes(&self, method: &str) -> usize {
         match method {
             // A byte can take four JSON bytes, plus bounded headers and URL.
             "http.request" => 5 * 1024 * 1024,
             "files.invoke" => 7 * 1024 * 1024,
             "llm.generate" => 2 * 1024 * 1024,
+            "model.io" => 32 * 1024 * 1024,
             _ => 1024 * 1024,
         }
     }
@@ -431,6 +444,10 @@ impl State {
                     })?;
                 Ok(Value::Null)
             }
+            Request::ModelIo(input) => Ok(match self.model_calls.execute(input).await {
+                Ok(value) => json!({"value":value}),
+                Err(error) => json!({"error":error}),
+            }),
             Request::Publish(registrations) => {
                 let module = self
                     .module
@@ -441,6 +458,7 @@ impl State {
                     registrations,
                     &module,
                     &self.outputs,
+                    &self.model_calls,
                     &self.calls,
                     &self.source,
                     &self.context.lifecycle,

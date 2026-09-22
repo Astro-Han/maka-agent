@@ -35,6 +35,7 @@ pub mod host;
 pub mod http;
 pub mod kernel;
 pub mod llm;
+pub mod model;
 pub mod package;
 pub mod permissions;
 pub mod preferences;

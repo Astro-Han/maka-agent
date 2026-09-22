@@ -17,17 +17,18 @@
  * under the License.
  */
 
-use super::{LIMIT, Result, error};
-use maka_network::{Policy, Socket};
+use super::{Result, error};
+use maka_plugins::model::{Connect, Socket, Transport};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use std::sync::Arc;
 use std::{collections::BTreeMap, time::Duration};
 
 /// None permits HTTP fallback: no model request has been dispatched yet.
 pub(super) async fn open(
-    policy: &Policy,
+    network: &dyn Transport,
     url: &str,
     headers: &BTreeMap<String, String>,
-) -> Result<Option<Socket>> {
+) -> Result<Option<Arc<dyn Socket>>> {
     let mut request_headers = HeaderMap::new();
     for (name, value) in headers {
         if matches!(
@@ -55,12 +56,22 @@ pub(super) async fn open(
         }
         if let Ok(Ok(socket)) = tokio::time::timeout(
             Duration::from_secs(15),
-            maka_network::connect_websocket(
-                policy.client_builder(),
-                url,
-                request_headers.clone(),
-                LIMIT,
-            ),
+            network.connect(Connect {
+                url: url.into(),
+                headers: request_headers
+                    .iter()
+                    .map(|(name, value)| {
+                        (
+                            name.to_string(),
+                            value
+                                .as_bytes()
+                                .iter()
+                                .map(|byte| char::from(*byte))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            }),
         )
         .await
         {

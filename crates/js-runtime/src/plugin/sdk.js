@@ -367,6 +367,25 @@
         executors: Object.freeze({
           register: (definition, execute) => register('executor', definition, execute),
         }),
+        modelAdapters: Object.freeze({
+          register: (name, open) =>
+            register('model_adapter', { name }, async (lifetime) => {
+              const session = await open(lifetime);
+              if (typeof session?.stream !== 'function')
+                throw new TypeError('Model adapter requires a stream method');
+              const id = callback(async (request, call) => {
+                try {
+                  if (call.confirmation) await session.confirm?.(call.confirmation);
+                  await session.stream(request, call);
+                  return null;
+                } catch (error) {
+                  if (error?.modelFailure) return { error: error.modelFailure };
+                  throw error;
+                }
+              });
+              return { callback: id, confirmation: typeof session.confirm === 'function' };
+            }),
+        }),
         behaviors: Object.freeze({
           register: (name, prepare) => register('behavior', { name }, prepare),
         }),
@@ -601,6 +620,58 @@
         }
         if (call?.executor) {
           context.emit = (output) => host('executor.emit', { handle: call.executor, output });
+        }
+        if (call?.model) {
+          const io = async (kind, input) => {
+            const result = await host('model.io', { handle: call.model, kind, input });
+            if (result.error !== undefined) {
+              throw Object.assign(new Error('Model transport operation failed'), {
+                modelFailure: result.error,
+              });
+            }
+            return result.value;
+          };
+          context.emit = (event) => io('emit', event);
+          context.progress = () => io('progress');
+          context.transport = Object.freeze({
+            identity: call.routing,
+            async request(request) {
+              const response = await io('request', {
+                ...request,
+                method: request.method ?? 'GET',
+                body: Array.from(
+                  typeof request.body === 'string'
+                    ? new TextEncoder().encode(request.body)
+                    : (request.body ?? []),
+                ),
+              });
+              return Object.freeze({
+                ...response.head,
+                headers: response.head.headers.map(([name, bytes]) => [
+                  name,
+                  Uint8Array.from(bytes),
+                ]),
+                async next() {
+                  const bytes = await io('read', response.id);
+                  return bytes === null ? null : Uint8Array.from(bytes);
+                },
+                close: () => io('close_body', response.id),
+              });
+            },
+            connect: (request) => io('connect', request),
+            send: (socket, frame) =>
+              io('send', {
+                socket,
+                frame: frame.kind === 'binary' ? { ...frame, data: Array.from(frame.data) } : frame,
+              }),
+            async receive(socket) {
+              const frame = await io('receive', socket);
+              return frame?.kind === 'binary'
+                ? { ...frame, data: Uint8Array.from(frame.data) }
+                : frame;
+            },
+            close: (socket) => io('close_socket', socket),
+          });
         }
         return await tracked(() => fn(input, Object.freeze(context)));
       } finally {

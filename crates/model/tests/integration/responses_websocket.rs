@@ -19,7 +19,7 @@
 
 use futures_util::{FutureExt, SinkExt, StreamExt};
 use maka_model::{
-    ModelExecutor, ModelRequest, ProviderConfig, ProviderKind, ResponsesLane, StepBuilder,
+    Conversation, ModelExecutor, ModelRequest, ProviderConfig, ProviderKind, StepBuilder,
 };
 use maka_runtime::configuration::policy::{NetworkProxy, ProxyProtocol};
 use serde_json::{Value, json};
@@ -42,6 +42,7 @@ mod failures;
 fn request(base_url: &str, text: &str) -> ModelRequest {
     ModelRequest {
         provider: ProviderConfig {
+            adapter: None,
             capabilities: Default::default(),
             kind: ProviderKind::OpenaiResponses,
             model: "test-responses".into(),
@@ -171,11 +172,11 @@ async fn finish(socket: &mut WebSocketStream<TcpStream>, id: &str) {
 
 async fn generate_step(
     executor: &ModelExecutor,
-    lane: &ResponsesLane,
+    lane: &Conversation,
     request: ModelRequest,
 ) -> maka_runtime::model::ModelStep {
     let mut stream = executor
-        .stream_in_lane(request, CancellationToken::new(), Some(lane.clone()))
+        .stream_in_conversation(request, CancellationToken::new(), Some(lane.clone()))
         .await
         .unwrap();
     let mut builder = StepBuilder::for_step("test-step").unwrap();
@@ -187,7 +188,7 @@ async fn generate_step(
     output
 }
 
-async fn generate(executor: &ModelExecutor, lane: &ResponsesLane, request: ModelRequest) {
+async fn generate(executor: &ModelExecutor, lane: &Conversation, request: ModelRequest) {
     let output = generate_step(executor, lane, request).await;
     assert_eq!(
         output.finish_reason,
@@ -242,7 +243,7 @@ async fn turn_reuses_socket_and_drops_it_after_sdk_cleanup() {
             String::from_utf8_lossy(&oracle.stderr)
         );
         let executor = ModelExecutor::new(2, Duration::from_secs(10)).unwrap();
-        let lane = ResponsesLane::default();
+        let lane = Conversation::default();
         generate(&executor, &lane, proxied_request(proxy_port, "first")).await;
         generate(&executor, &lane, proxied_request(proxy_port, "second")).await;
         drop(lane);

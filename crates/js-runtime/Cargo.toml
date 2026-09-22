@@ -24,6 +24,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+maka-plugins.workspace = true
 maka-runtime.workspace = true
 maka-network.workspace = true
 reqwest.workspace = true

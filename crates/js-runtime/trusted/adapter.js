@@ -17,22 +17,18 @@
  * under the License.
  */
 
-import { createOpenAI, openai } from '@ai-sdk/openai';
-import { createOpenResponses } from '@ai-sdk/open-responses';
-import { plaintextResponsesStream, responsesCompatibilityFetch } from './open-responses.js';
+import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic, anthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { compatibleFetch, compatibleEvents } from './compatible-transport.js';
 import { forwardProviderStream } from './provider-errors.js';
 import { boundedFetch, ProviderResponseLimitError } from './provider-fetch.js';
-import { responsesFetch } from './responses-transport.js';
 import { networkFetch } from './network-fetch.js';
-import { codexHeaders } from './codex-auth.js';
 
 // SDK metadata distinguishes server execution from provider-defined local tools.
 // Derive this from the installed SDK, not a parallel list of vendor tool names.
 const providerExecutedTools = new Set(
-  [...Object.values(openai.tools), ...Object.values(anthropic.tools)]
+  Object.values(anthropic.tools)
     .map((factory) => factory({}))
     .filter((tool) => tool.isProviderExecuted === true)
     .map((tool) => tool.id),
@@ -45,18 +41,18 @@ export async function stream(request, emit, signal, requestId) {
       throw new Error(`Unsupported provider-executed tool: ${tool.id}`);
     }
   }
-  const { kind, model, baseUrl, apiKey, codex, headers, bodyOverlay } = request.provider;
+  const { kind, model, baseUrl, apiKey, headers, bodyOverlay } = request.provider;
   const fetch = networkFetch(requestId);
   const scopedFetch = (input, init) => boundedFetch(input, init, fetch);
   const settings = {
     baseURL: baseUrl,
-    apiKey: codex ? codex.accessToken : apiKey,
+    apiKey,
     fetch: scopedFetch,
-    ...(codex ? { headers: codexHeaders(codex) } : {}),
   };
   const compatible = kind?.openai_compatible;
-  const plaintext = kind?.open_responses;
-  const isResponses = kind === 'openai_responses' || !!plaintext;
+  if (!compatible && kind !== 'anthropic' && kind !== 'openai_chat') {
+    throw new Error('Unsupported AI SDK protocol');
+  }
   const overlayKeys = Object.keys(bodyOverlay ?? {});
   if (Object.keys(headers ?? {}).length > 0 || overlayKeys.length > 0) {
     settings.fetch = async (input, init) => {
@@ -103,54 +99,30 @@ export async function stream(request, emit, signal, requestId) {
     };
   }
   if (compatible) settings.fetch = compatibleFetch(settings.fetch, requestId);
-  if (isResponses && !Object.keys(headers ?? {}).length && !overlayKeys.length) {
-    settings.fetch = responsesFetch(settings.fetch, requestId);
-  }
-  if (plaintext) settings.fetch = responsesCompatibilityFetch(settings.fetch, plaintext);
-  const instance = plaintext
-    ? createOpenResponses({
-        url: responsesUrl(baseUrl),
-        name: 'openResponses',
-        apiKey: settings.apiKey,
-        headers: settings.headers,
-        fetch: settings.fetch,
-      })(model)
-    : compatible
-      ? createOpenAICompatible({ ...settings, name: compatible.name, includeUsage: true })(model)
-      : kind === 'anthropic'
-        ? createAnthropic({
-            ...settings,
-            headers: {
-              'anthropic-beta':
-                'interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
-            },
-          })(model)
-        : kind === 'openai_chat'
-          ? createOpenAI(settings).chat(model)
-          : createOpenAI(settings).responses(model);
+  const instance = compatible
+    ? createOpenAICompatible({ ...settings, name: compatible.name, includeUsage: true })(model)
+    : kind === 'anthropic'
+      ? createAnthropic({
+          ...settings,
+          headers: {
+            'anthropic-beta':
+              'interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
+          },
+        })(model)
+      : createOpenAI(settings).chat(model);
   const open = async () => {
     const result = await instance.doStream({
       abortSignal: signal,
-      prompt: isResponses ? responsesPrompt(request.prompt) : request.prompt,
-      tools: isResponses
-        ? request.tools?.map((tool) => ({ ...tool, name: responsesToolName(tool.name) }))
-        : request.tools,
+      prompt: request.prompt,
+      tools: request.tools,
       providerOptions: request.providerOptions,
       maxOutputTokens: request.maxOutputTokens,
-      includeRawChunks: !!compatible || !!plaintext,
+      includeRawChunks: !!compatible,
       toolChoice: request.tools?.length ? { type: 'auto' } : undefined,
     });
-    return plaintext
-      ? { ...result, stream: plaintextResponsesStream(result.stream, plaintext) }
-      : result;
+    return result;
   };
-  const compatibleNormalize = compatible ? compatibleEvents() : (part) => part;
-  const normalize = (part) => {
-    const normalized = compatibleNormalize(part);
-    return isResponses && normalized?.toolName === 'maka_tool_search'
-      ? { ...normalized, toolName: 'tool_search' }
-      : normalized;
-  };
+  const normalize = compatible ? compatibleEvents() : (part) => part;
   try {
     await forwardProviderStream(open, normalize, emit, kind);
   } catch (error) {
@@ -162,29 +134,4 @@ export async function stream(request, emit, signal, requestId) {
     }
     throw error;
   }
-}
-
-// Translate only provider-bound tool identities. Opaque results and nested JS
-// source keep their canonical names; rewriting their text would change content.
-function responsesToolName(name) {
-  return name === 'tool_search' ? 'maka_tool_search' : name;
-}
-function responsesUrl(baseUrl) {
-  const url = new URL(baseUrl);
-  url.pathname = url.pathname.replace(/\/$/, '') + '/responses';
-  return url.href;
-}
-function responsesPrompt(prompt) {
-  return prompt.map((message) => {
-    if (!['assistant', 'tool'].includes(message.role) || !Array.isArray(message.content))
-      return message;
-    return {
-      ...message,
-      content: message.content.map((part) =>
-        ['tool-call', 'tool-result'].includes(part.type)
-          ? { ...part, toolName: responsesToolName(part.toolName) }
-          : part,
-      ),
-    };
-  });
 }

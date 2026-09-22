@@ -20,39 +20,32 @@
 use super::ops::Models;
 use deno_core::{JsBuffer, OpState, op2};
 use deno_error::JsErrorBox;
-use reqwest::{
-    Client, Method, Response,
-    header::{HeaderMap, HeaderName, HeaderValue},
-};
+use maka_plugins::{http, model::Transport};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     collections::BTreeMap,
     rc::Rc,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex},
 };
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Exchange {
-    policy: maka_network::Policy,
-    client: OnceLock<Client>,
-    response: AsyncMutex<Option<Response>>,
+    network: Arc<dyn Transport>,
+    response: AsyncMutex<Option<http::Response>>,
     cancellation: CancellationToken,
     current: Mutex<CancellationToken>,
 }
-
 impl Exchange {
-    pub fn new(policy: maka_network::Policy, cancellation: CancellationToken) -> Self {
+    pub fn new(network: Arc<dyn Transport>, cancellation: CancellationToken) -> Self {
         Self {
-            policy,
-            client: OnceLock::new(),
+            network,
             response: AsyncMutex::new(None),
             current: Mutex::new(cancellation.child_token()),
             cancellation,
         }
     }
-
     async fn start(
         &self,
         method: String,
@@ -60,101 +53,65 @@ impl Exchange {
         headers: BTreeMap<String, String>,
         body: Vec<u8>,
     ) -> Result<Value, JsErrorBox> {
-        if body.len() > 32 * 1024 * 1024 {
-            return Err(failed("HTTP input exceeds 32 MiB"));
-        }
         self.close().await;
+        let method: http::Method =
+            serde_json::from_value(json!(method)).map_err(|_| failed("invalid HTTP method"))?;
+        let head = matches!(method, http::Method::Head);
         let cancellation = self.cancellation.child_token();
         *self.current.lock().unwrap() = cancellation.clone();
         let mut slot = self.response.lock().await;
-        if self.client.get().is_none() {
-            let client = self
-                .policy
-                .client_builder()
-                .build()
-                .map_err(|_| failed("HTTP client initialization failed"))?;
-            let _ = self.client.set(client);
-        }
-        let method: Method = method.parse().map_err(|_| failed("invalid HTTP method"))?;
-        let head = method == Method::HEAD;
-        let mut request_headers = HeaderMap::new();
-        for (name, value) in headers {
-            let name: HeaderName = name.parse().map_err(|_| failed("invalid HTTP header"))?;
-            // Fetch Headers use ByteString (Latin-1), not UTF-8.
-            let bytes = value
-                .chars()
-                .map(u8::try_from)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| failed("invalid HTTP header"))?;
-            let value =
-                HeaderValue::from_bytes(&bytes).map_err(|_| failed("invalid HTTP header"))?;
-            request_headers.insert(name, value);
-        }
-        let request = self
-            .client
-            .get()
-            .unwrap()
-            .request(method, url)
-            .headers(request_headers)
-            .body(body);
         let response = tokio::select! {
             biased;
             _ = cancellation.cancelled() => return Err(failed("HTTP request cancelled")),
-            response = request.send() => response.map_err(|error| transport_failure(&error, "HTTP request failed"))?,
+            response = self.network.request(http::Request { method, url, headers: headers.into_iter().collect(), body }) =>
+                response.map_err(|error| match error {
+                    maka_plugins::model::Error::Provider(_) => JsErrorBox::from_err(TransportFailure),
+                    other => JsErrorBox::generic(other.to_string()),
+                })?,
         };
-        let status = response.status().as_u16();
+        let status = response.head.status;
         let headers: Vec<_> = response
-            .headers()
+            .head
+            .headers
             .iter()
             .map(|(name, value)| {
                 [
-                    name.to_string(),
-                    value.as_bytes().iter().copied().map(char::from).collect(),
+                    name.clone(),
+                    value.iter().copied().map(char::from).collect(),
                 ]
             })
             .collect();
         let has_body = !head && !matches!(status, 204 | 205 | 304);
-        let result = json!({"status":status, "headers":headers, "hasBody":has_body});
+        let result = json!({"status": status, "headers": headers, "hasBody": has_body});
         *slot = Some(response);
         Ok(result)
     }
-
     async fn chunk(&self) -> Result<Option<Vec<u8>>, JsErrorBox> {
         let cancellation = self.current.lock().unwrap().clone();
         let mut slot = self.response.lock().await;
-        let Some(response) = slot.as_mut() else {
+        let Some(response) = slot.as_ref() else {
             return Ok(None);
         };
         let result = tokio::select! {
             biased;
             _ = cancellation.cancelled() => Err(failed("HTTP request cancelled")),
-            result = response.chunk() => result.map_err(|error| transport_failure(&error, "HTTP response body failed")),
+            result = response.body.next() => result.map_err(|error| match error {
+                http::Error::Failed(_) => JsErrorBox::from_err(TransportFailure),
+                other => JsErrorBox::generic(other.to_string()),
+            }),
         };
-        match result {
-            Ok(Some(bytes)) => {
-                if bytes.len() > 8 * 1024 * 1024 {
-                    slot.take();
-                    return Err(failed("HTTP body chunk exceeds 8 MiB"));
-                }
-                Ok(Some(bytes.to_vec()))
-            }
-            Ok(None) => {
-                slot.take();
-                Ok(None)
-            }
-            Err(error) => {
-                slot.take();
-                Err(error)
-            }
+        if !matches!(result, Ok(Some(_))) {
+            slot.take();
         }
+        result
     }
-
     async fn close(&self) {
         self.current.lock().unwrap().cancel();
-        self.response.lock().await.take();
+        if let Some(response) = self.response.lock().await.take() {
+            let _ = response.body.close().await;
+        }
     }
 }
-
 fn exchange(state: &OpState, id: u32) -> Result<Rc<Exchange>, JsErrorBox> {
     state
         .borrow::<Models>()
@@ -166,42 +123,11 @@ fn exchange(state: &OpState, id: u32) -> Result<Rc<Exchange>, JsErrorBox> {
 fn failed(message: &'static str) -> JsErrorBox {
     JsErrorBox::generic(message)
 }
-
 #[derive(Debug, thiserror::Error, deno_error::JsError)]
 #[class(generic)]
 #[property("code" = "MAKA_HTTP_TRANSPORT")]
 #[error("model HTTP transport interrupted")]
 struct TransportFailure;
-
-fn transport_failure(error: &reqwest::Error, message: &'static str) -> JsErrorBox {
-    use std::{error::Error, io::ErrorKind};
-    let mut transient = error.is_timeout() || error.is_dns();
-    let mut cause = error.source();
-    while let Some(error) = cause {
-        if let Some(error) = error.downcast_ref::<std::io::Error>() {
-            transient |= matches!(
-                error.kind(),
-                ErrorKind::ConnectionRefused
-                    | ErrorKind::ConnectionReset
-                    | ErrorKind::ConnectionAborted
-                    | ErrorKind::NotConnected
-                    | ErrorKind::BrokenPipe
-                    | ErrorKind::TimedOut
-                    | ErrorKind::HostUnreachable
-                    | ErrorKind::NetworkUnreachable
-                    | ErrorKind::NetworkDown
-            );
-        }
-        cause = error.source();
-    }
-    // Connector/body errors also include certificate and decoding failures.
-    // Only typed network evidence crosses this boundary; URLs/secrets never do.
-    if transient {
-        JsErrorBox::from_err(TransportFailure)
-    } else {
-        failed(message)
-    }
-}
 
 #[op2]
 #[serde]

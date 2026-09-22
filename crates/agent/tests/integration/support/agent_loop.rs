@@ -84,6 +84,7 @@ pub(crate) fn input(base: &str, suffix: &str, effect: Arc<Effect>) -> RunInput {
         },
         request_fingerprint: None,
         provider: ProviderConfig {
+            adapter: None,
             capabilities: Default::default(),
             kind: ProviderKind::OpenaiChat,
             model: "test".into(),

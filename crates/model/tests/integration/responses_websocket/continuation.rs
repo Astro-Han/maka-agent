@@ -85,7 +85,7 @@ async fn idle_close_reconnect_and_upgrade_fallback_restore_the_raw_baseline() {
                 assert_eq!(&history[1..4], finalized.as_slice());
                 assert_eq!(history[4]["call_id"], "call_1");
             });
-            let lane = ResponsesLane::default();
+            let lane = Conversation::default();
             let step = generate_step(&executor, &lane, request(&base, "first")).await;
             assert_eq!(step.parts.len(), 3);
             assert!(matches!(&step.parts[0], ModelPart::Text { text_kind: TextKind::Thinking, text, .. } if text == "Check the file."));
@@ -99,7 +99,7 @@ async fn idle_close_reconnect_and_upgrade_fallback_restore_the_raw_baseline() {
             }).collect();
             let mut next = replay(&base);
             next.prompt[1] = serde_json::from_value(json!({"role":"assistant","content":content})).unwrap();
-            assert!(lane.confirm(&next.prompt, &["call_1"], step.response_id.as_deref()));
+            assert!(lane.confirm(&next.prompt, &["call_1"], step.response_id.as_deref()).await.unwrap());
             generate(&executor, &lane, next).await;
             drop(lane);
             server.await.unwrap();
@@ -231,25 +231,40 @@ async fn canonical_tool_confirmation_matches_ts_and_changed_properties_restore_f
         );
         let executor = ModelExecutor::new(1, Duration::from_secs(10)).unwrap();
         for mode in CONFIRMATION_CASES {
-            let lane = ResponsesLane::default();
+            let lane = Conversation::default();
             let step = generate_step(&executor, &lane, request(&base, "first")).await;
             assert_eq!(step.tool_calls().next().unwrap().id, "call_1");
             let mut next = replay(&base);
             match mode {
                 "unconfirmed" => {}
-                "wrong-tool" => assert!(!lane.confirm(
-                    &next.prompt,
-                    &["another-call"],
-                    step.response_id.as_deref()
-                )),
+                "wrong-tool" => assert!(
+                    !lane
+                        .confirm(&next.prompt, &["another-call"], step.response_id.as_deref())
+                        .await
+                        .unwrap()
+                ),
                 "wrong-response" => {
-                    assert!(!lane.confirm(&next.prompt, &["call_1"], Some("other-response")))
+                    assert!(
+                        !lane
+                            .confirm(&next.prompt, &["call_1"], Some("other-response"))
+                            .await
+                            .unwrap()
+                    )
                 }
                 "changed-before" => {
                     next.prompt[0] = maka_model::prompt::Message::user("compacted");
-                    assert!(!lane.confirm(&next.prompt, &["call_1"], step.response_id.as_deref()));
+                    assert!(
+                        !lane
+                            .confirm(&next.prompt, &["call_1"], step.response_id.as_deref())
+                            .await
+                            .unwrap()
+                    );
                 }
-                _ => assert!(lane.confirm(&next.prompt, &["call_1"], step.response_id.as_deref())),
+                _ => assert!(
+                    lane.confirm(&next.prompt, &["call_1"], step.response_id.as_deref())
+                        .await
+                        .unwrap()
+                ),
             }
             if mode == "changed-after" {
                 next.prompt[0] = maka_model::prompt::Message::user("compacted");

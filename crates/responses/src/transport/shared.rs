@@ -17,7 +17,6 @@
  * under the License.
  */
 
-use maka_network::Policy;
 use std::{
     collections::{BTreeMap, VecDeque, hash_map::RandomState},
     hash::BuildHasher,
@@ -31,7 +30,7 @@ const MAX_FAILURES: usize = 64;
 
 /// Runtime-wide disposable transport memory. Route fingerprints keep cooldown
 /// bounded without retaining credentials or unbounded endpoint strings.
-pub(crate) struct Shared {
+pub struct Shared {
     pub cache: Arc<Semaphore>,
     routes: RandomState,
     failures: Mutex<VecDeque<(u64, Instant)>>,
@@ -48,8 +47,8 @@ impl Default for Shared {
 }
 
 impl Shared {
-    pub fn route(&self, url: &str, headers: &BTreeMap<String, String>, policy: &Policy) -> u64 {
-        self.routes.hash_one((url, headers, policy))
+    pub fn route(&self, url: &str, headers: &BTreeMap<String, String>, network: u64) -> u64 {
+        self.routes.hash_one((url, headers, network))
     }
 
     pub fn deferred(&self, route: u64, now: Instant) -> bool {
@@ -71,42 +70,28 @@ impl Shared {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maka_runtime::configuration::policy::NetworkProxy;
 
     #[test]
     fn cooldown_is_route_scoped_expires_and_retains_only_bounded_recent_failures() {
         let shared = Shared::default();
         let now = Instant::now();
-        let direct = Policy::default();
+        let direct = 1;
         let headers = BTreeMap::from([("authorization".into(), "Bearer first".into())]);
-        let route = shared.route("https://api.example/responses", &headers, &direct);
+        let route = shared.route("https://api.example/responses", &headers, direct);
         shared.defer(route, now);
         assert!(shared.deferred(route, now + COOLDOWN - Duration::from_millis(1)));
         let changed_headers = BTreeMap::from([("authorization".into(), "Bearer second".into())]);
         assert!(!shared.deferred(
-            shared.route("https://api.example/responses", &changed_headers, &direct),
+            shared.route("https://api.example/responses", &changed_headers, direct),
             now
         ));
         assert!(!shared.deferred(
-            shared.route("https://other.example/responses", &headers, &direct),
+            shared.route("https://other.example/responses", &headers, direct),
             now
         ));
-        let proxy = Policy::from_settings(
-            &NetworkProxy {
-                enabled: true,
-                host: "localhost".into(),
-                port: 1080,
-                protocol: maka_runtime::configuration::policy::ProxyProtocol::Http,
-                auth_enabled: false,
-                username: String::new(),
-                bypass_list: vec![],
-                auto_bypass_domains: vec![],
-            },
-            None,
-        )
-        .unwrap();
+        let proxy = 2;
         assert!(!shared.deferred(
-            shared.route("https://api.example/responses", &headers, &proxy),
+            shared.route("https://api.example/responses", &headers, proxy),
             now
         ));
         assert!(!shared.deferred(route, now + COOLDOWN));

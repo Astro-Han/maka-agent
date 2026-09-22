@@ -31,6 +31,10 @@ use std::sync::Arc;
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Registration {
+    ModelAdapter {
+        name: String,
+        callback: u32,
+    },
     Background {
         name: String,
         callback: u32,
@@ -157,17 +161,27 @@ pub(super) fn stage(
     value: Value,
     module: &Module,
     outputs: &Arc<super::executor::Outputs>,
+    model_calls: &Arc<super::model::Calls>,
     calls: &Arc<super::invocation::Calls>,
     source: &super::remote::Source,
     lifecycle: &maka_plugins::fiber::Context,
 ) -> Result<Staged, String> {
     let registrations: Vec<Registration> = serde_json::from_value(value).map_err(super::message)?;
-    stage_entries(registrations, module, outputs, calls, source, lifecycle)
+    stage_entries(
+        registrations,
+        module,
+        outputs,
+        model_calls,
+        calls,
+        source,
+        lifecycle,
+    )
 }
 pub(super) fn stage_entries(
     registrations: Vec<Registration>,
     module: &Module,
     outputs: &Arc<super::executor::Outputs>,
+    model_calls: &Arc<super::model::Calls>,
     calls: &Arc<super::invocation::Calls>,
     source: &super::remote::Source,
     lifecycle: &maka_plugins::fiber::Context,
@@ -254,6 +268,24 @@ pub(super) fn stage_entries(
                         maka_plugins::remote::key(&source.package_id, &name)
                             .map_err(super::message)?,
                         endpoint,
+                    )
+                    .map_err(super::message)?;
+            }
+            Registration::ModelAdapter { name, callback } => {
+                validate_callback(callback)?;
+                staged
+                    .insert(
+                        name,
+                        maka_plugins::model::Adapter {
+                            provider: Arc::new(super::model::Adapter {
+                                callback: Arc::new(callbacks::Callback {
+                                    module: module.clone(),
+                                    id: callback,
+                                    calls: calls.clone(),
+                                }),
+                                calls: model_calls.clone(),
+                            }),
+                        },
                     )
                     .map_err(super::message)?;
             }
@@ -379,6 +411,7 @@ pub(super) fn stage_entries(
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Kind {
+    ModelAdapter,
     Background,
     Behavior,
     InputPreparation,
@@ -398,6 +431,7 @@ pub(super) fn withdraw(
     names: &[String],
 ) -> Result<(), maka_plugins::Error> {
     match kind {
+        Kind::ModelAdapter => publisher.withdraw_many::<maka_plugins::model::Adapter>(names),
         Kind::Background => {
             publisher.withdraw_many::<Arc<dyn maka_plugins::background::BackgroundWork>>(names)
         }

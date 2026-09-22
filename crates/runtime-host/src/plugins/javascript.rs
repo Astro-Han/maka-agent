@@ -24,6 +24,7 @@ mod callbacks;
 mod executor;
 mod input;
 mod invocation;
+mod model;
 mod registration;
 mod remote;
 mod revision;
@@ -152,6 +153,7 @@ impl Plugin for JavaScript {
                 registrations,
                 &module,
                 bridge.outputs(),
+                bridge.model_calls(),
                 bridge.calls(),
                 &remote,
                 &context.lifecycle,

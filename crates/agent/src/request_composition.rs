@@ -26,6 +26,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Surface {
+    pub adapter: maka_plugins::model::Binding,
     prompt: Resolved,
     pub evidence: Arc<FrozenComposition>,
 }
@@ -33,6 +34,7 @@ pub(super) struct Surface {
 impl Surface {
     pub async fn capture(
         tools: &RequestTools<'_>,
+        models: &maka_model::ModelExecutor,
         input: &RunInput,
         cancellation: &CancellationToken,
     ) -> Result<Self, RunError> {
@@ -54,6 +56,15 @@ impl Surface {
                 }
             }
         }
+        let name = input.provider.adapter_name();
+        let adapter = match tools.captured() {
+            Some(captured) => maka_model::adapters::resolve(captured, name)?,
+            None => models.binding_in_scope(
+                &input.provider,
+                &maka_plugins::composition::Scope::Session(input.invocation.session_id.clone()),
+            )?,
+        };
+        prompt.sources.push(adapter.source(name)?);
         let evidence = RequestComposition {
             system_prompt: prompt.system.clone(),
             dynamic_context: prompt.contexts.clone(),
@@ -66,6 +77,7 @@ impl Surface {
         .freeze()
         .map_err(|error| RunError::Internal(error.into()))?;
         Ok(Self {
+            adapter,
             prompt,
             evidence: Arc::new(evidence),
         })

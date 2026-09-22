@@ -31,6 +31,7 @@ use tokio_util::sync::CancellationToken;
 pub(super) fn request(kind: ProviderKind, base_url: String) -> ModelRequest {
     ModelRequest {
         provider: ProviderConfig {
+            adapter: None,
             capabilities: Default::default(),
             kind,
             model: "test-model".into(),
@@ -269,10 +270,11 @@ async fn active_stream_outlives_idle_budget_but_silence_closes_the_socket() {
                     let mut byte = [0];
                     assert_eq!(socket.read(&mut byte).await.unwrap(), 0, "idle timeout must close the transport");
                 } else {
-                    // Continuous progress for longer than the whole idle budget.
+                    // Heartbeats are wire progress, not canonical text. They
+                    // must keep a live provider from hitting the idle deadline.
                     for _ in 0..4 {
                         tokio::time::sleep(Duration::from_millis(900)).await;
-                        socket.write_all(first.as_bytes()).await.unwrap();
+                        socket.write_all(b": keep-alive\n\n").await.unwrap();
                     }
                     socket.write_all(last.as_bytes()).await.unwrap();
                 }
@@ -298,7 +300,7 @@ async fn active_stream_outlives_idle_budget_but_silence_closes_the_socket() {
                 assert!(matches!(failure, Some(maka_model::ModelError::TimedOut)), "{failure:?}");
             } else {
                 assert!(failure.is_none(), "{failure:?}");
-                assert_eq!(deltas, 5);
+                assert_eq!(deltas, 1);
                 builder.finish().unwrap();
             }
             server.await.unwrap();
@@ -410,7 +412,7 @@ async fn customization_cannot_replace_generated_headers_or_body_fields() {
                 _ = listener.accept() => panic!("conflicting customization reached the network"),
                 event = stream.next() => event.expect("adapter failure").expect_err("customization conflict").to_string(),
             };
-            assert!(error.contains(&expected));
+            assert!(error.contains(&expected), "expected {expected}, got {error}");
             assert!(!error.contains("private-conflict"));
             stream.cancel_and_wait().await;
         }

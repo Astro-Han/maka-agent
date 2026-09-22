@@ -338,6 +338,7 @@ impl Catalog {
                 *kind == TypeId::of::<T>() && record.owner.is_effective()
             })
             .map(|(_, record)| Contribution {
+                registration: record.batch,
                 retired: record.retired.clone(),
                 owner: record.owner.clone(),
                 value: record
@@ -407,6 +408,7 @@ impl Captured {
                 (
                     name.clone(),
                     Contribution {
+                        registration: record.batch,
                         retired: record.retired.clone(),
                         value: record
                             .value
@@ -431,6 +433,7 @@ pub struct Snapshot<T> {
 }
 
 pub struct Contribution<T> {
+    registration: uuid::Uuid,
     retired: CancellationToken,
     pub value: Arc<T>,
     pub owner: Context,
@@ -439,6 +442,7 @@ pub struct Contribution<T> {
 impl<T> Clone for Contribution<T> {
     fn clone(&self) -> Self {
         Self {
+            registration: self.registration,
             retired: self.retired.clone(),
             value: self.value.clone(),
             owner: self.owner.clone(),
@@ -447,6 +451,10 @@ impl<T> Clone for Contribution<T> {
 }
 
 impl<T> Contribution<T> {
+    /// Identifies a publication, including replacement within one activation.
+    pub fn registration_id(&self) -> uuid::Uuid {
+        self.registration
+    }
     pub fn admit(&self) -> Result<CallGuard, Error> {
         let call = self.owner.admit()?;
         if self.retired.is_cancelled() {

@@ -123,3 +123,9 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 接受调用者 Host 路径的 Rust endpoint 声明 `Endpoint::requiring_host_paths()`。Host 在绑定和调用时都检查路径授权，借用其他连接的注册目标也不能绕过。项目 ID 和已有 Session 查询不要求原始路径权限；插件通过显式注入的只读视图访问它们。
 
 `ctx.models.resolve({ kind: 'named', connectionSlug, model })` 或 `ctx.models.resolve({ kind: 'default' })` 只返回可用模型的非敏感绑定，不授予执行权限。`restoreChild` 用原始创建请求恢复已有子会话的访问权，不创建会话或工作区。
+
+## 模型适配器
+
+`ctx.modelAdapters.register(name, open)` 注册协议适配器。`open('request' | 'conversation')` 返回 `stream(request, context)` 和可选的 `confirm(history)`。Rust 使用 `maka_plugins::model::ProviderAdapter`，共享类型化事件、HTTP 与 WebSocket 契约。模型 override 的 `adapter` 指定贡献名称；默认名称为 `responses`、`chat-completions`、`anthropic-messages`。
+
+Host 每逻辑步骤冻结注册，解析凭据，负责准入、取消、预算和规范日志结算。适配器会取得已解析秘密，不应记录请求或凭据；它负责协议编解码、带背压的事件输出和重试安全分类。HTTP body 随调用结束，socket 随适配器会话结束；下次调用通过新的 transport 操作已有 socket。路由身份变化使连接缓存失效。显式选择缺失或退休时失败，不暗中切换实现。

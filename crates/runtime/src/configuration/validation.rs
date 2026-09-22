@@ -145,6 +145,12 @@ pub fn profiles(
     }
     for (id, p) in values {
         text(id, 512, true)?;
+        if let Some(adapter) = &p.adapter {
+            text(adapter, 256, true)?;
+            if adapter.chars().any(char::is_control) {
+                return Err("invalid model adapter name".into());
+            }
+        }
         if let Some(levels) = &p.thinking_levels
             && (levels.is_empty()
                 || levels.iter().enumerate().any(|(index, level)| {

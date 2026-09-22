@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod adapters;
 mod connection_probe;
 mod context_overflow;
 mod discovery;

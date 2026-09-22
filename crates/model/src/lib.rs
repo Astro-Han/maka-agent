@@ -20,18 +20,21 @@
 pub mod connection;
 mod delta;
 mod events;
-mod failure;
-pub use failure::{ProviderFailure, ProviderFailureReason};
+pub use maka_runtime::model::error::{ModelError, ProviderFailure, ProviderFailureReason};
+pub use maka_runtime::model::request::ProviderKind;
 pub mod oauth;
-pub mod prompt;
+pub use maka_runtime::model::prompt;
+pub mod adapters;
+mod conversation;
+mod network;
 pub mod reasoning;
-mod responses;
+mod sdk;
 mod step;
+pub use conversation::Conversation;
 pub use maka_runtime::{model::ModelEvent, tools::ToolDefinition};
-pub use responses::ResponsesLane;
 pub use step::StepBuilder;
 
-use maka_js_runtime::trusted::{ProviderEvent, TrustedError, TrustedRuntime};
+use maka_js_runtime::trusted::TrustedRuntime;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,21 +45,14 @@ use tokio_util::sync::CancellationToken;
 
 mod auth;
 pub use auth::{AuthResolver, ProviderAuth};
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderKind {
-    OpenaiChat,
-    OpenaiResponses,
-    OpenResponses(maka_runtime::model::PlaintextResponses),
-    OpenaiCompatible { name: String },
-    Anthropic,
-}
+use maka_runtime::model::budget;
 
 /// Trusted configuration, never exposed to a Code Mode isolate or event log.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<String>,
     #[serde(skip)]
     pub capabilities: maka_runtime::configuration::ModelCapabilities,
     #[serde(skip)]
@@ -72,48 +68,25 @@ pub struct ProviderConfig {
     pub body_overlay: Option<serde_json::Map<String, Value>>,
 }
 
-/// SDK-boundary values only. The agent layer must project canonical facts into
-/// this request; neither these values nor SDK state are a history authority.
+/// Provider input projected from canonical facts, never a history authority.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelRequest {
     pub provider: ProviderConfig,
     pub prompt: Vec<prompt::Message>,
-    #[serde(
-        skip_serializing_if = "Vec::is_empty",
-        serialize_with = "serialize_tools"
-    )]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolDefinition>,
     pub provider_options: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u64>,
 }
 
-fn serialize_tools<S: serde::Serializer>(
-    tools: &[ToolDefinition],
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    #[derive(Serialize)]
-    #[serde(tag = "type", rename_all = "kebab-case")]
-    enum SdkTool<'a> {
-        Function(&'a ToolDefinition),
-        Provider {
-            id: &'a str,
-            name: &'a str,
-            args: &'a Value,
-        },
-    }
-    serializer.collect_seq(tools.iter().map(|tool| match &tool.provider {
-        Some(provider) => SdkTool::Provider {
-            id: &provider.id,
-            name: &tool.name,
-            args: &provider.args,
-        },
-        None => SdkTool::Function(tool),
-    }))
-}
-
 impl ProviderConfig {
+    pub fn adapter_name(&self) -> &str {
+        self.adapter
+            .as_deref()
+            .unwrap_or_else(|| adapters::name(&self.kind))
+    }
     pub fn tool_context(&self) -> maka_runtime::tools::ModelToolContext {
         use maka_runtime::tools::ProviderToolProtocol;
         maka_runtime::tools::ModelToolContext {
@@ -128,27 +101,45 @@ impl ProviderConfig {
     }
 }
 
-#[derive(Clone, Debug, thiserror::Error)]
-pub enum ModelError {
-    #[error("model request cancelled")]
-    Cancelled,
-    #[error("model stream idle timeout exceeded")]
-    TimedOut,
-    #[error("model input exceeds provider capacity (observed output: {observed_output})")]
-    ContextOverflow { observed_output: bool },
-    #[error(transparent)]
-    Provider(ProviderFailure),
-    #[error("model adapter failed: {0}")]
-    Adapter(String),
+impl ModelRequest {
+    fn into_adapter(self) -> Result<maka_runtime::model::request::Request, ModelError> {
+        use maka_runtime::model::request::{Credentials, Provider, Request};
+        let auth = match self.provider.auth {
+            ProviderAuth::ApiKey(key) => Credentials::ApiKey(key),
+            ProviderAuth::Codex {
+                access_token,
+                session_id,
+            } => Credentials::Codex {
+                access_token,
+                session_id,
+            },
+            ProviderAuth::Bound { .. } => {
+                return Err(ModelError::Adapter("unresolved model credentials".into()));
+            }
+        };
+        Ok(Request {
+            provider: Provider {
+                kind: self.provider.kind,
+                model: self.provider.model,
+                base_url: self.provider.base_url,
+                auth,
+                headers: self.provider.headers,
+                body_overlay: self.provider.body_overlay,
+            },
+            prompt: self.prompt,
+            tools: self.tools,
+            provider_options: self.provider_options,
+            max_output_tokens: self.max_output_tokens,
+        })
+    }
 }
 
-/// Bounded stream of SDK events. SDK-specific normalization belongs at this
-/// crate's boundary, not in storage or client protocol.
+/// Bounded stream of runtime events, independent of the selected adapter.
 pub struct ModelStream {
-    receiver: mpsc::Receiver<Result<ProviderEvent, TrustedError>>,
+    receiver: mpsc::Receiver<Result<ModelEvent, ModelError>>,
     cancellation: CancellationToken,
-    worker: tokio::task::JoinHandle<()>,
-    normalizer: events::Normalizer,
+    worker: Option<tokio::task::JoinHandle<()>>,
+    finished: bool,
     pending_delta: Option<delta::PendingDelta>,
     ended: bool,
 }
@@ -166,18 +157,45 @@ impl ModelStream {
             } else {
                 self.pending_delta = None;
             }
-            let result = match self.receiver.recv().await {
+            let received = if let Some(worker) = self.worker.as_mut() {
+                tokio::select! {
+                    biased;
+                    event = self.receiver.recv() => event,
+                    result = worker => {
+                        self.worker = None;
+                        self.receiver.close();
+                        if result.is_err() {
+                            self.ended = true;
+                            return Some(Err(ModelError::Adapter("model adapter worker failed".into())));
+                        }
+                        continue;
+                    }
+                }
+            } else {
+                self.receiver.recv().await
+            };
+            let result = match received {
                 // Preserve the worker's cancellation/deadline cause, but do not
                 // keep journaling buffered output after cancellation.
                 Some(Ok(_)) if self.cancellation.is_cancelled() => continue,
-                Some(Ok(value)) => self.normalizer.push(value.into_value()),
-                Some(Err(error)) => Err(error.into()),
+                Some(Ok(_)) if self.finished => {
+                    Err(ModelError::Adapter("event after model finish".into()))
+                }
+                Some(Ok(value)) => {
+                    self.finished = matches!(value, ModelEvent::Finished { .. });
+                    Ok(Some(value))
+                }
+                Some(Err(error)) => Err(error),
                 None => {
                     self.ended = true;
                     if self.cancellation.is_cancelled() {
                         return Some(Err(ModelError::Cancelled));
                     }
-                    return self.normalizer.end().err().map(Err);
+                    return (!self.finished).then(|| {
+                        Err(ModelError::Adapter(
+                            "model stream ended without finish".into(),
+                        ))
+                    });
                 }
             };
             match result {
@@ -203,7 +221,9 @@ impl ModelStream {
     pub async fn cancel_and_wait(mut self) {
         self.cancellation.cancel();
         self.receiver.close();
-        let _ = (&mut self.worker).await;
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.await;
+        }
     }
 }
 
@@ -217,7 +237,9 @@ impl Drop for ModelStream {
 pub struct ModelExecutor {
     permits: Arc<Semaphore>,
     idle_timeout: Duration,
-    runtime: TrustedRuntime,
+    catalog: maka_plugins::contributions::Catalog,
+    _standalone: Option<Arc<maka_plugins::fiber::Fiber>>,
+    networks: Arc<network::Pool>,
 }
 
 impl ModelExecutor {
@@ -233,11 +255,36 @@ impl ModelExecutor {
         if concurrency == 0 || idle_timeout.is_zero() {
             return Err(ModelError::Adapter("invalid model execution limits".into()));
         }
+        let (catalog, owner) = adapters::standalone(runtime)?;
         Ok(Self {
             permits: Arc::new(Semaphore::new(concurrency)),
             idle_timeout,
-            runtime,
+            catalog,
+            _standalone: Some(owner),
+            networks: Arc::default(),
         })
+    }
+
+    /// Use the embedding Host's ordinary plugin catalog. No builtin fallback.
+    pub fn with_catalog(mut self, catalog: maka_plugins::contributions::Catalog) -> Self {
+        self.catalog = catalog;
+        self._standalone = None;
+        self
+    }
+
+    pub fn binding(
+        &self,
+        provider: &ProviderConfig,
+    ) -> Result<maka_plugins::model::Binding, ModelError> {
+        self.binding_in_scope(provider, &maka_plugins::composition::Scope::Profile)
+    }
+
+    pub fn binding_in_scope(
+        &self,
+        provider: &ProviderConfig,
+        scope: &maka_plugins::composition::Scope,
+    ) -> Result<maka_plugins::model::Binding, ModelError> {
+        adapters::resolve(&self.catalog.capture(scope), provider.adapter_name())
     }
 
     pub async fn stream(
@@ -245,14 +292,27 @@ impl ModelExecutor {
         request: ModelRequest,
         cancellation: CancellationToken,
     ) -> Result<ModelStream, ModelError> {
-        self.stream_in_lane(request, cancellation, None).await
+        self.stream_in_conversation(request, cancellation, None)
+            .await
     }
 
-    pub async fn stream_in_lane(
+    pub async fn stream_in_conversation(
+        &self,
+        request: ModelRequest,
+        cancellation: CancellationToken,
+        conversation: Option<Conversation>,
+    ) -> Result<ModelStream, ModelError> {
+        let binding = self.binding(&request.provider)?;
+        self.stream_with_adapter(request, cancellation, conversation, binding)
+            .await
+    }
+
+    pub async fn stream_with_adapter(
         &self,
         mut request: ModelRequest,
         cancellation: CancellationToken,
-        lane: Option<ResponsesLane>,
+        conversation: Option<Conversation>,
+        binding: maka_plugins::model::Binding,
     ) -> Result<ModelStream, ModelError> {
         for tool in &request.tools {
             if let Some(provider) = &tool.provider {
@@ -300,23 +360,74 @@ impl ModelExecutor {
             result = auth::resolve(&mut request.provider.auth) => result?,
         }
         auth::prepare(&mut request)?;
-        let (sender, receiver) = mpsc::channel(32);
+        let (sender, receiver) = mpsc::channel(4);
         let worker_cancel = cancellation.clone();
         let idle_timeout = self.idle_timeout;
-        let runtime = self.runtime.clone();
-        let network = request.provider.network.clone();
-        if let Some(lane) = &lane {
-            lane.prepare(&mut request);
-        }
-        let lane = lane.map(|lane| lane.transport);
-        let request = serde_json::to_value(request)
-            .map_err(|error| ModelError::Adapter(error.to_string()))?;
+        let lease = binding.admit()?;
+        let network = self.networks.get(&request.provider.network)?;
+        let request = request.into_adapter()?;
+        budget::bytes(&request, 32 * 1024 * 1024)?;
         let worker = tokio::spawn(async move {
             let _permit = permit;
             let failure_sender = sender.clone();
-            let result = runtime
-                .model_in_lane(request, sender, worker_cancel, idle_timeout, lane, network)
-                .await;
+            let _lease = lease;
+            let adapter_cancel = worker_cancel.child_token();
+            let _settlement = adapter_cancel.clone().drop_guard();
+            let (activity, mut progress) = tokio::sync::watch::channel(tokio::time::Instant::now());
+            let events: Arc<dyn maka_plugins::model::Events> = Arc::new(ChannelEvents {
+                sender,
+                activity,
+                total: std::sync::atomic::AtomicU32::new(0),
+            });
+            let network = Arc::new(network::Call {
+                transport: network,
+                events: events.clone(),
+                cancellation: adapter_cancel.clone(),
+            });
+            let operation = async {
+                let session = match conversation {
+                    Some(conversation) => {
+                        conversation
+                            .session(&binding, adapter_cancel.clone())
+                            .await?
+                    }
+                    None => {
+                        binding
+                            .open(
+                                maka_plugins::model::Lifetime::Request,
+                                adapter_cancel.clone(),
+                            )
+                            .await?
+                    }
+                };
+                session
+                    .stream(
+                        request,
+                        maka_plugins::model::Context {
+                            events,
+                            cancellation: adapter_cancel.clone(),
+                            idle_timeout,
+                            transport: network,
+                        },
+                    )
+                    .await
+            };
+            tokio::pin!(operation);
+            let result = loop {
+                let deadline = *progress.borrow_and_update() + idle_timeout;
+                let cause = tokio::select! {
+                    biased;
+                    result = &mut operation => break result,
+                    _ = worker_cancel.cancelled() => ModelError::Cancelled,
+                    _ = tokio::time::sleep_until(deadline) => ModelError::TimedOut,
+                    Ok(()) = progress.changed() => continue,
+                };
+                adapter_cancel.cancel();
+                // JS callbacks are signalled and given their bounded cleanup
+                // window. A stuck native adapter cannot hold Host admission forever.
+                let _ = tokio::time::timeout(Duration::from_secs(6), &mut operation).await;
+                break Err(cause);
+            };
             if let Err(error) = result {
                 let _ = failure_sender.send(Err(error)).await;
             }
@@ -324,20 +435,45 @@ impl ModelExecutor {
         Ok(ModelStream {
             receiver,
             cancellation,
-            worker,
-            normalizer: events::Normalizer::default(),
+            worker: Some(worker),
+            finished: false,
             pending_delta: None,
             ended: false,
         })
     }
 }
 
-impl From<TrustedError> for ModelError {
-    fn from(error: TrustedError) -> Self {
-        match error {
-            TrustedError::Cancelled => Self::Cancelled,
-            TrustedError::TimedOut => Self::TimedOut,
-            TrustedError::Failed(message) => Self::Adapter(message),
-        }
+struct ChannelEvents {
+    total: std::sync::atomic::AtomicU32,
+    sender: mpsc::Sender<Result<ModelEvent, ModelError>>,
+    activity: tokio::sync::watch::Sender<tokio::time::Instant>,
+}
+impl maka_plugins::model::Events for ChannelEvents {
+    fn progress(&self) {
+        self.activity.send_replace(tokio::time::Instant::now());
+    }
+    fn emit(
+        &self,
+        event: ModelEvent,
+    ) -> futures_util::future::BoxFuture<'_, Result<(), ModelError>> {
+        Box::pin(async move {
+            let bytes = budget::bytes(&event, 8 * 1024 * 1024)?;
+            self.total
+                .fetch_update(
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                    |total| {
+                        total
+                            .checked_add(bytes)
+                            .filter(|total| *total <= 64 * 1024 * 1024)
+                    },
+                )
+                .map_err(|_| ModelError::Adapter("model output exceeds 64 MiB".into()))?;
+            self.progress();
+            self.sender
+                .send(Ok(event))
+                .await
+                .map_err(|_| ModelError::Cancelled)
+        })
     }
 }

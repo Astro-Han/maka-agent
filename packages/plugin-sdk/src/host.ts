@@ -32,6 +32,7 @@ export type * from './credentials.js';
 export type * from './http.js';
 export type * from './filesystem.js';
 export type * from './llm.js';
+export type * from './models.js';
 export type * from './clients.js';
 export type * from './history.js';
 
@@ -338,6 +339,7 @@ export interface HostContext {
       invoke: (input: Input, call: CallContext) => Awaitable<Json>,
     ): Promise<Registration>;
   };
+  readonly modelAdapters: import('./models.js').ModelAdapters;
   readonly executors: {
     register(
       definition: ExecutorDefinition,

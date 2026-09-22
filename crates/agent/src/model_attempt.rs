@@ -36,7 +36,7 @@ use uuid::Uuid;
 
 pub(super) enum Attempt {
     Main {
-        lane: maka_model::ResponsesLane,
+        lane: maka_model::Conversation,
         continuation_base: Option<u64>,
         surface: Arc<crate::request_composition::Surface>,
     },
@@ -210,6 +210,34 @@ async fn execute_once(
         return Err(RunError::Cancelled);
     }
     let prepared = prepare_request(input, prompt, definitions, purpose)?;
+    let (binding, composition) = match surface {
+        Some(surface) => (surface.adapter.clone(), surface.evidence.clone()),
+        None => {
+            let request = &prepared.request;
+            let binding = inner.model.binding_in_scope(
+                &request.provider,
+                &maka_plugins::composition::Scope::Session(input.invocation.session_id.clone()),
+            )?;
+            let evidence = maka_runtime::composition::RequestComposition {
+                system_prompt: request.prompt.iter().find_map(|message| match message {
+                    Message::System { content, .. } => Some(content.clone()),
+                    _ => None,
+                }),
+                dynamic_context: vec![],
+                tool_catalog_digest: maka_runtime::artifact::content_digest(
+                    &serde_json::to_vec(&request.tools)
+                        .map_err(|error| RunError::Internal(error.to_string()))?,
+                ),
+                tools: request.tools.clone(),
+                provider_options: Some(request.provider_options.clone()),
+                max_output_tokens: request.max_output_tokens,
+                sources: vec![binding.source(request.provider.adapter_name())?],
+            }
+            .freeze()
+            .map_err(|error| RunError::Internal(error.into()))?;
+            (binding, Arc::new(evidence))
+        }
+    };
     let step_id = Uuid::new_v4().to_string();
     let event = maka_runtime::event::RuntimeEvent::new(
         input.invocation.clone(),
@@ -235,16 +263,13 @@ async fn execute_once(
                 .map(|baseline| baseline.event_id.clone()),
         },
     );
-    let mut write = maka_runtime::event::EventWrite::plain(event)?;
-    if let Some(surface) = surface {
-        write = write.with_composition(surface.evidence.clone())?;
-    }
+    let write = maka_runtime::event::EventWrite::plain(event)?.with_composition(composition)?;
     use maka_runtime::event::EventSink;
     inner.log.clone().commit(write).await?;
     let result: Result<_, RunError> = async {
         let stream = inner
             .model
-            .stream_in_lane(prepared.request, cancellation.clone(), lane)
+            .stream_with_adapter(prepared.request, cancellation.clone(), lane, binding)
             .await?;
         receive(inner, input, &step_id, purpose, stream).await
     }

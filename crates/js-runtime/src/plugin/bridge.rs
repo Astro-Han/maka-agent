@@ -29,6 +29,9 @@ use tokio_util::sync::CancellationToken;
 /// A module-scoped Host capability router. Host validates instance identity and
 /// invocation authority; the VM transports only encodable values.
 pub trait Bridge: Send + Sync {
+    fn max_output_bytes(&self, _method: &str) -> usize {
+        1024 * 1024
+    }
     /// Encoded payload allowance; capability implementations validate their
     /// decoded input separately. The VM-wide in-flight budget still applies.
     fn max_input_bytes(&self, _method: &str) -> usize {
@@ -118,6 +121,7 @@ async fn op_maka_plugin(
             .map_err(|_| JsErrorBox::generic("Host input capacity exhausted"))?;
         (binding.bridge.clone(), binding.closing.clone(), call, bytes)
     };
+    let output_limit = bridge.max_output_bytes(&method).min(32 * 1024 * 1024);
     let output = tokio::select! {
         biased;
         _ = closing.cancelled() => Err(failed("plugin instance is retired")),
@@ -127,9 +131,11 @@ async fn op_maka_plugin(
     if serde_json::to_vec(&output)
         .map_err(|error| JsErrorBox::generic(error.to_string()))?
         .len()
-        > 1024 * 1024
+        > output_limit
     {
-        return Err(JsErrorBox::generic("Host result exceeds 1 MiB"));
+        return Err(JsErrorBox::generic(
+            "Host result exceeds its output byte limit",
+        ));
     }
     // Even an immediately ready Host operation must return control to the VM
     // owner. Otherwise an async JS loop can starve queued revocations/cleanup.

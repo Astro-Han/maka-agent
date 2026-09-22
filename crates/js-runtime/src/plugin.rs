@@ -415,8 +415,8 @@ impl Module {
             return Err(failed("invalid export path"));
         }
         let size = serde_json::to_vec(&args).map_err(failed)?.len();
-        if size > 1024 * 1024 {
-            return Err(failed("call arguments exceed 1 MiB"));
+        if size > 32 * 1024 * 1024 {
+            return Err(failed("call arguments exceed 32 MiB"));
         }
         let calls = if control {
             &self.0.control_calls

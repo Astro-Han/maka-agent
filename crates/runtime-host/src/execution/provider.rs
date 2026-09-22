@@ -196,6 +196,7 @@ pub(super) async fn observe_binding(
         .map_err(|_| unavailable("Invalid provider request headers"))?
         .unwrap_or_default();
     let config = ProviderConfig {
+        adapter: overrides.and_then(|value| value.adapter.clone()),
         capabilities: model.capabilities,
         kind: route.kind,
         model: target.model.clone(),

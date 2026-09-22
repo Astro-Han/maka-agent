@@ -80,6 +80,7 @@ export async function codexProfiles(baseUrl) {
       providerOptions: {
         openai: {
           store: false,
+          include: ['reasoning.encrypted_content'],
           textVerbosity: 'medium',
           instructions: 'Keep this system instruction.',
         },
@@ -110,6 +111,7 @@ export async function main(baseURL, continuation = false) {
         providerOptions: {
           openai: {
             store: false,
+            include: ['reasoning.encrypted_content'],
             ...(plan.previousResponseId ? { previousResponseId: plan.previousResponseId } : {}),
           },
         },

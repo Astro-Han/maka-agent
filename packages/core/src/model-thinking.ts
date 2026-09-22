@@ -119,6 +119,7 @@ function deriveThinkingChoices(options: ThinkingOptions | undefined): readonly T
 
 /** A connection-scoped user model record. An empty record preserves a manually added id. */
 export interface ModelOverride {
+  readonly adapter?: string;
   /** Independent model-level preferences; omitted follows the Host default. */
   readonly codeMode?: boolean;
   readonly applyPatch?: boolean;
@@ -148,6 +149,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function normalizeModelOverride(entry: unknown): ModelOverride | undefined {
   if (!isRecord(entry)) return undefined;
   const declared: {
+    adapter?: string;
     codeMode?: boolean;
     applyPatch?: boolean;
     knowledgeCutoff?: string;
@@ -164,6 +166,14 @@ function normalizeModelOverride(entry: unknown): ModelOverride | undefined {
     apiProtocol?: 'openai-chat' | 'openai-responses' | 'anthropic-messages';
     serviceTier?: 'fast';
   } = {};
+  if (
+    typeof entry.adapter === 'string' &&
+    entry.adapter.length > 0 &&
+    entry.adapter.length <= 256 &&
+    !/\p{Cc}/u.test(entry.adapter)
+  ) {
+    declared.adapter = entry.adapter;
+  }
   if (Array.isArray(entry.thinkingLevels)) {
     // Declared levels are filtered to the declarable vocabulary, not merely
     // the level vocabulary: `off` is a disable-wire encoding no generic
