@@ -21,7 +21,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { StoredMessage } from '@maka/core/session';
 import { deferred, waitFor } from '@maka/core/test-only/async-primitives';
-import { SESSION_CONTINUITY_SCHEMA_VERSION } from '@maka/runtime-host/protocol';
 import {
   encodeDesktopTranscriptBatches,
   encodeDesktopTranscriptChange,
@@ -45,7 +44,10 @@ import {
   readSettledMessagesFrom,
 } from '../../renderer/platform/desktop/session-message-settlement.js';
 import { DesktopTranscriptReplica, type DesktopTranscriptReplicaChange } from '../desktop-transcript-replica.js';
-import { runtimeHostSessionFixture } from './runtime-host-session-test-fixture.js';
+import {
+  continuitySnapshot,
+  runtimeHostSessionFixture,
+} from './runtime-host-session-test-fixture.js';
 
 test('merges a settled tail without dropping earlier messages', () => {
   const earlier = assistantMessage('earlier', 'assistant-earlier');
@@ -734,8 +736,6 @@ test('bounds the default active transcript range by Turn identities', async () =
   const bootstrapPage = transcriptPage('older', null, messages.length - 1);
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
     decodeTranscriptPage: async () => ({ messages, nextCursor: null }),
     async close() {},
@@ -761,8 +761,6 @@ test('bounds the default active transcript range by presentation bytes', async (
   const bootstrapPage = transcriptPage('older', null, messages.length - 1);
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
     decodeTranscriptPage: async () => ({ messages, nextCursor: null }),
     async close() {},
@@ -792,8 +790,6 @@ test('keeps an oversized latest Turn visible after bootstrap eviction', async ()
   const bootstrapPage = transcriptPage('older', null, latest.identity);
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
     decodeTranscriptPage: async () => ({ messages: [older, latest], nextCursor: null }),
     async close() {},
@@ -825,8 +821,6 @@ test('keeps an oversized latest Turn visible before a trailing session note', as
   const bootstrapPage = transcriptPage('older', null, trailingNote.identity);
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
     decodeTranscriptPage: async () => ({ messages: [latest, trailingNote], nextCursor: null }),
     async close() {},
@@ -846,11 +840,11 @@ test('advances a projected transcript across hidden durable records', async () =
   const visibleAdvancePage = transcriptPage('newer', null, 5);
   const hiddenAdvancePage = transcriptPage('newer', null, 6);
   const changes: { durableUpserts: readonly { sequence: number }[] }[] = [];
+  let watermark = 1;
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
+    transcriptWatermark: () => watermark,
     decodeTranscriptPage: async (page) => ({
       messages:
         page === bootstrapPage
@@ -870,8 +864,10 @@ test('advances a projected transcript across hidden durable records', async () =
 
   // Sequences 1, 2, 5, and 6 are valid Host-private records omitted from the
   // Guest projection. The physical watermark still advances across them.
-  await replica.advance(5);
-  await replica.advance(6);
+  watermark = 5;
+  await replica.advance();
+  watermark = 6;
+  await replica.advance();
 
   assert.equal(replica.durableThrough, 6);
   assert.deepEqual(replica.snapshot().durable.map(({ sequence }) => sequence), [0, 3, 4]);
@@ -892,11 +888,11 @@ test('keeps an oversized Turn visible when the watermark advances onto it', asyn
   };
   const bootstrapPage = transcriptPage('older', null, older.identity);
   const newerPage = transcriptPage('newer', null, latest.identity);
+  let watermark = 0;
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
+    transcriptWatermark: () => watermark,
     decodeTranscriptPage: async (page) => page === bootstrapPage
       ? { messages: [older], nextCursor: null }
       : { messages: [latest], nextCursor: null },
@@ -905,7 +901,8 @@ test('keeps an oversized Turn visible when the watermark advances onto it', asyn
   });
   const replica = await DesktopTranscriptReplica.prepare(handle);
 
-  await replica.advance(latest.identity);
+  watermark = latest.identity;
+  await replica.advance();
 
   assert.deepEqual(replica.snapshot().durable.map(({ sequence }) => sequence), [latest.identity]);
 });
@@ -930,11 +927,11 @@ test('keeps an oversized settled Turn visible before a trailing session note', a
   };
   const bootstrapPage = transcriptPage('older', null, older.identity);
   const newerPage = transcriptPage('newer', null, trailingNote.identity);
+  let watermark = 0;
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
+    transcriptWatermark: () => watermark,
     decodeTranscriptPage: async (page) => page === bootstrapPage
       ? { messages: [older], nextCursor: null }
       : { messages: [latest, trailingNote], nextCursor: null },
@@ -943,7 +940,8 @@ test('keeps an oversized settled Turn visible before a trailing session note', a
   });
   const replica = await DesktopTranscriptReplica.prepare(handle);
 
-  await replica.advance(trailingNote.identity);
+  watermark = trailingNote.identity;
+  await replica.advance();
 
   assert.ok(replica.snapshot().durable.some(({ sequence }) => sequence === latest.identity));
 });
@@ -960,8 +958,6 @@ test('does not resurrect a discarded replica when a history page read is in flig
   const changes: DesktopTranscriptReplicaChange[] = [];
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
     decodeTranscriptPage: async (candidate) => candidate === bootstrapPage
       ? { messages: messages.slice(4), nextCursor: 'older' }
@@ -1003,11 +999,11 @@ test('does not drive a discarded replica terminal when a contiguous catch-up is 
   const newerGate = deferred<void>();
   const newerEntered = deferred<void>();
   const changes: DesktopTranscriptReplicaChange[] = [];
+  let watermark = 4;
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
+    transcriptWatermark: () => watermark,
     decodeTranscriptPage: async (candidate) => candidate === bootstrapPage
       ? { messages, nextCursor: null }
       : { messages: [appended], nextCursor: null },
@@ -1023,7 +1019,8 @@ test('does not drive a discarded replica terminal when a contiguous catch-up is 
     onChange: (_replica, change) => changes.push(change),
   });
 
-  const advancing = replica.advance(5);
+  watermark = 5;
+  const advancing = replica.advance();
   await newerEntered.promise;
   replica.discard();
   assert.equal(replica.resident, false);
@@ -1052,11 +1049,11 @@ test('a transcript opened between catch-up pages can join the change that follow
   const secondGate = deferred<void>();
   const secondEntered = deferred<void>();
   const changes: DesktopTranscriptReplicaChange[] = [];
+  let watermark = 2;
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: { durable: bootstrapPage },
+    transcriptWatermark: () => watermark,
     decodeTranscriptPage: async (candidate) => candidate === bootstrapPage
       ? { messages: bootstrap, nextCursor: null }
       : candidate === first
@@ -1075,7 +1072,8 @@ test('a transcript opened between catch-up pages can join the change that follow
     onChange: (_replica, change) => changes.push(change),
   });
 
-  const advancing = replica.advance(6);
+  watermark = 6;
+  const advancing = replica.advance();
   await secondEntered.promise;
   // The first page is installed; the second is pending. A transcript opening
   // now must be told the watermark its rows actually reach.
@@ -1104,8 +1102,6 @@ test('transfers prepared transcript bytes into active replica accounting', async
   let accountedBytes = 0;
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
-    transcript: Promise.resolve([]),
-    events: { async *[Symbol.asyncIterator]() {} },
     decodeTranscriptPage: async (_page, _maxMessageBytes, accountAssemblyBytes) => {
       accountAssemblyBytes?.(messageBytes);
       accountAssemblyBytes?.(-messageBytes);
@@ -1132,7 +1128,6 @@ test('does not release resident bytes when preparation accounting rejects them',
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
     transcript: Promise.resolve([message]),
-    events: { async *[Symbol.asyncIterator]() {} },
     async close() {},
   });
 
@@ -1168,6 +1163,41 @@ test('reopens a failed transcript range with a fresh generation', async () => {
   await assert.rejects(() => controller.ready(), /open failed/);
   await controller.reload();
   assert.equal(store.range().generation, 'reloaded');
+  await controller.close();
+});
+
+test('a live read failure preserves rows and recovers once per observation, then allows explicit retry', async () => {
+  const store = transcriptStore();
+  const identity = { sessionId: 'session-1', generation: 'first', hostEpoch: 'host-1' };
+  const errors: string[] = [];
+  let attempts = 0;
+  const controller = createDesktopTranscriptRangeController(store, async () => {
+    attempts += 1;
+    if (attempts === 2) throw new Error('still unavailable');
+    const next = { ...identity, generation: attempts === 1 ? 'first' : 'recovered' };
+    for (const batch of encodeDesktopTranscriptSnapshot({
+      ...next, beginsAtTurnBoundary: true, durableThrough: 0,
+      durable: [{ sequence: 0, message: assistantMessage('retained', 'answer') }],
+      hasOlder: false,
+    })) store.accept(batch);
+    return transcriptHandle(next);
+  }, { onError: (error) => errors.push(String(error)) });
+  await controller.ready();
+  controller.observationChanged('ready');
+  store.accept({
+    ...identity, durableThrough: 0, fragments: [], reset: false, ready: true,
+    readError: 'final page unavailable',
+  });
+  await waitFor(() => errors.some((error) => error.includes('still unavailable')));
+  assert.equal(store.snapshot().messages.length, 1);
+  assert.equal(store.range().durableThrough, 0);
+  assert.ok(store.readError());
+  controller.observationChanged('ready');
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(attempts, 2, 'failure must not create an automatic retry loop');
+  await controller.reload();
+  assert.equal(store.range().generation, 'recovered');
+  assert.equal(store.readError(), undefined);
   await controller.close();
 });
 
@@ -1501,27 +1531,4 @@ function syntheticLargeTranscript(): Array<{ identity: number; message: StoredMe
       },
     ];
   }).flat();
-}
-
-function continuitySnapshot() {
-  return {
-    schemaVersion: SESSION_CONTINUITY_SCHEMA_VERSION,
-    session: {
-      sessionId: 'session-1',
-      metadataRevision: 1,
-      status: 'running' as const,
-      createdAt: 1,
-      isArchived: false,
-    },
-    projectionRevision: 1,
-    rootTurn: null,
-    goal: null,
-    queue: {
-      hostEpoch: 'host-1',
-      queueRevision: 0,
-      steering: [],
-      followup: [],
-    },
-    interactions: { pending: [] },
-  };
 }

@@ -45,6 +45,8 @@ export interface DesktopTranscriptFragment {
  * One answer spans batches until `ready`; `hasOlder` is final only there.
  */
 export interface DesktopTranscriptBatchPayload {
+  /** A retryable read failure; carries no rows and does not advance coverage. */
+  readonly readError?: string;
   readonly earlierThan?: number;
   readonly coversFrom?: number | null;
   readonly sessionId: string;
@@ -111,6 +113,10 @@ export function assertDesktopTranscriptBatch(value: unknown): DesktopTranscriptB
     !isSequence(batch.deliverySequence) ||
     typeof batch.generation !== 'string' ||
     typeof batch.hostEpoch !== 'string' ||
+    (batch.readError !== undefined &&
+      (typeof batch.readError !== 'string' || batch.readError.length === 0 ||
+        batch.readError.length > 1024 || batch.reset !== false || batch.ready !== true ||
+        !Array.isArray(batch.fragments) || batch.fragments.length !== 0)) ||
     (batch.durableThrough !== null && !isSequence(batch.durableThrough)) ||
     !Array.isArray(batch.fragments) ||
     (batch.hasOlder !== undefined && typeof batch.hasOlder !== 'boolean') ||

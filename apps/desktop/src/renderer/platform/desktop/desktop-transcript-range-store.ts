@@ -207,7 +207,13 @@ export function createDesktopTranscriptRangeController(
     throw error;
   });
   let gapReload: Promise<void> | undefined;
+  let reportedReadError: Error | undefined;
   const unsubscribe = store.subscribe(() => {
+    const readError = store.readError();
+    if (readError && readError !== reportedReadError) {
+      reportedReadError = readError;
+      recovery.transcriptFailed(readError);
+    }
     acknowledgeTail();
     if (!store.needsReload() || gapReload || closed) return;
     gapReload = reload()
@@ -337,6 +343,7 @@ export class DesktopTranscriptRangeStore {
   #hostEpoch: string | undefined;
   #ready = false;
   #needsReload = false;
+  #readError: Error | undefined;
   #snapshot: DesktopTranscriptRangeSnapshot | undefined;
   readonly #durableWaiters = new Set<() => void>();
   readonly #listeners = new Set<() => void>();
@@ -365,6 +372,12 @@ export class DesktopTranscriptRangeStore {
     if (!this.#accepts(batch)) return false;
     if (batch.reset && batch.sessionId !== this.#expectedSessionId) {
       throw new Error('Desktop transcript belongs to a different Session');
+    }
+    if (batch.readError !== undefined) {
+      this.#assembly = undefined;
+      this.#readError = new Error(batch.readError);
+      this.#commit();
+      return true;
     }
     let assembly = batch.reset ? undefined : this.#assembly;
     if (!assembly) {
@@ -404,6 +417,7 @@ export class DesktopTranscriptRangeStore {
         this.#adoptHostIdentity(answer);
         this.#ready = true;
         this.#needsReload = false;
+        this.#readError = undefined;
       }
     } else if (answer.kind === 'tail') {
       this.#needsReload = true;
@@ -446,6 +460,10 @@ export class DesktopTranscriptRangeStore {
   /** Set when a tail change did not continue what is held; the controller reopens. */
   needsReload(): boolean {
     return this.#needsReload;
+  }
+
+  readError(): Error | undefined {
+    return this.#readError;
   }
 
   /** Fires after every committed change to `snapshot()`. */

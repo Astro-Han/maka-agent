@@ -203,7 +203,7 @@ class RuntimeHostMakaSessionDriverImpl implements RuntimeHostMakaSessionDriver {
   #model: string;
   #llmConnectionId: string | undefined;
   #llmConnectionSlug: string;
-  #thinkingLevel: ThinkingLevel | undefined;
+  #thinkingLevel: ThinkingLevel | null | undefined;
   // What a Session created right now would start in, for display only. Never
   // sent on create: an omitted field is what makes the Host's `chatDefaults`
   // the authority. Refreshed on `/new` because that default can change — and

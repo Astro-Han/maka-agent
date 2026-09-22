@@ -383,6 +383,9 @@ class TranscriptSubscription
     interactions: { pending: [] },
   };
   readonly transcriptBootstrap: SessionTranscriptBootstrap;
+  get transcriptWatermark(): number | null {
+    return this.transcriptBootstrap.durable.throughSequence;
+  }
   readonly pages: Omit<SessionTranscriptPageInput, 'subscriptionId'>[] = [];
   readonly #decoded = new WeakMap<
     SessionTranscriptPage,

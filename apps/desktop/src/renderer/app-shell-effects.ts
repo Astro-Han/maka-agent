@@ -334,7 +334,7 @@ export function useActiveSessionEvents(options: {
     effectIsCurrent: () => boolean,
   ) => {
     options.publishTranscript(sessionId, controller, effectIsCurrent, () => {
-      clearMessageLoadError(sessionId);
+      if (!controller.store.readError()) clearMessageLoadError(sessionId);
       options.setMessageLoadPending(false);
     });
   });

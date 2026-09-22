@@ -77,6 +77,11 @@ export async function readSettledMessagesFrom(
     sessionId,
     (batch) => {
       if (!store.accept(batch)) return;
+      const error = store.readError();
+      if (error) {
+        cancel(error);
+        return;
+      }
       tailRevision += 1;
       notify();
       nextChange = changed();
