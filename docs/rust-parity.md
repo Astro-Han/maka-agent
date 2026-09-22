@@ -87,9 +87,8 @@ implementations; wire adapters may retain existing client vocabulary.
 | --- | --- | --- |
 | Plan | State and durable receipts are complete: revision/abandonment, version and replan-source checks, frozen submissions, progress/interruption/resume/cancellation, exact retries and fixed-watermark history pages. Tools, Behavior, Remote/Desktop and live execution observation remain unwired. Non-Agent collaboration mode still fails admission. | **Plugin + Host.** The plugin owns workflow and records through public storage. Approving a plan grants no sandbox permissions; Host retains authorization and Turn admission. Without a Host receipt, execution is awaiting admission, not running. |
 | Goal | Query/arm/control, continuation, termination, budget and recovery semantics. | **Plugin + Host.** Goal policy owns subsequent submissions; Host enforces admitted hard limits and records usage. Retiring the plugin must close future submission admission. |
-| Deep research | Research workflow, query/progress, results and recovery. | **Plugin.** Reuse Graph/Swarm, Web, bounded model calls and reliable submission. Do not build another generic orchestration engine. |
 | Daily review / recap | Daily-review query/mutate, scheduled review and `session.recap.generate`. | **Plugin + Host.** Summarization/selection/output in plugins; reuse Scheduler and authorized history/model services. Host retains any canonical Session metadata commit. |
-| External agents | Setup start/query/cancel; execution adapters, configuration, auth, conversation identity, adapter-specific attachments/interactions/resume/fork; Command Code GO execution. | **Plugin + Host.** Implement concrete CLI/ACP adapters as Executor plugins over owned processes/HTTP. Generic Executor support is not a shipped adapter. Host owns authorization, cancellation and canonical external-event recording. |
+| External agents | Setup start/query/cancel; execution adapters, configuration, auth, conversation identity, adapter-specific attachments/interactions/resume/fork. | **Plugin + Host.** Implement concrete CLI/ACP adapters as Executor plugins over owned processes/HTTP. Generic Executor support is not a shipped adapter. Host owns authorization, cancellation and canonical external-event recording. |
 | Usage / Pricing | Usage queries, revision-consistent screens/activity pages, pricing query/mutate and valuation. | **Plugin + Host.** Reports, price policy and rebuildable projections may be an Insights domain; Host records usage independently of plugin availability and provides consistent reads. Missing usage must not become zero. |
 | Background health | BackgroundTaskHealth process and endpoint checks. | **Plugin + Host.** Health interpretation and Tool in a plugin; Host exposes authorized resource observations and bounded probes. A stored PID is not resource ownership. |
 | Session lineage | Branch/revision create/abandon, regeneration. Ordinary resume/startup recovery exist. | **Host.** One transactional lineage and workspace authority; plugins may request changes through commands, not reproduce them in private storage. |
@@ -137,7 +136,7 @@ it does not reinterpret uncertain work using current policy or defaults.
    the same scoped contracts as external plugins. Maintain Rust/JS parity as new consumers appear.
 2. **External acceptance:** the JS workflow fixture exercises UI consent, durable background work,
    exact receipts, disable/reactivation and revocation across Host restart.
-3. **Missing business domains:** complete Plan/Goal and research/review;
+3. **Missing business domains:** complete Plan/Goal and review;
    finish external adapters and Insights/health. Reuse the domain boundaries rather than first
    implementing new business logic in Host and moving it later.
 4. **Remaining core parity:** complete Session lifecycle/lineage/transfer, policy, access/collaboration,

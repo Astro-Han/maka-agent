@@ -32,7 +32,7 @@ export const workHubLiveCopy = {
     reviewAttachments: 'Please review the attachments.',
     sendFailed: 'Could not send',
     retrySteering:
-      'Retry the original text and attachments with Shift+Enter to resolve the previous submission first.',
+      'Retry the original text and attachments with Cmd/Ctrl+Enter to resolve the previous submission first.',
     retryFollowup:
       'Retry the original text and attachments with Enter to resolve the previous submission first.',
     sendUnknown: 'The Host has not confirmed this message. Retry checks the same submission.',
@@ -82,7 +82,7 @@ export const workHubLiveCopy = {
     attachmentUploadFailed: '附件上传失败',
     reviewAttachments: '请查看附件。',
     sendFailed: '发送失败',
-    retrySteering: '请先保留原文和附件，用 Shift+Enter 重试并确认上次提交结果。',
+    retrySteering: '请先保留原文和附件，用 Cmd/Ctrl+Enter 重试并确认上次提交结果。',
     retryFollowup: '请先保留原文和附件，用 Enter 重试并确认上次提交结果。',
     sendUnknown: 'Host 尚未确认这条消息。重试会核对原提交。',
     sendNotAdmitted: 'Host 在接收这条消息前已重启，可以重试发送。',
@@ -131,7 +131,7 @@ export const workHubLiveCopy = {
     attachmentUploadFailed: '附件上傳失敗',
     reviewAttachments: '請查看附件。',
     sendFailed: '傳送失敗',
-    retrySteering: '請先保留原文和附件，用 Shift+Enter 重試並確認上次提交結果。',
+    retrySteering: '請先保留原文和附件，用 Cmd/Ctrl+Enter 重試並確認上次提交結果。',
     retryFollowup: '請先保留原文和附件，用 Enter 重試並確認上次提交結果。',
     sendUnknown: 'Host 尚未確認這則訊息。重試會核對原提交。',
     sendNotAdmitted: 'Host 在接收這則訊息前已重新啟動，可以重試傳送。',

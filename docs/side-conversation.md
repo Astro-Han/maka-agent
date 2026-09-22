@@ -51,7 +51,7 @@ The generic side-conversation entry extends that foundation:
   actions may use the inherited permission profile, and the permission can be
   changed from the side Composer;
 - while a side turn is running, Enter queues a follow-up for the next turn and
-  Shift+Enter steers the active turn at its next model step; both appear
+  Cmd/Ctrl+Enter steers the active turn at its next model step; both appear
   immediately, while Stop remains available;
 - the side Composer shares `/` Skill discovery, `@` file references, files,
   quotes, and draft ownership with the main Composer;
@@ -307,7 +307,7 @@ Maka now has the first usable slice of the same architecture:
   quote queues;
 - the same Composer shell as the main conversation, including a functional
   attachment menu, Skill and file mentions, inherited permission menu,
-  Enter-to-queue / Shift+Enter-to-Steer routing, and Host-backed queue controls;
+  Enter-to-queue / Cmd/Ctrl+Enter-to-Steer routing, and Host-backed queue controls;
 - the same answer metadata surface for Copy, Info, and Regenerate, with Branch
   withheld because it would navigate outside the temporary side-tab lifecycle;
 - no content-area close action: Side Chat lifetime belongs exclusively to tab

@@ -131,7 +131,7 @@ test('Side Chat follow-ups survive queue actions, Host handoffs and reconnect', 
 
     await sideComposer.fill('steer the current response');
     await awaitSendReady(companion);
-    await sideComposer.press('Shift+Enter');
+    await sideComposer.press('ControlOrMeta+Enter');
     await expect(companion).toContainText('Acknowledged steering: steer the current response');
     await expect(queued.locator('.maka-composer-queue-text')).toHaveText([
       'second follow-up', 'edited first follow-up',
@@ -163,7 +163,7 @@ test('Side Chat follow-ups survive queue actions, Host handoffs and reconnect', 
     await page.screenshot({ path: testInfo.outputPath('side-chat-queue.png'), fullPage: true });
     await sideComposer.fill('release the held response');
     await awaitSendReady(companion);
-    await sideComposer.press('Shift+Enter');
+    await sideComposer.press('ControlOrMeta+Enter');
     await expect(companion).toContainText('Acknowledged steering: release the held response');
     await expect(companion).toContainText('Fake backend received: successor one', { timeout: 20_000 });
     await expect(companion).toContainText('Fake backend received: successor two', { timeout: 20_000 });

@@ -218,6 +218,10 @@ export function reconcileTurnIdentities(
   const previousById = new Map(previous.map((turn) => [turn.turnId, turn]));
   const reconciled = next.map((turn) => {
     const prior = previousById.get(turn.turnId);
+    if (prior) {
+      const timeline = retainSteeringLayout(prior.timeline, turn.timeline);
+      if (timeline !== turn.timeline) turn = { ...turn, timeline };
+    }
     if (!prior || valuesEqual(prior, turn)) return prior ?? turn;
     // The turn moved, but usually only its tail did: hand the previous
     // timeline entry back for every item whose value did not change, so the
@@ -227,6 +231,60 @@ export function reconcileTurnIdentities(
   return reconciled.length === previous.length && reconciled.every((turn, index) => turn === previous[index])
     ? previous
     : reconciled;
+}
+
+/**
+ * The durable assistant row contains full text, not live slice offsets.
+ * Keep an already displayed split only while its entire span is still covered
+ * by identical canonical text and confirmed steering rows. This uses the
+ * existing visible transcript cache; live buffers can retire normally.
+ */
+function retainSteeringLayout(
+  previous: TurnTimelineItem[],
+  next: TurnTimelineItem[],
+): TurnTimelineItem[] {
+  const positions = new Map<string, number[]>();
+  previous.forEach((item, index) => {
+    if (item.kind !== 'text' && item.kind !== 'thinking') return;
+    const key = timelineItemKey(item);
+    const indices = positions.get(key) ?? [];
+    indices.push(index);
+    positions.set(key, indices);
+  });
+  const splitPositions = [...positions.values()].filter((indices) => indices.length > 1).flat();
+  if (splitPositions.length === 0) return next;
+  const span = previous.slice(Math.min(...splitPositions), Math.max(...splitPositions) + 1);
+  if (!span.some((item) => item.kind === 'user')) return next;
+  const keys = new Set(span.map(timelineItemKey));
+  const matches = next.flatMap((item, index) => keys.has(timelineItemKey(item)) ? [index] : []);
+  // New, missing or repeated facts invalidate this layout instead of being hidden.
+  if (matches.length !== keys.size) return next;
+  const first = matches[0]!;
+  const last = matches.at(-1)!;
+  if (last - first + 1 !== keys.size) return next;
+  const current = new Map(next.slice(first, last + 1).map((item) => [timelineItemKey(item), item]));
+  if (current.size !== keys.size) return next;
+  for (const key of keys) {
+    const item = current.get(key);
+    const fragments = span.filter((part) => timelineItemKey(part) === key);
+    if (!item) return next;
+    if (item.kind === 'text' || item.kind === 'thinking') {
+      if (item.live || fragments.some((part) => part.kind !== item.kind)
+        || fragments.map((part) => 'text' in part ? part.text : '').join('') !== item.text) return next;
+    } else if (item.kind === 'user') {
+      if (item.steeringEventId === undefined || fragments.length !== 1 || fragments[0]?.kind !== 'user'
+        || fragments[0].message.text !== item.message.text) return next;
+    } else if (fragments.length !== 1) {
+      return next;
+    }
+  }
+  const retained = span.map((fragment): TurnTimelineItem => {
+    const item = current.get(timelineItemKey(fragment))!;
+    return (item.kind === 'text' || item.kind === 'thinking') && 'text' in fragment
+      ? { ...item, text: fragment.text }
+      : item;
+  });
+  return [...next.slice(0, first), ...retained, ...next.slice(last + 1)];
 }
 
 /**
