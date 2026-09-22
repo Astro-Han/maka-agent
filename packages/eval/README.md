@@ -193,8 +193,8 @@ A subject that exhausts the framework timeout is reported as `subject_failed` wi
 Maka benchmark subjects freeze a versioned Session profile. `headless-coding-v1` is persisted in
 the Session header, so later turns and backend rebuilds retain the same contract. It fixes the
 system prompt, disables product identity/personalization/skills/workspace-memory prompt fragments,
-and admits only `Bash`, `StopBackgroundTask`, `WriteStdin`, `Read`, `Write`, `Edit`, `Glob`,
-`Grep`, and `apply_patch` as tool candidates. Bash is the product tool unchanged; because the
+and admits only `Shell`, `StopBackgroundTask`, `WriteStdin`, `Read`, `Write`, `Edit`, `Glob`,
+`Grep`, and `apply_patch` as tool candidates. Shell is the product tool unchanged; because the
 subject runs with Full access, it carries no sandbox boundary declaration and the widening tool
 is absent, as in any Full access root session. Provider-specific routing remains authoritative: DeepSeek Responses exposes `apply_patch` instead of `Write` and
 `Edit`, and `Read` also accepts Session-scoped Maka tool-result paths. A real

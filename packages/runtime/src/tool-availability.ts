@@ -37,7 +37,7 @@ export const TOOL_SEARCH_MAX_SCHEMA_CHARS = 64 * 1024;
 
 /** Tools that remain visible whenever they are bound. */
 const DIRECT_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'Bash',
+  'Shell',
   'Read',
   'Write',
   'Edit',

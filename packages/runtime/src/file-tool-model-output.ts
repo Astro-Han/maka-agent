@@ -41,7 +41,7 @@ export function fileWriteToolResultToModelOutput(
  * turns, compaction, resume — flows through the replay plan. Without this
  * projection the model saw a one-line summary live but the full diff JSON on
  * every later turn, which is both a token leak and a shape inconsistency.
- * Same precedent as `projectBashToolResultForModel`.
+ * Same precedent as `projectShellToolResultForModel`.
  */
 export function projectFileWriteToolResultForModel(toolName: string, output: unknown): unknown {
   if (toolName !== 'Edit' && toolName !== 'Write' && toolName !== 'FormatJson') return output;

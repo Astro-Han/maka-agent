@@ -20,7 +20,7 @@
 // packages/runtime/src/shell-exec.ts
 //
 // Runtime's shared shell runner. It streams stdout/stderr into a
-// BashTailBuffer (keeping only the last `maxRetainedChars` per stream) and lets
+// ShellTailBuffer (keeping only the last `maxRetainedChars` per stream) and lets
 // the command run to completion regardless of output size.
 //
 // It is the dumb core: it always RESOLVES with shell facts, rejecting only when
@@ -29,7 +29,7 @@
 
 import { spawn } from 'node:child_process';
 import { buildShellSpawnPlan, defaultShellPlan, type ShellPlan } from './shell-detect.js';
-import { BashTailBuffer } from './bash-tail-buffer.js';
+import { ShellTailBuffer } from './shell-tail-buffer.js';
 import { DEFAULT_PROCESS_TERMINATION_GRACE_MS } from './process-tree-terminator.js';
 import {
   DEFAULT_PROCESS_IO_DRAIN_TIMEOUT_MS,
@@ -46,8 +46,8 @@ import {
 // Per-stream cap on the output RETAINED for the result (~1MB). This only bounds
 // what is kept to return. The tool layer preserves this result for durable
 // storage; unified result pruning bounds its model projection.
-// Shared so both Bash paths retain identically.
-export const BASH_MAX_RETAINED_CHARS = 1024 * 1024;
+// Shared so both Shell paths retain identically.
+export const SHELL_MAX_RETAINED_CHARS = 1024 * 1024;
 
 // Per-stream cap on output forwarded LIVE via emitOutput (~1MB). The command is
 // never killed for size and the full recoverable tail is still RETAINED (above),
@@ -55,7 +55,7 @@ export const BASH_MAX_RETAINED_CHARS = 1024 * 1024;
 // UI with per-chunk deltas (tool-output-delta has no aggregate cap). Once a
 // stream passes this, we emit one suppressed marker and stop forwarding live;
 // chunks keep flowing into the retained tail buffer.
-export const BASH_MAX_LIVE_EMIT_CHARS = 1024 * 1024;
+export const SHELL_MAX_LIVE_EMIT_CHARS = 1024 * 1024;
 
 // Emitted once per stream when live forwarding is suppressed. The full output is
 // not lost — it still feeds the retained tail and the returned result.
@@ -67,9 +67,9 @@ export interface BoundedShellOptions {
   cwd: string;
   /** Hard wall-clock cap; the child is SIGTERM'd and `timedOut` is set. */
   timeoutMs: number;
-  /** Per-stream retained-tail cap in characters. Defaults to BASH_MAX_RETAINED_CHARS. */
+  /** Per-stream retained-tail cap in characters. Defaults to SHELL_MAX_RETAINED_CHARS. */
   maxRetainedChars?: number;
-  /** Per-stream cap on LIVE emitOutput forwarding. Defaults to BASH_MAX_LIVE_EMIT_CHARS. */
+  /** Per-stream cap on LIVE emitOutput forwarding. Defaults to SHELL_MAX_LIVE_EMIT_CHARS. */
   maxLiveEmitChars?: number;
   /** Child environment. Defaults to the parent process env (spawn's default). */
   env?: NodeJS.ProcessEnv;
@@ -148,8 +148,8 @@ function runSpawnedProcessWithBoundedTail(
   options: BoundedShellOptions,
   stdin?: string,
 ): Promise<BoundedShellResult> {
-  const cap = options.maxRetainedChars ?? BASH_MAX_RETAINED_CHARS;
-  const liveCap = options.maxLiveEmitChars ?? BASH_MAX_LIVE_EMIT_CHARS;
+  const cap = options.maxRetainedChars ?? SHELL_MAX_RETAINED_CHARS;
+  const liveCap = options.maxLiveEmitChars ?? SHELL_MAX_LIVE_EMIT_CHARS;
   const graceMs = options.killGraceMs ?? DEFAULT_PROCESS_TERMINATION_GRACE_MS;
   const ioDrainTimeoutMs = options.ioDrainTimeoutMs ?? DEFAULT_PROCESS_IO_DRAIN_TIMEOUT_MS;
   if (options.abortSignal?.aborted) {
@@ -181,12 +181,12 @@ function runSpawnedProcessWithBoundedTail(
     } finally {
       closeChildFdSources(options.fdInputs);
     }
-    const stdoutBuf = new BashTailBuffer(cap);
-    const stderrBuf = new BashTailBuffer(cap);
+    const stdoutBuf = new ShellTailBuffer(cap);
+    const stderrBuf = new ShellTailBuffer(cap);
     let stdoutChars = 0;
     let stderrChars = 0;
     let settled = false;
-    // Per-stream live-forwarding budget (see BASH_MAX_LIVE_EMIT_CHARS). Once a
+    // Per-stream live-forwarding budget (see SHELL_MAX_LIVE_EMIT_CHARS). Once a
     // stream passes liveCap we emit one marker and stop forwarding it live.
     let liveEmitted = { stdout: 0, stderr: 0 };
     let liveSuppressed = { stdout: false, stderr: false };

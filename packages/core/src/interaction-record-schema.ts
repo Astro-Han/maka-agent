@@ -164,7 +164,7 @@ export function isPermissionRequestPayload(value: unknown): value is PermissionR
   return (
     value.kind === 'sandbox_escalation' &&
     hasExactShape(value, SANDBOX_ESCALATION_SHAPE) &&
-    value.toolName === 'Bash' &&
+    value.toolName === 'Shell' &&
     value.reason === 'sandbox_escalation' &&
     typeof value.command === 'string' &&
     typeof value.cwd === 'string' &&

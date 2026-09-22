@@ -53,7 +53,7 @@ export function buildBackgroundTaskHealthTool(
       'Check a tracked background task and an optional HTTP endpoint. Uses HEAD with one GET fallback for 405/501; discards the body. Reports HTTP status only, not browser loading or ownership of the listener. Redirects are not followed. Logs are omitted by default; use Read(ref) for full logs.',
     parameters: z
       .object({
-        ref: z.string().describe('The maka://runtime/background-tasks/<id> ref returned by Bash'),
+        ref: z.string().describe('The maka://runtime/background-tasks/<id> ref returned by Shell'),
         include_logs: z.boolean().optional().describe('Include captured task logs in this report'),
         url: z
           .string()

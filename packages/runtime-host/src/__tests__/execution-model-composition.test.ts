@@ -29,8 +29,8 @@ import { promisify } from 'node:util';
 import { test } from 'node:test';
 import { z } from 'zod';
 import {
-  DEFAULT_BASH_TIMEOUT_MS,
-  MAX_FOREGROUND_BASH_TIMEOUT_MS,
+  DEFAULT_SHELL_TIMEOUT_MS,
+  MAX_FOREGROUND_SHELL_TIMEOUT_MS,
 } from '@maka/runtime/shell-run-contract';
 import {
   clientCapabilityConnectionIdentity,
@@ -157,9 +157,9 @@ const MIN_IMPLEMENTATION_CHILD_REQUESTS = 6;
 const MAX_IMPLEMENTATION_CHILD_REQUESTS =
   MIN_IMPLEMENTATION_CHILD_REQUESTS + MAX_IMPLEMENTATION_CHILD_PTY_READS - 1;
 const HEADLESS_CODING_V1_PROMPT_HASH =
-  'sha256:b2773282ac4755dc8d8a663eafdec68c3fa6f5680ec8557d261b5f723672b467';
+  'sha256:ba203a8c34f38e34124db97b55ba97b89133e3a5d5492da7eaf24ff011dd51ab';
 const HEADLESS_CODING_V1_TOOLS_HASH =
-  'sha256:9ef90b13f64829ae5baba777e929177838b59c9ed73e12a8c0b24c418ea2e473';
+  'sha256:9a7b825b33d7dd2cf13a31ad750d846a619ee7644306223c56349c7ebc86bcdb';
 const execFileAsync = promisify(execFile);
 test('backend creation resolves a bound Session by immutable Connection identity', async () => {
   let observedRef: unknown;
@@ -244,10 +244,10 @@ test('backend creation aborts a stalled pricing snapshot read', async () => {
   });
 });
 
-test('production Host executes Bash against the current live sandbox boundary', {
+test('production Host executes Shell against the current live sandbox boundary', {
   skip: process.platform === 'win32' ? 'Managed arbitrary-shell sandboxing is unavailable' : false,
 }, async () => {
-  const base = await mkdtemp(join(tmpdir(), 'maka-host-managed-bash-'));
+  const base = await mkdtemp(join(tmpdir(), 'maka-host-managed-shell-'));
   const root = join(base, 'interactive');
   const project = join(base, 'project');
   let outsideRoot: string | undefined;
@@ -258,8 +258,8 @@ test('production Host executes Bash against the current live sandbox boundary', 
   assert.ok(owner);
   if (!owner) return;
   const context: ConnectionContext = {
-    hostEpoch: 'managed-bash-test-epoch',
-    connectionId: 'managed-bash-test-client',
+    hostEpoch: 'managed-shell-test-epoch',
+    connectionId: 'managed-shell-test-client',
     principal: 'local_os_user',
     acquireResidency: () => ({ release() {} }),
   };
@@ -268,20 +268,20 @@ test('production Host executes Bash against the current live sandbox boundary', 
     if (process.platform === 'darwin') {
       outsideRoot = await mkdtemp(join(homedir(), '.maka-host-sandbox-boundary-'));
       sandboxPaths = {
-        outsideBash: join(outsideRoot, 'bash-denied.txt'),
+        outsideShell: join(outsideRoot, 'shell-denied.txt'),
         outsideWrite: join(outsideRoot, 'write-denied.txt'),
-        workspaceBash: join(project, 'bash-allowed.txt'),
+        workspaceShell: join(project, 'shell-allowed.txt'),
         workspaceWrite: join(project, 'write-allowed.txt'),
       };
     }
-    provider.configureManagedBashFlow(sandboxPaths);
+    provider.configureManagedShellFlow(sandboxPaths);
     await mkdir(project);
     const policy = await openInteractiveRuntimePolicyStoresForWrite(owner.lease);
     const created = await policy.connectionCatalog.create({
       expectedCatalogRevision: 0,
       connection: {
-        slug: 'hosted-managed-bash-provider',
-        name: 'Hosted managed Bash provider',
+        slug: 'hosted-managed-shell-provider',
+        name: 'Hosted managed Shell provider',
         providerType: 'moonshot',
         baseUrl: provider.baseUrl,
         enabled: true,
@@ -313,7 +313,7 @@ test('production Host executes Bash against the current live sandbox boundary', 
     const session = await execution.sessionStore.create({
       cwd: project,
       llmConnectionId: connection.connectionId,
-      llmConnectionSlug: 'hosted-managed-bash-provider',
+      llmConnectionSlug: 'hosted-managed-shell-provider',
       model: MODEL_ID,
       sandboxMode: 'workspace-write',
     });
@@ -330,7 +330,7 @@ test('production Host executes Bash against the current live sandbox boundary', 
     });
     await composition.recover();
 
-    const firstTurnId = 'hosted-managed-bash-turn-1';
+    const firstTurnId = 'hosted-managed-shell-turn-1';
     const firstTerminal = await waitForTerminal(
       composition,
       session.id,
@@ -361,7 +361,7 @@ test('production Host executes Bash against the current live sandbox boundary', 
     );
     const mainRequests = provider.requests.filter((request) => request.body.stream === true);
     assert.equal(mainRequests.length, 2);
-    assert.deepEqual(toolParameterEnum(mainRequests[0]?.body, 'Bash', 'boundary_intent'), [
+    assert.deepEqual(toolParameterEnum(mainRequests[0]?.body, 'Shell', 'boundary_intent'), [
       'current',
       'expand',
     ]);
@@ -377,21 +377,21 @@ test('production Host executes Bash against the current live sandbox boundary', 
       session.id,
       firstTerminal.runId,
     );
-    const bashCall = firstRuntimeEvents.find(
-      (event) => event.content?.kind === 'function_call' && event.content.name === 'Bash',
+    const shellCall = firstRuntimeEvents.find(
+      (event) => event.content?.kind === 'function_call' && event.content.name === 'Shell',
     );
     assert.equal(
-      bashCall?.content?.kind === 'function_call'
-        ? (bashCall.content.args as { boundary_intent?: unknown }).boundary_intent
+      shellCall?.content?.kind === 'function_call'
+        ? (shellCall.content.args as { boundary_intent?: unknown }).boundary_intent
         : undefined,
       'current',
     );
-    const bashResult = firstRuntimeEvents.find(
-      (event) => event.content?.kind === 'function_response' && event.content.name === 'Bash',
+    const shellResult = firstRuntimeEvents.find(
+      (event) => event.content?.kind === 'function_response' && event.content.name === 'Shell',
     );
-    assert.equal(bashResult?.content?.kind, 'function_response');
-    if (bashResult?.content?.kind === 'function_response') {
-      assert.notEqual(bashResult.content.isError, true);
+    assert.equal(shellResult?.content?.kind, 'function_response');
+    if (shellResult?.content?.kind === 'function_response') {
+      assert.notEqual(shellResult.content.isError, true);
     }
     assert.equal(
       firstRuntimeEvents.some(
@@ -400,7 +400,7 @@ test('production Host executes Bash against the current live sandbox boundary', 
       false,
     );
 
-    const requestId = 'hosted-managed-bash-network-expansion';
+    const requestId = 'hosted-managed-shell-network-expansion';
     await execution.sessionStore.createSandboxBoundaryRequest({
       sessionId: session.id,
       requestId,
@@ -417,7 +417,7 @@ test('production Host executes Bash against the current live sandbox boundary', 
     assert.equal(expanded.changed, true);
     assert.equal(expanded.boundary.revision, 1);
 
-    const secondTurnId = 'hosted-managed-bash-turn-2';
+    const secondTurnId = 'hosted-managed-shell-turn-2';
     const secondTerminal = await waitForTerminal(
       composition,
       session.id,
@@ -466,9 +466,9 @@ test('production Host executes Bash against the current live sandbox boundary', 
         latestToolResultText(sandboxRequests[5]!.body) ?? '',
         /sandbox_boundary_required/u,
       );
-      assert.equal(await fileExists(sandboxPaths.outsideBash), false);
+      assert.equal(await fileExists(sandboxPaths.outsideShell), false);
       assert.equal(await fileExists(sandboxPaths.outsideWrite), false);
-      assert.equal(await readFile(sandboxPaths.workspaceBash, 'utf8'), 'bash allowed');
+      assert.equal(await readFile(sandboxPaths.workspaceShell, 'utf8'), 'shell allowed');
       assert.equal(await readFile(sandboxPaths.workspaceWrite, 'utf8'), 'write allowed');
 
       const sandboxEvents = await execution.runtimeEventStore.readRuntimeEvents(
@@ -488,9 +488,9 @@ test('production Host executes Bash against the current live sandbox boundary', 
             : undefined,
         ),
         [
-          { name: 'Bash', isError: true },
+          { name: 'Shell', isError: true },
           { name: 'Write', isError: true },
-          { name: 'Bash', isError: false },
+          { name: 'Shell', isError: false },
           { name: 'Write', isError: false },
         ],
       );
@@ -777,7 +777,7 @@ async function runPermissionUpdateHostRegression(
       );
       assert.ok(activeGoalRun, 'Goal continuation did not hold an active Run');
       if (!activeGoalRun) return;
-      assert.equal(activeGoalRun.opening.configuration.sandboxMode, 'explore');
+      assert.equal(activeGoalRun.opening.configuration.sandboxMode, 'read-only');
       exercisedRunId = activeGoalRun.runId;
 
       await commitBypassPermissionUpdate(composition, execution, session.id, context);
@@ -785,8 +785,14 @@ async function runPermissionUpdateHostRegression(
       await waitForGoalStatus(composition, session.id, 'achieved', context);
     }
 
-    assert.equal((await execution.sessionStore.readHeader(session.id)).sandboxMode, 'bypass');
-    assert.equal((await execution.sessionStore.readExecutionBoundary(session.id)).kind, 'bypass');
+    assert.equal(
+      (await execution.sessionStore.readHeader(session.id)).sandboxMode,
+      'danger-full-access',
+    );
+    assert.equal(
+      (await execution.sessionStore.readExecutionBoundary(session.id)).kind,
+      'danger-full-access',
+    );
     assert.equal(admitted, 1);
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0]?.arguments, {
@@ -842,7 +848,7 @@ async function commitBypassPermissionUpdate(
   if (!updated.ok) return;
   assert.equal(updated.result.kind, 'committed');
   if (updated.result.kind !== 'committed' || 'kind' in updated.result.session) return;
-  assert.equal(updated.result.session.sandboxMode, 'bypass');
+  assert.equal(updated.result.session.sandboxMode, 'danger-full-access');
 }
 
 async function waitForGoalStatus(
@@ -2543,31 +2549,31 @@ test('hosted execution freezes the headless coding provider wire contract', asyn
     assert.equal(stableHash(instructions), HEADLESS_CODING_V1_PROMPT_HASH);
     assert.equal(stableHash(tools), HEADLESS_CODING_V1_TOOLS_HASH);
     assert.deepEqual(responsesToolNames(request?.body), [
-      'Bash',
       'Edit',
       'Glob',
       'Grep',
       'Read',
+      'Shell',
       'StopBackgroundTask',
       'Write',
       'WriteStdin',
     ]);
-    const bash = (tools as Array<Record<string, unknown>>).find((tool) => tool.name === 'Bash');
-    assert.ok(bash);
-    // The Eval session runs with Full access: the product Bash, minus the
+    const shell = (tools as Array<Record<string, unknown>>).find((tool) => tool.name === 'Shell');
+    assert.ok(shell);
+    // The Eval session runs with Full access: the product Shell, minus the
     // boundary declaration that Full access has nothing to enforce.
     assert.deepEqual(
-      Object.keys((bash.parameters as { properties: Record<string, unknown> }).properties),
+      Object.keys((shell.parameters as { properties: Record<string, unknown> }).properties),
       ['command', 'timeout_ms', 'run_in_background', 'pty'],
     );
     assert.match(
-      String(bash.description),
+      String(shell.description),
       new RegExp(
-        `timeout ${DEFAULT_BASH_TIMEOUT_MS}ms, maximum ${MAX_FOREGROUND_BASH_TIMEOUT_MS}ms`,
+        `timeout ${DEFAULT_SHELL_TIMEOUT_MS}ms, maximum ${MAX_FOREGROUND_SHELL_TIMEOUT_MS}ms`,
         'u',
       ),
     );
-    assert.doesNotMatch(String(bash.description), /sandbox boundary/u);
+    assert.doesNotMatch(String(shell.description), /sandbox boundary/u);
     assert.equal(responsesToolNames(request?.body).includes('request_sandbox_boundary'), false);
 
     const stores = await openInteractiveExecutionStoresForWrite(owner.lease);
@@ -2829,11 +2835,11 @@ test('production Host executes a canonical ai-sdk Session against a real provide
     // Non-direct bound tools stay deferred until activated by tool_search.
     assert.deepEqual(toolNames(request?.body), [
       'AskUserQuestion',
-      'Bash',
       'Edit',
       'Glob',
       'Grep',
       'Read',
+      'Shell',
       'Skill',
       'SkillSearch',
       'StopBackgroundTask',
@@ -3524,11 +3530,11 @@ test('production Host publishes and retires an implementation child patch', asyn
       'implementation',
     ]);
     const childToolNames = [
-      'Bash',
       'Edit',
       'Glob',
       'Grep',
       'Read',
+      'Shell',
       'StopBackgroundTask',
       'Write',
       'WriteStdin',
@@ -3551,9 +3557,9 @@ test('production Host publishes and retires an implementation child patch', asyn
     if (!child) return;
     // The persisted header is a configuration projection, not execution
     // authority, and may be narrower than the inherited live boundary.
-    assert.notEqual(child.sandboxMode, 'bypass');
+    assert.notEqual(child.sandboxMode, 'danger-full-access');
     const childBoundary = await execution.sessionStore.readExecutionBoundary(child.id);
-    assert.equal(childBoundary.kind, 'bypass');
+    assert.equal(childBoundary.kind, 'danger-full-access');
     assert.ok(child.subagentWorkspace);
     assert.equal(child.cwd, child.subagentWorkspace?.worktreePath);
     assert.equal(await fileExists(join(project, 'implementation.txt')), false);
@@ -4482,11 +4488,11 @@ test('one composer freezes Runtime Policy while each Run freezes its remaining p
   );
 });
 
-test('backend composition survives a moved saved Git Bash executable while Bash fails closed', async () => {
+test('backend composition survives a moved saved Git Bash executable while Shell fails closed', async () => {
   // A previously valid Git Bash path that was moved or uninstalled is a
   // repairable optional-tool configuration error: it must not fail text-only
   // backend composition. The turn plan carries the setup error, the tool
-  // description declares the outage, and the Bash boundary rethrows it
+  // description declares the outage, and the Shell boundary rethrows it
   // instead of silently falling back to another shell.
   const policy = {
     ...createDefaultRuntimePolicy(),
@@ -4543,20 +4549,20 @@ test('backend composition survives a moved saved Git Bash executable while Bash 
     contextWindow: null,
   });
 
-  const bash = composer.tools.find((tool) => tool.name === 'Bash') as
+  const shell = composer.tools.find((tool) => tool.name === 'Shell') as
     | MakaTool<{ command: string }, unknown>
     | undefined;
-  assert.ok(bash, 'expected the default tool surface to include Bash');
+  assert.ok(shell, 'expected the default tool surface to include Shell');
   const unavailableShell = resolveTurnShellPlan(policy.shell, {
     platform: 'win32',
     fileExists: () => false,
   });
   assert.equal(unavailableShell.setupError?.code, 'executable_missing');
-  assert.match(bash.description, /unavailable this turn/);
-  assert.doesNotMatch(bash.description, /write PowerShell syntax/);
+  assert.match(shell.description, /unavailable this turn/);
+  assert.doesNotMatch(shell.description, /write PowerShell syntax/);
   await assert.rejects(
     async () => {
-      await bash.impl({ command: 'echo never-runs' }, {
+      await shell.impl({ command: 'echo never-runs' }, {
         sessionId: 'session',
         turnId: 'turn-1',
         cwd: '/workspace',
@@ -4605,12 +4611,12 @@ test('backend composition survives a moved saved Git Bash executable while Bash 
     1,
     'a child activation must not re-read shell policy after Runtime captured its plan',
   );
-  const capturedBash = childComposer.tools.find((tool) => tool.name === 'Bash');
-  assert.match(capturedBash?.description ?? '', /captured child shell/);
-  assert.doesNotMatch(capturedBash?.description ?? '', /unavailable this turn/);
+  const capturedShell = childComposer.tools.find((tool) => tool.name === 'Shell');
+  assert.match(capturedShell?.description ?? '', /captured child shell/);
+  assert.doesNotMatch(capturedShell?.description ?? '', /unavailable this turn/);
 });
 
-test('child execution Bash carries the configured shell guidance and spawn plan', async () => {
+test('child execution Shell carries the configured shell guidance and spawn plan', async () => {
   const calls: unknown[] = [];
   const shell = {
     plan: {
@@ -4623,7 +4629,7 @@ test('child execution Bash carries the configured shell guidance and spawn plan'
     builtinTools: {
       shell,
       shellRuns: {
-        async runForegroundBash(input) {
+        async runForegroundShell(input) {
           calls.push(input);
           return {
             kind: 'terminal' as const,
@@ -4641,27 +4647,27 @@ test('child execution Bash carries the configured shell guidance and spawn plan'
             },
           };
         },
-        async runBackgroundBash() {
+        async runBackgroundShell() {
           throw new Error('background execution was not requested');
         },
       },
     },
     worktreePatchWriteBackAvailable: true,
   });
-  const bash = composition.childTools.find((tool) => tool.name === 'Bash') as
+  const shellTool = composition.childTools.find((tool) => tool.name === 'Shell') as
     | MakaTool<{ command: string }, unknown>
     | undefined;
-  assert.ok(bash);
-  assert.match(bash.description, /Git Bash/);
-  assert.match(bash.description, /POSIX shell syntax/);
+  assert.ok(shellTool);
+  assert.match(shellTool.description, /Git Bash/);
+  assert.match(shellTool.description, /POSIX shell syntax/);
 
-  await bash.impl(
+  await shellTool.impl(
     { command: 'printf child-shell' },
     {
       sessionId: 'child-session',
       turnId: 'child-turn',
       cwd: '/workspace',
-      toolCallId: 'child-bash',
+      toolCallId: 'child-shell',
       abortSignal: new AbortController().signal,
       emitOutput: () => {},
     },
@@ -4735,8 +4741,8 @@ test('the headless coding profile freezes the Eval prompt and tool ceiling', asy
     sessionTodo: {} as SessionTodoToolStore,
     builtinTools: {
       shellRuns: {
-        runForegroundBash: () => Promise.reject(new Error('not used')),
-        runBackgroundBash: () => Promise.reject(new Error('not used')),
+        runForegroundShell: () => Promise.reject(new Error('not used')),
+        runBackgroundShell: () => Promise.reject(new Error('not used')),
       },
       backgroundTasks: { stopBackgroundTask: () => Promise.reject(new Error('not used')) },
       ptyControls: { writeStdin: () => Promise.reject(new Error('not used')) },
@@ -4754,7 +4760,7 @@ test('the headless coding profile freezes the Eval prompt and tool ceiling', asy
   assert.deepEqual(
     composition.tools.map(({ name }) => name),
     [
-      'Bash',
+      'Shell',
       'StopBackgroundTask',
       'WriteStdin',
       'Read',
@@ -4776,7 +4782,7 @@ test('the headless coding profile freezes the Eval prompt and tool ceiling', asy
     ).text,
     [
       'Complete the task by acting with the available tools, not by narrating.',
-      'Prefer Read, Glob, and Grep for inspection, Edit and Write for file changes, and Bash for shell commands and tests.',
+      'Prefer Read, Glob, and Grep for inspection, Edit and Write for file changes, and Shell for shell commands and tests.',
       'Verify the result when practical.',
       'Stop when the task is complete.',
     ].join('\n'),
@@ -5401,9 +5407,9 @@ interface ProviderRequest {
 }
 
 interface ManagedSandboxPaths {
-  readonly outsideBash: string;
+  readonly outsideShell: string;
   readonly outsideWrite: string;
-  readonly workspaceBash: string;
+  readonly workspaceShell: string;
   readonly workspaceWrite: string;
 }
 
@@ -5419,7 +5425,7 @@ type ProviderFlow =
       goalEvaluationCount: number;
     }
   | {
-      readonly kind: 'managed_bash';
+      readonly kind: 'managed_shell';
       readonly sandboxPaths?: ManagedSandboxPaths;
     }
   | {
@@ -5447,7 +5453,7 @@ async function startProvider(): Promise<{
     readonly activeRequestStarted: Promise<void>;
     releaseActiveRequest(): void;
   };
-  configureManagedBashFlow(sandboxPaths?: ManagedSandboxPaths): void;
+  configureManagedShellFlow(sandboxPaths?: ManagedSandboxPaths): void;
   configureClientCapability(input: { groupId: string; toolName: string }): void;
   configureProjectionImageFlow(toolName: string): void;
   configureChildAgentFlow(): void;
@@ -5492,10 +5498,10 @@ async function startProvider(): Promise<{
         releaseActiveRequest: () => activeRequestRelease.resolve(),
       };
     },
-    configureManagedBashFlow: (sandboxPaths) => {
+    configureManagedShellFlow: (sandboxPaths) => {
       if (flow.kind !== 'default') throw new Error('Provider flow is already configured');
       flow = {
-        kind: 'managed_bash',
+        kind: 'managed_shell',
         ...(sandboxPaths ? { sandboxPaths } : {}),
       };
     },
@@ -5656,9 +5662,9 @@ async function handleProviderRequest(
     respondProviderText(response, RESPONSE_TEXT);
     return;
   }
-  if (flow.kind === 'managed_bash' && streamRequestIndex === 1) {
-    assert.ok(toolNames(body).includes('Bash'));
-    respondProviderToolCall(response, streamRequestIndex, 'Bash', {
+  if (flow.kind === 'managed_shell' && streamRequestIndex === 1) {
+    assert.ok(toolNames(body).includes('Shell'));
+    respondProviderToolCall(response, streamRequestIndex, 'Shell', {
       command: '/bin/pwd',
       required_boundary: {
         filesystem: {
@@ -5669,35 +5675,35 @@ async function handleProviderRequest(
     });
     return;
   }
-  if (flow.kind === 'managed_bash' && flow.sandboxPaths && streamRequestIndex === 4) {
-    respondProviderToolCall(response, streamRequestIndex, 'Bash', {
-      command: `printf denied > ${JSON.stringify(flow.sandboxPaths.outsideBash)}`,
+  if (flow.kind === 'managed_shell' && flow.sandboxPaths && streamRequestIndex === 4) {
+    respondProviderToolCall(response, streamRequestIndex, 'Shell', {
+      command: `printf denied > ${JSON.stringify(flow.sandboxPaths.outsideShell)}`,
       boundary_intent: 'current',
     });
     return;
   }
-  if (flow.kind === 'managed_bash' && flow.sandboxPaths && streamRequestIndex === 5) {
+  if (flow.kind === 'managed_shell' && flow.sandboxPaths && streamRequestIndex === 5) {
     respondProviderToolCall(response, streamRequestIndex, 'Write', {
       path: flow.sandboxPaths.outsideWrite,
       content: 'write denied',
     });
     return;
   }
-  if (flow.kind === 'managed_bash' && flow.sandboxPaths && streamRequestIndex === 6) {
-    respondProviderToolCall(response, streamRequestIndex, 'Bash', {
-      command: `printf 'bash allowed' > ${JSON.stringify(flow.sandboxPaths.workspaceBash)}`,
+  if (flow.kind === 'managed_shell' && flow.sandboxPaths && streamRequestIndex === 6) {
+    respondProviderToolCall(response, streamRequestIndex, 'Shell', {
+      command: `printf 'shell allowed' > ${JSON.stringify(flow.sandboxPaths.workspaceShell)}`,
       boundary_intent: 'current',
     });
     return;
   }
-  if (flow.kind === 'managed_bash' && flow.sandboxPaths && streamRequestIndex === 7) {
+  if (flow.kind === 'managed_shell' && flow.sandboxPaths && streamRequestIndex === 7) {
     respondProviderToolCall(response, streamRequestIndex, 'Write', {
       path: flow.sandboxPaths.workspaceWrite,
       content: 'write allowed',
     });
     return;
   }
-  if (flow.kind === 'managed_bash') {
+  if (flow.kind === 'managed_shell') {
     respondProviderText(response, RESPONSE_TEXT);
     return;
   }
@@ -5748,11 +5754,11 @@ async function handleProviderRequest(
   }
   if (flow.kind === 'implementation_child_agent' && streamRequestIndex === 3) {
     assert.deepEqual(toolNames(body), [
-      'Bash',
       'Edit',
       'Glob',
       'Grep',
       'Read',
+      'Shell',
       'StopBackgroundTask',
       'Write',
       'WriteStdin',
@@ -5764,7 +5770,7 @@ async function handleProviderRequest(
     return;
   }
   if (flow.kind === 'implementation_child_agent' && streamRequestIndex === 4) {
-    respondProviderToolCall(response, streamRequestIndex, 'Bash', {
+    respondProviderToolCall(response, streamRequestIndex, 'Shell', {
       command: 'node pty-child.mjs',
       boundary_intent: 'current',
       run_in_background: true,

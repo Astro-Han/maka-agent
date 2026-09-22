@@ -1399,7 +1399,7 @@ export class SessionManager {
     const ownToolCalls = new Set(ownUpdates.map((update) => update.sourceToolCallId));
     const messages = await this.readShellRunProjectionMessages(sessionId);
     if (!messages) return ownUpdates;
-    const bashToolCalls = shellRunBashToolCallIds(messages);
+    const shellToolCalls = shellRunShellToolCallIds(messages);
     const inherited = new Map<
       string,
       {
@@ -1412,7 +1412,7 @@ export class SessionManager {
     for (const message of messages) {
       if (
         message.type === 'tool_result' &&
-        bashToolCalls.has(message.toolUseId) &&
+        shellToolCalls.has(message.toolUseId) &&
         !ownToolCalls.has(message.toolUseId) &&
         message.content.kind === 'shell_run' &&
         isActiveShellRunStatus(message.content.status)
@@ -1460,7 +1460,7 @@ export class SessionManager {
 
     const messages = await this.readShellRunProjectionMessages(sessionId);
     if (!messages) return null;
-    const bashToolCalls = shellRunBashToolCallIds(messages);
+    const shellToolCalls = shellRunShellToolCallIds(messages);
     let candidate:
       | {
           turnId: string;
@@ -1471,7 +1471,7 @@ export class SessionManager {
     for (const message of messages) {
       if (
         message.type === 'tool_result' &&
-        bashToolCalls.has(message.toolUseId) &&
+        shellToolCalls.has(message.toolUseId) &&
         message.content.kind === 'shell_run' &&
         message.content.ref === ref &&
         isActiveShellRunStatus(message.content.status)
@@ -5716,10 +5716,10 @@ function tail<T>(items: readonly T[], max: number): T[] {
   return items.slice(items.length - max);
 }
 
-function shellRunBashToolCallIds(messages: readonly StoredMessage[]): Set<string> {
+function shellRunShellToolCallIds(messages: readonly StoredMessage[]): Set<string> {
   return new Set(
     messages.flatMap((message) =>
-      message.type === 'tool_call' && message.toolName === 'Bash' ? [message.id] : [],
+      message.type === 'tool_call' && message.toolName === 'Shell' ? [message.id] : [],
     ),
   );
 }

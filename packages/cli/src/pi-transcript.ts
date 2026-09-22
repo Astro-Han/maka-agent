@@ -529,7 +529,7 @@ export function hydrateToolsWithStoredMessages(
     if (
       durable.result?.kind === 'shell_run' &&
       durable.callStatus !== 'errored' &&
-      entry.toolName === 'Bash'
+      entry.toolName === 'Shell'
     ) {
       applyShellRunResult(entry, structuredClone(durable.result));
     } else if (durable.result !== undefined && entry.result === undefined) {
@@ -819,7 +819,7 @@ export function applyMakaSessionEventToTranscript(
       break;
 
     case 'tool_start': {
-      // A Read / StopBackgroundTask aimed at a ref a visible Bash card owns is
+      // A Read / StopBackgroundTask aimed at a ref a visible Shell card owns is
       // internal polling of that run: it never gets a row, so an active polling
       // loop cannot flicker cards in and out of the transcript. The result
       // folds into the parent at tool_result. A poll is folded only when its
@@ -874,7 +874,7 @@ export function applyMakaSessionEventToTranscript(
         if (tool.suppressed) unsuppressToolAtTail(state, tool);
         tool.callStatus = toolResultActivityStatus(event.isError, event.content);
         if (shellRun) {
-          if (tool.toolName === 'Bash') {
+          if (tool.toolName === 'Shell') {
             applyShellRunResult(tool, shellRun);
           } else {
             applyOwnShellRunResult(tool, shellRun, event.durationMs);
@@ -1182,7 +1182,7 @@ function foldStoredShellRunChildren(entries: MakaPiTranscriptEntry[]): MakaPiTra
         .find(
           (candidate): candidate is MakaPiToolEntry =>
             candidate.kind === 'tool' &&
-            candidate.toolName === 'Bash' &&
+            candidate.toolName === 'Shell' &&
             candidate.result?.kind === 'shell_run' &&
             candidate.result.ref === shellRun.ref,
         );
@@ -2094,7 +2094,7 @@ function unsuppressToolAtTail(state: MakaPiTranscriptState, tool: MakaPiToolEntr
 }
 
 function isShellRunToolCard(tool: MakaPiToolEntry): boolean {
-  return tool.toolName === 'Bash' || tool.userOwned === true;
+  return tool.toolName === 'Shell' || tool.userOwned === true;
 }
 
 function createProgressBuffer(): BoundedChunkBuffer<string> {
@@ -2126,7 +2126,7 @@ function findShellRunParent(
     .find(
       (entry): entry is MakaPiToolEntry =>
         entry.kind === 'tool' &&
-        entry.toolName === 'Bash' &&
+        entry.toolName === 'Shell' &&
         entry.toolUseId !== childToolUseId &&
         entry.result?.kind === 'shell_run' &&
         entry.result.ref === ref,
@@ -2159,7 +2159,7 @@ function isLiveShellRunCard(entry: MakaPiToolEntry | undefined): boolean {
 }
 
 /**
- * Apply a live result to a parent Bash card, announcing a running → settled
+ * Apply a live result to a parent Shell card, announcing a running → settled
  * transition exactly once. Shared by both poll paths (folded at tool_start and
  * the tool_result fold) so a settle observed through the model's polling
  * notifies the same way as the event-driven update.

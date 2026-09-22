@@ -179,7 +179,7 @@ describe('ToolRuntime session sandbox boundary', () => {
       getPermissionPauseTarget: () => null,
     });
     const tool: MakaTool = {
-      name: 'Bash',
+      name: 'Shell',
       description: 'test',
       parameters: {},
       impl: (_args, context) => {
@@ -227,7 +227,7 @@ describe('ToolRuntime session sandbox boundary', () => {
     await settle(
       runtime,
       {
-        name: 'Bash',
+        name: 'Shell',
         description: 'test',
         parameters: {},
         impl: (_args, context) => {
@@ -862,7 +862,7 @@ describe('ToolRuntime session sandbox boundary', () => {
       getPermissionPauseTarget: () => null,
     });
     const invalid: MakaTool = {
-      name: 'Bash',
+      name: 'Shell',
       description: 'invalid boundary declaration',
       parameters: {},
       impl: () => {
@@ -875,7 +875,7 @@ describe('ToolRuntime session sandbox boundary', () => {
       },
     };
     const unresolved: MakaTool = {
-      name: 'Bash',
+      name: 'Shell',
       description: 'unresolved boundary declaration',
       parameters: {},
       impl: () => {
@@ -1071,7 +1071,7 @@ describe('ToolRuntime session sandbox boundary', () => {
       getPermissionPauseTarget: () => null,
     });
     const tool: MakaTool = {
-      name: 'Bash',
+      name: 'Shell',
       description: 'test',
       parameters: {},
       impl: () => {

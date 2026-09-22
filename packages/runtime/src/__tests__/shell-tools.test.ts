@@ -21,8 +21,8 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { TERMINAL_MOUSE_EVENTS } from '@maka/core/terminal-input';
 import {
-  buildLocalForegroundBashTool,
-  buildManagedBashTool,
+  buildLocalForegroundShellTool,
+  buildManagedShellTool,
   createWriteStdinSchemas,
   shapeTerminalResult,
   WRITE_STDIN_EXAMPLE_REF,
@@ -39,7 +39,7 @@ const pwshPlan: ShellPlan = {
 };
 
 test('an explicit Git Bash tool declares POSIX syntax', () => {
-  const tool = buildLocalForegroundBashTool({
+  const tool = buildLocalForegroundShellTool({
     shell: {
       plan: {
         kind: 'git-bash',
@@ -53,7 +53,7 @@ test('an explicit Git Bash tool declares POSIX syntax', () => {
   assert.doesNotMatch(tool.description, /write PowerShell syntax/);
 });
 
-describe('Bash tool fails closed when the turn shell plan carries a setup error', () => {
+describe('Shell tool fails closed when the turn shell plan carries a setup error', () => {
   const brokenShell = {
     plan: { kind: 'cmd', displayName: 'cmd.exe' } as ShellPlan,
     setupError: new ShellPreferenceError(
@@ -63,13 +63,13 @@ describe('Bash tool fails closed when the turn shell plan carries a setup error'
   };
 
   test('description declares the outage instead of dialect guidance', () => {
-    const tool = buildLocalForegroundBashTool({ shell: brokenShell });
+    const tool = buildLocalForegroundShellTool({ shell: brokenShell });
     assert.match(tool.description, /unavailable this turn/);
     assert.doesNotMatch(tool.description, /write cmd syntax/);
   });
 
   test('local foreground execution throws the setup error before spawning', async () => {
-    const tool = buildLocalForegroundBashTool({ shell: brokenShell });
+    const tool = buildLocalForegroundShellTool({ shell: brokenShell });
     await assert.rejects(
       async () => {
         await tool.impl({ command: 'echo never-runs' }, fakeToolContext());
@@ -84,10 +84,10 @@ describe('Bash tool fails closed when the turn shell plan carries a setup error'
 
   test('managed execution throws before any shell-run reaches the host', async () => {
     const controller: ShellRunLauncher = {
-      runForegroundBash: () => Promise.reject(new Error('must not be called')),
-      runBackgroundBash: () => Promise.reject(new Error('must not be called')),
+      runForegroundShell: () => Promise.reject(new Error('must not be called')),
+      runBackgroundShell: () => Promise.reject(new Error('must not be called')),
     };
-    const tool = buildManagedBashTool(controller, { shell: brokenShell });
+    const tool = buildManagedShellTool(controller, { shell: brokenShell });
     await assert.rejects(async () => {
       await tool.impl({ command: 'echo never-runs' }, fakeToolContext());
     }, ShellPreferenceError);
@@ -97,13 +97,13 @@ describe('Bash tool fails closed when the turn shell plan carries a setup error'
   });
 });
 
-describe('Bash tool shell is threaded through to execution, not just the description', () => {
+describe('Shell tool shell is threaded through to execution, not just the description', () => {
   test('foreground tool executes with the same shell it declares', async () => {
     // /bin/echo stands in for pwsh.exe: if the tool's shell reaches the
     // spawn, stdout echoes the PowerShell flags and wrapper back. A shell that only
     // reached the description would run via the default POSIX shell and
     // print a bare 'wired-marker'.
-    const tool = buildLocalForegroundBashTool({
+    const tool = buildLocalForegroundShellTool({
       shell: { plan: { kind: 'pwsh', displayName: 'PowerShell 7 (pwsh)', exe: '/bin/echo' } },
     });
     const result = (await tool.impl({ command: 'echo wired-marker' }, fakeToolContext())) as {
@@ -120,8 +120,8 @@ describe('Bash tool shell is threaded through to execution, not just the descrip
   test('background tool forwards its shell to the shell-run controller', async () => {
     const captured: unknown[] = [];
     const controller: ShellRunLauncher = {
-      runForegroundBash: () => Promise.reject(new Error('not used')),
-      runBackgroundBash: (input: unknown) => {
+      runForegroundShell: () => Promise.reject(new Error('not used')),
+      runBackgroundShell: (input: unknown) => {
         captured.push(input);
         return Promise.resolve({
           kind: 'shell_run',
@@ -136,7 +136,7 @@ describe('Bash tool shell is threaded through to execution, not just the descrip
         });
       },
     };
-    const tool = buildManagedBashTool(controller, { shell: { plan: pwshPlan } });
+    const tool = buildManagedShellTool(controller, { shell: { plan: pwshPlan } });
     await tool.impl({ command: 'echo hi', run_in_background: true }, fakeToolContext());
     assert.deepEqual((captured[0] as { shell?: unknown }).shell, pwshPlan);
   });
@@ -144,7 +144,7 @@ describe('Bash tool shell is threaded through to execution, not just the descrip
   test('managed completion callback remains exactly-once when the launcher settles it', async () => {
     let completionCount = 0;
     const controller: ShellRunLauncher = {
-      async runForegroundBash(input) {
+      async runForegroundShell(input) {
         input.onCompletion?.({ successful: true });
         return {
           kind: 'terminal',
@@ -162,9 +162,9 @@ describe('Bash tool shell is threaded through to execution, not just the descrip
           },
         };
       },
-      runBackgroundBash: () => Promise.reject(new Error('not used')),
+      runBackgroundShell: () => Promise.reject(new Error('not used')),
     };
-    const tool = buildManagedBashTool(controller, {
+    const tool = buildManagedShellTool(controller, {
       transformCommand: ({ ctx }) => ({
         cwd: ctx.cwd,
         onCompletion: () => {
@@ -178,9 +178,9 @@ describe('Bash tool shell is threaded through to execution, not just the descrip
   });
 });
 
-describe('Bash provider-facing result projection', () => {
-  test('managed Bash removes only the duplicated foreground command', async () => {
-    const tool = buildManagedBashTool(fakeShellRuns());
+describe('Shell provider-facing result projection', () => {
+  test('managed Shell removes only the duplicated foreground command', async () => {
+    const tool = buildManagedShellTool(fakeShellRuns());
     const terminal = {
       kind: 'terminal',
       cwd: '/workspace',
@@ -434,7 +434,7 @@ function fakeToolContext() {
 
 function fakeShellRuns() {
   return {
-    runForegroundBash: () => Promise.reject(new Error('not used')),
-    runBackgroundBash: () => Promise.reject(new Error('not used')),
+    runForegroundShell: () => Promise.reject(new Error('not used')),
+    runBackgroundShell: () => Promise.reject(new Error('not used')),
   };
 }

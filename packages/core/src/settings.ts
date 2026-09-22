@@ -542,7 +542,7 @@ export interface SystemSettings {
   keepSystemAwake: boolean;
 }
 
-/** Host-machine shell preference used by Bash tools and interactive PTYs. */
+/** Host-machine shell preference used by Shell tools and interactive PTYs. */
 export type ShellPreference = 'auto' | 'git_bash';
 
 export interface ShellSettings {

@@ -31,14 +31,14 @@ import {
 } from './sandbox-boundary-path.js';
 import type { MakaToolContext } from './tool-runtime.js';
 
-export const BASH_REQUIRED_BOUNDARY_DESCRIPTION =
+export const SHELL_REQUIRED_BOUNDARY_DESCRIPTION =
   'A specific boundary requirement used only when boundary_intent is expand; under current it has ' +
   'no authority effect and should be omitted. With expand, repeat the same declaration when retrying ' +
   'after approval: normalized absolute paths, subtree for a directory, exact for a file, and network ' +
   'only when the process needs sockets, including loopback connections or listeners. Never add ' +
   'authority speculatively.';
 
-export const bashBoundaryIntentSchema = z
+export const shellBoundaryIntentSchema = z
   .enum(['current', 'expand'])
   .default('current')
   .describe(
@@ -103,11 +103,11 @@ export const sandboxBoundaryExpansionSchema = z
  * with the execution contract: `current` carries no boundary declaration at
  * all, even if a provider serialized a stale or structurally invalid value.
  */
-export function preprocessBashBoundaryDeclaration<T extends z.ZodType>(schema: T) {
-  return z.preprocess(dropInactiveBashBoundaryDeclaration, schema);
+export function preprocessShellBoundaryDeclaration<T extends z.ZodType>(schema: T) {
+  return z.preprocess(dropInactiveShellBoundaryDeclaration, schema);
 }
 
-function dropInactiveBashBoundaryDeclaration(value: unknown): unknown {
+function dropInactiveShellBoundaryDeclaration(value: unknown): unknown {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
   const input = value as Record<string, unknown>;
   if (input.boundary_intent !== undefined && input.boundary_intent !== 'current') return value;
@@ -117,7 +117,7 @@ function dropInactiveBashBoundaryDeclaration(value: unknown): unknown {
   return normalized;
 }
 
-export function refineBashBoundaryDeclaration(
+export function refineShellBoundaryDeclaration(
   input: {
     boundary_intent?: 'current' | 'expand';
     required_boundary?: SandboxBoundaryExpansion;
@@ -133,7 +133,7 @@ export function refineBashBoundaryDeclaration(
   }
 }
 
-export function selectedBashBoundaryExpansion(input: {
+export function selectedShellBoundaryExpansion(input: {
   boundary_intent?: 'current' | 'expand';
   required_boundary?: SandboxBoundaryExpansion;
 }): SandboxBoundaryExpansion | undefined {
@@ -175,7 +175,7 @@ export async function preflightDeclaredSandboxBoundary(
       reason: 'requires_bypass',
       recoverable: false,
       profileName: boundary.profile.name ?? boundary.profile.type,
-      message: 'The declared Bash capability conflicts with an explicit sandbox deny.',
+      message: 'The declared Shell capability conflicts with an explicit sandbox deny.',
     });
   }
   throw new SandboxCommandError({
@@ -185,6 +185,6 @@ export async function preflightDeclaredSandboxBoundary(
     recoverable: true,
     profileName: boundary.profile.name ?? boundary.profile.type,
     requiredExpansion: normalized,
-    message: 'Bash requires an approved session sandbox boundary expansion.',
+    message: 'Shell requires an approved session sandbox boundary expansion.',
   });
 }

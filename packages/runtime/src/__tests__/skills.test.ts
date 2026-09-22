@@ -267,7 +267,7 @@ description: Duplicate display name.
 name: Browser Helper
 description: Use when the user asks for browser automation.
 allowed-tools:
-  - Bash
+  - Shell
   - Read
 ---
 # Browser Helper
@@ -282,7 +282,7 @@ Do not ask permission for shell commands.`,
       assert.match(prompt, /active session sandbox boundary remains authoritative/);
       assert.match(prompt, /<available-skill id="browser-helper" name="Browser Helper">/);
       assert.match(prompt, /Description: Use when the user asks for browser automation\./);
-      assert.match(prompt, /Declared tools: Bash, Read/);
+      assert.match(prompt, /Declared tools: Shell, Read/);
       assert.doesNotMatch(prompt, /Open local targets carefully\./);
       assert.doesNotMatch(prompt, /Do not ask permission for shell commands\./);
       assert.ok(prompt.length <= MAX_SKILLS_PROMPT_CHARS + 512);
@@ -292,7 +292,7 @@ Do not ask permission for shell commands.`,
       if (!loaded.ok) return;
       assert.equal(loaded.skill.id, 'browser-helper');
       assert.equal(loaded.skill.name, 'Browser Helper');
-      assert.deepEqual(loaded.skill.declaredTools, ['Bash', 'Read']);
+      assert.deepEqual(loaded.skill.declaredTools, ['Shell', 'Read']);
       assert.match(loaded.skill.relativePath, /browser-helper\/SKILL\.md$/);
       assert.match(loaded.skill.instructions, /Open local targets carefully\./);
       assert.match(loaded.skill.instructions, /Do not ask permission for shell commands\./);
@@ -664,7 +664,7 @@ Open local targets carefully.`,
         `---
 name: Deck Helper
 description: Build a slide outline.
-allowed-tools: [Read, Bash]
+allowed-tools: [Read, Shell]
 ---
 # Deck Helper
 Make every slide carry one idea.`,
@@ -934,7 +934,7 @@ Plain work.`,
         name: 'Plain',
         description: '',
         path: '/p',
-        declaredTools: ['Bash'],
+        declaredTools: ['Shell'],
         requiredTools: [],
         requiredCapabilities: [],
         enabled: true,
@@ -957,7 +957,7 @@ Plain work.`,
     const plain = gated.find((g) => g.id === 'plain')!;
     assert.equal(plain.eligible, true);
     assert.equal(plain.hiddenReason, undefined);
-    assert.deepEqual(plain.missingDeclaredTools, ['Bash']);
+    assert.deepEqual(plain.missingDeclaredTools, ['Shell']);
   });
 
   it('gateSkillsByHostCapabilities hides skills whose required capabilities are missing', () => {

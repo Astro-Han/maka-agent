@@ -36,9 +36,9 @@ describe('Memory Extraction evidence planning', () => {
     const entries = withOrdinals([
       textEvent('user', 'user', 'Remember the durable result.'),
       callEvent('call-event-1', 'call-1', 'Read'),
-      callEvent('call-event-2', 'call-2', 'Bash'),
+      callEvent('call-event-2', 'call-2', 'Shell'),
       resultEvent('result-event-1', 'call-1', 'Read', { text: 'durable result' }),
-      resultEvent('result-event-2', 'call-2', 'Bash', 'failed', true),
+      resultEvent('result-event-2', 'call-2', 'Shell', 'failed', true),
       callEvent('call-event-3', 'call-3', 'List'),
       resultEvent('result-event-3', 'call-3', 'List', {}),
       textEvent('next', 'model', 'Done.'),

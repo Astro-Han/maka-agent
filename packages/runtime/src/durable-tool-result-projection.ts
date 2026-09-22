@@ -44,7 +44,7 @@ import { decodePersistedToolResultContent } from '@maka/core/tool-result-record-
 import type { ToolResultOutput } from './model-protocol.js';
 import { toolResultOutput } from './tool-result-output.js';
 import { withToolResultArchiveResourceRef } from './tool-result-archive.js';
-import { projectBashToolResultForModel } from './bash-model-output.js';
+import { projectShellToolResultForModel } from './shell-model-output.js';
 import { projectFileWriteToolResultForModel } from './file-tool-model-output.js';
 
 const OMITTED_BINARY_TEXT =
@@ -292,8 +292,8 @@ export function decodeEffectiveToolResultProjection(
   }
   if (shellResult.state === 'valid') output = shellResult.content;
   output =
-    content.name === 'Bash'
-      ? projectBashToolResultForModel(output)
+    content.name === 'Shell'
+      ? projectShellToolResultForModel(output)
       : projectFileWriteToolResultForModel(content.name, output);
   const projection =
     content.isError === true

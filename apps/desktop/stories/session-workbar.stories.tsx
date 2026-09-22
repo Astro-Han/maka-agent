@@ -515,7 +515,7 @@ const populatedTrace: SessionTrace = {
           startedAt: NOW + 20_100,
           endedAt: NOW + 21_900,
           durationMs: 1_800,
-          toolName: 'bash',
+          toolName: 'Shell',
           status: 'failed',
           recovered: { disposition: 'parked', reasonCode: 'sandbox_denied' },
         },
@@ -612,7 +612,7 @@ const populatedContext: ContextDiagnosticsResult = {
       { kind: 'other', bytes: 400 },
     ],
     tools: [
-      { name: 'Bash', bytes: 9_400 },
+      { name: 'Shell', bytes: 9_400 },
       { name: 'Read', bytes: 7_100 },
       { name: 'Edit', bytes: 6_300 },
       { name: 'Grep', bytes: 5_200 },

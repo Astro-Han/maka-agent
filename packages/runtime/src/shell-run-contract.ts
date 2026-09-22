@@ -32,8 +32,8 @@ import type { ShellPlan } from './shell-detect.js';
 import type { ChildFdInput } from './child-fd-input.js';
 import type { SandboxType } from './sandbox/types.js';
 
-export const DEFAULT_BASH_TIMEOUT_MS = 120_000;
-export const MAX_FOREGROUND_BASH_TIMEOUT_MS = 10 * 60 * 1_000;
+export const DEFAULT_SHELL_TIMEOUT_MS = 120_000;
+export const MAX_FOREGROUND_SHELL_TIMEOUT_MS = 10 * 60 * 1_000;
 export const MAX_WRITE_STDIN_INPUT_BYTES = 64 * 1024;
 export const MAX_WRITE_STDIN_ACTIONS = 64;
 export const MIN_PTY_COLS = 2;
@@ -84,7 +84,7 @@ export interface ShellRunProcessManagerInput {
   scheduleTimeout?: (run: () => void, delayMs: number) => () => void;
 }
 
-export interface ShellRunBashInput {
+export interface ShellRunInput {
   sessionId: string;
   sourceRunId?: string;
   sourceTurnId: string;

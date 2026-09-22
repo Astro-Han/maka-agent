@@ -202,7 +202,7 @@ describe('Linux sandbox smoke', () => {
     assert.equal(result.stdout, 'EPERM');
   });
 
-  test('builtin Bash executes a tool from a nonstandard host PATH inside bubblewrap', {
+  test('builtin Shell executes a tool from a nonstandard host PATH inside bubblewrap', {
     skip: skipReason,
   }, async () => {
     if (!capability.available) return;
@@ -218,14 +218,14 @@ describe('Linux sandbox smoke', () => {
 
     try {
       const manager = new SandboxManager([new LinuxBubblewrapBackend({ capability })]);
-      const bash = buildBuiltinTools({
+      const shell = buildBuiltinTools({
         permissionProfile: createWorkspaceWritePermissionProfile(),
         sandboxManager: manager,
         sandboxPlatform: 'linux',
-      }).find((candidate) => candidate.name === 'Bash');
-      if (!bash) throw new Error('Bash tool missing');
+      }).find((candidate) => candidate.name === 'Shell');
+      if (!shell) throw new Error('Shell tool missing');
 
-      const result = (await bash.impl(
+      const result = (await shell.impl(
         { command: 'maka-path-probe' },
         {
           sessionId: 'session-1',
@@ -248,12 +248,12 @@ describe('Linux sandbox smoke', () => {
     }
   });
 
-  test('builtin Bash enforces an expanded managed boundary and explicit bypass', {
+  test('builtin Shell enforces an expanded managed boundary and explicit bypass', {
     skip: skipReason,
   }, async () => {
     if (!capability.available) return;
-    const workspace = await mkdtemp(join(tmpdir(), 'maka-linux-bash-one-shot-workspace-'));
-    const outside = await mkdtemp(join(homedir(), '.maka-linux-bash-one-shot-outside-'));
+    const workspace = await mkdtemp(join(tmpdir(), 'maka-linux-shell-one-shot-workspace-'));
+    const outside = await mkdtemp(join(homedir(), '.maka-linux-shell-one-shot-outside-'));
     const allowedPath = join(outside, 'allowed.txt');
     const siblingPath = join(outside, 'sibling.txt');
     const escalatedPath = join(outside, 'escalated.txt');
@@ -261,12 +261,12 @@ describe('Linux sandbox smoke', () => {
 
     try {
       const manager = new SandboxManager([new LinuxBubblewrapBackend({ capability })]);
-      const bash = buildBuiltinTools({
+      const shell = buildBuiltinTools({
         permissionProfile: createWorkspaceWritePermissionProfile(),
         sandboxManager: manager,
         sandboxPlatform: 'linux',
-      }).find((candidate) => candidate.name === 'Bash');
-      if (!bash) throw new Error('Bash tool missing');
+      }).find((candidate) => candidate.name === 'Shell');
+      if (!shell) throw new Error('Shell tool missing');
 
       const requiredBoundary = {
         filesystem: {
@@ -285,7 +285,7 @@ describe('Linux sandbox smoke', () => {
       const additionalCommand =
         `printf additional-ok > ${shellQuote(allowedPath)}; ` +
         `/bin/sh -c ${shellQuote(siblingAttempt)} 2>/dev/null || :; exit 0`;
-      const additionalResult = (await bash.impl(
+      const additionalResult = (await shell.impl(
         {
           command: additionalCommand,
           boundary_intent: 'expand',
@@ -310,7 +310,7 @@ describe('Linux sandbox smoke', () => {
 
       await rm(allowedPath);
       await symlink(siblingPath, allowedPath);
-      await bash.impl(
+      await shell.impl(
         {
           command:
             `printf stale-link-write > ${shellQuote(allowedPath)} 2>/dev/null || :; ` + 'true',
@@ -329,7 +329,7 @@ describe('Linux sandbox smoke', () => {
       assert.equal(await readFile(siblingPath, 'utf8'), 'sibling-before');
 
       const escalationCommand = `printf escalation-ok > ${shellQuote(escalatedPath)}`;
-      const escalationResult = (await bash.impl(
+      const escalationResult = (await shell.impl(
         { command: escalationCommand },
         {
           sessionId: 'session-1',

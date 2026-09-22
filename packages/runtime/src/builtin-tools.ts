@@ -47,7 +47,7 @@ import { parseAttachmentResourceRef } from '@maka/core/attachments';
 import { type SandboxBoundaryExpansion } from '@maka/core/sandbox-boundary';
 import { isStorageRef, type StorageRef, type ToolResultContent } from '@maka/core/events';
 import { type PermissionProfile } from '@maka/core/permission-profile';
-import { bashToolResultToModelOutput } from './bash-model-output.js';
+import { shellToolResultToModelOutput } from './shell-model-output.js';
 import { fileWriteToolResultToModelOutput } from './file-tool-model-output.js';
 import { toolResultOutput } from './tool-result-output.js';
 import { GREP_MAX_LINES, GREP_MAX_LINES_PER_FILE, GREP_MAX_MATCH_BYTES } from './grep-search.js';
@@ -55,7 +55,7 @@ import { openAiApplyPatchInputSchema } from './openai-apply-patch.js';
 import { parseCodexV4aPatch } from './codex-v4a-patch.js';
 import { executeApplyPatchOperations } from './apply-patch-batch.js';
 import {
-  buildManagedBashTool,
+  buildManagedShellTool,
   buildStopBackgroundTaskTool,
   buildWriteStdinTool,
   shapeTerminalResult,
@@ -93,13 +93,13 @@ import type { ChildFdInput } from './child-fd-input.js';
 import { normalizeSandboxBoundaryPath } from './sandbox-boundary-path.js';
 import type { FilesystemWorkerClient } from './filesystem-worker/client.js';
 import {
-  BASH_REQUIRED_BOUNDARY_DESCRIPTION,
-  bashBoundaryIntentSchema,
+  SHELL_REQUIRED_BOUNDARY_DESCRIPTION,
+  shellBoundaryIntentSchema,
   preflightDeclaredSandboxBoundary,
-  preprocessBashBoundaryDeclaration,
-  refineBashBoundaryDeclaration,
+  preprocessShellBoundaryDeclaration,
+  refineShellBoundaryDeclaration,
   sandboxBoundaryExpansionSchema,
-  selectedBashBoundaryExpansion,
+  selectedShellBoundaryExpansion,
 } from './sandbox-boundary-declaration.js';
 
 // Generous wall-clock cap for the ripgrep-backed Grep tool. A search should be
@@ -130,9 +130,9 @@ const GREP_TIMEOUT_MS = 120_000;
  * says Maka cannot tell what happened to the file, and sends the model to look
  * rather than to retry a call that may have already taken effect.
  *
- * Neither may name Bash. Read, Glob and Grep are the entire tool set of a
+ * Neither may name Shell. Read, Glob and Grep are the entire tool set of a
  * `local_read` child (`agent-catalog.ts`), and `buildToolsForAgentDefinition`
- * hands that child those three tools and nothing else. "Use Bash to do the same
+ * hands that child those three tools and nothing else. "Use Shell to do the same
  * work" is, for the caller most likely to be running a bare Grep, an
  * instruction it cannot carry out — a dead end dressed as a way out. The
  * fallback is therefore offered on a condition the model can check for itself,
@@ -179,9 +179,9 @@ export interface BuildBuiltinToolsOptions {
   ptyControls?: PtyControlWriter;
   executor?: WorkspaceExecutor;
   /**
-   * Turn-scoped shell resolution that runs Bash commands. Defaults to the
+   * Turn-scoped shell resolution that runs Shell commands. Defaults to the
    * process-wide detected shell. A broken saved preference rides along as
-   * `setupError` and fails closed at the Bash boundary.
+   * `setupError` and fails closed at the Shell boundary.
    */
   shell?: TurnShellPlan;
   /** Host-only environment overlay for a pre-bound Plugin Shell invocation. */
@@ -189,7 +189,7 @@ export interface BuildBuiltinToolsOptions {
   permissionProfile?: PermissionProfile;
   sandboxManager?: SandboxManager;
   /**
-   * Whether Bash advertises `boundary_intent` / `required_boundary`. False for
+   * Whether Shell advertises `boundary_intent` / `required_boundary`. False for
    * a session whose boundary cannot be widened (Full access); a declaration no
    * host enforces is noise in the model's tool selection. Defaults to true.
    */
@@ -217,9 +217,9 @@ export function buildBuiltinTools(options: BuildBuiltinToolsOptions = {}): MakaT
   const executionFacts = executor.facts;
   const shell = options.shell ?? { plan: defaultShellPlan() };
   const sandboxPlatform = options.sandboxPlatform ?? process.platform;
-  const bashTools = options.shellRuns
+  const shellTools = options.shellRuns
     ? [
-        buildManagedBashTool(options.shellRuns, {
+        buildManagedShellTool(options.shellRuns, {
           executionFacts,
           shell,
           declareSandboxBoundary: options.declareSandboxBoundary !== false,
@@ -258,7 +258,7 @@ export function buildBuiltinTools(options: BuildBuiltinToolsOptions = {}): MakaT
         }),
       ]
     : [
-        buildExecutorBashTool(executor, shell, {
+        buildExecutorShellTool(executor, shell, {
           ...(options.permissionProfile ? { permissionProfile: options.permissionProfile } : {}),
           ...(options.sandboxManager ? { sandboxManager: options.sandboxManager } : {}),
           declareSandboxBoundary: options.declareSandboxBoundary !== false,
@@ -292,7 +292,7 @@ export function buildBuiltinTools(options: BuildBuiltinToolsOptions = {}): MakaT
     },
   } satisfies MakaTool;
   const tools: MakaTool[] = [
-    ...bashTools,
+    ...shellTools,
     ...backgroundTools,
     {
       name: 'Read',
@@ -620,50 +620,50 @@ function filesystemCall(
   };
 }
 
-interface ExecutorBashSandboxOptions {
+interface ExecutorShellSandboxOptions {
   permissionProfile?: PermissionProfile;
   sandboxManager?: SandboxManager;
   sandboxPlatform: SandboxPlatform;
   declareSandboxBoundary?: boolean;
 }
 
-function buildExecutorBashTool(
+function buildExecutorShellTool(
   executor: WorkspaceExecutor,
   shell: TurnShellPlan,
-  sandboxOptions: ExecutorBashSandboxOptions,
+  sandboxOptions: ExecutorShellSandboxOptions,
 ): MakaTool {
   const declareSandboxBoundary = sandboxOptions.declareSandboxBoundary !== false;
-  const executorBashFields = {
+  const executorShellFields = {
     command: z.string().describe('The shell command to execute'),
     timeout_ms: z.number().int().positive().max(600_000).optional(),
   };
   return {
-    name: 'Bash',
+    name: 'Shell',
     activityKind: 'command',
     description:
       withTurnShellGuidance('Run a shell command in the session cwd.', shell) +
       (declareSandboxBoundary ? ' Enforced by the current session sandbox boundary.' : ''),
     parameters: declareSandboxBoundary
-      ? preprocessBashBoundaryDeclaration(
+      ? preprocessShellBoundaryDeclaration(
           z
             .object({
-              ...executorBashFields,
-              boundary_intent: bashBoundaryIntentSchema,
+              ...executorShellFields,
+              boundary_intent: shellBoundaryIntentSchema,
               required_boundary: sandboxBoundaryExpansionSchema
                 .optional()
-                .describe(BASH_REQUIRED_BOUNDARY_DESCRIPTION),
+                .describe(SHELL_REQUIRED_BOUNDARY_DESCRIPTION),
             })
             .strict()
-            .superRefine(refineBashBoundaryDeclaration),
+            .superRefine(refineShellBoundaryDeclaration),
         )
-      : z.object(executorBashFields).strict(),
-    toModelOutput: ({ output }) => bashToolResultToModelOutput(output),
+      : z.object(executorShellFields).strict(),
+    toModelOutput: ({ output }) => shellToolResultToModelOutput(output),
     executionFacts: executor.facts,
     impl: async (input, ctx) => {
       const { command, timeout_ms } = input;
       throwIfShellSetupFailed(shell);
       const normalizedRequiredBoundary = await preflightDeclaredSandboxBoundary(
-        selectedBashBoundaryExpansion(input),
+        selectedShellBoundaryExpansion(input),
         ctx,
       );
       const { cwd, abortSignal, emitOutput } = ctx;
@@ -680,7 +680,7 @@ function buildExecutorBashTool(
           recoverable: false,
           profileName: ctx.executionBoundary.profile.name ?? ctx.executionBoundary.profile.type,
           message:
-            'Managed Bash execution is unavailable because a command sandbox cannot be enforced.',
+            'Managed Shell execution is unavailable because a command sandbox cannot be enforced.',
         });
       }
       const transformed = sandboxOptions.sandboxManager
@@ -770,7 +770,7 @@ function sandboxCommand(
         recoverable: false,
         profileName: effective.profile.name ?? effective.profile.type,
         message:
-          'PTY Bash is unavailable while the active permission profile requires command sandboxing.',
+          'PTY Shell is unavailable while the active permission profile requires command sandboxing.',
       });
     }
     return undefined;
@@ -779,7 +779,7 @@ function sandboxCommand(
   // AppContainer-compatible executable), but it cannot launch an arbitrary
   // shell: cmd.exe/pwsh fail DLL initialization (STATUS_DLL_INIT_FAILED,
   // 0xC0000142) inside a capability-less AppContainer, and the POSIX `/bin/sh`
-  // this path emits is not a launchable Windows executable at all. Bash command
+  // this path emits is not a launchable Windows executable at all. Shell command
   // sandboxing is therefore unavailable on win32 in this milestone. Route it
   // through the shared "command sandbox unavailable" contract rather than
   // handing the broker an unlaunchable manifest: fail closed when the profile
@@ -812,7 +812,7 @@ function sandboxCommand(
     unavailablePaths: [],
   };
   try {
-    preparedProfile = prepareLinuxBashProfilePaths(
+    preparedProfile = prepareLinuxShellProfilePaths(
       platform,
       effective.profile,
       effective.workspaceRoots,
@@ -922,7 +922,7 @@ interface PreparedLinuxProfilePaths {
   readonly unavailablePaths: readonly string[];
 }
 
-function prepareLinuxBashProfilePaths(
+function prepareLinuxShellProfilePaths(
   platform: SandboxPlatform,
   profile: PermissionProfile,
   workspaceRoots: readonly string[],

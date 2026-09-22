@@ -27,7 +27,7 @@ import { isActiveShellRunStatus } from '@maka/core/shell-run';
 import { ShellRunProcessManager } from '@maka/runtime/shell-run-manager';
 import {
   ShellRunPtyControlClosedError,
-  type ShellRunBashInput,
+  type ShellRunInput,
 } from '@maka/runtime/shell-run-contract';
 import { resolveStorageRoot, tryAcquireInteractiveRootOwner } from '@maka/storage/root-authority';
 import {
@@ -104,15 +104,15 @@ describe('real Host Runtime Resource process lifecycle', {
   });
 
   test('runs pipes and serializes one PTY controller across two connections', async () => {
-    const foreground = await coordinator.runForegroundBash(
-      bashInput('printf foreground-ok', 'call.foreground/1'),
+    const foreground = await coordinator.runForegroundShell(
+      shellInput('printf foreground-ok', 'call.foreground/1'),
     );
     assert.equal(foreground.status, 'completed');
     assert.equal(foreground.output.mode, 'pipes');
     assert.equal(foreground.output.mode === 'pipes' && foreground.output.stdout, 'foreground-ok');
 
-    const background = await coordinator.runBackgroundBash({
-      ...bashInput('IFS= read -r line; printf "received:%s\\n" "$line"', 'call.pty/1'),
+    const background = await coordinator.runBackgroundShell({
+      ...shellInput('IFS= read -r line; printf "received:%s\\n" "$line"', 'call.pty/1'),
       pty: true,
     });
     assert.equal(background.status, 'running');
@@ -193,8 +193,8 @@ describe('real Host Runtime Resource process lifecycle', {
   });
 
   test('treats control during PTY timeout as a resource conflict without draining Host', async () => {
-    const background = await coordinator.runBackgroundBash({
-      ...bashInput(
+    const background = await coordinator.runBackgroundShell({
+      ...shellInput(
         'trap "" TERM; stty -echo; printf "READY\\n"; while :; do sleep 1; done',
         'call.timeout/1',
       ),
@@ -256,8 +256,8 @@ describe('real Host Runtime Resource process lifecycle', {
     // A DA flood makes the emulator emit protocol replies past the 1MB
     // boundary, which fails the collector and requests termination; the TERM
     // trap keeps the process alive so acquire lands inside the kill grace.
-    const background = await coordinator.runBackgroundBash({
-      ...bashInput(
+    const background = await coordinator.runBackgroundShell({
+      ...shellInput(
         'trap "" TERM; while :; do printf "\\033[c%.0s" {1..200}; done',
         'call.integrity/1',
       ),
@@ -300,13 +300,15 @@ describe('real Host Runtime Resource process lifecycle', {
   });
 
   test('drain terminates a real process and synchronously rejects new startup', async () => {
-    const background = await coordinator.runBackgroundBash(bashInput('sleep 60', 'shutdown-tool'));
+    const background = await coordinator.runBackgroundShell(
+      shellInput('sleep 60', 'shutdown-tool'),
+    );
     assert.equal(background.status, 'running');
     assert.equal(activeResidencies, 1);
 
     coordinator.beginDrain();
     await assert.rejects(
-      () => coordinator.runBackgroundBash(bashInput('printf too-late', 'late-tool')),
+      () => coordinator.runBackgroundShell(shellInput('printf too-late', 'late-tool')),
       /Runtime resources are draining/,
     );
     await coordinator.close();
@@ -336,7 +338,7 @@ describe('real Host Runtime Resource process lifecycle', {
   }
 });
 
-function bashInput(command: string, sourceToolCallId: string): ShellRunBashInput {
+function shellInput(command: string, sourceToolCallId: string): ShellRunInput {
   return {
     sessionId: SESSION_ID,
     sourceTurnId: 'turn-1',

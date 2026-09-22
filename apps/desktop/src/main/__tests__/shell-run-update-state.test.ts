@@ -30,11 +30,11 @@ test('ShellRun update state rejects a stale hydration result after a newer notif
   const current = mergeShellRunUpdates({}, [update(3)]);
   const afterStaleHydration = mergeShellRunUpdates(current, [update(2)]);
   assert.equal(afterStaleHydration, current);
-  assert.equal(afterStaleHydration.session?.bash?.result.revision, 3);
+  assert.equal(afterStaleHydration.session?.shell?.result.revision, 3);
 
   const afterNewerNotification = mergeShellRunUpdates(current, [update(4)]);
   assert.notEqual(afterNewerNotification, current);
-  assert.equal(afterNewerNotification.session?.bash?.result.revision, 4);
+  assert.equal(afterNewerNotification.session?.shell?.result.revision, 4);
 });
 
 test('ShellRun update state fans owner completion into an inherited session view', () => {
@@ -46,7 +46,7 @@ test('ShellRun update state fans owner completion into an inherited session view
       ownerSessionId: 'owner',
     },
     sourceTurnId: 'turn',
-    sourceToolCallId: 'bash',
+    sourceToolCallId: 'shell',
     result: shellRun(3),
   };
   const current = mergeShellRunUpdates({}, [inherited]);
@@ -54,7 +54,7 @@ test('ShellRun update state fans owner completion into an inherited session view
     sessionId: 'owner',
     ownership: { kind: 'local' },
     sourceTurnId: 'owner-turn',
-    sourceToolCallId: 'owner-bash',
+    sourceToolCallId: 'owner-shell',
     result: {
       ...shellRun(4),
       status: 'completed',
@@ -65,10 +65,10 @@ test('ShellRun update state fans owner completion into an inherited session view
 
   const next = mergeShellRunNotification(current, 'branch', ownerCompletion);
 
-  assert.equal(next.branch?.bash?.sessionId, 'branch');
-  assert.deepEqual(next.branch?.bash?.ownership, inherited.ownership);
-  assert.equal(next.branch?.bash?.result.status, 'completed');
-  assert.equal(next.branch?.bash?.result.revision, 4);
+  assert.equal(next.branch?.shell?.sessionId, 'branch');
+  assert.deepEqual(next.branch?.shell?.ownership, inherited.ownership);
+  assert.equal(next.branch?.shell?.result.status, 'completed');
+  assert.equal(next.branch?.shell?.result.revision, 4);
 });
 
 test('ShellRun update state applies ownership changes at the same revision', () => {
@@ -80,7 +80,7 @@ test('ShellRun update state applies ownership changes at the same revision', () 
       ownerSessionId: 'owner',
     },
     sourceTurnId: 'turn',
-    sourceToolCallId: 'bash',
+    sourceToolCallId: 'shell',
     result: shellRun(3),
   };
   const current = mergeShellRunUpdates({}, [owned]);
@@ -90,11 +90,11 @@ test('ShellRun update state applies ownership changes at the same revision', () 
   }]);
 
   assert.notEqual(next, current);
-  assert.deepEqual(next.branch?.bash?.ownership, {
+  assert.deepEqual(next.branch?.shell?.ownership, {
     kind: 'source_unavailable',
     sourceSessionId: 'parent',
   });
-  assert.equal(next.branch?.bash?.result.revision, 3);
+  assert.equal(next.branch?.shell?.result.revision, 3);
 });
 
 test('ShellRun hydration ignores an old read and replays updates after the resync boundary', () => {
@@ -116,7 +116,7 @@ function update(revision: number): ShellRunUpdate {
     sessionId: 'session',
     ownership: { kind: 'local' },
     sourceTurnId: 'turn',
-    sourceToolCallId: 'bash',
+    sourceToolCallId: 'shell',
     result: shellRun(revision),
   };
 }

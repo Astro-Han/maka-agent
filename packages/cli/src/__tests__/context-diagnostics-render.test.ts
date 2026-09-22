@@ -51,7 +51,7 @@ test('names each tool, and marks every derived figure as an estimate', () => {
           { kind: 'tool_definitions', bytes: 800 },
         ],
         tools: [
-          { name: 'Bash', bytes: 500 },
+          { name: 'Shell', bytes: 500 },
           { name: 'Read', bytes: 300 },
         ],
         remainingTools: { count: 3, bytes: 120 },
@@ -61,7 +61,7 @@ test('names each tool, and marks every derived figure as an estimate', () => {
 
   assert.match(out, /System instructions: ≈100 tokens Tool definitions: ≈200 tokens/);
   // Per tool, because that is the only row a reader can act on.
-  assert.match(out, /By tool Bash: ≈125 tokens Read: ≈75 tokens/);
+  assert.match(out, /By tool Shell: ≈125 tokens Read: ≈75 tokens/);
   assert.match(out, /3 more tools: ≈30 tokens/);
   // The provider-reported figures keep naming their source; the estimates
   // never borrow that authority.

@@ -158,7 +158,7 @@ export function usageStatsSessions(
           model: 'glm-5.1',
           usage: { input: 4820, output: 1240, cacheRead: 3200, cacheMissInput: 1620, cacheCreation: 640, reasoning: 210, costUsd: 0.0186 },
           tools: [
-            { id: 'usage-glm-1-bash', toolName: 'Bash', displayName: '运行测试', durationMs: 8_240 },
+            { id: 'usage-glm-1-shell', toolName: 'Shell', displayName: '运行测试', durationMs: 8_240 },
             { id: 'usage-glm-1-read', toolName: 'Read', displayName: '读取源码', durationMs: 1_120 },
             { id: 'usage-glm-1-grep', toolName: 'Grep', displayName: '检索用法', durationMs: 640 },
           ],
@@ -200,7 +200,7 @@ export function usageStatsSessions(
           model: 'claude-haiku-4.5',
           usage: { input: 1500, output: 300, costUsd: 0.0021 },
           tools: [
-            { id: 'usage-claude-2-bash', toolName: 'Bash', displayName: '构建 renderer', durationMs: 5_200 },
+            { id: 'usage-claude-2-shell', toolName: 'Shell', displayName: '构建 renderer', durationMs: 5_200 },
           ],
         }),
       ],
@@ -220,7 +220,7 @@ export function usageStatsSessions(
           model: 'gpt-5.1-mini',
           usage: { input: 3300, output: 900, cacheRead: 1200, costUsd: 0.0125 },
           tools: [
-            { id: 'usage-gpt-1-bash', toolName: 'Bash', displayName: '生成截图', durationMs: 6_400 },
+            { id: 'usage-gpt-1-shell', toolName: 'Shell', displayName: '生成截图', durationMs: 6_400 },
             { id: 'usage-gpt-1-grep', toolName: 'Grep', displayName: '扫描目录', durationMs: 720, isError: true },
           ],
         }),

@@ -59,8 +59,8 @@ export function deriveToolArtifactCandidates(
       return deriveWriteArtifacts(args, result, input.cwd);
     case 'Edit':
       return deriveEditArtifacts(args);
-    case 'Bash':
-      return deriveBashArtifacts(args, input.cwd);
+    case 'Shell':
+      return deriveShellArtifacts(args, input.cwd);
     default:
       return [];
   }
@@ -119,7 +119,7 @@ function deriveEditArtifacts(args: Record<string, unknown> | null): ToolArtifact
   ];
 }
 
-function deriveBashArtifacts(
+function deriveShellArtifacts(
   args: Record<string, unknown> | null,
   cwd: string,
 ): ToolArtifactCandidate[] {
@@ -134,7 +134,7 @@ function deriveBashArtifacts(
       name: basename(path),
       mimeType: mimeForPath(path),
       source: 'tool_result',
-      summary: 'Bash redirect output',
+      summary: 'Shell redirect output',
       sourcePath: path,
     },
   ];

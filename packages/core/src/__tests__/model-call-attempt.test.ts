@@ -66,13 +66,13 @@ describe('ModelCallAttempt codec', () => {
           { kind: 'system_instructions', bytes: 400 },
           { kind: 'tool_definitions', bytes: 300 },
         ],
-        tools: [{ name: 'Bash', bytes: 300 }],
+        tools: [{ name: 'Shell', bytes: 300 }],
         remainingTools: { count: 2, bytes: 40 },
         unlabelledToolBytes: 10,
       },
     });
 
-    assert.deepEqual(decoded.promptComposition?.tools, [{ name: 'Bash', bytes: 300 }]);
+    assert.deepEqual(decoded.promptComposition?.tools, [{ name: 'Shell', bytes: 300 }]);
   });
 
   test('rejects a composition that names one bucket twice', () => {

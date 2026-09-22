@@ -77,7 +77,7 @@ function toolCall(intent?: string): Extract<StoredMessage, { type: 'tool_call' }
     id: 'tc1',
     turnId: 't1',
     ts: 1_700_000_000_000,
-    toolName: 'Bash',
+    toolName: 'Shell',
     displayName: 'Shell command',
     intent,
     args: {},
@@ -545,7 +545,7 @@ describe('thread search text projection', () => {
     const entries = {
       s1: { session: session({ id: 's1' }), messages: [toolCall('check disk usage on /var')] },
     };
-    for (const query of ['Bash', 'Shell command']) {
+    for (const query of ['Shell', 'Shell command']) {
       assert.deepEqual(
         expectResults(
           await runThreadSearch({ source: 'thread', query, limit: 5 }, makeDeps(entries)),
@@ -616,7 +616,7 @@ describe('thread search text projection', () => {
         turnId: 't1',
         ts: 1,
         toolUseId: 'call1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         decision: 'allow',
       },
     ];

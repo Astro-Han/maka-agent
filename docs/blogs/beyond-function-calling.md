@@ -31,7 +31,7 @@ Before a large language model can invoke a tool, it requires explicit awareness 
 
 Tool overhead begins long before execution starts. Schemas occupy scarce context windows, dilute model attention during planning, and degrade prefix cache reuse across provider endpoints. As registries expand, the broader action space comes at the expense of task-specific context and introduces higher decision variance.
 
-When an agent exposes only elementary tools like `Read`, `Write`, and `Bash`, the overhead remains manageable. Once the registry includes browser drivers, OS automation routines, subagent delegations, enterprise services, and dozens of Model Context Protocol (MCP) connectors, keeping all schemas resident across all requests breaks scalability.
+When an agent exposes only elementary tools like `Read`, `Write`, and `Shell`, the overhead remains manageable. Once the registry includes browser drivers, OS automation routines, subagent delegations, enterprise services, and dozens of Model Context Protocol (MCP) connectors, keeping all schemas resident across all requests breaks scalability.
 
 Maka addresses this limitation through Deferred Tools. The mechanism does not alter execution timing; its purpose is to control when complete schemas become visible to the model.
 

@@ -21,10 +21,10 @@ import type { ToolResultOutput } from './model-protocol.js';
 import { toolResultOutput } from './tool-result-output.js';
 
 /**
- * Keep the canonical Bash result intact for durable storage while removing the
- * command already present in the paired provider-visible Bash call.
+ * Keep the canonical Shell result intact for durable storage while removing the
+ * command already present in the paired provider-visible Shell call.
  */
-export function projectBashToolResultForModel(output: unknown): unknown {
+export function projectShellToolResultForModel(output: unknown): unknown {
   if (
     !output ||
     typeof output !== 'object' ||
@@ -37,7 +37,7 @@ export function projectBashToolResultForModel(output: unknown): unknown {
   return projected;
 }
 
-export function bashToolResultToModelOutput(output: unknown): ToolResultOutput {
+export function shellToolResultToModelOutput(output: unknown): ToolResultOutput {
   const isError =
     output !== null &&
     typeof output === 'object' &&
@@ -45,5 +45,5 @@ export function bashToolResultToModelOutput(output: unknown): ToolResultOutput {
     output.kind === 'terminal' &&
     'status' in output &&
     output.status !== 'completed';
-  return toolResultOutput(projectBashToolResultForModel(output), isError);
+  return toolResultOutput(projectShellToolResultForModel(output), isError);
 }

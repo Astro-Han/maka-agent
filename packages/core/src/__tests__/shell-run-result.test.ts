@@ -121,7 +121,7 @@ describe('ShellRun view updates', () => {
 
     assert.equal(projected.length, 1);
     assert.equal(projected[0]?.sessionId, 'branch');
-    assert.equal(projected[0]?.sourceToolCallId, 'bash-1');
+    assert.equal(projected[0]?.sourceToolCallId, 'shell-1');
     assert.deepEqual(projected[0]?.ownership, inherited.ownership);
     assert.equal(projected[0]?.result.status, 'completed');
     assert.equal(projected[0]?.result.revision, 3);
@@ -326,7 +326,7 @@ function shellRunUpdate(overrides: Partial<ShellRunUpdate>): ShellRunUpdate {
     sessionId: 'branch',
     ownership: { kind: 'local' },
     sourceTurnId: 'turn-1',
-    sourceToolCallId: 'bash-1',
+    sourceToolCallId: 'shell-1',
     result: shellRun(),
     ...overrides,
   };

@@ -645,7 +645,7 @@ flowchart TD
 
 即使 atomic rename 能避免半文件，也不能保证“检查 hash 到 rename”之间没有另一个进程修改文件。没有 conditional replace/CAS 前，`matches_prior_state` 不能自动 redo。
 
-通用 Bash、任意远程 API、发送、发布、付款和删除等没有专属协议的副作用继续默认 park。恢复覆盖范围不是越大越好；错误地自动执行一次，通常比明确停车更危险。
+通用 Shell、任意远程 API、发送、发布、付款和删除等没有专属协议的副作用继续默认 park。恢复覆盖范围不是越大越好；错误地自动执行一次，通常比明确停车更危险。
 
 ## Phase 4：Runtime history 还要绑定 workspace
 
@@ -917,7 +917,7 @@ Process crash、SQLite transaction atomicity 和应用级 `fsync` 不能自动�
 当前实现不承诺：
 
 - 恢复旧 provider stream、Promise 或 JavaScript 指令位置；
-- 对任意 Bash、远程 API 或子进程提供 exactly-once；
+- 对任意 Shell、远程 API 或子进程提供 exactly-once；
 - 自动处理 T1 已提交、T2 缺失的真实工具副作用；
 - 用 workspace UUID marker 证明文件内容未漂移；
 - 跨进程或多节点的最终 continuation fencing；

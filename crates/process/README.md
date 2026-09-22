@@ -24,6 +24,13 @@
 Native process and PTY transport, cancellation, sandbox launch integration and
 headless terminal state for Linux, macOS and Windows.
 
+`Shell` captures the executable once for command execution and interactive PTYs.
+On Unix it prefers a supported, executable account login shell (not `$SHELL`).
+Fallback order is zsh → bash → sh on macOS, bash → zsh → sh on Linux;
+Windows prefers PowerShell 7 → Windows PowerShell → cmd. Model guidance names
+the selected dialect. Commands load login profiles by default; `login: false`
+skips them. Profile loading remains inside the same sandbox and timeout.
+
 `terminal::Screen` uses `alacritty_terminal` without its PTY event loop or renderer.
 The existing PTY worker owns the parser; no JavaScript runtime, extra thread or
 cross-runtime serialization is needed. The Host retains admission, canonical

@@ -71,9 +71,9 @@ describe('deriveToolArtifactCandidates', () => {
     );
   });
 
-  test('Bash derives only explicit stdout redirects and does not scan stdout/stderr text', () => {
+  test('Shell derives only explicit stdout redirects and does not scan stdout/stderr text', () => {
     const [candidate] = deriveToolArtifactCandidates({
-      toolName: 'Bash',
+      toolName: 'Shell',
       cwd: '/workspace/maka',
       args: { command: 'npm run build > "reports/build.log" 2>&1' },
       result: { stdout: 'wrote /tmp/guessed.html', stderr: 'see report.pdf' },
@@ -84,7 +84,7 @@ describe('deriveToolArtifactCandidates', () => {
 
     assert.deepStrictEqual(
       deriveToolArtifactCandidates({
-        toolName: 'Bash',
+        toolName: 'Shell',
         cwd: '/workspace/maka',
         args: { command: 'echo "wrote reports/build.log"' },
         result: { stdout: 'reports/build.log' },

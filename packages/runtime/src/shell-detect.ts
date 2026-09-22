@@ -19,7 +19,7 @@
 
 // packages/runtime/src/shell-detect.ts
 //
-// Which shell runs Bash tool commands, and how to tell the model about it.
+// Which shell runs Shell tool commands, and how to tell the model about it.
 //
 // Node's `spawn(cmd, { shell: true })` silently picks the platform default:
 // /bin/sh on POSIX, cmd.exe on Windows. cmd.exe is the weakest shell on any
@@ -27,7 +27,7 @@
 // the model is trapped writing `dir /s /b` style commands. This module detects
 // a better shell (pwsh > powershell > cmd) and carries the result to the two
 // places that need it: the spawn call (shell-exec / shell-run-manager) and the
-// Bash tool description that declares the dialect to the model. Selection
+// Shell tool description that declares the dialect to the model. Selection
 // without declaration — or the other way round — makes the model guess the
 // dialect, which is the original bug.
 
@@ -40,7 +40,7 @@ export type ShellKind = 'posix' | 'git-bash' | 'legacy-wsl-bash' | 'pwsh' | 'pow
 
 export interface ShellPlan {
   kind: ShellKind;
-  /** Human-readable name for Bash tool guidance, e.g. "PowerShell 7 (pwsh)". */
+  /** Human-readable name for Shell tool guidance, e.g. "PowerShell 7 (pwsh)". */
   displayName: string;
   /** Executable to spawn explicitly for non-default shell plans. */
   exe?: string;
@@ -72,10 +72,10 @@ export interface ResolveShellPlanInput extends DetectShellInput {}
 
 /**
  * The one Host-owned shell resolution captured at turn admission. `plan`
- * drives model guidance and Bash execution for the whole turn so a mid-turn
+ * drives model guidance and Shell execution for the whole turn so a mid-turn
  * settings change cannot split guidance from execution; a broken saved
  * preference rides along as `setupError` instead of throwing at composition
- * time, so text-only turns keep working while the Bash/PTY boundary stays
+ * time, so text-only turns keep working while the Shell/PTY boundary stays
  * fail-closed (and never falls back to another shell).
  */
 export interface TurnShellPlan {
@@ -121,7 +121,7 @@ export function resolveShellPlan(
  * Resolves the turn-scoped shell plan without throwing. A saved preference
  * whose executable moved or was uninstalled is a repairable optional-tool
  * configuration error: composition must not widen it into whole-turn
- * unavailability, so the failure is captured in `setupError` and the Bash/PTY
+ * unavailability, so the failure is captured in `setupError` and the Shell/PTY
  * boundary re-throws it when a command actually runs.
  */
 export function resolveTurnShellPlan(
@@ -138,7 +138,7 @@ export function resolveTurnShellPlan(
   }
 }
 
-/** Fail-closed gate for the Bash/PTY boundary: never execute through a broken preference. */
+/** Fail-closed gate for the Shell/PTY boundary: never execute through a broken preference. */
 export function throwIfShellSetupFailed(shell: TurnShellPlan): void {
   if (shell.setupError) throw shell.setupError;
 }
@@ -185,7 +185,7 @@ export function detectShell(input: DetectShellInput = {}): ShellPlan {
 
 /**
  * The shell for this process's real platform/env, detected once and cached:
- * detection touches the filesystem, and every Bash tool call would otherwise
+ * detection touches the filesystem, and every Shell tool call would otherwise
  * repeat it. The environment a desktop app runs in does not change under it.
  */
 export function defaultShellPlan(): ShellPlan {
@@ -336,12 +336,12 @@ export function buildPtyShellSpawnPlan(
 }
 
 /**
- * Shell-dialect sentence for Bash tool descriptions. Empty on POSIX (the
+ * Shell-dialect sentence for Shell tool descriptions. Empty on POSIX (the
  * historical description is the contract there). On Windows this is the other
  * half of shell selection: without it the model guesses the dialect — the
  * original `dir /s /b` bug.
  */
-export function bashToolShellGuidance(shell: ShellPlan): string {
+export function shellGuidance(shell: ShellPlan): string {
   if (shell.kind === 'posix') return '';
   const dialect =
     shell.kind === 'git-bash' || shell.kind === 'legacy-wsl-bash'
@@ -355,14 +355,14 @@ export function bashToolShellGuidance(shell: ShellPlan): string {
 }
 
 /**
- * Turn-scoped variant of {@link bashToolShellGuidance}. When the saved
+ * Turn-scoped variant of {@link shellGuidance}. When the saved
  * preference is broken, dialect guidance would be a lie — every command fails
  * at the boundary — so the description declares the outage and the repair
  * instead of naming a shell that cannot run.
  */
-export function bashToolTurnShellGuidance(shell: TurnShellPlan): string {
-  if (!shell.setupError) return bashToolShellGuidance(shell.plan);
-  return `Bash is unavailable this turn: ${shell.setupError.message} Repair the shell setting to re-enable it; commands keep failing closed rather than falling back to another shell.`;
+export function turnShellGuidance(shell: TurnShellPlan): string {
+  if (!shell.setupError) return shellGuidance(shell.plan);
+  return `Shell is unavailable this turn: ${shell.setupError.message} Repair the shell setting to re-enable it; commands keep failing closed rather than falling back to another shell.`;
 }
 
 function findAt(

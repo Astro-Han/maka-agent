@@ -381,7 +381,7 @@ describe("flat timeline under tool projection (#1307 P1 regression)", () => {
     const settled = materializeTurns([
       {
         type: "tool_call",
-        id: "bash-1",
+        id: "shell-1",
         turnId: "t1",
         ts: 1,
         toolName: "Shell",
@@ -389,10 +389,10 @@ describe("flat timeline under tool projection (#1307 P1 regression)", () => {
       },
       {
         type: "tool_result",
-        id: "r-bash-1",
+        id: "r-shell-1",
         turnId: "t1",
         ts: 2,
-        toolUseId: "bash-1",
+        toolUseId: "shell-1",
         isError: false,
         content: shellRunResult(1),
       },
@@ -500,7 +500,7 @@ describe("unfinished tools take their status from the turn", () => {
       },
       {
         type: "tool_call",
-        id: "bash-1",
+        id: "shell-1",
         turnId: "t1",
         ts: 3,
         toolName: "Shell",
@@ -523,7 +523,7 @@ describe("unfinished tools take their status from the turn", () => {
       },
       {
         type: "tool_call",
-        id: "bash-1",
+        id: "shell-1",
         turnId: "t1",
         ts: 3,
         toolName: "Shell",
@@ -549,7 +549,7 @@ describe("live tool status over persisted", () => {
       },
       {
         type: "tool_call",
-        id: "bash-1",
+        id: "shell-1",
         turnId: "t1",
         ts: 3,
         toolName: "Shell",
@@ -563,7 +563,7 @@ describe("live tool status over persisted", () => {
           stepId: "a1",
           tools: [
             {
-              toolUseId: "bash-1",
+              toolUseId: "shell-1",
               toolName: "Shell",
               stepId: "a1",
               status: "running",
@@ -594,7 +594,7 @@ describe("live tool status over persisted", () => {
       },
       {
         type: "tool_call",
-        id: "bash-1",
+        id: "shell-1",
         turnId: "t1",
         ts: 3,
         toolName: "Shell",
@@ -608,7 +608,7 @@ describe("live tool status over persisted", () => {
           stepId: "a1",
           tools: [
             {
-              toolUseId: "bash-1",
+              toolUseId: "shell-1",
               toolName: "Shell",
               stepId: "a1",
               status: "running",
@@ -706,7 +706,7 @@ describe("live tool status over persisted", () => {
       },
       {
         type: "tool_call",
-        id: "bash-1",
+        id: "shell-1",
         turnId: "t1",
         ts: 3,
         toolName: "Shell",
@@ -717,7 +717,7 @@ describe("live tool status over persisted", () => {
       type: "tool_start",
       id: "event-1",
       turnId: "t1",
-      toolUseId: "bash-1",
+      toolUseId: "shell-1",
       toolName: "Shell",
       args: { command: "sleep 60" },
       ts: 4,
@@ -727,8 +727,8 @@ describe("live tool status over persisted", () => {
       id: "event-2",
       turnId: "t1",
       sessionId: "s",
-      toolCallId: "bash-1",
-      toolUseId: "bash-1",
+      toolCallId: "shell-1",
+      toolUseId: "shell-1",
       seq: 0,
       stream: "stdout",
       chunk: "still going\n",

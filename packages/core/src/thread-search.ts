@@ -521,9 +521,9 @@ export function collectSearchableText(message: StoredMessage): string | undefine
     case 'tool_call':
       // PR-SEARCH-2 review fixup (@xuan `2f1aba55`): index ONLY
       // `intent` — the user-visible description of what the tool call
-      // is doing. `toolName` (e.g. `Bash`) and `displayName` are
-      // internal labels and would let searches for `Bash` match every
-      // bash invocation regardless of intent. The PR-SEARCH-1 plan
+      // is doing. `toolName` (e.g. `Shell`) and `displayName` are
+      // internal labels and would let searches for `Shell` match every
+      // shell invocation regardless of intent. The PR-SEARCH-1 plan
       // already locked `intent` as the only searchable field on
       // `ToolCallMessage`; the previous draft over-indexed by mistake.
       return message.intent && message.intent.length > 0 ? message.intent : undefined;

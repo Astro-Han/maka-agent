@@ -110,7 +110,7 @@ test('a Host-owned PTY survives Desktop disconnect and transfers control to TUI'
     owner = undefined;
     assert.ok(resources);
 
-    const started = await resources.runBackgroundBash({
+    const started = await resources.runBackgroundShell({
       sessionId: SESSION_ID,
       sourceTurnId: 'turn-1',
       sourceToolCallId: 'tool.pty/continuity',

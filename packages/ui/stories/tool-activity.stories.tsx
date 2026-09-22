@@ -183,7 +183,7 @@ export const DenseMixedResults: Story = {
   render: (args) => <ToolDetailBoard items={args.items} />,
 };
 
-// Real path: expanding a Bash row. Live, foreground-settled (`terminal`),
+// Real path: expanding a Shell row. Live, foreground-settled (`terminal`),
 // background (`shell_run`) and failed all reach the detail panel by different
 // branches; this is where to check they still read as one surface. The
 // background case has no other story.

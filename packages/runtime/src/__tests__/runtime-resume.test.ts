@@ -60,8 +60,8 @@ describe('runtime resume phase 0 projection', () => {
 
   test('projects deterministic tool operations from legal RuntimeEvent prefixes', () => {
     const events = [
-      callEvent('call-1', 'tool-1', 'Bash', { command: 'npm test' }),
-      responseEvent('result-1', 'tool-1', 'Bash', { ok: false }, true),
+      callEvent('call-1', 'tool-1', 'Shell', { command: 'npm test' }),
+      responseEvent('result-1', 'tool-1', 'Shell', { ok: false }, true),
       callEvent('call-2', 'tool-2', 'Read', { file_path: 'README.md' }),
     ];
 
@@ -80,7 +80,7 @@ describe('runtime resume phase 0 projection', () => {
       [
         {
           toolCallId: 'tool-1',
-          toolName: 'Bash',
+          toolName: 'Shell',
           status: 'failed',
           callRuntimeEventId: 'call-1',
           responseRuntimeEventId: 'result-1',
@@ -98,11 +98,11 @@ describe('runtime resume phase 0 projection', () => {
 
   test('distinguishes committed failed results from indeterminate missing results', () => {
     const failed = buildResumePlanFromRuntimeEvents([
-      callEvent('call-1', 'tool-1', 'Bash', { command: 'exit 1' }),
-      responseEvent('result-1', 'tool-1', 'Bash', { exitCode: 1 }, true),
+      callEvent('call-1', 'tool-1', 'Shell', { command: 'exit 1' }),
+      responseEvent('result-1', 'tool-1', 'Shell', { exitCode: 1 }, true),
     ]);
     const indeterminate = buildResumePlanFromRuntimeEvents([
-      callEvent('call-2', 'tool-2', 'Bash', { command: 'touch marker' }),
+      callEvent('call-2', 'tool-2', 'Shell', { command: 'touch marker' }),
     ]);
 
     assert.equal(failed.disposition, 'safe_replay');
@@ -120,7 +120,7 @@ describe('runtime resume phase 0 projection', () => {
   test('excludes unresolved tool calls from provider replay history', () => {
     const events = [
       textEvent('user-1', 'user', 'hello'),
-      callEvent('call-1', 'tool-1', 'Bash', { command: 'touch marker' }),
+      callEvent('call-1', 'tool-1', 'Shell', { command: 'touch marker' }),
       textEvent('system-1', 'system', 'diagnostic'),
     ];
 
@@ -212,7 +212,7 @@ describe('runtime resume phase 0 projection', () => {
 
   test('blocks replay on unmatched tool results rather than inventing provider history', () => {
     const plan = buildResumePlanFromRuntimeEvents([
-      responseEvent('result-1', 'tool-1', 'Bash', { ok: true }, false),
+      responseEvent('result-1', 'tool-1', 'Shell', { ok: true }, false),
     ]);
 
     assert.equal(plan.disposition, 'blocked');
@@ -281,11 +281,11 @@ describe('runtime resume phase 1 safe-boundary continuation', () => {
         ...continuationIdentity,
       },
       {
-        ...callEvent('child-call', 'tool-2', 'Bash', { command: 'npm test' }),
+        ...callEvent('child-call', 'tool-2', 'Shell', { command: 'npm test' }),
         ...continuationIdentity,
       },
       {
-        ...responseEvent('child-result', 'tool-2', 'Bash', { exitCode: 0 }, false),
+        ...responseEvent('child-result', 'tool-2', 'Shell', { exitCode: 0 }, false),
         ...continuationIdentity,
       },
       {
@@ -324,7 +324,7 @@ describe('runtime resume phase 1 safe-boundary continuation', () => {
       sourceWorkspaceIdentity: 'workspace-1',
       currentWorkspaceIdentity: 'workspace-1',
       backgroundOperationsSettled: true,
-      availableToolNames: ['Bash'],
+      availableToolNames: ['Shell'],
     });
 
     assert.equal(plan.disposition, 'continue');
@@ -352,7 +352,7 @@ describe('runtime resume phase 1 safe-boundary continuation', () => {
     };
     const plan = buildResumePlanFromRuntimeEvents([
       initial,
-      callEvent('call-1', 'tool-1', 'Bash', { command: 'touch marker' }),
+      callEvent('call-1', 'tool-1', 'Shell', { command: 'touch marker' }),
     ]);
 
     assert.equal(plan.disposition, 'blocked');
@@ -372,7 +372,7 @@ describe('runtime resume phase 1 safe-boundary continuation', () => {
     };
     const events = [
       initial,
-      callEvent('call-1', 'tool-1', 'Bash', { command: 'touch marker' }),
+      callEvent('call-1', 'tool-1', 'Shell', { command: 'touch marker' }),
       base({
         id: 'terminal-1',
         role: 'system',
@@ -405,8 +405,8 @@ describe('runtime resume phase 1 safe-boundary continuation', () => {
   test('creates a new execution identity from a fully committed safe boundary', () => {
     const events = [
       textEvent('user-1', 'user', 'run the tests'),
-      callEvent('call-1', 'tool-1', 'Bash', { command: 'npm test' }),
-      responseEvent('result-1', 'tool-1', 'Bash', { exitCode: 0 }, false),
+      callEvent('call-1', 'tool-1', 'Shell', { command: 'npm test' }),
+      responseEvent('result-1', 'tool-1', 'Shell', { exitCode: 0 }, false),
     ];
 
     const plan = buildSafeBoundaryContinuationPlan(events, {
@@ -417,7 +417,7 @@ describe('runtime resume phase 1 safe-boundary continuation', () => {
       sourceWorkspaceIdentity: 'workspace-1',
       currentWorkspaceIdentity: 'workspace-1',
       backgroundOperationsSettled: true,
-      availableToolNames: ['Bash'],
+      availableToolNames: ['Shell'],
       continuationIdentity: {
         invocationId: 'invocation-2',
         runId: 'run-2',
@@ -440,7 +440,7 @@ describe('runtime resume phase 1 safe-boundary continuation', () => {
       safetySnapshot: {
         workspaceIdentity: 'workspace-1',
         backgroundOperationsSettled: true,
-        availableToolNames: ['Bash'],
+        availableToolNames: ['Shell'],
       },
     });
   });
@@ -549,11 +549,11 @@ describe('runtime resume phase 1 safe-boundary continuation', () => {
     const plan = buildSafeBoundaryContinuationPlan(
       [
         textEvent('user-1', 'user', 'start the service'),
-        callEvent('call-1', 'tool-1', 'Bash', { command: 'npm start', background: true }),
+        callEvent('call-1', 'tool-1', 'Shell', { command: 'npm start', background: true }),
         responseEvent(
           'result-1',
           'tool-1',
-          'Bash',
+          'Shell',
           {
             kind: 'shell_run',
             ref: 'maka://runtime/background-tasks/run-1',
@@ -658,8 +658,8 @@ describe('runtime resume phase 1 safe-boundary continuation', () => {
           author: 'system',
           actions: { stateDelta: { continuationStart: true } },
         }),
-        callEvent('call-1', 'tool-1', 'Bash', { command: 'npm test' }),
-        responseEvent('result-1', 'tool-1', 'Bash', { exitCode: 0 }, false),
+        callEvent('call-1', 'tool-1', 'Shell', { command: 'npm test' }),
+        responseEvent('result-1', 'tool-1', 'Shell', { exitCode: 0 }, false),
       ],
       safeBoundaryFacts(),
     );
@@ -723,7 +723,7 @@ function safeBoundaryFacts() {
     sourceWorkspaceIdentity: 'workspace-1',
     currentWorkspaceIdentity: 'workspace-1',
     backgroundOperationsSettled: true,
-    availableToolNames: ['Bash', 'Write'],
+    availableToolNames: ['Shell', 'Write'],
     continuationIdentity: {
       invocationId: 'invocation-2',
       runId: 'run-2',

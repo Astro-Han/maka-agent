@@ -199,7 +199,7 @@ describe('ACP Session event mapper', () => {
       event({
         type: 'tool_start',
         toolUseId: 'tool',
-        toolName: 'Bash',
+        toolName: 'Shell',
         args: undefined,
         argsPreview: { command: 'pwd' },
         activityKind: 'command',

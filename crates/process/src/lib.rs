@@ -85,6 +85,9 @@ pub fn shell_schema() -> Value {
 struct Input {
     #[schemars(length(min = 1, max = MAX_COMMAND_BYTES))]
     command: String,
+    /// Load the shell's login profile. Set false to skip it.
+    #[serde(default = "default_login")]
+    login: bool,
     #[serde(default = "default_timeout")]
     #[schemars(range(min = 1, max = MAX_TIMEOUT_MS))]
     timeout_ms: u64,
@@ -92,11 +95,15 @@ struct Input {
 fn default_timeout() -> u64 {
     DEFAULT_TIMEOUT_MS
 }
+fn default_login() -> bool {
+    true
+}
 
 #[derive(Clone)]
 pub struct ShellExecutor {
     cwd: PathBuf,
     shell: shell::ShellPlan,
+    login: bool,
     sandbox: maka_sandbox::Sandbox,
     network_route: maka_network::Policy,
     #[cfg(target_os = "linux")]
@@ -145,6 +152,7 @@ impl ShellExecutor {
         Ok(Self {
             cwd,
             shell: shell::ShellPlan::detect(),
+            login: true,
             sandbox,
             network_route: maka_network::Policy::default(),
             #[cfg(target_os = "linux")]
@@ -160,6 +168,12 @@ impl ShellExecutor {
 
     pub fn cwd(&self) -> &Path {
         &self.cwd
+    }
+
+    /// Control command profile loading without changing the executable or permissions.
+    pub fn with_login_shell(mut self, login: bool) -> Self {
+        self.login = login;
+        self
     }
 
     /// Capture the selected interactive login shell and its display command.
@@ -183,7 +197,7 @@ impl ShellExecutor {
     }
 
     fn prepare(&self, source: &str, terminal: bool) -> Result<Command, ToolError> {
-        self.capture(self.shell.command(&self.cwd, source, terminal))
+        self.capture(self.shell.command(&self.cwd, source, terminal, self.login))
     }
 
     fn capture(&self, command: Command) -> Result<Command, ToolError> {
@@ -258,6 +272,7 @@ impl ToolExecutor for ShellExecutor {
                 ));
             }
             let cancellation = cancellation.child_token();
+            let executor = executor.with_login_shell(input.login);
             let plan = executor.prepare(&input.command, false)?;
             // Dropping the awaiter requests cancellation, but cannot abort the
             // worker that owns process termination, reaping and pipe drain.

@@ -36,8 +36,8 @@ const REF = 'maka://runtime/background-tasks/pty-1';
 describe('ShellRun UI projection', () => {
   test('reconciles WriteStdin into its Shell parent while retaining safe operation metadata', () => {
     const messages: StoredMessage[] = [
-      toolCall('bash-1', 'turn-1', 'Shell', { command: 'read value', pty: true }, 1),
-      toolResult('bash-1', 'turn-1', shellRun(1), 2),
+      toolCall('shell-1', 'turn-1', 'Shell', { command: 'read value', pty: true }, 1),
+      toolResult('shell-1', 'turn-1', shellRun(1), 2),
       toolCall('write-1', 'turn-2', 'WriteStdin', {
         ref: REF,
         input: 'private-value\n',
@@ -54,13 +54,13 @@ describe('ShellRun UI projection', () => {
     ];
 
     const turns = materializeTurns(messages, 'en');
-    const bash = turns[0]?.tools[0];
+    const shell = turns[0]?.tools[0];
     const write = turns[1]?.tools[0];
-    assert.equal(bash?.toolName, 'Shell');
-    assert.equal(bash?.result?.kind, 'shell_run');
-    if (bash?.result?.kind !== 'shell_run') assert.fail('expected ShellRun parent');
-    assert.equal(bash.result.revision, 2);
-    assert.equal(bash.result.operation, undefined);
+    assert.equal(shell?.toolName, 'Shell');
+    assert.equal(shell?.result?.kind, 'shell_run');
+    if (shell?.result?.kind !== 'shell_run') assert.fail('expected ShellRun parent');
+    assert.equal(shell.result.revision, 2);
+    assert.equal(shell.result.operation, undefined);
     assert.equal(write?.toolName, 'WriteStdin');
     assert.deepEqual(write?.args, {
       ref: REF,
@@ -81,8 +81,8 @@ describe('ShellRun UI projection', () => {
 
   test('keeps a durable background update ahead of a stale live turn result', () => {
     const messages: StoredMessage[] = [
-      toolCall('bash-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 1),
-      toolResult('bash-1', 'turn-1', shellRun(1), 2),
+      toolCall('shell-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 1),
+      toolResult('shell-1', 'turn-1', shellRun(1), 2),
       { type: 'user', id: 'user-2', turnId: 'turn-2', ts: 3, text: 'next' },
     ];
     const projection = createTranscriptProjection();
@@ -91,7 +91,7 @@ describe('ShellRun UI projection', () => {
       sessionId: 'session-1',
       ownership: { kind: 'local' },
       sourceTurnId: 'turn-1',
-      sourceToolCallId: 'bash-1',
+      sourceToolCallId: 'shell-1',
       result: shellRunSnapshot(3, { status: 'completed', completedAt: 5, exitCode: 0 }),
     };
     const durable = projection.project({ locale: 'en', messages, shellRunUpdates: [update] });
@@ -101,10 +101,10 @@ describe('ShellRun UI projection', () => {
     const live: LiveTurnProjection = {
       turnId: 'turn-1',
       steps: [{
-        stepId: 'tool:bash-1',
+        stepId: 'tool:shell-1',
         contentOrder: ['tools'],
         tools: [{
-          toolUseId: 'bash-1',
+          toolUseId: 'shell-1',
           toolName: 'Shell',
           status: 'running',
           args: { command: 'job', pty: true },
@@ -117,14 +117,14 @@ describe('ShellRun UI projection', () => {
     const result = overlaid[0]?.tools[0]?.result;
     assert.equal(result?.kind === 'shell_run' ? result.revision : undefined, 3);
     assert.equal(result?.kind === 'shell_run' ? result.status : undefined, 'completed');
-    const bash = overlaid[0]?.tools[0];
-    assert.equal(bash ? toolActivityPresentationStatus(bash) : undefined, 'completed');
+    const shell = overlaid[0]?.tools[0];
+    assert.equal(shell ? toolActivityPresentationStatus(shell) : undefined, 'completed');
   });
 
   test('keeps a newer live PTY screen ahead of the persisted snapshot', () => {
     const messages: StoredMessage[] = [
-      toolCall('bash-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 1),
-      toolResult('bash-1', 'turn-1', shellRun(1), 2),
+      toolCall('shell-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 1),
+      toolResult('shell-1', 'turn-1', shellRun(1), 2),
     ];
     const liveResult = shellRun(2);
     if (liveResult.output?.mode !== 'pty') assert.fail('expected PTY output');
@@ -132,10 +132,10 @@ describe('ShellRun UI projection', () => {
     const live: LiveTurnProjection = {
       turnId: 'turn-1',
       steps: [{
-        stepId: 'tool:bash-1',
+        stepId: 'tool:shell-1',
         contentOrder: ['tools'],
         tools: [{
-          toolUseId: 'bash-1',
+          toolUseId: 'shell-1',
           toolName: 'Shell',
           status: 'running',
           args: { command: 'job', pty: true },
@@ -167,10 +167,10 @@ describe('ShellRun UI projection', () => {
     const live: LiveTurnProjection = {
       turnId: 'turn-1',
       steps: [{
-        stepId: 'tool:bash-1',
+        stepId: 'tool:shell-1',
         contentOrder: ['tools'],
         tools: [{
-          toolUseId: 'bash-1',
+          toolUseId: 'shell-1',
           toolName: 'Shell',
           status: 'running',
           args: { command: 'job', pty: true },
@@ -181,7 +181,7 @@ describe('ShellRun UI projection', () => {
       sessionId: 'session-1',
       ownership: { kind: 'local' },
       sourceTurnId: 'turn-1',
-      sourceToolCallId: 'bash-1',
+      sourceToolCallId: 'shell-1',
       result: shellRunSnapshot(1),
     };
 
@@ -200,8 +200,8 @@ describe('ShellRun UI projection', () => {
 
   test('marks a running ShellRun inherited from a source session as detached', () => {
     const messages: StoredMessage[] = [
-      toolCall('bash-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 1),
-      toolResult('bash-1', 'turn-1', shellRun(1), 2),
+      toolCall('shell-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 1),
+      toolResult('shell-1', 'turn-1', shellRun(1), 2),
     ];
     const turns = createTranscriptProjection().project({ locale: 'en', messages, shellRunUpdates: [{
       sessionId: 'branch-session',
@@ -211,7 +211,7 @@ describe('ShellRun UI projection', () => {
         ownerSessionId: 'source-session',
       },
       sourceTurnId: 'turn-1',
-      sourceToolCallId: 'bash-1',
+      sourceToolCallId: 'shell-1',
       result: shellRunSnapshot(2),
     }] });
 
@@ -224,7 +224,7 @@ describe('ShellRun UI projection', () => {
       sessionId: 'branch-session',
       ownership: { kind: 'source_unavailable', sourceSessionId: 'source-session' },
       sourceTurnId: 'turn-1',
-      sourceToolCallId: 'bash-1',
+      sourceToolCallId: 'shell-1',
       result: shellRunSnapshot(2),
     }] });
     assert.equal(unavailable[0]?.tools[0]?.shellRunSource, 'unavailable');
@@ -232,7 +232,7 @@ describe('ShellRun UI projection', () => {
 
   test('does not pair stale ownership with a newer ShellRun revision', () => {
     const tool: ToolActivityItem = {
-      toolUseId: 'bash-1',
+      toolUseId: 'shell-1',
       toolName: 'Shell',
       status: 'completed',
       args: { command: 'job' },

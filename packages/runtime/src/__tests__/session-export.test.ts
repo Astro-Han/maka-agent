@@ -980,7 +980,7 @@ test(
           tool_name, canonical_args_hash, recovery_mode, current_state,
           call_event_id, result_event_id, version, dispatch_event_id
         )
-        VALUES ('op-1', 'invocation-1', 'run-1', 'turn-1', 'call-1', 'Bash', 'hash',
+        VALUES ('op-1', 'invocation-1', 'run-1', 'turn-1', 'call-1', 'Shell', 'hash',
           'never_auto_retry', 'prepared', 'call-event', NULL, 1, 'call-event');
       `);
     } finally {

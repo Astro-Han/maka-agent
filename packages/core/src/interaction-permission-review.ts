@@ -26,7 +26,7 @@ import {
 } from './additional-permissions.js';
 import { COMPUTER_USE_APPROVAL_CLASSES, type ComputerUseApprovalClass } from './computer-use.js';
 import {
-  categorizeBash,
+  categorizeShell,
   isToolCategory,
   permissionReasonForCategory,
   type PermissionRequest,
@@ -204,7 +204,7 @@ export interface InteractionAdditionalPermissionsPrompt {
 
 export interface InteractionSandboxEscalationPrompt {
   readonly kind: 'sandbox_escalation';
-  readonly toolName: 'Bash';
+  readonly toolName: 'Shell';
   readonly category: ToolCategory;
   readonly reason: 'sandbox_escalation';
   readonly review: InteractionCommandReview & { readonly cwd: string };
@@ -443,19 +443,19 @@ function projectSandboxPrompt(
   request: Extract<PermissionRequestPayload, { kind: 'sandbox_escalation' }>,
 ): InteractionSandboxEscalationPrompt {
   if (
-    request.toolName !== 'Bash' ||
+    request.toolName !== 'Shell' ||
     request.reason !== 'sandbox_escalation' ||
     !allowOnceDeny(request.availableDecisions)
   )
     throw new Error('Invalid sandbox escalation request');
   const category = categoryValue(request.category);
-  if (category !== categorizeBash(request.command))
+  if (category !== categorizeShell(request.command))
     throw new Error('Sandbox category does not match command');
   const command = safeText(request.command, INTERACTION_PERMISSION_COMMAND_MAX_BYTES);
-  if (category !== categorizeBash(command)) throw new InteractionPermissionProjectionError();
+  if (category !== categorizeShell(command)) throw new InteractionPermissionProjectionError();
   const prompt: InteractionSandboxEscalationPrompt = {
     kind: 'sandbox_escalation',
-    toolName: 'Bash',
+    toolName: 'Shell',
     category,
     reason: 'sandbox_escalation',
     review: {
@@ -477,7 +477,7 @@ function projectSandboxPrompt(
 function decodeSandboxPrompt(record: Record<string, unknown>): InteractionSandboxEscalationPrompt {
   exact(record, SANDBOX_PROMPT_SHAPE, 'sandbox escalation prompt');
   if (
-    record.toolName !== 'Bash' ||
+    record.toolName !== 'Shell' ||
     record.reason !== 'sandbox_escalation' ||
     !allowOnceDeny(record.availableDecisions)
   )
@@ -486,11 +486,11 @@ function decodeSandboxPrompt(record: Record<string, unknown>): InteractionSandbo
   if (review.kind !== 'command' || review.cwd === undefined)
     throw new Error('Invalid sandbox command review');
   const category = categoryValue(record.category);
-  if (category !== categorizeBash(review.command))
+  if (category !== categorizeShell(review.command))
     throw new Error('Sandbox category does not match command review');
   return deepFreeze({
     kind: 'sandbox_escalation',
-    toolName: 'Bash',
+    toolName: 'Shell',
     category,
     reason: 'sandbox_escalation',
     review: { ...review, cwd: review.cwd },
@@ -511,11 +511,11 @@ function projectToolReview(
 ): InteractionToolPermissionReview {
   const record = projectionRecord(args);
   switch (toolName) {
-    case 'Bash': {
+    case 'Shell': {
       const command = projectionString(record.command, INTERACTION_PERMISSION_COMMAND_MAX_BYTES);
       const cwd = optionalProjectionString(record, 'cwd', INTERACTION_PERMISSION_PATH_MAX_BYTES);
-      if (category !== categorizeBash(command))
-        throw new Error('Bash category does not match command');
+      if (category !== categorizeShell(command))
+        throw new Error('Shell category does not match command');
       return {
         kind: 'command',
         command: safeText(command, INTERACTION_PERMISSION_COMMAND_MAX_BYTES),
@@ -1108,7 +1108,7 @@ function assertToolSemantics(
       browser_extract: ['browser', 'browser'],
     };
   const expected =
-    toolName === 'Bash'
+    toolName === 'Shell'
       ? ([category, 'command'] as const)
       : (identity[toolName] ??
         (category === 'computer_use'
@@ -1130,11 +1130,11 @@ function assertToolSemantics(
   }
   if (toolName === 'WriteStdin' && remember) throw new Error('WriteStdin cannot be remembered');
   if (
-    toolName === 'Bash' &&
+    toolName === 'Shell' &&
     review.kind === 'command' &&
-    category !== categorizeBash(review.command)
+    category !== categorizeShell(review.command)
   )
-    throw new Error('Bash category does not match command');
+    throw new Error('Shell category does not match command');
 }
 
 function reasonValue(value: unknown): InteractionPermissionReason {

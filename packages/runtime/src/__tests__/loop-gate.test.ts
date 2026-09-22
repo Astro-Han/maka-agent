@@ -326,7 +326,7 @@ describe('loop-gate for repeated identical FAILING tool calls', () => {
 
   test('identical SUCCEEDING calls are never gated — polling is allowed', async () => {
     const h = makeHarness();
-    const poll = makeTool('Bash', h.impl);
+    const poll = makeTool('Shell', h.impl);
     const args = { command: 'git status --porcelain' };
 
     const runs = LOOP_GATE_IDENTICAL_THRESHOLD + 2;
@@ -344,7 +344,7 @@ describe('loop-gate for repeated identical FAILING tool calls', () => {
   test('a success between failures resets the streak', async () => {
     const h = makeHarness();
     const box = { fail: true };
-    const t = makeFlakyTool('Bash', h.impl, box);
+    const t = makeFlakyTool('Shell', h.impl, box);
     const args = { command: 'npm test' };
 
     box.fail = true;
@@ -366,7 +366,7 @@ describe('loop-gate for repeated identical FAILING tool calls', () => {
     const blocked = await call(h, t, args);
     assert.deepEqual(
       blocked,
-      { error: formatLoopGateText('Bash') },
+      { error: formatLoopGateText('Shell') },
       'blocked after two fresh failures',
     );
     assert.equal(h.impl.length, 4, 'the blocked call did not run');
@@ -374,17 +374,17 @@ describe('loop-gate for repeated identical FAILING tool calls', () => {
 
   test('a different tool or args between failures resets the streak', async () => {
     const h = makeHarness();
-    const bash = makeFailingTool('Bash', h.impl);
+    const shell = makeFailingTool('Shell', h.impl);
     const edit = makeFailingTool('Edit', h.impl);
     const cmd = { command: 'npm test' };
 
-    // Three identical Bash failures, but never back-to-back — iterate-then-retry
+    // Three identical Shell failures, but never back-to-back — iterate-then-retry
     // (fail a test, edit, re-run the same failing test) must not be gated.
-    await call(h, bash, cmd);
+    await call(h, shell, cmd);
     await call(h, edit, { path: 'a' });
-    await call(h, bash, cmd);
+    await call(h, shell, cmd);
     await call(h, edit, { path: 'a' });
-    const last = await call(h, bash, cmd);
+    const last = await call(h, shell, cmd);
 
     assert.deepEqual(last, { error: 'boom' }, 'the re-run after a different call is not blocked');
     assert.equal(h.impl.length, 5, 'all five calls ran');
@@ -481,11 +481,11 @@ describe('loop-gate for repeated identical FAILING tool calls', () => {
     assert.equal(h.impl.length, 3, 'the post-reset call ran');
   });
 
-  // A Bash adapter may return a terminal result instead of throwing, so its failure
+  // A Shell adapter may return a terminal result instead of throwing, so its failure
   // is counted only when deriveToolResultStatus() classifies the terminal exitCode.
   test('a returned terminal result with a non-zero exit counts as a failure', async () => {
     const h = makeHarness();
-    const t = makeTerminalTool('Bash', h.impl, 1);
+    const t = makeTerminalTool('Shell', h.impl, 1);
     const args = { command: 'npm test' };
 
     const results: unknown[] = [];
@@ -505,14 +505,14 @@ describe('loop-gate for repeated identical FAILING tool calls', () => {
     }
     assert.deepEqual(
       results[LOOP_GATE_IDENTICAL_THRESHOLD - 1],
-      { error: formatLoopGateText('Bash') },
+      { error: formatLoopGateText('Shell') },
       'the Nth identical failure is gated',
     );
   });
 
   test('a returned terminal result with exit 0 is a success — polling is not gated', async () => {
     const h = makeHarness();
-    const t = makeTerminalTool('Bash', h.impl, 0);
+    const t = makeTerminalTool('Shell', h.impl, 0);
     const args = { command: 'git status --porcelain' };
 
     const runs = LOOP_GATE_IDENTICAL_THRESHOLD + 2;

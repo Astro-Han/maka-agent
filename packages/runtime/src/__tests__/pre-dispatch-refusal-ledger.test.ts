@@ -248,7 +248,7 @@ const REFUSAL_PATHS: Array<{
     drive: async (h) => {
       const runtime = runtimeFor(h);
       const tool: MakaTool = {
-        name: 'Bash',
+        name: 'Shell',
         description: 'test',
         parameters: z.object({ command: z.string() }),
         impl: async () => {

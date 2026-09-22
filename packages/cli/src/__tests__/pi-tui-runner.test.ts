@@ -6805,7 +6805,7 @@ Slug openai-work<cursor>
     ]);
   });
 
-  test('hydrates a resumed background Bash card from durable shell-run state', async () => {
+  test('hydrates a resumed background Shell card from durable shell-run state', async () => {
     const terminal = new FakeTerminal();
     const ref = 'maka://runtime/background-tasks/bg-1';
     const driver = new SlashCommandDriver(
@@ -6819,7 +6819,7 @@ Slug openai-work<cursor>
               id: 'tool-bg',
               turnId: 'turn-1',
               ts: 1,
-              toolName: 'Bash',
+              toolName: 'Shell',
               args: { command: 'build' },
             },
             {
@@ -6909,7 +6909,7 @@ Slug openai-work<cursor>
               id: 'tool-bg',
               turnId: 'turn-1',
               ts: 1,
-              toolName: 'Bash',
+              toolName: 'Shell',
               args: { command: 'build' },
             },
             {
@@ -7612,7 +7612,7 @@ Slug openai-work<cursor>
     ]);
   });
 
-  test('marks an inherited running Bash card detached after rewind', async () => {
+  test('marks an inherited running Shell card detached after rewind', async () => {
     const terminal = new FakeTerminal();
     const ref = 'maka://runtime/background-tasks/bg-1';
     const branchMessages = [
@@ -7621,7 +7621,7 @@ Slug openai-work<cursor>
         id: 'tool-bg',
         turnId: 'turn-1',
         ts: 1,
-        toolName: 'Bash',
+        toolName: 'Shell',
         args: { command: 'build' },
       },
       {
@@ -7790,7 +7790,7 @@ Slug openai-work<cursor>
         id: 'tool-bg',
         turnId: 'turn-1',
         ts: 1,
-        toolName: 'Bash',
+        toolName: 'Shell',
         args: { command: 'build' },
       },
       {
@@ -11132,7 +11132,7 @@ class LiveCtxDriver extends FakeSessionDriver {
       turnId: 'turn-1',
       ts: 1,
       toolUseId: 'tool-1',
-      toolName: 'Bash',
+      toolName: 'Shell',
       args: { command: 'npm test' },
     };
     await new Promise<void>((resolve) => {
@@ -11171,7 +11171,7 @@ class ToolOutputDriver extends FakeSessionDriver {
       turnId: 'turn-1',
       ts: 1,
       toolUseId: 'tool-1',
-      toolName: 'Bash',
+      toolName: 'Shell',
       args: { command: 'npm test' },
     };
     yield {
@@ -11238,7 +11238,7 @@ class ReaderThenQuestionDriver extends ToolOutputDriver {
       turnId: 'turn-1',
       ts: 1,
       toolUseId: 'tool-1',
-      toolName: 'Bash',
+      toolName: 'Shell',
       args: { command: 'npm test' },
     };
     yield {
@@ -11330,7 +11330,7 @@ class BackgroundShellRunDriver extends ToolOutputDriver {
       turnId: 'turn-1',
       ts: 1,
       toolUseId: 'tool-bg',
-      toolName: 'Bash',
+      toolName: 'Shell',
       args: { command: 'build' },
     };
     yield {
@@ -11363,7 +11363,7 @@ class BackgroundShellRunDriver extends ToolOutputDriver {
   }
 }
 
-// #1135: an off-screen running Bash card settles while off-screen. The settle
+// #1135: an off-screen running Shell card settles while off-screen. The settle
 // is delivered via subscribeShellRunUpdates (see the test). The driver only
 // sets up the off-screen running card and a late visible tool.
 class OffscreenSettleDriver extends ToolOutputDriver {
@@ -11374,7 +11374,7 @@ class OffscreenSettleDriver extends ToolOutputDriver {
       turnId: 'turn-1',
       ts: 1,
       toolUseId: 'tool-early',
-      toolName: 'Bash',
+      toolName: 'Shell',
       args: { command: 'early-build' },
     };
     yield {
@@ -11411,7 +11411,7 @@ class OffscreenSettleDriver extends ToolOutputDriver {
       turnId: 'turn-1',
       ts: 4,
       toolUseId: 'tool-late',
-      toolName: 'Bash',
+      toolName: 'Shell',
       args: { command: 'late-build' },
     };
     yield {
@@ -12203,7 +12203,7 @@ class HostSuccessorDriver extends SlashCommandDriver {
           id: 'tool-bg',
           turnId,
           ts: 1,
-          toolName: 'Bash',
+          toolName: 'Shell',
           args: { command: 'build' },
         },
         {

@@ -99,7 +99,7 @@ A real execution history captures far more than conversational text:
 7. Runtime: Request a broader sandbox permission
 8. User: Approve
 9. Tool: Return the edit result
-10. Model: Call Bash to rerun the tests
+10. Model: Call Shell to rerun the tests
 11. Tool: Return the test results
 12. Model: Produce the final answer
 13. Runtime: Mark the Run completed

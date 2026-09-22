@@ -39,7 +39,7 @@ describe('foldPromptComposition', () => {
   test('folds kinds into the vocabulary /context already uses', () => {
     const composition = foldPromptComposition([
       segment({ kind: 'system_prompt', bytes: 400 }),
-      segment({ kind: 'tool_schema', bytes: 300, label: 'Bash' }),
+      segment({ kind: 'tool_schema', bytes: 300, label: 'Shell' }),
       segment({ kind: 'message', bytes: 200 }),
       segment({ kind: 'provider_options', bytes: 100 }),
     ]);
@@ -55,13 +55,13 @@ describe('foldPromptComposition', () => {
   test('sizes each tool on its own, largest first', () => {
     const composition = foldPromptComposition([
       segment({ kind: 'tool_schema', bytes: 300, label: 'Read' }),
-      segment({ kind: 'tool_schema', bytes: 900, label: 'Bash' }),
+      segment({ kind: 'tool_schema', bytes: 900, label: 'Shell' }),
       segment({ kind: 'tool_schema', bytes: 300, label: 'Edit' }),
     ]);
 
     // Ties broken by name so two reads of one session order identically.
     assert.deepEqual(composition?.tools, [
-      { name: 'Bash', bytes: 900 },
+      { name: 'Shell', bytes: 900 },
       { name: 'Edit', bytes: 300 },
       { name: 'Read', bytes: 300 },
     ]);
@@ -70,11 +70,11 @@ describe('foldPromptComposition', () => {
 
   test('counts unnamed tool schemas without inventing a name for them', () => {
     const composition = foldPromptComposition([
-      segment({ kind: 'tool_schema', bytes: 500, label: 'Bash' }),
+      segment({ kind: 'tool_schema', bytes: 500, label: 'Shell' }),
       segment({ kind: 'tool_schema', bytes: 250 }),
     ]);
 
-    assert.deepEqual(composition?.tools, [{ name: 'Bash', bytes: 500 }]);
+    assert.deepEqual(composition?.tools, [{ name: 'Shell', bytes: 500 }]);
     assert.equal(composition?.unlabelledToolBytes, 250);
     // The kind total still holds every byte, named or not.
     assert.deepEqual(composition?.segments, [{ kind: 'tool_definitions', bytes: 750 }]);
@@ -82,11 +82,11 @@ describe('foldPromptComposition', () => {
 
   test('preserves the count carried by a bounded tool remainder', () => {
     const composition = foldPromptComposition([
-      segment({ kind: 'tool_schema', bytes: 500, label: 'Bash' }),
+      segment({ kind: 'tool_schema', bytes: 500, label: 'Shell' }),
       segment({ kind: 'tool_schema', bytes: 9_000, representedSegments: 748 }),
     ]);
 
-    assert.deepEqual(composition?.tools, [{ name: 'Bash', bytes: 500 }]);
+    assert.deepEqual(composition?.tools, [{ name: 'Shell', bytes: 500 }]);
     assert.deepEqual(composition?.remainingTools, { count: 748, bytes: 9_000 });
     assert.equal(composition?.unlabelledToolBytes, undefined);
   });
@@ -121,13 +121,13 @@ describe('readPromptCompositionEvent', () => {
         attemptId: 'attempt-1',
         requestBytes: 900,
         segments: [
-          { kind: 'tool_schema', index: 0, cacheable: true, hash: 'h', bytes: 800, label: 'Bash' },
+          { kind: 'tool_schema', index: 0, cacheable: true, hash: 'h', bytes: 800, label: 'Shell' },
         ],
       }),
     );
 
     assert.equal(read?.attemptId, 'attempt-1');
-    assert.deepEqual(read?.composition.tools, [{ name: 'Bash', bytes: 800 }]);
+    assert.deepEqual(read?.composition.tools, [{ name: 'Shell', bytes: 800 }]);
   });
 
   test('ignores every other event on the stream', () => {
@@ -145,7 +145,7 @@ describe('readPromptCompositionEvent', () => {
         attemptId: 'attempt-1',
         requestBytes: 900,
         segments: [
-          { kind: 'tool_schema', index: 0, cacheable: true, hash: 'h', bytes: 800, label: 'Bash' },
+          { kind: 'tool_schema', index: 0, cacheable: true, hash: 'h', bytes: 800, label: 'Shell' },
           { kind: 'tool_schema', index: 1, cacheable: true, hash: 'h', bytes: 'lots' },
         ],
       }),

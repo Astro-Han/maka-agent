@@ -87,7 +87,7 @@ function runTool(
 }
 
 describe('file tools follow the execution boundary', () => {
-  test('a bypass boundary reaches outside the session cwd, as Bash already does', async () => {
+  test('a bypass boundary reaches outside the session cwd, as Shell already does', async () => {
     const { cwd, outside, cleanup } = await makeDirs();
     try {
       const tools = toolsFor();

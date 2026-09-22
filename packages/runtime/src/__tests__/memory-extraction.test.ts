@@ -277,13 +277,13 @@ describe('bounded Memory Extraction', () => {
       event('tool-call-2', 'model', {
         kind: 'function_call',
         id: 'call-2',
-        name: 'Bash',
+        name: 'Shell',
         args: { cmd: 'false' },
       }),
       event('tool-result-2', 'tool', {
         kind: 'function_response',
         id: 'call-2',
-        name: 'Bash',
+        name: 'Shell',
         result: 'failed',
         isError: true,
       }),

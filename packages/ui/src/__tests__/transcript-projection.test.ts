@@ -38,8 +38,8 @@ const SESSION = 'session-1';
 function history(): StoredMessage[] {
   return [
     { type: 'user', id: 'u1', turnId: 'turn-1', ts: 1, text: 'run a job' },
-    toolCall('bash-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 2),
-    toolResult('bash-1', 'turn-1', shellRun(1), 3),
+    toolCall('shell-1', 'turn-1', 'Shell', { command: 'job', pty: true }, 2),
+    toolResult('shell-1', 'turn-1', shellRun(1), 3),
     { type: 'assistant', id: 'a1', turnId: 'turn-1', ts: 4, text: 'started', modelId: 'model-1' },
     { type: 'user', id: 'u2', turnId: 'turn-2', ts: 5, text: 'and now?' },
     { type: 'assistant', id: 'a2', turnId: 'turn-2', ts: 6, text: 'done', modelId: 'model-1' },
@@ -50,7 +50,7 @@ const backgroundUpdate: ShellRunUpdate = {
   sessionId: SESSION,
   ownership: { kind: 'local' },
   sourceTurnId: 'turn-1',
-  sourceToolCallId: 'bash-1',
+  sourceToolCallId: 'shell-1',
   result: shellRunSnapshot(9),
 };
 
@@ -135,8 +135,8 @@ describe('incremental transcript projection', () => {
     });
     assert.notStrictEqual(advanced[0], settled[0], 'a real revision advance must move the owning turn');
     assert.strictEqual(advanced[1], settled[1]);
-    const advancedBash = advanced[0]?.tools[0];
-    assert.equal(advancedBash?.result?.kind === 'shell_run' ? advancedBash.result.revision : undefined, 10);
+    const advancedShell = advanced[0]?.tools[0];
+    assert.equal(advancedShell?.result?.kind === 'shell_run' ? advancedShell.result.revision : undefined, 10);
   });
 
 
@@ -238,13 +238,13 @@ describe('incremental transcript projection', () => {
       sessionId: SESSION,
       ownership: { kind: 'source_owned', sourceSessionId: 'source', ownerSessionId: 'source' },
       sourceTurnId: 'turn-1',
-      sourceToolCallId: 'bash-1',
+      sourceToolCallId: 'shell-1',
       result: shellRunSnapshot(1),
     };
     const before = projection.project({ locale: 'en', sessionId: SESSION, messages, shellRunUpdates: [owned] });
-    const bash = before[0]?.tools[0];
-    assert.equal(bash?.shellRunSource, 'owned');
-    assert.equal(bash?.result?.kind === 'shell_run' ? bash.result.revision : undefined, 1);
+    const shell = before[0]?.tools[0];
+    assert.equal(shell?.shellRunSource, 'owned');
+    assert.equal(shell?.result?.kind === 'shell_run' ? shell.result.revision : undefined, 1);
 
     const after = projection.project({
       locale: 'en',
@@ -381,14 +381,14 @@ describe('incremental transcript projection', () => {
       result: shellRun(5),
     };
     const parent: ToolActivityItem = {
-      toolUseId: 'bash-1',
+      toolUseId: 'shell-1',
       toolName: 'Shell',
       status: 'running',
       args: {},
       result: shellRun(1),
     };
     const folded = foldShellRunToolActivities([child, parent]);
-    assert.deepEqual(folded.map((tool) => tool.toolUseId), ['bash-1']);
+    assert.deepEqual(folded.map((tool) => tool.toolUseId), ['shell-1']);
     const result = folded[0]?.result;
     assert.equal(result?.kind === 'shell_run' ? result.revision : undefined, 5);
   });
@@ -405,16 +405,16 @@ describe('incremental transcript projection', () => {
       liveTurns: [{
         turnId: 'turn-live',
         steps: [{
-          stepId: 'tool:bash-live',
+          stepId: 'tool:shell-live',
           contentOrder: ['tools'],
-          tools: [{ toolUseId: 'bash-live', toolName: 'Shell', status: 'running', args: { command: 'job', pty: true } }],
+          tools: [{ toolUseId: 'shell-live', toolName: 'Shell', status: 'running', args: { command: 'job', pty: true } }],
         }],
       }],
       shellRunUpdates: [{
         sessionId: SESSION,
         ownership: { kind: 'source_owned', sourceSessionId: 'source', ownerSessionId: 'source' },
         sourceTurnId: 'turn-live',
-        sourceToolCallId: 'bash-live',
+        sourceToolCallId: 'shell-live',
         result: shellRunSnapshot(2),
       }],
     });

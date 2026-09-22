@@ -194,7 +194,6 @@ function Session({
               sandboxMode: view.sandboxMode,
               collaborationMode: view.collaborationMode,
               orchestrationMode: view.behavior,
-              toolMode: view.toolMode,
             },
           },
           zh,

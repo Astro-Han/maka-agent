@@ -104,7 +104,7 @@ describe('failed turn execution state', () => {
 });
 
 it('does not hide a terminal diagnostic behind a sandbox tool failure or promote a tool failure to a failed turn', () => {
-  const turn: TurnViewModel = { turnId: 't1', status: 'failed', errorClass: 'unknown', failureMessage: 'Provider request failed after the tool result', tools: [{ toolUseId: 'tool-1', toolName: 'Bash', status: 'errored', args: {}, result: { kind: 'text', text: 'Operation not permitted', sandboxDenial: { likely: true } } }], timeline: [], notes: [], startedAt: 1 };
+  const turn: TurnViewModel = { turnId: 't1', status: 'failed', errorClass: 'unknown', failureMessage: 'Provider request failed after the tool result', tools: [{ toolUseId: 'tool-1', toolName: 'Shell', status: 'errored', args: {}, result: { kind: 'text', text: 'Operation not permitted', sandboxDenial: { likely: true } } }], timeline: [], notes: [], startedAt: 1 };
   const context = { activeId: 'session-1', pendingTurnActions: new Set<string>(), uiLocale: 'en' as const };
   assert.ok(deriveAppShellTurnPresentation([turn], context).failedReasonLabels.t1);
   assert.equal(deriveAppShellTurnPresentation([{ ...turn, status: 'completed' }], context).failedReasonLabels.t1, undefined);

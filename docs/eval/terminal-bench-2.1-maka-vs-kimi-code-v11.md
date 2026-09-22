@@ -123,7 +123,7 @@ These are the main product/harness setting differences present in v11. They are 
 
 2. **System instructions.** Maka sends an empty system string. Kimi Code still bootstraps its product main-agent profile — ~20KB of interactive coding-agent instructions — regardless of the empty external env var.
 
-3. **Tool surface and shell semantics.** Maka headless: narrow file/shell set with foreground Bash. Kimi Code print default: the full product tool list (tasks, cron, agent/swarm, plan/goal family, web) with product Bash/background behavior. The stock print path has no user-facing "minimal main tools" switch.
+3. **Tool surface and shell semantics.** Maka headless: narrow file/shell set with foreground Shell. Kimi Code print default: the full product tool list (tasks, cron, agent/swarm, plan/goal family, web) with product Bash/background behavior. The stock print path has no user-facing "minimal main tools" switch.
 
 4. **Completion contract.** Kimi's product system steers toward telling the user when work is done or blocked; Maka relies on the task instruction plus tool schemas.
 

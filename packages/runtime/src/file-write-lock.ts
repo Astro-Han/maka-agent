@@ -30,7 +30,7 @@
 // Keying is lexical, so one file reached under two names — via a symlinked parent
 // dir, a hard link, or a case-insensitive filesystem ("a.txt" vs "A.txt") — takes
 // two keys and is not merged. This matches opencode's lexical (path.resolve)
-// per-file Semaphore. (Bash is not serialized either — a per-file lock cannot key
+// per-file Semaphore. (Shell is not serialized either — a per-file lock cannot key
 // arbitrary shell.)
 
 const tails = new Map<string, Promise<void>>();

@@ -47,7 +47,7 @@ export async function verifyMessageRecovery(connection, reopened) {
     }
     assert(owned, 'accepted message must acquire a canonical root');
     const turn = await waitMessageTerminal(request, sessionId, owned.turnId);
-    assert.equal(turn.status, status);
+    assert.equal(turn.status, status, JSON.stringify({ sessionId, messageId, turn }));
     if (['reserved', 'missing', 'skill-gate'].includes(sessionId)) {
       assert.equal(turn.turnId, 'reserved-' + sessionId);
       assert.equal(turn.runId, 'run-' + sessionId);

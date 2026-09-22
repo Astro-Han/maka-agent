@@ -339,7 +339,7 @@ describe('subagent tools', () => {
         'Write',
         'Edit',
         'apply_patch',
-        'Bash',
+        'Shell',
         'WriteStdin',
         'StopBackgroundTask',
       ],
@@ -354,7 +354,7 @@ describe('subagent tools', () => {
         'Write',
         'Edit',
         'apply_patch',
-        'Bash',
+        'Shell',
         'WriteStdin',
         'StopBackgroundTask',
       ],
@@ -398,7 +398,7 @@ describe('subagent tools', () => {
         events.some((event) => event.type === 'permission_request'),
         false,
       );
-      assert.strictEqual(tools.has('Bash'), true);
+      assert.strictEqual(tools.has('Shell'), true);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

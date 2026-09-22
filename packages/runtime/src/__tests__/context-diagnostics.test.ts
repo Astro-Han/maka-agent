@@ -47,7 +47,7 @@ test('rejects v2 snapshots that the canonical writer cannot produce', () => {
       ...base,
       composition: {
         segments: [{ kind: 'messages', bytes: 10 }],
-        tools: [{ name: 'Bash', bytes: 10 }],
+        tools: [{ name: 'Shell', bytes: 10 }],
       },
     },
     {
@@ -96,7 +96,7 @@ test('serves the sealed snapshot without reading a single run', async () => {
 
     assert.equal(diagnostics.status, 'available');
     if (diagnostics.status !== 'available') return;
-    assert.deepEqual(diagnostics.composition?.tools, [{ name: 'Bash', bytes: 800 }]);
+    assert.deepEqual(diagnostics.composition?.tools, [{ name: 'Shell', bytes: 800 }]);
     assert.equal(scanned, 0, 'a sealed snapshot is one projection read');
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -282,7 +282,7 @@ test('rebuilds a canonical observation, then repairs it so the next read scans n
             comparison: 'exact',
             digest: `sha256:${'a'.repeat(64)}`,
             bytes: 800,
-            label: 'Bash',
+            label: 'Shell',
           },
         ]),
       }),
@@ -291,7 +291,7 @@ test('rebuilds a canonical observation, then repairs it so the next read scans n
       'session-1',
       'run-1',
       attemptEvent('run-1', 'attempt-1', 20, 'completed', 'model-new', 40, 200, [
-        { kind: 'tool_schema', index: 0, cacheable: true, hash: 't', bytes: 800, label: 'Bash' },
+        { kind: 'tool_schema', index: 0, cacheable: true, hash: 't', bytes: 800, label: 'Shell' },
       ]),
     );
 
@@ -304,14 +304,14 @@ test('rebuilds a canonical observation, then repairs it so the next read scans n
     assert.equal(cold.status, 'available');
     if (cold.status !== 'available') return;
     assert.equal(cold.modelId, 'model-new');
-    assert.deepEqual(cold.composition?.tools, [{ name: 'Bash', bytes: 800 }]);
+    assert.deepEqual(cold.composition?.tools, [{ name: 'Shell', bytes: 800 }]);
     assert.ok(scanned > 0, 'the first read falls back to the ledger');
 
     scanned = 0;
     const warm = await readLatestContextDiagnostics(counted, 'session-1', ['run-1']);
     assert.equal(warm.status, 'available');
     if (warm.status !== 'available') return;
-    assert.deepEqual(warm.composition?.tools, [{ name: 'Bash', bytes: 800 }]);
+    assert.deepEqual(warm.composition?.tools, [{ name: 'Shell', bytes: 800 }]);
     assert.equal(scanned, 0, 'the cold read repaired the projection on its way out');
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -348,7 +348,7 @@ test('reads a provider-only ledger that predates canonical metering', async () =
       runId: 'run-1',
       events: [
         attemptEvent('run-1', 'attempt-1', 20, 'completed', 'model-old', 40, 200, [
-          { kind: 'tool_schema', index: 0, cacheable: true, hash: 't', bytes: 800, label: 'Bash' },
+          { kind: 'tool_schema', index: 0, cacheable: true, hash: 't', bytes: 800, label: 'Shell' },
         ]),
       ],
     },
@@ -359,7 +359,7 @@ test('reads a provider-only ledger that predates canonical metering', async () =
   assert.equal(diagnostics.status, 'available');
   if (diagnostics.status !== 'available') return;
   assert.equal(diagnostics.modelId, 'model-old');
-  assert.deepEqual(diagnostics.composition?.tools, [{ name: 'Bash', bytes: 800 }]);
+  assert.deepEqual(diagnostics.composition?.tools, [{ name: 'Shell', bytes: 800 }]);
 });
 
 test('a canonical record on the ledger keeps the legacy path out of it', async () => {
@@ -456,7 +456,7 @@ test('a legacy request whose capture is missing reports no composition, not an o
       events: [
         meteringEvent('run-1', 'attempt-1', 10, 'model-old', 10, 100),
         attemptEvent('run-1', 'attempt-1', 10, 'completed', 'model-old', 10, 100, [
-          { kind: 'tool_schema', index: 0, cacheable: true, hash: 't', bytes: 800, label: 'Bash' },
+          { kind: 'tool_schema', index: 0, cacheable: true, hash: 't', bytes: 800, label: 'Shell' },
         ]),
         meteringEvent('run-1', 'attempt-2', 20, 'model-new', 40, 200),
       ],
@@ -778,7 +778,7 @@ test('repairs malformed projection bytes from the canonical ledger', async () =>
             comparison: 'exact',
             digest: `sha256:${'a'.repeat(64)}`,
             bytes: 800,
-            label: 'Bash',
+            label: 'Shell',
           },
         ]),
       }),
@@ -806,7 +806,7 @@ test('repairs malformed projection bytes from the canonical ledger', async () =>
     const first = await readLatestContextDiagnostics(counted, 'session-1', ['run-1']);
     assert.equal(first.status, 'available');
     if (first.status !== 'available') return;
-    assert.deepEqual(first.composition?.tools, [{ name: 'Bash', bytes: 800 }]);
+    assert.deepEqual(first.composition?.tools, [{ name: 'Shell', bytes: 800 }]);
     assert.ok(scanned > 0, 'the malformed bytes force a canonical rebuild');
 
     scanned = 0;
@@ -895,7 +895,7 @@ test('rebuilds a nested-malformed v2 projection from the canonical ledger', asyn
             comparison: 'exact',
             digest: `sha256:${'a'.repeat(64)}`,
             bytes: 800,
-            label: 'Bash',
+            label: 'Shell',
           },
         ]),
       }),
@@ -929,7 +929,7 @@ test('rebuilds a nested-malformed v2 projection from the canonical ledger', asyn
     const first = await readLatestContextDiagnostics(counted, 'session-1', ['run-1']);
     assert.equal(first.status, 'available');
     if (first.status !== 'available') return;
-    assert.deepEqual(first.composition?.tools, [{ name: 'Bash', bytes: 800 }]);
+    assert.deepEqual(first.composition?.tools, [{ name: 'Shell', bytes: 800 }]);
     assert.ok(scanned > 0, 'the malformed nested value cannot answer the warm read');
 
     scanned = 0;
@@ -1051,7 +1051,7 @@ function latestContext(attemptId: string, completedAt: number, modelId = 'model'
       contextWindow: 200,
       composition: {
         segments: [{ kind: 'tool_definitions', bytes: 800 }],
-        tools: [{ name: 'Bash', bytes: 800 }],
+        tools: [{ name: 'Shell', bytes: 800 }],
       },
     },
   };

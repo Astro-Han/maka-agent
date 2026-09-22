@@ -60,7 +60,7 @@ test('Deep Research keeps standard inspection tools and its durable workspace to
   for (const name of ['Read', 'Glob', 'Grep', 'WebSearch', 'deep_research_status']) {
     assert.equal(names.has(name), true, `expected Deep Research tool ${name}`);
   }
-  for (const name of ['Write', 'Edit', 'Bash', 'ExploreAgent']) {
+  for (const name of ['Write', 'Edit', 'Shell', 'ExploreAgent']) {
     assert.equal(names.has(name), false, `unexpected Deep Research tool ${name}`);
   }
 });
@@ -123,8 +123,8 @@ test('scoped Tool resolution receives the complete stable Host binding', () => {
   );
 });
 
-test('Full access composes Bash without a boundary declaration and without the widening tool', () => {
-  const bashKeys = (sandboxMode: 'danger-full-access' | 'workspace-write' | undefined) => {
+test('Full access composes Shell without a boundary declaration and without the widening tool', () => {
+  const shellKeys = (sandboxMode: 'danger-full-access' | 'workspace-write' | undefined) => {
     const composer = createFixtureComposer({
       builtinTools: unusedManagedShellBuiltinTools(),
       ...(sandboxMode
@@ -139,21 +139,21 @@ test('Full access composes Bash without a boundary declaration and without the w
         : {}),
     });
     const tools = composer.resolveTools?.() ?? [];
-    const bash = tools.find(({ name }) => name === 'Bash');
-    assert.ok(bash);
+    const shell = tools.find(({ name }) => name === 'Shell');
+    assert.ok(shell);
     return {
-      keys: Object.keys(z.toJSONSchema(bash.parameters as z.ZodTypeAny).properties ?? {}),
+      keys: Object.keys(z.toJSONSchema(shell.parameters as z.ZodTypeAny).properties ?? {}),
       widening: tools.some(({ name }) => name === 'request_sandbox_boundary'),
-      enforced: bash.description.includes('Enforced by the current session sandbox boundary.'),
+      enforced: shell.description.includes('Enforced by the current session sandbox boundary.'),
     };
   };
-  assert.deepEqual(bashKeys('danger-full-access'), {
+  assert.deepEqual(shellKeys('danger-full-access'), {
     keys: ['command', 'timeout_ms', 'run_in_background', 'pty'],
     widening: false,
     enforced: false,
   });
   for (const mode of ['workspace-write', undefined] as const) {
-    assert.deepEqual(bashKeys(mode), {
+    assert.deepEqual(shellKeys(mode), {
       keys: [
         'command',
         'timeout_ms',
@@ -277,7 +277,7 @@ test('WorkHub v2 binds control, tasks, attachment reading and user questions whi
     tool(`mcp__desktop_browser__${name}`),
   );
   const clientCapabilities = {
-    tools: [control, tasks, ...browserTools, tool('Bash')],
+    tools: [control, tasks, ...browserTools, tool('Shell')],
     groups: [],
   };
   assert.deepEqual(
@@ -409,7 +409,7 @@ function unusedManagedShellBuiltinTools(): Parameters<
 >[0]['builtinTools'] {
   const unused = () => Promise.reject(new Error('not used'));
   return {
-    shellRuns: { runForegroundBash: unused, runBackgroundBash: unused },
+    shellRuns: { runForegroundShell: unused, runBackgroundShell: unused },
     backgroundTasks: { stopBackgroundTask: unused },
     ptyControls: { writeStdin: unused },
   };

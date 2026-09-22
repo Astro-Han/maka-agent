@@ -30,7 +30,7 @@ import { createReadOnlyPermissionProfile } from '@maka/core/permission-profile';
 import { type LlmConnection } from '@maka/core/llm-connections';
 import type { SessionEvent } from '@maka/core/events';
 import { type SessionHeader } from '@maka/core/session';
-import { buildForegroundBashTool, buildManagedBashTool } from '../shell-tools.js';
+import { buildForegroundShellTool, buildManagedShellTool } from '../shell-tools.js';
 import { ToolRuntime, type MakaTool, type ToolRuntimeInput } from '../tool-runtime.js';
 
 describe('ToolRuntime settlement', () => {
@@ -240,10 +240,10 @@ describe('ToolRuntime settlement', () => {
     assert.deepEqual(order, ['prepare', 'T1', 'cancel']);
   });
 
-  it('keeps the durable Bash command while omitting it from the durable projection', async () => {
+  it('keeps the durable Shell command while omitting it from the durable projection', async () => {
     const runtime = makeRuntime();
     const events: SessionEvent[] = [];
-    const bash = buildForegroundBashTool({
+    const shell = buildForegroundShellTool({
       description: 'shell',
       execute: async () => ({
         exitCode: 0,
@@ -254,7 +254,7 @@ describe('ToolRuntime settlement', () => {
       }),
     });
     const settlement = await runtime.settleToolCall({
-      tool: bash,
+      tool: shell,
       turnId: 'turn-1',
       stepId: 'step-1',
       toolCallId: 'call-1',
@@ -289,7 +289,7 @@ describe('ToolRuntime settlement', () => {
     });
   });
 
-  it('projects every managed foreground Bash terminal state without its command', async () => {
+  it('projects every managed foreground Shell terminal state without its command', async () => {
     const terminalResults = [
       {
         kind: 'terminal' as const,
@@ -361,14 +361,14 @@ describe('ToolRuntime settlement', () => {
     for (const [index, terminal] of terminalResults.entries()) {
       const runtime = makeRuntime();
       const events: SessionEvent[] = [];
-      const bash = buildManagedBashTool({
-        runForegroundBash: async () => terminal,
-        runBackgroundBash: async () => {
+      const shell = buildManagedShellTool({
+        runForegroundShell: async () => terminal,
+        runBackgroundShell: async () => {
           throw new Error('not used');
         },
       });
       const settlement = await runtime.settleToolCall({
-        tool: bash,
+        tool: shell,
         turnId: 'turn-1',
         stepId: 'step-1',
         toolCallId: `call-${index}`,

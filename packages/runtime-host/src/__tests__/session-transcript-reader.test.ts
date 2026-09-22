@@ -243,11 +243,11 @@ for (const coordination of [false, true])
           refs: { providerEventId: 'assistant-2' },
         }),
       );
-      let largeBash: ReturnType<typeof shapeTerminalResult> | undefined;
+      let largeShell: ReturnType<typeof shapeTerminalResult> | undefined;
       const resultCount = coordination ? 9 : 2;
       {
         const stream = `${(coordination ? 'x' : '\u0001').repeat(127)}\n`.repeat(8_191);
-        largeBash = shapeTerminalResult({
+        largeShell = shapeTerminalResult({
           cwd: capability.canonicalPath,
           command: 'synthetic bounded output',
           result: {
@@ -257,12 +257,12 @@ for (const coordination of [false, true])
           },
         });
         const modelProjection = encodeDurableToolResultOutput(
-          { type: 'json', value: largeBash as never },
+          { type: 'json', value: largeShell as never },
           session.id,
         );
         assert.equal(modelProjection.kind, 'json');
         for (let index = 0; index < resultCount; index++) {
-          const toolCallId = `large-bash-${index}`;
+          const toolCallId = `large-shell-${index}`;
           await stores.runtimeEventStore.appendRuntimeEvent(
             session.id,
             'run-1',
@@ -274,7 +274,7 @@ for (const coordination of [false, true])
               content: {
                 kind: 'function_call',
                 id: toolCallId,
-                name: 'Bash',
+                name: 'Shell',
                 args: { command: 'synthetic bounded output' },
               },
               refs: { toolCallId },
@@ -288,8 +288,8 @@ for (const coordination of [false, true])
             content: {
               kind: 'function_response',
               id: toolCallId,
-              name: 'Bash',
-              result: largeBash,
+              name: 'Shell',
+              result: largeShell,
               modelProjection,
             },
             refs: { toolCallId },
@@ -333,7 +333,7 @@ for (const coordination of [false, true])
       assert.equal(completedAssistant?.type, 'assistant');
       if (completedAssistant?.type === 'assistant')
         assert.equal(completedAssistant.text, 'final text');
-      if (largeBash) assertLargeBashResult(messages, largeBash);
+      if (largeShell) assertLargeShellResult(messages, largeShell);
       const evidence = await openToolResultArchiveEvidenceReader(owner.lease);
       try {
         const reader = {
@@ -341,7 +341,7 @@ for (const coordination of [false, true])
         };
         const page = readPageSchema.parse(
           await readToolResultArchiveResource(reader, session.id, {
-            path: 'maka://runtime/tool-results/large-bash-0-result',
+            path: 'maka://runtime/tool-results/large-shell-0-result',
             limit: 1,
           }),
         );
@@ -349,7 +349,7 @@ for (const coordination of [false, true])
         assert.equal(page.totalLines, 16_386);
         const tail = readPageSchema.parse(
           await readToolResultArchiveResource(reader, session.id, {
-            path: 'maka://runtime/tool-results/large-bash-0-result',
+            path: 'maka://runtime/tool-results/large-shell-0-result',
             offset: page.totalLines - 1,
           }),
         );
@@ -386,7 +386,7 @@ for (const coordination of [false, true])
         maxMessages: 1,
       });
       assert.deepEqual(ids(running), [{ type: 'user', id: 'user-1' }]);
-      if (largeBash) {
+      if (largeShell) {
         await stores.runtimeEventStore.appendRuntimeEvent(
           session.id,
           'run-1',
@@ -418,9 +418,9 @@ for (const coordination of [false, true])
           maxStoredBytes: TRANSCRIPT_TURN_MAX_BYTES,
           maxMessages: 32,
         });
-        assertLargeBashResult(
+        assertLargeShellResult(
           recovered.records.map(({ message }) => message),
-          largeBash,
+          largeShell,
         );
       }
     } finally {
@@ -1225,12 +1225,12 @@ function runtimeEvent(sessionId: string, overrides: Partial<RuntimeEvent>): Runt
   };
 }
 
-function assertLargeBashResult(
+function assertLargeShellResult(
   messages: readonly StoredMessage[],
   expected: ReturnType<typeof shapeTerminalResult>,
 ): void {
   const result = messages.find(
-    (message) => message.type === 'tool_result' && message.toolUseId === 'large-bash-0',
+    (message) => message.type === 'tool_result' && message.toolUseId === 'large-shell-0',
   );
   assert.ok(result?.type === 'tool_result');
   assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') < TRANSCRIPT_TURN_MAX_BYTES);
@@ -1243,7 +1243,10 @@ function assertLargeBashResult(
   assert.ok(result.content.output.stderr.length < expected.output.stderr.length);
   assert.match(result.content.output.stdout, /TAIL/);
   assert.match(result.content.output.stderr, /ERROR_TAIL/);
-  assert.match(result.content.output.stdout, /maka:\/\/runtime\/tool-results\/large-bash-0-result/);
+  assert.match(
+    result.content.output.stdout,
+    /maka:\/\/runtime\/tool-results\/large-shell-0-result/,
+  );
   assert.equal(result.content.output.stdoutTruncated, true);
   assert.equal(result.content.output.stderrTruncated, true);
 }

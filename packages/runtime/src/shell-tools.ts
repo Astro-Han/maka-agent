@@ -39,18 +39,18 @@ import type { SandboxType } from './sandbox/types.js';
 import { isLikelySandboxDenial } from './sandbox/detect.js';
 import { runShellWithBoundedTail, type BoundedShellResult } from './shell-exec.js';
 import {
-  bashToolShellGuidance,
-  bashToolTurnShellGuidance,
+  shellGuidance,
+  turnShellGuidance,
   defaultShellPlan,
   type ShellPlan,
   throwIfShellSetupFailed,
   type TurnShellPlan,
 } from './shell-detect.js';
 import {
-  DEFAULT_BASH_TIMEOUT_MS,
+  DEFAULT_SHELL_TIMEOUT_MS,
   MAX_PTY_COLS,
   MAX_PTY_ROWS,
-  MAX_FOREGROUND_BASH_TIMEOUT_MS,
+  MAX_FOREGROUND_SHELL_TIMEOUT_MS,
   MAX_SHELL_RUN_RESOURCE_REF_CHARS,
   MAX_SHELL_RUN_TIMEOUT_MS,
   MAX_WRITE_STDIN_ACTIONS,
@@ -59,30 +59,30 @@ import {
   MIN_PTY_ROWS,
   type BackgroundTaskStopper,
   type PtyControlWriter,
-  type ShellRunBashInput,
+  type ShellRunInput,
   isShellRunResourceRef,
   isWellFormedTerminalInput,
 } from './shell-run-contract.js';
 import type { ChildFdInput } from './child-fd-input.js';
-import { bashToolResultToModelOutput } from './bash-model-output.js';
+import { shellToolResultToModelOutput } from './shell-model-output.js';
 import {
-  BASH_REQUIRED_BOUNDARY_DESCRIPTION,
-  bashBoundaryIntentSchema,
+  SHELL_REQUIRED_BOUNDARY_DESCRIPTION,
+  shellBoundaryIntentSchema,
   preflightDeclaredSandboxBoundary,
-  preprocessBashBoundaryDeclaration,
-  refineBashBoundaryDeclaration,
+  preprocessShellBoundaryDeclaration,
+  refineShellBoundaryDeclaration,
   sandboxBoundaryExpansionSchema,
-  selectedBashBoundaryExpansion,
+  selectedShellBoundaryExpansion,
 } from './sandbox-boundary-declaration.js';
 
-export interface ForegroundBashExecuteInput {
+export interface ForegroundShellExecuteInput {
   command: string;
   cwd: string;
   timeoutMs?: number;
   ctx: MakaToolContext;
 }
 
-export interface ForegroundBashResult {
+export interface ForegroundShellResult {
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -94,16 +94,16 @@ export interface ForegroundBashResult {
   sandboxed?: boolean;
 }
 
-export interface BuildForegroundBashToolOptions {
+export interface BuildForegroundShellToolOptions {
   description: string;
   executionFacts?: ToolExecutionFacts;
   defaultTimeoutMs?: (command: string) => number | undefined;
   maxTimeoutMs?: number;
   emitReturnedOutput?: boolean;
-  execute: (input: ForegroundBashExecuteInput) => Promise<ForegroundBashResult>;
+  execute: (input: ForegroundShellExecuteInput) => Promise<ForegroundShellResult>;
   afterResult?: (
     input: { command: string; cwd: string; timeoutMs?: number },
-    result: ForegroundBashResult,
+    result: ForegroundShellResult,
     ctx: MakaToolContext,
   ) => Promise<void> | void;
 }
@@ -112,21 +112,21 @@ type TerminalToolResult = Extract<ToolResultContent, { kind: 'terminal' }>;
 type ShellRunToolResult = Extract<ToolResultContent, { kind: 'shell_run' }>;
 
 export interface ShellRunLauncher {
-  runForegroundBash(input: ShellRunBashInput): Promise<TerminalToolResult>;
-  runBackgroundBash(input: ShellRunBashInput): Promise<ShellRunToolResult>;
+  runForegroundShell(input: ShellRunInput): Promise<TerminalToolResult>;
+  runBackgroundShell(input: ShellRunInput): Promise<ShellRunToolResult>;
 }
 
-export function buildForegroundBashTool(options: BuildForegroundBashToolOptions): MakaTool {
+export function buildForegroundShellTool(options: BuildForegroundShellToolOptions): MakaTool {
   const maxTimeoutMs = options.maxTimeoutMs ?? 600_000;
   return {
-    name: 'Bash',
+    name: 'Shell',
     activityKind: 'command',
     description: options.description,
     parameters: z.object({
       command: z.string().describe('The shell command to execute'),
       timeout_ms: z.number().int().positive().max(maxTimeoutMs).optional(),
     }),
-    toModelOutput: ({ output }) => bashToolResultToModelOutput(output),
+    toModelOutput: ({ output }) => shellToolResultToModelOutput(output),
     ...(options.executionFacts ? { executionFacts: options.executionFacts } : {}),
     impl: async ({ command, timeout_ms }, ctx) => {
       const timeoutMs = timeout_ms ?? options.defaultTimeoutMs?.(command);
@@ -149,11 +149,11 @@ export function buildForegroundBashTool(options: BuildForegroundBashToolOptions)
   };
 }
 
-export function buildLocalForegroundBashTool(
+export function buildLocalForegroundShellTool(
   options: { executionFacts?: ToolExecutionFacts; shell?: TurnShellPlan } = {},
 ): MakaTool {
   const shell = options.shell ?? { plan: defaultShellPlan() };
-  return buildForegroundBashTool({
+  return buildForegroundShellTool({
     description:
       withTurnShellGuidance('Run a shell command in the session cwd.', shell) +
       ' Subject to permission policy.',
@@ -172,7 +172,7 @@ export function buildLocalForegroundBashTool(
   });
 }
 
-export function buildManagedBashTool(
+export function buildManagedShellTool(
   shellRuns: ShellRunLauncher,
   options: {
     executionFacts?: ToolExecutionFacts;
@@ -188,11 +188,11 @@ export function buildManagedBashTool(
     declareSandboxBoundary?: boolean;
     /**
      * Foreground timeout when the model does not ask for one, per command —
-     * the same hook shape buildForegroundBashTool exposes, so a host that
+     * the same hook shape buildForegroundShellTool exposes, so a host that
      * carves out a slow command keeps that carve-out on both paths instead of
      * re-implementing it on one.
      *
-     * A host default is CLAMPED to MAX_FOREGROUND_BASH_TIMEOUT_MS rather than
+     * A host default is CLAMPED to MAX_FOREGROUND_SHELL_TIMEOUT_MS rather than
      * passed through: the launcher REJECTS anything larger, so an operator who
      * raised their own floor past ten minutes would otherwise break every
      * foreground command instead of merely capping it. A timeout the model asks
@@ -225,69 +225,69 @@ export function buildManagedBashTool(
 ): MakaTool {
   const shell = options.shell ?? { plan: defaultShellPlan() };
   const declareSandboxBoundary = options.declareSandboxBoundary !== false;
-  const managedBashFields = {
+  const managedShellFields = {
     command: z.string().describe('The shell command to execute'),
     timeout_ms: z.number().int().positive().max(MAX_SHELL_RUN_TIMEOUT_MS).optional(),
     run_in_background: z.boolean().optional(),
     pty: z.boolean().optional(),
   };
-  const refineManagedBash = (
-    { timeout_ms, run_in_background, pty }: z.infer<z.ZodObject<typeof managedBashFields>>,
+  const refineManagedShell = (
+    { timeout_ms, run_in_background, pty }: z.infer<z.ZodObject<typeof managedShellFields>>,
     ctx: z.core.$RefinementCtx,
   ) => {
     if (
       !run_in_background &&
       timeout_ms !== undefined &&
-      timeout_ms > MAX_FOREGROUND_BASH_TIMEOUT_MS
+      timeout_ms > MAX_FOREGROUND_SHELL_TIMEOUT_MS
     ) {
       ctx.addIssue({
         code: 'too_big',
-        maximum: MAX_FOREGROUND_BASH_TIMEOUT_MS,
+        maximum: MAX_FOREGROUND_SHELL_TIMEOUT_MS,
         origin: 'number',
         inclusive: true,
         path: ['timeout_ms'],
-        message: `Foreground Bash timeout may not exceed ${MAX_FOREGROUND_BASH_TIMEOUT_MS}ms`,
+        message: `Foreground Shell timeout may not exceed ${MAX_FOREGROUND_SHELL_TIMEOUT_MS}ms`,
       });
     }
     if (pty && !run_in_background) {
       ctx.addIssue({
         code: 'custom',
         path: ['pty'],
-        message: 'PTY Bash requires run_in_background=true',
+        message: 'PTY Shell requires run_in_background=true',
       });
     }
   };
   return {
-    name: 'Bash',
+    name: 'Shell',
     activityKind: 'command',
     description:
       withTurnShellGuidance(options.lead ?? 'Run a shell command in the session cwd.', shell) +
-      ` Foreground is the default (timeout ${DEFAULT_BASH_TIMEOUT_MS}ms, maximum ${MAX_FOREGROUND_BASH_TIMEOUT_MS}ms).` +
+      ` Foreground is the default (timeout ${DEFAULT_SHELL_TIMEOUT_MS}ms, maximum ${MAX_FOREGROUND_SHELL_TIMEOUT_MS}ms).` +
       ` Set run_in_background=true only when the command should continue as a tracked runtime background task; background commands have no default timeout (maximum explicit timeout ${MAX_SHELL_RUN_TIMEOUT_MS}ms).` +
       ' Set pty=true together with run_in_background=true only for terminal semantics or later input; use the returned ref with Read or WriteStdin.' +
       (declareSandboxBoundary ? ' Enforced by the current session sandbox boundary.' : ''),
     parameters: declareSandboxBoundary
-      ? preprocessBashBoundaryDeclaration(
+      ? preprocessShellBoundaryDeclaration(
           z
             .object({
-              ...managedBashFields,
-              boundary_intent: bashBoundaryIntentSchema,
+              ...managedShellFields,
+              boundary_intent: shellBoundaryIntentSchema,
               required_boundary: sandboxBoundaryExpansionSchema
                 .optional()
-                .describe(BASH_REQUIRED_BOUNDARY_DESCRIPTION),
+                .describe(SHELL_REQUIRED_BOUNDARY_DESCRIPTION),
             })
             .strict()
-            .superRefine(refineManagedBash)
-            .superRefine(refineBashBoundaryDeclaration),
+            .superRefine(refineManagedShell)
+            .superRefine(refineShellBoundaryDeclaration),
         )
-      : z.object(managedBashFields).strict().superRefine(refineManagedBash),
-    toModelOutput: ({ output }) => bashToolResultToModelOutput(output),
+      : z.object(managedShellFields).strict().superRefine(refineManagedShell),
+    toModelOutput: ({ output }) => shellToolResultToModelOutput(output),
     ...(options.executionFacts ? { executionFacts: options.executionFacts } : {}),
     impl: async (input, ctx) => {
       throwIfShellSetupFailed(shell);
       const { command, timeout_ms, run_in_background, pty } = input;
       const normalizedRequiredBoundary = await preflightDeclaredSandboxBoundary(
-        selectedBashBoundaryExpansion(input),
+        selectedShellBoundaryExpansion(input),
         ctx,
       );
       const transformed = options.transformCommand?.({
@@ -304,7 +304,7 @@ export function buildManagedBashTool(
           : clampHostForegroundTimeout(options.defaultTimeoutMs?.(command)));
       try {
         const result = await shellRuns[
-          run_in_background ? 'runBackgroundBash' : 'runForegroundBash'
+          run_in_background ? 'runBackgroundShell' : 'runForegroundShell'
         ]({
           sessionId: ctx.sessionId,
           ...(ctx.runId ? { sourceRunId: ctx.runId } : {}),
@@ -347,7 +347,7 @@ export function buildManagedBashTool(
 
 function clampHostForegroundTimeout(value: number | undefined): number | undefined {
   if (value === undefined) return undefined;
-  return Math.min(value, MAX_FOREGROUND_BASH_TIMEOUT_MS);
+  return Math.min(value, MAX_FOREGROUND_SHELL_TIMEOUT_MS);
 }
 
 function onceCompletion(
@@ -363,13 +363,13 @@ function onceCompletion(
 }
 
 export function withShellGuidance(lead: string, shell: ShellPlan): string {
-  const guidance = bashToolShellGuidance(shell);
+  const guidance = shellGuidance(shell);
   return guidance ? `${lead} ${guidance}` : lead;
 }
 
 /** {@link withShellGuidance} for a turn-scoped plan, including the broken-preference outage notice. */
 export function withTurnShellGuidance(lead: string, shell: TurnShellPlan): string {
-  const guidance = bashToolTurnShellGuidance(shell);
+  const guidance = turnShellGuidance(shell);
   return guidance ? `${lead} ${guidance}` : lead;
 }
 
@@ -378,7 +378,7 @@ export function buildStopBackgroundTaskTool(backgroundTasks: BackgroundTaskStopp
     name: 'StopBackgroundTask',
     activityKind: 'command',
     description:
-      'Stop a background task by runtime ref. Currently supports background shell run refs returned by Bash.',
+      'Stop a background task by runtime ref. Currently supports background shell run refs returned by Shell.',
     parameters: z.object({
       ref: z
         .string()
@@ -510,7 +510,7 @@ export function createWriteStdinSchemas(): {
         ref: z
           .string()
           .max(MAX_SHELL_RUN_RESOURCE_REF_CHARS)
-          .refine(isShellRunResourceRef, 'ref must be a canonical PTY Bash runtime ref'),
+          .refine(isShellRunResourceRef, 'ref must be a canonical PTY Shell runtime ref'),
         input: z
           .string()
           .min(1, 'input must not be empty')
@@ -603,7 +603,7 @@ export function createWriteStdinSchemas(): {
       ref: z
         .string()
         .max(MAX_SHELL_RUN_RESOURCE_REF_CHARS)
-        .describe('The runtime ref returned by a PTY Bash task'),
+        .describe('The runtime ref returned by a PTY Shell task'),
       actions: z
         .array(providerAction)
         .max(MAX_WRITE_STDIN_ACTIONS)
@@ -690,7 +690,7 @@ function isEmptyProviderSize(value: unknown): boolean {
 export function shapeTerminalResult(input: {
   cwd: string;
   command: string;
-  result: ForegroundBashResult | BoundedShellResult;
+  result: ForegroundShellResult | BoundedShellResult;
 }): TerminalToolResult {
   return {
     kind: 'terminal',
@@ -725,7 +725,7 @@ export function shapeTerminalResult(input: {
 }
 
 function terminalStatus(
-  result: ForegroundBashResult | BoundedShellResult,
+  result: ForegroundShellResult | BoundedShellResult,
 ): TerminalToolResult['status'] {
   if (result.timedOut) return 'timed_out';
   if (result.aborted) return 'cancelled';

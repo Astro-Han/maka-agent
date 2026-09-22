@@ -157,7 +157,7 @@ Renderer:
 ### 现状问题
 
 Maka 已有 `ToolProgressEvent`，但当前 runtime tools 多数只在 tool 完成后返回完整 result。
-`Bash` 使用 `exec`，只有完成后一次性拿 stdout/stderr。UI 的 terminal renderer 也只能显示 settled output。
+`Shell` 使用 `exec`，只有完成后一次性拿 stdout/stderr。UI 的 terminal renderer 也只能显示 settled output。
 
 用户路径上的不成熟感：
 
@@ -187,7 +187,7 @@ export interface ToolProgressEvent extends BaseEvent {
 
 Runtime:
 
-- Bash 从 `exec` 改成 `spawn`；
+- Shell 从 `exec` 改成 `spawn`；
 - stdout/stderr chunk 经 redaction 后发 `tool_progress`；
 - final `tool_result` 保留 capped output + artifact ref（完整日志入 artifact）；
 - abort 时落 `tool_result` with `isError=true` + `reason='aborted'` 或独立 aborted event。
@@ -696,7 +696,7 @@ Gate:
 
 1. `ArtifactRecord` core/storage contract + fixture seed (no UI pane yet).
 2. Right artifact pane renderer + smoke path.
-3. Tool streaming delta for Bash + terminal artifact ref.
+3. Tool streaming delta for Shell + terminal artifact ref.
 
 Why first: this changes Maka from "chat transcript" to "work product workspace".
 

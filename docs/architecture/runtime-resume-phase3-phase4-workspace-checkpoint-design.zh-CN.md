@@ -371,7 +371,7 @@ lease/fencing 或 append-if-absent 解决。
 
 #### B3：明确延后
 
-本 PR 不实现通用 provider retry、ShellRun reattach、Bash 重放、conversation clone identity
+本 PR 不实现通用 provider retry、ShellRun reattach、Shell 重放、conversation clone identity
 rewrite 或其他 typed continuation branch。linked-child RateLimit retry 入口已经删除；B2.1
 repair retry 只修复已持久化的 continuation authority，不会重新调用 provider。其他能力必须在
 各自拥有 durable handle/幂等协议后独立设计，不能复用 B2 的普通 continuation claim 来暗示
@@ -605,5 +605,5 @@ receipt 与 owner 抽象不得迁入新主线。
 - M0 不把 managed worktree 交给生产工具；
 - attached checkout 不提供 managed 级 workspace continuity；
 - Maka-owned Git artifact 不覆盖用户当前 checkout；
-- 无法证明的 Bash/远程 API 副作用不自动重试；
+- 无法证明的 Shell/远程 API 副作用不自动重试；
 - process-crash transaction atomicity 不等于断电级 durability。

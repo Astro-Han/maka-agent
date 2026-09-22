@@ -205,7 +205,7 @@ function ledgerEvents(sessionId: string, runId: string): RuntimeEvent[] {
       content: {
         kind: 'function_call',
         id: 'tool-1',
-        name: 'Bash',
+        name: 'Shell',
         args: { command: 'touch marker' },
       },
     },
@@ -216,7 +216,7 @@ function ledgerEvents(sessionId: string, runId: string): RuntimeEvent[] {
       partial: false,
       author: 'tool',
       role: 'tool',
-      content: { kind: 'function_response', id: 'tool-1', name: 'Bash', result: { exitCode: 0 } },
+      content: { kind: 'function_response', id: 'tool-1', name: 'Shell', result: { exitCode: 0 } },
     },
     {
       ...identity,

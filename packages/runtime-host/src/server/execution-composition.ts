@@ -597,7 +597,7 @@ export async function createExecutionRuntimeHostComposition(
     pluginShell.bindRuntime({
       run: (options, invocation) =>
         invokeBuiltin(
-          'Bash',
+          'Shell',
           {
             command: options.command,
             timeout_ms: options.timeoutMs,

@@ -54,10 +54,10 @@ import { createHostExecutionArtifactServices } from '../server/execution-artifac
 import { restoreArtifactV1Shape } from './fixtures/artifact-v1.js';
 import { SessionAdmissionGate } from '../server/session-admission-gate.js';
 
-for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as const) {
+for (const scenario of ['text', 'large raw MCP image', 'executor-sized Shell'] as const) {
   test(`production archives survive reopen (${scenario})`, async () => {
     const largeImage = scenario === 'large raw MCP image';
-    const largeBash = scenario === 'executor-sized Bash';
+    const largeShell = scenario === 'executor-sized Shell';
     const root = await mkdtemp(join(tmpdir(), 'maka-ledger-archive-host-'));
     const owner = await tryAcquireInteractiveRootOwner(
       await resolveStorageRoot({ path: root, kind: 'interactive' }),
@@ -69,7 +69,7 @@ for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as
     try {
       // Control characters exercise JSON's worst-case six-byte escaping.
       const stream = `${'\u0001'.repeat(127)}\n`.repeat(8191);
-      const bash = largeBash
+      const shell = largeShell
         ? shapeTerminalResult({
             cwd: root,
             command: 'synthetic bounded output',
@@ -81,8 +81,8 @@ for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as
             },
           })
         : undefined;
-      const projection: DurableToolResultProjection = bash
-        ? encodeDurableToolResultOutput({ type: 'json', value: bash as never }, 'session')
+      const projection: DurableToolResultProjection = shell
+        ? encodeDurableToolResultOutput({ type: 'json', value: shell as never }, 'session')
         : largeImage
           ? {
               version: 1,
@@ -113,9 +113,9 @@ for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as
         content: {
           kind: 'function_response',
           id: 'call',
-          name: bash ? 'Bash' : 'Read',
+          name: shell ? 'Shell' : 'Read',
           result:
-            bash ??
+            shell ??
             (largeImage
               ? {
                   content: [
@@ -149,7 +149,7 @@ for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as
       });
       assert.ok(projectedEvidence.ok);
       assert.ok(projectedEvidence.storedBytes! < TOOL_RESULT_ARCHIVE_EVIDENCE_MAX_BYTES);
-      if (bash) assert.ok(projectedEvidence.storedBytes! > 12_000_000);
+      if (shell) assert.ok(projectedEvidence.storedBytes! > 12_000_000);
       else assert.ok(projectedEvidence.storedBytes! < 4096);
       assert.equal(
         projectedEvidence.event.content?.kind === 'function_response'
@@ -157,7 +157,7 @@ for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as
           : undefined,
         null,
       );
-      const old = bash
+      const old = shell
         ? undefined
         : await artifacts.create({
             id: 'legacy-archive',
@@ -173,7 +173,7 @@ for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as
         runtimeEventId: 'response',
         turnId: 'turn',
         toolCallId: 'call',
-        toolName: bash ? 'Bash' : 'Read',
+        toolName: shell ? 'Shell' : 'Read',
         serializedResult,
         bodySha256,
         originalBytes: Buffer.byteLength(serializedResult),
@@ -196,7 +196,7 @@ for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as
       assert.equal(typeof prepared.commitTransition, 'function');
       assert.equal(
         (await artifacts.listPage('session', { offset: 0, limit: 10 })).total,
-        bash ? 0 : 1,
+        shell ? 0 : 1,
       );
       const placeholder = buildLedgerArchivedToolResultPlaceholder({ ...input, storage: 'ledger' });
       const transition = buildModelProjectionTransition({
@@ -205,7 +205,7 @@ for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as
           runtimeEventId: 'response',
           part: 'tool_result',
           toolCallId: 'call',
-          toolName: bash ? 'Bash' : 'Read',
+          toolName: shell ? 'Shell' : 'Read',
         },
         sourceProjection: projection,
         replacement: { version: 1, kind: 'json', value: placeholder as never },
@@ -273,7 +273,7 @@ for (const scenario of ['text', 'large raw MCP image', 'executor-sized Bash'] as
         }),
         { ok: true, serializedResult },
       );
-      if (bash) {
+      if (shell) {
         const read = async (offset: number) => {
           const page = readPageSchema.parse(
             await readToolResultArchiveResource(services.toolResultArchive.services, 'session', {
@@ -470,7 +470,7 @@ test('Hosted execution publishes contained Tool Artifacts and durable result arc
       turnId: 'turn-1',
       runtimeEventId: 'runtime-event-1',
       toolCallId: 'tool-call-1',
-      toolName: 'Bash',
+      toolName: 'Shell',
       result: { output: 'x'.repeat(2_048) },
       serializedResult,
       originalEstimatedTokens: 512,

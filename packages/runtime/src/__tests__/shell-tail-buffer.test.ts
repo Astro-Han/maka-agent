@@ -19,11 +19,11 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { BashTailBuffer } from '../bash-tail-buffer.js';
+import { ShellTailBuffer } from '../shell-tail-buffer.js';
 
-describe('BashTailBuffer', () => {
+describe('ShellTailBuffer', () => {
   test('bounds retained output to the exact tail', () => {
-    const buf = new BashTailBuffer(20);
+    const buf = new ShellTailBuffer(20);
     for (let i = 0; i < 100; i++) buf.push(`line${i}\n`);
     const value = buf.value();
     assert.ok(value.length <= 20);
@@ -32,13 +32,13 @@ describe('BashTailBuffer', () => {
   });
 
   test('keeps the tail of an oversized line', () => {
-    const buf = new BashTailBuffer(5);
+    const buf = new ShellTailBuffer(5);
     buf.push('abcdefghij');
     assert.equal(buf.value(), 'fghij');
   });
 
   test('retains the same tail across chunk boundaries', () => {
-    const buf = new BashTailBuffer(6);
+    const buf = new ShellTailBuffer(6);
     buf.push('abc');
     buf.push('def');
     buf.push('ghi');
@@ -50,7 +50,7 @@ describe('BashTailBuffer', () => {
       [3, '😀x'],
       [2, 'x'],
     ] as const) {
-      const buf = new BashTailBuffer(cap);
+      const buf = new ShellTailBuffer(cap);
       buf.push('abc😀x');
       assert.equal(buf.value(), expected);
     }

@@ -543,7 +543,7 @@ describe('projectRuntimeEventsToStoredMessages', () => {
       content: {
         kind: 'function_response',
         id: 'tool-large',
-        name: 'Bash',
+        name: 'Shell',
         result: { kind: 'text', text: 'large result' },
       },
       refs: { toolCallId: 'tool-large' },
@@ -570,7 +570,7 @@ describe('projectRuntimeEventsToStoredMessages', () => {
       content: {
         kind: 'function_response',
         id: 'tool-terminal',
-        name: 'Bash',
+        name: 'Shell',
         result: { kind: 'text', text: 'provider-facing result' },
         modelProjection: { version: 1, kind: 'json', value: { kind: 'terminal' } },
       },
@@ -1021,7 +1021,7 @@ describe('projectRuntimeEventsToStoredMessages', () => {
     assert.deepStrictEqual(replay.diagnostics, []);
   });
 
-  test('folds retired permission modes while projecting persisted tool results', () => {
+  test('preserves sandbox modes while projecting persisted tool results', () => {
     const out = projectRuntimeEventsToStoredMessages(
       [
         ev({
@@ -1038,7 +1038,7 @@ describe('projectRuntimeEventsToStoredMessages', () => {
               turnId: 'child-turn',
               runId: 'child-run',
               status: 'completed',
-              sandboxMode: 'execute',
+              sandboxMode: 'workspace-write',
               summary: 'done',
               artifactIds: [],
             } as never,
@@ -1054,7 +1054,7 @@ describe('projectRuntimeEventsToStoredMessages', () => {
       projected?.type === 'tool_result' && projected.content.kind === 'subagent'
         ? projected.content.sandboxMode
         : undefined,
-      'ask',
+      'workspace-write',
     );
     assert.deepStrictEqual(out.diagnostics, []);
   });
@@ -1352,7 +1352,7 @@ describe('projectRuntimeEventsToStoredMessages', () => {
               protocol: 't1_after_preflight_v1',
               operationId: 'toolop-1',
               providerToolCallId: 'tool-1',
-              toolName: 'Bash',
+              toolName: 'Shell',
               canonicalArgsHash: 'sha256:args',
               recoveryMode: 'reconcile',
             },
@@ -2350,7 +2350,7 @@ const ACTION_COVERAGE_SAMPLES: ActionCoverageSamples = {
       protocol: 't1_after_preflight_v1',
       operationId: 'coverage-op',
       providerToolCallId: 'coverage-tool',
-      toolName: 'Bash',
+      toolName: 'Shell',
       canonicalArgsHash: 'sha256:args',
       recoveryMode: 'reconcile',
     },
@@ -2549,7 +2549,7 @@ describe('legacy transcript conversion keeps every row', () => {
       turnId,
       ts,
       toolUseId: 'tool-1',
-      toolName: 'Bash',
+      toolName: 'Shell',
       decision: 'allow',
       hint: 'rm -rf build',
     };

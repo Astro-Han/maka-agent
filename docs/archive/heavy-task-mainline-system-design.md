@@ -142,7 +142,7 @@ self_check_submit
 普通工程动作仍然通过已有 isolated tools 完成：
 
 ```text
-Bash
+Shell
 Read
 Write
 Edit
@@ -547,7 +547,7 @@ Compact evidence 是 ordinary tools 和 runtime artifacts 的 bounded public 摘
 典型来源：
 
 ```text
-Bash stdout/stderr summary
+Shell stdout/stderr summary
 Read/Grep bounded observation
 Write/Edit mutation summary without body/diff
 Glob result summary
@@ -1103,7 +1103,7 @@ compact evidence recorder
 
 ```text
 ordinary isolated tools:
-  Bash / Read / Write / Edit / Glob / Grep / agent_spawn / agent_list / agent_output
+  Shell / Read / Write / Edit / Glob / Grep / agent_spawn / agent_list / agent_output
 
 heavy-task submit tools:
   inventory_submit / todo_update / self_check_submit
@@ -1208,7 +1208,7 @@ semantic complete 要求 runnable_artifact 和 public_check 都完成
 ```text
 Read/Grep/Glob: inspect public inputs
 Write/Edit: create or repair runnable artifact
-Bash: run public checks
+Shell: run public checks
 agent_*: optional delegated public work
 ```
 
@@ -1222,7 +1222,7 @@ heavy_task_evidence_recorded from compact evidence recorder
 设计约束：
 
 ```text
-Bash stdout/stderr can be summarized, not blindly replayed full-length
+Shell stdout/stderr can be summarized, not blindly replayed full-length
 Write/Edit bodies are not captured as compact evidence bodies
 official verifier artifacts are not model evidence
 large output is truncated with metadata
@@ -1231,8 +1231,8 @@ large output is truncated with metadata
 这里的 authority 分层很重要：
 
 ```text
-public Bash check can support self-check
-public Bash check does not become official verifier
+public Shell check can support self-check
+public Shell check does not become official verifier
 official verifier later remains external
 ```
 
@@ -1243,10 +1243,10 @@ official verifier later remains external
 典型事件顺序：
 
 ```text
-Bash public check -> compact evidence records failure summary
+Shell public check -> compact evidence records failure summary
 todo_update marks check/repair state
 Edit/Write repairs artifact
-Bash reruns public check
+Shell reruns public check
 todo_update marks repair/check completed with evidence
 ```
 
@@ -1275,7 +1275,7 @@ base cleanup only on visible task/workspace evidence
 写入可以来自：
 
 ```text
-Bash cleanup command
+Shell cleanup command
 todo_update evidence
 compact evidence summary
 self_check_submit publicReason
@@ -1544,7 +1544,7 @@ MIPS 160-step 原始 run 属于这个分支；clean replay 进一步指向 final
 形态：
 
 ```text
-many Read/Bash inspections
+many Read/Shell inspections
 late inventory/todo
 no Write/Edit
 no runnable artifact
@@ -2097,7 +2097,7 @@ redaction metadata where useful
 验证 / compaction 规则：
 
 ```text
-Bash stdout/stderr bounded and truncated
+Shell stdout/stderr bounded and truncated
 Read/Grep excerpts bounded
 Write/Edit bodies omitted
 raw diffs omitted
@@ -2547,7 +2547,7 @@ A medium public build task can pass with only the thin loop.
 观察到的形态：
 
 ```text
-many static-analysis Bash/Read calls
+many static-analysis Shell/Read calls
 late inventory/todo
 engineering/check surfaces available but not productively used
 runnable artifact appeared late or not at all before timeout/cancel
@@ -3319,7 +3319,7 @@ prompt rendering labels self-check advisory
 必须断言：
 
 ```text
-Bash output bounded/truncated
+Shell output bounded/truncated
 Read/Grep excerpts bounded
 Write/Edit bodies omitted
 raw diffs omitted

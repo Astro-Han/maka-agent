@@ -35,7 +35,7 @@ function toolStartEvent(): SessionEvent {
     turnId: 'turn-1',
     ts: 1,
     toolUseId: 'tool-1',
-    toolName: 'Bash',
+    toolName: 'Shell',
     args: { command: 'npm test' },
   };
 }

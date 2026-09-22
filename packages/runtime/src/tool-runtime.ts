@@ -1539,7 +1539,7 @@ export class ToolRuntime {
       // so provider silence here is expected, not a stalled model stream. A
       // long-running tool (apt-get install, a build, an ML training step, a
       // subagent loop) must not trip the idle timeout and abort the whole
-      // invocation; the tool carries its own timeout (e.g. Bash timeout_ms)
+      // invocation; the tool carries its own timeout (e.g. Shell timeout_ms)
       // and the trial/run layer is the outer backstop.
       const pauseTarget = this.input.getPermissionPauseTarget();
       pauseTarget?.pause();
@@ -1679,7 +1679,7 @@ export class ToolRuntime {
           this.recentSandboxDenials.add(denialKey);
           if (content.kind === 'terminal' || content.kind === 'shell_run') {
             this.recentSandboxDenials.add(
-              sandboxDenialKey('Bash', this.input.header.cwd, {
+              sandboxDenialKey('Shell', this.input.header.cwd, {
                 command: content.cmd,
               }),
             );
@@ -3306,7 +3306,7 @@ function coerceTerminalFailure(
   message: string;
   sandboxDenied: boolean;
 } | null {
-  if (tool.name !== 'Bash' || !err || typeof err !== 'object') return null;
+  if (tool.name !== 'Shell' || !err || typeof err !== 'object') return null;
   const error = err as {
     code?: unknown;
     stdout?: unknown;
@@ -3416,7 +3416,7 @@ function sandboxDenialKey(toolName: string, cwd: string, args: unknown): string 
 
 function isBoundaryAuthorityAttempt(toolName: string, args: unknown): boolean {
   if (toolName === REQUEST_SANDBOX_BOUNDARY_TOOL_NAME) return true;
-  if (toolName !== 'Bash' || !args || typeof args !== 'object') return false;
+  if (toolName !== 'Shell' || !args || typeof args !== 'object') return false;
   const record = args as Record<string, unknown>;
   return (
     Object.hasOwn(record, 'boundary_intent') &&
@@ -3447,7 +3447,7 @@ function deriveToolResultStatus(
   }
   if (content.kind === 'rive_workflow' && content.ok === false) return 'error';
   if (content.kind === 'web_search_error') return 'error';
-  // Bash returns terminal facts instead of throwing for ordinary shell failure.
+  // Shell returns terminal facts instead of throwing for ordinary shell failure.
   // The explicit status is the shared classification point for isError,
   // telemetry, and loop-gate failure streaks.
   if (content.kind === 'terminal') {

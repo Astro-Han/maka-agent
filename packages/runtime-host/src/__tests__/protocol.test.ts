@@ -449,7 +449,7 @@ describe('Runtime Host bootstrap protocol', () => {
       {
         ...identity,
         type: 'tool_start',
-        toolName: 'Bash',
+        toolName: 'Shell',
         intent: '只读探索:定位渲染入口',
         argsPreview: { command: 'git status --porcelain' },
       },

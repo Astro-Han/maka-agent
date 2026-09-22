@@ -132,7 +132,7 @@ export interface ShellRunRecord {
   sourceRunId?: string;
   sourceTurnId: string;
   sourceToolCallId: string;
-  /** Defaults to `model` for model-initiated Bash runs. */
+  /** Defaults to `model` for model-initiated Shell runs. */
   visibility?: ShellRunVisibility;
   cwd: string;
   command: string;

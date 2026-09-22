@@ -569,7 +569,7 @@ function createTranscriptProjection(invocations: readonly RuntimeInvocationRecor
     push(event: RuntimeEvent) {
       eventCount += 1;
       const content = event.content;
-      // The durable model projection is never a transcript input. Large Bash
+      // The durable model projection is never a transcript input. Large Shell
       // streams are consumed into a bounded terminal preview by the read model.
       const measured =
         content?.kind === 'function_response'

@@ -40,7 +40,7 @@ describe('RecoveryResolver', () => {
     assert.deepEqual(resolution.decisions, [
       {
         toolCallId: 'call-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         status: 'definitely_not_dispatched',
         reason: 'new_protocol_before_dispatch',
         callRuntimeEventId: 'function-call-1',
@@ -60,7 +60,7 @@ describe('RecoveryResolver', () => {
     assert.deepEqual(resolution.decisions, [
       {
         toolCallId: 'call-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         operationId: 'operation-1',
         status: 'indeterminate',
         reason: 'dispatch_without_response',
@@ -257,7 +257,7 @@ describe('RecoveryResolver', () => {
     assert.deepEqual(resolution.decisions, [
       {
         toolCallId: 'call-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         status: 'completed',
         reason: 'matching_response',
         callRuntimeEventId: 'function-call-1',
@@ -278,7 +278,7 @@ describe('RecoveryResolver', () => {
     assert.deepEqual(resolution.decisions, [
       {
         toolCallId: 'call-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         operationId: 'operation-1',
         status: 'corruption',
         reason: 'orphan_dispatch',
@@ -298,7 +298,7 @@ describe('RecoveryResolver', () => {
     assert.deepEqual(resolution.decisions, [
       {
         toolCallId: 'call-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         status: 'corruption',
         reason: 'orphan_response',
         responseRuntimeEventId: 'function-response-1',
@@ -318,7 +318,7 @@ describe('RecoveryResolver', () => {
     assert.deepEqual(resolution.decisions, [
       {
         toolCallId: 'call-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         operationId: 'operation-1',
         status: 'corruption',
         reason: 'identity_conflict',
@@ -340,7 +340,7 @@ describe('RecoveryResolver', () => {
     assert.deepEqual(resolution.decisions, [
       {
         toolCallId: 'call-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         operationId: 'operation-1',
         status: 'corruption',
         reason: 'duplicate_dispatch',
@@ -364,7 +364,7 @@ describe('RecoveryResolver', () => {
     assert.deepEqual(resolution.decisions, [
       {
         toolCallId: 'call-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         operationId: 'operation-1',
         status: 'corruption',
         reason: 'duplicate_response',
@@ -446,7 +446,7 @@ function functionCallEvent(): RuntimeEvent {
     id: 'function-call-1',
     role: 'model',
     author: 'agent',
-    content: { kind: 'function_call', id: 'call-1', name: 'Bash', args: { command: 'do-it' } },
+    content: { kind: 'function_call', id: 'call-1', name: 'Shell', args: { command: 'do-it' } },
   });
 }
 
@@ -458,8 +458,8 @@ function toolDispatchEvent(overrides: { toolName?: string } = {}): RuntimeEvent 
         protocol: 't1_after_preflight_v1',
         operationId: 'operation-1',
         providerToolCallId: 'call-1',
-        toolName: overrides.toolName ?? 'Bash',
-        canonicalArgsHash: canonicalToolArgsHash('Bash', { command: 'do-it' }),
+        toolName: overrides.toolName ?? 'Shell',
+        canonicalArgsHash: canonicalToolArgsHash('Shell', { command: 'do-it' }),
         recoveryMode: 'never_auto_retry',
       },
     },
@@ -513,7 +513,7 @@ function functionResponseEvent(isError = false, operationId?: string): RuntimeEv
     content: {
       kind: 'function_response',
       id: 'call-1',
-      name: 'Bash',
+      name: 'Shell',
       result: isError ? 'permission denied' : 'ok',
       ...(isError ? { isError: true } : {}),
     },

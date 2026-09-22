@@ -100,7 +100,7 @@ function toolCallEvent(id: string): RuntimeEvent {
     ...textEvent(id, ''),
     role: 'model',
     author: 'agent',
-    content: { kind: 'function_call', id: 'tool-call', name: 'Bash', args: {} },
+    content: { kind: 'function_call', id: 'tool-call', name: 'Shell', args: {} },
   };
 }
 
@@ -109,7 +109,7 @@ function toolResultEvent(id: string, result: string): RuntimeEvent {
     ...textEvent(id, ''),
     role: 'tool',
     author: 'tool',
-    content: { kind: 'function_response', id: 'tool-call', name: 'Bash', result },
+    content: { kind: 'function_response', id: 'tool-call', name: 'Shell', result },
   };
 }
 

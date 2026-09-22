@@ -1960,7 +1960,7 @@ test('live tool_start projects intent and a bounded args preview, never full arg
     turnId: 'turn-1',
     ts: 1,
     toolUseId: 'tool-1',
-    toolName: 'Bash',
+    toolName: 'Shell',
     intent: '只读探索:检查渲染入口',
     args: { command: 'git status --porcelain', content: 'x'.repeat(100 * 1024) },
   });

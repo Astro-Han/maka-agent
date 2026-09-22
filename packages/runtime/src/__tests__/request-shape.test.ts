@@ -69,7 +69,7 @@ describe('prepared prompt composition', () => {
         { role: 'system', content: 'system' },
         { role: 'user', content: 'hello' },
       ],
-      tools: [{ name: 'Bash', inputSchema: { type: 'object' } }, { inputSchema: {} }],
+      tools: [{ name: 'Shell', inputSchema: { type: 'object' } }, { inputSchema: {} }],
       providerOptions: { anthropic: { thinking: { type: 'enabled' } } },
     });
 
@@ -79,7 +79,7 @@ describe('prepared prompt composition', () => {
     );
     assert.deepEqual(
       composition?.tools?.map((tool) => tool.name),
-      ['Bash'],
+      ['Shell'],
     );
     // The unnamed tool's schema is still counted; it just cannot be listed.
     assert.ok((composition?.unlabelledToolBytes ?? 0) > 0);

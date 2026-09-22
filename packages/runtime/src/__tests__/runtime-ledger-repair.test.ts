@@ -481,7 +481,7 @@ test("converts Maka's own legacy transcript whole, and resumes an interrupted co
         id: 'n-tool',
         turnId: 'turn-1',
         ts: ts + 1,
-        toolName: 'Bash',
+        toolName: 'Shell',
         args: { command: 'npm test' },
       },
       {

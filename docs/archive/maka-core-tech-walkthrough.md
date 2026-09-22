@@ -214,7 +214,7 @@ agent loop 的引擎。用 Vercel AI SDK 的 `streamText` 配合 `stopWhen: step
 
 核心规则：**不可逆操作（`fs_destructive`、`git_destructive`、`privileged`、`browser`）在 `execute` 模式下仍强制 prompt**——浏览器操作可能发帖 / 下单，视为不可逆。`bypass` 全 allow，仅用户显式选择时进入。
 
-`BUILTIN_TOOL_CATEGORY` 把 Claude SDK 风格的工具名映射到类别，`Bash` 默认 `shell_unsafe`，再由 `categorizeBash()` 根据命令前缀动态降级或升级（`ls`/`pwd` → `shell_safe`，`rm` → `fs_destructive`，`git push --force` → `git_destructive`）。
+`BUILTIN_TOOL_CATEGORY` 把 Claude SDK 风格的工具名映射到类别，`Shell` 默认 `shell_unsafe`，再由 `categorizeShell()` 根据命令前缀动态降级或升级（`ls`/`pwd` → `shell_safe`，`rm` → `fs_destructive`，`git push --force` → `git_destructive`）。
 
 ### 纯函数原则
 

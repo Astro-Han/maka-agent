@@ -96,7 +96,7 @@ function toolDurationText(entry: MakaPiToolEntry): string {
  * whole during truncation: a long command can never hide an `exit 1`.
  *
  * The `no output` placeholder appears only when the row cannot name the call
- * (no input summary): once the target says what ran, `● Bash  $ git add -A`
+ * (no input summary): once the target says what ran, `● Shell  $ git add -A`
  * reads complete on its own and the disclaimer is noise.
  */
 function renderCompactToolBlock(entry: MakaPiToolEntry, width: number): string[] {
@@ -196,7 +196,7 @@ function renderExpandedToolBlock(entry: MakaPiToolEntry, width: number): string[
     lines.push(...renderCappedResultText(entry.progress.values().join(''), width, ansi.dim));
   }
   // A terminal snapshot is the authoritative accumulated stream. Rendering
-  // the deltas that preceded it as well would repeat every line once the Bash
+  // the deltas that preceded it as well would repeat every line once the Shell
   // card settles. Compact results intentionally keep the live deltas because
   // they may be the only output available.
   const renderLiveOutput = !shellResultSupersedesLiveOutput(entry.result);
@@ -216,7 +216,7 @@ function renderExpandedToolBlock(entry: MakaPiToolEntry, width: number): string[
     lines.push(...renderToolResult(entry, width));
   }
   if (
-    entry.toolName === 'Bash' &&
+    entry.toolName === 'Shell' &&
     makaPiToolPresentationStatus(entry) === 'running' &&
     entry.result?.kind === 'shell_run'
   ) {
@@ -573,7 +573,7 @@ function renderToolResult(entry: MakaPiToolEntry, width: number): string[] {
   if (result?.kind === 'file_write') {
     return renderIndented(`Wrote ${result.bytes} bytes to ${result.path}`, width, 2);
   }
-  // A generic `text` dump — a Bash body or raw tool text — is what the head/tail
+  // A generic `text` dump — a Shell body or raw tool text — is what the head/tail
   // cap targets: the model already holds the full body, so the transcript only
   // needs enough to orient. An interrupted call with no result uses the same
   // capped path for its explanation. `json` is deliberately excluded: a Read json is
@@ -685,7 +685,7 @@ function renderShellRunResult(
   width: number,
 ): string[] {
   const lines: string[] = [];
-  // The command/cwd live on the result. The Bash input summary shows only the
+  // The command/cwd live on the result. The Shell input summary shows only the
   // command's first line (`command.split('\n')[0]`), so skip the result-side
   // `$ cmd` only when the input already shows the whole command — a single-line
   // command. A multiline command, or a ref-only StopBackgroundTask input,
@@ -771,7 +771,7 @@ function toolInputSummary(entry: MakaPiToolEntry): string {
   const obj =
     input !== null && typeof input === 'object' ? (input as Record<string, unknown>) : undefined;
   switch (entry.toolName) {
-    case 'Bash': {
+    case 'Shell': {
       const command = obj?.command;
       if (typeof command === 'string' && command.trim()) {
         // Agents often lead with `#` comment lines; the row names what the

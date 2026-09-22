@@ -61,7 +61,7 @@ test('context operations preserve bounded exact wire values', () => {
         contextWindow: 128_000,
         composition: {
           segments: [{ kind: 'messages', bytes: 80 }],
-          tools: [{ name: 'Bash', bytes: 40 }],
+          tools: [{ name: 'Shell', bytes: 40 }],
           remainingTools: { count: 3, bytes: 90 },
         },
         compaction: {
@@ -86,7 +86,7 @@ test('context operations preserve bounded exact wire values', () => {
         contextWindow: 128_000,
         composition: {
           segments: [{ kind: 'messages', bytes: 80 }],
-          tools: [{ name: 'Bash', bytes: 40 }],
+          tools: [{ name: 'Shell', bytes: 40 }],
           remainingTools: { count: 3, bytes: 90 },
         },
         compaction: {

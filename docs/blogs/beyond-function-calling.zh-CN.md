@@ -31,7 +31,7 @@ Agent 中的 Tool 则完全不同。
 
 工具的开销从执行前就已经产生。Schema 挤占宝贵的上下文窗口，分散模型对核心任务的注意力，并可能改变 Provider 侧 KV Cache 的命中前缀。随着可用工具数量的膨胀，模型的行动空间虽然得以拓展，但留给任务本身的有效上下文被不断压缩，动作决策面临的噪声干扰也显著增加。
 
-当 Agent 仅配置 `Read`、`Write`、`Bash` 等基础工具时，这种开销尚可接受。然而，一旦接入浏览器自动化、系统级 GUI 操作、子 Agent 委派、外部企业服务以及大量 MCP Connector，在每一次请求中常驻全量 Tool Schema 将迅速突破架构的可扩展性上限。
+当 Agent 仅配置 `Read`、`Write`、`Shell` 等基础工具时，这种开销尚可接受。然而，一旦接入浏览器自动化、系统级 GUI 操作、子 Agent 委派、外部企业服务以及大量 MCP Connector，在每一次请求中常驻全量 Tool Schema 将迅速突破架构的可扩展性上限。
 
 Maka 引入 Deferred Tool 机制来应对这一瓶颈。Deferred Tool 并不改变工具的执行时机，核心在于按需控制 Tool Schema 暴露给模型的时间点。
 

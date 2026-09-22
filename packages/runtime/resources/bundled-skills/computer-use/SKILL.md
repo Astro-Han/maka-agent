@@ -22,7 +22,7 @@ Use `maka_computer` for a user-requested local application UI. Maka is backgroun
 5. Continue from the fresh observation returned by the action.
 6. Verify the requested visible result; a dispatch `ok` is not proof of the user's business outcome.
 
-Use Browser tools for web pages inside Maka. Use Read, Write, Bash, connectors, APIs, or CLIs for work that does not require operating the real application UI. Never recreate a failed GUI action with AppleScript, System Events, `open`, cliclick, or screenshot scripts.
+Use Browser tools for web pages inside Maka. Use Read, Write, Shell, connectors, APIs, or CLIs for work that does not require operating the real application UI. Never recreate a failed GUI action with AppleScript, System Events, `open`, cliclick, or screenshot scripts.
 
 ## Resolve and observe
 

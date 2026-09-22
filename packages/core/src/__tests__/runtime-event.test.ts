@@ -630,7 +630,7 @@ describe('RuntimeEvent actions', () => {
         kind: 'tool_permission',
         requestId: 'pr-1',
         toolUseId: 'tc-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         category: 'shell_unsafe',
         reason: 'shell_dangerous',
         args: { command: 'rm foo' },
@@ -731,7 +731,7 @@ describe('RuntimeEvent actions', () => {
           kind: 'tool_permission',
           requestId: 'hosted-pr-1',
           toolUseId: 'tool-use-1',
-          toolName: 'Bash',
+          toolName: 'Shell',
           category: 'shell_unsafe',
           reason: 'shell_dangerous',
           args: { command: 'rm foo' },
@@ -762,7 +762,7 @@ describe('RuntimeEvent actions', () => {
       requestId: 'pr-1',
       decision: 'allow' as const,
       rememberForTurn: true,
-      toolName: 'Bash',
+      toolName: 'Shell',
     };
 
     assert.deepEqual(
@@ -778,7 +778,7 @@ describe('RuntimeEvent actions', () => {
         decision: 'allow',
         toolName: 'x'.repeat(INTERACTION_TOOL_NAME_MAX_BYTES + 1),
       },
-      { requestId: 'pr-1', decision: 'allow', toolName: 'Bash', extra: true },
+      { requestId: 'pr-1', decision: 'allow', toolName: 'Shell', extra: true },
     ]) {
       assert.throws(() =>
         decodeRuntimeEvent({
@@ -837,7 +837,7 @@ describe('runtimeEventHasModelVisibleContent', () => {
         content: {
           kind: 'function_response',
           id: '1',
-          name: 'Bash',
+          name: 'Shell',
           result: 'boom',
           isError: true,
         },

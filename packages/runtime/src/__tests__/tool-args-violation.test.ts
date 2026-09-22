@@ -293,7 +293,7 @@ test('a sandbox denial names the tool that widens the boundary', async () => {
     getPermissionPauseTarget: () => null,
   });
   const tool: MakaTool = {
-    name: 'Bash',
+    name: 'Shell',
     description: 'test',
     parameters: z.object({ command: z.string() }),
     impl: async () => {
@@ -331,18 +331,18 @@ describe('unrepairable tool calls', () => {
   test('an unknown tool name is answered with the names that exist', () => {
     const repaired = repairMakaToolCall({
       toolCall: { toolCallId: 'tool-1', toolName: 'ReadFile', input: '{"path":"/tmp/a"}' },
-      availableToolNames: ['Bash', 'Read', 'Write'],
+      availableToolNames: ['Shell', 'Read', 'Write'],
       error: new Error('No such tool: ReadFile'),
     });
 
     const input = JSON.parse(repaired?.input ?? '{}') as { error?: string };
-    assert.match(input.error ?? '', /Available tools: Bash, Read, Write\./);
+    assert.match(input.error ?? '', /Available tools: Shell, Read, Write\./);
   });
 
   test('a known tool called with the wrong shape is told its fields', () => {
     const repaired = repairMakaToolCall({
       toolCall: { toolCallId: 'tool-1', toolName: 'Read', input: '{"filePath":"/tmp/a"}' },
-      availableToolNames: ['Bash', 'Read'],
+      availableToolNames: ['Shell', 'Read'],
       toolParameters: (name) => (name === 'Read' ? readSchema : undefined),
       error: new Error('Invalid arguments for tool Read'),
     });
@@ -357,7 +357,7 @@ describe('unrepairable tool calls', () => {
   test('still redacts secret-shaped text in what it relays', () => {
     const repaired = repairMakaToolCall({
       toolCall: { toolCallId: 'tool-1', toolName: 'Nope', input: '{}' },
-      availableToolNames: ['Bash'],
+      availableToolNames: ['Shell'],
       error: new Error('No such tool: Authorization: Bearer sk-live-secret-token-value'),
     });
 

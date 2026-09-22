@@ -260,7 +260,7 @@ export interface WorkspaceGrepFilesExecutor {
   grepFiles(input: WorkspaceGrepInput): Promise<WorkspaceGrepResult>;
 }
 
-export type WorkspaceBashExecutor = WorkspaceExecutorFactsProvider & WorkspaceCommandExecutor;
+export type WorkspaceShellExecutor = WorkspaceExecutorFactsProvider & WorkspaceCommandExecutor;
 
 export type WorkspaceReadExecutor = WorkspaceExecutorFactsProvider &
   WorkspaceExistingPathResolver &
@@ -288,7 +288,7 @@ export type WorkspaceGrepExecutor = WorkspaceExecutorFactsProvider &
 export type WorkspaceSearchExecutor = WorkspaceGlobExecutor & WorkspaceGrepExecutor;
 
 export interface WorkspaceExecutor
-  extends WorkspaceBashExecutor,
+  extends WorkspaceShellExecutor,
     WorkspaceReadExecutor,
     WorkspaceWriteExecutor,
     WorkspaceEditExecutor,

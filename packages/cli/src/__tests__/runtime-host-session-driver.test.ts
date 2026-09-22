@@ -3449,7 +3449,7 @@ function pendingPermission() {
       toolUseId: 'tool-permission',
       prompt: {
         kind: 'tool_permission' as const,
-        toolName: 'Bash',
+        toolName: 'Shell',
         category: 'shell_unsafe' as const,
         reason: 'shell_dangerous' as const,
         review: { kind: 'command' as const, command: 'echo protected', cwd: '/tmp' },
@@ -4127,7 +4127,7 @@ function toolStartFrame(
       turnId: 'turn-1',
       ts: 10,
       toolUseId: `tool-${index}`,
-      toolName: 'Bash',
+      toolName: 'Shell',
     },
   };
 }

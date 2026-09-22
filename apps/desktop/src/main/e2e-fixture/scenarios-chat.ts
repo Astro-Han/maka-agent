@@ -55,7 +55,7 @@ export function turnMessages(now: number): StoredMessage[] {
       id: 'tool-status',
       turnId,
       ts: now - 9 * 60_000 - 50_000,
-      toolName: 'Bash',
+      toolName: 'Shell',
       displayName: '检查测试状态',
       intent: '运行测试摘要并读取失败输出',
       args: { cmd: 'npm test --workspaces --if-present', cwd: '/workspace/maka' },

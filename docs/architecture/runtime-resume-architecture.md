@@ -626,7 +626,7 @@ flowchart TD
 
 Atomic rename prevents torn files but does not provide conditional replacement. Without CAS, matching the prior state cannot authorize automatic redo.
 
-Generic Bash, arbitrary remote APIs, send, publish, pay, and delete continue to park without a dedicated protocol.
+Generic Shell, arbitrary remote APIs, send, publish, pay, and delete continue to park without a dedicated protocol.
 
 ## Phase 4: bind Runtime history to the workspace
 
@@ -886,7 +886,7 @@ Process crash and SQLite transaction atomicity do not automatically prove power-
 Current implementation does not promise:
 
 - restoring an old provider stream, Promise, or instruction pointer;
-- exactly-once for arbitrary Bash, remote APIs, or child processes;
+- exactly-once for arbitrary Shell, remote APIs, or child processes;
 - automatic settlement of real T1-without-T2 tool effects;
 - using workspace UUID as proof of file contents;
 - final cross-process or multi-node continuation fencing;

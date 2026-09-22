@@ -60,7 +60,7 @@ it('reconciles late predecessor content after its durable answer is already load
   const { root } = installReactRenderer();
   try {
     const controller = createAppShellSessionUiStateController();
-    const b = { turnId: 'B', steps: [{ stepId: 'bash', tools: [{ toolUseId: 'bash', toolName: 'Bash', args: {}, status: 'running' as const }] }] };
+    const b = { turnId: 'B', steps: [{ stepId: 'shell', tools: [{ toolUseId: 'shell', toolName: 'Shell', args: {}, status: 'running' as const }] }] };
     controller.setLiveTurnBySession(() => ({ session: [b] }));
     controller.setExecution('session', { type: 'host_execution', available: true,
       rootTurn: { sessionId: 'session', turnId: 'B', runId: 'run-B', status: 'running' } });

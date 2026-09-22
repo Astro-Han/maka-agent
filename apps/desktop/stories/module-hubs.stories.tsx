@@ -261,7 +261,7 @@ const DAILY_REVIEW_SUMMARY: DailyReviewSummary = {
     },
   ],
   topTools: [
-    { key: 'Bash', label: 'Bash', requests: 18, totalTokens: 4_200, costUsd: 0.05 },
+    { key: 'Shell', label: 'Shell', requests: 18, totalTokens: 4_200, costUsd: 0.05 },
     { key: 'Read', label: 'Read', requests: 12, totalTokens: 2_100, costUsd: 0.02 },
   ],
   topModels: [

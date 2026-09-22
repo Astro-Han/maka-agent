@@ -114,7 +114,7 @@ function permissionRecord(requestId: string): InteractionRecord {
       toolUseId: `tool-${requestId}`,
       prompt: {
         kind: 'tool_permission',
-        toolName: 'Bash',
+        toolName: 'Shell',
         category: 'shell_unsafe',
         reason: 'shell_dangerous',
         review: { kind: 'command', command: 'echo okay', cwd: '/repo' },

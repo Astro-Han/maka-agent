@@ -169,7 +169,7 @@ Host 全量仍有一项基线测试竞态，不能称为全仓测试全绿：192
 PTY 随后约 0.5 秒正常输出 `READY` 和 `CHILD_PTY_OK:ping`，但模型重试仍读到原工具结果，最终触发
 5 秒 terminal deadline。独立进程复现相同现象；加载追踪所涉及的 **693 个 tracked 源文件**
 逐字节与上述 main 相同，另外两个为构建生成的 model metadata / pricing 文件；没有加载本 PR
-修改的 projector。首次默认并发全量还出现过 Bash sandbox 测试超时，该项单独运行通过。
+修改的 projector。首次默认并发全量还出现过 Shell sandbox 测试超时，该项单独运行通过。
 本轮未修改无关 Host 夹具、放宽时限或用重试掩盖失败；详细本地日志为
 `/tmp/maka-pr-4901-host-tests-bounded.log`、`/tmp/maka-pr-4901-host-pty-probe.log` 和
 `/tmp/maka-pr-4901-host-base-comparison.json`。

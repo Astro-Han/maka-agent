@@ -59,7 +59,7 @@ export const en: Copy = {
   scene: {
     events: [
       { tone: 'mut', name: 'Text', label: 'Model says', detail: '"I\'ll rerun the failing test."' },
-      { tone: '', name: 'FunctionCall', label: 'Runs a command', detail: 'Bash · npm test' },
+      { tone: '', name: 'FunctionCall', label: 'Runs a command', detail: 'Shell · npm test' },
       {
         tone: 'warn',
         name: 'permissionRequest',

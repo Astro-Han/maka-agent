@@ -44,7 +44,7 @@ Shared execution composition — where `BackendRegistry` and `SessionManager` ar
 
 ## Background-task readiness
 
-`Bash` background runs return a durable runtime-task ref and expose the native
+`Shell` background runs return a durable runtime-task ref and expose the native
 process id when available. A process id published after startup is captured on
 the next task observation, output flush, or finalization.
 `BackgroundTaskHealth` deliberately keeps

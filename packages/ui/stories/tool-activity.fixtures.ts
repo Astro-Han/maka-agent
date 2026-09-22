@@ -56,7 +56,7 @@ function pipeOutput(stdout = '', stderr = '') {
   };
 }
 
-// Background Bash (`run_in_background: true`) settles as `shell_run`, not
+// Background Shell (`run_in_background: true`) settles as `shell_run`, not
 // `terminal`. It shares the command surface with the foreground and live paths,
 // so the three belong in one story to compare.
 const shellRunResult = {
@@ -133,7 +133,7 @@ function toolItem(item: ToolActivityItem): ToolActivityItem {
 export const statusOverviewItems = [
   toolItem({
     toolUseId: 'status-long-running',
-    toolName: 'bash',
+    toolName: 'Shell',
     displayName: 'Shell command',
     intent: 'Run a command that has not returned yet.',
     status: 'running',
@@ -141,7 +141,7 @@ export const statusOverviewItems = [
   }),
   toolItem({
     toolUseId: 'status-running',
-    toolName: 'bash',
+    toolName: 'Shell',
     displayName: 'Build Storybook',
     intent: 'Generate the static Storybook bundle.',
     status: 'running',
@@ -159,7 +159,7 @@ export const statusOverviewItems = [
   }),
   toolItem({
     toolUseId: 'status-errored',
-    toolName: 'bash',
+    toolName: 'Shell',
     displayName: 'Eval test',
     status: 'errored',
     args: { cmd: 'npm run -w @maka/eval test' },
@@ -180,7 +180,7 @@ export const statusOverviewItems = [
 export const terminalAndLiveOutputItems = [
   toolItem({
     toolUseId: 'terminal-result',
-    toolName: 'bash',
+    toolName: 'Shell',
     displayName: 'Storybook build',
     intent: 'Build Storybook and keep long terminal output bounded.',
     status: 'completed',
@@ -190,7 +190,7 @@ export const terminalAndLiveOutputItems = [
   }),
   toolItem({
     toolUseId: 'live-output',
-    toolName: 'bash',
+    toolName: 'Shell',
     displayName: 'Live output',
     intent: 'Stream interleaved stdout and stderr while the tool runs.',
     status: 'running',
@@ -205,7 +205,7 @@ export const terminalAndLiveOutputItems = [
 export const shellCommandSurfaceItems = [
   toolItem({
     toolUseId: 'shell-surface-live',
-    toolName: 'Bash',
+    toolName: 'Shell',
     displayName: 'Live output',
     intent: 'Stream interleaved stdout and stderr while the tool runs.',
     status: 'running',
@@ -216,7 +216,7 @@ export const shellCommandSurfaceItems = [
   }),
   toolItem({
     toolUseId: 'shell-surface-terminal',
-    toolName: 'Bash',
+    toolName: 'Shell',
     displayName: 'Storybook build',
     intent: 'Foreground run that settled with long bounded output.',
     status: 'completed',
@@ -226,7 +226,7 @@ export const shellCommandSurfaceItems = [
   }),
   toolItem({
     toolUseId: 'shell-surface-background',
-    toolName: 'Bash',
+    toolName: 'Shell',
     displayName: 'Background watcher',
     intent: 'Background run tracked by ref instead of returning inline.',
     status: 'running',
@@ -236,7 +236,7 @@ export const shellCommandSurfaceItems = [
   }),
   toolItem({
     toolUseId: 'shell-surface-failed',
-    toolName: 'Bash',
+    toolName: 'Shell',
     displayName: 'Failing test',
     intent: 'Failure keeps the same surface and only re-tints its border.',
     status: 'errored',
@@ -366,7 +366,7 @@ export const fileDiffAndWebSearchItems = [
 export const errorsAndPermissionDeniedItems = [
   toolItem({
     toolUseId: 'terminal-error',
-    toolName: 'bash',
+    toolName: 'Shell',
     displayName: 'Failing test',
     intent: 'Surface stderr and the error-copy affordance.',
     status: 'errored',
@@ -376,7 +376,7 @@ export const errorsAndPermissionDeniedItems = [
   }),
   toolItem({
     toolUseId: 'permission-denied',
-    toolName: 'bash',
+    toolName: 'Shell',
     displayName: 'Denied shell command',
     intent: 'This intent is hidden when the permission denial copy is rendered.',
     status: 'errored',

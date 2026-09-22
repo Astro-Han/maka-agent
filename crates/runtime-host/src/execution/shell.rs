@@ -49,6 +49,9 @@ pub(super) fn schema() -> Value {
 struct Input {
     #[schemars(length(min = 1, max = 65536))]
     command: String,
+    /// Load the shell's login profile. Set false to skip it.
+    #[serde(default = "default_login")]
+    login: bool,
     #[schemars(range(min = 1, max = 86_400_000))]
     timeout_ms: Option<u64>,
     #[serde(default)]
@@ -61,6 +64,10 @@ struct Input {
     additional_permissions: Option<maka_sandbox::grant::Permissions>,
     /// Explain why the additional access is necessary. Required with additional_permissions.
     justification: Option<String>,
+}
+
+fn default_login() -> bool {
+    true
 }
 
 #[derive(Clone)]
@@ -146,7 +153,7 @@ impl ToolPreparer for SessionShell {
                     let input: Input = serde_json::from_value(input).map_err(failed)?;
                     let source = input.command.clone();
                     let terminal = input.pty;
-                    let compiler = executor.clone();
+                    let compiler = executor.clone().with_login_shell(input.login);
                     let command = tokio::task::spawn_blocking(move || {
                         if terminal {
                             compiler.command_pty(&source)

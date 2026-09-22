@@ -355,13 +355,13 @@ describe('InteractiveUsageStores', () => {
       assert.equal((await stores.telemetry.logs({ range: 'all' })).total, 1);
       const tools = await stores.telemetry.toolLogs({
         range: 'all',
-        toolName: 'Bash',
+        toolName: 'Shell',
         status: 'success',
       });
       assert.equal(tools.total, 1);
-      assert.equal(tools.rows[0]?.toolName, 'Bash');
+      assert.equal(tools.rows[0]?.toolName, 'Shell');
       await assert.rejects(
-        () => stores.telemetry.logs({ range: 'all', toolName: 'Bash' }),
+        () => stores.telemetry.logs({ range: 'all', toolName: 'Shell' }),
         /toolName is not applicable to LLM logs/,
       );
       await stores.close();
@@ -509,7 +509,7 @@ describe('InteractiveUsageStores', () => {
         toolRecord({
           id: 'tool-openai-ok',
           sessionId: 'session-a',
-          toolName: 'Bash',
+          toolName: 'Shell',
           providerId: 'openai',
           modelId: 'gpt-5',
           status: 'success',
@@ -575,7 +575,7 @@ describe('InteractiveUsageStores', () => {
         toolRecord({
           id: 'bucket-session-a',
           sessionId: 'session-a',
-          toolName: 'Bash',
+          toolName: 'Shell',
           providerId: 'openai',
           modelId: 'gpt-5',
           durationMs: 100,
@@ -585,7 +585,7 @@ describe('InteractiveUsageStores', () => {
         toolRecord({
           id: 'bucket-session-b',
           sessionId: 'session-b',
-          toolName: 'Bash',
+          toolName: 'Shell',
           providerId: 'openai',
           modelId: 'gpt-5',
           durationMs: 400,
@@ -598,7 +598,7 @@ describe('InteractiveUsageStores', () => {
       );
       assert.deepEqual(
         scoped.map((bucket) => [bucket.key, bucket.requests, bucket.avgLatencyMs]),
-        [['Bash', 1, 100]],
+        [['Shell', 1, 100]],
       );
 
       await stores.close();
@@ -695,7 +695,7 @@ function llmRecord(overrides: Record<string, unknown> = {}) {
 function toolRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: 'tool_1',
-    toolName: 'Bash',
+    toolName: 'Shell',
     durationMs: 30,
     status: 'success',
     bytesIn: 1,

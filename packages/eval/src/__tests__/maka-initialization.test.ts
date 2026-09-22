@@ -124,7 +124,7 @@ test('official Maka shim uses one Host for preflight and execution across retrie
                   index: 0,
                   id: 'fixture-tool',
                   type: 'function',
-                  function: { name: 'tool_search', arguments: JSON.stringify({ query: 'Bash' }) },
+                  function: { name: 'tool_search', arguments: JSON.stringify({ query: 'Shell' }) },
                 },
               ],
             },
@@ -162,7 +162,7 @@ test('official Maka shim uses one Host for preflight and execution across retrie
           modelTarget: { kind: 'explicit', connectionSlug: 'fixture', model: 'deepseek-chat' },
           sandboxMode: 'danger-full-access',
         },
-        content: { text: 'Find the Bash tool, then reply.' },
+        content: { text: 'Find the Shell tool, then reply.' },
         maxSteps: 4,
       },
     };

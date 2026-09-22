@@ -293,7 +293,7 @@ const usageLogs: UsageStats['logs'] = [
   }),
   // No sessionName → renders the "未命名会话 · <short id>" fallback.
   makeUsageLog({ id: '3', kind: 'model', model: 'glm-4.7', status: 'error', minutesAgo: 16 }),
-  makeUsageLog({ id: '4', kind: 'tool', model: 'glm-4.7', toolName: 'Bash', sessionName: 'Bash 环境探查', minutesAgo: 25 }),
+  makeUsageLog({ id: '4', kind: 'tool', model: 'glm-4.7', toolName: 'Shell', sessionName: 'Shell 环境探查', minutesAgo: 25 }),
   {
     ...makeUsageLog({ id: '5', kind: 'model', model: 'gpt-5', status: 'aborted', minutesAgo: 31 }),
     sessionId: undefined,
@@ -363,7 +363,7 @@ const usageStats: UsageStats = {
       errors: 1,
       avgDurationMs: 1240,
     },
-    { tool: 'Bash', calls: 120, success: 118, errors: 2, avgDurationMs: 840 },
+    { tool: 'Shell', calls: 120, success: 118, errors: 2, avgDurationMs: 840 },
   ],
   pricing: [{ provider: 'zai-coding-plan', model: 'glm-4.7', inputPerMTokUsd: 0, outputPerMTokUsd: 0 }],
   provenance: STORY_USAGE_PROVENANCE,

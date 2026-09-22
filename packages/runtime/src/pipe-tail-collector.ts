@@ -19,20 +19,20 @@
 
 import type { PipeShellOutput } from '@maka/core/shell-run';
 
-import { BashTailBuffer } from './bash-tail-buffer.js';
-import { BASH_MAX_RETAINED_CHARS } from './shell-exec.js';
+import { ShellTailBuffer } from './shell-tail-buffer.js';
+import { SHELL_MAX_RETAINED_CHARS } from './shell-exec.js';
 
 export class PipeTailCollector {
-  private readonly stdout: BashTailBuffer;
-  private readonly stderr: BashTailBuffer;
+  private readonly stdout: ShellTailBuffer;
+  private readonly stderr: ShellTailBuffer;
   private stdoutChars = 0;
   private stderrChars = 0;
   private generation = 0;
   private latestStream: 'stdout' | 'stderr' | undefined;
 
-  constructor(maxRetainedChars = BASH_MAX_RETAINED_CHARS) {
-    this.stdout = new BashTailBuffer(maxRetainedChars);
-    this.stderr = new BashTailBuffer(maxRetainedChars);
+  constructor(maxRetainedChars = SHELL_MAX_RETAINED_CHARS) {
+    this.stdout = new ShellTailBuffer(maxRetainedChars);
+    this.stderr = new ShellTailBuffer(maxRetainedChars);
   }
 
   accept(stream: 'stdout' | 'stderr', chunk: string): number {

@@ -99,7 +99,7 @@ Agent State(t) = Project(RuntimeEvents[0...t], policy, runtime configuration)
 7. Runtime: 请求扩大 sandbox permission
 8. User: 批准
 9. Tool: 返回修改结果
-10. Model: 调用 Bash 重新运行测试
+10. Model: 调用 Shell 重新运行测试
 11. Tool: 返回测试结果
 12. Model: 输出最终结论
 13. Runtime: 将这次 Run 标记为 completed

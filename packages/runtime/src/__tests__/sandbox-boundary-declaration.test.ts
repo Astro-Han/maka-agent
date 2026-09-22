@@ -27,7 +27,7 @@ import { preflightDeclaredSandboxBoundary } from '../sandbox-boundary-declaratio
 import { SandboxCommandError } from '../sandbox/errors.js';
 import type { MakaToolContext } from '../tool-runtime.js';
 
-describe('declared Bash sandbox boundary error classification', () => {
+describe('declared Shell sandbox boundary error classification', () => {
   test('maps a model-correctable boundary semantic error to invalid_boundary_declaration', async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), 'maka-boundary-declaration-'));
     try {

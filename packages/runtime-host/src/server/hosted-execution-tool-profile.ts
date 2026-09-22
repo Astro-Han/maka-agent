@@ -24,7 +24,7 @@ import type { MakaTool } from '@maka/runtime/tool-runtime';
 import { readParameters, resolveReadInput } from '@maka/runtime/read-page';
 
 const HEADLESS_CODING_V1_TOOL_NAMES = [
-  'Bash',
+  'Shell',
   'StopBackgroundTask',
   'WriteStdin',
   'Read',
@@ -37,7 +37,7 @@ const HEADLESS_CODING_V1_TOOL_NAMES = [
 
 const HEADLESS_CODING_V1_SYSTEM_PROMPT = [
   'Complete the task by acting with the available tools, not by narrating.',
-  'Prefer Read, Glob, and Grep for inspection, Edit and Write for file changes, and Bash for shell commands and tests.',
+  'Prefer Read, Glob, and Grep for inspection, Edit and Write for file changes, and Shell for shell commands and tests.',
   'Verify the result when practical.',
   'Stop when the task is complete.',
 ].join('\n');

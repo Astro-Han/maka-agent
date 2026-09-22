@@ -88,7 +88,7 @@ import { RunTrace } from '../run-trace.js';
 import { decodeModelCallAttempt, type ModelCallAttempt } from '@maka/core/model-call-attempt';
 import { buildLlmHistorySummarizer } from '../history-compact-summarizer.js';
 import { createToolResultArchiveCapability } from '../tool-result-archive-capability.js';
-import { buildForegroundBashTool } from '../shell-tools.js';
+import { buildForegroundShellTool } from '../shell-tools.js';
 import {
   createTestAiSdkBackend,
   projectedTranscriptOf,
@@ -1063,7 +1063,7 @@ describe('AiSdkBackend sandbox boundary convergence', () => {
       },
       {
         toolCallId: 'approved-boundary-use',
-        toolName: 'Bash',
+        toolName: 'Shell',
         input: {
           command: 'read an already allowed workspace file',
           boundary_intent: 'expand',
@@ -1076,7 +1076,7 @@ describe('AiSdkBackend sandbox boundary convergence', () => {
       },
       {
         toolCallId: 'boundary-retry',
-        toolName: 'Bash',
+        toolName: 'Shell',
         input: {
           command: 'read outside the workspace',
           boundary_intent: 'expand',
@@ -1089,7 +1089,7 @@ describe('AiSdkBackend sandbox boundary convergence', () => {
       },
       {
         toolCallId: 'forbidden-final-tool',
-        toolName: 'Bash',
+        toolName: 'Shell',
         input: { command: 'echo should-not-run', boundary_intent: 'current' },
       },
     ] as const;
@@ -1122,7 +1122,7 @@ describe('AiSdkBackend sandbox boundary convergence', () => {
       | Awaited<ReturnType<NonNullable<AiSdkBackendInput['createSandboxBoundaryRequest']>>>
       | undefined;
     let createCalls = 0;
-    let bashImplCalls = 0;
+    let shellImplCalls = 0;
     const backend = createBackend({
       header: { ...header(), cwd, workspaceRoot: cwd },
       connection: connection(),
@@ -1131,7 +1131,7 @@ describe('AiSdkBackend sandbox boundary convergence', () => {
       tools: [
         buildRequestSandboxBoundaryTool(),
         {
-          name: 'Bash',
+          name: 'Shell',
           description: 'Run one command.',
           parameters: z.object({
             command: z.string(),
@@ -1140,7 +1140,7 @@ describe('AiSdkBackend sandbox boundary convergence', () => {
           }),
           impl: async (input, context) => {
             await preflightDeclaredSandboxBoundary(input.required_boundary, context);
-            bashImplCalls += 1;
+            shellImplCalls += 1;
             return 'used existing authority';
           },
         },
@@ -1175,13 +1175,13 @@ describe('AiSdkBackend sandbox boundary convergence', () => {
 
     assert.equal(streamCalls, 4);
     assert.equal(createCalls, 1);
-    assert.equal(bashImplCalls, 1);
+    assert.equal(shellImplCalls, 1);
     assert.equal(events.filter((event) => event.type === 'sandbox_boundary_request').length, 1);
     assert.doesNotMatch(
       JSON.stringify(model.doStreamCalls[1]?.tools ?? []),
       /request_sandbox_boundary/u,
     );
-    assert.match(JSON.stringify(model.doStreamCalls[1]?.tools ?? []), /Bash/u);
+    assert.match(JSON.stringify(model.doStreamCalls[1]?.tools ?? []), /Shell/u);
     assert.deepEqual(model.doStreamCalls[3]?.tools ?? [], []);
     assert.deepEqual(model.doStreamCalls[3]?.toolChoice, { type: 'none' });
     assert.match(JSON.stringify(model.doStreamCalls[3]?.prompt), /sandbox_boundary_finalization/u);
@@ -1488,7 +1488,7 @@ describe('AiSdkBackend model history', () => {
       record: (event) => traces.push(event),
     });
     const tool: MakaTool = {
-      name: 'Bash',
+      name: 'Shell',
       description: 'shell',
       parameters: {},
       impl: async () => {
@@ -2004,7 +2004,7 @@ describe('AiSdkBackend model history', () => {
             content: {
               kind: 'function_call',
               id: 'tool-1',
-              name: 'Bash',
+              name: 'Shell',
               args: { command: 'printf ok' },
             },
           }),
@@ -2016,7 +2016,7 @@ describe('AiSdkBackend model history', () => {
             content: {
               kind: 'function_response',
               id: 'tool-1',
-              name: 'Bash',
+              name: 'Shell',
               result: {
                 kind: 'terminal',
                 cwd: '/workspace',
@@ -4389,7 +4389,7 @@ describe('AiSdkBackend model history', () => {
     ]);
   });
 
-  test('replays durable Bash results without duplicating commands in provider output', async () => {
+  test('replays durable Shell results without duplicating commands in provider output', async () => {
     const model = completionModel();
     const durableResults = [
       {
@@ -4490,7 +4490,7 @@ describe('AiSdkBackend model history', () => {
           content: {
             kind: 'function_call',
             id: `tool-${index}`,
-            name: 'Bash',
+            name: 'Shell',
             args: { command: result.cmd },
           },
         }),
@@ -4504,7 +4504,7 @@ describe('AiSdkBackend model history', () => {
           content: {
             kind: 'function_response',
             id: `tool-${index}`,
-            name: 'Bash',
+            name: 'Shell',
             result,
             isError: result.status !== 'completed',
           },
@@ -4535,7 +4535,7 @@ describe('AiSdkBackend model history', () => {
       assert.equal(
         serializedPrompt.split(durable.cmd).length - 1,
         1,
-        `command ${index} should remain only in its paired Bash call`,
+        `command ${index} should remain only in its paired Shell call`,
       );
       const output = toolResults[index]?.output;
       assert.equal(output?.type, durable.status === 'completed' ? 'json' : 'error-json');
@@ -6809,7 +6809,7 @@ describe('AiSdkBackend model history', () => {
           content: {
             kind: 'function_call',
             id: 'snapshot-tool',
-            name: 'Bash',
+            name: 'Shell',
             args: {},
           },
         }),
@@ -6821,7 +6821,7 @@ describe('AiSdkBackend model history', () => {
           content: {
             kind: 'function_response',
             id: 'snapshot-tool',
-            name: 'Bash',
+            name: 'Shell',
             result: 'large output\n'.repeat(2000),
           },
         }),
@@ -8031,7 +8031,7 @@ describe('AiSdkBackend error surfaces', () => {
     );
   });
 
-  test('failed Bash results preserve terminal stdout and stderr as an error card', async () => {
+  test('failed Shell results preserve terminal stdout and stderr as an error card', async () => {
     const messages: ToolResultMessage[] = [];
     const events: SessionEvent[] = [];
     const backend = createBackend({
@@ -8045,7 +8045,7 @@ describe('AiSdkBackend error surfaces', () => {
       now: () => 1,
     });
     const tool: MakaTool = {
-      name: 'Bash',
+      name: 'Shell',
       description: 'shell',
       parameters: {},
       impl: async () => {
@@ -9126,7 +9126,7 @@ describe('AiSdkBackend usage telemetry', () => {
     assert.equal(usageCheckpoints[0]?.costUsd, undefined);
   });
 
-  test('a pruned Bash result retains durable output and is readable without rerunning', async () => {
+  test('a pruned Shell result retains durable output and is readable without rerunning', async () => {
     const durable = durableTurnHarness('turn-1', 'run the verbose command');
     const stdoutLines = [
       'FRONT_SENTINEL',
@@ -9170,7 +9170,7 @@ describe('AiSdkBackend usage telemetry', () => {
         const archive = findArchive(prompt);
         const chunks: LanguageModelV4StreamPart[] =
           streamCalls === 1
-            ? call('tool-1', 'Bash', { command: 'verbose-command' })
+            ? call('tool-1', 'Shell', { command: 'verbose-command' })
             : streamCalls === 2
               ? call('tool-2', 'Read', { path: archive.resourceRef, limit: 1 })
               : streamCalls === 3
@@ -9200,7 +9200,7 @@ describe('AiSdkBackend usage telemetry', () => {
       modelId: 'mock-model-id',
       modelFactory: () => model,
       tools: [
-        buildForegroundBashTool({
+        buildForegroundShellTool({
           description: 'Run a foreground command.',
           execute: async () => {
             executeCalls += 1;
@@ -9239,7 +9239,7 @@ describe('AiSdkBackend usage telemetry', () => {
     const durableResult = durable.ledger.find(
       (event) =>
         event.content?.kind === 'function_response' &&
-        event.content.name === 'Bash' &&
+        event.content.name === 'Shell' &&
         event.content.id === 'tool-1',
     );
     assert.ok(durableResult?.content?.kind === 'function_response');
@@ -9328,7 +9328,7 @@ describe('AiSdkBackend usage telemetry', () => {
                   {
                     type: 'tool-call',
                     toolCallId: 'tool-2',
-                    toolName: 'Bash',
+                    toolName: 'Shell',
                     input: JSON.stringify({ cmd: 'continue' }),
                   },
                   {
@@ -9346,7 +9346,7 @@ describe('AiSdkBackend usage telemetry', () => {
                     {
                       type: 'tool-call',
                       toolCallId: 'tool-3',
-                      toolName: 'Bash',
+                      toolName: 'Shell',
                       input: JSON.stringify({ cmd: 'again' }),
                     },
                     {
@@ -9389,8 +9389,8 @@ describe('AiSdkBackend usage telemetry', () => {
           impl: async () => ({ body: largeBody }),
         },
         {
-          name: 'Bash',
-          description: 'Bash description',
+          name: 'Shell',
+          description: 'Shell description',
           parameters: z.object({ cmd: z.string() }),
           impl: async () => ({ body: 'NEWEST_RESULT_STAYS_VISIBLE'.repeat(600) }),
         },
@@ -12104,7 +12104,7 @@ describe('AiSdkBackend tool execution', () => {
   });
 
   test('pauses stream watchdog while a regular (non-subagent) tool is running', async () => {
-    // A long Bash command (apt-get install, a build) must not trip the model
+    // A long Shell command (apt-get install, a build) must not trip the model
     // stream idle timeout: the model is between steps while the tool runs.
     const backend = createBackend({
       header: header('read-only'),
@@ -12126,7 +12126,7 @@ describe('AiSdkBackend tool execution', () => {
     };
     let release!: () => void;
     const tool: MakaTool = {
-      name: 'Bash',
+      name: 'Shell',
       description: 'run a shell command',
       parameters: {},
       impl: async () =>
@@ -12391,14 +12391,14 @@ describe('AiSdkBackend tool-call repair', () => {
     const repaired = repairMakaToolCall({
       toolCall: {
         toolCallId: 'tool-1',
-        toolName: 'bash',
+        toolName: 'shell',
         input: '{"command":"pwd"}',
       },
-      availableToolNames: ['Bash', 'Read'],
+      availableToolNames: ['Shell', 'Read'],
       error: new Error('No such tool'),
     });
 
-    assert.equal(repaired?.toolName, 'Bash');
+    assert.equal(repaired?.toolName, 'Shell');
     assert.equal(repaired?.input, '{"command":"pwd"}');
   });
 
@@ -12409,7 +12409,7 @@ describe('AiSdkBackend tool-call repair', () => {
         toolName: 'DeleteEverything',
         input: '{"path":"/"}',
       },
-      availableToolNames: ['Bash', 'Read'],
+      availableToolNames: ['Shell', 'Read'],
       error: new Error('No such tool: Authorization: Bearer sk-live-secret-token-value'),
     });
 
@@ -12427,7 +12427,7 @@ describe('AiSdkBackend tool-call repair', () => {
         toolName: INVALID_TOOL_NAME,
         input: '{}',
       },
-      availableToolNames: ['Bash', 'Read'],
+      availableToolNames: ['Shell', 'Read'],
       error: new Error('Invalid tool failed'),
     });
 

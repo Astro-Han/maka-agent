@@ -97,15 +97,15 @@ notice — but we do not ship them as guarantees.
 The OS user account is Maka's outer trust envelope. Inside that envelope,
 Runtime Host also routes selected agent tool effects through OS-enforced child
 process sandboxes when the active session has a restricted managed
-`ExecutionBoundary`. On macOS and Linux, non-PTY Bash commands and the
+`ExecutionBoundary`. On macOS and Linux, non-PTY Shell commands and the
 filesystem worker run through Seatbelt and bubblewrap respectively. On
 Windows, the AppContainer boundary currently covers the purpose-built
-filesystem worker only; arbitrary-shell Bash is unavailable and fails closed
+filesystem worker only; arbitrary-shell Shell is unavailable and fails closed
 when the active profile requires a command sandbox.
 
 This is not universal tool containment. Bypass boundaries and unrestricted,
 disabled, or external profiles do not add a Maka-managed local sandbox;
-external environments may supply their own isolation. Managed PTY Bash is
+external environments may supply their own isolation. Managed PTY Shell is
 refused when the active profile requires sandboxing. Client-launched
 integrated terminals are host PTYs outside the managed agent execution
 boundary, and runtime or attachment resource reads do not execute through the
@@ -230,7 +230,7 @@ boundary in §2.3 was crossed. Examples:
   result envelopes, log lines).
 - A tool intended to be permission-gated bypasses the
   PermissionEngine.
-- A non-PTY Bash command or local-path filesystem operation under a
+- A non-PTY Shell command or local-path filesystem operation under a
   restricted managed boundary escapes its effective Seatbelt,
   bubblewrap, or supported AppContainer policy, or silently falls
   back to host execution when required enforcement is unavailable.

@@ -17,14 +17,14 @@
  * under the License.
  */
 
-// packages/runtime/src/bash-tail-buffer.ts
+// packages/runtime/src/shell-tail-buffer.ts
 //
 // Memory-bounded tail accumulator for streaming shell output. A runaway command
-// must not be able to grow the captured result without limit (the old Bash path
+// must not be able to grow the captured result without limit (the old Shell path
 // instead discarded ALL output past a hard cap), so we retain only the last
 // `cap` characters. Trimming avoids splitting a UTF-16 surrogate pair.
 
-export class BashTailBuffer {
+export class ShellTailBuffer {
   private chunks: string[] = [];
   private retained = 0;
 

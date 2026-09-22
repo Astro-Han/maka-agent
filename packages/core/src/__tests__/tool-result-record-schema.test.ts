@@ -67,7 +67,7 @@ describe('sandbox boundary failure tool result metadata', () => {
   test('preserves the machine-readable reason and exact required expansion', () => {
     const result = {
       kind: 'text',
-      text: 'Bash requires an approved session sandbox boundary expansion.',
+      text: 'Shell requires an approved session sandbox boundary expansion.',
       sandboxFailure: {
         reason: 'sandbox_boundary_required',
         requiredExpansion: { network: { enabled: true } },
@@ -159,17 +159,15 @@ describe('retired permission modes in stored subagent results', () => {
     artifactIds: [],
   } as const;
 
-  test('folds a legacy mode to its live equivalent instead of returning it verbatim', () => {
-    const decoded = decodePersistedToolResultContent(markPersisted<ToolResultContent>(stored));
-    assert.equal(decoded.kind === 'subagent' ? decoded.sandboxMode : undefined, 'workspace-write');
-    assert.deepEqual(decoded, { ...stored, sandboxMode: 'workspace-write' });
-  });
-
-  test('folds through the stored-message decoder as well', () => {
-    assert.deepEqual(toolResultContent(decodePersistedMessage(storedToolResult(stored))), {
-      ...stored,
-      sandboxMode: 'workspace-write',
-    });
+  test('rejects retired modes at persisted result and message boundaries', () => {
+    assert.throws(
+      () => decodePersistedToolResultContent(markPersisted<ToolResultContent>(stored)),
+      /Invalid tool result content/,
+    );
+    assert.throws(
+      () => decodePersistedMessage(storedToolResult(stored)),
+      /Invalid tool result content/,
+    );
   });
 
   test('rejects retired values at canonical tool-result and message boundaries', () => {

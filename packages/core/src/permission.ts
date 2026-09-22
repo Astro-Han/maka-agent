@@ -48,8 +48,8 @@ export type ToolCategory =
   | 'web_read' //          WebFetch, WebSearch (GET-class)
   | 'file_write' //        Write, Edit, patch (create / append / overwrite)
   | 'fs_destructive' //    rm, rmdir, dd, truncate, shred, mkfs, find -delete, ...
-  | 'shell_safe' //        reserved: categorizeBash no longer produces it (no shell is auto-safe); fail-closed in policy
-  | 'shell_unsafe' //      default Bash bucket
+  | 'shell_safe' //        reserved: categorizeShell no longer produces it (no shell is auto-safe); fail-closed in policy
+  | 'shell_unsafe' //      default Shell bucket
   | 'git_destructive' //   git reset --hard, push --force, branch -D, ...
   | 'network_send' //      POST / PUT / DELETE
   | 'privileged' //        sudo, chmod, chown, kill, systemctl
@@ -118,8 +118,8 @@ export const BUILTIN_TOOL_CATEGORY: Record<string, ToolCategory> = {
   Edit: 'file_write',
   apply_patch: 'file_write',
   patch: 'file_write',
-  // shell — default unsafe; categorizeBash() may downgrade or upgrade
-  Bash: 'shell_unsafe',
+  // shell — default unsafe; categorizeShell() may downgrade or upgrade
+  Shell: 'shell_unsafe',
   WriteStdin: 'shell_unsafe',
 };
 
@@ -134,7 +134,7 @@ export const BUILTIN_TOOL_CATEGORY: Record<string, ToolCategory> = {
 // like `git status` can trigger fsmonitor helpers. Eight review rounds of
 // enumerating dangerous shapes proved the futility of the inverse (deciding a
 // Turing-complete shell's runtime effect from a static string is undecidable).
-// So categorizeBash never returns shell_safe; read-only needs go through typed
+// So categorizeShell never returns shell_safe; read-only needs go through typed
 // tools (Read/Glob/Grep — fixed argv, no shell), and every shell command is at
 // least shell_unsafe → prompt. The categories below only make the confirmation
 // REASON accurate (delete vs elevate vs generic); they are no longer the safety
@@ -195,7 +195,7 @@ export const FS_DESTRUCTIVE_PATTERNS: readonly RegExp[] = [
   /^find\s+.*\s-exec\s+.*\b(rm|shred|truncate|dd)\b/,
   /^xargs\s+.*\b(rm|shred|truncate|dd)\b/,
   // PowerShell / cmd.exe deletes plus the POSIX rm family. On Windows the
-  // Bash tool runs PowerShell and steers the model toward its syntax
+  // Shell tool runs PowerShell and steers the model toward its syntax
   // (shell-detect.ts), so these land in fs_destructive to make the confirmation
   // REASON accurate (delete, not generic) — not to gate allow-vs-prompt, which
   // is already closed: shell_unsafe prompts too, so a miss only mislabels the
@@ -343,7 +343,7 @@ function isPrivilegedSegment(segment: string): boolean {
  * shell_unsafe already prompts, a missed variant only mislabels the reason; it
  * never changes allow-vs-prompt.
  */
-export function categorizeBash(cmd: string): ToolCategory {
+export function categorizeShell(cmd: string): ToolCategory {
   const t = cmd.trim();
   // Backtick is BOTH a split boundary (bash command substitution — `rm x` runs
   // even inside double quotes, so it must stay a boundary) AND PowerShell's
@@ -371,7 +371,7 @@ export function classifyToolUse(input: {
     input.categoryHint ?? BUILTIN_TOOL_CATEGORY[input.toolName] ?? 'custom_tool';
   if (category === 'shell_unsafe') {
     const cmd = (input.args as { command?: unknown } | null)?.command;
-    if (typeof cmd === 'string') category = categorizeBash(cmd);
+    if (typeof cmd === 'string') category = categorizeShell(cmd);
   }
   return category;
 }
@@ -455,7 +455,7 @@ export interface SandboxEscalationRequest {
   kind: 'sandbox_escalation';
   requestId: string;
   toolUseId: string;
-  toolName: 'Bash';
+  toolName: 'Shell';
   category: ToolCategory;
   reason: 'sandbox_escalation';
   command: string;

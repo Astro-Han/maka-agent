@@ -54,12 +54,12 @@ describe('tool args redaction', () => {
       command: `curl -H "Authorization: Bearer ${bearerToken}" https://example.test`,
       password: passwordValue,
     };
-    const line = formatToolInvocationLine({ toolName: 'Bash', args }, 'en');
+    const line = formatToolInvocationLine({ toolName: 'Shell', args }, 'en');
     assert.ok(line !== undefined);
     assert.doesNotMatch(line, new RegExp(bearerToken));
     assert.match(line, /redacted/i);
 
-    const preview = projectToolArgsPreview('Bash', args);
+    const preview = projectToolArgsPreview('Shell', args);
     const serialized = JSON.stringify(preview ?? null);
     assert.doesNotMatch(serialized, new RegExp(bearerToken));
     assert.doesNotMatch(serialized, new RegExp(passwordValue));

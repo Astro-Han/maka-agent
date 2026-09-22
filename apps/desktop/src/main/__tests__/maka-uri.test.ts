@@ -67,7 +67,7 @@ describe('Maka URI safety boundary', () => {
       'maka://compose?text=',
       'maka://compose?other=value',
       'maka://compose/run?text=hi',
-      'maka://tool/Bash?cmd=ls',
+      'maka://tool/Shell?cmd=ls',
       'maka:///account',
       'maka://user@settings/account',
       'maka://settings:9999/account',

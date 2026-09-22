@@ -33,7 +33,7 @@ import {
   type ShellRunUpdate,
 } from '@maka/core/events';
 import type {
-  ShellRunBashInput,
+  ShellRunInput,
   ShellRunPtySnapshot,
   ShellRunWriteInput,
 } from '@maka/runtime/shell-run-contract';
@@ -464,7 +464,7 @@ describe('Host Runtime Resource coordinator', () => {
   });
 
   test('stops a launched one-shot command when the start reply cannot be honored', async () => {
-    // The command is live once runBackgroundBash returns; if the launch result
+    // The command is live once runBackgroundShell returns; if the launch result
     // cannot be encoded for the reply, the operation must report failure AND
     // stop the process, so a client retry cannot double-execute (#3210 review).
     const harness = createHarness();
@@ -482,7 +482,7 @@ describe('Host Runtime Resource coordinator', () => {
   });
 
   test('bounds the start reply when a one-shot command finishes inside the launch', async () => {
-    // A one-shot that reaches terminal status inside runBackgroundBash comes
+    // A one-shot that reaches terminal status inside runBackgroundShell comes
     // back as a full pipes snapshot; the reply must still fit the wire limit.
     const harness = createHarness();
     const terminalResult: ShellRunSnapshotResult = {
@@ -563,7 +563,7 @@ describe('Host Runtime Resource coordinator', () => {
   });
 
   test('keeps the caller-supplied turn plan authoritative over the settings snapshot', async () => {
-    // The turn's Bash tool carries the plan resolved at turn admission. A
+    // The turn's Shell tool carries the plan resolved at turn admission. A
     // mid-turn settings change must not split model guidance from execution,
     // so the coordinator never overwrites a supplied plan — it does not even
     // consult the settings snapshot when one is present.
@@ -580,11 +580,11 @@ describe('Host Runtime Resource coordinator', () => {
       },
     });
 
-    await harness.coordinator.runForegroundBash({ ...backgroundInput(), shell: callerPlan });
+    await harness.coordinator.runForegroundShell({ ...backgroundInput(), shell: callerPlan });
     assert.deepEqual(harness.lastForegroundInput?.shell, callerPlan);
     assert.equal(resolveCalls, 0);
 
-    await harness.coordinator.runBackgroundBash({ ...backgroundInput(), shell: callerPlan });
+    await harness.coordinator.runBackgroundShell({ ...backgroundInput(), shell: callerPlan });
     assert.deepEqual(harness.lastBackgroundInput?.shell, callerPlan);
     assert.equal(resolveCalls, 0);
     harness.finishBackground({ successful: true });
@@ -597,7 +597,7 @@ describe('Host Runtime Resource coordinator', () => {
       exe: 'C:\\\\Program Files\\\\Git\\\\bin\\\\bash.exe',
     };
     const harness = createHarness({ resolveShell: async () => shell });
-    await harness.coordinator.runForegroundBash(backgroundInput());
+    await harness.coordinator.runForegroundShell(backgroundInput());
 
     assert.deepEqual(harness.lastForegroundInput?.shell, shell);
   });
@@ -619,7 +619,7 @@ describe('Host Runtime Resource coordinator', () => {
       },
     });
 
-    const foreground = harness.coordinator.runForegroundBash(backgroundInput());
+    const foreground = harness.coordinator.runForegroundShell(backgroundInput());
     await resolving;
     harness.coordinator.beginDrain();
     releaseResolution();
@@ -738,7 +738,7 @@ describe('Host Runtime Resource coordinator', () => {
     const harness = createHarness();
     assert.equal(await harness.coordinator.hasLiveSessionResources(SESSION_ID), true);
     let callerCompletion = 0;
-    const result = await harness.coordinator.runBackgroundBash(
+    const result = await harness.coordinator.runBackgroundShell(
       backgroundInput(() => {
         callerCompletion += 1;
       }),
@@ -763,7 +763,7 @@ describe('Host Runtime Resource coordinator', () => {
     harness.coordinator.beginDrain();
     assert.equal(harness.terminateCount, 1);
     await assert.rejects(
-      () => harness.coordinator.runBackgroundBash(backgroundInput()),
+      () => harness.coordinator.runBackgroundShell(backgroundInput()),
       /Runtime resources are draining/,
     );
     await harness.coordinator.close();
@@ -785,7 +785,7 @@ describe('Host Runtime Resource coordinator', () => {
       return completion;
     };
 
-    const foreground = harness.coordinator.runForegroundBash(backgroundInput());
+    const foreground = harness.coordinator.runForegroundShell(backgroundInput());
     await started;
     assert.equal(harness.activeResidencies, 1);
 
@@ -856,7 +856,7 @@ test('rejects a queued resource start when drain detaches from the active Sessio
     harness.sessionAdmission.detach(() => harness.coordinator.beginDrain());
   });
   await started;
-  const resource = harness.coordinator.runBackgroundBash(backgroundInput());
+  const resource = harness.coordinator.runBackgroundShell(backgroundInput());
   const observed = assert.rejects(resource, /Runtime resources are draining/);
   release();
   await Promise.all([active, observed]);
@@ -873,7 +873,7 @@ function createHarness(
     >
   > = {},
 ) {
-  let backgroundCompletion: ShellRunBashInput['onCompletion'];
+  let backgroundCompletion: ShellRunInput['onCompletion'];
   let currentSnapshot = ptySnapshot();
   const state = {
     updates: [resourceUpdate(0)],
@@ -891,24 +891,24 @@ function createHarness(
     stateReadFailure: undefined as Error | undefined,
     malformedStartResult: false as boolean,
     backgroundResult: undefined as
-      | Awaited<ReturnType<HostRuntimeResourceCoordinatorInput['manager']['runBackgroundBash']>>
+      | Awaited<ReturnType<HostRuntimeResourceCoordinatorInput['manager']['runBackgroundShell']>>
       | undefined,
     livePty: undefined as ShellRunPtySnapshot | null | undefined,
     inspectCalls: [] as { sessionId: string; ref: string }[],
     inspectFailure: undefined as Error | undefined,
     activeResidencies: 0,
-    lastBackgroundInput: undefined as ShellRunBashInput | undefined,
-    lastForegroundInput: undefined as ShellRunBashInput | undefined,
+    lastBackgroundInput: undefined as ShellRunInput | undefined,
+    lastForegroundInput: undefined as ShellRunInput | undefined,
     foregroundRun: undefined as
-      | HostRuntimeResourceCoordinatorInput['manager']['runForegroundBash']
+      | HostRuntimeResourceCoordinatorInput['manager']['runForegroundShell']
       | undefined,
   };
   const manager: HostRuntimeResourceCoordinatorInput['manager'] = {
-    runForegroundBash: (input) => {
+    runForegroundShell: (input) => {
       state.lastForegroundInput = input;
       return state.foregroundRun?.(input) ?? Promise.resolve(foregroundResult());
     },
-    runBackgroundBash: async (input) => {
+    runBackgroundShell: async (input) => {
       state.lastBackgroundInput = input;
       backgroundCompletion = input.onCompletion;
       if (input.pty) {
@@ -1072,7 +1072,7 @@ function guestConnection(principal: string): ConnectionContext {
   };
 }
 
-function backgroundInput(onCompletion?: ShellRunBashInput['onCompletion']): ShellRunBashInput {
+function backgroundInput(onCompletion?: ShellRunInput['onCompletion']): ShellRunInput {
   return {
     sessionId: SESSION_ID,
     sourceTurnId: 'turn-1',

@@ -1233,7 +1233,7 @@ describe('SessionManager graph operator provisioning', () => {
       'Glob',
       'Grep',
       'apply_patch',
-      'Bash',
+      'Shell',
       'WriteStdin',
       'StopBackgroundTask',
     ]);

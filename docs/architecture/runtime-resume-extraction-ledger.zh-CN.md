@@ -387,7 +387,7 @@ B3（typed retry/reattach branch）仍然 defer，不进入本 PR。
 
 - Write/Edit file checkpoint、observer、reconciler；
 - workspace checkpoint、Git tree/worktree、rebaseline；
-- Bash retry、ShellRun reattach 或 typed branch；
+- Shell retry、ShellRun reattach 或 typed branch；
 - clone conversation 时的 recovery ref 改写；
 - `ContinuationExecutionProfileV1`（model/prompt/tool schema/policy digest）；
 - runtime-host execution-store facade 的 SQLite authority/owner 接线；该项进入 PR D；

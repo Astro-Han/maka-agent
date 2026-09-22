@@ -39,9 +39,9 @@ describe('tool quiet preview', () => {
 });
 
 describe('formatToolInvocationLine', () => {
-  it('names a Bash call by its command', () => {
+  it('names a Shell call by its command', () => {
     const line = formatToolInvocationLine(
-      { toolName: 'Bash', args: { command: 'git status --porcelain' } },
+      { toolName: 'Shell', args: { command: 'git status --porcelain' } },
       'en',
     );
     assert.equal(line, 'git status --porcelain');
@@ -103,7 +103,7 @@ describe('projectToolArgsPreview', () => {
   });
 
   it('redacts secrets embedded in command strings', () => {
-    const preview = projectToolArgsPreview('Bash', {
+    const preview = projectToolArgsPreview('Shell', {
       command: 'curl -H "Authorization: Bearer super-secret-token-value" https://example.com',
     });
     const serialized = JSON.stringify(preview);
@@ -148,7 +148,7 @@ describe('projectToolArgsPreview', () => {
   });
 
   it('bounds long values and whole-preview size', () => {
-    const preview = projectToolArgsPreview('Bash', { command: 'x'.repeat(5000) });
+    const preview = projectToolArgsPreview('Shell', { command: 'x'.repeat(5000) });
     const command = (preview as { command: string }).command;
     assert.ok(command.length <= 240, `expected <=240 chars, got ${command.length}`);
     assert.ok(command.endsWith('…'));
@@ -187,8 +187,8 @@ describe('projectToolArgsPreview', () => {
   });
 
   it('returns undefined when nothing displayable exists', () => {
-    assert.equal(projectToolArgsPreview('Bash', {}), undefined);
-    assert.equal(projectToolArgsPreview('Bash', undefined), undefined);
-    assert.equal(projectToolArgsPreview('Bash', { content: 'not a headline field' }), undefined);
+    assert.equal(projectToolArgsPreview('Shell', {}), undefined);
+    assert.equal(projectToolArgsPreview('Shell', undefined), undefined);
+    assert.equal(projectToolArgsPreview('Shell', { content: 'not a headline field' }), undefined);
   });
 });

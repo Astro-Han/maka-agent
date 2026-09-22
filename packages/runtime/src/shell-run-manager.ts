@@ -36,8 +36,8 @@ import type { ToolResultContent } from '@maka/core/events';
 import { redactSecrets } from '@maka/core/redaction';
 
 import {
-  BASH_MAX_LIVE_EMIT_CHARS,
-  BASH_MAX_RETAINED_CHARS,
+  SHELL_MAX_LIVE_EMIT_CHARS,
+  SHELL_MAX_RETAINED_CHARS,
   LIVE_OUTPUT_SUPPRESSED_MARKER,
 } from './shell-exec.js';
 import {
@@ -57,13 +57,13 @@ import {
 } from './pty-screen-collector.js';
 import { loadPtyStack, type PtyStack } from './pty-stack.js';
 import {
-  DEFAULT_BASH_TIMEOUT_MS,
+  DEFAULT_SHELL_TIMEOUT_MS,
   DEFAULT_MAX_LIVE_PTY_RUNS,
   DEFAULT_MAX_LIVE_SHELL_RUNS,
   DEFAULT_PIPE_OUTPUT_DRAIN_MS,
   DEFAULT_SHELL_RUN_FLUSH_BYTES,
   DEFAULT_SHELL_RUN_FLUSH_INTERVAL_MS,
-  MAX_FOREGROUND_BASH_TIMEOUT_MS,
+  MAX_FOREGROUND_SHELL_TIMEOUT_MS,
   MAX_SHELL_RUN_TIMEOUT_MS,
   ShellRunPtyControlClosedError,
   parseShellRunResourceRef,
@@ -72,7 +72,7 @@ import {
   type BackgroundTaskStopper,
   type PtyControlWriter,
   type RuntimeResourceReader,
-  type ShellRunBashInput,
+  type ShellRunInput,
   type ShellRunPtyDataEvent,
   type ShellRunPtySnapshot,
   type ShellRunProcessManagerInput,
@@ -278,8 +278,8 @@ export class ShellRunProcessManager
     this.maxLivePtyRuns = input.maxLivePtyRuns ?? DEFAULT_MAX_LIVE_PTY_RUNS;
     this.flushIntervalMs = input.flushIntervalMs ?? DEFAULT_SHELL_RUN_FLUSH_INTERVAL_MS;
     this.flushBytes = input.flushBytes ?? DEFAULT_SHELL_RUN_FLUSH_BYTES;
-    this.maxRetainedChars = input.maxRetainedChars ?? BASH_MAX_RETAINED_CHARS;
-    this.maxLiveEmitChars = input.maxLiveEmitChars ?? BASH_MAX_LIVE_EMIT_CHARS;
+    this.maxRetainedChars = input.maxRetainedChars ?? SHELL_MAX_RETAINED_CHARS;
+    this.maxLiveEmitChars = input.maxLiveEmitChars ?? SHELL_MAX_LIVE_EMIT_CHARS;
     this.killGraceMs = input.killGraceMs ?? DEFAULT_PROCESS_TERMINATION_GRACE_MS;
     this.exitAcknowledgementMs =
       input.exitAcknowledgementMs ?? DEFAULT_PROCESS_TERMINATION_GRACE_MS;
@@ -298,7 +298,7 @@ export class ShellRunProcessManager
       });
   }
 
-  async runBackgroundBash(input: ShellRunBashInput): Promise<ShellRunToolResult> {
+  async runBackgroundShell(input: ShellRunInput): Promise<ShellRunToolResult> {
     const onCompletion = onceShellRunCompletion(input.onCompletion);
     const ownedInput = onCompletion ? { ...input, onCompletion } : input;
     try {
@@ -330,7 +330,7 @@ export class ShellRunProcessManager
     }
   }
 
-  async runForegroundBash(input: ShellRunBashInput): Promise<TerminalToolResult> {
+  async runForegroundShell(input: ShellRunInput): Promise<TerminalToolResult> {
     const onCompletion = onceShellRunCompletion(input.onCompletion);
     const ownedInput = onCompletion ? { ...input, onCompletion } : input;
     let live: LiveShellRun | undefined;
@@ -342,10 +342,10 @@ export class ShellRunProcessManager
       validateSourceToolCallId(input.sourceToolCallId);
       return await this.withPendingStartup(input.sessionId, async () => {
         if (input.pty)
-          throw new Error('Foreground Bash does not support PTY mode; set run_in_background=true');
+          throw new Error('Foreground Shell does not support PTY mode; set run_in_background=true');
         if (input.abortSignal?.aborted)
           throw abortError('Command aborted before shell process started');
-        const timeoutMs = normalizeForegroundTimeoutMs(input.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS);
+        const timeoutMs = normalizeForegroundTimeoutMs(input.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS);
         live = await this.start(ownedInput, 'pipes', timeoutMs, true, (admitted) => {
           live = admitted;
           if (input.abortSignal?.aborted) cancel();
@@ -699,7 +699,7 @@ export class ShellRunProcessManager
   }
 
   private async start(
-    input: ShellRunBashInput,
+    input: ShellRunInput,
     mode: ShellMode,
     timeoutMs: number | undefined,
     forwardLive: boolean,
@@ -708,7 +708,7 @@ export class ShellRunProcessManager
     const sessionEpoch = this.sessionTerminationEpoch(input.sessionId);
     this.assertStartAllowed(input.sessionId, sessionEpoch);
     if (mode === 'pty' && (input.argv || input.fdInputs)) {
-      throw new Error('PTY Bash does not support transformed argv or inherited fd inputs');
+      throw new Error('PTY Shell does not support transformed argv or inherited fd inputs');
     }
     const slotReservation = this.reserveSlot(mode);
     try {
@@ -749,7 +749,7 @@ export class ShellRunProcessManager
   }
 
   private async startPipe(
-    input: ShellRunBashInput,
+    input: ShellRunInput,
     shellRunId: string,
     timeoutMs: number | undefined,
     forwardLive: boolean,
@@ -828,7 +828,7 @@ export class ShellRunProcessManager
   }
 
   private async startPty(
-    input: ShellRunBashInput,
+    input: ShellRunInput,
     shellRunId: string,
     timeoutMs: number | undefined,
     stack: PtyStack,
@@ -930,7 +930,7 @@ export class ShellRunProcessManager
   }
 
   private createLiveBase(
-    input: ShellRunBashInput,
+    input: ShellRunInput,
     record: ShellRunRecord,
     mode: ShellMode,
     timeoutMs: number | undefined,
@@ -958,7 +958,7 @@ export class ShellRunProcessManager
   }
 
   private async createStartingRecord(
-    input: ShellRunBashInput,
+    input: ShellRunInput,
     shellRunId: string,
     timeoutMs: number | undefined,
     output: ShellOutput,
@@ -1956,8 +1956,8 @@ export class ShellRunProcessManager
 }
 
 function onceShellRunCompletion(
-  callback: ShellRunBashInput['onCompletion'],
-): ShellRunBashInput['onCompletion'] {
+  callback: ShellRunInput['onCompletion'],
+): ShellRunInput['onCompletion'] {
   if (!callback) return undefined;
   let completed = false;
   return (outcome) => {
@@ -1967,7 +1967,7 @@ function onceShellRunCompletion(
   };
 }
 
-function notifyFailedStartup(callback: ShellRunBashInput['onCompletion']): void {
+function notifyFailedStartup(callback: ShellRunInput['onCompletion']): void {
   try {
     callback?.({ successful: false });
   } catch {
@@ -2064,7 +2064,7 @@ async function racePromiseWithAbort<T>(
 function normalizeBackgroundTimeoutMs(value: number | undefined): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isInteger(value) || value <= 0 || value > MAX_SHELL_RUN_TIMEOUT_MS) {
-    throw new Error(`Background Bash timeout must be between 1 and ${MAX_SHELL_RUN_TIMEOUT_MS}ms`);
+    throw new Error(`Background Shell timeout must be between 1 and ${MAX_SHELL_RUN_TIMEOUT_MS}ms`);
   }
   return value;
 }
@@ -2095,14 +2095,14 @@ function validateSourceToolCallId(value: string): void {
 
 function requireProgram(argv: readonly string[]): string {
   const program = argv[0];
-  if (!program) throw new Error('Transformed Bash argv must include a program');
+  if (!program) throw new Error('Transformed Shell argv must include a program');
   return program;
 }
 
 function normalizeForegroundTimeoutMs(value: number): number {
-  if (!Number.isInteger(value) || value <= 0 || value > MAX_FOREGROUND_BASH_TIMEOUT_MS) {
+  if (!Number.isInteger(value) || value <= 0 || value > MAX_FOREGROUND_SHELL_TIMEOUT_MS) {
     throw new Error(
-      `Foreground Bash timeout must be between 1 and ${MAX_FOREGROUND_BASH_TIMEOUT_MS}ms`,
+      `Foreground Shell timeout must be between 1 and ${MAX_FOREGROUND_SHELL_TIMEOUT_MS}ms`,
     );
   }
   return value;

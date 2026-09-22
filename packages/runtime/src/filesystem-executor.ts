@@ -134,7 +134,7 @@ export interface BoundaryFilesystemExecutorInput {
  * The path scope a boundary authorises.
  *
  * `bypass` is the user asking for no restrictions, and it already means exactly
- * that for Bash, which runs untransformed on the host under the same boundary.
+ * that for Shell, which runs untransformed on the host under the same boundary.
  * Every other boundary — including a missing one, which is an embedder that
  * never opted in — stays workspace-scoped.
  */

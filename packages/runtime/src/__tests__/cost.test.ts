@@ -286,7 +286,7 @@ describe('recordToolInvocation', () => {
       },
       {
         toolCallId: 'call-1',
-        toolName: 'Bash',
+        toolName: 'Shell',
         durationMs: 5,
         status: 'success',
         resultSummary: { kind: 'shell', status: 'completed', itemCount: 1 },

@@ -1,10 +1,10 @@
 // packages/runtime/src/tool-output.ts
 //
-// Shared, model-facing truncation for tool output (Bash stdout/stderr today).
+// Shared, model-facing truncation for tool output (Shell stdout/stderr today).
 //
 // WHY: an unbounded tool result either floods the model's context (a chatty
 // command's full output) or, worse, gets discarded outright when a hard byte
-// cap is hit (the old Bash behavior threw away *all* output past 10MB, failing
+// cap is hit (the old Shell behavior threw away *all* output past 10MB, failing
 // otherwise-finished work). Both hurt completion reliability. This bounds what
 // the model sees to a line/byte budget, keeps the most useful slice, and tells
 // the model the output was cut and how to recover the rest.

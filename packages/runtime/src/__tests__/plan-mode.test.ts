@@ -127,7 +127,7 @@ describe('Plan Mode tool surface', () => {
       tools: [
         tool('Read', 'read'),
         tool('Write', 'file_write'),
-        tool('Bash', 'shell_unsafe'),
+        tool('Shell', 'shell_unsafe'),
         tool('Browser', 'browser'),
         tool('CustomTool'),
         tool('ScheduledTask'),
@@ -140,7 +140,7 @@ describe('Plan Mode tool surface', () => {
     });
     assert.deepEqual(
       selected.map((tool) => tool.name),
-      ['Read', 'Write', 'Bash', 'Browser', 'CustomTool', 'AskUserQuestion', 'SubmitPlan'],
+      ['Read', 'Write', 'Shell', 'Browser', 'CustomTool', 'AskUserQuestion', 'SubmitPlan'],
     );
 
     const prompt = renderPlanModePrompt({ fullAccess: true });

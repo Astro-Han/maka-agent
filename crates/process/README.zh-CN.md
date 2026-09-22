@@ -23,6 +23,12 @@
 
 Linux、macOS 和 Windows 的原生进程／PTY 传输、取消、沙箱启动接入和无界面终端状态。
 
+`Shell` 为命令执行和交互 PTY 一次性选定可执行程序。Unix 优先使用受支持且可执行的
+系统账户登录 shell，而非 `$SHELL`；macOS 按 zsh → bash → sh 回退，Linux 按
+bash → zsh → sh 回退。Windows 优先 PowerShell 7 → Windows PowerShell → cmd。
+模型提示与所选语法一致。命令默认加载登录配置，`login: false` 可跳过；
+配置加载仍受同一沙箱和超时约束。
+
 `terminal::Screen` 使用 `alacritty_terminal`，不启用其 PTY 事件循环或渲染器。
 解析器归现有 PTY worker 所有，不需要 JavaScript runtime、额外线程或跨 runtime 序列化。
 Host 保留执行准入、规范日志、背压和最终输出排空；Desktop 仍用 xterm 渲染。

@@ -59,11 +59,11 @@ test('hosted execution tool profiles are durable Session creation inputs', () =>
   );
 });
 
-test('the headless coding profile freezes prompt, tools, and memory and passes product Bash through', () => {
+test('the headless coding profile freezes prompt, tools, and memory and passes product Shell through', () => {
   const profile = hostedExecutionRunProfile('headless-coding-v1');
   assert.ok(profile);
   assert.deepEqual(profile.toolNames, [
-    'Bash',
+    'Shell',
     'StopBackgroundTask',
     'WriteStdin',
     'Read',
@@ -78,15 +78,15 @@ test('the headless coding profile freezes prompt, tools, and memory and passes p
     profile.systemPrompt,
     [
       'Complete the task by acting with the available tools, not by narrating.',
-      'Prefer Read, Glob, and Grep for inspection, Edit and Write for file changes, and Bash for shell commands and tests.',
+      'Prefer Read, Glob, and Grep for inspection, Edit and Write for file changes, and Shell for shell commands and tests.',
       'Verify the result when practical.',
       'Stop when the task is complete.',
     ].join('\n'),
   );
 
   const original: MakaTool = {
-    name: 'Bash',
-    description: 'Product Bash',
+    name: 'Shell',
+    description: 'Product Shell',
     parameters: z.object({
       command: z.string(),
       run_in_background: z.boolean().optional(),
@@ -98,7 +98,7 @@ test('the headless coding profile freezes prompt, tools, and memory and passes p
     [
       original,
       ...profile.toolNames
-        .filter((name) => name !== 'Bash')
+        .filter((name) => name !== 'Shell')
         .map(
           (name): MakaTool => ({
             name,
@@ -177,7 +177,7 @@ test('WorkHub v2 keeps its attachment and browser tool ceiling visible in direct
     },
   }).find(({ name }) => name === 'Read')!;
   const tools = [
-    makeTool('Bash'),
+    makeTool('Shell'),
     builtinRead,
     ...browserTools,
     control,
@@ -297,7 +297,7 @@ test('WorkHub v2 keeps its attachment and browser tool ceiling visible in direct
                 'mcp__desktop_browser__browser_extract'
               ].map(name =>
                 [name in tools, typeof tools[name]]),
-              forbidden: ['Bash', 'Write'].map(name =>
+              forbidden: ['Shell', 'Write'].map(name =>
                 [name in tools, typeof tools[name]]),
               result: await tools.mcp__desktop_browser__browser_navigate({ url: 'https://example.com/' })
             };`,
@@ -329,7 +329,7 @@ test('WorkHub v2 keeps its attachment and browser tool ceiling visible in direct
   }
   for (const name of projected.map((tool) => tool.name)) assert.ok(providerPrompt.includes(name));
   assert.doesNotMatch(providerCatalog, /mcp__desktop_browser__browser_navigate/u);
-  assert.doesNotMatch(providerCatalog, /Bash|Write/u);
+  assert.doesNotMatch(providerCatalog, /Shell|Write/u);
   assert.deepEqual(browserCalls, [{ url: 'https://example.com/' }]);
   const result = events.find(
     (event) => event.type === 'tool_result' && event.toolUseId === 'exec-1',

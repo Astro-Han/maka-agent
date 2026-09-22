@@ -23,7 +23,7 @@ import { hasExactShape, isRecord } from './record-schema.js';
 import { serializedByteLength } from './serialized-byte-length.js';
 
 export const DURABLE_TOOL_RESULT_PROJECTION_VERSION = 1 as const;
-// Storage capacity, not a provider context budget. Two executor-retained Bash
+// Storage capacity, not a provider context budget. Two executor-retained Shell
 // streams can require 12 MiB after JSON escaping; Read bounds their presentation.
 export const DURABLE_TOOL_RESULT_PROJECTION_MAX_BYTES = 16 * 1024 * 1024;
 export const DURABLE_TOOL_RESULT_PROJECTION_MAX_PARTS = 64;

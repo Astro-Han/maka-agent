@@ -61,7 +61,7 @@ describe('effective model history feeds budgeting and compaction', () => {
     const raw = toolResultEvent('evt-3', RAW_SECRET);
 
     // Same raw result, but only the un-projected legacy event is sized by it.
-    assert.equal(estimateRuntimeEventsTokens([projected], 1), 'Bash'.length + PROJECTED.length);
+    assert.equal(estimateRuntimeEventsTokens([projected], 1), 'Shell'.length + PROJECTED.length);
     assert.ok(estimateRuntimeEventsTokens([raw], 1) > RAW_SECRET.length);
   });
 
@@ -197,7 +197,7 @@ function toolCallEvent(id: string): RuntimeEvent {
     ...userEvent(id, ''),
     role: 'model',
     author: 'agent',
-    content: { kind: 'function_call', id: 'tool-call', name: 'Bash', args: {} },
+    content: { kind: 'function_call', id: 'tool-call', name: 'Shell', args: {} },
   };
 }
 
@@ -213,7 +213,7 @@ function toolResultEvent(
     content: {
       kind: 'function_response',
       id: 'tool-call',
-      name: 'Bash',
+      name: 'Shell',
       result,
       ...(modelProjection ? { modelProjection } : {}),
     },

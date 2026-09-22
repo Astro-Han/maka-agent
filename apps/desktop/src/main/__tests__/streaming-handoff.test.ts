@@ -245,7 +245,7 @@ describe('single live-turn handoff', () => {
         text: { text: '最终答案', truncated: false, complete: true },
         tools: [{
           toolUseId: 'tool-1',
-          toolName: 'Bash',
+          toolName: 'Shell',
           stepId: 'assistant-1',
           status: 'running',
           args: {},
@@ -258,7 +258,7 @@ describe('single live-turn handoff', () => {
     assert.equal((markup.match(/maka-processing-block/g) ?? []).length, 0);
     assert.ok(markup.indexOf('深度思考') >= 0);
     assert.ok(markup.indexOf('深度思考') < markup.indexOf('最终答案'));
-    assert.ok(markup.indexOf('最终答案') < markup.indexOf('Bash'));
+    assert.ok(markup.indexOf('最终答案') < markup.indexOf('Shell'));
     assert.equal((markup.match(/data-turn-id=/g) ?? []).length, 1);
   });
 
@@ -309,7 +309,7 @@ describe('single live-turn handoff', () => {
         steps: [{
           stepId: 'assistant-1',
           text: { text, truncated: false, complete: false },
-          tools: [{ toolUseId: 'tool-1', toolName: 'Bash', stepId: 'assistant-1', status: 'running', args: {} }],
+          tools: [{ toolUseId: 'tool-1', toolName: 'Shell', stepId: 'assistant-1', status: 'running', args: {} }],
         }],
       }],
       onNew() {},
@@ -351,7 +351,7 @@ describe('single live-turn handoff', () => {
     });
     emit({
       type: 'tool_start', id: 'e2', turnId: 'turn-1', stepId: 'assistant-1', ts: 2,
-      toolUseId: 'tool-1', toolName: 'Bash', args: {},
+      toolUseId: 'tool-1', toolName: 'Shell', args: {},
     });
     emit({
       type: 'text_complete', id: 'e3', turnId: 'turn-1', messageId: 'assistant-1', ts: 3, text: '答案',
@@ -457,7 +457,7 @@ describe('single live-turn handoff', () => {
 
     handlers.handleEvent('session-1', {
       type: 'tool_start', id: 'start', turnId: 'turn-1', toolUseId: 'tool-1',
-      toolName: 'Bash', args: {}, ts: 0,
+      toolName: 'Shell', args: {}, ts: 0,
     });
     publications = 0;
     for (let index = 0; index <= 200; index += 1) {
@@ -733,7 +733,7 @@ describe('single live-turn handoff', () => {
           stepId: 'step-1',
           tools: [{
             toolUseId: 'tool-1',
-            toolName: 'Bash',
+            toolName: 'Shell',
             status: 'running',
             args: {},
           }],
@@ -773,7 +773,7 @@ describe('single live-turn handoff', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(liveTurns.get()['session-1']?.[0]?.terminal, true);
     handlers.reconcilePersistedMessages('session-1', [
-      { type: 'tool_call', id: 'tool-1', turnId: 'turn-1', stepId: 'step-1', ts: 2, toolName: 'Bash', args: {} },
+      { type: 'tool_call', id: 'tool-1', turnId: 'turn-1', stepId: 'step-1', ts: 2, toolName: 'Shell', args: {} },
     ]);
     assert.equal(liveTurns.get()['session-1'], undefined);
   });
@@ -784,7 +784,7 @@ describe('single live-turn handoff', () => {
       steps: [{
         stepId: 'step-1',
         tools: [{
-          toolUseId: 'tool-1', toolName: 'Bash', status: 'running', args: {},
+          toolUseId: 'tool-1', toolName: 'Shell', status: 'running', args: {},
           outputChunks: [{
             seq: 0, stream: 'stdout', text: 'partial output', redacted: false, createdAt: 1,
           }],
@@ -838,11 +838,11 @@ describe('single live-turn handoff', () => {
     });
 
     handlers.reconcilePersistedMessages('session-1', [
-      { type: 'tool_call', id: 'tool-1', turnId: 'turn-1', stepId: 'step-1', ts: 3, toolName: 'Bash', args: {} },
+      { type: 'tool_call', id: 'tool-1', turnId: 'turn-1', stepId: 'step-1', ts: 3, toolName: 'Shell', args: {} },
     ]);
     assert.equal(liveTurns.get()['session-1']?.[0]?.steps[0]?.tools[0]?.outputChunks?.[0]?.text, 'partial output');
     handlers.reconcilePersistedMessages('session-1', [
-      { type: 'tool_call', id: 'tool-1', turnId: 'turn-1', stepId: 'step-1', ts: 3, toolName: 'Bash', args: {} },
+      { type: 'tool_call', id: 'tool-1', turnId: 'turn-1', stepId: 'step-1', ts: 3, toolName: 'Shell', args: {} },
       { type: 'tool_result', id: 'result-1', turnId: 'turn-1', ts: 4, toolUseId: 'tool-1', isError: true, content: { kind: 'text', text: 'partial output' } },
     ]);
     assert.equal(liveTurns.get()['session-1'], undefined);
@@ -855,14 +855,14 @@ describe('single live-turn handoff', () => {
         {
           stepId: 'step-1',
           tools: [{
-            toolUseId: 'old-tool', toolName: 'Bash', status: 'completed', args: {},
+            toolUseId: 'old-tool', toolName: 'Shell', status: 'completed', args: {},
             outputChunks: [{ seq: 0, stream: 'stdout', text: 'old\n', redacted: false, createdAt: 1 }],
           }],
           contentOrder: ['tools'],
         },
         {
           stepId: 'step-2',
-          tools: [{ toolUseId: 'new-tool', toolName: 'Bash', status: 'running', args: {} }],
+          tools: [{ toolUseId: 'new-tool', toolName: 'Shell', status: 'running', args: {} }],
           contentOrder: ['tools'],
         },
       ],
@@ -886,7 +886,7 @@ describe('single live-turn handoff', () => {
     });
 
     handlers.reconcilePersistedMessages('session-1', [
-      { type: 'tool_call', id: 'old-tool', turnId: 'turn-1', stepId: 'step-1', ts: 1, toolName: 'Bash', args: {} },
+      { type: 'tool_call', id: 'old-tool', turnId: 'turn-1', stepId: 'step-1', ts: 1, toolName: 'Shell', args: {} },
       { type: 'tool_result', id: 'old-result', turnId: 'turn-1', ts: 2, toolUseId: 'old-tool', isError: false, content: { kind: 'text', text: 'old\n' } },
     ]);
 
@@ -899,7 +899,7 @@ describe('single live-turn handoff', () => {
         turnId: 'turn-1',
         steps: [{
           stepId: 'tool:tool-1',
-          tools: [{ toolUseId: 'tool-1', toolName: 'Bash', status: 'completed', args: {} }],
+          tools: [{ toolUseId: 'tool-1', toolName: 'Shell', status: 'completed', args: {} }],
         }],
       }],
     });
@@ -932,7 +932,7 @@ describe('single live-turn handoff', () => {
     resolveRefresh(true);
     await new Promise<void>((resolve) => setImmediate(resolve));
     handlers.reconcilePersistedMessages('session-1', [
-      { type: 'tool_call', id: 'tool-1', turnId: 'turn-1', stepId: 'tool:tool-1', ts: 2, toolName: 'Bash', args: {} },
+      { type: 'tool_call', id: 'tool-1', turnId: 'turn-1', stepId: 'tool:tool-1', ts: 2, toolName: 'Shell', args: {} },
       { type: 'tool_result', id: 'result-1', turnId: 'turn-1', ts: 3, toolUseId: 'tool-1', isError: false, content: { kind: 'text', text: 'ok' } },
     ]);
     assert.equal(liveTurns.get()['session-1'], undefined);

@@ -205,7 +205,7 @@ export const IMPLEMENTATION_AGENT_DEFINITION: AgentDefinition = {
     'Write',
     'Edit',
     'apply_patch',
-    'Bash',
+    'Shell',
     'WriteStdin',
     'StopBackgroundTask',
   ],

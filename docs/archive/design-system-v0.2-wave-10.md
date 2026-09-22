@@ -948,7 +948,7 @@ export interface ArtifactRecord {
   sizeBytes: number;
   /** Optional mime-type hint (e.g. 'text/html', 'application/pdf'); falls back to inference. */
   mimeType?: string;
-  /** Optional generalized source description (e.g. "Bash tool output", "Edit diff"). */
+  /** Optional generalized source description (e.g. "Shell tool output", "Edit diff"). */
   source?: string;
   /**
    * State machine. Defaults to `'live'`; `'deleted'` is a tombstone (soft-delete)
@@ -1148,11 +1148,11 @@ attribute + 内容传递方式）：
 | **PR108c** | tool runtime 钩子；node:test gate | @xuan |
 
 **PR108c 范围澄清**（@kenji review #5 — 2026-05-22）：第一版**不做 LLM
-extractor**。runtime hook 只在 `Write` / `Edit` / `Bash` 工具明确产出**确定性
+extractor**。runtime hook 只在 `Write` / `Edit` / `Shell` 工具明确产出**确定性
 artifact** 时记录：
 - `Write` → 1 个 `kind: 'file'` record（path 已知）
 - `Edit` → 1 个 `kind: 'diff'` record（patch 已知）
-- `Bash` → 仅当命令显式 redirect 到文件（`>` / `>>`）时生成 `kind: 'file'` record；
+- `Shell` → 仅当命令显式 redirect 到文件（`>` / `>>`）时生成 `kind: 'file'` record；
   stdout/stderr 不自动 promote 成 artifact（避免噪声）
 
 未来 LLM extractor（从 assistant message 提取 ` ```html ` block 当 artifact）

@@ -65,7 +65,7 @@ async fn terminal_shape_nonzero_and_unicode_tail() {
         "output":{"mode":"pipes","stdout":"hello","stderr":"error","stdoutTruncated":false,
         "stderrTruncated":false,"redacted":false}})
     );
-    let result = invoke(&cwd, json!({"command":"i=0; while [ $i -lt 24000 ]; do printf '界'; i=$((i+1)); done; printf 尾"}), CancellationToken::new()).await.unwrap();
+    let result = invoke(&cwd, json!({"command":"i=0; while [ $i -lt 24000 ]; do printf '界'; i=$((i+1)); done; printf 尾", "login":false}), CancellationToken::new()).await.unwrap();
     let text = result["output"]["stdout"].as_str().unwrap();
     assert!(text.len() <= 65536 && text.ends_with('尾') && !text.contains('�'));
     assert_eq!(result["status"], "completed");

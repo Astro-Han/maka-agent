@@ -47,7 +47,7 @@ const toolPermission: PermissionRequest = {
   kind: 'tool_permission',
   requestId: 'request-1',
   toolUseId: 'tool-1',
-  toolName: 'Bash',
+  toolName: 'Shell',
   category: 'shell_unsafe',
   reason: 'shell_dangerous',
   args: {
@@ -100,7 +100,7 @@ describe('Interaction projection', () => {
       toolUseId: 'tool-1',
       prompt: {
         kind: 'tool_permission',
-        toolName: 'Bash',
+        toolName: 'Shell',
         category: 'shell_unsafe',
         reason: 'shell_dangerous',
         review: { kind: 'command', command: 'echo hello', cwd: '/repo' },
@@ -134,33 +134,33 @@ describe('Interaction projection', () => {
     });
   });
 
-  test('redacts standard secret access keys in Bash and generic reviews', () => {
+  test('redacts standard secret access keys in Shell and generic reviews', () => {
     const command =
       'aws configure set aws_secret_access_\\\nkey \\\nconfig-secret && aws s3 cp . s3://bucket --secret-access-\\\r\nkey flag-\\\nsecret && AWS_SECRET_ACCESS_\\\nKEY\\\n=environment-secret curl -H "awsSecretAccessKey=aws-secret" -H "secretAccessKey=standard-secret" -H "accessKey=ordinary-access-key" example.test && tool --secret-access-key-\\\nfile visible-file';
-    const bashRequest = {
+    const shellRequest = {
       ...toolPermission,
       args: { command },
     };
-    const bash = projectInteractionPermissionRequest(bashRequest);
-    assert.equal(bash.prompt.kind, 'tool_permission');
-    assert.equal(bash.prompt.review.kind, 'command');
-    if (bash.prompt.review.kind !== 'command') return;
+    const shell = projectInteractionPermissionRequest(shellRequest);
+    assert.equal(shell.prompt.kind, 'tool_permission');
+    assert.equal(shell.prompt.review.kind, 'command');
+    if (shell.prompt.review.kind !== 'command') return;
     assert.doesNotMatch(
-      bash.prompt.review.command,
+      shell.prompt.review.command,
       /config-secret|flag-secret|aws-secret|standard-secret|environment-secret/,
     );
     assert.match(
-      bash.prompt.review.command,
+      shell.prompt.review.command,
       /aws configure set aws_secret_access_\\\\u\{A\}key \\\\u\{A\}\[redacted\]/,
     );
-    assert.match(bash.prompt.review.command, /--secret-access-\\\\u\{D\}\\u\{A\}key \[redacted\]/);
+    assert.match(shell.prompt.review.command, /--secret-access-\\\\u\{D\}\\u\{A\}key \[redacted\]/);
     assert.match(
-      bash.prompt.review.command,
+      shell.prompt.review.command,
       /AWS_SECRET_ACCESS_\\\\u\{A\}KEY\\\\u\{A\}=\[redacted\]/,
     );
-    assert.match(bash.prompt.review.command, /accessKey=ordinary-access-key/);
-    assert.match(bash.prompt.review.command, /visible-file/);
-    assert.deepEqual(bashRequest.args, { command });
+    assert.match(shell.prompt.review.command, /accessKey=ordinary-access-key/);
+    assert.match(shell.prompt.review.command, /visible-file/);
+    assert.deepEqual(shellRequest.args, { command });
 
     const generic = projectInteractionPermissionRequest({
       ...toolPermission,
@@ -240,7 +240,7 @@ describe('Interaction projection', () => {
           kind: 'sandbox_escalation',
           requestId: 'r3',
           toolUseId: 't3',
-          toolName: 'Bash',
+          toolName: 'Shell',
           category: 'privileged',
           reason: 'sandbox_escalation',
           command: 'sudo true\u0007 password=raw-value',
@@ -260,7 +260,7 @@ describe('Interaction projection', () => {
         },
         expectedPrompt: {
           kind: 'sandbox_escalation',
-          toolName: 'Bash',
+          toolName: 'Shell',
           category: 'privileged',
           reason: 'sandbox_escalation',
           review: {

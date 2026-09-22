@@ -26,7 +26,7 @@ import {
   type BackgroundTaskStopper,
   type PtyControlWriter,
   type RuntimeResourceReader,
-  type ShellRunBashInput,
+  type ShellRunInput,
   type ShellRunPtySnapshot,
   type ShellRunWriteInput,
   ShellRunPtyControlClosedError,
@@ -170,9 +170,9 @@ export class HostRuntimeResourceCoordinator
     this.#resolveShell = input.resolveShell ?? defaultShellPlan;
   }
 
-  async runForegroundBash(
-    input: ShellRunBashInput,
-  ): Promise<Awaited<ReturnType<ShellRunLauncher['runForegroundBash']>>> {
+  async runForegroundShell(
+    input: ShellRunInput,
+  ): Promise<Awaited<ReturnType<ShellRunLauncher['runForegroundShell']>>> {
     if (this.#draining) throw new Error('Runtime resources are draining');
     const residency = this.#acquireResidency();
     try {
@@ -182,7 +182,7 @@ export class HostRuntimeResourceCoordinator
         if (this.#draining) throw new Error('Runtime resources are draining');
         const shell = input.shell ?? (await this.#resolveShell());
         if (this.#draining) throw new Error('Runtime resources are draining');
-        return { execution: this.#manager.runForegroundBash({ ...input, shell }) };
+        return { execution: this.#manager.runForegroundShell({ ...input, shell }) };
       });
       return await execution;
     } finally {
@@ -190,9 +190,9 @@ export class HostRuntimeResourceCoordinator
     }
   }
 
-  async runBackgroundBash(
-    input: ShellRunBashInput,
-  ): Promise<Awaited<ReturnType<ShellRunLauncher['runBackgroundBash']>>> {
+  async runBackgroundShell(
+    input: ShellRunInput,
+  ): Promise<Awaited<ReturnType<ShellRunLauncher['runBackgroundShell']>>> {
     if (this.#draining) throw new Error('Runtime resources are draining');
     const residency = this.#acquireResidency();
     let completed = false;
@@ -212,7 +212,7 @@ export class HostRuntimeResourceCoordinator
         if (this.#draining) throw new Error('Runtime resources are draining');
         const shell = input.shell ?? (await this.#resolveShell());
         if (this.#draining) throw new Error('Runtime resources are draining');
-        return this.#manager.runBackgroundBash({ ...input, shell, onCompletion: complete });
+        return this.#manager.runBackgroundShell({ ...input, shell, onCompletion: complete });
       });
     } catch (error) {
       complete({ successful: false });
@@ -449,9 +449,9 @@ export class HostRuntimeResourceCoordinator
           completed = true;
           residency.release();
         };
-        let launched: Awaited<ReturnType<ShellRunLauncher['runBackgroundBash']>>;
+        let launched: Awaited<ReturnType<ShellRunLauncher['runBackgroundShell']>>;
         try {
-          launched = await this.#manager.runBackgroundBash({
+          launched = await this.#manager.runBackgroundShell({
             sessionId: input.sessionId,
             sourceTurnId: input.launchId,
             sourceToolCallId: input.launchId,

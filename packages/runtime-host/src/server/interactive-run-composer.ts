@@ -104,9 +104,9 @@ export interface InteractiveRunComposerInput {
   readonly skillBudget?: SkillCatalogBudgetOptions;
   /**
    * Turn-scoped shell resolution captured at backend admission. One plan
-   * drives guidance and every Bash execution for the turn; a broken saved
+   * drives guidance and every Shell execution for the turn; a broken saved
    * preference rides along as `setupError` so text-only turns still compose
-   * while the Bash/PTY boundary fails closed.
+   * while the Shell/PTY boundary fails closed.
    */
   readonly shell?: TurnShellPlan;
   readonly clientCapabilities?: Pick<ClientCapabilitySnapshot, 'tools' | 'groups'>;
@@ -394,7 +394,7 @@ export function createInteractiveRunComposerFactory(
   return async ({ backendContext, connection, modelId, runtimePolicy, contextWindow }) => {
     // Turn admission: resolve the Host-owned plan once per backend. The
     // captured setupError keeps a moved/uninstalled Git Bash scoped to the
-    // Bash/PTY boundary instead of failing text-only turns here.
+    // Shell/PTY boundary instead of failing text-only turns here.
     const shell =
       (backendContext.tools ? backendContext.turnShellPlan : undefined) ??
       (input.resolveTurnShellPlan ?? resolveTurnShellPlan)(runtimePolicy.policy.shell);
@@ -526,7 +526,7 @@ function buildDefaultHostTools(
   plan?: InteractiveRunComposerInput['plan'],
   deepResearchTools: readonly MakaTool[] = [],
 ): MakaTool[] {
-  // Full access has no boundary to widen, so neither the Bash declaration nor
+  // Full access has no boundary to widen, so neither the Shell declaration nor
   // the widening tool is offered. An unknown mode is not Full access.
   const fullAccess = plan?.sandboxMode === 'danger-full-access';
   const builtins = builtinOptions

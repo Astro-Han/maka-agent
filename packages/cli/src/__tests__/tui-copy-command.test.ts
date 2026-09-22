@@ -89,7 +89,7 @@ describe('serializeTranscriptText', () => {
     const state = stateWith([
       { kind: 'user', messageId: 'u1', text: 'do it' },
       { kind: 'assistant', messageId: 'a1', text: "I'll inspect it." },
-      { kind: 'tool', toolUseId: 't1', toolName: 'Bash', input: {}, resultVersion: 0 } as never,
+      { kind: 'tool', toolUseId: 't1', toolName: 'Shell', input: {}, resultVersion: 0 } as never,
       { kind: 'assistant', messageId: 'a2', text: '' },
       { kind: 'assistant', messageId: 'a3', text: 'Final answer.' },
     ]);

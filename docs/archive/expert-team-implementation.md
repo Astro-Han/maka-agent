@@ -181,7 +181,7 @@ execute: 若已在 team → 拒绝；createTeam → ctx.meta.isTeamLead=true →
 
 // TaskStop：取消 running/pending 的 AgentTask 或 background shell
 ```
-**Delegate Mode**（Shift+Tab）：把 lead 限制为协调工具 `Agent, TaskStop, SendMessage, AskUserQuestion, StructuredOutput`（无 Read/Edit/Bash）。**Plan-before-implement**：`Agent{mode:"plan"}` → 成员交计划 → lead `SendMessage{plan_approval_response, approve}`。
+**Delegate Mode**（Shift+Tab）：把 lead 限制为协调工具 `Agent, TaskStop, SendMessage, AskUserQuestion, StructuredOutput`（无 Read/Edit/Shell）。**Plan-before-implement**：`Agent{mode:"plan"}` → 成员交计划 → lead `SendMessage{plan_approval_response, approve}`。
 
 **Team 磁盘状态**：`~/.codebuddy/teams/{team}/config.json`、`inboxes/{member}.json`、`~/.codebuddy/tasks/{team}/`（任务 pending/in_progress/completed，支持依赖，完成自动解锁下游，成员自领）。清理 team 必须 lead 做。
 
@@ -293,7 +293,7 @@ guards: isValidPluginFolderName（无 ../\/前导.）; BLOCKED{员工管理,招�
 - **Hooks**：host 侧 `PreToolUse/PostToolUse/PostToolUseFailure/UserPromptSubmit/SessionStart/SessionEnd/Stop/SubagentStart/SubagentStop/PreCompact/PostCompact/...`；`SubagentStop` = subagent 上下文里 `Stop` 的 remap，payload `{hookEventName, clearContext?}`，支持 `once`。`listSubagents`/`getSubagentMessages` 从 `<sessionId>.jsonl` 重建嵌套 transcript。
 
 ### ai-slides 案例（工具作用域=委派边界）
-6 个 sub-agent（researcher/visual-researcher/designer/render-reviewer/narrative-reviewer/notes-writer）。**只有 `slides topic researcher` 持 `WebFetch/WebSearch/Bash/Write`** → Main agent 物理上拿不到 web 工具，reviewer 只读。并行=一条 msg 最多 10 个 `Agent`（每个一 slotId）；**磁盘 artifact + JSON 指针交接**（重字节不进 orchestrator 上下文）；revision-lock（`deckRevision`/`slotRevision` + `expected*Revision`）防并发覆盖；入口自校验（designer 收到 >1 slotId 就中止让重派）。
+6 个 sub-agent（researcher/visual-researcher/designer/render-reviewer/narrative-reviewer/notes-writer）。**只有 `slides topic researcher` 持 `WebFetch/WebSearch/Shell/Write`** → Main agent 物理上拿不到 web 工具，reviewer 只读。并行=一条 msg 最多 10 个 `Agent`（每个一 slotId）；**磁盘 artifact + JSON 指针交接**（重字节不进 orchestrator 上下文）；revision-lock（`deckRevision`/`slotRevision` + `expected*Revision`）防并发覆盖；入口自校验（designer 收到 >1 slotId 就中止让重派）。
 
 ## B5. Awareness / SOUL / Memory 三层人格
 - **文件**：`~/.qoderwork/awareness/<agent>/`；模板 `Resources/awareness-templates/`（含 `soul-presets/{decisive,thoughtful,efficient,supportive}.md`）。`BOOTSTRAP_FILES=[SOUL.md, AGENTS.md, HEARTBEAT.md]`，`MEMORY_MANAGED=[MEMORY.md, USER.md]`。字节预算 head/tail 截断。

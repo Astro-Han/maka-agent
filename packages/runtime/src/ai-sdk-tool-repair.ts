@@ -114,7 +114,7 @@ export function isProviderSandboxBoundaryAttempt(toolCall: {
 }): boolean {
   const toolName = toolCall.toolName.toLowerCase();
   if (toolName === REQUEST_SANDBOX_BOUNDARY_TOOL_NAME) return true;
-  if (toolName !== 'bash') return false;
+  if (toolName !== 'shell') return false;
   const parsed = parseToolCallInput(toolCall.input);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
   const boundaryIntent = (parsed as Record<string, unknown>).boundary_intent;

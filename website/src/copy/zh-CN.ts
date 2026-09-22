@@ -49,7 +49,7 @@ export const zhCN: Copy = {
   scene: {
     events: [
       { tone: 'mut', name: 'Text', label: '模型说', detail: '「我重新跑一下失败的测试。」' },
-      { tone: '', name: 'FunctionCall', label: '执行命令', detail: 'Bash · npm test' },
+      { tone: '', name: 'FunctionCall', label: '执行命令', detail: 'Shell · npm test' },
       { tone: 'warn', name: 'permissionRequest', label: '请求权限', detail: '超出沙箱' },
       { tone: 'ok', name: 'permissionDecision', label: '你批准了', detail: '已写进日志' },
       {
