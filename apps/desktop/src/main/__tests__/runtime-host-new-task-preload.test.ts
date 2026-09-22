@@ -59,6 +59,7 @@ async function loadBridge(changeDuringRead: 'guest' | 'owner') {
         assert.equal(scope.hostId, owner.hostId, 'Guest reconnects must not redirect Owner reads');
       }
       switch (channel) {
+        case 'app:bootstrapReady': return;
         case 'runtime-host:activeIdentity': return { ...owner };
         case 'runtime-host:identities': return [{ ...owner }, { ...guest }];
         case 'runtime-host-profiles:getSnapshot':

@@ -65,6 +65,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
       ipcRenderer: {
         on() {}, off() {}, send() {},
         async invoke(channel: string, ...args: unknown[]) {
+          if (channel === 'app:bootstrapReady') return;
           if (channel === 'runtime-host:activeIdentity') return owner;
           if (channel === 'runtime-host:identities') return [owner];
           assert.equal((args[0] as typeof owner).hostId, owner.hostId);
@@ -165,6 +166,7 @@ test('WorkHub loads earlier history through the preload with a fragmented answer
     off(channel: string) { listeners.delete(channel); },
     send() {},
     async invoke(channel: string, ...args: unknown[]): Promise<unknown> {
+      if (channel === 'app:bootstrapReady') return;
       if (channel === 'runtime-host:activeIdentity') return owner;
       if (channel === 'runtime-host:identities') return [owner];
       if (channel === 'session-local:transcript') return null;

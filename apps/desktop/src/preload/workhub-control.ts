@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { invokeWhenReady } from './bootstrap-invoke.js';
+
 import { ipcRenderer } from "electron";
 import type {
   WorkHubControlBridge,
@@ -24,7 +26,7 @@ import type {
 } from "../shared/workhub-control.js";
 
 const command = (name: string, payload?: unknown) =>
-  ipcRenderer.invoke("workhub-control:command", name, payload);
+  invokeWhenReady("workhub-control:command", name, payload);
 export const workHubControlBridge: WorkHubControlBridge = {
   getSnapshot: () => command("snapshot"),
   stop: () => command("stop"),

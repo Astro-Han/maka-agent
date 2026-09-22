@@ -259,6 +259,9 @@ import type { ShellRunPtyDataEvent, ShellRunPtySnapshot } from '@maka/runtime/sh
 import type { ConfigCategory } from '@maka/storage/config-transfer';
 import type { OnboardingMilestone, OnboardingMilestoneId, OnboardingState } from '@maka/core/onboarding';
 import type {
+  HostHandoffAction,
+  HostHandoffPresentation,
+  HostHandoffView,
   RemoteRuntimeHostProfile,
   RuntimeHostProfile,
   RuntimeHostProfileAccess,
@@ -791,7 +794,17 @@ export interface DesktopSessionUsageSummary extends UsageSummaryV2 {
   readonly provenance: UsageProvenance;
 }
 
+export interface DesktopHostHandoffPayload {
+  readonly view: HostHandoffView;
+  readonly presentation: HostHandoffPresentation;
+}
+
 export interface MakaBridge {
+  runtimeHostHandoff: {
+    current(): Promise<DesktopHostHandoffPayload | null>;
+    decide(revision: string, action: HostHandoffAction): Promise<void>;
+    subscribe(handler: (payload: DesktopHostHandoffPayload | null) => void): () => void;
+  };
   sessionLocal: import('../shared/session-local-contract.js').DesktopSessionLocalBridge;
   workHubControl: import('../shared/workhub-control.js').WorkHubControlBridge;
   workHubPresentation: import('../shared/workhub-presentation.js').WorkHubPresentationBridge;

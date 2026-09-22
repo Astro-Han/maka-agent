@@ -18,15 +18,8 @@
  */
 
 /**
- * PR-SHOW-AFTER-FIRST-COMMIT: shared reveal gate for the hidden main window.
- *
- * The BrowserWindow is created with `show: false` (main-window.ts) so the OS
- * never flashes the index.html `.maka-preload` skeleton before React paints.
- * Two callers reveal it: the `window:notifyRendererReady` IPC (fired from the
- * renderer's first React commit) and a fallback timer for a wedged renderer.
- * Both route through here so the show() decision lives in one place — and so
- * it stays unit-testable without an Electron runtime (main-window.ts itself
- * can't be imported under plain `node --test` because it pulls in `electron`).
+ * Shared reveal gate for first paint, renderer recovery and deferred focus.
+ * All paths honor the same visibility and foreground policy.
  */
 
 /**
@@ -91,8 +84,8 @@ export function showWindowOnceReady(win: RevealableWindow | null, mode: WindowRe
 
 /**
  * Reveal without activating, whatever the mode — for a window whose reveal is
- * deliberately quiet even in the product (WorkHub's progress card, the startup
- * progress window). `hidden` still shows nothing.
+ * deliberately quiet even in the product, such as WorkHub's progress card.
+ * `hidden` still shows nothing.
  */
 export function showWindowInactive(win: RevealableWindow | null, mode: WindowRevealMode): void {
   showWindowOnceReady(win, mode === 'hidden' ? 'hidden' : 'inactive');
@@ -137,11 +130,8 @@ export interface WindowRevealGate {
 
 /**
  * Readiness-aware wrapper around showWindowOnceReady. Focus requests that
- * arrive before the renderer's first commit (user re-launches or clicks the
- * dock icon while the window is still hidden) must NOT show() the window —
- * that would flash the `.maka-preload` skeleton the hidden creation exists to
- * suppress. They are remembered and flushed as show()+focus() when markReady
- * fires, so the user's foreground intent is honored, just not early.
+ * arrive before first paint are retained until markReady, so foreground
+ * intent cannot reveal an unpainted window.
  *
  * The same deferral applies to restoring a saved maximized state: Electron's
  * BrowserWindow.maximize() reveals a still-hidden window (verified on macOS),

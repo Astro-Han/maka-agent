@@ -43,7 +43,7 @@ type AppQuitPhase = 'running' | 'preparing' | 'cleaning' | 'ready-to-exit';
 
 export function createAppQuitCoordinator(deps: AppQuitCoordinatorDeps): AppQuitCoordinator {
   let phase: AppQuitPhase = 'running';
-  let windowCreationAbort = new AbortController();
+  const windowCreationAbort = new AbortController();
 
   const focusOrCreateWindow = (): Promise<void> => {
     if (phase !== 'running') return Promise.resolve();
@@ -64,7 +64,6 @@ export function createAppQuitCoordinator(deps: AppQuitCoordinatorDeps): AppQuitC
       event.preventDefault();
       if (phase !== 'running') return;
       phase = 'preparing';
-      windowCreationAbort.abort();
       const quitAbort = new AbortController();
       const budget = new NativeHostBudget(deps.timeoutMs ?? 8_000);
       const finishCleanup = () => {
@@ -91,11 +90,11 @@ export function createAppQuitCoordinator(deps: AppQuitCoordinatorDeps): AppQuitC
           (preparation) => {
             if (preparation === 'cancelled') {
               phase = 'running';
-              windowCreationAbort = new AbortController();
               focusOrCreateWindow();
               return;
             }
             phase = 'cleaning';
+            windowCreationAbort.abort();
             return Promise.resolve()
               .then(() => budget.wait(deps.cleanup(), 'quit cleanup'))
               .then(finishCleanup, (error) => {
@@ -105,7 +104,6 @@ export function createAppQuitCoordinator(deps: AppQuitCoordinatorDeps): AppQuitC
           },
           (error) => {
             phase = 'running';
-            windowCreationAbort = new AbortController();
             deps.onPreparationError(error);
             focusOrCreateWindow();
           },

@@ -104,6 +104,9 @@ Desktop SSH／WSL 引导在本机下载并验证 `nativeRuntimeHostVersion` 固�
 `MAKA_NATIVE_CLI_PACKAGES`（由 `host fetch` 填充的缓存目录），正式打包的 Desktop 忽略这些覆盖。
 已有配置的启动无需访问 npm。
 
+Desktop 在加载 Host 服务前绘制主窗口。IPC 注册等待和文档加载均有时限；Host 失败不影响草稿、管理和退出。
+需要用户决定的交接在主窗口内呈现，不额外创建启动窗口。
+
 Desktop 复用原生托管 Host，需要时激活固定版本；自身版本变化和退出不控制托管 Host 的寿命。
 暂停本地启动后，会等待已发出的激活收尾，再交接 Root。
 Desktop 可管理本机原生部署及已有的 SSH／WSL 原生 operator 配置。远程生命周期命令使用

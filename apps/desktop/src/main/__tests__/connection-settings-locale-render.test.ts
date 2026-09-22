@@ -472,6 +472,7 @@ function connectionDetailBridge(overrides: Partial<ConnectionsBridge>): Connecti
 
 function managementServices(): RuntimeHostManagementServices {
   return {
+    handoff: { current: unexpectedCall, subscribe: unexpectedCall, decide: unexpectedCall, copyText: unexpectedCall },
     supportsWsl: false,
     profilePairing: { retry: unexpectedCall, discard: unexpectedCall },
     connectionCodes: {

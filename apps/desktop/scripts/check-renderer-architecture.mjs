@@ -2627,8 +2627,21 @@ function validateMainRendererLoader(desktopRoot, violations) {
   );
   const [loaderFunction] = loaderFunctions;
   const [resolverFunction] = resolverFunctions;
-  const ifStatements = loaderFunction ? nodesIn(loaderFunction.body).filter((node) => node.type === 'IfStatement') : [];
-  const hasWorkHubSurface = loaderFunction?.params.length === 3;
+  const hasLoadBudget = loaderFunction?.params.length === 4;
+  const loadDeclaration = hasLoadBudget ? declarators('load')[0] : undefined;
+  const loadBody = hasLoadBudget ? loadDeclaration?.init?.body : loaderFunction?.body;
+  const validLoadBudget = !hasLoadBudget || (
+    declarators('load').length === 1 &&
+    loadDeclaration.init?.type === 'ArrowFunctionExpression' &&
+    loadDeclaration.init.async === true &&
+    loadDeclaration.init.params.length === 0 &&
+    loaderFunction.params[3].type === 'AssignmentPattern' &&
+    isIdentifier(loaderFunction.params[3].left, 'options') &&
+    !nodesIn(loaderFunction.body).some((node) =>
+      ['mainWindow', 'rendererEntry', 'surface', 'URL', 'load'].some((name) => mutatesIdentifier(node, name)))
+  );
+  const ifStatements = loadBody ? nodesIn(loadBody).filter((node) => node.type === 'IfStatement') : [];
+  const hasWorkHubSurface = loaderFunction?.params.length >= 3;
   const loadBranch = ifStatements[hasWorkHubSurface ? 1 : 0];
   const surfaceBranch = ifStatements[0];
   const surfaceStatements = surfaceBranch?.consequent?.body ?? [];
@@ -2691,10 +2704,11 @@ function validateMainRendererLoader(desktopRoot, violations) {
     isViteDevServerFlag(returnDevFlags[0]) &&
     loaderFunctions.length === 1 &&
     loaderFunction.async === true &&
-    JSON.stringify(loaderFunction.params.map((parameter) => parameter.type === 'Identifier' ? parameter.name : undefined)) ===
+    JSON.stringify(loaderFunction.params.slice(0, hasLoadBudget ? 3 : undefined).map((parameter) => parameter.type === 'Identifier' ? parameter.name : undefined)) ===
       JSON.stringify(hasWorkHubSurface ? ['mainWindow', 'rendererEntry', 'surface'] : ['mainWindow', 'rendererEntry']) &&
+    validLoadBudget &&
     validWorkHubSurface &&
-    loaderFunction.body.body.length === (hasWorkHubSurface ? 2 : 1) &&
+    loadBody?.body?.length === (hasWorkHubSurface ? 2 : 1) &&
     entryPaths.length === 1 &&
     isRendererEntryPathInitializer(entryPaths[0].init) &&
     entryUrls.length === 1 &&
@@ -2747,7 +2761,13 @@ function validateMainWindowEntryContract(desktopRoot, violations) {
     (node) =>
       node.type === 'CallExpression' &&
       isIdentifier(node.callee, 'loadMainRenderer') &&
-      node.arguments.length === 2 &&
+      (node.arguments.length === 2 || (
+        node.arguments.length === 4 &&
+        isIdentifier(node.arguments[2], 'undefined') &&
+        node.arguments[3].type === 'ObjectExpression' &&
+        node.arguments[3].properties.length === 1 &&
+        isIdentifier(objectPropertyValues(node.arguments[3], 'signal')[0], 'signal')
+      )) &&
       isIdentifier(node.arguments[0], 'mainWindow') &&
       isIdentifier(node.arguments[1], 'rendererEntry'),
   );
@@ -2769,8 +2789,6 @@ function validateMainWindowEntryContract(desktopRoot, violations) {
 
   const allowedNavigationFiles = new Set([
     'src/main/browser-message-box.ts',
-    // Self-contained, sandboxed startup status document without the app preload.
-    'src/main/startup-progress-window.ts',
     'src/main/browser/controller.ts',
     'src/main/computer-use/cursor-overlay-window.ts',
     'src/main/computer-use/pip-electron.ts',

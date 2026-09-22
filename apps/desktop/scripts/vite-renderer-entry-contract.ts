@@ -24,12 +24,15 @@ const SOURCE_FILE = /\.(?:(?:c|m)?(?:js|ts)x?)$/u;
 const ALLOWED_HTML_TAGS = new Set([
   'body',
   'div',
+  'g',
   'head',
   'html',
   'link',
   'meta',
+  'path',
   'script',
   'style',
+  'svg',
   'title',
 ]);
 const CONTENT_SECURITY_POLICY =

@@ -66,12 +66,6 @@ export function registerAppClientIpc(
   targetIpc: Pick<ReconnectableReadIpcMain, 'handle'> = ipcMain,
 ): void {
   const { mainWindowController, e2eFixture, updateService } = deps;
-  targetIpc.handle('window:quit', (event): void => {
-    if (!mainWindowController.isMainRenderer(event.sender) || event.senderFrame !== event.sender.mainFrame) {
-      throw new Error('Quitting requires the main renderer');
-    }
-    setImmediate(() => app.quit());
-  });
   targetIpc.handle('window:popupMenu', (event, input: unknown) => {
     if (!mainWindowController.isMainRenderer(event.sender) || event.senderFrame !== event.sender.mainFrame) {
       throw new Error('Native menus require the main renderer');
@@ -81,9 +75,6 @@ export function registerAppClientIpc(
   });
   targetIpc.handle('window:setTitlebarControlsVisible', (event, visible: unknown): void => {
     mainWindowController.setTitlebarControlsVisible(event.sender, visible);
-  });
-  targetIpc.handle('window:notifyRendererReady', (event): void => {
-    mainWindowController.notifyRendererReady(event.sender, event.senderFrame);
   });
   targetIpc.handle('window:setThemeSource', (event, themePref: unknown): void => {
     mainWindowController.setThemeSource(event.sender, themePref);

@@ -19,24 +19,9 @@
 
 import { resolveDesktopWslHostHandoff } from './runtime-host-wsl-handoff.js';
 import { pluginNotifications } from './plugin-notifications.js';
-import {
-  app,
-  type BrowserWindow,
-  clipboard,
-  ipcMain,
-  Menu,
-  nativeImage,
-  nativeTheme,
-  Notification,
-  powerMonitor,
-  powerSaveBlocker,
-  shell,
-  Tray,
-  type MessageBoxOptions,
-  type MessageBoxReturnValue,
-} from "electron";
+import { app, clipboard, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, powerSaveBlocker, shell, Tray } from "electron";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -46,7 +31,7 @@ import {
 import { type ConnectionEvent } from '@maka/core/connections';
 import { type SessionChangedEvent, type SessionChangedReason } from '@maka/core/session';
 import { isBotDeliveryProvider } from '@maka/core/bot-chat-settings';
-import { resolveSystemUiLocale } from '@maka/core/ui-locale';
+
 import {
   PROVIDER_REGISTRY,
   providerAuthRequiresSecret,
@@ -80,7 +65,7 @@ import { createWorkBoardStore } from "@maka/storage/work-board-store";
 import { normalizeWorkBoardLinkedSession } from "@maka/core/work-board";
 import { createFileCredentialStore } from "@maka/storage/credential-store";
 import { createMcpConfigStore } from "@maka/storage/mcp-config-store";
-import { createSettingsStore } from "@maka/storage/settings-store";
+
 import { resolveStorageRoot } from "@maka/storage/root-authority";
 
 import { createMcpOAuthController } from "./mcp-oauth-controller.js";
@@ -92,12 +77,8 @@ import { createWorkHubRuntime } from './workhub-runtime.js';
 import { createWindowsAppTray } from './windows-app-tray.js';
 import { readableAppIconPath } from './app-icon-surface.js';
 import { registerAppClientIpc, registerAppIpc } from "./app-ipc-main.js";
-import { createAppQuitCoordinator } from "./app-quit-coordinator.js";
-import {
-  desktopDiagnosticUpdateChannel,
-  desktopUpdateChannelFromManifest,
-  verifyDownloadedUpdateAttestation,
-} from "./app-update-attestation.js";
+
+import { desktopUpdateChannelFromManifest, verifyDownloadedUpdateAttestation } from "./app-update-attestation.js";
 import { createAppUpdateService } from "./app-update-service.js";
 import { createAttachmentApprovalRegistry } from "./attachment-approval.js";
 import { renderAttachmentPreview, resizeImageForAttachment } from "./attachment-resize-native.js";
@@ -108,53 +89,33 @@ import { DesktopSessionLocalService, desktopSessionLocalPartition, registerDeskt
 import { registerBrowserIpc } from "./browser-ipc-main.js";
 import { browserViewHost } from "./browser/browser-host.js";
 import { releaseBrowserSession } from "./browser/session.js";
-import {
-  isBrowserMessageBoxPresentationActive,
-  showBrowserMessageBox,
-  type BrowserMessageBoxTheme,
-} from "./browser-message-box.js";
+import { isBrowserMessageBoxPresentationActive } from "./browser-message-box.js";
 import { createE2eFixtureBotOnboardingAdapters } from "./bot-onboarding-e2e-fixture.js";
-import { resolveBuildInfo } from "./build-info.js";
+
 import { computerUseServiceHealth } from "./computer-use-host.js";
 import { registerDesktopDiagnosticsIpc } from "./desktop-diagnostics-ipc-main.js";
 import { assembleDesktopNativeCapabilities } from "./desktop-native-capability-assembly.js";
 import { clientSettingsConfirmation } from "./client-settings-confirmation-copy.js";
 import { nativeFileDialogCopy } from "./native-file-dialog-copy.js";
-import { createDesktopLocaleAuthority } from "./desktop-locale-authority.js";
+
 import { buildRiveWorkflowTool } from "./rive-workflow-tool.js";
 import { applyAppIcon } from "./app-icon-surface.js";
 import { registerAppIconIpc } from "./app-icon-ipc.js";
 import { listAppIconPreviews } from "./app-icon-surface.js";
 import { importCustomAppIcon } from "./custom-app-icons.js";
-import { installDesktopShellPresentation } from "./desktop-shell-presentation.js";
-import {
-  resolveE2eFixture,
-  seedE2eFixture,
-} from "./e2e-fixture.js";
+
 import { PARTIAL_HISTORY_TRANSCRIPT_BYTES } from "./e2e-fixture/seed-helpers.js";
 import { createKeepSystemAwakeController } from "./keep-system-awake.js";
-import { isDarkAppearance } from "./theme-source.js";
+
 import {
   readWithFallback,
   type ReconnectableReadIpcMain,
 } from "./ipc-reconnect-policy.js";
-import { createMainWindowController } from "./main-window.js";
+
 import type { DesktopRuntimeHostIdentity } from "../preload/bridge-contract.js";
-import {
-  captureDesktopDiagnosticEnvironment,
-  copyDesktopDiagnosticReport,
-  createDesktopMainRendererDiagnosticInput,
-  createDesktopStartupDiagnosticInput,
-  mainProcessLogBuffer,
-  runtimeHostProcessLogBuffer,
-  type DesktopDiagnosticsDeps,
-} from "./main-process-diagnostics.js";
-import {
-  defaultRuntimeHostRecoveryDialog,
-  showMainRendererProcessGoneDialog,
-  showMessageBoxWithDiagnostics,
-} from "./native-diagnostic-dialog.js";
-import { getNativeDiagnosticDialogCopy } from "./native-diagnostic-dialog-copy.js";
+
+import { defaultRuntimeHostRecoveryDialog } from "./native-diagnostic-dialog.js";
+
 import {
   resolveDesktopSessionWorkspace,
 } from "./new-session-project.js";
@@ -178,10 +139,7 @@ import { resolveProjectContextRoot } from "./project-context-root.js";
 import { createProjectManagementService } from "./project-management-service.js";
 import { projectPickerTitle } from "./project-picker-copy.js";
 import type { ProjectManagementService } from "./project-management-service.js";
-import {
-  createProjectRootController,
-  type ProjectRootController,
-} from "./project-root-controller.js";
+import { createProjectRootController } from "./project-root-controller.js";
 import { createSessionCopyCleanupAuthority } from "@maka/storage/session-copy-cleanup";
 import {
   projectHostConnections,
@@ -202,17 +160,12 @@ import type {
   DesktopRuntimeHostCandidateControls,
   DesktopRuntimeHostTargetPolicy,
 } from "./runtime-host-desktop-candidate.js";
-import {
-  RuntimeHostUpgradeCancelledError,
-  startRuntimeHostDesktopManager,
-  type RuntimeHostDesktopManager,
-  type RuntimeHostDesktopTargetState,
-} from "./runtime-host-desktop-manager.js";
+import { startRuntimeHostDesktopManager, type RuntimeHostDesktopManager, type RuntimeHostDesktopTargetState } from "./runtime-host-desktop-manager.js";
 import {
   buildRuntimeHostActiveQuitDialog,
 } from "./runtime-host-quit-copy.js";
 import { prepareRuntimeHostQuit } from "./runtime-host-quit.js";
-import { createDesktopHostHandoffSurface } from './startup-presentation.js';
+import { createDesktopHostHandoffSurface } from './runtime-host-handoff-surface.js';
 import { registerRuntimeHostMemoryIpc } from "./runtime-host-memory-ipc-main.js";
 import {
   createDesktopRuntimeHostProfileService,
@@ -270,7 +223,7 @@ import {
 } from "./runtime-host-settings-ipc-main.js";
 import { registerRuntimeHostUsageIpc } from "./runtime-host-usage-ipc-main.js";
 import { registerRuntimeHostWorkspaceIpc } from "./runtime-host-workspace-ipc-main.js";
-import { resolveShellEnv } from "./shell-env.js";
+
 import {
   registerSettingsBotsIpc,
   type SettingsBotsIpcHandle,
@@ -281,14 +234,7 @@ import {
   isIsolatedE2e,
   revealMode,
 } from "./startup-context.js";
-import { resolveDesktopStorageRoot } from "./storage-root-startup.js";
-import { startupStep } from "./startup-step.js";
-import {
-  closeDesktopStartupProgress,
-  desktopStartupProgressWindow,
-  isDesktopStartupInProgress,
-  updateDesktopStartupProgress,
-} from './startup-presentation.js';
+
 import { registerWorkspaceSearchIpc } from "./workspace-search-ipc-main.js";
 import {
   parseDesktopSessionResourceKey,
@@ -296,11 +242,17 @@ import {
   type DesktopTargetScope,
 } from "../shared/runtime-host-identity.js";
 
-await resolveShellEnv();
+import {
+  buildInfo, userDataDir, e2eFixture, workspaceRoot, fixtureStorageRoot,
+  settingsStore, desktopLocale, desktopDiagnostics, mainWindowController,
+  mainWindowDelegates, quitCoordinator, shellEnvReady, showDesktopMessageBox,
+  showStartupDiagnosticDialog,
+} from "./early-window.js";
+import { bootContext } from "./boot-context.js";
+
+await shellEnvReady;
 
 const MANAGED_UPDATE_RECONNECT_TIMEOUT_MS = 10_000;
-const buildInfo = resolveBuildInfo(app.isPackaged, app.getAppPath());
-const userDataDir = app.getPath("userData");
 const runtimeHostPeerConfiguration = await configureDesktopRuntimeHostPeerClient({
   isPackaged: app.isPackaged,
   enableDevelopmentPeer: process.argv.includes('--runtime-host-peer'),
@@ -374,100 +326,14 @@ function activeRuntimeHostRef(): DesktopTargetScope | undefined {
     : undefined;
 }
 const runtimeHostGeneration = app.isPackaged ? app.getVersion() : randomUUID();
-const e2eFixture = resolveDesktopE2eFixture();
 const useBotOnboardingFixture = e2eFixture?.scenario === "settings-bots-onboarding";
-const workspaceRoot = join(
-  userDataDir,
-  "workspaces",
-  e2eFixture?.workspaceName ?? "default",
-);
 // Runtime authority and Desktop-owned control tables must not migrate the old TS Host database.
 const localHostRoot = isE2e ? workspaceRoot : join(userDataDir, "runtime-host-rust");
 const desktopControlRoot = isE2e ? workspaceRoot : join(userDataDir, "desktop-state");
 const desktopDatabaseOptions = {
   schemaMigration: isE2e ? "require_current" as const : "migrate" as const,
 };
-mkdirSync(workspaceRoot, { recursive: true });
-const desktopDiagnostics: DesktopDiagnosticsDeps = {
-  environment: () =>
-    captureDesktopDiagnosticEnvironment({
-      appVersion: app.getVersion(),
-      buildMode: buildInfo.mode,
-      updateChannel: desktopDiagnosticUpdateChannel({
-        isPackaged: app.isPackaged,
-        appPath: app.getAppPath(),
-      }),
-      buildCommit: buildInfo.commit,
-      locale: app.getLocale(),
-      workspacePath: workspaceRoot,
-    }),
-  mainLogs: () => mainProcessLogBuffer.snapshot(),
-  runtimeHostProcessLogs: () => runtimeHostProcessLogBuffer.snapshot(),
-  runtimeHostConnections: () => runtimeHostManager?.entries() ?? [],
-  resolveActiveRuntimeHost: () => {
-    const scope = activeRuntimeHostRef();
-    return scope ? resolveRuntimeHostDiagnostics(scope) : undefined;
-  },
-  resolveRuntimeHost: resolveRuntimeHostDiagnostics,
-  writeClipboard: (report) => clipboard.writeText(report),
-};
-let resolveBrowserDialogParent = desktopStartupProgressWindow;
-let resolveBrowserDialogAppearance = async (): Promise<BrowserMessageBoxTheme> => ({
-  locale: resolveSystemUiLocale(app.getPreferredSystemLanguages()),
-  palette: "default",
-});
-
-async function showDesktopMessageBox(
-  options: MessageBoxOptions,
-  override?: Partial<BrowserMessageBoxTheme>,
-): Promise<MessageBoxReturnValue> {
-  const appearance = { ...(await resolveBrowserDialogAppearance()), ...override, revealMode };
-  return showBrowserMessageBox(options, resolveBrowserDialogParent(), appearance);
-}
-
-function showStartupDiagnosticDialog(
-  options: MessageBoxOptions,
-  locale: ReturnType<typeof resolveSystemUiLocale>,
-  diagnosticDetails = options.detail,
-): Promise<MessageBoxReturnValue> {
-  return showMessageBoxWithDiagnostics(options, {
-    locale,
-    showMessageBox: (nextOptions) => showDesktopMessageBox(nextOptions, { locale }),
-    copyDiagnostics: () =>
-      copyDesktopDiagnosticReport(
-        desktopDiagnostics,
-        createDesktopStartupDiagnosticInput({
-          title: options.title || options.message,
-          description: options.message,
-          ...(diagnosticDetails ? { details: diagnosticDetails } : {}),
-        }),
-      ),
-  });
-}
-if (e2eFixture) {
-  console.log(
-    `[e2e-fixture] scenario=${e2eFixture.scenario} workspace=${workspaceRoot}`,
-  );
-  await seedE2eFixture({ workspaceRoot, fixture: e2eFixture });
-}
-const resolveLocalStorageRoot = async () => {
-  if (!isE2e) {
-    await startupStep("native storage root", initializeNativeRuntimeHost(nativeHostExecutable, localHostRoot));
-    return resolveStorageRoot({ path: localHostRoot, kind: "interactive" });
-  }
-  return (
-  e2eFixture
-    ? resolveStorageRoot({ path: workspaceRoot, kind: "interactive" })
-    : startupStep(
-        "storage root",
-        resolveDesktopStorageRoot(workspaceRoot, {
-          confirmRepair: () => confirmDesktopStorageRootRepair(workspaceRoot),
-        }),
-      )
-  );
-};
-updateDesktopStartupProgress('storage');
-let startupLocalStorageRoot = isE2e ? await resolveLocalStorageRoot() : undefined;
+let startupLocalStorageRoot = fixtureStorageRoot;
 let rootInitialization: Promise<NonNullable<typeof startupLocalStorageRoot>> | undefined;
 function ensureLocalStorageRoot(budget: import('./native-runtime-host-operation.js').NativeHostBudget) {
   if (startupLocalStorageRoot) return Promise.resolve(startupLocalStorageRoot);
@@ -482,31 +348,6 @@ function ensureLocalStorageRoot(budget: import('./native-runtime-host-operation.
   void pending.finally(() => { if (rootInitialization === pending) rootInitialization = undefined; }).catch(() => undefined);
   return pending;
 }
-if (isE2e && !startupLocalStorageRoot) {
-  app.quit();
-  await new Promise<never>(() => {});
-  throw new Error("Desktop storage root resolution did not complete");
-}
-const settingsStore = createSettingsStore(workspaceRoot);
-const desktopLocale = createDesktopLocaleAuthority({
-  readSettings: () => settingsStore.get(),
-  preferredSystemLanguages: () => app.getPreferredSystemLanguages(),
-});
-resolveBrowserDialogAppearance = async () => {
-  try {
-    const settings = await settingsStore.get();
-    return {
-      locale: desktopLocale.observe(settings),
-      palette: settings.appearance.palette,
-      dark: isDarkAppearance(
-        e2eFixture?.theme ?? settings.appearance.theme,
-        nativeTheme.shouldUseDarkColors,
-      ),
-    };
-  } catch {
-    return { locale: desktopLocale.current(), palette: "default" };
-  }
-};
 const mcpConfigStore = createMcpConfigStore(workspaceRoot);
 const mcpManager = new McpClientManager({
   clientName: "maka-desktop",
@@ -543,43 +384,8 @@ function ensureMcpReady(): Promise<void> {
   return mcpStartup;
 }
 const keepSystemAwake = createKeepSystemAwakeController(powerSaveBlocker);
-let onMainWindowClose = (): void => {};
-let onMainWindowClosed = (): void => {};
-const mainWindowController = createMainWindowController({
-  workspaceRoot,
-  e2eFixture,
-  settingsStore,
-  revealMode,
-  onClose: () => onMainWindowClose(),
-  onClosed: () => onMainWindowClosed(),
-  onShow: closeDesktopStartupProgress,
-  onRendererProcessGone: async (details) => {
-    const diagnosticInput = createDesktopMainRendererDiagnosticInput({
-      title: "Maka main Renderer process exited unexpectedly",
-      description: `Reason: ${details.reason}`,
-      details: `Exit code: ${details.exitCode}`,
-    });
-    for (;;) {
-      const locale = await desktopLocale.resolve();
-      const decision = await showMainRendererProcessGoneDialog({
-        locale,
-        copyDiagnostics: () =>
-          copyDesktopDiagnosticReport(desktopDiagnostics, diagnosticInput),
-        // showBrowserMessageBox attaches only to a visible, non-minimized
-        // parent. A pre-first-paint crash therefore gets a standalone window.
-        showMessageBox: (options) => showDesktopMessageBox(options, { locale }),
-      });
-      if (decision !== "recover") break;
-      if (await mainWindowController.reloadMainRenderer()) return;
-      if (!mainWindowController.browserWindow()) break;
-    }
-    app.quit();
-  },
-});
-resolveBrowserDialogParent = () => {
-  const main = mainWindowController.browserWindow();
-  return main?.isVisible() ? main : desktopStartupProgressWindow();
-};
+bootContext.activeRuntimeHostRef = activeRuntimeHostRef;
+bootContext.resolveRuntimeHostDiagnostics = resolveRuntimeHostDiagnostics;
 const runtimeHostSshTerminal = createDesktopRuntimeHostSshTerminal({
   ipcMain,
   send: (channel, event) => mainWindowController.send(channel, event),
@@ -600,13 +406,7 @@ const localRuntimeHostRemoteAccess = createDesktopLocalRuntimeHostRemoteAccess({
   },
   directPeerAvailable: runtimeHostDirectPeerAvailable,
   manager: () => runtimeHostManager,
-  resolveSetupPackage: async (signal) => {
-    updateDesktopStartupProgress('package');
-    const result = await runtimeHostSetupPackage.resolveForThisDesktop(signal);
-    updateDesktopStartupProgress('checking');
-    return result;
-  },
-  onUpdateProgress: updateDesktopStartupProgress,
+  resolveSetupPackage: (signal) => runtimeHostSetupPackage.resolveForThisDesktop(signal),
   operator: localRuntimeHostOperator,
 });
 const native = assembleDesktopNativeCapabilities({
@@ -635,7 +435,7 @@ const releaseDesktopInteractionSession = (sessionId: string): void => {
 const permissionOverlay = createPermissionOverlayMain({
   resolveLocale: () => desktopLocale.resolve(),
 });
-onMainWindowClose = () => {
+mainWindowDelegates.onMainWindowClose = () => {
   native.computerUseOverlay.destroyAll();
   native.computerUsePip.destroyAll();
 };
@@ -1084,10 +884,10 @@ const windowsAppTray = createWindowsAppTray({
   quit: () => app.quit(),
   onError: (error) => console.error('[tray]', error),
 });
-onMainWindowClosed = () => {
+mainWindowDelegates.onMainWindowClosed = () => {
   // A hidden WorkHub host window can keep window-all-closed from firing.
   // Without a tray, use the existing quit flow; cancelling it restores Maka.
-  if (process.platform !== 'darwin' && !windowsAppTray.hasTray() && !isDesktopStartupInProgress()) app.quit();
+  if (process.platform !== 'darwin' && !windowsAppTray.hasTray()) app.quit();
 };
 const mcpCapabilityPublisher = createCapabilityRevisionPublisher(() =>
   mcpManager.toolSnapshot().revision,
@@ -1399,7 +1199,13 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
   },
   {
     background: true,
-    handoffSurface: createDesktopHostHandoffSurface(() => desktopLocale.resolve()),
+    handoffSurface: createDesktopHostHandoffSurface({
+      ipcMain,
+      authorize: (event) => mainWindowController.isMainRenderer(event.sender) && event.senderFrame === event.sender.mainFrame,
+      send: (payload) => mainWindowController.send('runtime-host-handoff:changed', payload),
+      focus: () => { void quitCoordinator.focusOrCreateWindow(); },
+      resolveLocale: () => desktopLocale.resolve(),
+    }),
     onTargetStateChanged: (state) => {
       if (state.readiness === 'ready') console.info('[startup-metric]', {
         hostReadyMs: Math.round(process.uptime() * 1000), profileId: state.target.profile.id,
@@ -1528,28 +1334,10 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
 );
 let workBoardIpc: ReturnType<typeof registerWorkBoardIpc> | undefined;
 let runtimeHostDesktopShutdown: Promise<void> | undefined;
-// The first Host handoff can be cancelled before the main window exists.
-// Install the same cleanup owner used by normal quit before that handoff.
-const quitCoordinator = createAppQuitCoordinator({
-  prepareToQuit: prepareRuntimeHostDesktopQuit,
-  cleanup: closeRuntimeHostDesktop,
-  focusOrCreateWindow: (signal) => {
-    if (!runtimeHostManager) return;
-    if (mainWindowController.hasOpenWindows()) mainWindowController.focus();
-    else return mainWindowController.createWindow(signal);
-  },
-  onPreparationError: (error) => {
-    console.error("[runtime-host] quit retirement failed:", error);
-  },
-  onCleanupError: (error) =>
-    console.error("[runtime-host] shutdown failed:", error),
-  onWindowCreationError: (error) =>
-    console.error("[window] creation failed:", error),
-  resumeQuit: () => app.quit(),
-});
-app.on("before-quit", quitCoordinator.handleBeforeQuit);
-updateDesktopStartupProgress('connect');
+bootContext.prepareToQuit = prepareRuntimeHostDesktopQuit;
+bootContext.cleanup = closeRuntimeHostDesktop;
 runtimeHostManager = await startLocalRuntimeHostManager();
+bootContext.runtimeHostManager = runtimeHostManager;
 // Desktop owns these tables in its own directory. The TS E2E composition retains
 // its existing shared-database migration authority.
 workBoardIpc = registerWorkBoardIpc({
@@ -1578,16 +1366,15 @@ workBoardIpc = registerWorkBoardIpc({
     }
   },
 });
-updateDesktopStartupProgress('renderer');
 wireLifecycle();
 runtimeHostManager.setDefaultProfile(runtimeHostStartup.preferences.defaultProfileId);
 sessionLocal.wake();
 windowsAppTray.start();
-await guestSessionMountService.start().catch((error: unknown) => {
+void guestSessionMountService.start().catch((error: unknown) => {
   console.error('[runtime-host] shared Sessions could not be restored:', error);
 });
 if (isE2e) {
-  await localRuntimeHostRemoteAccess.recover().catch((error: unknown) => {
+  void localRuntimeHostRemoteAccess.recover().catch((error: unknown) => {
     console.error('[runtime-host] interrupted Local Host setup could not be recovered:', error);
   });
 }
@@ -2011,7 +1798,6 @@ function registerHostClientIpc(
   };
 }
 
-
 function registerPersistentClientIpc(): void {
   registerAppClientIpc({
     mainWindowController,
@@ -2236,20 +2022,13 @@ function emitSessionsChanged(
 }
 
 function wireLifecycle(): void {
-  installDesktopShellPresentation({
-    mainWindowController,
-    focusOrCreateWindow: quitCoordinator.focusOrCreateWindow,
-  });
-  app.on("second-instance", quitCoordinator.focusOrCreateWindow);
-  app.on("activate", quitCoordinator.focusOrCreateWindow);
   app.on("browser-window-focus", () => {
     void updateService.checkForUpdatesOnFocus();
   });
   app.on("window-all-closed", () => {
     native.computerUseOverlay.destroyAll();
     native.computerUsePip.destroyAll();
-    if (process.platform !== "darwin" && !windowsAppTray.hasTray() && !isBrowserMessageBoxPresentationActive() &&
-      !isDesktopStartupInProgress()) app.quit();
+    if (process.platform !== "darwin" && !windowsAppTray.hasTray() && !isBrowserMessageBoxPresentationActive()) app.quit();
   });
   powerMonitor.on("resume", wakePeerRecoveryAfterResume);
   quitCoordinator.focusOrCreateWindow();
@@ -2330,50 +2109,6 @@ async function disposeRuntimeHostDesktop(): Promise<void> {
 
 function wakePeerRecoveryAfterResume(): void {
   runtimeHostManager?.notifySystemResume();
-}
-
-function resolveDesktopE2eFixture(): ReturnType<typeof resolveE2eFixture> {
-  try {
-    return resolveE2eFixture(
-      process.env.MAKA_E2E_FIXTURE,
-      app.isPackaged,
-      process.env.MAKA_E2E_FIXTURE_REDUCED_MOTION,
-      process.env.MAKA_E2E_FIXTURE_THEME,
-      process.env.MAKA_E2E_FIXTURE_LOCALE,
-      process.env.MAKA_E2E_FIXTURE_TIMEZONE,
-      process.env.MAKA_E2E_FIXTURE_PLATFORM,
-    );
-  } catch (error) {
-    if (!process.env.MAKA_E2E_FIXTURE) throw error;
-    console.error(
-      `[e2e-fixture] fatal: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    process.exit(1);
-  }
-}
-
-async function confirmDesktopStorageRootRepair(
-  workspaceRoot: string,
-): Promise<boolean> {
-  console.log(
-    "[storage-root] root-identity conflict; parking at repair dialog",
-  );
-  const locale = resolveSystemUiLocale(app.getPreferredSystemLanguages());
-  const copy = getNativeDiagnosticDialogCopy(locale).storageRootRepair;
-  const { response } = await showStartupDiagnosticDialog(
-    {
-      type: "warning",
-      title: copy.title,
-      message: copy.message,
-      detail: copy.detail(workspaceRoot),
-      buttons: [copy.repair, copy.exit],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-    },
-    locale,
-  );
-  return response === 0;
 }
 
 async function promptForDefaultRuntimeHostRecovery(input: {

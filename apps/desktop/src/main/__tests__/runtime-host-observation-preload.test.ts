@@ -240,6 +240,7 @@ async function preloadHarness(invoke: (channel: string, ...args: unknown[]) => P
   const ipcRenderer = {
     on: events.on.bind(events), off: events.off.bind(events), send() {},
     async invoke(channel: string, ...args: unknown[]) {
+      if (channel === 'app:bootstrapReady') return;
       if (channel === 'runtime-host:activeIdentity') return owner;
       if (channel === 'runtime-host:identities') return [owner];
       if (channel === 'sessions:unobserve') return;

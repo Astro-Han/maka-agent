@@ -33,7 +33,7 @@ const preloadSource = readFileSync(
 );
 
 test('every MCP bridge method rides the scoped Runtime Host seam', () => {
-  const rawMcpInvokes = preloadSource.match(/ipcRenderer\.invoke\(\s*'mcp:/gu) ?? [];
+  const rawMcpInvokes = preloadSource.match(/(?:ipcRenderer\.invoke|invokeWhenReady)\(\s*'mcp:/gu) ?? [];
   assert.deepEqual(rawMcpInvokes, []);
   for (const channel of [
     'mcp:getConfig',

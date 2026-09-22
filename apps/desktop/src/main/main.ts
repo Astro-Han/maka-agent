@@ -28,15 +28,7 @@ import { join } from 'node:path';
 import { resolveBuildInfo } from './build-info.js';
 import { resolveUpdateTestUserDataDirectory } from './app-update-test-context.js';
 import { desktopDiagnosticUpdateChannel } from './app-update-attestation.js';
-import {
-  captureDesktopDiagnosticEnvironment,
-  copyDesktopDiagnosticReport,
-  createDesktopPreviousMainProcessDiagnosticInput,
-  installMainProcessLogCapture,
-  formatDesktopDiagnosticReport,
-  createDesktopStartupDiagnosticInput,
-  mainProcessLogBuffer,
-} from './main-process-diagnostics.js';
+import { captureDesktopDiagnosticEnvironment, installMainProcessLogCapture, mainProcessLogBuffer } from './main-process-diagnostics.js';
 import {
   appendUncaughtMainProcessError,
   createMainProcessRecoveryJournal,
@@ -47,11 +39,7 @@ import { isIsolatedE2e, revealMode } from './startup-context.js';
 import { reportDevelopmentLaunchResult } from './dev-single-instance-result.js';
 import { registerPreviousMainProcessDiagnosticsIpc } from './desktop-diagnostics-ipc-main.js';
 import { showBrowserMessageBox } from './browser-message-box.js';
-import {
-  showDesktopStartupProgress,
-  updateDesktopStartupProgress,
-  desktopStartupProgressWindow,
-} from './startup-presentation.js';
+import { bootContext } from './boot-context.js';
 
 let recoveryJournal: MainProcessRecoveryJournal | undefined;
 installMainProcessLogCapture(mainProcessLogBuffer, () => recoveryJournal?.markDirty());
@@ -202,30 +190,16 @@ if (!app.requestSingleInstanceLock()) {
   // store/db write".
   app
     .whenReady()
-    .then(() => {
+    .then(async () => {
       console.log('[startup] app ready');
-      showDesktopStartupProgress((phase) => {
-        clipboard.writeText(formatDesktopDiagnosticReport(
-          createDesktopStartupDiagnosticInput({
-            title: 'Desktop startup', description: 'Startup phase: ' + phase,
-          }),
-          captureDesktopDiagnosticEnvironment({
-            appVersion: app.getVersion(), buildMode: buildInfo.mode,
-            updateChannel: desktopDiagnosticUpdateChannel({
-              isPackaged: app.isPackaged, appPath: app.getAppPath(),
-            }),
-            buildCommit: buildInfo.commit, locale: app.getLocale(),
-            workspacePath: join(app.getPath('userData'), 'workspaces', 'default'),
-          }),
-          mainProcessLogBuffer.snapshot(),
-          { ok: false, error: 'Runtime Host is not yet available during startup' },
-        ));
-      });
-      return import('./runtime-host-boot.js');
+      const earlyWindow = await import('./early-window.js');
+      await earlyWindow.firstWindowConstructed;
+      await import('./runtime-host-boot.js');
+      bootContext.markIpcReady();
     })
     .catch(async (error: unknown) => {
       console.error('[startup] fatal:', error);
-      updateDesktopStartupProgress('attention');
+      bootContext.failIpcReady(error);
       try {
         // E2E runs must not hang on a modal error box (same reasoning as the
         // fixture-fatal path in runtime-host-boot.ts: print a parseable line and exit fast).
@@ -249,7 +223,7 @@ if (!app.requestSingleInstanceLock()) {
             mainLogs: () => mainProcessLogBuffer.snapshot(),
             writeClipboard: (report) => clipboard.writeText(report),
             showMessageBox: (options) =>
-              showBrowserMessageBox(options, desktopStartupProgressWindow(), {
+              showBrowserMessageBox(options, undefined, {
                 locale,
                 revealMode,
               }),

@@ -429,6 +429,7 @@ export function WorkHubRoot({
           data-progress={progress}
           data-progress-editing={editingProgress}
           className="workHubLive workhub-surface"
+          data-maka-content-ready
           data-placement={presentation?.placement ?? 'docked'}
           data-conversation-expanded={showConversation}
           aria-label={t.title}

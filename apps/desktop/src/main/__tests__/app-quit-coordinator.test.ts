@@ -137,12 +137,12 @@ describe('app quit coordinator', () => {
     assert.equal(resumeQuitCount, 1);
   });
 
-  it('does not reopen the main window after quit cleanup starts', () => {
+  it('does not reopen the main window after quit cleanup starts', async () => {
     let focusOrCreateCount = 0;
     let windowCreationSignal: AbortSignal | undefined;
     const coordinator = createAppQuitCoordinator({
       prepareToQuit: async () => 'ready',
-      cleanup: () => new Promise<void>(() => {}),
+      cleanup: async () => {},
       focusOrCreateWindow: (signal) => {
         focusOrCreateCount += 1;
         windowCreationSignal = signal;
@@ -158,6 +158,8 @@ describe('app quit coordinator', () => {
     coordinator.focusOrCreateWindow();
 
     assert.equal(focusOrCreateCount, 1);
+    assert.equal(windowCreationSignal?.aborted, false, 'preparation must not interrupt navigation');
+    await flushQuitCoordinator();
     assert.equal(windowCreationSignal?.aborted, true);
   });
 
@@ -165,13 +167,15 @@ describe('app quit coordinator', () => {
     let cleanupCount = 0;
     let focusOrCreateCount = 0;
     let resumeQuitCount = 0;
+    const windowSignals: AbortSignal[] = [];
     const coordinator = createAppQuitCoordinator({
       prepareToQuit: async () => 'cancelled',
       cleanup: async () => {
         cleanupCount += 1;
       },
-      focusOrCreateWindow: () => {
+      focusOrCreateWindow: (signal) => {
         focusOrCreateCount += 1;
+        windowSignals.push(signal);
       },
       onPreparationError: () => {},
       onCleanupError: () => {},
@@ -181,12 +185,15 @@ describe('app quit coordinator', () => {
       },
     });
 
+    await coordinator.focusOrCreateWindow();
     coordinator.handleBeforeQuit({ preventDefault: () => {} });
     await flushQuitCoordinator();
 
     assert.equal(cleanupCount, 0);
     assert.equal(resumeQuitCount, 0);
-    assert.equal(focusOrCreateCount, 1);
+    assert.equal(focusOrCreateCount, 2);
+    assert.equal(windowSignals[0], windowSignals[1]);
+    assert.equal(windowSignals[0]?.aborted, false, 'cancelled quit must preserve pending navigation and recovery');
   });
 
   it('reports window creation failure without leaking an unhandled rejection', async () => {

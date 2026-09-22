@@ -125,6 +125,10 @@ The target needs no Node/npm/Rust. Development builds
 can set `MAKA_NATIVE_CLI_VERSION` and `MAKA_NATIVE_CLI_PACKAGES` (a `host fetch` cache directory).
 These overrides are ignored in packaged Desktop. Existing profiles start offline.
 
+Desktop paints its main window before loading Host services. Registration waits
+and document loads are bounded; Host failure leaves drafts, management and quit
+available. Handoff decisions appear in the main window, not a second startup window.
+
 Desktop reuses managed native Hosts and activates pinned code when needed;
 its own generation and exit do not govern their lifetime. Pausing local launches
 waits for outstanding activations before handing off the Root.

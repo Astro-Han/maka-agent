@@ -17,13 +17,12 @@
  * under the License.
  */
 
-import type { ComponentProps } from 'react';
 import { ClientPluginSlot, ClientPluginSession } from '../features/client-plugins/index.js';
 import { AppShell as LegacyAppShell } from '../app-shell';
 import { WorkHubRoot, WorkHubSurfaceSwitch } from '../features/workhub';
 
-export function AppShell(props: ComponentProps<typeof LegacyAppShell>) {
-  return <WorkHubSurfaceSwitch main={<LegacyAppShell {...props} />} workhub={<WorkHubConversation />} />;
+export function AppShell() {
+  return <WorkHubSurfaceSwitch main={<LegacyAppShell />} workhub={<WorkHubConversation />} />;
 }
 
 function WorkHubConversation() {

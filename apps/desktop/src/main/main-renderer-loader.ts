@@ -23,6 +23,7 @@ import { pathToFileURL } from 'node:url';
 export interface MainRendererWindow {
   loadFile(path: string): Promise<void>;
   loadURL(url: string): Promise<void>;
+  readonly webContents?: { stop(): void; isDestroyed(): boolean };
 }
 
 export interface MainRendererEntry {
@@ -54,16 +55,44 @@ export async function loadMainRenderer(
   mainWindow: MainRendererWindow,
   rendererEntry: MainRendererEntry,
   surface?: 'workhub',
+  options: { readonly signal?: AbortSignal; readonly timeoutMs?: number } = {},
 ): Promise<void> {
-  if (surface) {
-    const url = new URL(rendererEntry.url);
-    url.searchParams.set('surface', surface);
-    await mainWindow.loadURL(url.href);
-    return;
-  }
-  if (rendererEntry.useDevServer) {
-    await mainWindow.loadURL(rendererEntry.url);
-  } else {
-    await mainWindow.loadFile(rendererEntry.filePath);
+  options.signal?.throwIfAborted();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const stop = () => {
+    try {
+      if (!mainWindow.webContents?.isDestroyed()) mainWindow.webContents?.stop();
+    } catch { /* The window may have closed while its load was pending. */ }
+  };
+  const load = async () => {
+    if (surface) {
+      const url = new URL(rendererEntry.url);
+      url.searchParams.set('surface', surface);
+      await mainWindow.loadURL(url.href);
+      return;
+    }
+    if (rendererEntry.useDevServer) {
+      await mainWindow.loadURL(rendererEntry.url);
+    } else {
+      await mainWindow.loadFile(rendererEntry.filePath);
+    }
+  };
+  try {
+    await Promise.race([
+      load(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('Desktop document loading timed out'));
+          stop();
+        }, options.timeoutMs ?? 15_000);
+        onAbort = () => { reject(options.signal!.reason); stop(); };
+        options.signal?.addEventListener('abort', onAbort, { once: true });
+        if (options.signal?.aborted) onAbort();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) options.signal?.removeEventListener('abort', onAbort);
   }
 }

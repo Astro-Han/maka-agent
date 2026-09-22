@@ -735,12 +735,12 @@
           "useAppShellTurnPresentation": 1,
           "useComposerAttachments": 1,
           "useEffect": 7,
-          "useLayoutEffect": 2,
+          "useLayoutEffect": 1,
           "useNewTaskChoice": 2,
           "useOnboardingSnapshot": 1,
           "usePlanModeState": 1,
           "usePluginSession": 1,
-          "useRef": 16,
+          "useRef": 15,
           "useRuntimeHostAvailability": 1,
           "useSessionCollaborationDialog": 1,
           "useSessionEventHealthPolling": 1,
@@ -795,6 +795,7 @@
           "./features/goals": 1,
           "./features/module-hub": 1,
           "./features/overlays/index.js": 1,
+          "./features/runtime-host-management": 1,
           "./features/session-collaboration": 1,
           "./features/session-navigation": 1,
           "./features/session-settings": 1,
@@ -848,7 +849,7 @@
           "react": 1
         },
         "importSpecifiers": 101,
-        "nonTriviaTokens": 13949
+        "nonTriviaTokens": 13850
       },
       "src/renderer/use-app-shell-composer-quotes.ts": {
         "importDeclarations": 3,
@@ -1062,7 +1063,6 @@
           "./onboarding-hero": 1,
           "./use-deep-research-run": 1,
           "./use-external-store-selector": 1,
-          "@astryxdesign/core": 1,
           "@maka/core/deep-research": 1,
           "@maka/ui": 1,
           "react": 1
@@ -3757,7 +3757,7 @@
         "environmentCapabilities": {},
         "hookCalls": {
           "useEffect": 1,
-          "useRef": 5,
+          "useRef": 2,
           "useState": 2,
           "useUiLocale": 1
         },
@@ -4136,7 +4136,7 @@
         "react": 1
       },
       "importSpecifiers": 6,
-      "nonTriviaTokens": 206
+      "nonTriviaTokens": 167
     },
     "src/renderer/main.tsx": {
       "importDeclarations": 7,

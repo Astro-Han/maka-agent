@@ -47,6 +47,7 @@ test('onboarding and workspace search never fan out Owner IPC to a ready Guest',
       // A missing Guest handler must not hold up either aggregate.
       if (scope?.hostId === guest.hostId) throw new Error('Guest has no Owner handler');
       switch (channel) {
+        case 'app:bootstrapReady': return;
         case 'runtime-host:activeIdentity': return owner;
         case 'runtime-host:identities': return [owner, guest];
         case 'session-local:catalog': return [{ scope: owner, sessions: [], authoritative: true }];

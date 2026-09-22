@@ -31,5 +31,6 @@ export {
 } from './ui/runtime-host-profile-pairing-actions.js';
 export type { RuntimeHostPairingActionCopy } from './ui/runtime-host-profile-pairing-actions.js';
 export { RuntimeHostManagementServicesProvider } from './services-context.js';
+export { RuntimeHostHandoffOverlay } from './ui/runtime-host-handoff-overlay.js';
 export { PeerMeshOperationOutcomeUnknownError } from './ports.js';
 export type { RuntimeHostManagementServices } from './ports.js';
