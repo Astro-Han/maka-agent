@@ -46,13 +46,6 @@ export interface ToolActivityCopy {
     description: string;
     copyAriaLabel: (label: string) => string;
   };
-  requiresBypass: {
-    title: string;
-    description: string;
-    errorMessage: string;
-    action: string;
-    pending: string;
-  };
   /**
    * Row labels for one Computer Use call, derived from its arguments (see
    * `computer-action-label.ts`). The tool's display name is a noun, so every
@@ -194,13 +187,6 @@ const TOOL_ACTIVITY_COPY = {
       actionAriaLabel: (action, identity) => `${action}：${identity}`,
     },
     sandboxBlocked: { title: '操作可能被沙箱阻止', description: '沙箱可能阻止了该调用中的至少一项操作。失败前可能已经产生部分结果，请检查输出和工作区状态后再决定是否重试。', copyAriaLabel: (label) => `${label}沙箱诊断信息` },
-    requiresBypass: {
-      title: '需要“绕过”模式',
-      description: '此操作会直接控制本机应用，无法在沙箱模式下执行。',
-      errorMessage: '需要“绕过”模式。此操作会直接控制本机应用，无法在沙箱模式下执行。',
-      action: '切换并重试',
-      pending: '正在切换…',
-    },
     computer: {
       fallback: '操作电脑',
       listApps: '列出打开的应用',
@@ -302,13 +288,6 @@ const TOOL_ACTIVITY_COPY = {
       actionAriaLabel: (action, identity) => `${action}：${identity}`,
     },
     sandboxBlocked: { title: '操作可能被沙箱阻止', description: '沙箱可能阻止了該呼叫中的至少一項操作。失敗前可能已經產生部分結果，請檢查輸出和工作區狀態後再決定是否重試。', copyAriaLabel: (label) => `${label}沙箱診斷資訊` },
-    requiresBypass: {
-      title: '需要“繞過”模式',
-      description: '此操作會直接控制本機應用，無法在沙箱模式下執行。',
-      errorMessage: '需要“繞過”模式。此操作會直接控制本機應用，無法在沙箱模式下執行。',
-      action: '切換並重試',
-      pending: '正在切換…',
-    },
     computer: {
       fallback: '操作電腦',
       listApps: '列出開啟的應用',
@@ -410,13 +389,6 @@ const TOOL_ACTIVITY_COPY = {
       actionAriaLabel: (action, identity) => `${action}: ${identity}`,
     },
     sandboxBlocked: { title: 'Operation may have been blocked by sandbox', description: 'The sandbox may have blocked at least one action in this call. Some effects may have occurred before it failed; check the output and workspace state before retrying.', copyAriaLabel: (label) => `${label} sandbox diagnostics` },
-    requiresBypass: {
-      title: 'Bypass mode required',
-      description: 'This action controls a local app directly and cannot run inside the sandbox.',
-      errorMessage: 'Bypass mode required. This action controls a local app directly and cannot run inside the sandbox.',
-      action: 'Switch and retry',
-      pending: 'Switching…',
-    },
     computer: {
       fallback: 'Use the computer',
       listApps: 'List open apps',

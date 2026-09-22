@@ -614,8 +614,7 @@
       "src/renderer/app-shell-turn-actions.ts": {
         "importDeclarations": 2,
         "bridgePaths": {
-          "window.maka.sessions.branchFromTurn": 1,
-          "window.maka.sessions.regenerateTurn": 1
+          "window.maka.sessions.branchFromTurn": 1
         },
         "environmentCapabilities": {},
         "hookCalls": {},
@@ -631,7 +630,7 @@
           "./session-workspace-errors.js": 1
         },
         "importSpecifiers": 3,
-        "nonTriviaTokens": 648
+        "nonTriviaTokens": 571
       },
       "src/renderer/app-shell-turn-view-model.ts": {
         "importDeclarations": 6,
@@ -654,7 +653,7 @@
           "react": 1
         },
         "importSpecifiers": 10,
-        "nonTriviaTokens": 1271
+        "nonTriviaTokens": 1243
       },
       "src/renderer/app-shell.tsx": {
         "importDeclarations": 64,
@@ -811,7 +810,7 @@
           "react": 1
         },
         "importSpecifiers": 100,
-        "nonTriviaTokens": 13580
+        "nonTriviaTokens": 13501
       },
       "src/renderer/use-app-shell-composer-quotes.ts": {
         "importDeclarations": 3,

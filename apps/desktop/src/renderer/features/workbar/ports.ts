@@ -35,7 +35,6 @@ import type {
 import type { BrowserState, BrowserViewRect } from '@maka/core/browser';
 import type { GitReviewReadResult, GitReviewSource } from '@maka/core/git-review';
 import type { ApprovalPolicy, ExecutionPolicy } from '@maka/core/execution-permissions';
-import type { RegenerateTurnInput } from '@maka/core/runtime-inputs';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
 import type { ClientCapabilityResponse } from '@maka/core/client-capability-grant';
 import type { WorkBoardItem, WorkBoardLinkedSession } from '@maka/core/work-board';
@@ -260,7 +259,6 @@ export interface SideChatSessionPort {
     sessionId: string,
     policy: ExecutionPolicy,
   ): Promise<SideChatSession>;
-  regenerateTurn(sessionId: string, input: RegenerateTurnInput): Promise<void>;
   respondToSandboxBoundary(
     sessionId: string,
     response: SandboxBoundaryResponse,

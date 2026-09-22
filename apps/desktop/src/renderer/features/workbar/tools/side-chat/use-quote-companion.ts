@@ -185,7 +185,6 @@ export interface UseQuoteCompanionResult {
   approvalPolicy: ApprovalPolicy | undefined;
   setApprovalPolicy: (policy: ApprovalPolicy) => Promise<boolean>;
   disableProtections: () => Promise<boolean>;
-  regeneratePendingTurnId: string | null;
   /** A localized, retryable error (fork setup, run error, or a rejected send). */
   error: string | null;
   /** The model the companion inherited from the source (shown read-only). */
@@ -226,7 +225,6 @@ export interface UseQuoteCompanionResult {
   deleteQueuedEntry: (entryId: string) => Promise<void>;
   reorderQueuedEntries: (entryIds: readonly string[]) => Promise<void>;
   setSandboxMode: (mode: SandboxMode) => Promise<boolean>;
-  regenerate: (turnId: string) => Promise<boolean>;
   stop: () => Promise<void>;
   respondToSandboxBoundary: (response: SandboxBoundaryResponse) => Promise<void>;
   respondToClientCapability: (response: ClientCapabilityResponse) => Promise<void>;
@@ -358,9 +356,6 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const turnInFlight = streaming;
   const turnInFlightRef = useRef(turnInFlight);
   turnInFlightRef.current = turnInFlight;
-  const [regeneratePendingTurnId, setRegeneratePendingTurnId] = useState<string | null>(
-    null,
-  );
   const [hasContent, setHasContent] = useState(false);
   const hasContentRef = useRef(hasContent);
   hasContentRef.current = hasContent;
@@ -1663,39 +1658,6 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     [requestExecutionPolicy, turnInFlight, mountedRef],
   );
 
-  const regenerate = useCallback(
-    async (turnId: string): Promise<boolean> => {
-      const id = companionIdRef.current;
-      if (!id || turnInFlight || regeneratePendingTurnId) return false;
-      setRegeneratePendingTurnId(turnId);
-      const regenerationTurnId = crypto.randomUUID();
-      try {
-        if (!(await prepareExecution(id)) || turnInFlightRef.current) return false;
-        stopRequestRef.current = null;
-        activeTurnIdRef.current = regenerationTurnId;
-        setError(null);
-        setLiveTurns((previous) => retainLiveTurn(previous, armLiveTurn(regenerationTurnId)));
-        ownTurnIdsRef.current.add(regenerationTurnId);
-        setOwnTurnTick((tick) => tick + 1);
-        await sideChat.regenerateTurn(id, {
-          sourceTurnId: turnId,
-          turnId: regenerationTurnId,
-        });
-        return true;
-      } catch {
-        if (mountedRef.current) {
-          activeTurnIdRef.current = null;
-          setLiveTurns((previous) => previous?.filter((turn) => turn.turnId !== regenerationTurnId || !turn.unconfirmed));
-          setError(copyRef.current.errors.sendFailed);
-        }
-        return false;
-      } finally {
-        if (mountedRef.current) setRegeneratePendingTurnId(null);
-      }
-    },
-    [mountedRef, prepareExecution, regeneratePendingTurnId, sideChat, turnInFlight],
-  );
-
   const respondToSandboxBoundary = useCallback(
     async (response: SandboxBoundaryResponse): Promise<void> => {
       const id = companionIdRef.current;
@@ -1817,7 +1779,6 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     approvalPolicy: executionPolicy?.approvalPolicy,
     setApprovalPolicy,
     disableProtections,
-    regeneratePendingTurnId,
     error,
     activeModel,
     activeSandboxBoundary,
@@ -1834,7 +1795,6 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     deleteQueuedEntry,
     reorderQueuedEntries,
     setSandboxMode,
-    regenerate,
     stop,
     respondToSandboxBoundary,
     respondToClientCapability,

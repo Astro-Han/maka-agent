@@ -233,7 +233,6 @@ operations! {
     TurnMessageQuery => ("turn.message.query", Query, Ready),
     TurnMessageSubmit => ("turn.message.submit", Command, Ready),
     TurnQuery => ("turn.query", Query, Ready),
-    TurnRegenerate => ("turn.regenerate", Command, Ready),
     TurnResumeQuery => ("turn.resume.query", Query, Ready),
     TurnResumeStart => ("turn.resume.start", Command, Ready),
     TurnStart => ("turn.start", Command, Ready),

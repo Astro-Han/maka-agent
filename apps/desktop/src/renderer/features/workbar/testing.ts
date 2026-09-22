@@ -157,7 +157,6 @@ export function createFakeWorkbarServices(
       setExecutionPolicy: async () => {
         throw new Error('Fake sideChat.setExecutionPolicy is not configured');
       },
-      regenerateTurn: async () => undefined,
       respondToSandboxBoundary: async () => undefined,
       respondToClientCapability: async () => undefined,
       respondToPermissions: async () => undefined,

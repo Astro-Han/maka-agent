@@ -916,7 +916,6 @@ function bridge(options: {
         ...SIDE_CHAT_SESSION,
         ...policy,
       }),
-      regenerateTurn: async () => undefined,
       respondToSandboxBoundary: async () => undefined,
       respondToClientCapability: async () => undefined,
       respondToPermissions: async () => undefined,

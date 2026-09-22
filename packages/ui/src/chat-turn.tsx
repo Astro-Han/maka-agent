@@ -465,8 +465,6 @@ export const TurnView = memo(function TurnView(props: {
    * linked subagent tool rows; omitted when the host has no navigation.
    */
   onOpenLinkedSession?(sessionId: string): void;
-  /** Resolve a requires-bypass tool refusal, then regenerate this turn. */
-  onSwitchToBypassAndRetry?(turnId: string): void | Promise<void>;
 }) {
   const locale = useUiLocale();
   const copy = getConversationCopy(locale).messages;
@@ -494,10 +492,6 @@ export const TurnView = memo(function TurnView(props: {
     !!props.liveStreaming ||
     (turn.user !== undefined && turn.statusSource === 'recorded' && turn.status !== 'running');
   const runningToolLabel = computerRunningLabel(turn.tools, locale);
-  const switchToBypassAndRetry = useCallback(
-    () => props.onSwitchToBypassAndRetry?.(turn.turnId),
-    [props.onSwitchToBypassAndRetry, turn.turnId],
-  );
   const conversationSegments = useMemo(
     () => splitTimelineAtUserMessages(foldedTimeline, showAssistantMessage),
     [foldedTimeline, showAssistantMessage],
@@ -733,11 +727,6 @@ export const TurnView = memo(function TurnView(props: {
                     statusRow={index === activityProcessIndex && hasLiveStatus ? statusRowProps : undefined}
                     onStreamingSettled={props.liveStreaming?.onStreamingSettled}
                     onOpenLinkedSession={props.onOpenLinkedSession}
-                    onSwitchToBypassAndRetry={
-                      props.onSwitchToBypassAndRetry
-                        ? switchToBypassAndRetry
-                        : undefined
-                    }
                     initialLiveContent={props.liveStreaming?.initialLiveContent}
                   />
                 ) : (
@@ -747,11 +736,6 @@ export const TurnView = memo(function TurnView(props: {
                     item={item}
                     onStreamingSettled={props.liveStreaming?.onStreamingSettled}
                     onOpenLinkedSession={props.onOpenLinkedSession}
-                    onSwitchToBypassAndRetry={
-                      props.onSwitchToBypassAndRetry
-                        ? switchToBypassAndRetry
-                        : undefined
-                    }
                     initialLiveContent={props.liveStreaming?.initialLiveContent}
                   />
                 ),
@@ -888,7 +872,7 @@ function splitTimelineAtUserMessages(
 }
 
 export interface TurnFooterActionMeta {
-  id: 'regenerate' | 'branch' | 'copy';
+  id: 'branch' | 'copy';
   label: string;
   enabled: boolean;
   tooltip?: string;
@@ -1082,7 +1066,6 @@ function turnMetaSummary(turn: TurnViewModel): string | undefined {
 }
 
 const STATUS_FOOTER_ICON: Record<TurnFooterActionMeta['id'], ReactNode> = {
-  regenerate: <Icon icon={RefreshCcw} size="sm" />,
   branch: <Icon icon={GitBranch} size="sm" />,
   copy: <Icon icon="copy" size="sm" />,
 };
@@ -1360,7 +1343,6 @@ const TurnTimelineEntry = memo(function TurnTimelineEntry(props: {
   item: Exclude<TurnTimelineItem, { kind: 'user' }>;
   onStreamingSettled?: (messageId?: string) => void;
   onOpenLinkedSession?(sessionId: string): void;
-  onSwitchToBypassAndRetry?(): void | Promise<void>;
   initialLiveContent?: ReadonlyMap<string, string>;
 }) {
   const { item } = props;
@@ -1380,7 +1362,6 @@ const TurnTimelineEntry = memo(function TurnTimelineEntry(props: {
         items={item.items}
         activityObserved={props.activityObserved}
         onOpenLinkedSession={props.onOpenLinkedSession}
-        onSwitchToBypassAndRetry={props.onSwitchToBypassAndRetry}
       />
     );
   }
@@ -1406,7 +1387,6 @@ const ProcessingBlock = memo(function ProcessingBlock(props: {
   statusRow?: TurnStatusRowProps;
   onStreamingSettled?: (messageId?: string) => void;
   onOpenLinkedSession?(sessionId: string): void;
-  onSwitchToBypassAndRetry?(): void | Promise<void>;
   initialLiveContent?: ReadonlyMap<string, string>;
 }) {
   const copy = getConversationCopy(useUiLocale()).messages;
@@ -1454,7 +1434,6 @@ const ProcessingBlock = memo(function ProcessingBlock(props: {
             item={entry}
             onStreamingSettled={props.onStreamingSettled}
             onOpenLinkedSession={props.onOpenLinkedSession}
-            onSwitchToBypassAndRetry={props.onSwitchToBypassAndRetry}
             initialLiveContent={props.initialLiveContent}
           />
         ))}

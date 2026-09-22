@@ -17,39 +17,14 @@
  * under the License.
  */
 
-/**
- * Pure derivation of turn footer action enabled-set.
- *
- * Lives outside the React component layer so the action × TurnStatus
- * × lineage matrix can be unit-tested with node:test. Mirrors the
- * other renderer-level pure derivations such as `session-health-notice.ts`.
- *
- * Footer actions (icon + Chinese text — see the TurnFooterActions
- * component for the actual buttons):
- *
- *   - regenerate     🔁 重新生成 → for any non-running turn (failed / aborted / completed)
- *   - branch         🌿 分支     → for any non-running turn (incl. aborted)
- *   - copy           📋 复制     → always available when there's content
- *
- * Running turns get only `copy` (the long-running operation finishes
- * naturally; cancel lives in the Composer Stop button, not the footer).
- *
- * #546: retry was merged into regenerate. One "重新生成" action re-runs
- * the turn regardless of how the previous attempt ended. The separate
- * retry action / lineage field is gone.
- *
- * @kenji review gate #1: footer enabled set is computed
- * **exclusively** from `TurnStatus` + lineage map, NOT from text
- * content or any optimistic UI state. This file is the canonical
- * source of that decision.
- */
+/** Footer availability follows settled Turn state, not optimistic transcript content. */
 
 import type { TurnStatus } from '@maka/core/session';
 
 import type { UiLocale } from '@maka/core/ui-locale';
 import { getDesktopConversationCopy } from './locales/conversation-copy.js';
 
-export type TurnFooterActionId = 'regenerate' | 'branch' | 'copy';
+export type TurnFooterActionId = 'branch' | 'copy';
 
 export interface TurnFooterAction {
   id: TurnFooterActionId;
@@ -80,12 +55,6 @@ export interface TurnFooterContext {
    */
   hasContent: boolean;
   /**
-   * True when there's already a regenerate sibling for this turn.
-   * Used to hint at "已重新生成" in the tooltip so the user
-   * understands a parallel answer already exists.
-   */
-  alreadyRegenerated?: boolean;
-  /**
    * Per @kenji review: prevent double-click duplicate sibling turns.
    * The renderer marks an action `pending` from click time until
    * `sessions:changed` (or timeout) clears it; the footer renders that
@@ -98,7 +67,7 @@ export interface TurnFooterContext {
 
 /**
  * Derive the ordered list of footer actions to render for a turn.
- * The order is fixed at the matrix level (regenerate → branch → copy)
+ * The order is fixed at the matrix level (branch → copy)
  * so adjacent buttons line up across rows even when some are disabled.
  *
  * @kenji gate: returned `enabled` flags depend only on `TurnStatus`
@@ -106,25 +75,12 @@ export interface TurnFooterContext {
  * optimistic guesses.
  */
 export function deriveTurnFooterActions(input: TurnFooterContext): TurnFooterAction[] {
-  const { status, hasContent, alreadyRegenerated, pendingActions } = input;
+  const { status, hasContent, pendingActions } = input;
   const copyText = getDesktopConversationCopy(input.locale).footer;
   const actionLabel = copyText.labels;
   const isPending = (id: TurnFooterActionId) => pendingActions?.has(id) ?? false;
   const PENDING_TOOLTIP = copyText.pending;
 
-  const regenerate: TurnFooterAction = isPending('regenerate')
-    ? { id: 'regenerate', label: actionLabel.regenerate, enabled: false, tooltip: PENDING_TOOLTIP, pending: true }
-    : {
-        id: 'regenerate',
-        label: actionLabel.regenerate,
-        enabled: status !== 'running',
-        tooltip:
-          status === 'running'
-            ? copyText.regenerateRunning
-            : alreadyRegenerated
-            ? copyText.regenerateAgain
-            : copyText.regenerate,
-      };
   const branch: TurnFooterAction = isPending('branch')
     ? { id: 'branch', label: actionLabel.branch, enabled: false, tooltip: PENDING_TOOLTIP, pending: true }
     : {
@@ -145,5 +101,5 @@ export function deriveTurnFooterActions(input: TurnFooterContext): TurnFooterAct
     tooltip: hasContent ? copyText.copy : copyText.copyEmpty,
   };
 
-  return [regenerate, branch, copy];
+  return [branch, copy];
 }

@@ -81,7 +81,7 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | 外部 agent | setup start/query/cancel；具体执行适配、配置、鉴权、对话身份，以及附件／交互／resume／fork。 | **插件 + Host。** CLI／ACP 适配作为 Executor 插件，使用受管理进程／HTTP。已有 Executor 框架不等于已有具体 adapter。Host 负责授权、取消和外部事件落盘。 |
 | Usage／Pricing | Usage 查询、一致版本视图及活动分页，Pricing 查询／修改和估价。 | **插件 + Host。** 报表、价格策略和可重建投影可归 Insights 领域；Host 不依赖插件存活来记录用量，并提供一致快照。缺失用量不能视为零。 |
 | 后台健康 | BackgroundTaskHealth 的进程和端点检查。 | **插件 + Host。** 插件解释健康状态并提供工具；Host 提供授权资源观察和有界探测。保存 PID 不等于拥有进程。 |
-| Session 谱系 | branch、revision create/abandon、regenerate；普通 resume 和启动恢复已有。 | **Host。** 谱系及工作区只有一个事务权威；插件可以请求命令，不能在私有存储中重做。 |
+| Session 谱系 | branch、revision create/abandon；普通 resume 和启动恢复已有。已移除 regenerate，修改请求使用编辑重发。 | **Host。** 谱系及工作区只有一个事务权威；插件可以请求命令，不能在私有存储中重做。 |
 | Session 生命周期 | 删除／预览、shared 查询。 | **Host。** 协调引用、运行中工作、附件、托管 worktree、授权及清理。shared 查询依赖真实协作授权。 |
 | Session 迁入迁出 | bundle 导入／导出；Codex、Claude Code、OpenCode 的统一外部 catalog/source/import。 | **插件 + Host。** 来源解析／发现可以作为 adapter；Host 拥有有界规范导入、身份、附件、来源记录和原子发布。原生 bundle 格式仍是 Host 合同，不能把外部事件字节直接作为可信执行权威。 |
 | Runtime policy | shell／external-agent 消费，普通 named tool profiles。 | **拆分。** shell 启动策略和能力上限留在 Host；外部 agent 设置由对应领域消费。Profile 提供定义，Host 在准入和每步捕获时取能力交集。只保存设置不算完成。 |

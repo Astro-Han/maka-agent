@@ -133,7 +133,6 @@ impl Operation {
                 | Self::TurnMessageQuery
                 | Self::TurnMessageSubmit
                 | Self::TurnQuery
-                | Self::TurnRegenerate
                 | Self::TurnResumeQuery
                 | Self::TurnResumeStart
                 | Self::TurnStart

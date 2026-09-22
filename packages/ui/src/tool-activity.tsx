@@ -55,7 +55,6 @@ import {
   extractErrorText,
   isCancelledToolResult,
   isPermissionDeniedToolResult,
-  isRequiresBypassToolResult,
   resultOwnsOwnPanel,
   withLiveStreamFallback,
 } from './tool-activity/result-projection.js';
@@ -195,16 +194,13 @@ function ToolDetailBody({ item, children }: { item: ToolActivityItem; children: 
 export function ToolCallDetail({
   item,
   activityObserved = true,
-  onSwitchToBypassAndRetry,
 }: {
   item: ToolActivityItem;
   activityObserved?: boolean;
-  onSwitchToBypassAndRetry?(): void | Promise<void>;
 }) {
   const locale = useUiLocale();
   const cancelled = isCancelledToolResult(item.result);
   const sandboxBlocked = isSandboxDeniedTool(item);
-  const requiresBypass = isRequiresBypassToolResult(item.result);
   // Cancel is not a failure; stale errored+cancelled must not paint as failed.
   const failedOutcome = item.status === 'errored' && !cancelled;
   const permissionDenied = isPermissionDeniedToolResult(item.result);
@@ -216,7 +212,7 @@ export function ToolCallDetail({
     .filter((value): value is string => Boolean(value))
     .join(' · ');
   const ptyControlResult = item.toolName === 'WriteStdin' && item.result?.kind === 'shell_run';
-  const ownsPanel = resultOwnsOwnPanel(item) || requiresBypass;
+  const ownsPanel = resultOwnsOwnPanel(item);
   // Sandbox only — ordinary failures use ChatToolCalls status=error on the row.
   const showSandboxBanner = sandboxBlocked && failedOutcome && !ptyControlResult;
   // Skip invocation when the owned panel already prints the command.
@@ -228,7 +224,7 @@ export function ToolCallDetail({
     && item.outputChunks.length > 0
     && !ownsPanel
     && (running || !item.result);
-  const showResult = !!item.result && !permissionDenied && !requiresBypass;
+  const showResult = !!item.result && !permissionDenied;
   const displayResult = showResult && item.result
     ? withLiveStreamFallback(item.result, item.outputChunks, {
       truncated: item.outputTruncated === true,
@@ -259,9 +255,6 @@ export function ToolCallDetail({
     <div className="maka-tool-call-detail">
       {showSandboxBanner && (
         <SandboxBlockedBanner result={displayResult ?? item.result} />
-      )}
-      {requiresBypass && (
-        <RequiresBypassBanner onSwitchToBypassAndRetry={onSwitchToBypassAndRetry} />
       )}
       <ToolDetailBody item={item}>
       {showResult && ownsPanel && displayResult && (
@@ -352,16 +345,15 @@ export function ToolTrow({
   items,
   activityObserved = true,
   onOpenLinkedSession,
-  onSwitchToBypassAndRetry,
 }: {
   items: ToolActivityItem[];
   activityObserved?: boolean;
   onOpenLinkedSession?(sessionId: string): void;
-  onSwitchToBypassAndRetry?(): void | Promise<void>;
 }) {
   const locale = useUiLocale();
   if (items.length === 0) return null;
-  const segments = toolTrowSegments(items, locale, activityObserved, onSwitchToBypassAndRetry);
+
+  const segments = toolTrowSegments(items, locale, activityObserved);
 
   // ChatToolCalls owns expandable tool evidence. Linked child sessions are
   // navigation targets instead, so they render through Astryx's compact List:
@@ -408,7 +400,6 @@ function toolTrowSegments(
   items: ToolActivityItem[],
   locale: UiLocale,
   activityObserved: boolean,
-  onSwitchToBypassAndRetry?: () => void | Promise<void>,
 ): ToolTrowSegment[] {
   const segments: ToolTrowSegment[] = [];
   let computerTarget: string | undefined;
@@ -429,7 +420,6 @@ function toolTrowSegments(
       isComputerTool(item) && !computerActionLabelIncludesTarget(item)
         ? computerTarget
         : undefined,
-      onSwitchToBypassAndRetry,
     );
     if (previous?.kind === 'tools') previous.calls.push(call);
     else segments.push({ kind: 'tools', key: item.toolUseId, calls: [call] });
@@ -501,7 +491,6 @@ function standardToolCall(
   locale: UiLocale,
   activityObserved: boolean,
   inferredTarget?: string,
-  onSwitchToBypassAndRetry?: () => void | Promise<void>,
 ): ChatToolCallItem {
   return {
     key: item.toolUseId,
@@ -523,7 +512,6 @@ function standardToolCall(
         <ToolCallDetail
           item={item}
           activityObserved={activityObserved}
-          onSwitchToBypassAndRetry={onSwitchToBypassAndRetry}
         />
       </ToolDetailReveal>
     ),
@@ -668,51 +656,12 @@ function astryxToolStatus(item: ToolActivityItem): ChatToolCallItem['status'] {
  */
 function toolCallErrorMessage(item: ToolActivityItem, locale: UiLocale): string | undefined {
   if (item.status !== 'errored') return undefined;
-  if (isRequiresBypassToolResult(item.result)) {
-    return getToolActivityCopy(locale).requiresBypass.errorMessage;
-  }
   return summarizeErrorText(formatUserVisibleToolText(
     redactSecrets(extractErrorText(item.result, locale)),
     locale,
   )).replace(/^Error:\s*/i, '');
 }
 
-function RequiresBypassBanner(props: {
-  onSwitchToBypassAndRetry?(): void | Promise<void>;
-}) {
-  const copy = getToolActivityCopy(useUiLocale()).requiresBypass;
-  const [pending, setPending] = useState(false);
-
-  async function switchAndRetry() {
-    if (!props.onSwitchToBypassAndRetry || pending) return;
-    setPending(true);
-    try {
-      await props.onSwitchToBypassAndRetry();
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <Banner
-      status="warning"
-      className="maka-requires-bypass-banner"
-      icon={<ShieldAlert size={ICON_SIZE.chrome} aria-hidden="true" />}
-      title={copy.title}
-      description={copy.description}
-      endContent={props.onSwitchToBypassAndRetry ? (
-        <UiButton
-          variant="primary"
-          size="sm"
-          isDisabled={pending}
-          aria-busy={pending || undefined}
-          onClick={() => void switchAndRetry()}
-          label={pending ? copy.pending : copy.action}
-        />
-      ) : undefined}
-    />
-  );
-}
 
 /**
  * A visible word for the two outcomes a red status icon cannot say on its own:

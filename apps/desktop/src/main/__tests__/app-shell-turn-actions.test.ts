@@ -21,6 +21,26 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { SessionSummary } from '@maka/core/session';
 import { createAppShellTurnActions } from '../../renderer/app-shell-turn-actions.js';
+import { deriveTurnFooterActions } from '../../renderer/turn-footer-actions.js';
+
+test('footer no longer exposes Regenerate', () => {
+  assert.deepEqual(
+    deriveTurnFooterActions({
+      status: 'completed',
+      hasContent: true,
+      locale: 'en',
+    }).map((action) => action.id),
+    ['branch', 'copy'],
+  );
+  assert.deepEqual(
+    deriveTurnFooterActions({
+      status: 'running',
+      hasContent: false,
+      locale: 'en',
+    }).map((action) => action.id),
+    ['branch', 'copy'],
+  );
+});
 
 test('preserves a Branch copy identity after an ambiguous failure and completes it on success', async () => {
   const calls: Array<{ sourceTurnId: string; copyId?: string }> = [];
@@ -41,7 +61,6 @@ test('preserves a Branch copy identity after an ambiguous failure and completes 
   const actions = createAppShellTurnActions({
     uiLocale: 'en',
     activeIdRef: { current: 'branch-action-source' },
-    checkExecutionReadiness: async () => { throw new Error('Branch must not start execution'); },
     captureSelection: () => {
       const revision = selectionRevision;
       return () => revision === selectionRevision;
@@ -82,51 +101,18 @@ test('preserves a Branch copy identity after an ambiguous failure and completes 
   }
 });
 
-test('regenerate requires readiness and cannot submit after selection changes during setup', async () => {
-  const submitted: string[] = [];
-  const restore = installWindow(async () => { throw new Error('unexpected branch'); },
-    async (id) => { submitted.push(id); });
-  let selection = 0;
-  let ready: () => Promise<boolean> = async () => false;
-  const pending = new Set<string>();
-  const actions = createAppShellTurnActions({
-    uiLocale: 'en', activeIdRef: { current: 'original' },
-    captureSelection: () => { const captured = selection; return () => captured === selection; },
-    checkExecutionReadiness: () => ready(),
-    turnActionRegistry: {
-      addKey(key) { if (pending.has(key)) return false; pending.add(key); return true; },
-      clearKey: (key) => { pending.delete(key); },
-      keyOf: (sessionId, turnId, actionId) => `${sessionId}:${turnId}:${actionId}`,
-    },
-    openSessionInChat() {}, refreshSessions: async () => [],
-    toastApi: { info() {}, success() {}, error() {} },
-  });
-  try {
-    await actions.handleTurnFooterAction('turn', 'regenerate');
-    assert.deepEqual(submitted, []);
-    ready = async () => { selection++; return true; };
-    await actions.handleTurnFooterAction('turn', 'regenerate');
-    assert.deepEqual(submitted, []);
-    ready = async () => true;
-    await actions.handleTurnFooterAction('turn', 'regenerate');
-    assert.deepEqual(submitted, ['original']);
-    assert.equal(pending.size, 0);
-  } finally { restore(); }
-});
-
 function installWindow(
   branchFromTurn: (
     sessionId: string,
     input: { sourceTurnId: string; copyId?: string },
   ) => Promise<SessionSummary>,
-  regenerateTurn: (sessionId: string) => Promise<void> = async () => { throw new Error('unexpected regenerate'); },
 ): () => void {
   const target = globalThis as unknown as { window?: unknown };
   const hadWindow = Object.prototype.hasOwnProperty.call(target, 'window');
   const previousWindow = target.window;
   Object.defineProperty(target, 'window', {
     configurable: true,
-    value: { maka: { sessions: { branchFromTurn, regenerateTurn } } },
+    value: { maka: { sessions: { branchFromTurn } } },
     writable: true,
   });
   return () => {

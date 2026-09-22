@@ -244,9 +244,6 @@ export function QuoteCompanionPanel(props: {
             status: turn.status,
             locale,
             hasContent: finalAssistantReplyText(turn).trim().length > 0,
-            ...(companion.regeneratePendingTurnId === turn.turnId
-              ? { pendingActions: new Set(['regenerate'] as const) }
-              : {}),
           }).filter((action) => action.id !== 'branch'),
         ]),
       ),
@@ -255,7 +252,7 @@ export function QuoteCompanionPanel(props: {
       failedExecutionStateLabels: {},
       lineageBadgesByTurn: {},
     }),
-    [companion.regeneratePendingTurnId, locale],
+    [locale],
   );
 
   return (
@@ -427,10 +424,13 @@ export function QuoteCompanionPanel(props: {
           activeSession={companion.companionSession}
           onReadAttachmentBytes={attachments.readBytes}
           deriveTurnPresentation={deriveTurnPresentation}
-          onTurnFooterAction={(turnId, actionId) => {
-            if (actionId === 'regenerate') {
-              void companion.regenerate(turnId);
-            }
+          onEditUserMessage={(turnId) => {
+            const message = companion.messages.find(
+              (candidate) => candidate.type === 'user' && candidate.turnId === turnId,
+            );
+            if (message?.type !== 'user') return;
+            composerRef.current?.setText(message.text);
+            composerRef.current?.focus();
           }}
           emptyOverride={<div className="maka-quote-companion-empty" aria-hidden="true" />}
           onNew={() => {}}
