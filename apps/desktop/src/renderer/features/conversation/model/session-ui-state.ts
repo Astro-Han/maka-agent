@@ -19,7 +19,7 @@
 
 import type { MessageQueueEntryProjection, ShellRunUpdate } from '@maka/core/events';
 import type { SessionEventStreamSnapshot } from '@maka/core/session-event-health';
-import { createTranscriptViewportNavigation, type InteractionQueues, type LiveTurnBuffer } from '@maka/ui';
+import { createTranscriptViewportNavigation, valuesEqual, type InteractionQueues, type LiveTurnBuffer } from '@maka/ui';
 import { createObservableState } from '../../../application/contracts/session-catalog/observable-state.js';
 import type { SessionExecutionProjection } from '../../../../shared/session-execution-projection.js';
 
@@ -200,7 +200,7 @@ export function createAppShellSessionUiStateController(
         const previous = current[sessionId];
         if (!projection) return previous?.available
           ? { ...current, [sessionId]: { ...previous, available: false } } : current;
-        if (previous === projection) return current;
+        if (valuesEqual(previous, projection)) return current;
         return { ...current, [sessionId]: projection };
       });
     },

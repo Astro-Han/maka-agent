@@ -23,6 +23,8 @@ import { act, createElement } from 'react';
 import type { ProjectRecord } from '@maka/core/project';
 import { LocaleProvider } from '@maka/ui';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
+import { createSessionCatalogController } from '../../renderer/application/contracts/session-catalog/session-catalog-state.js';
+import type { DesktopSessionSummary } from '../../shared/desktop-session-projection.js';
 import {
   createFakeSessionNavigationServices,
   createSessionOpenCommand,
@@ -39,8 +41,8 @@ import {
 
 function session(
   id: string,
-  overrides: Partial<SessionNavigationSession> = {},
-): SessionNavigationSession {
+  overrides: Partial<DesktopSessionSummary> = {},
+): DesktopSessionSummary {
   return {
     id,
     name: id,
@@ -54,6 +56,9 @@ function session(
     connectionLocked: true,
     model: 'test',
     sandboxMode: 'workspace-write',
+    approvalPolicy: { kind: 'on-request' },
+    revision: 1,
+    activityAt: 1,
     profileId: 'local',
     profileName: 'Local',
     profileKind: 'local',
@@ -239,24 +244,29 @@ describe('useSessionNavigationController', () => {
 
 describe('useSessionNavigationReads', () => {
   let latestReads: ReturnType<typeof useSessionNavigationReads> | undefined;
+  let renders = 0;
 
   function ReadsProbe(props: Parameters<typeof useSessionNavigationReads>[0]) {
+    renders++;
     latestReads = useSessionNavigationReads(props);
     return null;
   }
 
   afterEach(() => {
     latestReads = undefined;
+    renders = 0;
   });
 
-  it('projects linked, archived, hidden, Project, and Runtime Host Sessions once', async () => {
+  it('updates parent navigation without publishing unrelated catalog changes to the shell', async () => {
     const { root } = installReactRenderer();
+    const catalog = createSessionCatalogController();
+    catalog.commitSessions(linkedCatalog);
     await act(async () =>
       root.render(
         createElement(LocaleProvider, {
           locale: 'en',
           children: createElement(ReadsProbe, {
-            sessions: linkedCatalog,
+            catalog,
             activeSessionId: 'child',
             activeSession: linkedCatalog[1],
             hiddenSessionIds,
@@ -266,16 +276,18 @@ describe('useSessionNavigationReads', () => {
     );
 
     assert.ok(latestReads);
-    assert.deepEqual(
-      latestReads.rail.sessions.map(({ id }) => id),
-      ['root', 'remote', 'environment'],
-    );
-    assert.equal(latestReads.rail.activeRowId, 'root');
-    assert.equal(latestReads.rail.activeParentSession?.id, 'root');
+    assert.equal(latestReads.activeParentSession?.id, 'root');
     assert.deepEqual(latestReads.branchBanner, {
       parentSessionId: 'root',
       parentSessionName: 'root',
     });
+    const before = renders;
+    await act(() => catalog.commitPatch('root', { ...linkedCatalog[0]!, hasUnread: true, activityAt: 100 }));
+    assert.equal(renders, before);
+    await act(() => catalog.commitPatch('root', { ...linkedCatalog[0]!, name: 'Renamed parent' }));
+    assert.equal(latestReads.activeParentSession?.name, 'Renamed parent');
+    assert.equal(latestReads.branchBanner?.parentSessionName, 'Renamed parent');
+    assert.ok(renders > before);
   });
 });
 

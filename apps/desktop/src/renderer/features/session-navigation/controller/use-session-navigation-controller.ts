@@ -30,7 +30,7 @@ import { useExternalStoreSelector } from '../../../application/contracts/session
 import { runtimeHostProjectKey } from '../../../application/contracts/runtime-host-project-key.js';
 import { deriveSessionNavigationGroups } from '../model/session-navigation-groups.js';
 import { deriveWorktreeSessionIds } from '../model/session-project-grouping.js';
-import type { SessionRailProjection } from '../model/session-rail.js';
+import type { SessionRailProjection } from '../../../application/contracts/session-catalog/session-rail.js';
 import {
   selectRailLayout,
   sessionRailLayoutStore,

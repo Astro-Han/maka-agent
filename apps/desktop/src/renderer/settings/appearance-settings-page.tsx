@@ -34,7 +34,7 @@ import {
   type UpdateAppSettingsResult,
 } from '@maka/core/settings';
 import { NumberInput, Switch, useMountedRef, useToast, useUiLocale } from '@maka/ui';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { getSettingsPreferencesCopy } from '../locales/settings-preferences-copy.js';
 import { CustomPetSettingsSection } from './custom-pet-settings-section.js';
 import {

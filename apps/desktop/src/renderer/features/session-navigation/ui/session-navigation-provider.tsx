@@ -39,12 +39,15 @@ import {
   SESSION_LIST_EXPANDED_MAX_WIDTH,
   SESSION_LIST_EXPANDED_MIN_WIDTH,
 } from '../model/session-list-layout.js';
-import type { SessionRailProjection } from '../model/session-rail.js';
+import { deriveSessionRail } from '../../../application/contracts/session-catalog/session-rail.js';
+import { sessionMatchesRail } from '../model/session-nav-filter.js';
+import { selectSessions, useSessionCatalogController } from '../../../application/contracts/session-catalog/session-catalog-state.js';
+import { useExternalStoreSelector } from '../../../application/contracts/session-catalog/use-external-store-selector.js';
+import { deriveStaleSessionIds } from '../../../application/contracts/session-catalog/stale-sessions.js';
 import { sessionRailLayoutStore } from '../model/session-rail-layout-store.js';
 import type {
   SessionNavigationPorts,
   SessionNavigationProjectScope,
-  SessionNavigationSession,
 } from '../ports.js';
 
 /** The chrome the shell owns and the rail only displays. */
@@ -64,10 +67,11 @@ export interface SessionNavigationChromeInput {
 }
 
 export interface SessionNavigationProviderProps extends SessionNavigationChromeInput {
-  rail: SessionRailProjection<SessionNavigationSession>;
+  activeSessionId: string | undefined;
+  hiddenSessionIds: ReadonlySet<string>;
   projectScopes: readonly SessionNavigationProjectScope[];
   streamingSessionIds: ReadonlySet<string>;
-  staleSessionIds: ReadonlySet<string>;
+  sendOutcomes: Parameters<typeof deriveStaleSessionIds>[0]['sendOutcomes'];
   SessionBadge?: ComponentType<{ readonly sessionId: string }>;
   ports: SessionNavigationPorts;
   /**
@@ -91,8 +95,15 @@ export interface SessionNavigationProviderProps extends SessionNavigationChromeI
  * first, the few dozen fibers of permanent chrome on the second.
  */
 export function SessionNavigationProvider(props: SessionNavigationProviderProps) {
+  const catalog = useSessionCatalogController();
+  const sessions = useExternalStoreSelector(catalog, selectSessions);
+  const rail = useMemo(() => deriveSessionRail(sessions, props.activeSessionId,
+    (session) => !props.hiddenSessionIds.has(session.id) && sessionMatchesRail(session)),
+  [sessions, props.activeSessionId, props.hiddenSessionIds]);
+  const staleSessionIds = useMemo(() => deriveStaleSessionIds({ sessions, sendOutcomes: props.sendOutcomes }),
+    [sessions, props.sendOutcomes]);
   const controller = useSessionNavigationController({
-    rail: props.rail,
+    rail,
     projectScopes: props.projectScopes,
     ports: props.ports,
   });
@@ -172,10 +183,10 @@ export function SessionNavigationProvider(props: SessionNavigationProviderProps)
 
   const data = useMemo<SessionRailData>(
     () => ({
-      sessions: props.rail.sessions,
-      activeId: props.workHubActive ? undefined : props.rail.activeRowId,
+      sessions: rail.sessions,
+      activeId: props.workHubActive ? undefined : rail.activeRowId,
       streamingSessionIds: props.streamingSessionIds,
-      staleSessionIds: props.staleSessionIds,
+      staleSessionIds,
       worktreeSessionIds: controller.selectors.worktreeSessionIds,
       groups: controller.layout.viewMode === 'project' ? controller.selectors.groups : undefined,
       groupVariant: controller.layout.viewMode,
@@ -196,8 +207,8 @@ export function SessionNavigationProvider(props: SessionNavigationProviderProps)
       props.onSelectSession,
       projectActions,
       relinkableProjectIds,
-      props.rail,
-      props.staleSessionIds,
+      rail,
+      staleSessionIds,
       props.streamingSessionIds,
       props.workHubActive,
       rowActions,

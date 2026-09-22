@@ -23,7 +23,7 @@ import { getDesktopConversationCopy } from './locales/conversation-copy.js';
 import { localizedShellErrorMessage } from './locales/shell-copy.js';
 import { normalizeSessionSummaryForDisplay } from './session-status-presentation.js';
 import {
-  selectAuthoritativeSessionIds, selectCatalogRevision, selectSessions, type SessionCatalogController,
+  selectAuthoritativeSessionIds, selectHasSessions, type SessionCatalogController,
 } from './application/contracts/session-catalog/session-catalog-state.js';
 import { sessionIdSetsEqual } from './features/conversation/index.js';
 import { useExternalStoreSelector } from './application/contracts/session-catalog/use-external-store-selector.js';
@@ -36,8 +36,7 @@ export function useAppShellSessionList(
   const uiLocale = useUiLocale();
   const presentation = useRef({ uiLocale, toastApi });
   presentation.current = { uiLocale, toastApi };
-  const sessions = useExternalStoreSelector(catalog, selectSessions);
-  const catalogRevision = useExternalStoreSelector(catalog, selectCatalogRevision);
+  const hasSessions = useExternalStoreSelector(catalog, selectHasSessions);
   const authoritativeSessionIds = useExternalStoreSelector(
     catalog, selectAuthoritativeSessionIds, undefined, sessionIdSetsEqual,
   );
@@ -48,5 +47,5 @@ export function useAppShellSessionList(
     toastApi.error(copy.refreshSessionsFailedTitle,
       localizedShellErrorMessage(error, copy.refreshSessionsFailedFallback, locale));
   }), [catalog]);
-  return { sessions, catalogRevision, authoritativeSessionIds, sessionsRef, ...actions };
+  return { hasSessions, authoritativeSessionIds, sessionsRef, ...actions };
 }

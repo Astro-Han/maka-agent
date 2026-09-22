@@ -59,7 +59,7 @@ import { SettingsPage, SettingsSection } from './settings-section';
 import { getCapabilityReasonCopy } from '../locales/capability-reason-copy';
 import { getPermissionCenterCopy, type PermissionCenterCopy } from '../locales/permission-center-copy';
 import { botStatusReasonCopy } from '../locales/settings-bot-copy';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import {
   useRuntimeHostSettingsErrorReporter,
   useRuntimeHostSettingsTarget,

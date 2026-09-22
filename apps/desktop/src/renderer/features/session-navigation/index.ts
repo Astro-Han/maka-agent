@@ -19,9 +19,10 @@
 
 export { SessionNavigationServicesProvider } from './services-context.js';
 export { SessionNavigationProvider } from './ui/session-navigation-provider.js';
+export { TasksSettingsPage, type ArchivedTasksBridge } from './ui/archived-tasks-page.js';
 export { createSessionOpenCommand } from './controller/session-open-command.js';
 export { useSessionNavigationReads } from './controller/use-session-navigation-reads.js';
-export { deriveSessionRail } from './model/session-rail.js';
+export { deriveSessionRail } from '../../application/contracts/session-catalog/session-rail.js';
 export { sessionRailLayoutStore } from './model/session-rail-layout-store.js';
 export type {
   SessionNavigationRowActions,

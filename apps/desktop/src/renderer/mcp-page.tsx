@@ -110,7 +110,7 @@ import {
   mcpWriteFailureMessage,
   type McpEditorDraft,
 } from './mcp-page-model';
-import { settingsActionErrorMessage } from './settings/settings-error-copy';
+import { settingsActionErrorMessage } from './application/contracts/settings-presentation/settings-error-copy.js';
 import { getMcpCopy, type McpCopy } from './locales/mcp-copy';
 import { formatCommandLine } from './mcp-command-line';
 import {

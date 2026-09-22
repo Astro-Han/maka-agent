@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { useMemo } from 'react';
 import type { OrchestrationMode } from '@maka/core/orchestration';
 import type { SandboxMode } from '@maka/core/permission';
 import { executionPoliciesEqual, type ExecutionPolicy, type ApprovalPolicy } from '@maka/core/execution-permissions';
@@ -34,7 +35,7 @@ import {
   type SessionModelConfigurationIntent,
   type SessionModelTarget,
 } from './session-model-configuration-intent.js';
-import type { DesktopSessionSummary } from '../../../shared/desktop-session-projection.js';
+import type { SessionCatalogController } from '../../application/contracts/session-catalog/session-catalog-state.js';
 import { useSessionSettingsServices } from './services-context.js';
 
 type SessionSettingValues = {
@@ -45,9 +46,8 @@ type SessionSettingValues = {
 };
 
 export function useSessionSettingIntent<Owner extends { sessionId?: string }>(input: {
-  catalogRevision: number;
+  catalog: Pick<SessionCatalogController, 'getState' | 'subscribe'>;
   isActiveSession(sessionId: string): boolean;
-  sessions: readonly DesktopSessionSummary[];
   newTaskExecutionPolicy: ExecutionPolicy;
   refreshCatalog(): Promise<unknown>;
   saveComposerDefaults(model: SessionModelTarget): void;
@@ -75,9 +75,13 @@ export function useSessionSettingIntent<Owner extends { sessionId?: string }>(in
     input.showSessionError(sessionId, failure.title, failure.description);
   };
   const catalogSessionRevision = (sessionId: string) =>
-    input.sessions.find((session) => session.id === sessionId)?.revision;
+    input.catalog.getState().sessions.find((session) => session.id === sessionId)?.revision;
+  const catalog = useMemo(() => ({
+    revision: () => input.catalog.getState().revision,
+    subscribeChanged: input.catalog.subscribe,
+  }), [input.catalog]);
   const intent = useSharedSessionSettingIntent<SessionSettingValues>({
-    catalogRevision: input.catalogRevision,
+    catalog,
     refreshCatalog: input.refreshCatalog,
     channels: {
       modelConfiguration: {
@@ -139,7 +143,7 @@ export function useSessionSettingIntent<Owner extends { sessionId?: string }>(in
   const sessionPolicy = (sessionId: string): ExecutionPolicy | undefined => {
     const pending = intent.overlayByChannel.executionPolicy[sessionId];
     if (pending) return pending;
-    const session = input.sessions.find((candidate) => candidate.id === sessionId);
+    const session = input.catalog.getState().sessions.find((candidate) => candidate.id === sessionId);
     return session?.approvalPolicy
       ? { sandboxMode: session.sandboxMode, approvalPolicy: session.approvalPolicy }
       : undefined;
@@ -176,7 +180,7 @@ export function useSessionSettingIntent<Owner extends { sessionId?: string }>(in
       intent.request('modelConfiguration', sessionId, modelConfigurationIntentForModel(modelTarget)),
     setSessionThinkingLevel: (sessionId: string, thinkingLevel: ThinkingLevel | null) => {
       const pending = intent.overlayByChannel.modelConfiguration[sessionId];
-      const session = input.sessions.find((candidate) => candidate.id === sessionId);
+      const session = input.catalog.getState().sessions.find((candidate) => candidate.id === sessionId);
       const currentModelTarget = session?.llmConnectionId
         ? {
             llmConnectionId: session.llmConnectionId,

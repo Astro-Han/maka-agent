@@ -20,7 +20,7 @@
 import { useUiLocale } from '@maka/ui';
 import type { UsageSettings } from '@maka/core/settings';
 import { UsageSettingsView } from '../features/usage';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { SettingsPage } from './settings-section';
 
 /**

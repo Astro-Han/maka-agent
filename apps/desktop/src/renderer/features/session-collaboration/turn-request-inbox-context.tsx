@@ -18,7 +18,9 @@
  */
 
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import { useToast, useUiLocale } from '@maka/ui';
+import { useToast, useUiLocale, valuesEqual } from '@maka/ui';
+import { useSessionCatalogController, type SessionCatalogState } from '../../application/contracts/session-catalog/session-catalog-state.js';
+import { useExternalStoreSelector } from '../../application/contracts/session-catalog/use-external-store-selector.js';
 import { getSessionCollaborationCopy } from '../../locales/session-collaboration-copy.js';
 import { useSessionTurnRequestInbox } from './controller/use-turn-request-inbox.js';
 
@@ -43,15 +45,19 @@ type SessionTurnRequestInbox = ReturnType<typeof useSessionTurnRequestInbox> & {
 };
 
 const SessionTurnRequestInboxContext = createContext<SessionTurnRequestInbox | null>(null);
+const selectSessionNames = (state: SessionCatalogState) => state.sessions
+  .map(({ id, name }) => ({ id, name })).sort((a, b) => a.id.localeCompare(b.id));
 
 export function SessionTurnRequestInboxProvider(props: {
-  readonly sessions: readonly { readonly id: string; readonly name: string }[];
   readonly onOpenSession: (sessionId: string) => void;
   readonly children?: ReactNode;
 }) {
   const copy = getSessionCollaborationCopy(useUiLocale());
+  const catalog = useSessionCatalogController();
+  const sessions = useExternalStoreSelector(catalog, selectSessionNames, undefined, valuesEqual);
   const inbox = useSessionTurnRequestInbox({
     ...props,
+    sessions,
     toast: useToast(),
     copy,
   });

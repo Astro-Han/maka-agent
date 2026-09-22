@@ -33,7 +33,7 @@ import {
   type AppUpdateAboutProjection,
 } from '../features/app-update/index.js';
 import { SettingsPage, SettingsRow, SettingsSection } from './settings-section.js';
-import { settingsActionErrorMessage } from './settings-error-copy.js';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { SettingsSkeletonStack } from './settings-skeleton.js';
 import { useActionGuard } from './use-action-guard.js';
 import { aboutChannelSummary, aboutUpdateRow } from './about-update-status.js';

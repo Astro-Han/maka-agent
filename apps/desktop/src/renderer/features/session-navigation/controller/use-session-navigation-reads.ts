@@ -17,11 +17,13 @@
  * under the License.
  */
 
-import { useMemo } from 'react';
+import { valuesEqual } from '@maka/ui';
+import { useCallback } from 'react';
+import type { SessionCatalogController, SessionCatalogState } from '../../../application/contracts/session-catalog/session-catalog-state.js';
 import { useExternalStoreSelector } from '../../../application/contracts/session-catalog/use-external-store-selector.js';
 import { deriveBranchBanner, type BranchBanner } from '../model/branch-banner.js';
 import { sessionMatchesRail } from '../model/session-nav-filter.js';
-import { deriveSessionRail, type SessionRailProjection } from '../model/session-rail.js';
+import { deriveSessionRail } from '../../../application/contracts/session-catalog/session-rail.js';
 import {
   selectRailLayout,
   sessionRailLayoutStore,
@@ -34,46 +36,30 @@ import {
 import type { SessionNavigationSession } from '../ports.js';
 
 export interface SessionNavigationReads {
-  /** The rail's membership, derived once and shared with the command palette. */
-  rail: SessionRailProjection<SessionNavigationSession>;
+  activeParentSession: { id: string; name: string } | undefined;
   branchBanner: BranchBanner | undefined;
   revisionNavigation: SessionRevisionNavigation | undefined;
   layout: SessionRailLayoutState;
 }
 
-/**
- * What the shell reads from Session Navigation, as opposed to what it owns.
- *
- * Nothing here holds state: three `useMemo`s over the catalog the shell already
- * has, and one subscription to the rail's geometry — which the window frame
- * needs, because `--maka-sidenav-width` is where the titlebar's breadcrumb
- * starts. The rail's own state lives under `SessionNavigationProvider` and is
- * not visible from here, which is the point of #4109: a hook called in the
- * shell's render body has the whole tree as its scope, so the ones that remain
- * had better hold nothing.
- */
+/** Only breadcrumb, revision navigation and geometry reach the shell. */
 export function useSessionNavigationReads(input: {
-  sessions: readonly SessionNavigationSession[];
+  catalog: SessionCatalogController;
   activeSessionId: string | undefined;
   activeSession: SessionNavigationSession | undefined;
   hiddenSessionIds: ReadonlySet<string>;
 }): SessionNavigationReads {
-  const { activeSession, activeSessionId, hiddenSessionIds, sessions } = input;
-  const rail = useMemo(
-    () =>
-      deriveSessionRail(sessions, activeSessionId, (session) =>
-        !hiddenSessionIds.has(session.id) && sessionMatchesRail(session),
-      ),
-    [activeSessionId, hiddenSessionIds, sessions],
-  );
-  const branchBanner = useMemo(
-    () => deriveBranchBanner(activeSession, sessions),
-    [activeSession, sessions],
-  );
-  const revisionNavigation = useMemo(
-    () => deriveSessionRevisionNavigation(sessions, activeSessionId),
-    [activeSessionId, sessions],
-  );
+  const { activeSession, activeSessionId, hiddenSessionIds, catalog } = input;
+  const select = useCallback(({ sessions }: SessionCatalogState) => {
+    const { activeParentSession: parent } = deriveSessionRail(sessions, activeSessionId,
+      (session) => !hiddenSessionIds.has(session.id) && sessionMatchesRail(session));
+    return {
+      activeParentSession: parent ? { id: parent.id, name: parent.name } : undefined,
+      branchBanner: deriveBranchBanner(activeSession, sessions),
+      revisionNavigation: deriveSessionRevisionNavigation(sessions, activeSessionId),
+    };
+  }, [activeSession, activeSessionId, hiddenSessionIds]);
+  const facts = useExternalStoreSelector(catalog, select, undefined, valuesEqual);
   const layout = useExternalStoreSelector(sessionRailLayoutStore, selectRailLayout);
-  return { rail, branchBanner, revisionNavigation, layout };
+  return { ...facts, layout };
 }

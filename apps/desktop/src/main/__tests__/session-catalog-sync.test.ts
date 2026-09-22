@@ -25,6 +25,7 @@ import type { DesktopSessionSummary } from '../../shared/desktop-session-project
 import { createSessionCatalogController, selectAuthoritativeSessionIds } from '../../renderer/application/contracts/session-catalog/session-catalog-state.js';
 import { createSessionPatchDrain } from '../../renderer/platform/desktop/session-catalog-sync.js';
 import { handleSessionChangedEvent } from '../../renderer/application/contracts/session-catalog/session-change-effects.js';
+import { observeRevisionDraftRetirement } from '../../renderer/features/conversation/index.js';
 
 function session(hostId: string, activityAt: number): DesktopSessionSummary {
   return {
@@ -35,6 +36,29 @@ function session(hostId: string, activityAt: number): DesktopSessionSummary {
     hasUnread: false, labels: [], sandboxMode: 'workspace-write', approvalPolicy: { kind: 'on-request' },
   };
 }
+
+test('revision drafts wait for admission, retire once on observed removal, and release their subscription', () => {
+  const catalog = createSessionCatalogController();
+  const source = session('source', 1);
+  const owner = session('draft', 2);
+  catalog.commitSessions([source]);
+  let retirements = 0;
+  const stop = observeRevisionDraftRetirement(catalog,
+    { sourceSessionId: source.id, draftSessionId: owner.id }, () => { retirements++; });
+  catalog.commitSessions([source]);
+  assert.equal(retirements, 0, 'a not-yet-published draft is not a deletion');
+  catalog.commitPatch(owner.id, owner);
+  catalog.commitPatch(owner.id, null);
+  catalog.commitPatch(source.id, null);
+  assert.equal(retirements, 1);
+  stop();
+  catalog.commitSessions([source, owner]);
+  const stopNext = observeRevisionDraftRetirement(catalog,
+    { sourceSessionId: source.id, draftSessionId: owner.id }, () => { retirements++; });
+  stopNext();
+  catalog.commitPatch(source.id, { ...source, isArchived: true });
+  assert.equal(retirements, 1, 'a discarded draft no longer observes catalog changes');
+});
 
 test('row patches fence late lists, preserve ordering and do not prove unrelated deletion', () => {
   const catalog = createSessionCatalogController();

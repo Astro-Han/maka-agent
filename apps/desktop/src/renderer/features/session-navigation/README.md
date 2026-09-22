@@ -17,65 +17,26 @@
   under the License.
 -->
 
-# Session Navigation feature
+# Session Navigation
 
-Session Navigation is the renderer feature boundary for the Session rail. It
-owns:
+[中文](README.zh-CN.md)
 
-- rail membership, linked-session highlighting, Project/Runtime Host grouping,
-  worktree badges, branch banners, and revision navigation;
-- collapsed/expanded state, width, grouping mode, and their existing local
-  persistence keys;
-- explicit jumps into a Session, including search turn targets; and
-- flag, archive, restore, rename, delete, and archived-task purge lifecycles.
+Owns rail membership, Host/Project grouping, linked-session navigation, geometry,
+and archive/restore/rename/delete/purge actions.
 
-## Dependency direction
+Composition owns the shared Session catalog. The rail and archived-task page
+subscribe directly; the shell reads only breadcrumb, revision navigation and
+geometry. The command palette shares the revision-aware projection through
+`application/contracts/session-catalog`.
 
-- Consumers import production APIs from `features/session-navigation`.
-- Tests may additionally import `features/session-navigation/testing`.
-- Contract types the shell fulfills for this feature live in `ports.ts`;
-  controller files export only what they implement.
-- Desktop Sessions bridge calls go through `SessionNavigationServices`; only
-  `platform/desktop/create-session-navigation-services.ts` reads that bridge.
-- Session Navigation may use shared renderer storage/copy, core types, and Maka
-  UI, but must not import AppShell, preload implementation, or main-process
-  code.
-
-AppShell remains responsible for the authoritative catalog snapshot and for
-composing explicit cross-feature intents: top-level destination selection,
-WorkHub exit, active-Session selection, transcript clearing, and renderer-state
-cleanup. Session Navigation does not own catalog authority, transcript/runtime
-state, Session controls, task submission, or Module Hub routing.
-
-Those intents stay intents. Opening a Session also clears the active transcript
-and leaves WorkHub, and the rail does not subscribe to either: it calls them
-through `SessionNavigationPorts`, which the shell composes.
-
-## Public surface
-
-- `<SessionNavigationProvider>` is where the rail's state lives. It calls
-  `useSessionNavigationController` and publishes what the rail reads as two
-  contexts — its data and its chrome — so a re-render of AppShell is not a
-  re-render of the rail (#4109).
-- `useSessionNavigationController` owns layout, projections, and row mutation
-  commands. It is called by the provider and nowhere else; calling it in a
-  render body above the rail is what put the rail's state on the whole tree.
-- `useSessionNavigationReads` is the shell's own narrow read: the rail
-  projection it also needs for the command palette, the branch banner, the
-  revision navigation, and the rail's width. It holds no state.
-- `createSessionOpenCommand` composes an explicit Session jump out of the
-  shell's own actions.
-- `sessionRailLayoutStore` owns collapse, width, and grouping mode, with the
-  existing persistence keys.
-
-## Lifecycle invariants
-
-- Archived, linked-subagent, and hidden companion Sessions follow the existing
-  single-rail projection; a linked child highlights its visible root.
-- Local Sessions group by Project while remote Sessions group by Runtime Host.
-- Opening a Session first exits WorkHub, selects the Sessions destination, then
-  activates the Session and replaces or clears the turn-scroll target.
-- At most one row mutation runs per Session. Mutations retain revision-family
-  semantics, and renderer state is cleared only after the Host confirms removal.
-- Width persistence remains trailing-debounced; width, collapse, and grouping
-  reuse the existing local-storage keys and hydration rules.
+- Production consumers use the feature index; tests may use `testing.ts`.
+- Session mutations use `SessionNavigationServices`; only its Desktop adapter
+  accesses the bridge. No preload, main-process or AppShell implementation imports.
+- `SessionNavigationProvider` owns the controller and publishes separate data
+  and chrome contexts. AppShell supplies cross-feature navigation intents.
+- Opening a Session exits WorkHub, selects Sessions, then replaces or clears the
+  transcript target. A linked child highlights its visible root.
+- Mutations retain revision-family semantics. Renderer state is cleared only
+  after Host confirmation. Purge cannot expand beyond the confirmed target set.
+- Host and Project jointly identify groups. Width persistence is trailing-debounced;
+  collapse, width and grouping retain their existing storage keys.

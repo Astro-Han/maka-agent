@@ -29,7 +29,7 @@ import {
 } from '@astryxdesign/core/Dialog';
 import { Layout, LayoutContent } from '@astryxdesign/core/Layout';
 import { PasswordInput } from './password-input';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { getBotSettingsCopy } from '../locales/settings-bot-copy';
 
 /**

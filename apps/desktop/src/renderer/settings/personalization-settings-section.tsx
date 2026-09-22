@@ -30,11 +30,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { SettingsField, SettingsRow, SettingsSection } from './settings-section';
 import { SettingsExpandableRow } from './settings-expandable-row';
-import { getSettingsSharedCopy } from '../locales/settings-shared-copy';
+import { getSettingsSharedCopy } from '../application/contracts/settings-presentation/settings-shared-copy.js';
 import type { AppSettings, PersonalizationSettings, UpdateAppSettingsResult } from '@maka/core/settings';
 import type { UiLocalePreference } from '@maka/core/ui-locale';
 import { Selector, TextArea, TextInput, useMountedRef, useToast, useUiLocale } from '@maka/ui';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { getSettingsPreferencesCopy } from '../locales/settings-preferences-copy.js';
 import { useOptionalRuntimeHostSettingsTarget } from './runtime-host-settings-target.js';
 import { SettingsRowSkeleton } from './settings-skeleton.js';

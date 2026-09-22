@@ -1332,7 +1332,10 @@ function NewChatComposerDraft() {
   const toast = useToast();
   const locale = useUiLocale();
   const intent = useSessionSettingIntent({
-    catalogRevision: 0, sessions: [], isActiveSession: () => false,
+    catalog: {
+      getState: () => ({ revision: 0, sessions: [], hasSnapshot: true, activeSessionId: undefined }),
+      subscribe: () => () => {},
+    }, isActiveSession: () => false,
     newTaskExecutionPolicy: policy, setNewTaskExecutionPolicy: setPolicy,
     refreshCatalog: async () => {}, saveComposerDefaults: noop,
     writeFailureCopy: () => ({ title: 'Unexpected Session write', description: '' }),

@@ -91,13 +91,13 @@ import {
 import { getSettingsNavigationCopy } from '../locales/settings-navigation-copy.js';
 import { SettingRow } from './settings-rows';
 import { SettingsPage, SettingsSection as SettingsSectionBlock } from './settings-section';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { SessionBundleTasks } from '../features/session-bundle';
 import { ImportTasksSettingsPage } from './import-tasks-settings-page';
-import { TasksSettingsPage, type ArchivedTasksBridge } from './tasks-settings-page';
+import { TasksSettingsPage, type ArchivedTasksBridge } from '../features/session-navigation/index.js';
 import { UsageScopeMount, UsageSettingsPage, type UsageScopeHandle } from './usage-settings-page';
 import type { UiLocaleUpdateGate } from './ui-locale-update-gate';
-import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
+import { getSettingsSharedCopy } from '../application/contracts/settings-presentation/settings-shared-copy.js';
 import {
   ConnectionSettingsServicesConsumer,
   type ConnectionSettingsServices,
@@ -1219,7 +1219,7 @@ function SettingsPageBody(props: {
         <SettingsPage as="section">
           <SessionBundleTasks
             isLocalTarget={props.isLocalRuntimeHost}
-            sessions={props.archivedTasks.sessions}
+            catalog={props.archivedTasks.catalog}
             renderSection={({ children, ...section }) => (
               <SettingsSectionBlock {...section}>{children}</SettingsSectionBlock>
             )}

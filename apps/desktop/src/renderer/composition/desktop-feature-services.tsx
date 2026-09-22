@@ -18,6 +18,7 @@
  */
 
 import type { ReactNode } from 'react';
+import { createSessionCatalogController, SessionCatalogProvider } from '../application/contracts/session-catalog/session-catalog-state.js';
 import { ClientPluginServicesProvider } from '../features/client-plugins/index.js';
 import { createDesktopClientPluginServices } from '../platform/desktop/create-client-plugin-services.js';
 import { WorkHubServicesProvider } from '../features/workhub';
@@ -59,6 +60,7 @@ if (import.meta.env.DEV) {
 
 export function createDesktopFeatureServices() {
   return {
+    sessionCatalog: createSessionCatalogController(),
     clientPlugins: createDesktopClientPluginServices(),
     appUpdate: createDesktopAppUpdateServices(),
     workHub: createDesktopWorkHubServices(),
@@ -83,6 +85,7 @@ export function DesktopFeatureServicesProvider(props: {
   readonly children?: ReactNode;
 }) {
   return (
+    <SessionCatalogProvider value={props.services.sessionCatalog}>
     <AppUpdateServicesProvider services={props.services.appUpdate}>
       <ConnectionSettingsServicesProvider services={props.services.connectionSettings}>
       <ExternalAgentSettingsServicesProvider services={props.services.externalAgentSettings}>
@@ -116,5 +119,6 @@ export function DesktopFeatureServicesProvider(props: {
       </ExternalAgentSettingsServicesProvider>
       </ConnectionSettingsServicesProvider>
     </AppUpdateServicesProvider>
+    </SessionCatalogProvider>
   );
 }

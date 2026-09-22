@@ -22,6 +22,7 @@ import { afterEach, describe, it } from 'node:test';
 import { parseHTML } from 'linkedom';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { createSessionCatalogController } from '../../renderer/application/contracts/session-catalog/session-catalog-state.js';
 import { AstryxLocaleProvider, LocaleProvider, ToastProvider } from '@maka/ui';
 import type { DesktopRuntimeHostRef } from '../../preload/bridge-contract.js';
 import type { DesktopExternalSessionCatalogItem } from '../../preload/external-session-catalog.js';
@@ -911,7 +912,7 @@ async function renderPage(options: {
     // own is a composition production never has.
     const page = createElement(SessionBundleTasks, {
       isLocalTarget: options.offersBundleSource === true,
-      sessions: [],
+      catalog: createSessionCatalogController(),
       renderSection: ({ children }: { children: ReactNode }) =>
         createElement('div', null, children),
       children: bare,

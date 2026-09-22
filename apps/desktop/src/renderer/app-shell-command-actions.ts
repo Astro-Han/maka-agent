@@ -18,9 +18,10 @@
  */
 
 import { useMemo, useRef } from "react";
+import type { SessionCatalogController } from './application/contracts/session-catalog/session-catalog-state.js';
 import type { LlmConnection } from '@maka/core/llm-connections';
 import type { SandboxMode } from '@maka/core/permission';
-import type { SessionSummary, StoredMessage } from '@maka/core/session';
+import type { StoredMessage } from '@maka/core/session';
 import type { SettingsSection, ThemePreference } from '@maka/core/settings';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type { NavSelection } from "@maka/ui";
@@ -32,9 +33,7 @@ import {
 } from './default-runtime-host-operation.js';
 import {
   buildCommandList,
-  buildSessionCommands,
 } from "./command-palette-commands.js";
-import type { Command } from './features/overlays/index.js';
 import { renderConversationMarkdown } from "./conversation-markdown.js";
 import {
   commandPaletteActionErrorMessage,
@@ -74,9 +73,9 @@ export interface AppShellCommandListOptions {
   newTaskProfileId: string | undefined;
   settingsOpen: boolean;
   settingsProfileId: string | undefined;
-  sessions: readonly SessionSummary[];
+  catalog: SessionCatalogController;
   themePref: ThemePreference;
-  visibleSessions: SessionSummary[];
+  hiddenSessionIds: ReadonlySet<string>;
   captureComposerImportOwner: () => ComposerImportOwner;
   createSession: () => void;
   openSideConversation: () => void;
@@ -224,9 +223,9 @@ export function buildAppShellCommandList(
       optionsRef.current.setNavSelection(selection);
     },
     onExportActiveConversation: async () => {
-      const { activeId, messages, sessions, toastApi } = optionsRef.current;
+      const { activeId, messages, catalog, toastApi } = optionsRef.current;
       if (!activeId) return;
-      const session = sessions.find((s) => s.id === activeId);
+      const session = catalog.getState().sessions.find((s) => s.id === activeId);
       const markdown = renderConversationMarkdown(
         session?.name ?? copy.newConversation,
         messages,
@@ -243,9 +242,9 @@ export function buildAppShellCommandList(
       }
     },
     onSaveActiveConversationToFile: async () => {
-      const { activeId, messages, sessions, toastApi } = optionsRef.current;
+      const { activeId, messages, catalog, toastApi } = optionsRef.current;
       if (!activeId) return;
-      const session = sessions.find((s) => s.id === activeId);
+      const session = catalog.getState().sessions.find((s) => s.id === activeId);
       const sessionName = session?.name ?? copy.newConversation;
       const markdown = renderConversationMarkdown(
         sessionName,
@@ -368,48 +367,19 @@ export function buildAppShellCommandList(
   });
 }
 
-export function buildAppShellSessionCommands(
-  optionsRef: RefBox<AppShellCommandListOptions>,
-): ReturnType<typeof buildSessionCommands> {
-  const options = optionsRef.current;
-  return buildSessionCommands({
-    locale: options.uiLocale,
-    sessions: options.visibleSessions,
-    activeSessionId: options.activeId,
-    onSelectSession: (sessionId) => {
-      optionsRef.current.openSessionInChat(sessionId);
-    },
-  });
-}
-
-/**
- * #1045: the palette's command list keeps a stable identity while it is open.
- * app-shell rebuilds commandOptions on every render (streaming ticks
- * included), so the base commands are built once per open/close transition —
- * their run() closures dereference the latest options through the ref, so the
- * frozen list still acts on current data. Session rows are derived separately,
- * memoized on the visible session catalog + active session only: background
- * session creates/renames stay live while the palette is open, without
- * reintroducing per-tick rebuilds (visibleSessions is itself memoized in
- * app-shell, so rows rebuild only on real catalog changes).
- */
+/** Base command actions read current options without rebuilding on stream ticks. */
 export function useAppShellCommands(
   paletteOpen: boolean,
   commandOptions: AppShellCommandListOptions,
-): Command[] {
+) {
   const optionsRef = useRef(commandOptions);
   optionsRef.current = commandOptions;
-  const { activeId, uiLocale, visibleSessions } = commandOptions;
-  const baseCommands = useMemo(
+  const { uiLocale } = commandOptions;
+  const commands = useMemo(
     () => buildAppShellCommandList(optionsRef),
     [paletteOpen, uiLocale],
   );
-  const sessionCommands = useMemo(
-    () => buildAppShellSessionCommands(optionsRef),
-    [paletteOpen, visibleSessions, activeId, uiLocale],
-  );
-  return useMemo(
-    () => [...baseCommands, ...sessionCommands],
-    [baseCommands, sessionCommands],
-  );
+  return { commands, activeSessionId: commandOptions.activeId,
+    hiddenSessionIds: commandOptions.hiddenSessionIds,
+    onSelectSession: commandOptions.openSessionInChat };
 }

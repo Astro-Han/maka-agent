@@ -24,7 +24,7 @@ import {
   archivedTaskRows,
   isOrphanedSubagentTask,
   matchesArchivedTaskQuery,
-} from '../../renderer/settings/task-catalog-rows.js';
+} from '../../renderer/features/session-navigation/testing.js';
 
 function summary(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {

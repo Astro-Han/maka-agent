@@ -22,7 +22,11 @@
 // across both. Astryx owns the dialog, input, listbox, keyboard navigation,
 // focus, and dismissal; the overlays controller owns whether it is open.
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useSessionCatalogController, type SessionCatalogState } from '../../../application/contracts/session-catalog/session-catalog-state.js';
+import { useExternalStoreSelector } from '../../../application/contracts/session-catalog/use-external-store-selector.js';
+import { deriveSessionRail } from '../../../application/contracts/session-catalog/session-rail.js';
+import { buildSessionCommands } from '../model/session-commands.js';
 import { ICON_SIZE, ChevronRight, CornerDownLeft } from '@maka/ui/icons';
 import {
   CommandPalette as AstryxCommandPalette,
@@ -33,6 +37,7 @@ import {
   type SearchableItem,
   PlatformShortcutText,
   useUiLocale,
+  valuesEqual,
 } from '@maka/ui';
 import { Kbd } from '@astryxdesign/core/Kbd';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
@@ -52,6 +57,27 @@ function fuzzy(query: string, text: string): boolean {
     if (t[j] === q[i]) i += 1;
   }
   return i === q.length;
+}
+
+/** Owns live Session rows without subscribing the shell or other overlays. */
+export function SessionCommandPalette(props: {
+  commands: Command[];
+  activeSessionId: string | undefined;
+  hiddenSessionIds: ReadonlySet<string>;
+  onSelectSession(sessionId: string): void;
+}) {
+  const { selectors } = useOverlays();
+  const locale = useUiLocale();
+  const catalog = useSessionCatalogController();
+  const select = useCallback(({ sessions }: SessionCatalogState) => selectors.paletteOpen
+    ? deriveSessionRail(sessions, props.activeSessionId,
+      (session) => !props.hiddenSessionIds.has(session.id) && !session.isArchived).sessions
+    : [], [selectors.paletteOpen, props.activeSessionId, props.hiddenSessionIds]);
+  const sessions = useExternalStoreSelector(catalog, select, undefined, valuesEqual);
+  const commands = useMemo(() => [...props.commands, ...buildSessionCommands({
+    locale, sessions, activeSessionId: props.activeSessionId, onSelectSession: props.onSelectSession,
+  })], [props.commands, props.activeSessionId, props.onSelectSession, locale, sessions]);
+  return <CommandPalette commands={commands} />;
 }
 
 export function CommandPalette(props: { readonly commands: Command[] }) {

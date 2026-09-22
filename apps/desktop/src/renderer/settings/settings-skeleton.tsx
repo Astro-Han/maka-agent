@@ -19,7 +19,7 @@
 
 import { Skeleton } from '@astryxdesign/core';
 import { useUiLocale } from '@maka/ui';
-import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
+import { getSettingsSharedCopy } from '../application/contracts/settings-presentation/settings-shared-copy.js';
 import type { ReactNode } from 'react';
 import { SettingsRow } from './settings-section.js';
 

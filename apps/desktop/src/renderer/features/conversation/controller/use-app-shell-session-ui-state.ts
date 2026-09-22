@@ -18,14 +18,31 @@
  */
 
 import { useRef, useState } from 'react';
-import type { SessionSummary, StoredMessage } from '@maka/core/session';
-import type { TransientUserMessageProjection } from '@maka/ui';
+import type { StoredMessage } from '@maka/core/session';
+import { valuesEqual, type TransientUserMessageProjection } from '@maka/ui';
+import type { DesktopSessionSummary } from '../../../../shared/desktop-session-projection.js';
+import { selectSessionById, type SessionCatalogController } from '../../../application/contracts/session-catalog/session-catalog-state.js';
+import { useExternalStoreSelector } from '../../../application/contracts/session-catalog/use-external-store-selector.js';
 import { currentTranscriptRange } from './transcript-reading-position.js';
 import { createAppShellSessionUiStateController, type AppShellSessionUiStateController } from '../model/session-ui-state.js';
 
 interface TranscriptSource {
   range(): { readonly sessionId: string; readonly hasOlder: boolean };
   snapshot(): { readonly messages: readonly StoredMessage[]; readonly ready: boolean };
+}
+
+const RAIL_ONLY_KEYS = new Set<keyof DesktopSessionSummary>([
+  'activityAt', 'hasUnread', 'isFlagged', 'lastMessagePreview', 'localCreatedAt',
+  'revision', 'statusUpdatedAt', 'subagentRuntime',
+]);
+
+/** Unknown fields participate: adding a setting must not silently stale the shell. */
+function shellSessionRowEqual(a: DesktopSessionSummary | undefined, b: DesktopSessionSummary | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof DesktopSessionSummary)[]);
+  for (const key of keys) if (!RAIL_ONLY_KEYS.has(key) && !valuesEqual(a[key], b[key])) return false;
+  return true;
 }
 
 export type TranscriptPublisher<Controller> = (
@@ -38,9 +55,8 @@ export type TranscriptPublisher<Controller> = (
 /** The rendered messages and the earlier-history flag are a single publication. */
 export function useAppShellSessionUiState<
   Controller extends { readonly store: TranscriptSource },
-  Session extends SessionSummary & { localState?: string; shared?: boolean },
 >(
-  sessions: readonly Session[],
+  catalog: SessionCatalogController,
   requestedSessionId: string | undefined,
   activeIdRef: { current: string | undefined },
   commitTranscript: (sessionId: string, messages: StoredMessage[], controller: Controller) => boolean,
@@ -90,8 +106,8 @@ export function useAppShellSessionUiState<
     },
   }));
 
-  const activeCatalogSession = sessions.find((session) => session.id === view.sessionId);
-  const requestedCatalogSession = sessions.find((session) => session.id === requestedSessionId);
+  const activeCatalogSession = useExternalStoreSelector(catalog, selectSessionById, view.sessionId, shellSessionRowEqual);
+  const requestedCatalogSession = useExternalStoreSelector(catalog, selectSessionById, requestedSessionId, shellSessionRowEqual);
   // Locally staged tasks cannot admit Host reads until creation completes.
   const activeHostSession = activeCatalogSession?.localState !== 'pending' ? activeCatalogSession : undefined;
   const requestedHostSession = requestedCatalogSession?.localState !== 'pending' ? requestedCatalogSession : undefined;

@@ -58,7 +58,7 @@ import {
 } from "@maka/ui";
 import { ProviderBrandMark } from "./provider-brand-marks";
 import { PasswordInput } from "./password-input";
-import { settingsActionErrorMessage } from "./settings-error-copy";
+import { settingsActionErrorMessage } from "../application/contracts/settings-presentation/settings-error-copy.js";
 import { useActionGuard, useKeyedActionGuard } from "./use-action-guard";
 import { useOptimisticSettingsDraft } from "./use-optimistic-settings-draft";
 import {
@@ -71,7 +71,7 @@ import { getSettingsPreferencesCopy } from "../locales/settings-preferences-copy
 import { settingsTestResultMessage } from "../locales/settings-test-result-copy.js";
 import { getShellCopy } from "../locales/shell-copy.js";
 import type { RuntimeHostSettingsConnectionsBridge } from '../features/connection-settings';
-import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
+import { getSettingsSharedCopy } from '../application/contracts/settings-presentation/settings-shared-copy.js';
 import {
   useOptionalRuntimeHostSettingsTarget,
   useRuntimeHostSettingsTarget,

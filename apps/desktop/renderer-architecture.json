@@ -76,7 +76,6 @@
     "src/renderer/locales/settings-navigation-copy.ts",
     "src/renderer/locales/settings-preferences-copy.ts",
     "src/renderer/locales/settings-projects-copy.ts",
-    "src/renderer/locales/settings-shared-copy.ts",
     "src/renderer/locales/settings-tasks-copy.ts",
     "src/renderer/locales/settings-test-result-copy.ts",
     "src/renderer/locales/settings-usage-copy.ts",
@@ -160,7 +159,6 @@
     "src/renderer/settings/runtime-host-project-directory-editor.tsx",
     "src/renderer/settings/runtime-host-settings-target.tsx",
     "src/renderer/settings/runtime-host-ssh-terminal-dialog.tsx",
-    "src/renderer/settings/settings-error-copy.ts",
     "src/renderer/settings/settings-expandable-row.tsx",
     "src/renderer/settings/settings-modal.tsx",
     "src/renderer/settings/settings-nav.ts",
@@ -174,8 +172,6 @@
     "src/renderer/settings/settings-snapshot-cache.ts",
     "src/renderer/settings/settings-status-summary-filter.tsx",
     "src/renderer/settings/settings-surface.tsx",
-    "src/renderer/settings/task-catalog-rows.ts",
-    "src/renderer/settings/tasks-settings-page.tsx",
     "src/renderer/settings/ui-locale-update-gate.ts",
     "src/renderer/settings/usage-settings-page.tsx",
     "src/renderer/settings/use-action-guard.ts",
@@ -359,8 +355,8 @@
           "./locales/shell-copy.js": 1,
           "react": 1
         },
-        "importSpecifiers": 9,
-        "nonTriviaTokens": 2154
+        "importSpecifiers": 8,
+        "nonTriviaTokens": 2058
       },
       "src/renderer/app-shell-context-compaction.ts": {
         "importDeclarations": 0,
@@ -767,7 +763,6 @@
           "./app-shell-stop-action": 1,
           "./app-shell-turn-actions": 1,
           "./app-shell-turn-view-model": 1,
-          "./application/contracts/session-catalog/stale-sessions": 1,
           "./chat-composer-region": 1,
           "./chat-message-surface": 1,
           "./composer-defaults": 1,
@@ -840,7 +835,7 @@
           "react": 1
         },
         "importSpecifiers": 101,
-        "nonTriviaTokens": 13825
+        "nonTriviaTokens": 13736
       },
       "src/renderer/use-app-shell-composer-quotes.ts": {
         "importDeclarations": 3,
@@ -865,7 +860,7 @@
         "bridgePaths": {},
         "environmentCapabilities": {},
         "hookCalls": {
-          "useExternalStoreSelector": 3,
+          "useExternalStoreSelector": 2,
           "useRef": 1,
           "useUiLocale": 1
         },
@@ -884,7 +879,7 @@
           "react": 1
         },
         "importSpecifiers": 5,
-        "nonTriviaTokens": 291
+        "nonTriviaTokens": 277
       },
       "src/renderer/use-app-shell-session-ui-reads.ts": {
         "importDeclarations": 0,
@@ -928,7 +923,7 @@
           "react": 1
         },
         "importSpecifiers": 5,
-        "nonTriviaTokens": 461
+        "nonTriviaTokens": 459
       }
     },
     "closure": {
@@ -1507,15 +1502,6 @@
           "@maka/core/ui-locale": 1
         }
       },
-      "src/renderer/locales/settings-shared-copy.ts": {
-        "bridgePaths": {},
-        "environmentCapabilities": {},
-        "hookCalls": {},
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [],
-        "dependencyPaths": {}
-      },
       "src/renderer/locales/settings-tasks-copy.ts": {
         "bridgePaths": {},
         "environmentCapabilities": {},
@@ -1682,6 +1668,7 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "./application/contracts/settings-presentation/settings-error-copy.js": 1,
           "./default-runtime-host-operation.js": 1,
           "./locales/mcp-copy": 1,
           "./mcp-brand-marks": 1,
@@ -1689,7 +1676,6 @@
           "./mcp-command-line": 1,
           "./mcp-editor-validation": 1,
           "./mcp-page-model": 1,
-          "./settings/settings-error-copy": 1,
           "@astryxdesign/core": 1,
           "@astryxdesign/core/Dialog": 1,
           "@astryxdesign/core/Layout": 1,
@@ -2050,11 +2036,11 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../default-runtime-host-operation.js": 1,
           "../features/app-update/index.js": 1,
           "../locales/settings-preferences-copy.js": 1,
           "./about-update-status.js": 1,
-          "./settings-error-copy.js": 1,
           "./settings-section.js": 1,
           "./settings-skeleton.js": 1,
           "./use-action-guard.js": 1,
@@ -2092,10 +2078,10 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../locales/settings-preferences-copy.js": 1,
           "../theme": 1,
           "./custom-pet-settings-section.js": 1,
-          "./settings-error-copy": 1,
           "./settings-section": 1,
           "@astryxdesign/core": 1,
           "@maka/core/settings": 1,
@@ -2176,12 +2162,12 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../locales/settings-bot-copy": 1,
           "../locales/settings-test-result-copy": 1,
           "./bot-chat-detail": 1,
           "./bot-chat-overview": 1,
           "./bot-chat-shared": 1,
-          "./settings-error-copy": 1,
           "@maka/ui": 1,
           "react": 1
         }
@@ -2220,9 +2206,9 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../locales/settings-bot-copy": 1,
           "./bot-chat-shared": 1,
-          "./settings-error-copy": 1,
           "@astryxdesign/core": 1,
           "@astryxdesign/core/Dialog": 1,
           "@astryxdesign/core/Layout": 1,
@@ -2260,9 +2246,9 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../locales/settings-bot-copy": 1,
           "./password-input": 1,
-          "./settings-error-copy": 1,
           "@astryxdesign/core/Collapsible": 1,
           "@astryxdesign/core/Dialog": 1,
           "@astryxdesign/core/Layout": 1,
@@ -2311,9 +2297,9 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../locales/settings-preferences-copy.js": 1,
           "./custom-pet-library-model.js": 1,
-          "./settings-error-copy": 1,
           "./settings-section": 1,
           "@astryxdesign/core": 1,
           "@maka/ui": 1,
@@ -2340,10 +2326,10 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../locales/settings-daily-review-copy": 1,
           "../model-catalog-choices": 1,
           "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
           "./settings-section": 1,
           "./settings-skeleton": 1,
           "./use-action-guard": 1,
@@ -2375,11 +2361,11 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
+          "../application/contracts/settings-presentation/settings-shared-copy.js": 1,
           "../locales/settings-data-copy": 1,
-          "../locales/settings-shared-copy.js": 1,
           "../open-path": 1,
           "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
           "./settings-rows": 1,
           "./settings-section": 1,
           "./use-action-guard": 1,
@@ -2406,16 +2392,16 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
+          "../application/contracts/settings-presentation/settings-shared-copy.js": 1,
           "../features/network-proxy/index.js": 1,
           "../locales/settings-preferences-copy.js": 1,
-          "../locales/settings-shared-copy.js": 1,
           "../locales/settings-test-result-copy.js": 1,
           "../locales/shell-copy.js": 1,
           "./password-input": 1,
           "./personalization-settings-section": 1,
           "./provider-brand-marks": 1,
           "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
           "./settings-section": 1,
           "./settings-skeleton.js": 1,
           "./use-action-guard": 1,
@@ -2440,11 +2426,11 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../locales/capability-reason-copy": 1,
           "../locales/settings-bot-copy": 1,
           "../locales/settings-health-copy": 1,
           "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
           "./settings-section": 1,
           "./settings-skeleton": 1,
           "./settings-status-summary-filter": 1,
@@ -2604,11 +2590,11 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../locales/capability-reason-copy": 1,
           "../locales/permission-center-copy": 1,
           "../locales/settings-bot-copy": 1,
           "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
           "./settings-section": 1,
           "./settings-skeleton": 1,
           "./settings-status-summary-filter": 1,
@@ -2639,10 +2625,10 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
+          "../application/contracts/settings-presentation/settings-shared-copy.js": 1,
           "../locales/settings-preferences-copy.js": 1,
-          "../locales/settings-shared-copy": 1,
           "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
           "./settings-expandable-row": 1,
           "./settings-section": 1,
           "./settings-skeleton.js": 1,
@@ -2676,14 +2662,14 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
+          "../application/contracts/settings-presentation/settings-shared-copy.js": 1,
           "../locales/settings-projects-copy.js": 1,
-          "../locales/settings-shared-copy.js": 1,
           "../project-path-display.js": 1,
           "../remote-project-directory-dialog.js": 1,
           "./runtime-host-interaction-boundary.js": 1,
           "./runtime-host-profiles-section.js": 1,
           "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
           "./settings-section": 1,
           "./use-action-guard": 1,
           "@astryxdesign/core": 1,
@@ -2908,6 +2894,7 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../features/connection-settings": 1,
           "./provider-catalog-page": 1,
           "./provider-connection-detail": 1,
@@ -2915,7 +2902,6 @@
           "./provider-display": 1,
           "./provider-oauth-section": 1,
           "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
           "./settings-route-focus": 1,
           "./settings-route-header": 1,
           "@astryxdesign/core": 1,
@@ -2979,10 +2965,10 @@
         "actionFactories": [],
         "dependencyPaths": {
           "../../shared/runtime-host-project-directory-policy.js": 1,
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../features/runtime-host-management": 1,
           "../locales/settings-projects-copy.js": 1,
           "./runtime-host-project-directory-editor.js": 1,
-          "./settings-error-copy.js": 1,
           "@astryxdesign/core/Dialog": 1,
           "@astryxdesign/core/Layout": 1,
           "@astryxdesign/core/Tooltip": 1,
@@ -3049,6 +3035,7 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../features/runtime-host-management": 1,
           "../features/session-collaboration": 1,
           "../locales/peer-mesh-copy.js": 1,
@@ -3057,7 +3044,6 @@
           "./password-input.js": 1,
           "./runtime-host-management-dialog.js": 1,
           "./runtime-host-onboarding-dialog.js": 1,
-          "./settings-error-copy.js": 1,
           "./settings-section.js": 1,
           "@astryxdesign/core": 1,
           "@maka/runtime-host/protocol": 1,
@@ -3121,19 +3107,6 @@
           "react": 1
         }
       },
-      "src/renderer/settings/settings-error-copy.ts": {
-        "bridgePaths": {},
-        "environmentCapabilities": {},
-        "hookCalls": {},
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [],
-        "dependencyPaths": {
-          "../locales/settings-shared-copy.js": 1,
-          "@maka/core/redaction": 1,
-          "@maka/ui": 1
-        }
-      },
       "src/renderer/settings/settings-expandable-row.tsx": {
         "bridgePaths": {},
         "environmentCapabilities": {},
@@ -3161,7 +3134,7 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
-          "../locales/settings-shared-copy": 1,
+          "../application/contracts/settings-presentation/settings-shared-copy.js": 1,
           "./settings-surface": 1,
           "@maka/ui": 1,
           "react": 1
@@ -3259,7 +3232,7 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
-          "../locales/settings-shared-copy.js": 1,
+          "../application/contracts/settings-presentation/settings-shared-copy.js": 1,
           "./settings-section.js": 1,
           "@astryxdesign/core": 1,
           "@maka/ui": 1
@@ -3317,13 +3290,15 @@
         "actionFactories": [],
         "dependencyPaths": {
           "../../shared/settings-ownership.js": 1,
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
+          "../application/contracts/settings-presentation/settings-shared-copy.js": 1,
           "../browser-storage": 1,
           "../features/client-plugins/index.js": 1,
           "../features/connection-settings": 1,
           "../features/external-agent-settings/index.js": 1,
           "../features/session-bundle": 1,
+          "../features/session-navigation/index.js": 1,
           "../locales/settings-navigation-copy.js": 1,
-          "../locales/settings-shared-copy.js": 1,
           "./about-settings-page": 1,
           "./appearance-settings-page": 1,
           "./bot-chat-settings-page": 1,
@@ -3338,7 +3313,6 @@
           "./providers-panel": 1,
           "./runtime-host-interaction-boundary.js": 1,
           "./runtime-host-settings-target.js": 1,
-          "./settings-error-copy": 1,
           "./settings-nav": 1,
           "./settings-request-authority.js": 1,
           "./settings-resource-state.js": 1,
@@ -3346,49 +3320,9 @@
           "./settings-section": 1,
           "./settings-skeleton": 1,
           "./settings-snapshot-cache.js": 1,
-          "./tasks-settings-page": 1,
           "./usage-settings-page": 1,
           "@astryxdesign/core": 1,
           "@maka/core/settings": 1,
-          "@maka/ui": 1,
-          "@maka/ui/icons": 1,
-          "react": 1
-        }
-      },
-      "src/renderer/settings/task-catalog-rows.ts": {
-        "bridgePaths": {},
-        "environmentCapabilities": {},
-        "hookCalls": {},
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [],
-        "dependencyPaths": {
-          "../features/session-navigation/index.js": 1
-        }
-      },
-      "src/renderer/settings/tasks-settings-page.tsx": {
-        "bridgePaths": {},
-        "environmentCapabilities": {},
-        "hookCalls": {
-          "useMountedRef": 1,
-          "useState": 2,
-          "useToast": 1,
-          "useUiLocale": 1
-        },
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [],
-        "dependencyPaths": {
-          "../locales/settings-shared-copy.js": 1,
-          "../locales/settings-tasks-copy.js": 1,
-          "./settings-error-copy": 1,
-          "./settings-section": 1,
-          "./task-catalog-rows": 1,
-          "@astryxdesign/core": 1,
-          "@astryxdesign/core/List": 1,
-          "@astryxdesign/core/TextInput": 1,
-          "@maka/core/relative-time": 1,
-          "@maka/runtime-host/profile-kind": 1,
           "@maka/ui": 1,
           "@maka/ui/icons": 1,
           "react": 1
@@ -3413,8 +3347,8 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
+          "../application/contracts/settings-presentation/settings-error-copy.js": 1,
           "../features/usage": 2,
-          "./settings-error-copy": 1,
           "./settings-section": 1,
           "@maka/ui": 1
         }

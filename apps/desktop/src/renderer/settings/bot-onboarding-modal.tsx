@@ -36,7 +36,7 @@ import {
 import { Layout, LayoutContent } from '@astryxdesign/core/Layout';
 import { ICON_SIZE, AlertCircle, Check } from '@maka/ui/icons';
 import { BotBrandLogo } from './bot-chat-shared';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { botOnboardingErrorMessage, botStatusReasonMessage, getBotSettingsCopy, type BotSettingsCopy } from '../locales/settings-bot-copy';
 
 export function BotOnboardingModal(props: {

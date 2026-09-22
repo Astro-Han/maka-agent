@@ -22,14 +22,11 @@ import { Button } from '@astryxdesign/core/Button';
 import type { QuoteRef } from '@maka/core/events';
 import type { SessionQuote } from '@maka/core/session-reference';
 import { useConversationServices } from '../services.js';
-
-type Session = {
-  id: string; name: string; runtimeHostId: string; isArchived: boolean; shared?: true;
-};
+import { selectSessions, useSessionCatalogController } from '../../../application/contracts/session-catalog/session-catalog-state.js';
+import { useExternalStoreSelector } from '../../../application/contracts/session-catalog/use-external-store-selector.js';
 
 /** Preview is explicitly attached; late reads cannot edit a different draft. */
-export function SessionReferencePicker({ sessions, currentSessionId, hostId, locale, disabled, onAttach }: {
-  sessions: readonly Session[];
+export function SessionReferencePicker({ currentSessionId, hostId, locale, disabled, onAttach }: {
   currentSessionId?: string;
   hostId?: string;
   locale: string;
@@ -37,6 +34,8 @@ export function SessionReferencePicker({ sessions, currentSessionId, hostId, loc
   onAttach(quote: QuoteRef): void;
 }) {
   const services = useConversationServices();
+  const catalog = useSessionCatalogController();
+  const sessions = useExternalStoreSelector(catalog, selectSessions);
   const zh = locale !== 'en';
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');

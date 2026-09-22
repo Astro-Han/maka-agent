@@ -53,7 +53,7 @@ import { getPeerMeshCopy } from "../locales/peer-mesh-copy.js";
 import type { UiLocale } from "@maka/core/ui-locale";
 
 import { PasswordInput } from "./password-input.js";
-import { settingsActionErrorMessage } from "./settings-error-copy.js";
+import { settingsActionErrorMessage } from "../application/contracts/settings-presentation/settings-error-copy.js";
 import { SettingsField, SettingsRow, SettingsSection } from "./settings-section.js";
 import { RuntimeHostOnboardingDialog } from './runtime-host-onboarding-dialog.js';
 import {

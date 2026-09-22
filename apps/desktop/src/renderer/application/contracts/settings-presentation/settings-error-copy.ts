@@ -20,7 +20,7 @@
 import { generalizedErrorMessageForLocale } from '@maka/core/redaction';
 import { type UiLocale } from '@maka/core/ui-locale';
 import { redactSecrets } from '@maka/ui';
-import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
+import { getSettingsSharedCopy } from './settings-shared-copy.js';
 
 export function settingsActionErrorMessage(error: unknown, locale: UiLocale): string {
   const raw = error instanceof Error

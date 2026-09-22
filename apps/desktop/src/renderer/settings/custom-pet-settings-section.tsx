@@ -21,7 +21,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EmptyState } from '@astryxdesign/core';
 import { Badge, Button, useMountedRef, useToast, useUiLocale } from '@maka/ui';
 import { SettingsRow, SettingsSection } from './settings-section';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { getSettingsPreferencesCopy } from '../locales/settings-preferences-copy.js';
 import {
   reconcileCustomPetLibrary,

@@ -24,6 +24,7 @@ import { LocaleProvider } from '@maka/ui';
 import type { StoredMessage } from '@maka/core/session';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 import { useAppShellSessionWorkspace } from '../../renderer/use-app-shell-session-workspace.js';
+import { createSessionCatalogController, SessionCatalogProvider } from '../../renderer/application/contracts/session-catalog/session-catalog-state.js';
 import { createDesktopTranscriptRangeController, DesktopTranscriptRangeStore } from '../../renderer/platform/desktop/desktop-transcript-range-store.js';
 import { encodeDesktopTranscriptSnapshot } from '../desktop-transcript-ipc.js';
 
@@ -66,7 +67,7 @@ describe('session workspace action identity', () => {
       return null;
     }
     act(() => root.render(createElement(LocaleProvider, {
-      locale: 'en', children: createElement(Probe),
+      locale: 'en', children: createElement(SessionCatalogProvider, { value: createSessionCatalogController(), children: createElement(Probe) }),
     })));
     act(() => workspace.sessionCatalogController.commitSessions([sessionA, sessionB, sessionC].map((id) => ({
       id, name: id, isFlagged: false, isArchived: false, labels: [],
@@ -87,6 +88,14 @@ describe('session workspace action identity', () => {
     act(() => { workspace.setActiveId(sessionA); workspace.commitTranscript(sessionA, a, readerA); });
     assert.equal(workspace.transcriptRangeRef.current, readerA);
     assert.equal(workspace.isSessionSelected(sessionA), true);
+    const catalog = workspace.sessionCatalogController;
+    const initialRow = catalog.getState().sessions.find(({ id }) => id === sessionA)!;
+    const rendered = displays.length;
+    act(() => catalog.commitPatch(sessionA, { ...initialRow, revision: 2, isFlagged: true, hasUnread: true, activityAt: 10 }));
+    assert.equal(displays.length, rendered, 'rail-only updates do not render the workspace');
+    act(() => catalog.commitPatch(sessionA, { ...initialRow, revision: 3, approvalPolicy: { kind: 'never' } }));
+    assert.deepEqual(workspace.activeCatalogSession?.approvalPolicy, { kind: 'never' });
+    assert.ok(displays.length > rendered, 'execution settings must reach the active shell');
     displays.length = 0;
     act(() => workspace.setActiveId(sessionB));
     assert.equal(workspace.requestedSessionId, sessionB);
@@ -176,7 +185,9 @@ describe('session workspace action identity', () => {
 
     act(() => {
       root.render(
-        createElement(LocaleProvider, { locale: 'en', children: createElement(Probe) }),
+        createElement(LocaleProvider, { locale: 'en', children: createElement(SessionCatalogProvider, {
+          value: createSessionCatalogController(), children: createElement(Probe),
+        }) }),
       );
     });
     assert.equal(reads.length, 1);

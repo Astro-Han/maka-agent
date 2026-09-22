@@ -27,7 +27,7 @@ import { useUiLocale } from '@maka/ui';
 import * as Overlays from './features/overlays/index.js';
 import type { OverlaysShellProjection } from './features/overlays/index.js';
 import { useAppShellCommands, type AppShellCommandListOptions } from './app-shell-command-actions';
-import type { ArchivedTasksBridge } from './settings/tasks-settings-page';
+import type { ArchivedTasksBridge } from './features/session-navigation/index.js';
 import type { UiLocaleUpdateGate } from './settings/ui-locale-update-gate';
 import { getShellRemainingCopy } from './locales/shell-remaining-copy.js';
 
@@ -126,15 +126,14 @@ function OverlayLayer({
   const { commands, selectors } = overlays;
   const { settings } = selectors;
 
-  // #1045: base commands freeze per open/close; session rows stay live on
-  // visibleSessions/activeId. run() closures read latest options via ref.
-  const paletteCommands = useAppShellCommands(selectors.paletteOpen, props.commandOptions);
+  // Base commands also serve global shortcuts while the palette is closed.
+  const palette = useAppShellCommands(selectors.paletteOpen, props.commandOptions);
   useHotkeys([
     {
       keys: 'mod+shift+d',
       allowInInputs: true,
       onPress: () =>
-        void paletteCommands.find((command) => command.id === 'diag:copy-diagnostics')?.run(),
+        void palette.commands.find((command) => command.id === 'diag:copy-diagnostics')?.run(),
     },
   ]);
 
@@ -168,7 +167,7 @@ function OverlayLayer({
       )}
       <Overlays.KeyboardHelpModal />
       <Overlays.SearchModalHost onNavigateToSession={props.onNavigateToSession} />
-      <Overlays.CommandPalette commands={paletteCommands} />
+      <Overlays.SessionCommandPalette {...palette} />
     </>
   );
 }

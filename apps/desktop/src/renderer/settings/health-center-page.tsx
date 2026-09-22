@@ -31,7 +31,7 @@ import { Button, RelativeTime, StatusDot, useUiLocale, Banner } from '@maka/ui';
 import { capabilityReasonMessage } from '../locales/capability-reason-copy';
 import { getHealthCenterCopy, type HealthCenterCopy } from '../locales/settings-health-copy';
 import { botStatusReasonCopy } from '../locales/settings-bot-copy';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { SettingsPage, SettingsRow, SettingsSection } from './settings-section';
 import { SettingsSkeletonStack } from './settings-skeleton';
 import { dotForStatus } from '@maka/ui';

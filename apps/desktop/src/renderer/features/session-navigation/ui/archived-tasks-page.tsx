@@ -26,17 +26,19 @@ import { Archive, ICON_SIZE, Search } from '@maka/ui/icons';
 import { HStack, StackItem } from '@astryxdesign/core';
 import { List, ListItem } from '@astryxdesign/core/List';
 import { TextInput } from '@astryxdesign/core/TextInput';
-import type { SessionPurgeOutcome } from '../features/session-navigation';
-import type { DesktopSessionSummary } from '../../preload/bridge-contract.js';
-import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
-import { getSettingsTasksCopy } from '../locales/settings-tasks-copy.js';
-import { settingsActionErrorMessage } from './settings-error-copy';
-import { SettingsPage, SettingsSection } from './settings-section';
+import type { SessionPurgeOutcome } from '../controller/session-row-actions.js';
+import type { DesktopSessionSummary } from '../../../../shared/desktop-session-projection.js';
+import { selectSessions, type SessionCatalogController } from '../../../application/contracts/session-catalog/session-catalog-state.js';
+import { useExternalStoreSelector } from '../../../application/contracts/session-catalog/use-external-store-selector.js';
+import { getSettingsSharedCopy } from '../../../application/contracts/settings-presentation/settings-shared-copy.js';
+import { getSettingsTasksCopy } from '../../../locales/settings-tasks-copy.js';
+import { settingsActionErrorMessage } from '../../../application/contracts/settings-presentation/settings-error-copy.js';
+import { SettingsPage, SettingsSection } from '../../../application/contracts/settings-presentation/settings-section.js';
 import {
   archivedTaskRows,
   isOrphanedSubagentTask,
   matchesArchivedTaskQuery,
-} from './task-catalog-rows';
+} from '../model/archived-tasks.js';
 
 /**
  * Everything this page needs from the shell's session catalog, as one prop so
@@ -44,7 +46,7 @@ import {
  * not have to understand.
  */
 export interface ArchivedTasksBridge {
-  sessions: readonly DesktopSessionSummary[];
+  catalog: SessionCatalogController;
   projects: readonly ProjectRecord[];
   onRestore(sessionId: string): void;
   onDelete(sessionId: string): void;
@@ -74,6 +76,7 @@ export interface ArchivedTasksBridge {
  * clearing a set of them in one pass.
  */
 export function TasksSettingsPage(props: ArchivedTasksBridge) {
+  const sessions = useExternalStoreSelector(props.catalog, selectSessions);
   const locale = useUiLocale();
   const copy = getSettingsTasksCopy(locale);
   const toast = useToast();
@@ -102,10 +105,10 @@ export function TasksSettingsPage(props: ArchivedTasksBridge) {
 
   // Store order is already recency-first with a stable id tie-break, and the
   // projection preserves it, so there is nothing left to sort here.
-  const archived = useMemo(() => archivedTaskRows(props.sessions), [props.sessions]);
+  const archived = useMemo(() => archivedTaskRows(sessions), [sessions]);
   const knownSessionIds = useMemo(
-    () => new Set(props.sessions.map((session) => session.id)),
-    [props.sessions],
+    () => new Set(sessions.map((session) => session.id)),
+    [sessions],
   );
   const isSearching = query.trim().length > 0;
   const visible = useMemo(

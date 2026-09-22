@@ -23,7 +23,7 @@ import type { BotOnboardingProvider } from '@maka/core/bot-onboarding';
 import type { BotProvider } from '@maka/core/bot-chat-settings';
 import type { BotStatus } from '@maka/runtime/bots';
 import { useMountedRef, useToast, useUiLocale } from "@maka/ui";
-import { settingsActionErrorMessage } from "./settings-error-copy";
+import { settingsActionErrorMessage } from "../application/contracts/settings-presentation/settings-error-copy.js";
 import {
   BOT_LABELS,
   botStatusDetail,

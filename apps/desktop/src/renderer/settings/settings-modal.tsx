@@ -23,9 +23,9 @@ import type { ProviderType } from '@maka/core/llm-connections';
 import type { DesktopSessionSummary } from '../../preload/bridge-contract.js';
 import type { UiLocalePreference } from '@maka/core/ui-locale';
 import { useUiLocale } from '@maka/ui';
-import { getSettingsSharedCopy } from '../locales/settings-shared-copy';
+import { getSettingsSharedCopy } from '../application/contracts/settings-presentation/settings-shared-copy.js';
 import { SettingsSurface } from './settings-surface';
-import type { ArchivedTasksBridge } from './tasks-settings-page';
+import type { ArchivedTasksBridge } from '../features/session-navigation/index.js';
 import type { UiLocaleUpdateGate } from './ui-locale-update-gate';
 
 export default function SettingsModal(props: {

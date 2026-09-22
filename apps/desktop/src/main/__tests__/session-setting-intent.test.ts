@@ -165,7 +165,7 @@ function Harness({
   capture(controller: SessionSettingIntentController<boolean>): void;
 }) {
   const controller = useSessionSettingIntent<{ setting: boolean }>({
-    catalogRevision,
+    catalog: { revision: () => catalogRevision, subscribeChanged: () => () => {} },
     refreshCatalog: async () => {
       throw new Error('catalog unavailable');
     },
@@ -190,7 +190,7 @@ function LatestIntentHarness({
   write(sessionId: string, value: string): Promise<boolean>;
 }) {
   const controller = useSessionSettingIntent<{ setting: string }>({
-    catalogRevision: 0,
+    catalog: { revision: () => 0, subscribeChanged: () => () => {} },
     refreshCatalog: async () => {},
     channels: {
       setting: {

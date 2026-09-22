@@ -32,10 +32,10 @@ import {
 import { openPathFailureCopy, openPathActionLabel } from '../open-path';
 import { SettingsActions, SettingsField, SettingsPage, SettingsSection } from './settings-section';
 import { SettingRow } from './settings-rows';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { useActionGuard } from './use-action-guard';
 import { getDataSettingsCopy, type DataSettingsCopy } from '../locales/settings-data-copy';
-import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
+import { getSettingsSharedCopy } from '../application/contracts/settings-presentation/settings-shared-copy.js';
 import { useOptionalRuntimeHostSettingsTarget } from './runtime-host-settings-target.js';
 
 const CONFIG_CATEGORY_IDS: readonly ConfigCategory[] = ['connections', 'settings', 'memory', 'credentials'];

@@ -526,9 +526,8 @@ function Harness(props: {
   }): void;
 }) {
   const controller = useSessionSettingIntent({
-    catalogRevision: 0,
+    catalog: { getState: () => ({ sessions: props.sessions, revision: 0, hasSnapshot: true, activeSessionId: undefined }), subscribe: () => () => {} },
     isActiveSession: () => true,
-    sessions: props.sessions,
     newTaskExecutionPolicy: { sandboxMode: 'workspace-write', approvalPolicy: { kind: 'on-request' } },
     refreshCatalog: async () => {},
     saveComposerDefaults: props.saveComposerDefaults,
@@ -550,9 +549,8 @@ function CausalRetirementHarness(props: {
   sessions: readonly DesktopSessionSummary[];
 }) {
   const controller = useSessionSettingIntent({
-    catalogRevision: props.catalogRevision,
+    catalog: { getState: () => ({ sessions: props.sessions, revision: props.catalogRevision, hasSnapshot: true, activeSessionId: undefined }), subscribe: () => () => {} },
     isActiveSession: () => true,
-    sessions: props.sessions,
     newTaskExecutionPolicy: { sandboxMode: 'workspace-write', approvalPolicy: { kind: 'on-request' } },
     refreshCatalog: async () => {},
     saveComposerDefaults: () => {},

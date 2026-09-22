@@ -202,6 +202,23 @@ describe('app shell session UI state controller', () => {
     assert.equal(notifications, 0);
   });
 
+  it('deduplicates equal execution facts without hiding a disconnect or terminal transition', () => {
+    const controller = createAppShellSessionUiStateController();
+    let notifications = 0;
+    controller.subscribe(() => { notifications++; });
+    const running = { type: 'host_execution' as const, available: true,
+      rootTurn: { sessionId: 'session', turnId: 'turn', runId: 'run', status: 'running' as const } };
+    controller.setExecution('session', running);
+    const first = controller.getState();
+    controller.setExecution('session', { ...running, rootTurn: { ...running.rootTurn } });
+    assert.equal(controller.getState(), first);
+    controller.setExecution('session', undefined);
+    assert.equal(controller.getState().executionBySession.session?.available, false);
+    controller.setExecution('session', { ...running, rootTurn: null });
+    assert.equal(controller.getState().executionBySession.session?.rootTurn, null);
+    assert.equal(notifications, 3);
+  });
+
   it('publishes unavailable transcript restores only until they are consumed', () => {
     let notifications = 0;
     const controller = createAppShellSessionUiStateController();

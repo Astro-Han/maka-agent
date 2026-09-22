@@ -24,7 +24,7 @@ import type { LlmConnection, ProjectedLlmConnection } from '@maka/core/llm-conne
 import { Selector, Switch, TextInput, useMountedRef, useUiLocale } from '@maka/ui';
 import { buildCatalogDailyReviewModelOptions } from '../model-catalog-choices';
 import { getDailyReviewSettingsCopy, type DailyReviewSettingsCopy } from '../locales/settings-daily-review-copy';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { SettingsPage, SettingsRow, SettingsSection } from './settings-section';
 import { SettingsSkeletonStack } from './settings-skeleton';
 import { useActionGuard } from './use-action-guard';

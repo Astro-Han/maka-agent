@@ -50,6 +50,7 @@ import type { SandboxMode } from '@maka/core/permission';
 import { executionPoliciesEqual, type ExecutionPolicy, type ApprovalPolicy } from '@maka/core/execution-permissions';
 import type { StoredMessage } from '@maka/core/session';
 import type { SideChatSession } from '../../ports.js';
+import { createObservableState } from '../../../../application/contracts/session-catalog/observable-state.js';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type { ChatModelChoice } from '@maka/core/chat-model-choice';
 import type { UserQuestionResponse } from '@maka/core/user-question';
@@ -379,9 +380,13 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   // double-invoke; a hand-rolled disposed flag would stay tripped after replay).
   const mountedRef = useMountedRef();
   const dismissalGuardRef = useRef(createCompanionDismissalGuard());
-  const [permissionCatalogRevision, setPermissionCatalogRevision] = useState(0);
+  const [permissionCatalog] = useState(() => {
+    const state = createObservableState(0);
+    return { revision: state.getState, subscribeChanged: state.subscribe,
+      observe: () => state.replaceState(state.getState() + 1) };
+  });
   const executionPolicyIntent = useSessionSettingIntent<QuoteCompanionSettingValues>({
-    catalogRevision: permissionCatalogRevision,
+    catalog: permissionCatalog,
     refreshCatalog: async () => {
       const sessionId = companionIdRef.current;
       if (!sessionId) return;
@@ -390,7 +395,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       if (!mountedRef.current || companionIdRef.current !== sessionId || !next) return;
       companionRef.current = next;
       setCompanion(next);
-      setPermissionCatalogRevision((revision) => revision + 1);
+      permissionCatalog.observe();
     },
     channels: {
       executionPolicy: {

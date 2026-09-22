@@ -42,7 +42,7 @@ import {
 } from '@maka/core/llm-connections';
 import type { UiLocale } from '@maka/core/ui-locale';
 import { dotForStatus, useMountedRef, useUiLocale } from '@maka/ui';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { connectionChipStatus } from './provider-connection-status';
 import {
   CATALOG_INITIAL_FILTER,

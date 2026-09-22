@@ -36,12 +36,12 @@ import { HStack, List, ListItem } from '@astryxdesign/core';
 import { ICON_SIZE, FolderOpen } from '@maka/ui/icons';
 import { getSettingsProjectsCopy } from '../locales/settings-projects-copy.js';
 import { projectPathDisplay } from '../project-path-display.js';
-import { settingsActionErrorMessage } from './settings-error-copy';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import { SettingsPage, SettingsSection } from './settings-section';
 import { RuntimeHostProfilesSection } from './runtime-host-profiles-section.js';
 import { useKeyedActionGuard } from './use-action-guard';
 import { useOptionalRuntimeHostSettingsTarget } from './runtime-host-settings-target.js';
-import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
+import { getSettingsSharedCopy } from '../application/contracts/settings-presentation/settings-shared-copy.js';
 import { RemoteProjectDirectoryDialog } from '../remote-project-directory-dialog.js';
 import { RuntimeHostInteractionBoundary } from './runtime-host-interaction-boundary.js';
 

@@ -56,7 +56,7 @@ import {
   canonicalProjectDirectoryRoots,
   projectDirectoryRootsValid,
 } from '../../shared/runtime-host-project-directory-policy.js';
-import { settingsActionErrorMessage } from './settings-error-copy.js';
+import { settingsActionErrorMessage } from '../application/contracts/settings-presentation/settings-error-copy.js';
 import {
   RuntimeHostProjectDirectoryEditor,
   type ProjectDirectoryRootDraft,

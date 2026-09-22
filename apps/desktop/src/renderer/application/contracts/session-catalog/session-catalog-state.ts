@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { useRef } from 'react';
+import { createContext, useContext } from 'react';
 import { valuesEqual } from '@maka/ui';
 import { compareDesktopSessionCatalogSummaries, type DesktopSessionSummary } from '../../../../shared/desktop-session-projection.js';
 import { createObservableState } from './observable-state.js';
@@ -100,10 +100,14 @@ export function createSessionCatalogController() {
 }
 
 export type SessionCatalogController = ReturnType<typeof createSessionCatalogController>;
+const SessionCatalogContext = createContext<SessionCatalogController | null>(null);
+export const SessionCatalogProvider = SessionCatalogContext.Provider;
 
 export const selectSessions = (state: SessionCatalogState): readonly DesktopSessionSummary[] =>
   state.sessions;
-export const selectCatalogRevision = (state: SessionCatalogState): number => state.revision;
+export const selectSessionById = (state: SessionCatalogState, id: string | undefined): DesktopSessionSummary | undefined =>
+  state.sessions.find((session) => session.id === id);
+export const selectHasSessions = (state: SessionCatalogState): boolean => state.sessions.length > 0;
 export const selectActiveSessionId = (state: SessionCatalogState): string | undefined =>
   state.activeSessionId;
 
@@ -119,12 +123,9 @@ export const selectAuthoritativeSessionIds = (
   // The initial empty catalog cannot prove that persisted Sessions were deleted.
   state.hasSnapshot ? new Set(state.sessions.map(({ id }) => id)) : undefined;
 
-/**
- * Owns the controller for the component's lifetime. Deliberately does NOT
- * subscribe: readers select what they need through `useExternalStoreSelector`.
- */
+/** Obtain the shared catalog without subscribing to its publications. */
 export function useSessionCatalogController(): SessionCatalogController {
-  const controllerRef = useRef<SessionCatalogController | null>(null);
-  if (!controllerRef.current) controllerRef.current = createSessionCatalogController();
-  return controllerRef.current;
+  const catalog = useContext(SessionCatalogContext);
+  if (!catalog) throw new Error('SessionCatalogProvider is missing');
+  return catalog;
 }

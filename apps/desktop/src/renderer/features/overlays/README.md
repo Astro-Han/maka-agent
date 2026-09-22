@@ -37,8 +37,8 @@ here too.
   from this slice and read the controller directly. The Settings modal stays
   with the legacy settings code; `app-shell-overlays.tsx` reads what to show
   through `OverlaysConsumer` and mounts it.
-- The palette's command list stays a shell concern: the shell builds the rows
-  from its own actions and passes them to `CommandPalette`.
+- The shell supplies base actions. `SessionCommandPalette` subscribes to the
+  shared Session catalog while open and adds revision-aware navigation rows.
 
 ## Model
 
