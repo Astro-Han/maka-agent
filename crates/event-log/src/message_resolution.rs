@@ -28,6 +28,11 @@ pub use owner::MessageExecution;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MessageResolution {
+    /// No durable message evidence in this existing Session's SQL snapshot.
+    /// Host must also exclude in-flight preparation before asserting non-admission.
+    Absent {
+        message_id: String,
+    },
     Pending {
         message_id: String,
     },
@@ -61,6 +66,9 @@ impl EventLog {
         self.connection.run(move |connection| Box::pin(async move {
             let mut tx = connection.begin().await?;
             let mut resolutions = Vec::new();
+            let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?)")
+                .bind(&session).fetch_one(&mut *tx).await?;
+            if !exists { return Ok(resolutions); }
             for message_id in messages {
                 let owner: Option<String> = sqlx::query_scalar(
                     "SELECT json_extract(e.event_json, '$.invocation')
@@ -81,8 +89,8 @@ impl EventLog {
                     let pending: bool = sqlx::query_scalar(
                         "SELECT EXISTS(SELECT 1 FROM message_admissions WHERE session_id = ? AND message_id = ?)"
                     ).bind(&session).bind(&message_id).fetch_one(&mut *tx).await?;
-                    if !pending { continue; }
-                    MessageResolution::Pending { message_id }
+                    if pending { MessageResolution::Pending { message_id } }
+                    else { MessageResolution::Absent { message_id } }
                 };
                 resolutions.push(resolution);
             }

@@ -671,13 +671,13 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     try {
       const { resolutions } = await sideChat.queryMessageExecutions(forkId, [...messageIds]);
       if (!mountedRef.current || companionIdRef.current !== forkId) return;
-      const cancelled = new Set<string>();
+      const retired = new Set<string>();
       const unprovenOwnedTurnIds = new Set<string>();
       let ownershipChanged = false;
       for (const resolution of resolutions) {
         const pending = pendingAdmissionRef.current;
-        if (resolution.state === 'cancelled') {
-          cancelled.add(resolution.messageId);
+        if (resolution.state === 'cancelled' || resolution.state === 'not_admitted') {
+          retired.add(resolution.messageId);
           if (pending?.messageId === resolution.messageId) releaseAdmission(pending);
         } else if (resolution.state === 'owned') {
           bindPendingMessageTurn(resolution.messageId, resolution.turnId);
@@ -697,7 +697,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         setHasContent(true);
         setOwnTurnTick((tick) => tick + 1);
       }
-      for (const messageId of cancelled) pendingUserMessagesRef.current.delete(messageId);
+      for (const messageId of retired) pendingUserMessagesRef.current.delete(messageId);
       if (unprovenOwnedTurnIds.size > 0) {
         const recovered = await Promise.allSettled(
           [...unprovenOwnedTurnIds].map((turnId) =>
@@ -711,10 +711,10 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         }
       }
       reconcilePendingUserMessages();
-      if (cancelled.size > 0) {
+      if (retired.size > 0) {
         setMessageQueue((current) => ({
           ...current,
-          entries: current.entries.filter((entry) => !cancelled.has(entry.messageId)),
+          entries: current.entries.filter((entry) => !retired.has(entry.messageId)),
         }));
       }
     } catch {

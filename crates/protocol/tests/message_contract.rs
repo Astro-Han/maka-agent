@@ -73,7 +73,7 @@ fn original_message_codec_agrees_on_identity_intent_queue_states_and_bounded_pro
         (TurnMessageQuery, json!({"cancelledMessageIds":["m"]})),
         (
             TurnMessageExecutionQuery,
-            json!({"resolutions":[{"state":"pending","messageId":"a"},{"state":"cancelled","messageId":"b"},{"state":"owned","messageId":"c","turnId":"t","runId":"r"}]}),
+            json!({"resolutions":[{"state":"pending","messageId":"a"},{"state":"cancelled","messageId":"b"},{"state":"owned","messageId":"c","turnId":"t","runId":"r"},{"state":"not_admitted","messageId":"d"}]}),
         ),
         (
             QueueRetract,
@@ -109,6 +109,7 @@ fn original_message_codec_agrees_on_identity_intent_queue_states_and_bounded_pro
     for resolution in [
         json!({"state":"unknown","messageId":"m"}),
         json!({"state":"pending","messageId":"m","turnId":"t"}),
+        json!({"state":"not_admitted","messageId":"m","runId":"r"}),
         json!({"state":"owned","messageId":"m","turnId":"t"}),
     ] {
         add(

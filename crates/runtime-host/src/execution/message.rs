@@ -30,6 +30,8 @@ use maka_runtime::{
 use uuid::Uuid;
 
 mod queued;
+mod submissions;
+pub(super) use submissions::Submissions;
 
 impl Executions {
     pub(crate) async fn submit(
@@ -39,6 +41,7 @@ impl Executions {
         root_id: &str,
         epoch: &str,
     ) -> Result<SubmitResult> {
+        let _submission = self.submissions.track(&input.session_id, &input.message_id);
         self.ordinary_session(&input.session_id).await?;
         let mut prepared = None;
         let mut queued: Option<(

@@ -30,7 +30,7 @@ import {
   RuntimeHostOperationError,
   RuntimeHostRequestInterruptedError,
 } from '@maka/runtime-host/client';
-import type { TurnMessageSubmitInput, TurnMessageSubmitResult } from '@maka/runtime-host/protocol';
+import type { TurnMessageExecutionResolution, TurnMessageSubmitInput, TurnMessageSubmitResult } from '@maka/runtime-host/protocol';
 import { DesktopSessionLocalStore, type LocalMessageIntent } from '../session-local-store.js';
 import {
   DesktopSessionLocalService,
@@ -85,6 +85,9 @@ async function database(t: TestContext, now?: () => number) {
 function client(hostEpoch: string): NonNullable<DesktopSessionLocalTarget['client']> {
   return {
     hostEpoch,
+    async queryMessageExecutions() {
+      return { resolutions: [] };
+    },
     async getSession() {
       return null;
     },
@@ -401,7 +404,7 @@ test('an unknown Host outcome blocks later local sends until the original messag
   assert.deepEqual(calls, ['message-1', 'other-session', 'message-1', 'message-2']);
 });
 
-test('lost ACK recovery never changes epoch or ID and does not block another Session', async (t) => {
+test('lost ACK keeps unknown identities blocked until the new epoch positively resolves them', async (t) => {
   const { store, beforeClose } = await database(t);
   const calls: TurnMessageSubmitInput[] = [];
   let target: DesktopSessionLocalTarget = {
@@ -447,10 +450,58 @@ test('lost ACK recovery never changes epoch or ID and does not block another Ses
   await waitFor(() => store.get('authority', 'message-2')?.state === 'accepted');
   assert.deepEqual(
     calls.filter((call) => call.messageId === 'message-1').map((call) => call.originHostEpoch),
-    ['epoch-1', 'epoch-1'],
+    ['epoch-1'],
   );
   assert.equal(store.get('authority', 'message-1')?.state, 'unknown');
   assert.equal(calls.find((call) => call.messageId === 'message-2')?.originHostEpoch, 'epoch-2');
+  store.enqueue('authority', intent('message-3'));
+  target = { ...target, client: {
+    ...client('epoch-2'),
+    async queryMessageExecutions() {
+      return { resolutions: [{ messageId: 'message-1', state: 'not_admitted' }] };
+    },
+  } };
+  service.wake();
+  await waitFor(() => store.get('authority', 'message-3')?.state === 'accepted');
+  assert.equal(store.get('authority', 'message-1')?.state, 'failed');
+  assert.equal(store.get('authority', 'message-1')?.intent.originHostEpoch, 'epoch-1');
+  assert.equal(service.listMessages(target, 'session-1')[0]?.canCancel, true);
+  assert.equal(calls.filter((call) => call.messageId === 'message-1').length, 1);
+});
+
+test('reopened outbox resolves durable ownership without re-submitting or rewriting the dispatch epoch', async (t) => {
+  const resolutions: TurnMessageExecutionResolution[] = [
+    { messageId: 'message-1', state: 'owned', turnId: 'original-turn', runId: 'original-run' },
+    { messageId: 'message-1', state: 'pending' },
+    { messageId: 'message-1', state: 'cancelled' },
+  ];
+  for (const resolution of resolutions) await t.test(resolution.state, async (t) => {
+    const db = await database(t);
+    db.store.enqueue('authority', intent());
+    const record = db.store.get('authority', 'message-1')!;
+    db.store.update({ ...record, state: 'unknown', intent: { ...record.intent, originHostEpoch: 'old' } });
+    const store = db.reopen();
+    const calls: string[] = [];
+    const target: DesktopSessionLocalTarget = {
+      partition: 'authority', profileId: 'profile', scope: { hostId: 'root', targetEpoch: 'target' },
+      client: { ...client('new'), async queryMessageExecutions(input) {
+        assert.deepEqual(input, { sessionId: 'session-1', messageIds: ['message-1'] });
+        return { resolutions: [resolution] };
+      } },
+      submit: async (input) => { calls.push(input.messageId); return accepted; },
+    };
+    const service = new DesktopSessionLocalService(store, {
+      targets: () => [target], changed() {}, onError: (error) => assert.fail(String(error)),
+    });
+    db.beforeClose.push(() => service.close());
+    store.enqueue('authority', intent('next'));
+    service.wake();
+    await waitFor(() => store.get('authority', 'next')?.state === 'accepted');
+    assert.deepEqual(calls, ['next']);
+    assert.equal(store.get('authority', 'message-1')?.state, resolution.state === 'cancelled' ? 'failed' : 'accepted');
+    assert.equal(store.get('authority', 'message-1')?.intent.originHostEpoch, 'old');
+    if (resolution.state === 'owned') assert.equal(service.listMessages(target, 'session-1')[0]?.turnId, 'original-turn');
+  });
 });
 
 test('a removed authority cannot be repopulated by an in-flight admission', async (t) => {

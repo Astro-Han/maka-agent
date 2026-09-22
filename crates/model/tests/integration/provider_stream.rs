@@ -213,6 +213,64 @@ assert_eq!(step.finish_reason, maka_runtime::model::ModelFinishReason::ToolCalls
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chat_tool_images_follow_the_complete_parallel_result_group_on_the_wire() {
+    use maka_model::prompt::{AssistantPart, ContentPart, FileData, Message, ToolOutput};
+
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let executor = ModelExecutor::new(1, Duration::from_secs(10)).unwrap();
+        for kind in [ProviderKind::OpenaiChat, ProviderKind::OpenaiCompatible { name: "fixture".into() }] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/v1", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let wire = read_request(&mut socket).await;
+                let (first, last) = fixtures(ProviderKind::OpenaiChat, "seen");
+                let body = first + &last;
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                serde_json::from_str::<Value>(wire.split_once("\r\n\r\n").unwrap().1).unwrap()
+            });
+            let append_user = matches!(kind, ProviderKind::OpenaiChat);
+            let mut input = request(kind, base);
+            input.prompt.push(Message::Assistant {
+                content: ["first", "second"].into_iter().map(|id| AssistantPart::ToolCall {
+                    tool_call_id: id.into(), tool_name: "echo".into(), input: json!({}),
+                    provider_executed: None, provider_options: None,
+                }).collect(),
+                provider_options: None,
+            });
+            for id in ["first", "second"] {
+                input.prompt.push(Message::tool(id, "echo", ToolOutput::Content(vec![
+                    ContentPart::text(format!("result-{id}")),
+                    ContentPart::File { data: FileData::Data("aW1hZ2U=".into()), media_type: "image/png".into(), provider_options: None },
+                ])));
+            }
+            if append_user { input.prompt.push(Message::user("compare these images")); }
+            let mut stream = executor.stream(input, CancellationToken::new()).await.unwrap();
+            while let Some(event) = stream.next().await { event.unwrap(); }
+            let body = server.await.unwrap();
+            let messages = body["messages"].as_array().unwrap();
+            let mut roles = vec!["user", "assistant", "tool", "tool", "user"];
+            if append_user { roles.push("user"); }
+            assert_eq!(messages.iter().map(|message| message["role"].as_str().unwrap()).collect::<Vec<_>>(), roles);
+            for (index, id) in [(2, "first"), (3, "second")] {
+                assert_eq!(messages[index]["tool_call_id"], id);
+                let text = messages[index]["content"].as_str().unwrap();
+                assert!(text.contains(&format!("result-{id}")));
+                assert!(!text.contains("aW1hZ2U="));
+                assert!(!text.contains("image/png"));
+            }
+            let images = messages[4]["content"].as_array().unwrap();
+            assert_eq!(images.len(), 4);
+            for (index, id) in [(0, "first"), (2, "second")] {
+                assert_eq!(images[index]["text"], format!("Image from tool echo ({id}):"));
+                assert_eq!(images[index + 1]["type"], "image_url");
+                assert_eq!(images[index + 1]["image_url"]["url"], "data:image/png;base64,aW1hZ2U=");
+            }
+        }
+    }).await.expect("Chat image projection must make bounded progress");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn malformed_provider_tool_identity_cannot_complete_a_model_step() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let executor = ModelExecutor::new(1, Duration::from_secs(15)).unwrap();

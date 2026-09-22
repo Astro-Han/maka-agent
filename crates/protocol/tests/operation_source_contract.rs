@@ -66,6 +66,7 @@ fn operation_inventory_and_execution_targets_match_current_typescript() {
                 "epoch": maka_protocol::COMPATIBILITY_EPOCH,
                 "operations": operations,
                 "targets": execution_targets(),
+                "providerPages": provider_pages(),
             }))
             .unwrap(),
         )
@@ -81,6 +82,48 @@ fn operation_inventory_and_execution_targets_match_current_typescript() {
     let report: Value = serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
     assert_eq!(report["check"], "operation-contract");
     assert_eq!(report["operationCount"], Operation::ALL.len());
+}
+
+fn provider_pages() -> Vec<Value> {
+    use maka_plugins::provider::{
+        Descriptor, Identity,
+        authentication::Method,
+        catalog::{Entry, Page},
+    };
+    let descriptor = Descriptor {
+        label: "模型账户".into(),
+        configuration_schema: json!({"type":"object"}),
+        configuration_defaults: json!({}),
+        authentication: vec![Method {
+            id: "key".into(),
+            label: "API key".into(),
+            input_schema: json!({"type":"object"}),
+            interactive: false,
+        }],
+        discovery: true,
+    };
+    descriptor.validate().unwrap();
+    let identity = Identity {
+        package_id: "example.provider".into(),
+        entry_id: "example.provider".into(),
+        scope: maka_runtime::scope::Scope::Profile,
+        name: "provider".into(),
+    };
+    identity.validate().unwrap();
+    [
+        Page::Page {
+            revision: 7,
+            entries: vec![Entry {
+                identity,
+                descriptor,
+            }],
+            next: Some("provider".into()),
+        },
+        Page::RevisionChanged { revision: 8 },
+    ]
+    .into_iter()
+    .map(|page| serde_json::to_value(page).unwrap())
+    .collect()
 }
 
 fn execution_targets() -> Vec<Value> {

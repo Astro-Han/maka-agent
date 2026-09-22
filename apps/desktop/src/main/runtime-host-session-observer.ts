@@ -872,13 +872,19 @@ export class RuntimeHostSessionObserver {
         const turnId = resolution.state === 'owned'
           ? resolution.turnId : (next.rootTurn ?? previous.rootTurn)?.turnId;
         if (!turnId) continue;
+        const outcome = resolution.state === 'owned'
+          ? 'admitted' as const
+          : resolution.state === 'cancelled' || resolution.state === 'not_admitted'
+            ? 'retracted' as const
+            : undefined;
+        if (!outcome) continue;
         this.#broadcast(state.sessionId, {
           type: 'message_admission',
           id: `host-message-resolution:${next.queue.hostEpoch}:${next.queue.queueRevision}:${resolution.messageId}`,
           turnId,
           ts: this.#now(),
           messageId: resolution.messageId,
-          outcome: resolution.state === 'owned' ? 'admitted' : 'retracted',
+          outcome,
         });
       }
     } catch {

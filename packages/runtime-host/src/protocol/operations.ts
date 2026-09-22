@@ -23,6 +23,8 @@ import { AGENT_GRAPH_OPERATION_SPECS } from './agent-graph.js';
 import { requireExactRecord, requireId, requireRecord, requireString } from './codec.js';
 import { CONNECTION_EFFECT_OPERATION_SPECS } from './connection-effects.js';
 import { CONFIGURATION_OPERATION_SPECS } from './configuration.js';
+import { MODEL_PROVIDER_OPERATION_SPECS } from './model-provider.js';
+export type { ModelProviderCatalogQuery, ModelProviderCatalogResult } from './model-provider.js';
 import { DEEP_RESEARCH_OPERATION_SPECS } from './deep-research.js';
 import { DAILY_REVIEW_OPERATION_SPECS } from './daily-review.js';
 import { CONTEXT_OPERATION_SPECS } from './context.js';
@@ -197,6 +199,7 @@ export * from './usage-pricing.js';
 export * from './workspace.js';
 
 export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
+  MODEL_PROVIDER_OPERATION_SPECS,
   HOST_BOOTSTRAP_OPERATION_SPECS,
   HOST_RESOURCE_OPERATION_SPECS,
   PEER_MESH_OPERATION_SPECS,

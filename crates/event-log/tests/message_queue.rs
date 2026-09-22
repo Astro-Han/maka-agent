@@ -278,6 +278,9 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
             MessageResolution::Cancelled {
                 message_id: "three".into()
             },
+            MessageResolution::Absent {
+                message_id: "absent".into()
+            },
         ]
     );
     assert!(

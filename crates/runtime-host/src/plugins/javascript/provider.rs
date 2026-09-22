@@ -47,7 +47,7 @@ pub(super) struct JavaScript {
     rename_all_fields = "camelCase"
 )]
 enum Operation {
-    Resolve(Resolve),
+    Resolve(Box<Resolve>),
     Authorize {
         connection: Connection,
         credential: Option<Credential>,
@@ -135,7 +135,9 @@ impl JavaScript {
 impl Provider for JavaScript {
     fn resolve(&self, request: Resolve) -> BoxFuture<'_, Result<Model, Error>> {
         Box::pin(async move {
-            let model: Model = self.invoke(Operation::Resolve(request), None).await?;
+            let model: Model = self
+                .invoke(Operation::Resolve(Box::new(request)), None)
+                .await?;
             model.validate()?;
             Ok(model)
         })

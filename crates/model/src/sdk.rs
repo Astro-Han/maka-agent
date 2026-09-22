@@ -28,6 +28,8 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+mod chat;
+
 fn serialize_tools<S: serde::Serializer>(
     tools: &[ToolDefinition],
     serializer: S,
@@ -54,7 +56,7 @@ fn serialize_tools<S: serde::Serializer>(
 
 pub(super) async fn stream(
     runtime: TrustedRuntime,
-    request: ModelRequest,
+    mut request: ModelRequest,
     context: Context,
 ) -> Result<(), ModelError> {
     let Context {
@@ -65,6 +67,12 @@ pub(super) async fn stream(
     } = context;
     #[derive(Serialize)]
     struct Tools<'a>(#[serde(serialize_with = "serialize_tools")] &'a [ToolDefinition]);
+    if matches!(
+        request.provider.kind,
+        crate::ProviderKind::OpenaiChat | crate::ProviderKind::OpenaiCompatible { .. }
+    ) {
+        request.prompt = chat::project(request.prompt);
+    }
     let tools = serde_json::to_value(Tools(&request.tools))
         .map_err(|error| ModelError::Adapter(error.to_string()))?;
     let mut request =

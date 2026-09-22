@@ -63,7 +63,7 @@ export interface DesktopSessionLocalTarget {
   readonly profileId: string;
   readonly client?: Pick<
     DesktopRuntimeHostClient,
-    'hostEpoch' | 'createSession' | 'getSession' | 'listSessions' | 'ingestAttachment'
+    'hostEpoch' | 'createSession' | 'getSession' | 'listSessions' | 'ingestAttachment' | 'queryMessageExecutions'
   >;
   readonly submit?: (input: TurnMessageSubmitInput) => Promise<TurnMessageSubmitResult>;
 }
@@ -383,6 +383,46 @@ export class DesktopSessionLocalService {
     const stillOwned = () =>
       this.#current(target) && this.store.get(record.partition, record.messageId) !== undefined;
     try {
+      if (record.intent.originHostEpoch !== undefined && record.intent.originHostEpoch !== client.hostEpoch) {
+        const { resolutions } = await client.queryMessageExecutions({
+          sessionId: record.sessionId,
+          messageIds: [record.messageId],
+        }).catch((error: unknown) => {
+          if (error instanceof RuntimeHostOperationError && error.code === 'unauthorized') throw error;
+          throw new Error('Host has not resolved the original message', { cause: error });
+        });
+        if (!stillOwned()) return;
+        const resolution = resolutions.find((entry) => entry.messageId === record.messageId);
+        if (!resolution) {
+          // Omission is unknown, never permission to resend an accepted effect.
+          throw new Error('Host has not resolved the original message');
+        }
+        const current = this.store.get(record.partition, record.messageId)!;
+        switch (resolution.state) {
+          case 'owned':
+            this.store.update({ ...current, state: 'accepted', error: undefined,
+              result: { disposition: 'turn_started', turnId: resolution.turnId, preparation: [] } });
+            break;
+          case 'pending':
+            this.store.update({ ...current, state: 'accepted', error: undefined,
+              result: { disposition: 'followup', preparation: [] } });
+            break;
+          case 'cancelled':
+          case 'not_admitted':
+            this.store.update({ ...current, state: 'failed', result: undefined,
+              error: resolution.state === 'cancelled'
+                ? 'The Host cancelled this message; the local copy is retained.'
+                : 'The Host never admitted this message; the local copy is retained.' });
+            break;
+        }
+        const timer = this.#retries.get(key);
+        if (timer) clearTimeout(timer);
+        this.#retries.delete(key);
+        this.#probed.delete(key);
+        this.#catalogFresh.delete(target.partition);
+        this.deps.changed(target.scope, record.sessionId);
+        return;
+      }
       const creation = this.store.creation(target.partition, record.sessionId);
       if (creation) {
         // session.create already has a durable request fingerprint. Replaying

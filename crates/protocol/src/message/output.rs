@@ -85,6 +85,9 @@ pub struct ExecutionQueryResult {
     deny_unknown_fields
 )]
 pub enum ExecutionResolution {
+    NotAdmitted {
+        message_id: String,
+    },
     Pending {
         message_id: String,
     },
@@ -159,7 +162,8 @@ pub fn decode_output(operation: Operation, value: &Value) -> Result<Output> {
             let mut seen = HashSet::new();
             for resolution in &output.resolutions {
                 let message = match resolution {
-                    ExecutionResolution::Pending { message_id }
+                    ExecutionResolution::NotAdmitted { message_id }
+                    | ExecutionResolution::Pending { message_id }
                     | ExecutionResolution::Cancelled { message_id } => message_id,
                     ExecutionResolution::Owned {
                         message_id,

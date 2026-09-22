@@ -88,6 +88,7 @@ export async function verifyMessageQueue(connection, workspace, reopened, openCl
       assert.deepEqual((await query()).resolutions, [
         previous.rootProof,
         ...['one', 'two', 'steer'].map((messageId) => ({ messageId, state: 'cancelled' })),
+        { messageId: 'absent', state: 'not_admitted' },
       ]);
       console.log('message-queue-reopened');
       return;
@@ -103,6 +104,7 @@ export async function verifyMessageQueue(connection, workspace, reopened, openCl
     assert.deepEqual((await query()).resolutions, [
       rootProof,
       ...['one', 'two', 'steer'].map((messageId) => ({ messageId, state: 'pending' })),
+      { messageId: 'absent', state: 'not_admitted' },
     ]);
     assert.deepEqual(await invoke('turn.message.query', { sessionId, messageIds: ids }), {
       cancelledMessageIds: [],

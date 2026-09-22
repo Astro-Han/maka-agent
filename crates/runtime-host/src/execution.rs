@@ -77,6 +77,7 @@ pub(crate) struct Executions {
     // never the model, effect, or human approval lifetime.
     interactions: Arc<crate::server::interactions::Interactions>,
     active: Mutex<HashMap<String, ActiveRun>>,
+    submissions: message::Submissions,
     plugin_processes: Arc<Mutex<HashMap<String, usize>>>,
     workers: TaskTracker,
     handoff_wake: tokio::sync::Notify,
@@ -117,6 +118,7 @@ impl Executions {
             .with_catalog(plugin_catalog.clone());
         Ok(Self {
             plugin_catalog,
+            submissions: Default::default(),
             plugin_calls,
             oauth: crate::oauth::Authority::new(workers.clone(), shutdown.clone()),
             controllers: Default::default(),

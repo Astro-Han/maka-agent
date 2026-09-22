@@ -55,6 +55,9 @@ impl BoundCommands {
             .digest()
             .map_err(|e| Error::Invalid(e.to_string()))?;
         let host = self.executions()?;
+        let _submission = host
+            .submissions
+            .track(&request.invocation.session_id, &request.message_id);
         let mut prepared = None;
         loop {
             let gate = host.interactions.own_admission().await;

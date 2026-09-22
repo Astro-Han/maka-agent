@@ -325,7 +325,9 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
         }),
         (error) => error.code === 'operation_unavailable',
       );
-      assert.deepEqual(await resolutions([first.messageId]), { resolutions: [] });
+      assert.deepEqual(await resolutions([first.messageId]), {
+        resolutions: [{ messageId: first.messageId, state: 'not_admitted' }],
+      });
       assert.equal(model.requests.length, 0);
       const blocked = await submit({
         ...first,
@@ -336,7 +338,9 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
       });
       assert.equal(blocked.disposition, 'blocked');
       assert.equal(blocked.preparation[0].receipt.failed[0].reason, 'disabled');
-      assert.deepEqual(await resolutions(['disabled-skill']), { resolutions: [] });
+      assert.deepEqual(await resolutions(['disabled-skill']), {
+        resolutions: [{ messageId: 'disabled-skill', state: 'not_admitted' }],
+      });
       assert.equal(model.requests.length, 0);
 
       const sibling = await openClient();
@@ -439,7 +443,9 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
       });
       assert.equal(incompatible.disposition, 'blocked');
       assert.equal(incompatible.preparation[0].receipt.failed[0].reason, 'host_incompatible');
-      assert.deepEqual(await resolutions(['wrong-run-tools']), { resolutions: [] });
+      assert.deepEqual(await resolutions(['wrong-run-tools']), {
+        resolutions: [{ messageId: 'wrong-run-tools', state: 'not_admitted' }],
+      });
       const followup = {
         ...second,
         messageId: 'followup-user-id',
