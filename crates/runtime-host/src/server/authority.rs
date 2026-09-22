@@ -221,6 +221,7 @@ fn path_free(request: &Request) -> bool {
         | Operation::InteractionAnswer
         | Operation::HostStatus
         | Operation::ConnectionCatalogQuery
+        | Operation::ModelProviderCatalogQuery
         | Operation::ConnectionModelsFetch
         | Operation::ConnectionOnboardingVerify
         | Operation::ConnectionOnboardingSave

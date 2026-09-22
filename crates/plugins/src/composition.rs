@@ -27,44 +27,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{Error, name};
+use crate::Error;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub enum Scope {
-    #[default]
-    Profile,
-    DesktopUi,
-    Session(String),
-}
-
-impl TryFrom<String> for Scope {
-    type Error = Error;
-
-    fn try_from(value: String) -> Result<Self, Error> {
-        match value.as_str() {
-            "profile" => Ok(Self::Profile),
-            "desktop-ui" => Ok(Self::DesktopUi),
-            _ => {
-                let session = value
-                    .strip_prefix("session:")
-                    .ok_or_else(|| Error::Invalid("invalid root".into()))?;
-                name(session)?;
-                Ok(Self::Session(session.to_owned()))
-            }
-        }
-    }
-}
-
-impl From<Scope> for String {
-    fn from(scope: Scope) -> String {
-        match scope {
-            Scope::Profile => "profile".into(),
-            Scope::DesktopUi => "desktop-ui".into(),
-            Scope::Session(id) => format!("session:{id}"),
-        }
-    }
-}
+pub use maka_runtime::scope::Scope;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]

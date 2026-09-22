@@ -106,13 +106,7 @@ impl ModelRequest {
         use maka_runtime::model::request::{Credentials, Provider, Request};
         let auth = match self.provider.auth {
             ProviderAuth::ApiKey(key) => Credentials::ApiKey(key),
-            ProviderAuth::Codex {
-                access_token,
-                session_id,
-            } => Credentials::Codex {
-                access_token,
-                session_id,
-            },
+            ProviderAuth::RequestHeaders(headers) => Credentials::RequestHeaders(headers),
             ProviderAuth::Bound { .. } => {
                 return Err(ModelError::Adapter("unresolved model credentials".into()));
             }
@@ -359,7 +353,6 @@ impl ModelExecutor {
             _ = cancellation.cancelled() => return Err(ModelError::Cancelled),
             result = auth::resolve(&mut request.provider.auth) => result?,
         }
-        auth::prepare(&mut request)?;
         let (sender, receiver) = mpsc::channel(4);
         let worker_cancel = cancellation.clone();
         let idle_timeout = self.idle_timeout;

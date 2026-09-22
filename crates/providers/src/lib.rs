@@ -17,32 +17,5 @@
  * under the License.
  */
 
-//! Runtime facts and execution contracts; no V8 or SQLite dependency.
-pub mod access;
-pub mod archive;
-pub mod artifact;
-pub mod attachment;
-pub mod capability;
-pub mod composition;
-pub mod configuration;
-pub mod context;
-pub mod continuation;
-pub mod event;
-mod event_write;
-pub mod execution;
-pub mod executor;
-pub mod handoff;
-pub mod input;
-pub mod interaction;
-pub mod message;
-pub mod model;
-pub mod oauth;
-pub mod provider;
-pub mod read;
-pub mod scope;
-pub mod shell_result;
-pub mod shell_run;
-pub mod terminal;
-pub mod tool_call;
-pub mod tool_output;
-pub mod tools;
+//! Bundled model providers, implemented through the public plugin contracts.
+pub mod codex;

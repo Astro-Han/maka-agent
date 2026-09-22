@@ -170,6 +170,7 @@ impl Platform {
     > {
         let catalog = kernel.catalog().clone();
         catalog.host_only::<maka_plugins::model::Adapter>()?;
+        catalog.host_only::<maka_plugins::provider::Definition>()?;
         let services_changed = kernel.subscribe_services();
         catalog
             .host_only::<maka_plugins::remote::Endpoint>()

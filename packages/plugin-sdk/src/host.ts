@@ -33,6 +33,7 @@ export type * from './http.js';
 export type * from './filesystem.js';
 export type * from './llm.js';
 export type * from './models.js';
+export type * from './providers.js';
 export type * from './clients.js';
 export type * from './history.js';
 
@@ -340,6 +341,7 @@ export interface HostContext {
     ): Promise<Registration>;
   };
   readonly modelAdapters: import('./models.js').ModelAdapters;
+  readonly modelProviders: import('./providers.js').ModelProviders;
   readonly executors: {
     register(
       definition: ExecutorDefinition,

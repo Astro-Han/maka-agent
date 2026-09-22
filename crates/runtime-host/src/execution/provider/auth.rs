@@ -70,10 +70,9 @@ impl AuthResolver for Binding {
             })?;
             let access_token = credential.access_token(self.client.clone()).await?;
             Ok(match self.provider {
-                Provider::OpenaiCodex => ProviderAuth::Codex {
-                    access_token,
-                    session_id: self.session_id.clone(),
-                },
+                Provider::OpenaiCodex => ProviderAuth::RequestHeaders(
+                    maka_providers::codex::request_headers(&access_token, &self.session_id)?,
+                ),
                 Provider::XaiOauth => ProviderAuth::ApiKey(access_token),
                 Provider::GithubCopilot => {
                     return Err(ModelError::Adapter(

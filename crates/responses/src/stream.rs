@@ -22,7 +22,6 @@ use crate::{
     decode::Decoder,
     transport::{Exchange, ResponsesLane, Shared},
 };
-use base64::Engine;
 use maka_plugins::http;
 use maka_plugins::model::{
     Context, Credentials as ProviderAuth, Events, ProviderKind, Request as ModelRequest,
@@ -255,28 +254,22 @@ fn headers(request: &ModelRequest) -> Result<BTreeMap<String, String>, ModelErro
         ("content-type".into(), "application/json".into()),
         ("accept".into(), "text/event-stream".into()),
     ]);
-    let token = match &request.provider.auth {
-        ProviderAuth::ApiKey(token) => token,
-        ProviderAuth::Codex {
-            access_token,
-            session_id,
-        } => {
-            for (key, value) in [
-                ("openai-beta", "responses=experimental"),
-                ("originator", "codex_cli_rs"),
-                ("user-agent", "codex_cli_rs/0.0.0 (Maka)"),
-                ("session_id", session_id),
-                ("x-client-request-id", session_id),
-            ] {
-                headers.insert(key.into(), value.into());
-            }
-            if let Some(account) = account_id(access_token) {
-                headers.insert("chatgpt-account-id".into(), account);
-            }
-            access_token
+    match &request.provider.auth {
+        ProviderAuth::ApiKey(token) => {
+            headers.insert("authorization".into(), format!("Bearer {token}"));
         }
-    };
-    headers.insert("authorization".into(), format!("Bearer {token}"));
+        ProviderAuth::RequestHeaders(prepared) => {
+            for (name, value) in prepared {
+                let name = name.to_ascii_lowercase();
+                if headers.get(&name).is_some_and(|existing| existing != value) {
+                    return Err(ModelError::Adapter(format!(
+                        "Authentication header conflicts with protocol header: {name}"
+                    )));
+                }
+                headers.insert(name, value.clone());
+            }
+        }
+    }
     for (key, value) in &request.provider.headers {
         let key = key.to_ascii_lowercase();
         if headers.get(&key).is_some_and(|existing| existing != value) {
@@ -287,34 +280,6 @@ fn headers(request: &ModelRequest) -> Result<BTreeMap<String, String>, ModelErro
         headers.insert(key, value.clone());
     }
     Ok(headers)
-}
-fn account_id(token: &str) -> Option<String> {
-    let mut parts = token.split('.');
-    parts.next()?;
-    let payload = parts.next()?;
-    parts.next()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload.trim_end_matches('='))
-        .ok()?;
-    let claims: Value = serde_json::from_slice(&bytes).ok()?;
-    for value in [
-        &claims["chatgpt_account_id"],
-        &claims["https://api.openai.com/auth"]["chatgpt_account_id"],
-    ] {
-        if let Some(id) = value.as_str().filter(|v| !v.is_empty()) {
-            return Some(id.into());
-        }
-    }
-    claims["organizations"].as_array()?.iter().find_map(|v| {
-        v["id"]
-            .as_str()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_owned)
-    })
 }
 fn context_overflow(code: &str) -> bool {
     matches!(

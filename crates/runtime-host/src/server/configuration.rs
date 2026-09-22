@@ -74,7 +74,8 @@ impl Output {
 pub(super) fn supports(operation: Operation) -> bool {
     matches!(
         operation,
-        Operation::ConnectionCatalogQuery
+        Operation::ModelProviderCatalogQuery
+            | Operation::ConnectionCatalogQuery
             | Operation::ConnectionRequestHeadersQuery
             | Operation::ConnectionRequestHeadersReplace
             | Operation::RuntimePolicyQuery
@@ -95,6 +96,10 @@ pub(super) fn supports(operation: Operation) -> bool {
 
 pub(super) fn decode_input(operation: Operation, value: &Value) -> Result<Value> {
     match operation {
+        Operation::ModelProviderCatalogQuery => {
+            serde_json::from_value::<maka_plugins::provider::catalog::Query>(value.clone())
+                .map_err(|_| ProtocolError::invalid("Invalid model provider query"))?;
+        }
         Operation::NetworkProxyTest => {
             maka_protocol::network_proxy::decode_input(value)?;
         }
@@ -150,6 +155,10 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> Result<Value>
 
 pub(super) fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
     match operation {
+        Operation::ModelProviderCatalogQuery => {
+            serde_json::from_value::<maka_plugins::provider::catalog::Page>(value.clone())
+                .map_err(|_| ProtocolError::invalid("Invalid model provider directory"))?;
+        }
         Operation::NetworkProxyTest => {
             maka_protocol::network_proxy::decode_output(value)?;
         }
@@ -195,6 +204,18 @@ pub(super) async fn execute(
     operation: Operation,
     value: &Value,
 ) -> std::result::Result<Output, OperationError> {
+    if operation == Operation::ModelProviderCatalogQuery {
+        let input = serde_json::from_value(value.clone()).map_err(|_| {
+            failure(maka_config::ConfigError::Invalid(
+                "invalid provider query".into(),
+            ))
+        })?;
+        let result = maka_plugins::provider::catalog::query(&host.executions.plugin_catalog, input)
+            .map_err(|error| failure(maka_config::ConfigError::Invalid(error.to_string())))?;
+        return serde_json::to_value(result)
+            .map(Output::Catalog)
+            .map_err(|error| failure(maka_config::ConfigError::Json(error)));
+    }
     if operation == Operation::NetworkProxyTest {
         return policy::test_network(&host.configuration, value).await;
     }

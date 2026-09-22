@@ -196,7 +196,11 @@ pub(super) async fn observe_binding(
         .map_err(|_| unavailable("Invalid provider request headers"))?
         .unwrap_or_default();
     let config = ProviderConfig {
-        adapter: overrides.and_then(|value| value.adapter.clone()),
+        adapter: overrides
+            .and_then(|value| value.adapter.clone())
+            .or_else(|| {
+                (row.provider_type == "openai-codex").then(|| maka_providers::codex::ADAPTER.into())
+            }),
         capabilities: model.capabilities,
         kind: route.kind,
         model: target.model.clone(),

@@ -35,10 +35,10 @@ impl maka_model::AuthResolver for BoundSubscription {
 
 fn codex_request(port: u16, token: &str) -> ModelRequest {
     let mut request = proxied_request(port, "first");
-    let auth = ProviderAuth::Codex {
-        access_token: token.into(),
-        session_id: "codex-session".into(),
-    };
+    request.provider.adapter = Some(maka_providers::codex::ADAPTER.into());
+    let auth = ProviderAuth::RequestHeaders(
+        maka_providers::codex::request_headers(token, "codex-session").unwrap(),
+    );
     request.provider.auth = ProviderAuth::Bound {
         identity: "root-bound-subscription".into(),
         resolver: std::sync::Arc::new(BoundSubscription(auth)),
@@ -170,7 +170,9 @@ async fn subscription_profile_matches_ts_through_proxy_ws_continuation_and_http_
         server.await.unwrap();
         let mut wrong_wire = codex_request(port, "unused");
         wrong_wire.provider.kind = ProviderKind::Anthropic;
-        assert!(executor.stream(wrong_wire, CancellationToken::new()).await.is_err());
+        let mut rejected = executor.stream(wrong_wire, CancellationToken::new()).await.unwrap();
+        assert!(matches!(rejected.next().await, Some(Err(ModelError::Adapter(message)))
+            if message == "subscription requires the Responses protocol"));
     }).await.unwrap();
 }
 

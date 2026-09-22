@@ -367,6 +367,24 @@
         executors: Object.freeze({
           register: (definition, execute) => register('executor', definition, execute),
         }),
+        modelProviders: Object.freeze({
+          register: (name, descriptor, provider) => {
+            for (const method of ['resolve', 'authorize']) {
+              if (typeof provider?.[method] !== 'function')
+                throw new TypeError(`Model provider requires a ${method} method`);
+            }
+            return register('model_provider', { name, descriptor }, async (request, call) => {
+              const method = provider[request.method];
+              if (typeof method !== 'function') return { error: { kind: 'unavailable' } };
+              try {
+                return { value: await method(request.input, call) };
+              } catch (error) {
+                if (error?.providerFailure) return { error: error.providerFailure };
+                throw error;
+              }
+            });
+          },
+        }),
         modelAdapters: Object.freeze({
           register: (name, open) =>
             register('model_adapter', { name }, async (lifetime) => {
@@ -631,8 +649,13 @@
             }
             return result.value;
           };
-          context.emit = (event) => io('emit', event);
-          context.progress = () => io('progress');
+          if (call.provider) {
+            context.openExternal = (url, userCode) =>
+              io('open_external', { url, user_code: userCode ?? null });
+          } else {
+            context.emit = (event) => io('emit', event);
+            context.progress = () => io('progress');
+          }
           context.transport = Object.freeze({
             identity: call.routing,
             async request(request) {

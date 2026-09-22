@@ -60,6 +60,7 @@ mod message_recovery;
 mod message_submit;
 mod model_adapters;
 mod model_overrides;
+mod model_providers;
 mod oauth;
 mod oauth_execution;
 mod oauth_refresh;

@@ -41,6 +41,7 @@ pub mod permissions;
 pub mod preferences;
 pub mod process;
 pub mod prompt;
+pub mod provider;
 mod registration;
 pub mod remote;
 pub mod revision;

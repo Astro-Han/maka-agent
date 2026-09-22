@@ -72,6 +72,18 @@ pub(crate) fn standalone(runtime: TrustedRuntime) -> Result<(Catalog, Arc<Fiber>
         owner.begin_loading()?;
         owner.ready()?;
         catalog.publish(&owner, Builtin(runtime).stage()?)?;
+        let subscription = Fiber::new(
+            maka_providers::codex::ID,
+            maka_providers::codex::ID,
+            Scope::Profile,
+        )?;
+        subscription.begin_loading()?;
+        subscription.ready()?;
+        catalog.publish_child(
+            &owner.context(),
+            subscription,
+            maka_providers::codex::Codex::default().stage()?,
+        )?;
         Ok::<_, maka_plugins::Error>((catalog, Arc::new(owner)))
     };
     setup().map_err(|error| ModelError::Adapter(error.to_string()))

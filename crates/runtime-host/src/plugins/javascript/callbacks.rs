@@ -154,6 +154,25 @@ pub(super) async fn invoke(
     context: Value,
     cancellation: CancellationToken,
 ) -> Result<Value, ToolError> {
+    invoke_with_grace(
+        module,
+        callback,
+        input,
+        context,
+        cancellation,
+        Duration::from_secs(5),
+    )
+    .await
+}
+
+pub(super) async fn invoke_with_grace(
+    module: &Module,
+    callback: u32,
+    input: Value,
+    context: Value,
+    cancellation: CancellationToken,
+    grace: Duration,
+) -> Result<Value, ToolError> {
     let id = uuid::Uuid::new_v4().to_string();
     let request = module.call(
         vec!["invoke".into()],
@@ -169,7 +188,7 @@ pub(super) async fn invoke(
                 }
                 request.await
             };
-            match tokio::time::timeout(Duration::from_secs(5), drain).await {
+            match tokio::time::timeout(grace, drain).await {
                 Ok(result) => result,
                 Err(_) => {
                     module.terminate_vm("plugin callback ignored cancellation");

@@ -72,7 +72,7 @@ export interface ModelRequest {
     baseUrl: string;
     headers?: Readonly<Record<string, string>>;
     bodyOverlay?: Readonly<Record<string, Json>> | null;
-  } & ({ apiKey: string } | { codex: { accessToken: string; sessionId: string } });
+  } & ({ apiKey: string } | { requestHeaders: Readonly<Record<string, string>> });
   prompt: readonly ModelMessage[];
   tools?: readonly {
     name: string;

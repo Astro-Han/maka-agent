@@ -41,12 +41,12 @@ export async function stream(request, emit, signal, requestId) {
       throw new Error(`Unsupported provider-executed tool: ${tool.id}`);
     }
   }
-  const { kind, model, baseUrl, apiKey, headers, bodyOverlay } = request.provider;
+  const { kind, model, baseUrl, apiKey, requestHeaders, headers, bodyOverlay } = request.provider;
   const fetch = networkFetch(requestId);
   const scopedFetch = (input, init) => boundedFetch(input, init, fetch);
   const settings = {
     baseURL: baseUrl,
-    apiKey,
+    apiKey: apiKey ?? '',
     fetch: scopedFetch,
   };
   const compatible = kind?.openai_compatible;
@@ -54,9 +54,24 @@ export async function stream(request, emit, signal, requestId) {
     throw new Error('Unsupported AI SDK protocol');
   }
   const overlayKeys = Object.keys(bodyOverlay ?? {});
-  if (Object.keys(headers ?? {}).length > 0 || overlayKeys.length > 0) {
+  if (
+    requestHeaders !== undefined ||
+    Object.keys(headers ?? {}).length > 0 ||
+    overlayKeys.length > 0
+  ) {
     settings.fetch = async (input, init) => {
       const generated = new Request(input, init);
+      if (requestHeaders !== undefined) {
+        generated.headers.delete('authorization');
+        generated.headers.delete('x-api-key');
+        for (const [name, value] of Object.entries(requestHeaders)) {
+          const current = generated.headers.get(name);
+          if (current !== null && current !== value) {
+            throw new Error(`Authentication header conflicts with a protocol header: ${name}`);
+          }
+          generated.headers.set(name, value);
+        }
+      }
       for (const [name, value] of Object.entries(headers ?? {})) {
         const current = generated.headers.get(name);
         if (current !== null && current !== value) {

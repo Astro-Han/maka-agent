@@ -4527,6 +4527,7 @@ dependencies = [
  "maka-js-runtime",
  "maka-network",
  "maka-plugins",
+ "maka-providers",
  "maka-responses",
  "maka-runtime",
  "reqwest",
@@ -4573,6 +4574,7 @@ dependencies = [
  "cap-std",
  "dunce",
  "futures-util",
+ "jsonschema",
  "libc",
  "maka-runtime",
  "maka-sandbox",
@@ -4636,6 +4638,24 @@ dependencies = [
  "thiserror 2.0.20",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "maka-providers"
+version = "0.2.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "futures-util",
+ "maka-plugins",
+ "maka-responses",
+ "maka-runtime",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "url",
 ]
 
 [[package]]
@@ -4705,6 +4725,7 @@ dependencies = [
  "maka-presentation",
  "maka-process",
  "maka-protocol",
+ "maka-providers",
  "maka-runtime",
  "maka-sandbox",
  "maka-scheduler",

@@ -213,12 +213,12 @@ async fn codex_search_preserves_real_provider_calls_and_citations() {
         let lane = Conversation::default();
         let request = ModelRequest {
             provider: ProviderConfig {
-                adapter: None,
+                adapter: Some(maka_providers::codex::ADAPTER.into()),
                 capabilities: Default::default(),
                 kind: ProviderKind::OpenaiResponses,
                 model: "gpt-5.6-luna".into(),
                 base_url: "https://chatgpt.com/backend-api/codex".into(),
-                auth: ProviderAuth::Codex {access_token, session_id: format!("maka-web-test-{}", std::process::id())},
+                auth: ProviderAuth::RequestHeaders(maka_providers::codex::request_headers(&access_token, &format!("maka-web-test-{}", std::process::id())).unwrap()),
                 headers: BTreeMap::new(), body_overlay: None, network,
             },
             prompt: vec![

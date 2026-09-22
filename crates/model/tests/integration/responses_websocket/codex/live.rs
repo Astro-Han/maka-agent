@@ -47,15 +47,15 @@ async fn live_luna_subscription_streams_and_confirms_canonical_ws_continuation()
         network = maka_network::Policy::from_settings(&proxy, None).unwrap();
     }
     let provider = ProviderConfig {
-        adapter: None,
+        adapter: Some(maka_providers::codex::ADAPTER.into()),
         capabilities: Default::default(),
         kind: ProviderKind::OpenaiResponses,
         model: "gpt-5.6-luna".into(),
         base_url: "https://chatgpt.com/backend-api/codex".into(),
-        auth: ProviderAuth::Codex {
-            access_token,
-            session_id: format!("maka-rust-live-{now}"),
-        },
+        auth: ProviderAuth::RequestHeaders(
+            maka_providers::codex::request_headers(&access_token, &format!("maka-rust-live-{now}"))
+                .unwrap(),
+        ),
         headers: BTreeMap::new(),
         body_overlay: None,
         network,

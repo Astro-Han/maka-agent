@@ -31,6 +31,11 @@ use std::sync::Arc;
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Registration {
+    ModelProvider {
+        name: String,
+        descriptor: maka_plugins::provider::Descriptor,
+        callback: u32,
+    },
     ModelAdapter {
         name: String,
         callback: u32,
@@ -271,6 +276,30 @@ pub(super) fn stage_entries(
                     )
                     .map_err(super::message)?;
             }
+            Registration::ModelProvider {
+                name,
+                descriptor,
+                callback,
+            } => {
+                validate_callback(callback)?;
+                staged
+                    .insert(
+                        name,
+                        maka_plugins::provider::Definition::new(
+                            descriptor,
+                            Arc::new(super::provider::JavaScript {
+                                callback: Arc::new(callbacks::Callback {
+                                    module: module.clone(),
+                                    id: callback,
+                                    calls: calls.clone(),
+                                }),
+                                calls: model_calls.clone(),
+                            }),
+                        )
+                        .map_err(super::message)?,
+                    )
+                    .map_err(super::message)?;
+            }
             Registration::ModelAdapter { name, callback } => {
                 validate_callback(callback)?;
                 staged
@@ -411,6 +440,7 @@ pub(super) fn stage_entries(
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Kind {
+    ModelProvider,
     ModelAdapter,
     Background,
     Behavior,
@@ -431,6 +461,7 @@ pub(super) fn withdraw(
     names: &[String],
 ) -> Result<(), maka_plugins::Error> {
     match kind {
+        Kind::ModelProvider => publisher.withdraw_many::<maka_plugins::provider::Definition>(names),
         Kind::ModelAdapter => publisher.withdraw_many::<maka_plugins::model::Adapter>(names),
         Kind::Background => {
             publisher.withdraw_many::<Arc<dyn maka_plugins::background::BackgroundWork>>(names)

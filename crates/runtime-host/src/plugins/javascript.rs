@@ -25,6 +25,7 @@ mod executor;
 mod input;
 mod invocation;
 mod model;
+mod provider;
 mod registration;
 mod remote;
 mod revision;

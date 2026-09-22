@@ -31,6 +31,7 @@ use std::{
 pub(super) struct Calls(Mutex<BTreeMap<String, Weak<Call>>>);
 struct Call {
     context: Context,
+    interaction: Option<Arc<dyn maka_plugins::provider::authentication::Interaction>>,
     resources: Arc<Resources>,
     bodies: Mutex<BTreeMap<String, Arc<dyn http::Body>>>,
 }
@@ -38,9 +39,9 @@ struct Call {
 struct Resources {
     sockets: Mutex<BTreeMap<String, Arc<dyn Socket>>>,
 }
-struct Handle {
+pub(super) struct Handle {
     calls: Arc<Calls>,
-    id: String,
+    pub id: String,
     call: Arc<Call>,
 }
 impl Drop for Handle {
@@ -52,10 +53,41 @@ impl Drop for Handle {
     }
 }
 impl Calls {
+    pub fn provider(
+        self: &Arc<Self>,
+        context: maka_plugins::provider::Context,
+    ) -> Result<Handle, Error> {
+        struct NoModelEvents;
+        impl Events for NoModelEvents {
+            fn emit(&self, _: ModelEvent) -> BoxFuture<'_, Result<(), Error>> {
+                Box::pin(async { Err(invalid("provider setup cannot emit model events")) })
+            }
+        }
+        self.register_call(
+            Context {
+                transport: context.transport,
+                // The provider's callback observes cancellation; an admitted
+                // exchange must still be allowed to read its replacement grant.
+                cancellation: tokio_util::sync::CancellationToken::new(),
+                idle_timeout: std::time::Duration::from_secs(150),
+                events: Arc::new(NoModelEvents),
+            },
+            Arc::new(Resources::default()),
+            context.interaction,
+        )
+    }
     fn register(
         self: &Arc<Self>,
         context: Context,
         resources: Arc<Resources>,
+    ) -> Result<Handle, Error> {
+        self.register_call(context, resources, None)
+    }
+    fn register_call(
+        self: &Arc<Self>,
+        context: Context,
+        resources: Arc<Resources>,
+        interaction: Option<Arc<dyn maka_plugins::provider::authentication::Interaction>>,
     ) -> Result<Handle, Error> {
         let mut calls = self.0.lock().unwrap();
         if calls.len() >= 128 {
@@ -63,6 +95,7 @@ impl Calls {
         }
         let call = Arc::new(Call {
             context,
+            interaction,
             resources,
             bodies: Mutex::default(),
         });
@@ -104,13 +137,20 @@ pub(super) struct Operation {
 #[derive(Deserialize)]
 #[serde(tag = "kind", content = "input", rename_all = "snake_case")]
 enum Io {
+    OpenExternal {
+        url: String,
+        user_code: Option<String>,
+    },
     Progress,
     Emit(ModelEvent),
     Request(http::Request),
     Read(String),
     CloseBody(String),
     Connect(Connect),
-    Send { socket: String, frame: Frame },
+    Send {
+        socket: String,
+        frame: Frame,
+    },
     Receive(String),
     CloseSocket(String),
 }
@@ -126,6 +166,15 @@ impl Call {
     }
     async fn execute(&self, operation: Io) -> Result<Value, Error> {
         match operation {
+            Io::OpenExternal { url, user_code } => {
+                self.interaction
+                    .as_ref()
+                    .ok_or_else(|| invalid("interactive login is unavailable"))?
+                    .open_external(url, user_code)
+                    .await
+                    .map_err(invalid)?;
+                Ok(Value::Null)
+            }
             Io::Progress => {
                 self.context.events.progress();
                 Ok(Value::Null)

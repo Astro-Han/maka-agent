@@ -118,6 +118,7 @@ operations! {
     ConfigurationCredentialsExport => ("configuration.credentials.export", Query, Ready),
     ConnectionCatalogCreate => ("connection.catalog.create", Command, Ready),
     ConnectionCatalogQuery => ("connection.catalog.query", Query, Ready),
+    ModelProviderCatalogQuery => ("model.provider.catalog.query", Query, Ready),
     ConnectionCatalogRemove => ("connection.catalog.remove", Command, Ready),
     ConnectionCatalogSetDefaultTarget => ("connection.catalog.set-default-target", Command, Ready),
     ConnectionCatalogUpdate => ("connection.catalog.update", Command, Ready),

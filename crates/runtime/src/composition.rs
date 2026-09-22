@@ -26,6 +26,7 @@ use std::collections::BTreeSet;
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
     ModelAdapter,
+    ModelProvider,
     Input,
     Tool,
     PromptSection,

@@ -24,6 +24,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+maka-providers.workspace = true
 maka-workhub.workspace = true
 maka-assistant.workspace = true
 futures-util.workspace = true
