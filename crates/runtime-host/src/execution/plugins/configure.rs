@@ -111,14 +111,7 @@ impl BoundCommands {
         host.workers.spawn(async move {
             let result = worker
                 .log
-                .update_session_metadata(
-                    &input.session_id,
-                    input.expected_revision,
-                    move |configuration: &mut SessionConfiguration| {
-                        *configuration = next;
-                        Ok(())
-                    },
-                )
+                .replace_session_metadata(&input.session_id, input.expected_revision, next)
                 .await
                 .map(|result| match result {
                     SessionMutation::Committed(record) => Configured::Committed {

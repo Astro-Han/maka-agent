@@ -283,6 +283,7 @@ impl State {
                 )
             }
             Request::ResolveModel(input) => encode(self.models.resolve(input).await?),
+            Request::SearchModels(input) => encode(self.models.search(input).await?),
             Request::Revision(input) => {
                 let _lease = self.context.lifecycle.resource_call()?;
                 Ok(self.calls.revisions.call(input).await?)
@@ -625,6 +626,10 @@ impl State {
             Request::CreateRoot(input) => {
                 let (commands, input) = self.execution(input)?;
                 encode(commands.create_root(input).await?)
+            }
+            Request::RestoreRoot(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.restore_root(input.operation_id).await?)
             }
             Request::WorkspacePatch(input) => {
                 let (commands, input) = self.execution(input)?;

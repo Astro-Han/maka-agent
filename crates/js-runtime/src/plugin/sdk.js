@@ -225,6 +225,7 @@
       restoreChild: (input) => call('restoreChild', input),
       createChild: (input) => call('createChild', input),
       createRoot: (input) => call('createRoot', input),
+      restoreRoot: (operationId) => call('restoreRoot', { operationId }),
       workspacePatch: (operationId) => call('workspacePatch', { operationId }),
       query: (operationId) => call('query', { operationId }),
       cancel: (operationId) => call('cancel', { operationId }),
@@ -527,6 +528,7 @@
         }),
         models: Object.freeze({
           resolve: (selection) => host('models.resolve', selection),
+          search: (query = {}) => host('models.search', query),
         }),
         async revision() {
           const handle = await host('revision', { kind: 'new' });

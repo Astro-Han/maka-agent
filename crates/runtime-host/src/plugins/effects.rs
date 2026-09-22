@@ -147,6 +147,18 @@ impl maka_plugins::permissions::Access for Effects {
     }
 }
 impl maka_plugins::llm::Models for Effects {
+    fn search(
+        &self,
+        query: maka_plugins::llm::Search,
+    ) -> BoxFuture<'_, Result<maka_plugins::llm::Choices, maka_plugins::Error>> {
+        Box::pin(async move {
+            query.validate()?;
+            let _lease = self.owner.resource_call()?;
+            let host = self.host.upgrade().ok_or(maka_plugins::Error::Retired)?;
+            host.search_plugin_models(query).await
+        })
+    }
+
     fn resolve(
         &self,
         selection: maka_plugins::llm::Selection,

@@ -24,6 +24,29 @@
   initial-value: 0px;
 }
 
+.workhub-model-selection {
+  display: grid;
+  gap: var(--space-3, 12px);
+  max-width: 32rem;
+  padding-block: var(--space-3, 12px);
+}
+
+.workhub-model-selection label {
+  display: grid;
+  gap: var(--space-1, 4px);
+}
+
+.workhub-model-selection input,
+.workhub-model-selection select {
+  box-sizing: border-box;
+  color: inherit;
+  background: var(--color-surface, transparent);
+  border: 1px solid var(--color-border-subtle, var(--border));
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--space-2, 8px);
+  width: 100%;
+}
+
 .workhub-body {
   display: grid;
   width: 100%;

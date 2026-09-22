@@ -34,6 +34,16 @@ export default async function (ctx) {
     throw new Error('model lookup invented an unconfigured default');
   if (await ctx.models.resolve({ kind: 'named', connectionSlug: 'recovery', model: 'not-enabled' }))
     throw new Error('disabled model is selectable');
+  const choices = await ctx.models.search({ query: 'recovery fixture-model' });
+  if (
+    !choices.complete ||
+    choices.models.length !== 1 ||
+    choices.models[0]?.model.connection_id !== model.connection_id ||
+    choices.models[0]?.isDefault
+  )
+    throw new Error('model search disagrees with selection resolution');
+  if ((await ctx.models.search({ query: 'not-enabled' })).models.length !== 0)
+    throw new Error('model search invented an available choice');
 
   /** @type {import('../../../../packages/plugin-sdk/src/host.js').ReadDirectory | undefined} */
   let preparedFiles;

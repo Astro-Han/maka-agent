@@ -50,6 +50,12 @@ impl Selection {
 }
 
 pub trait Models: Send + Sync {
+    /// Bounded, non-secret chat model choices. Refine the query when incomplete.
+    /// Discovery does not grant execution authority or promise provider readiness.
+    fn search(
+        &self,
+        query: Search,
+    ) -> futures_util::future::BoxFuture<'_, Result<Choices, crate::Error>>;
     /// Resolve an enabled model without exposing credentials, endpoints, or overlays.
     /// Admission still validates the selected binding and its current permissions.
     fn resolve(
@@ -65,6 +71,39 @@ pub trait Models: Send + Sync {
         call: crate::call::Scope,
         input: Generate,
     ) -> futures_util::future::BoxFuture<'_, Result<ModelGeneration, maka_runtime::tools::ToolError>>;
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Search {
+    #[serde(default)]
+    pub query: String,
+}
+impl Search {
+    pub fn validate(&self) -> Result<(), crate::Error> {
+        if self.query.len() > 512 || self.query.chars().any(char::is_control) {
+            return Err(crate::Error::Invalid("invalid model search query".into()));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Choice {
+    pub model: maka_runtime::execution::ModelBinding,
+    pub connection_name: String,
+    pub display_name: String,
+    pub thinking_levels: Vec<maka_runtime::execution::ThinkingLevel>,
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Choices {
+    pub revision: u64,
+    pub models: Vec<Choice>,
+    pub complete: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -59,6 +59,117 @@ impl From<RootApproval> for RootGrant {
 }
 
 impl BoundCommands {
+    fn root_id(&self, operation_id: &str) -> Result<String, Error> {
+        if operation_id.is_empty()
+            || operation_id.len() > 256
+            || operation_id
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace())
+        {
+            return Err(Error::Invalid("invalid root operation ID".into()));
+        }
+        let bytes = serde_json::to_vec(&(
+            "plugin-root-v1",
+            self.namespace.package(),
+            String::from(self.namespace.scope().clone()),
+            operation_id,
+        ))
+        .map_err(|error| Error::Invalid(error.to_string()))?;
+        Ok(format!("plugin-root-{:x}", Sha256::digest(bytes)))
+    }
+
+    pub(super) async fn restore_managed_root(
+        &self,
+        operation_id: String,
+    ) -> Result<Option<ChildSession>, Error> {
+        let id = self.root_id(&operation_id)?;
+        let approval = self.root_grant.as_ref().ok_or(Error::Denied)?;
+        let host = self.executions()?;
+        let _lease = self.context.admit().map_err(|_| Error::Revoked)?;
+        self.authorize_origin(&host).await?;
+        let project = observe_workspace(&host, approval).await?;
+        let _gate = host.interactions.own_admission().await;
+        self.authorize_origin(&host).await?;
+        recheck_project(&host, project).await?;
+        if !host.accepting() {
+            return Err(Error::Draining);
+        }
+        if self.submission_stop.is_cancelled() {
+            return Err(Error::Revoked);
+        }
+        let Some(record) = host
+            .log
+            .get_session::<SessionConfiguration>(&id)
+            .await
+            .map_err(storage)?
+        else {
+            return Ok(None);
+        };
+        if host
+            .log
+            .session_manager(&id)
+            .await
+            .map_err(storage)?
+            .as_ref()
+            != Some(&self.namespace)
+        {
+            return Err(Error::Denied);
+        }
+        let current = &record.configuration;
+        if record.archived
+            || current.workspace != approval.workspace
+            || current.workspace_origin != approval.workspace_origin
+            || rank(current.sandbox_mode) > rank(approval.sandbox_mode)
+            || !current
+                .approval_policy
+                .is_subset_of(approval.approval_policy)
+        {
+            return Err(Error::Denied);
+        }
+        if let Some(source) = &approval.source {
+            let origin = host
+                .log
+                .get_session::<SessionConfiguration>(&source.session_id)
+                .await
+                .map_err(storage)?
+                .ok_or(Error::NotFound)?;
+            let parent = &origin.configuration;
+            if rank(current.sandbox_mode) > rank(parent.sandbox_mode)
+                || !current.approval_policy.is_subset_of(parent.approval_policy)
+                || current.workspace.host_cwd != parent.workspace.host_cwd
+                || current.workspace_origin != parent.workspace_origin
+                || parent.bound_tools.as_ref().is_some_and(|ceiling| {
+                    current
+                        .bound_tools
+                        .as_ref()
+                        .is_none_or(|tools| !tools.is_subset(ceiling))
+                })
+                || parent.tool_profile.is_some() && current.tool_profile != parent.tool_profile
+                || parent.instructions.as_ref().is_some_and(|base| {
+                    current.instructions.as_ref().is_none_or(|text| {
+                        text != base
+                            && !text
+                                .strip_prefix(base)
+                                .is_some_and(|tail| tail.starts_with("\n\n"))
+                    })
+                })
+            {
+                return Err(Error::Denied);
+            }
+        }
+        self.grants.lock().unwrap().insert(
+            id.clone(),
+            Grant {
+                workspace_origin: current.workspace_origin,
+                boundary_revision: current.boundary_revision,
+                sandbox_mode: current.sandbox_mode,
+                approval_policy: current.approval_policy,
+                cwd: current.workspace.host_cwd.clone(),
+            },
+        );
+        Ok(Some(ChildSession { session_id: id }))
+    }
+
     pub(super) async fn authorize_origin(&self, host: &Executions) -> Result<(), Error> {
         if let Some(call) = &self.call {
             match host.plugin_execution_boundary(call).await? {
@@ -152,14 +263,7 @@ impl BoundCommands {
         let host = self.executions()?;
         let lease = self.context.admit().map_err(|_| Error::Revoked)?;
         self.authorize_origin(&host).await?;
-        let bytes = serde_json::to_vec(&(
-            "plugin-root-v1",
-            self.namespace.package(),
-            String::from(self.namespace.scope().clone()),
-            &request.operation_id,
-        ))
-        .map_err(|error| Error::Invalid(error.to_string()))?;
-        let id = format!("plugin-root-{:x}", Sha256::digest(bytes));
+        let id = self.root_id(&request.operation_id)?;
         let fingerprint = format!(
             "sha256:{:x}",
             Sha256::digest(
@@ -167,57 +271,10 @@ impl BoundCommands {
                     .map_err(|error| Error::Invalid(error.to_string()))?
             )
         );
-        let observed_project = match &approval.workspace.target {
-            WorkspaceTarget::Project { project_id } => Some(
-                host.log
-                    .get_project(project_id)
-                    .await
-                    .map_err(storage)?
-                    .ok_or(Error::NotFound)?,
-            ),
-            WorkspaceTarget::HostPath { .. } => None,
-        };
-        // Filesystem observation never holds Host-wide admission.
-        if let Some(project) = &observed_project {
-            let resolved = crate::server::resolve_project_workspace(project.clone())
-                .await
-                .map_err(|error| Error::Invalid(error.message))?;
-            if resolved.host_cwd != approval.workspace.host_cwd {
-                return Err(Error::Denied);
-            }
-        }
-        let path = std::path::PathBuf::from(&approval.workspace.host_cwd);
-        let expected = approval.workspace_identity.clone();
-        tokio::task::spawn_blocking(move || {
-            let canonical = path
-                .canonicalize()
-                .map_err(|error| Error::Host(error.to_string()))?;
-            if maka_fs_tools::workspace::project::host_path(&canonical)
-                .map_err(|error| Error::Host(error.to_string()))?
-                != path.to_str().ok_or(Error::Denied)?
-                || maka_fs_tools::workspace::read_identity(&canonical)
-                    .map_err(|error| Error::Host(error.to_string()))?
-                    != expected
-            {
-                return Err(Error::Denied);
-            }
-            Ok(())
-        })
-        .await
-        .map_err(|error| Error::Host(error.to_string()))??;
+        let observed_project = observe_workspace(&host, approval).await?;
         let gate = host.interactions.own_admission().await;
         self.authorize_origin(&host).await?;
-        if let Some(project) = observed_project
-            && host
-                .log
-                .get_project(&project.id)
-                .await
-                .map_err(storage)?
-                .as_ref()
-                != Some(&project)
-        {
-            return Err(Error::Conflict);
-        }
+        recheck_project(&host, observed_project).await?;
         let approval = approval.clone();
         let worker = host.clone();
         let grants = self.grants.clone();
@@ -311,6 +368,69 @@ impl BoundCommands {
             .await
             .map_err(|_| Error::OutcomeUnknown("root Session owner disappeared".into()))?
     }
+}
+
+// Filesystem observation never holds Host-wide admission.
+async fn observe_workspace(
+    host: &Executions,
+    approval: &RootGrant,
+) -> Result<Option<maka_event_log::projects::ProjectRecord>, Error> {
+    let project = match &approval.workspace.target {
+        WorkspaceTarget::Project { project_id } => Some(
+            host.log
+                .get_project(project_id)
+                .await
+                .map_err(storage)?
+                .ok_or(Error::NotFound)?,
+        ),
+        WorkspaceTarget::HostPath { .. } => None,
+    };
+    if let Some(project) = &project {
+        let resolved = crate::server::resolve_project_workspace(project.clone())
+            .await
+            .map_err(|error| Error::Invalid(error.message))?;
+        if resolved.host_cwd != approval.workspace.host_cwd {
+            return Err(Error::Denied);
+        }
+    }
+    let path = std::path::PathBuf::from(&approval.workspace.host_cwd);
+    let expected = approval.workspace_identity.clone();
+    tokio::task::spawn_blocking(move || {
+        let canonical = path
+            .canonicalize()
+            .map_err(|error| Error::Host(error.to_string()))?;
+        if maka_fs_tools::workspace::project::host_path(&canonical)
+            .map_err(|error| Error::Host(error.to_string()))?
+            != path.to_str().ok_or(Error::Denied)?
+            || maka_fs_tools::workspace::read_identity(&canonical)
+                .map_err(|error| Error::Host(error.to_string()))?
+                != expected
+        {
+            return Err(Error::Denied);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| Error::Host(error.to_string()))??;
+    Ok(project)
+}
+
+async fn recheck_project(
+    host: &Executions,
+    project: Option<maka_event_log::projects::ProjectRecord>,
+) -> Result<(), Error> {
+    if let Some(project) = project
+        && host
+            .log
+            .get_project(&project.id)
+            .await
+            .map_err(storage)?
+            .as_ref()
+            != Some(&project)
+    {
+        return Err(Error::Conflict);
+    }
+    Ok(())
 }
 
 async fn configuration(

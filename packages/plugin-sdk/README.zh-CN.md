@@ -125,7 +125,9 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 
 接受调用者 Host 路径的 Rust endpoint 声明 `Endpoint::requiring_host_paths()`。Host 在绑定和调用时都检查路径授权，借用其他连接的注册目标也不能绕过。项目 ID 和已有 Session 查询不要求原始路径权限；插件通过显式注入的只读视图访问它们。
 
-`ctx.models.resolve({ kind: 'named', connectionSlug, model })` 或 `ctx.models.resolve({ kind: 'default' })` 只返回可用模型的非敏感绑定，不授予执行权限。`restoreChild` 用原始创建请求恢复已有子会话的访问权，不创建会话或工作区。
+`ctx.models.search({ query })` 返回已启用的聊天模型及思考程度，每页最多 50 项／48 KiB；`complete` 为 false 时应缩小搜索范围。`ctx.models.resolve({ kind: 'named', connectionSlug, model })` 解析精确选择，`{ kind: 'default' }` 解析当前默认模型。两者均不授予执行权限，也不保证提供商当前可用。
+
+`restoreRoot(operationId)` 按当前工作区和来源上限恢复本包／作用域托管的根会话，不依赖原模型。`restoreChild` 要求原始子会话创建请求。两者均不创建资源；不存在的观察不能排除并发创建。`configure` 每次成功选择都会推进 Session revision，包括相同值，以阻止较早的配置 CAS 覆盖它，不修改事件历史。
 
 ## 模型适配器
 

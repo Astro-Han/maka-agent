@@ -204,6 +204,19 @@ export default async function (ctx) {
       });
       if (configured.kind !== 'committed' || configured.session.sessionId !== root.sessionId)
         throw new Error('managed Session configuration did not commit');
+      if (configured.session.revision <= session.revision)
+        throw new Error('successful configuration must fence older choices, including no-ops');
+      const staleChoice = await commands.configure({
+        sessionId: root.sessionId,
+        expectedRevision: session.revision,
+        target: {
+          kind: 'executor',
+          executorId: 'example.background',
+          settings: { model: 'stale-choice' },
+        },
+      });
+      if (staleChoice.kind !== 'revision_conflict')
+        throw new Error('an older choice overrode the successful no-op configuration');
       const replay = await commands.createRoot(request);
       if (replay.sessionId !== root.sessionId)
         throw new Error('root creation replay changed identity');
@@ -212,6 +225,22 @@ export default async function (ctx) {
         throw new Error('root creation accepted a changed proposal');
       } catch (error) {
         if (error.code !== 'conflict') throw error;
+      }
+      // A fresh capability can recover the managed root without remembering
+      // which creation proposal won; changed create retries still conflict.
+      const restoredCommands = await ctx.executions.restore(intent.grant);
+      try {
+        const restored = await restoredCommands.restoreRoot(intent.operation);
+        if (
+          restored?.sessionId !== root.sessionId ||
+          (await restoredCommands.session(restored.sessionId)).revision !==
+            configured.session.revision
+        )
+          throw new Error('managed root recovery lost its identity or configuration');
+        if ((await restoredCommands.restoreRoot('uncreated-root')) !== null)
+          throw new Error('managed root recovery created a Session');
+      } finally {
+        await restoredCommands.close();
       }
       const receipt = await commands.submit({
         operationId: 'workspace-work',

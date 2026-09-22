@@ -433,6 +433,7 @@ pub trait Commands: Send + Sync + std::any::Any {
     ) -> futures_util::future::BoxFuture<'_, Result<Invocation, CommandError>>;
     /// Replace an idle Session's model/Executor selection without changing its
     /// workspace, behavior or permission ceiling. Revision mismatch is explicit.
+    /// Every committed choice advances the revision, including identical values.
     fn configure(
         &self,
         input: Configure,
@@ -509,6 +510,13 @@ pub trait Commands: Send + Sync + std::any::Any {
         &self,
         request: CreateRoot,
     ) -> futures_util::future::BoxFuture<'_, Result<ChildSession, CommandError>>;
+    /// Recover this namespace's managed root without replaying its creation settings.
+    /// Rechecks the current workspace and source ceilings. Absence is only an
+    /// observation: a concurrent creation may still commit with this operation ID.
+    fn restore_root(
+        &self,
+        operation_id: String,
+    ) -> futures_util::future::BoxFuture<'_, Result<Option<ChildSession>, CommandError>>;
     /// Host-captured constraints suitable for persisting with a business intent.
     fn boundaries(&self) -> Result<Vec<SessionBoundary>, CommandError>;
     /// Export a settled child workspace once; exact retries return its immutable Artifact.

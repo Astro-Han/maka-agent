@@ -371,6 +371,10 @@ export interface HostContext {
   };
   /** Non-secret selection lookup; grants no model execution permission. */
   readonly models: {
+    /** Enabled chat choices, not a grant or a promise of provider readiness.
+     * At most 50 entries / 48 KiB; refine the query when incomplete.
+     */
+    search(query?: { query?: string }): Promise<import('./llm.js').ModelChoices>;
     resolve(
       selection: { kind: 'default' } | { kind: 'named'; connectionSlug: string; model: string },
     ): Promise<{

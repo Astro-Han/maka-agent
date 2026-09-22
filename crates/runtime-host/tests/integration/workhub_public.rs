@@ -67,14 +67,34 @@ async fn scenario() {
         }
     });
     let model = configure(&fixture, &provider.base_url).await;
-    let config = maka_config::ConfigurationStore::for_root(Arc::new(fixture.owner()))
+    let configuration = maka_config::ConfigurationStore::for_root(Arc::new(fixture.owner()))
         .await
         .unwrap();
-    let revision = config.catalog().await.unwrap().revision;
-    config.set_default_target(serde_json::from_value(json!({
-        "expectedCatalogRevision":revision, "target":{"connectionId":model.connection_id,"modelId":model.model}
-    })).unwrap()).await.unwrap();
-    config.close().await.unwrap();
+    {
+        use sha2::{Digest, Sha256};
+        configuration
+            .create_access_credential(
+                maka_config::access::AccessCredential {
+                    credential_id: "workhub-viewer".into(),
+                    credential_hash: format!("{:x}", Sha256::digest(b"synthetic-workhub-viewer")),
+                    principal_id: "workhub-viewer".into(),
+                    principal_kind: maka_runtime::access::ManagedPrincipalKind::RemoteOwner,
+                    grants: vec!["plugin.remote".into()],
+                    can_publish_client_capabilities: false,
+                    can_use_host_paths: false,
+                    created_at: "2026-09-22T00:00:00Z".into(),
+                    state: maka_config::access::CredentialState::Active {
+                        client_instance_id: None,
+                    },
+                    capability_owner: None,
+                },
+                maka_config::access::AccessCreateMode::Issue,
+                None,
+            )
+            .await
+            .unwrap();
+    }
+    configuration.close().await.unwrap();
     let mut original = Value::Null;
     let mut intent = Value::Null;
     let mut coordinator = String::new();
@@ -103,10 +123,17 @@ async fn scenario() {
         ));
         let stop = CancellationToken::new();
         let cleanup = stop.clone().drop_guard();
+        let websocket = maka_runtime_host::server::websocket::WebSocketListener::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            vec![],
+        )
+        .await
+        .unwrap();
+        let address = websocket.local_addr().unwrap();
         let server = tokio::spawn(
             LocalListener::bind(&endpoint)
                 .unwrap()
-                .serve(host.clone(), stop.clone()),
+                .serve_with_websocket(websocket, host.clone(), stop.clone()),
         );
         let mut peer = Peer::new(host.clone(), "public-workhub-client").await;
         super::javascript_plugins::ready(&mut peer).await;
@@ -145,12 +172,50 @@ async fn scenario() {
                 json!({"id":workspace["id"]}),
             )
             .await;
-            let view = remote(&mut peer, &client, &document, None, "resolve", Value::Null).await;
+            let missing =
+                remote_result(&mut peer, &client, &document, None, "resolve", Value::Null).await;
+            assert_eq!(
+                missing["ok"], false,
+                "an unconfigured default must require a choice"
+            );
+            let choices = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "models",
+                json!({"query":"fixture-model"}),
+            )
+            .await;
+            assert_eq!(choices["complete"], true);
+            assert_eq!(choices["models"][0]["model"], json!(model));
+            // A valid binding with unsupported thinking leaves a durable, failed
+            // creation intent. A later user choice must repair it at the same ID.
+            let rejected = remote_result(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "select-coordinator-model",
+                json!({"kind":"model","model":model,"thinkingLevel":"max"}),
+            )
+            .await;
+            assert_eq!(rejected["ok"], false);
+            let view = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "select-coordinator-model",
+                json!({"kind":"model","model":model,"thinkingLevel":null}),
+            )
+            .await;
             coordinator = view["sessionId"].as_str().unwrap().to_owned();
             assert_ne!(coordinator, "maka_workhub_coordination");
             assert_eq!(view["behavior"], "z.workhub.coordinator");
             assert_eq!(view["sandboxMode"], "workspace-write");
             assert_eq!(view["approvalPolicy"], json!({"kind":"on-request"}));
+            restricted_selection(address, &client, json!(model)).await;
             success(peer.rpc("session.create", json!({
                 "sessionId":"workhub-target", "workspace":{"kind":"host_path","path":fixture.workspace},
                 "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
@@ -670,6 +735,74 @@ async fn upload(peer: &mut Peer, session: &str) -> Value {
         .await,
     )["attachment"]
         .clone()
+}
+
+async fn restricted_selection(address: std::net::SocketAddr, client: &Value, model: Value) {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    let mut request = format!("ws://{address}/runtime-host")
+        .into_client_request()
+        .unwrap();
+    request.headers_mut().insert(
+        "Authorization",
+        "Bearer synthetic-workhub-viewer".parse().unwrap(),
+    );
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    socket
+        .send(Message::text(
+            json!({"kind":"hello", "clientInstanceId":"workhub-viewer",
+        "protocolMin":0,"protocolMax":0,"compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH,
+        "compositionId":"maka.interactive"})
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let hello: Value =
+        serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+    assert_eq!(hello["state"], "ready");
+    let mut document = Value::Null;
+    let mut target = Value::Null;
+    let binding = json!({"client":client,"method":"select-coordinator-model","sessionId":null});
+    for step in ["document", "bind", "call"] {
+        let input = match step {
+            "document" => json!({"kind":"open_document"}),
+            "bind" => json!({"kind":"bind","binding":binding}),
+            _ => json!({"kind":"call","binding":binding,"document":document,"target":target,
+                "input":{"kind":"model","model":model,"thinkingLevel":null}}),
+        };
+        socket
+            .send(Message::text(
+                json!({"requestId":step,"operation":"plugin.remote","input":input}).to_string(),
+            ))
+            .await
+            .unwrap();
+        let response = loop {
+            let frame: Value =
+                serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                    .unwrap();
+            if frame["requestId"] == step {
+                break frame;
+            }
+        };
+        match step {
+            "document" => document = success(response)["document"].clone(),
+            "bind" => target = success(response)["target"].clone(),
+            _ => {
+                assert_eq!(
+                    response["ok"], false,
+                    "a Remote-only principal borrowed another owner's consent"
+                );
+                assert!(
+                    response["error"]["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("plugin execution authority is retired or revoked"),
+                    "{response}"
+                );
+            }
+        }
+    }
+    socket.close(None).await.unwrap();
 }
 
 async fn wait_assignment(peer: &mut Peer, client: &Value, document: &Value, id: &str) {

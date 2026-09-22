@@ -34,6 +34,80 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 impl Executions {
+    pub(crate) async fn search_plugin_models(
+        &self,
+        query: maka_plugins::llm::Search,
+    ) -> Result<maka_plugins::llm::Choices, maka_plugins::Error> {
+        use maka_plugins::{
+            Error,
+            llm::{Choice, Choices},
+        };
+        let failed = |error: maka_config::ConfigError| Error::Invalid(error.to_string());
+        let catalog = self.configuration.catalog().await.map_err(failed)?;
+        tokio::task::spawn_blocking(move || {
+            let query = query.query.to_lowercase();
+            let terms: Vec<_> = query.split_whitespace().collect();
+            let mut page = Choices {
+                revision: catalog.revision,
+                models: Vec::new(),
+                complete: true,
+            };
+            'connections: for row in &catalog.connections {
+                if !row.enabled
+                    || maka_config::model_catalog::provider_facts(&row.provider_type)
+                        .map_err(failed)?
+                        .retired
+                {
+                    continue;
+                }
+                let default = catalog
+                    .default_target
+                    .as_ref()
+                    .filter(|target| target.connection_id == row.connection_id)
+                    .map(|target| target.model_id.as_str());
+                for entry in maka_config::model_catalog::resolve(row, default).map_err(failed)? {
+                    if !entry.can_use_as_chat_default || !row.enabled_model_ids.contains(&entry.id)
+                    {
+                        continue;
+                    }
+                    let display_name = entry.display_name.unwrap_or_else(|| entry.id.clone());
+                    let haystack =
+                        format!("{} {} {} {}", row.slug, row.name, entry.id, display_name)
+                            .to_lowercase();
+                    if !terms.iter().all(|term| haystack.contains(term)) {
+                        continue;
+                    }
+                    if page.models.len() == 50 {
+                        page.complete = false;
+                        break 'connections;
+                    }
+                    page.models.push(Choice {
+                        model: maka_runtime::execution::ModelBinding {
+                            connection_id: row.connection_id.clone(),
+                            connection_slug: row.slug.clone(),
+                            model: entry.id,
+                        },
+                        connection_name: row.name.clone(),
+                        display_name,
+                        thinking_levels: entry.thinking_levels,
+                        is_default: entry.is_default,
+                    });
+                }
+            }
+            while serde_json::to_vec(&page)
+                .map_err(|error| Error::Invalid(error.to_string()))?
+                .len()
+                > 48 * 1024
+            {
+                page.models.pop();
+                page.complete = false;
+            }
+            Ok(page)
+        })
+        .await
+        .map_err(|error| Error::Invalid(error.to_string()))?
+    }
+
     pub(crate) async fn resolve_plugin_model(
         &self,
         selection: maka_plugins::llm::Selection,
@@ -76,6 +150,13 @@ impl Executions {
             || maka_config::model_catalog::provider_facts(&row.provider_type)
                 .map_err(|error| maka_plugins::Error::Invalid(error.to_string()))?
                 .retired
+        {
+            return Ok(None);
+        }
+        if !maka_config::model_catalog::resolve(&row, Some(&model))
+            .map_err(|error| maka_plugins::Error::Invalid(error.to_string()))?
+            .iter()
+            .any(|entry| entry.id == model && entry.can_use_as_chat_default)
         {
             return Ok(None);
         }

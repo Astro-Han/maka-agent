@@ -42,6 +42,8 @@ pub(super) fn publish(
         ("consent", Action::Consent),
         ("creation-template", Action::Template),
         ("resolve", Action::Resolve),
+        ("models", Action::Models),
+        ("select-coordinator-model", Action::SelectModel),
         ("query", Action::Query),
         ("candidates", Action::Candidates),
         ("configure-creation", Action::Creation),
@@ -78,6 +80,8 @@ enum Action {
     Consent,
     Template,
     Resolve,
+    Models,
+    SelectModel,
     Query,
     Candidates,
     Creation,
@@ -130,24 +134,19 @@ impl Method for Call {
                     struct Template {
                         authorization: Target,
                         collaboration_mode: maka_runtime::execution::CollaborationMode,
+                        target: maka_plugins::execution::Target,
                     }
                     let request: Template = decode(input)?;
                     let Target::Workspace { sandbox_mode, .. } = &request.authorization else {
                         return Err(Error::Invalid("Expected a workspace".into()));
                     };
-                    let model = manager
-                        .coordinator
-                        .models
-                        .resolve(maka_plugins::llm::Selection::Default)
-                        .await
-                        .map_err(|e| Error::Provider(e.to_string()))?
-                        .ok_or_else(|| Error::Invalid("Choose a default model first".into()))?;
+                    request
+                        .target
+                        .validate()
+                        .map_err(|error| Error::Invalid(error.to_string()))?;
                     encode(crate::decision::Creation {
                         settings: maka_plugins::execution::RootSettings {
-                            target: maka_plugins::execution::Target::Model {
-                                model,
-                                thinking_level: None,
-                            },
+                            target: request.target,
                             sandbox_mode: *sandbox_mode,
                             approval_policy: maka_runtime::execution::ApprovalPolicy::OnRequest,
                             collaboration_mode: request.collaboration_mode,
@@ -167,6 +166,48 @@ impl Method for Call {
                     let (view, _) = manager.coordinator.resolve().await.map_err(failure)?;
                     encode(view)
                 }
+                Action::Models => encode(
+                    manager
+                        .coordinator
+                        .models
+                        .search(decode(input)?)
+                        .await
+                        .map_err(|error| Error::Provider(error.to_string()))?,
+                ),
+                Action::SelectModel => {
+                    let target = decode(input)?;
+                    let authority = caller
+                        .views
+                        .authorize(Authorization {
+                            operation_id: uuid::Uuid::new_v4(),
+                            title: "Choose the WorkHub coordinator model".into(),
+                            target: Target::PluginWorkspace {
+                                sandbox_mode: maka_runtime::execution::SandboxMode::WorkspaceWrite,
+                            },
+                            capabilities: [Capability::Executions].into(),
+                        })
+                        .await?;
+                    let result = async {
+                        let commands = manager
+                            .executions
+                            .acquire(authority.scope())
+                            .await
+                            .map_err(command)?;
+                        encode(
+                            manager
+                                .coordinator
+                                .select_model(target, commands)
+                                .await
+                                .map_err(failure)?,
+                        )
+                    }
+                    .await;
+                    authority
+                        .finish()
+                        .await
+                        .map_err(|_| Error::CleanupUnconfirmed)?;
+                    result
+                }
                 Action::Query => {
                     empty(input)?;
                     Ok(
@@ -178,11 +219,22 @@ impl Method for Call {
                     encode(manager.candidates().await.map_err(failure)?)
                 }
                 Action::Creation => {
-                    manager
-                        .configure_creation(decode(input)?)
+                    let creation: crate::decision::Creation = decode(input)?;
+                    let authority = caller
+                        .views
+                        .authorize(Authorization {
+                            operation_id: uuid::Uuid::new_v4(),
+                            title: "Choose WorkHub task defaults".into(),
+                            target: creation.authorization.clone(),
+                            capabilities: [Capability::Executions].into(),
+                        })
+                        .await?;
+                    let result = manager.configure_creation(creation).await.map_err(failure);
+                    authority
+                        .finish()
                         .await
-                        .map_err(failure)?;
-                    Ok(Value::Null)
+                        .map_err(|_| Error::CleanupUnconfirmed)?;
+                    result.map(|()| Value::Null)
                 }
                 Action::Decide => {
                     #[derive(Deserialize)]

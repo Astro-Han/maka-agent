@@ -121,7 +121,9 @@ Authenticated applications can also bind `plugin.remote` by `{ packageId, method
 
 Native endpoints accepting caller-supplied Host paths declare `Endpoint::requiring_host_paths()`. Host checks that grant at both bind and call, even for a borrowed registration target. Project-ID and existing-Session queries do not require raw-path authority; plugins receive explicitly injected read-only views.
 
-Model selection uses `ctx.models.resolve({ kind: 'named', connectionSlug, model })`; `{ kind: 'default' }` resolves the current default. Its non-secret result grants no execution authority. `restoreChild` reopens access to an existing child using the original creation request, without creating a Session or workspace.
+`ctx.models.search({ query })` returns enabled chat choices with thinking levels, at most 50 entries / 48 KiB; refine the query when `complete` is false. `ctx.models.resolve({ kind: 'named', connectionSlug, model })` resolves an exact choice; `{ kind: 'default' }` resolves the current default. Neither grants execution authority or promises provider readiness.
+
+`restoreRoot(operationId)` recovers this package/scope's managed root under current workspace and source ceilings, independently of its original model. `restoreChild` requires the original child creation request. Neither creates anything; absence does not exclude a concurrent creation. `configure` advances the Session revision on every committed choice, including identical values, fencing older configuration CASes without changing event history.
 
 ## Model adapters
 

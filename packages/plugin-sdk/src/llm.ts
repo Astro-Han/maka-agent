@@ -17,6 +17,21 @@
  * under the License.
  */
 
+export type ModelChoice = {
+  model: { connection_id: string; connection_slug: string; model: string };
+  connectionName: string;
+  displayName: string;
+  thinkingLevels: readonly NonNullable<
+    import('./execution.js').ExecutorSettings['thinkingLevel']
+  >[];
+  isDefault: boolean;
+};
+export type ModelChoices = {
+  revision: number;
+  models: readonly ModelChoice[];
+  complete: boolean;
+};
+
 export interface ModelGeneration {
   text: string;
   modelId: string;

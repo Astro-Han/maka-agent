@@ -25,6 +25,7 @@ import type {
   ClientSlots,
 } from '@maka-agent/plugin-sdk/client';
 import type { Executions } from '@maka-agent/plugin-sdk/host';
+import { ModelSelection, type ModelTarget } from './model-selection.js';
 
 type Target = AuthorizationRequest['target'];
 type Creation = {
@@ -56,9 +57,11 @@ export function registerAccess(context: ClientContext): void {
   context.slots.register('workspace.manage', 'new-work', function Workspace(props) {
     const zh = props.locale !== 'en';
     return (
-      <ConsentButton
+      <ModelSelection
+        context={context}
+        locale={props.locale}
         label={zh ? '使用此工作区创建 WorkHub 任务' : 'Create WorkHub tasks in this workspace'}
-        action={async () => {
+        onSelect={async (model) => {
           const target: Target = {
             kind: 'workspace',
             workspace: props.workspace,
@@ -73,11 +76,13 @@ export function registerAccess(context: ClientContext): void {
             {
               authorization: Target;
               collaborationMode: ClientSlots['workspace.manage']['collaborationMode'];
+              target: ModelTarget;
             },
             Creation
           >('creation-template')({
             authorization: target,
             collaborationMode: props.collaborationMode,
+            target: model,
           });
           await context.remote.method<Creation, null>('configure-creation')(creation);
         }}

@@ -25,6 +25,7 @@ import { registerFeedback } from './feedback.js';
 import { WorkHubRoot } from './surface.js';
 import { coordinationCommands } from './client-session.js';
 import { bindSurface } from './client-surface.js';
+import { ModelSelection, type ModelTarget } from './model-selection.js';
 import styles from './styles.css';
 
 type Resolution = { sessionId: string };
@@ -83,28 +84,55 @@ const plugin: ClientPlugin = {
           };
         }, [props.contextRevision, props.onResolved, props.onError, retry]);
         return failed ? (
-          <Button
-            label={props.locale === 'en' ? 'Retry' : props.locale === 'zh-TW' ? '重試' : '重试'}
-            onClick={() => {
-              props.onResolving();
-              void (async () => {
-                const zh = props.locale !== 'en';
+          <div>
+            <Button
+              label={props.locale === 'en' ? 'Retry' : props.locale === 'zh-TW' ? '重試' : '重试'}
+              onClick={() => {
+                props.onResolving();
+                void (async () => {
+                  const zh = props.locale !== 'en';
+                  await authorize(
+                    context,
+                    { kind: 'plugin_workspace', sandboxMode: 'workspace-write' },
+                    zh ? '启用 WorkHub 协调会话' : 'Enable the WorkHub coordinator',
+                  );
+                  await authorize(
+                    context,
+                    { kind: 'profile' },
+                    zh ? '允许 WorkHub 发现任务' : 'Allow WorkHub to discover tasks',
+                  );
+                  setRetry((current) => current + 1);
+                })().catch((error: unknown) =>
+                  props.onError(error instanceof Error ? error.message : String(error)),
+                );
+              }}
+            />
+            <ModelSelection
+              context={context}
+              locale={props.locale}
+              label={props.locale === 'en' ? 'Use this model' : '使用此模型'}
+              onSelect={async (target) => {
                 await authorize(
                   context,
                   { kind: 'plugin_workspace', sandboxMode: 'workspace-write' },
-                  zh ? '启用 WorkHub 协调会话' : 'Enable the WorkHub coordinator',
+                  props.locale === 'en'
+                    ? 'Enable the WorkHub coordinator'
+                    : '启用 WorkHub 协调会话',
                 );
                 await authorize(
                   context,
                   { kind: 'profile' },
-                  zh ? '允许 WorkHub 发现任务' : 'Allow WorkHub to discover tasks',
+                  props.locale === 'en'
+                    ? 'Allow WorkHub to discover tasks'
+                    : '允许 WorkHub 发现任务',
+                );
+                await context.remote.method<ModelTarget, Resolution>('select-coordinator-model')(
+                  target,
                 );
                 setRetry((current) => current + 1);
-              })().catch((error: unknown) =>
-                props.onError(error instanceof Error ? error.message : String(error)),
-              );
-            }}
-          />
+              }}
+            />
+          </div>
         ) : null;
       },
     );

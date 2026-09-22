@@ -81,6 +81,8 @@ pub(super) enum Request {
     HistoryCopy(HistoryCopy),
     #[serde(rename = "models.resolve")]
     ResolveModel(maka_plugins::llm::Selection),
+    #[serde(rename = "models.search")]
+    SearchModels(maka_plugins::llm::Search),
     #[serde(rename = "llm.generate")]
     Generate(ModelRequest),
     #[serde(rename = "clients.tools")]
@@ -167,6 +169,8 @@ pub(super) enum Request {
     CreateChild(Execution<CreateChild>),
     #[serde(rename = "execution.createRoot")]
     CreateRoot(Execution<CreateRoot>),
+    #[serde(rename = "execution.restoreRoot")]
+    RestoreRoot(Execution<Operation>),
     #[serde(rename = "execution.workspacePatch")]
     WorkspacePatch(Execution<Operation>),
     #[serde(rename = "execution.query")]

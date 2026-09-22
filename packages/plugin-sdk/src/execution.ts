@@ -138,10 +138,10 @@ export type ExecutionTarget =
   | { kind: 'executor'; executorId: string; settings?: ExecutorSettings };
 
 /** Selection belongs to the executor; no Host model connection is implied. */
-export interface ExecutorSettings {
+export type ExecutorSettings = {
   model?: string;
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-}
+};
 export interface SessionConfiguration {
   sessionId: string;
   revision: number;
@@ -188,6 +188,7 @@ export interface Executions {
   input(invocation: Invocation): Promise<MessageContent | null>;
   /** Resume this exact sealed model Run; retries preserve its canonical receipt. */
   resume(input: { operationId: string; source: Invocation }): Promise<Invocation>;
+  /** Every committed choice advances revision, including identical values. */
   configure(input: {
     sessionId: string;
     expectedRevision: number;
@@ -230,6 +231,10 @@ export interface Executions {
       instructions?: string | null;
     };
   }): Promise<{ sessionId: string }>;
+  /** Recover this package/scope's managed root under current workspace/source ceilings.
+   * Never creates or reconfigures it; null does not rule out a concurrent creation.
+   */
+  restoreRoot(operationId: string): Promise<{ sessionId: string } | null>;
   /** Reads only an authorized Session, never the global catalog. */
   session(sessionId: string): Promise<SessionConfiguration>;
   /** Registered plugin tools/executors visible within this Session's ceiling, not a grant. */

@@ -83,6 +83,39 @@ impl EventLog {
         T: Serialize + DeserializeOwned + Clone + PartialEq + Send + 'static,
         F: FnOnce(&mut T) -> Result<(), StoreError> + Send + 'static,
     {
+        self.mutate_session_metadata(id, expected, false, update)
+            .await
+    }
+
+    /// A successful replacement always advances the revision, even for identical
+    /// content. Callers can use the committed choice to fence older configuration CASes.
+    pub async fn replace_session_metadata<T>(
+        &self,
+        id: &str,
+        expected: u64,
+        configuration: T,
+    ) -> Result<SessionMutation<T>, StoreError>
+    where
+        T: Serialize + DeserializeOwned + Clone + PartialEq + Send + 'static,
+    {
+        self.mutate_session_metadata(id, expected, true, move |current| {
+            *current = configuration;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn mutate_session_metadata<T, F>(
+        &self,
+        id: &str,
+        expected: u64,
+        always_advance: bool,
+        update: F,
+    ) -> Result<SessionMutation<T>, StoreError>
+    where
+        T: Serialize + DeserializeOwned + Clone + PartialEq + Send + 'static,
+        F: FnOnce(&mut T) -> Result<(), StoreError> + Send + 'static,
+    {
         self.validate_root()?;
         validate_id(id)?;
         if expected == 0 || expected > MAX_SAFE_INTEGER {
@@ -104,7 +137,7 @@ impl EventLog {
                     }
                     let previous = record.configuration.clone();
                     update(&mut record.configuration)?;
-                    if record.configuration == previous {
+                    if !always_advance && record.configuration == previous {
                         return Ok(SessionMutation::Committed(record));
                     }
                     let configuration = serde_json::to_string(&record.configuration)?;
