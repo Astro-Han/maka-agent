@@ -18,15 +18,7 @@
  */
 
 fn main() {
-    bundle_providers();
-    for source in [
-        "terminal.js",
-        "TERMINAL_SOURCE.md",
-        "../../scripts/rust/bundle-terminal.mjs",
-        "../../package-lock.json",
-    ] {
-        println!("cargo:rerun-if-changed={source}");
-    }
+    println!("cargo:rerun-if-changed=../../package-lock.json");
     println!("cargo:rerun-if-env-changed=MAKA_JS_DEPS");
     let dependencies = std::env::var_os("MAKA_JS_DEPS")
         .map(std::path::PathBuf::from)
@@ -37,15 +29,7 @@ fn main() {
             dependencies.join(source).display()
         );
     }
-    let status = std::process::Command::new("node")
-        .arg("../../scripts/rust/bundle-terminal.mjs")
-        .arg(std::env::var_os("OUT_DIR").expect("Cargo OUT_DIR"))
-        .status()
-        .expect("Node is required to bundle the terminal engine at build time");
-    assert!(
-        status.success(),
-        "terminal bundle failed; install repository npm dependencies first"
-    );
+    bundle_providers();
 }
 
 fn bundle_providers() {

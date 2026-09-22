@@ -254,7 +254,8 @@ user/project content paths stay separate from private journals.
 - Rust owns storage, network routing, tools and native process/PTY lifetimes.
   Plugins enter through catalogs and scoped Host services, sharing
   journaled effects, permissions and draining rather than replacing the Engine.
-  One lazy, long-lived V8 serves concurrent model requests and terminal parsers.
+  One lazy, long-lived V8 serves concurrent model requests. Native PTY workers
+  own their Alacritty terminal state without JavaScript or cross-runtime messages.
   Code Mode cells use separate short-lived isolates. Count and byte limits provide
   backpressure; V8 heap limits are not process-memory containment.
 - Code Mode budgets cumulative VM execution, excluding asynchronous tool waits

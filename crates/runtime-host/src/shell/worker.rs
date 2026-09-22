@@ -42,7 +42,6 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Worker {
-    pub runtime: maka_js_runtime::trusted::TrustedRuntime,
     pub log: Arc<EventLog>,
     pub record: ShellRun,
     pub commands: mpsc::Receiver<Control>,
@@ -55,9 +54,9 @@ pub(super) struct Worker {
 }
 impl Worker {
     pub async fn run(mut self, command: PtyCommand, size: TerminalSize) -> Result<()> {
-        let mut terminal = Terminal::new(self.runtime.clone(), size, self.output.clone()).await?;
+        let mut terminal = Terminal::new(size, self.output.clone());
         let result = self.run_terminal(command, size, &mut terminal).await;
-        terminal.close().await;
+        terminal.close();
         result
     }
 
@@ -196,8 +195,8 @@ impl Worker {
                             None => break,
                         }
                     }
-                    // Parser cuts are awaited to completion outside select.
-                    terminal.output(&buffer[..count], eof).await?;
+                    // Complete the parser cut before persisting or handling controls.
+                    terminal.output(&buffer[..count], eof)?;
                     self.persist(terminal, None).await?;
                     if let Some(error) = failure { return Err(error.into()); }
                 }

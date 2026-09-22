@@ -18,9 +18,8 @@
  */
 
 use super::{provider_compatible::body as read_request, provider_stream::request};
-use maka_js_runtime::{terminal::Screen, trusted::TrustedRuntime};
+use maka_js_runtime::trusted::TrustedRuntime;
 use maka_model::{ModelError, ModelEvent, ModelExecutor, ProviderKind, StepBuilder};
-use maka_runtime::terminal::TerminalSize;
 use serde_json::json;
 use std::{io, time::Duration};
 use tokio::{
@@ -45,8 +44,7 @@ enum Response {
 async fn ingress_limits_close_only_offending_http_and_preserve_bounded_sse_records() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let runtime = TrustedRuntime::default();
-        let models = ModelExecutor::with_runtime(runtime.clone(), 1, Duration::from_secs(20)).unwrap();
-        let mut screen = Screen::with_runtime(runtime, TerminalSize::new(20, 3).unwrap()).unwrap();
+        let models = ModelExecutor::with_runtime(runtime, 1, Duration::from_secs(20)).unwrap();
         let exact_record = format!(":{}\n\n", "x".repeat(LIMIT - 3));
         let cr_records = format!(":{}\r\r", "x".repeat(LIMIT / 2)).repeat(3);
         let multiline = "data: {}\r\n".repeat(LIMIT / 10 + 1);
@@ -139,11 +137,7 @@ async fn ingress_limits_close_only_offending_http_and_preserve_bounded_sse_recor
                 }
                 assert!(step.finish().is_err());
             }
-            screen.write(&index.to_string()).await.unwrap();
-            assert!(screen.snapshot().await.unwrap().screen.ends_with(&index.to_string()));
         }
-        // Reuse the same parser after every response was settled.
-        screen.close().await;
     }).await.expect("ingress failure must settle without a shared-runtime failure");
 }
 

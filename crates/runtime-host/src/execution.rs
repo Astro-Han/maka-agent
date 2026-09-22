@@ -119,10 +119,9 @@ impl Executions {
             plugin_calls,
             oauth: crate::oauth::Authority::new(workers.clone(), shutdown.clone()),
             controllers: Default::default(),
-            shells: Arc::new(crate::shell::ShellResources::with_runtime(
+            shells: Arc::new(crate::shell::ShellResources::new(
                 log.clone(),
                 shutdown.clone(),
-                runtime.clone(),
             )),
             engine: Engine::new(
                 log.clone(),

@@ -50,7 +50,7 @@ pub enum ShellError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
-    Screen(#[from] maka_js_runtime::terminal::ScreenError),
+    Screen(#[from] maka_process::terminal::ScreenError),
     #[error(transparent)]
     Process(#[from] maka_runtime::tools::ToolError),
 }
@@ -60,10 +60,9 @@ type Key = (String, String);
 type Active = Arc<Mutex<HashMap<Key, ShellHandle>>>;
 pub(super) type Update = Option<std::result::Result<Arc<ShellRun>, Arc<ShellError>>>;
 
-/// At most eight native PTYs; parser objects share the Host's trusted JS worker.
+/// At most eight native PTYs; each worker owns its Rust terminal parser.
 /// This is an internal execution API, not a client authorization boundary.
 pub struct ShellResources {
-    runtime: maka_js_runtime::trusted::TrustedRuntime,
     log: Arc<EventLog>,
     active: Active,
     output_changes: watch::Sender<()>,
@@ -74,16 +73,7 @@ pub struct ShellResources {
 
 impl ShellResources {
     pub fn new(log: Arc<EventLog>, host_drain: CancellationToken) -> Self {
-        Self::with_runtime(log, host_drain, Default::default())
-    }
-
-    pub fn with_runtime(
-        log: Arc<EventLog>,
-        host_drain: CancellationToken,
-        runtime: maka_js_runtime::trusted::TrustedRuntime,
-    ) -> Self {
         Self {
-            runtime,
             log,
             active: Arc::default(),
             output_changes: watch::channel(()).0,
@@ -147,7 +137,6 @@ impl ShellResources {
         };
         let log = self.log.clone();
         let host_drain = self.host_drain.clone();
-        let shared_runtime = self.runtime.clone();
         active.insert(key, handle.clone());
         // Release the map before spawn: failure drops Residency on this thread.
         drop(active);
@@ -160,7 +149,6 @@ impl ShellResources {
                         .build()?;
                     runtime.block_on(
                         worker::Worker {
-                            runtime: shared_runtime,
                             log: log.clone(),
                             record,
                             commands: receiver,

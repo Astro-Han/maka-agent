@@ -19,7 +19,6 @@
 
 (() => {
   const requests = new Map();
-  const terminals = new Map();
   globalThis.makaTrusted = {
     async model(id, request) {
       const controller = new AbortController();
@@ -38,25 +37,6 @@
     },
     cancel(id) {
       requests.get(id)?.abort();
-    },
-    create(id, size) {
-      terminals.set(id, createTerminal(size));
-    },
-    async terminal(id, operation, argument) {
-      const terminal = terminals.get(id);
-      if (!terminal) throw new Error('terminal parser closed');
-      let result = await terminal[operation](argument);
-      if (operation === 'write') result = { replies: result, screen: terminal.snapshot() };
-      else if (operation === 'resize') result = terminal.snapshot();
-      const json = JSON.stringify(result ?? null);
-      if (Deno.core.byteLength(json) > 2 * 1024 * 1024)
-        throw new Error('terminal snapshot budget exceeded');
-      return json;
-    },
-    dispose(id) {
-      const terminal = terminals.get(id);
-      terminals.delete(id);
-      terminal?.dispose();
     },
   };
 })();

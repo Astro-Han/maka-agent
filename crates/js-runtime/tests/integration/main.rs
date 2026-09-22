@@ -20,4 +20,3 @@
 mod code_mode;
 mod plugin_vm;
 mod result_contract;
-mod terminal_screen;

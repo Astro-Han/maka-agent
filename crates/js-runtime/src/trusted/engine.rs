@@ -106,10 +106,6 @@ pub(super) fn create(health: &Arc<Health>) -> Result<JsRuntime> {
             include_str!(concat!(env!("OUT_DIR"), "/providers.js")),
         ),
         (
-            "maka:trusted/terminal",
-            include_str!(concat!(env!("OUT_DIR"), "/terminal.js")),
-        ),
-        (
             "maka:trusted/dispatch",
             include_str!("../../trusted/dispatch.js"),
         ),
@@ -122,9 +118,6 @@ pub(super) fn create(health: &Arc<Health>) -> Result<JsRuntime> {
 pub(super) struct Functions {
     pub model: v8::Global<v8::Function>,
     pub cancel: v8::Global<v8::Function>,
-    pub create: v8::Global<v8::Function>,
-    pub terminal: v8::Global<v8::Function>,
-    pub dispose: v8::Global<v8::Function>,
 }
 
 impl Functions {
@@ -141,9 +134,6 @@ impl Functions {
         Ok(Self {
             model: get(runtime, "model")?,
             cancel: get(runtime, "cancel")?,
-            create: get(runtime, "create")?,
-            terminal: get(runtime, "terminal")?,
-            dispose: get(runtime, "dispose")?,
         })
     }
 }
@@ -165,12 +155,6 @@ pub(super) fn call(
     };
     let promise = runtime.call_with_args(function, &values);
     Ok(Box::pin(async move { promise.await.map_err(failed) }))
-}
-
-pub(super) fn string(runtime: &mut JsRuntime, value: v8::Global<v8::Value>) -> Result<String> {
-    deno_core::scope!(scope, runtime);
-    let value = v8::Local::new(scope, value);
-    deno_core::serde_v8::from_v8(scope, value).map_err(failed)
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! Trusted plugin VMs, separate from the model/terminal runtime.
+//! Trusted plugin VMs, separate from the model runtime.
 //! A VM multiplexes modules and promises; module handles own code retention.
 mod bridge;
 mod engine;

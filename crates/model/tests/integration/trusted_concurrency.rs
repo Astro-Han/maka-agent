@@ -18,9 +18,8 @@
  */
 
 use super::provider_stream::{read_request, request};
-use maka_js_runtime::{terminal::Screen, trusted::TrustedRuntime};
+use maka_js_runtime::trusted::TrustedRuntime;
 use maka_model::{ModelEvent, ModelExecutor, ProviderKind, StepBuilder};
-use maka_runtime::terminal::TerminalSize;
 use serde_json::json;
 use std::time::Duration;
 use tokio::{
@@ -31,13 +30,10 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn shared_sdk_and_terminals_progress_through_backpressure_cancellation_and_parser_failure() {
+async fn shared_sdk_requests_progress_through_backpressure_and_cancellation() {
     tokio::time::timeout(Duration::from_secs(20), async {
         let runtime = TrustedRuntime::default();
         let models = ModelExecutor::with_runtime(runtime.clone(), 4, Duration::from_secs(15)).unwrap();
-        let size = TerminalSize::new(20, 3).unwrap();
-        let mut screen = Screen::with_runtime(runtime.clone(), size).unwrap();
-        let mut broken = Screen::with_runtime(runtime.clone(), size).unwrap();
 
         let waiting = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let waiting_base = format!("http://{}/v1", waiting.local_addr().unwrap());
@@ -96,8 +92,6 @@ async fn shared_sdk_and_terminals_progress_through_backpressure_cancellation_and
             stream.cancel_and_wait().await;
         }
         complete(&models, &base).await;
-        screen.write("one").await.unwrap();
-        assert_eq!(screen.snapshot().await.unwrap().screen, "one");
 
         held.cancel_and_wait().await;
         pending_http.await.unwrap();
@@ -122,17 +116,11 @@ async fn shared_sdk_and_terminals_progress_through_backpressure_cancellation_and
         abandoned_call.abort();
         assert!(abandoned_call.await.unwrap_err().is_cancelled());
         abandoned_http.await.unwrap();
-        assert!(broken.write("x\u{1b}[2147483647I").await.unwrap_err().to_string().contains("expansion budget"));
-        assert!(broken.snapshot().await.is_err());
-        broken.close().await;
         complete(&models, &base).await;
 
         slow.cancel_and_wait().await;
         flood_http.await.unwrap();
-        screen.write("\r\ntwo").await.unwrap();
-        assert_eq!(screen.snapshot().await.unwrap().screen, "one\ntwo");
         complete(&models, &base).await;
-        screen.close().await;
         healthy_http.await.unwrap();
     }).await.expect("one trusted V8 must make progress across independent lifetimes");
 }

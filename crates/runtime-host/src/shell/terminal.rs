@@ -22,8 +22,8 @@ use super::{
     control::{ControlError, WriteReceipt},
     output::Output,
 };
-use maka_js_runtime::terminal::Screen;
 use maka_process::pty::PtyIo;
+use maka_process::terminal::Screen;
 use maka_runtime::terminal::{TerminalScreen, TerminalSize};
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -38,60 +38,57 @@ pub(super) struct Terminal {
     output: Output,
 }
 impl Terminal {
-    pub async fn new(
-        runtime: maka_js_runtime::trusted::TrustedRuntime,
-        size: TerminalSize,
-        output: Output,
-    ) -> Result<Self> {
-        let mut screen = Screen::with_runtime(runtime, size)?;
-        let snapshot = match screen.snapshot().await {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                screen.close().await;
-                return Err(error.into());
-            }
-        };
-        Ok(Self {
-            screen: Some(screen),
-            snapshot,
+    pub fn new(size: TerminalSize, output: Output) -> Self {
+        Self {
+            screen: Some(Screen::new(size)),
+            snapshot: TerminalScreen::new(size),
             decoder: Decoder::default(),
             writes: VecDeque::new(),
             output,
-        })
+        }
     }
 
-    pub async fn output(&mut self, bytes: &[u8], eof: bool) -> Result<()> {
+    pub fn output(&mut self, bytes: &[u8], eof: bool) -> Result<()> {
         let text = self.decoder.decode(bytes, eof);
         let Some(screen) = &mut self.screen else {
             return Ok(());
         };
-        match screen.write(&text).await {
-            Ok(cut) => {
-                self.snapshot = cut.screen;
+        match screen.write(&text) {
+            Ok(replies) => {
+                self.snapshot = screen.snapshot()?;
                 // Observational stream, not a durable outcome. Publish only a
                 // completed parser cut, including final output during drain.
                 self.output.publish(&text)?;
-                if !cut.replies.is_empty() {
+                if !replies.is_empty() {
+                    let pending: usize = self
+                        .writes
+                        .iter()
+                        .map(|write| write.remaining().len())
+                        .sum();
+                    if pending.saturating_add(replies.len()) > 1024 * 1024 {
+                        self.close();
+                        return Err(ShellError::Rejected("terminal reply queue exceeds 1 MiB"));
+                    }
                     self.writes
-                        .push_back(PendingWrite::new(cut.replies, None, false, false));
+                        .push_back(PendingWrite::new(replies, None, false, false));
                 }
                 Ok(())
             }
             Err(error) => {
-                // Last good cut survives. Await disposal before the native
-                // worker can finish and release resource residency.
-                self.close().await;
+                // Preserve the last good cut and release parser state immediately.
+                self.close();
                 Err(error.into())
             }
         }
     }
 
-    pub async fn resize(&mut self, size: TerminalSize) -> Result<()> {
+    pub fn resize(&mut self, size: TerminalSize) -> Result<()> {
         let screen = self
             .screen
             .as_mut()
             .ok_or(ShellError::Rejected("terminal parser unavailable"))?;
-        self.snapshot = screen.resize(size).await?;
+        screen.resize(size)?;
+        self.snapshot = screen.snapshot()?;
         self.output.resize(size);
         Ok(())
     }
@@ -105,10 +102,8 @@ impl Terminal {
         }
     }
 
-    pub async fn close(&mut self) {
-        if let Some(screen) = self.screen.take() {
-            screen.close().await;
-        }
+    pub fn close(&mut self) {
+        self.screen = None;
     }
 }
 
@@ -218,7 +213,7 @@ pub(super) async fn drain(
                 Err(error) => { io.discard_output()?; return Err(error.into()); }
             }
         };
-        if let Err(error) = terminal.output(&buffer[..count], count == 0).await {
+        if let Err(error) = terminal.output(&buffer[..count], count == 0) {
             failure.get_or_insert(error);
         }
         // After root exit replies have no consumer and are not input effects.

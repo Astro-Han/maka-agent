@@ -66,7 +66,7 @@ impl Worker {
                 }
                 resized = true;
                 if resize_changed {
-                    terminal.resize(size).await?;
+                    terminal.resize(size)?;
                 }
                 self.persist(terminal, None).await
             }

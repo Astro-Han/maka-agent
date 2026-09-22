@@ -22,7 +22,6 @@ mod evaluate;
 mod execution_budget;
 pub mod plugin;
 mod result;
-pub mod terminal;
 pub mod trusted;
 
 use bridge::{Admission, ToolScope, maka_code};

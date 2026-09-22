@@ -37,6 +37,7 @@ mod process;
 pub mod pty;
 mod shell;
 mod tail;
+pub mod terminal;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]

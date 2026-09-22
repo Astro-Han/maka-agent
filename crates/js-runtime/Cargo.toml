@@ -44,6 +44,3 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tokio-tungstenite.workspace = true
-
-[target.'cfg(unix)'.dev-dependencies]
-maka-process.workspace = true

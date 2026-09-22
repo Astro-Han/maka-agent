@@ -17,8 +17,8 @@
  * under the License.
  */
 
-//! One lazily started, trusted isolate per Host. Network waits and terminal
-//! cuts are multiplexed; generated Code Mode JavaScript never enters it.
+//! One lazily started, trusted model isolate per Host. Network waits are
+//! multiplexed; generated Code Mode JavaScript never enters it.
 mod budget;
 mod engine;
 mod http;
@@ -50,7 +50,7 @@ pub enum TrustedError {
 }
 
 pub(super) type Result<T> = std::result::Result<T, TrustedError>;
-pub(super) type Reply = oneshot::Sender<Result<String>>;
+pub(super) type Reply = oneshot::Sender<Result<()>>;
 
 /// Queued SDK output retains its share of the runtime-wide byte budget until
 /// the consumer takes it. Queue count alone is not a useful memory boundary
@@ -78,8 +78,7 @@ struct Inner {
 }
 
 struct Service {
-    // The queue is structurally bounded by the 128 live object permits:
-    // one start/cut plus one cancel/dispose per object, never arbitrary messages.
+    // The queue is bounded by 128 live requests: one start and one cancel each.
     commands: mpsc::UnboundedSender<Command>,
     health: Arc<Health>,
 }
@@ -99,20 +98,6 @@ pub(super) enum Command {
         reply: Reply,
     },
     Cancel(u32),
-    Create {
-        id: u32,
-        size: Value,
-        permit: OwnedSemaphorePermit,
-    },
-    Terminal {
-        id: u32,
-        operation: super::terminal::Operation,
-        reply: Reply,
-    },
-    Dispose {
-        id: u32,
-        reply: Option<Reply>,
-    },
 }
 
 impl Default for TrustedRuntime {
@@ -235,7 +220,7 @@ impl TrustedRuntime {
                 biased;
                 result = &mut done => {
                     cancel_on_drop.disarm();
-                    let result = result.map_err(|_| service.health.error())?.map(|_| ());
+                    let result = result.map_err(|_| service.health.error())?;
                     return if cancellation.is_cancelled() { Err(TrustedError::Cancelled) } else { result };
                 },
                 _ = cancellation.cancelled() => break TrustedError::Cancelled,
@@ -256,53 +241,6 @@ impl TrustedRuntime {
             let _ = done.await;
         }
         Err(cause)
-    }
-
-    pub(super) fn create_terminal(&self, size: Value) -> Result<u32> {
-        let permit = self
-            .0
-            .slots
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| failed("trusted runtime object capacity exhausted"))?;
-        let service = self.service()?;
-        let id = self.next_id()?;
-        service
-            .commands
-            .send(Command::Create { id, size, permit })
-            .map_err(|_| service.health.error())?;
-        Ok(id)
-    }
-
-    pub(super) async fn terminal(
-        &self,
-        id: u32,
-        operation: super::terminal::Operation,
-    ) -> Result<String> {
-        let service = self.service()?;
-        let (reply, mut done) = oneshot::channel();
-        service
-            .commands
-            .send(Command::Terminal {
-                id,
-                operation,
-                reply,
-            })
-            .map_err(|_| service.health.error())?;
-        if let Ok(result) = tokio::time::timeout(Duration::from_secs(10), &mut done).await {
-            return result.map_err(|_| service.health.error())?;
-        }
-        service
-            .health
-            .fail("terminal cut failed to settle within 10 seconds");
-        let _ = done.await;
-        Err(service.health.error())
-    }
-
-    pub(super) fn dispose(&self, id: u32, reply: Option<Reply>) {
-        if let Ok(service) = self.service() {
-            let _ = service.commands.send(Command::Dispose { id, reply });
-        }
     }
 }
 

@@ -339,7 +339,6 @@ const provenanceMarkers = [
  */
 const reviewedProvenance = new Map([
   [
-    'crates/js-runtime/TERMINAL_SOURCE.md',
     'Original Maka provenance documentation quoting MIT notices for the locked xterm bundle; the upstream code retains its MIT license.',
   ],
   [
