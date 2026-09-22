@@ -104,6 +104,8 @@ The installed SDK must recognize the descriptor as provider-executed. Unknown ID
 
 ## Client SDK
 
+`ctx.slots.register('settings.page', key, Component, { label, order? })` publishes a page and its navigation entry together on the selected Settings Host. `label` is a string or an `en`/`zh-CN`/`zh-TW` translation map; the component receives `locale` and `page` (the registration key). Selection expires on Host, connection or registration replacement. Native settings remain available while plugins reconnect. Other slots accept optional `{ order }`.
+
 Client SDK API **1** uses React supplied by Desktop. Export a `ClientPlugin` from `@maka-agent/plugin-sdk/client`; its `activate(ctx, config)` stages keyed Slot registrations and effects. Slot registration closes after initialization. `ctx.effect` and `ctx.style` remain available while active; their disposer is idempotent. Async cleanup stays owned until settlement, including after explicit disposal. Cleanup failure requires reloading the document before that Entry can activate again.
 
 Build with `buildClient({ packageId, entryPoint })` from `@maka-agent/plugin-sdk/build` (requires esbuild in the author's build environment). Save the returned JavaScript and declare `client: { entry: "client.js", sdkVersion: 1 }` in the manifest. The loader checks exact bytes and SDK compatibility before execution. Bundles share the trusted Renderer, not a sandbox; they have no Node compatibility layer.

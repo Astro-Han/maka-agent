@@ -108,6 +108,8 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 
 ## Client SDK
 
+`ctx.slots.register('settings.page', key, Component, { label, order? })` 在设置页选中的 Host 上同时发布页面与导航项。`label` 是字符串或包含 `en`/`zh-CN`/`zh-TW` 的翻译表；组件接收 `locale` 和注册 key 对应的 `page`。切换 Host、连接或注册后，旧选择失效。插件重连不影响原生设置。其他 Slot 接受可选的 `{ order }`。
+
 `application.overlay` 挂载于应用默认 Host；`session.header.actions` 和 `turn.footer` 挂载于所查看 Session 的 Host，接收 canonical `sessionId`。页脚另含 `turnId`，同一可见 Turn 即使包含多次 steering 也只挂载一次，不替换原生操作。Session／Turn 参数用于定位观察，不授予执行权限。
 
 `ctx.events.subscribe({ kind: 'session.changed' }, listener, onError?)` 观察来源 Host 的失效通知。`session.event` 和 `tool.activity` 还须指定该 Host 的 canonical `sessionId`。回调接收可判别的 `ClientProductEvent`；事件 payload 是需自行收窄的开放产品投影。观察流包括实时增量和可能重放的 seed，不是持久 `LogEvent` 或恰好一次回执。订阅随实例发布，释放或退休立即停止投递，不跟随替代连接。插件领域变化使用公共 Remote 流。

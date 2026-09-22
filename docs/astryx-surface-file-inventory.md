@@ -6,7 +6,7 @@ Generated against `@astryxdesign/core@0.6.1` (195 component exports).
 
 Wiki bar: Design Conventions · API Use-the-System · Theming · Container Padding.
 
-**Totals:** 281 files — blocker 4, reimplementation 0, polish 4, aligned 273.
+**Totals:** 283 files — blocker 4, reimplementation 0, polish 4, aligned 275.
 
 ## Exclusions (explicit)
 
@@ -51,6 +51,8 @@ Wiki bar: Design Conventions · API Use-the-System · Theming · Container Paddi
 | `apps/desktop/src/renderer/executor-task-picker.tsx` | other | none | aligned — no raw controls; no Astryx JSX usage | aligned |
 | `apps/desktop/src/renderer/features/app-update/services-context.tsx` | other | none | aligned — no raw controls; no Astryx JSX usage | aligned |
 | `apps/desktop/src/renderer/features/app-update/ui/app-update-provider.tsx` | other | none | aligned — no raw controls; no Astryx JSX usage | aligned |
+| `apps/desktop/src/renderer/features/client-plugins/context.tsx` | other | none | aligned — no raw controls; no Astryx JSX usage | aligned |
+| `apps/desktop/src/renderer/features/client-plugins/settings.tsx` | other | Banner, SideNavItem, SideNavSection | aligned — uses Astryx (Banner, SideNavItem, SideNavSection) | aligned |
 | `apps/desktop/src/renderer/features/client-plugins/suggestions.tsx` | other | none | aligned — no raw controls; no Astryx JSX usage | aligned |
 | `apps/desktop/src/renderer/features/connection-settings/generic-provider-mark.tsx` | other | none | aligned — no raw controls; no Astryx JSX usage | aligned |
 | `apps/desktop/src/renderer/features/connection-settings/onboarding-step-form.tsx` | dialog-overlay | VStack | aligned — uses Astryx (VStack) | aligned |

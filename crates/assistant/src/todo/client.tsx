@@ -110,7 +110,7 @@ const plugin: ClientPlugin = {
       'session.composer.before',
       'checklist',
       (props) => <Checklist {...props} context={context} />,
-      20,
+      { order: 20 },
     );
     context.style(`
       .maka-todo { font-size: 12px; padding: 6px 8px; }

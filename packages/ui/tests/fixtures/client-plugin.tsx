@@ -24,6 +24,12 @@ const plugin: ClientPlugin = {
   activate(ctx, config) {
     const label = typeof config === 'object' && config !== null && 'label' in config
       ? String(config.label) : 'Plugin';
+    ctx.slots.register('settings.page', 'preferences', function Preferences({ page }) {
+      return <p data-plugin-page={page}>{label}</p>;
+    }, { label: { en: 'Preferences', 'zh-CN': '偏好', 'zh-TW': '偏好' } });
+    ctx.slots.register('settings.page', 'diagnostics', function Diagnostics({ page }) {
+      return <p data-plugin-page={page}>Diagnostics: {label}</p>;
+    }, { label: { en: 'Diagnostics', 'zh-CN': '诊断', 'zh-TW': '診斷' } });
     ctx.style('[data-plugin-example] { padding: 12px; border: 1px solid currentColor; }');
     ctx.slots.register('session.composer.before', 'example', function Example() {
       const [count, setCount] = useState(0);

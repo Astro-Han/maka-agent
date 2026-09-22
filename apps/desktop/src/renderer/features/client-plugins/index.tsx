@@ -19,28 +19,17 @@
 
 import * as React from 'react';
 import { useUiLocale } from '@maka/ui';
-import * as JsxRuntime from 'react/jsx-runtime';
-import * as ClientSdk from '@maka-agent/plugin-sdk/client';
-import * as ClientUi from '@maka/ui/plugin';
+import type * as ClientSdk from '@maka-agent/plugin-sdk/client';
 import { ClientSlot } from '@maka/ui/client-plugins';
-import { createServicesContext } from '../../application/contracts/feature-services.js';
-import type { ClientHostRef, ClientPluginServices } from './ports.js';
+import type { ClientHostRef } from './ports.js';
 import { usePublishComposerSuggestions } from './suggestions.js';
-import { ClientHostRuntime } from './host-runtime.js';
+import { useClientHost, useServices } from './context.js';
+export { ClientPluginServicesProvider } from './context.js';
+export { ClientPluginSettings, type ClientSettingsSelection } from './settings.js';
 import { parseDesktopSessionKey } from '../../../shared/runtime-host-identity.js';
 export { ComposerSuggestionsProvider, useComposerSuggestions } from './suggestions.js';
 
 export type { ClientHostRef, ClientPluginServices } from './ports.js';
-const { Provider, useServices } = createServicesContext<{
-  services: ClientPluginServices;
-  hosts: Map<string, ClientHostRuntime>;
-}>('ClientPluginServices');
-
-export function ClientPluginServicesProvider(props: { services: ClientPluginServices; children?: React.ReactNode }) {
-  const value = React.useMemo(() => ({ services: props.services, hosts: new Map<string, ClientHostRuntime>() }), [props.services]);
-  return <Provider services={value}>{props.children}</Provider>;
-}
-const modules = { react: React, 'react/jsx-runtime': JsxRuntime, '@maka-agent/plugin-sdk/client': ClientSdk, '@maka/ui/plugin': ClientUi };
 
 /** Bound to an originating Host, never the currently selected default Host. */
 export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
@@ -50,19 +39,8 @@ export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
   readonly className?: string;
   readonly input: ClientSdk.ClientSlots[K];
 }): React.ReactNode {
-  const { services, hosts } = useServices();
   const publishSuggestions = usePublishComposerSuggestions();
-  const { profileId, hostId } = props.host;
-  const key = JSON.stringify([profileId, hostId]);
-  let owner = hosts.get(key);
-  if (!owner) {
-    owner = new ClientHostRuntime(() => services.connect({ profileId, hostId }), {
-      document, modules, report: (diagnostic) => console.error('Client plugin failed', diagnostic),
-    });
-    hosts.set(key, owner);
-  }
-  const { runtime, failure, contextRevision, session } = React.useSyncExternalStore(owner.subscribe, owner.snapshot, owner.snapshot);
-  const report = owner.report;
+  const { runtime, failure, contextRevision, session, report } = useClientHost(props.host);
   const resolving = 'onResolved' in props.input ? props.input.onResolved : undefined;
   const resolutionError = 'onError' in props.input ? props.input.onError : undefined;
   const onResolved = React.useCallback((id: string, signal: AbortSignal) => {

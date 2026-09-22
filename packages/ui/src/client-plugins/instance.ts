@@ -19,7 +19,7 @@
 
 import type { ClientContext, ClientDescriptor, ClientIdentity, ClientPlugin, ClientRemote, ClientLocalFiles, ClientAuthorization } from '@maka-agent/plugin-sdk/client';
 import type { Json } from '@maka-agent/plugin-sdk/host';
-import type { ClientEvents } from '@maka-agent/plugin-sdk/client';
+import type { ClientEvents, ClientLabel } from '@maka-agent/plugin-sdk/client';
 import type { SlotEntry } from './slots.js';
 import { createElement } from 'react';
 
@@ -143,13 +143,22 @@ export class ClientInstance {
         },
       },
       slots: {
-        register: (slot, key, component, order = 0) => {
+        register: (slot, key, component, ...options) => {
           this.#assertStaged();
+          const settings = options[0];
+          if (settings !== undefined && (!settings || typeof settings !== 'object' || Array.isArray(settings)))
+            throw new Error('Client slot options must be an object');
+          if (settings && Object.keys(settings).some((key) => key !== 'order' && !(slot === 'settings.page' && key === 'label')))
+            throw new Error('Unknown Client slot option');
+          const order = settings?.order ?? 0;
+          const label = slot === 'settings.page'
+            ? pageLabel(settings && 'label' in settings ? settings.label : undefined)
+            : undefined;
           if (!key || key.length > 128 || !Number.isFinite(order) || this.slots.length >= 128)
             throw new Error('Invalid or excessive Client slot registration');
           if (this.slots.some((entry) => entry.slot === slot && entry.key === key))
             throw new Error('Duplicate Client slot key');
-          const entry: SlotEntry = { owner: context.identity, slot, key, order,
+          const entry: SlotEntry = { owner: context.identity, slot, key, order, label,
             render: (input) => createElement(component, input) };
           this.slots.push(entry);
           return () => {
@@ -257,4 +266,13 @@ export class ClientInstance {
   #assertActive(): void {
     if (this.#phase !== 'active') throw new Error('Client plugin is not effective');
   }
+}
+
+function pageLabel(value: unknown): ClientLabel {
+  const valid = (text: unknown): text is string => typeof text === 'string' && text.trim().length > 0 && text.length <= 256;
+  if (valid(value)) return value;
+  if (value && typeof value === 'object' && 'en' in value && 'zh-CN' in value && 'zh-TW' in value &&
+    valid(value.en) && valid(value['zh-CN']) && valid(value['zh-TW']))
+    return Object.freeze({ en: value.en, 'zh-CN': value['zh-CN'], 'zh-TW': value['zh-TW'] });
+  throw new Error('Settings pages require a nonempty title or localized titles');
 }

@@ -172,7 +172,7 @@ const plugin: ClientPlugin = {
           target={{ kind: 'session', sessionId: props.sessionId }}
         />
       ),
-      10,
+      { order: 10 },
     );
     context.slots.register(
       'workspace.composer.before',
@@ -185,7 +185,7 @@ const plugin: ClientPlugin = {
           target={{ kind: 'workspace', ...props }}
         />
       ),
-      10,
+      { order: 10 },
     );
     context.slots.register(
       'workspace.manage',
@@ -200,7 +200,7 @@ const plugin: ClientPlugin = {
             manageOnly
           />
         ) : null,
-      10,
+      { order: 10 },
     );
   },
 };

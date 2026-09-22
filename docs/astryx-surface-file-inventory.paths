@@ -21,6 +21,8 @@ apps/desktop/src/renderer/error-boundary.tsx
 apps/desktop/src/renderer/executor-task-picker.tsx
 apps/desktop/src/renderer/features/app-update/services-context.tsx
 apps/desktop/src/renderer/features/app-update/ui/app-update-provider.tsx
+apps/desktop/src/renderer/features/client-plugins/context.tsx
+apps/desktop/src/renderer/features/client-plugins/settings.tsx
 apps/desktop/src/renderer/features/client-plugins/suggestions.tsx
 apps/desktop/src/renderer/features/connection-settings/generic-provider-mark.tsx
 apps/desktop/src/renderer/features/connection-settings/onboarding-step-form.tsx

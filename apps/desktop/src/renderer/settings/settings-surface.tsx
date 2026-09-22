@@ -68,7 +68,7 @@ import { createDefaultSettings, DEFAULT_APP_ICON } from '@maka/core/settings';
 import { Banner, Selector, useMountedRef, useToast, useUiLocale } from '@maka/ui';
 import { ProvidersPanel } from './providers-panel';
 import { ExternalAgentsSettingsPage } from '../features/external-agent-settings/index.js';
-import { ClientPluginSlot } from '../features/client-plugins/index.js';
+import { ClientPluginSlot, ClientPluginSettings, type ClientSettingsSelection } from '../features/client-plugins/index.js';
 import { safeLocalStorageSet } from '../browser-storage';
 import { ProjectsSettingsPage } from './projects-settings-page';
 import { NativeRuntimeHostManagementDialog } from './native-runtime-host-management-dialog.js';
@@ -200,7 +200,11 @@ function SettingsSurfaceContent(
   const copy = getSettingsSharedCopy(locale);
   const localizedNav = groupedNav(locale);
   const isNarrowSettings = useMediaQuery(NARROW_SETTINGS_QUERY);
-  const [section, setSection] = useState<SettingsSection>(() => props.request?.section ?? readLastSettingsSection());
+  const [route, setRoute] = useState<
+    { kind: 'native'; section: SettingsSection } | { kind: 'plugin'; selection: ClientSettingsSelection }
+  >(() => ({ kind: 'native', section: props.request?.section ?? readLastSettingsSection() }));
+  const section = route.kind === 'native' ? route.section : undefined;
+  const setSection = (section: SettingsSection) => setRoute({ kind: 'native', section });
   const [providerCatalogRequested, setProviderCatalogRequested] = useState(props.openProviderCatalog === true);
   // One-shot landing intent, mirroring providerCatalogRequested above: the
   // request retires once ProvidersPanel consumes it, so remounting the panel
@@ -237,7 +241,7 @@ function SettingsSurfaceContent(
   // away from anything the user opened inside Settings dozens of times a
   // second while a session streams.
   useEffect(() => {
-    props.initialFocusRef.current?.focus();
+    if (section) props.initialFocusRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ref identity is stable; re-run only on section change.
   }, [section]);
 
@@ -265,7 +269,7 @@ function SettingsSurfaceContent(
   }, []);
 
   useEffect(() => {
-    safeLocalStorageSet('maka-settings-section-v1', section);
+    if (section) safeLocalStorageSet('maka-settings-section-v1', section);
   }, [section]);
   const defaultSettings = useMemo(() => createDefaultSettings(), []);
   const snapshotCache = useMemo(
@@ -453,7 +457,7 @@ function SettingsSurfaceContent(
   );
   const connections = selectedConnections?.connections ?? [];
   const defaultSlug = selectedConnections?.defaultSlug ?? null;
-  const sectionScope = settingsSectionScope(section);
+  const sectionScope = section ? settingsSectionScope(section) : 'runtime-host';
   const showsRuntimeHost = sectionScope !== 'client';
   const requiresRuntimeHost = sectionScope === 'runtime-host';
   useEffect(() => {
@@ -462,8 +466,8 @@ function SettingsSurfaceContent(
     );
     return () => props.onSelectedRuntimeHostProfileIdChange(undefined);
   }, [props.onSelectedRuntimeHostProfileIdChange, selectedProfileId, showsRuntimeHost]);
-  const sectionNeedsSettings = ['general', 'search', 'external-agents'].includes(section);
-  const sectionNeedsConnections = ['general', 'models', 'daily-review'].includes(section);
+  const sectionNeedsSettings = section !== undefined && ['general', 'search', 'external-agents'].includes(section);
+  const sectionNeedsConnections = section !== undefined && ['general', 'models', 'daily-review'].includes(section);
   const runtimeHostAvailabilityStatus: RuntimeHostAvailabilityStatus =
     selectedRuntimeHost
       ? 'ready'
@@ -815,7 +819,7 @@ function SettingsSurfaceContent(
   // boundary — so an unrouted section fails loudly at build time instead of
   // silently rendering 通用 copy over a different page's body. The nav
   // highlight below still keys off `section === item.id` independently.
-  const headerCopy = getSettingsNavigationCopy(locale).sections[section];
+  const headerCopy = section ? getSettingsNavigationCopy(locale).sections[section] : undefined;
   const runtimeHostOptions = (runtimeHosts?.entries ?? [])
     .filter((entry) => entry.enabled)
     .map((entry) => ({
@@ -850,7 +854,11 @@ function SettingsSurfaceContent(
   }
 
   return (
-    <div className="settingsSurface" data-modal="true" data-maka-assistant-section={section}>
+    <ClientPluginSettings host={selectedRuntimeHost} epoch={selectedRuntimeHostEpoch}
+      verified={runtimeHostTargetVerified} locale={locale}
+      selection={route.kind === 'plugin' ? route.selection : undefined}
+      onSelect={(selection) => setRoute({ kind: 'plugin', selection })}>
+    {(pluginSettings) => <div className="settingsSurface" data-modal="true" data-maka-assistant-section={section ?? 'extension'}>
       <Layout
         height="fill"
         padding={0}
@@ -910,6 +918,7 @@ function SettingsSurfaceContent(
                   ))}
                 </SideNavSection>
               ))}
+              {pluginSettings.navigation}
             </SideNav>
           </LayoutPanel>
         )}
@@ -937,8 +946,8 @@ function SettingsSurfaceContent(
                 <LayoutHeader padding={6}>
                   <div className="settingsPageHeader">
                     <div className="settingsPageHeaderTitleStack">
-                      <h2>{headerCopy.label}</h2>
-                      {headerCopy.description && (
+                      <h2>{headerCopy?.label ?? pluginSettings.title}</h2>
+                      {headerCopy?.description && (
                         <p className="settingsPageHeaderDescription">{headerCopy.description}</p>
                       )}
                     </div>
@@ -970,7 +979,7 @@ function SettingsSurfaceContent(
                     loadErrorTitle={copy.usageLoadFailed}
                     describeError={(error) => settingsActionErrorMessage(error, locale)}
                   >
-                  {loading ? (
+                  {route.kind === 'plugin' ? pluginSettings.page : loading ? (
                     <SettingsSkeleton />
                   ) : requiresRuntimeHost &&
                     !runtimeHostContentReady &&
@@ -1020,7 +1029,7 @@ function SettingsSurfaceContent(
                           isInteractive={!requiresRuntimeHost || runtimeHostContentVerified}
                         >
                           <SettingsPageBody
-                            section={section}
+                            section={route.section}
                             // A bundle names a path on THIS machine, so the
                             // feature is offered only while the Local Host is
                             // the target -- never beside a Remote one.
@@ -1078,7 +1087,8 @@ function SettingsSurfaceContent(
       {nativeManagementTarget ? <NativeRuntimeHostManagementDialog
         key={nativeManagementTarget.id} target={nativeManagementTarget}
         onClose={() => setNativeManagementTarget(undefined)} /> : null}
-    </div>
+    </div>}
+    </ClientPluginSettings>
   );
 }
 

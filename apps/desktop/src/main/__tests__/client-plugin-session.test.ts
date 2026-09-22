@@ -59,7 +59,7 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
       void fetch(script.src).then((response) => response.text()).then((bytes) => {
         if (!script.isConnected) return;
         Object.defineProperty(document, 'currentScript', { configurable: true, value: script });
-        try { runInNewContext(bytes, { window, AbortController, crypto: globalThis.crypto }); script.onload?.(new Event('load')); }
+        try { runInNewContext(bytes, { window, AbortController, crypto: globalThis.crypto, setTimeout, clearTimeout }); script.onload?.(new Event('load')); }
         catch { script.onerror?.(new Event('error')); }
         finally { Object.defineProperty(document, 'currentScript', { configurable: true, value: null }); }
       });

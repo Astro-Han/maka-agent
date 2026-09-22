@@ -56,6 +56,10 @@ export interface ClientDescriptor extends ClientIdentity {
 
 /** Augment this interface for slots agreed upon by a product and its plugins. */
 export interface ClientSlots {
+  'settings.page': {
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly page: string;
+  };
   'application.overlay': { readonly locale: 'en' | 'zh-CN' | 'zh-TW' };
   'session.header.actions': {
     readonly sessionId: string;
@@ -169,7 +173,9 @@ export interface ClientContext {
       slot: K,
       key: string,
       component: ComponentType<ClientSlots[K]>,
-      order?: number,
+      ...options: K extends 'settings.page'
+        ? [options: { readonly order?: number; readonly label: ClientLabel }]
+        : [options?: { readonly order?: number }]
     ): () => void;
   };
   /** Setup waits for publication, or starts immediately when active. Release is idempotent;
@@ -177,6 +183,8 @@ export interface ClientContext {
   effect(setup: () => void | (() => Awaitable<void>)): () => void;
   style(css: string): () => void;
 }
+
+export type ClientLabel = string | Readonly<Record<'en' | 'zh-CN' | 'zh-TW', string>>;
 
 export interface ClientLocalFiles {
   pick(): Promise<string | null>;

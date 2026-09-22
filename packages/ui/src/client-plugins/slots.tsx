@@ -18,13 +18,14 @@
  */
 
 import { Component, useSyncExternalStore, type ReactNode } from 'react';
-import type { ClientIdentity, ClientSlots } from '@maka-agent/plugin-sdk/client';
+import type { ClientIdentity, ClientSlots, ClientLabel } from '@maka-agent/plugin-sdk/client';
 
 export interface SlotEntry {
   readonly owner: ClientIdentity;
   readonly slot: keyof ClientSlots;
   readonly key: string;
   readonly order: number;
+  readonly label?: ClientLabel;
   /** Existential input: only the matching slot may invoke this renderer. */
   readonly render: (input: never) => ReactNode;
 }
@@ -49,13 +50,15 @@ export function ClientSlot<K extends keyof ClientSlots>(props: {
   readonly store: ClientSlotStore;
   readonly name: K;
   readonly entryId?: string;
+  readonly entryKey?: string;
   readonly className?: string;
   readonly input: ClientSlots[K];
   readonly onError: (owner: ClientIdentity, error: unknown) => void;
 }): ReactNode {
   const entries = useSyncExternalStore(props.store.subscribe, props.store.snapshot, props.store.snapshot);
   const matching = entries.filter((entry) => entry.slot === props.name &&
-    (!props.entryId || entry.owner.entryId === props.entryId));
+    (!props.entryId || entry.owner.entryId === props.entryId) &&
+    (!props.entryKey || entry.key === props.entryKey));
   if (!matching.length) return null;
   return <div className={props.className}>{matching.map((entry) => (
     <SlotBoundary key={`${entry.owner.activation}/${entry.key}`} owner={entry.owner} onError={props.onError}>
