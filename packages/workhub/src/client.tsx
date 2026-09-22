@@ -26,6 +26,7 @@ import { WorkHubRoot } from './surface.js';
 import { coordinationCommands } from './client-session.js';
 import { bindSurface } from './client-surface.js';
 import { ModelSelection, type ModelTarget } from './model-selection.js';
+import { DelegationModels } from './delegation-models.js';
 import styles from './styles.css';
 
 type Resolution = { sessionId: string };
@@ -52,7 +53,16 @@ const plugin: ClientPlugin = {
           props.hostSessionId,
         ],
       );
-      return <WorkHubRoot {...props} {...bound} signal={context.signal} />;
+      return (
+        <>
+          <DelegationModels
+            context={context}
+            locale={props.locale}
+            contextRevision={props.contextRevision}
+          />
+          <WorkHubRoot {...props} {...bound} signal={context.signal} />
+        </>
+      );
     });
     const resolve = context.remote.method<null, Resolution>('resolve');
     context.slots.register(

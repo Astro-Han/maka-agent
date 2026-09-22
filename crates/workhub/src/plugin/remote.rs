@@ -45,6 +45,8 @@ pub(super) fn publish(
         ("models", Action::Models),
         ("executors", Action::Executors),
         ("select-coordinator-model", Action::SelectModel),
+        ("delegation-model", Action::DelegationModel),
+        ("select-delegation-model", Action::SelectDelegationModel),
         ("query", Action::Query),
         ("candidates", Action::Candidates),
         ("configure-creation", Action::Creation),
@@ -84,6 +86,8 @@ enum Action {
     Models,
     Executors,
     SelectModel,
+    DelegationModel,
+    SelectDelegationModel,
     Query,
     Candidates,
     Creation,
@@ -230,6 +234,70 @@ impl Method for Call {
                     Ok(
                         json!({"coordinatorSessionId":manager.coordinator.session_id().await.map_err(failure)?, "recovery":manager.report.lock().unwrap().clone()}),
                     )
+                }
+                Action::DelegationModel => {
+                    #[derive(Deserialize)]
+                    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                    struct Input {
+                        assignment_id: String,
+                    }
+                    let input: Input = decode(input)?;
+                    encode(
+                        manager
+                            .assignments
+                            .model_choice(&input.assignment_id)
+                            .await
+                            .map_err(failure)?,
+                    )
+                }
+                Action::SelectDelegationModel => {
+                    #[derive(Deserialize)]
+                    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                    struct Input {
+                        assignment_id: String,
+                        expected_revision: Option<u64>,
+                        target: maka_plugins::execution::Target,
+                    }
+                    let input: Input = decode(input)?;
+                    let choice = manager
+                        .assignments
+                        .model_choice(&input.assignment_id)
+                        .await
+                        .map_err(failure)?;
+                    let authority = caller
+                        .views
+                        .authorize(Authorization {
+                            operation_id: uuid::Uuid::new_v4(),
+                            title: "Choose the delegated task model".into(),
+                            target: choice.authorization,
+                            capabilities: [Capability::Executions].into(),
+                        })
+                        .await?;
+                    let result = async {
+                        let commands = manager
+                            .executions
+                            .acquire(authority.scope())
+                            .await
+                            .map_err(command)?;
+                        encode(
+                            manager
+                                .assignments
+                                .select_model(
+                                    &input.assignment_id,
+                                    input.expected_revision,
+                                    input.target,
+                                    commands.as_ref(),
+                                )
+                                .await
+                                .map_err(failure)?,
+                        )
+                    }
+                    .await;
+                    authority
+                        .finish()
+                        .await
+                        .map_err(|_| Error::CleanupUnconfirmed)?;
+                    result
                 }
                 Action::Candidates => {
                     empty(input)?;

@@ -99,6 +99,8 @@ async fn scenario() {
     let mut intent = Value::Null;
     let mut coordinator = String::new();
     let mut controls = Vec::<Value>::new();
+    let mut repair_intent = Value::Null;
+    let mut repaired = Value::Null;
     for reopened in [false, true] {
         let host = Host::open_with_options(
             fixture.owner(),
@@ -215,7 +217,13 @@ async fn scenario() {
             assert_eq!(view["behavior"], "z.workhub.coordinator");
             assert_eq!(view["sandboxMode"], "workspace-write");
             assert_eq!(view["approvalPolicy"], json!({"kind":"on-request"}));
-            restricted_selection(address, &client, json!(model)).await;
+            restricted_selection(
+                address,
+                &client,
+                "select-coordinator-model",
+                json!({"kind":"model","model":model,"thinkingLevel":null}),
+            )
+            .await;
             success(peer.rpc("session.create", json!({
                 "sessionId":"workhub-target", "workspace":{"kind":"host_path","path":fixture.workspace},
                 "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
@@ -630,15 +638,102 @@ async fn scenario() {
         )
         .await;
         assert_eq!(stopped["kind"], "stopped");
+        if !reopened {
+            repair_intent = json!({
+                "operationId":"repair-root", "source":intent["source"],
+                "authorization":{"kind":"plugin_workspace","sandboxMode":"workspace-write"},
+                "target":{"kind":"create","request":{
+                    "operationId":"repairable-root", "managed":false, "name":"Repairable delegated work",
+                    "settings":{
+                        "target":{"kind":"model","model":model,"thinkingLevel":"max"},
+                        "sandboxMode":"read-only", "approvalPolicy":{"kind":"on-request"},
+                        "collaborationMode":"agent", "behavior":"default"
+                    }
+                }},
+                "content":{"text":"Only execute the repaired model"}
+            });
+            let failed = remote_result(
+                &mut peer,
+                &client,
+                &document,
+                Some(&coordinator),
+                "route",
+                repair_intent.clone(),
+            )
+            .await;
+            assert_eq!(
+                failed["ok"], false,
+                "unsupported thinking must not admit work"
+            );
+            let before = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "delegation-model",
+                json!({"assignmentId":"repair-root"}),
+            )
+            .await;
+            assert_eq!(before["revision"], Value::Null);
+            let choice = json!({"assignmentId":"repair-root", "expectedRevision":before["revision"],
+                "target":{"kind":"model","model":model,"thinkingLevel":null}});
+            restricted_selection(address, &client, "select-delegation-model", choice.clone()).await;
+            let repaired_session = remote(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "select-delegation-model",
+                choice.clone(),
+            )
+            .await;
+            assert_eq!(repaired_session["target"]["thinkingLevel"], Value::Null);
+            let stale = remote_result(
+                &mut peer,
+                &client,
+                &document,
+                None,
+                "select-delegation-model",
+                choice,
+            )
+            .await;
+            assert_eq!(
+                stale["ok"], false,
+                "stale model choices must not overwrite the repair"
+            );
+            repaired = remote(
+                &mut peer,
+                &client,
+                &document,
+                Some(&coordinator),
+                "route",
+                repair_intent.clone(),
+            )
+            .await;
+            wait_assignment(&mut peer, &client, &document, "repair-root").await;
+        } else {
+            assert_eq!(
+                remote(
+                    &mut peer,
+                    &client,
+                    &document,
+                    Some(&coordinator),
+                    "route",
+                    repair_intent.clone()
+                )
+                .await,
+                repaired
+            );
+        }
         peer.close().await;
         stop.cancel();
         server.await.unwrap().unwrap();
         cleanup.disarm();
         drop(host);
     }
-    // Seven original steps, two shared-work and three selection steps; no replayed admission.
+    // Original, shared/selected and repaired work; no replayed admission after restart.
     let requests = provider.requests.lock().unwrap();
-    assert_eq!(requests.len(), 12);
+    assert_eq!(requests.len(), 13);
     let advertised = |request: &Value| {
         request["tools"].as_array().is_some_and(|tools| {
             tools
@@ -737,7 +832,12 @@ async fn upload(peer: &mut Peer, session: &str) -> Value {
         .clone()
 }
 
-async fn restricted_selection(address: std::net::SocketAddr, client: &Value, model: Value) {
+async fn restricted_selection(
+    address: std::net::SocketAddr,
+    client: &Value,
+    method: &str,
+    selection: Value,
+) {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
     let mut request = format!("ws://{address}/runtime-host")
@@ -762,13 +862,13 @@ async fn restricted_selection(address: std::net::SocketAddr, client: &Value, mod
     assert_eq!(hello["state"], "ready");
     let mut document = Value::Null;
     let mut target = Value::Null;
-    let binding = json!({"client":client,"method":"select-coordinator-model","sessionId":null});
+    let binding = json!({"client":client,"method":method,"sessionId":null});
     for step in ["document", "bind", "call"] {
         let input = match step {
             "document" => json!({"kind":"open_document"}),
             "bind" => json!({"kind":"bind","binding":binding}),
             _ => json!({"kind":"call","binding":binding,"document":document,"target":target,
-                "input":{"kind":"model","model":model,"thinkingLevel":null}}),
+                "input":selection}),
         };
         socket
             .send(Message::text(

@@ -29,17 +29,28 @@ export function ModelSelection({
   locale,
   label,
   onSelect,
+  initialTarget,
 }: {
   context: ClientContext;
   locale: string;
   label: string;
   onSelect: (target: ModelTarget) => Promise<void>;
+  initialTarget?: ModelTarget;
 }) {
   const zh = locale !== 'en';
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<ModelChoices>();
-  const [selected, setSelected] = useState('');
-  const [thinking, setThinking] = useState<{ model: string; level: string }>();
+  const [selected, setSelected] = useState(() =>
+    initialTarget ? JSON.stringify(initialTarget.model) : '',
+  );
+  const [thinking, setThinking] = useState<{ model: string; level: string } | undefined>(() =>
+    initialTarget
+      ? {
+          model: JSON.stringify(initialTarget.model),
+          level: initialTarget.thinkingLevel ?? '',
+        }
+      : undefined,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   useEffect(() => {

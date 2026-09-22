@@ -92,18 +92,6 @@ impl Assignment {
     }
 }
 
-async fn restore_or_create_root(
-    commands: &dyn Commands,
-    request: &CreateRoot,
-) -> Result<String, Error> {
-    Ok(
-        match commands.restore_root(request.operation_id.clone()).await? {
-            Some(session) => session.session_id,
-            None => commands.create_root(request.clone()).await?.session_id,
-        },
-    )
-}
-
 pub struct Assignments {
     pub coordinator: Arc<crate::Coordinator>,
     pub repository: Arc<Repository>,
@@ -162,7 +150,8 @@ impl Assignments {
                     let session = match &assignment.request.target {
                         Target::Existing { session_id } => session_id.clone(),
                         Target::Create { request } => {
-                            restore_or_create_root(commands.as_ref(), request).await?
+                            self.restore_or_create_root(commands.as_ref(), request)
+                                .await?
                         }
                     };
                     let mut content = assignment.request.content.clone();
@@ -261,7 +250,8 @@ impl Assignments {
         match &assignment.request.target {
             Target::Create { request } => {
                 // Reattach exactly the root this grant created, including after a restart.
-                restore_or_create_root(commands.as_ref(), request).await?;
+                self.restore_or_create_root(commands.as_ref(), request)
+                    .await?;
             }
             Target::Existing { session_id } => {
                 commands.session(session_id.clone()).await?;

@@ -25,6 +25,7 @@ mod control;
 mod coordinator;
 mod decision;
 mod feedback;
+mod model_repair;
 mod observation;
 mod plugin;
 mod queue;

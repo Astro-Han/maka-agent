@@ -428,6 +428,9 @@ live verification are deferred.
 
 WorkHub supports scoped conversation, candidate discovery, interactive target selection,
 delegation to existing or new sessions, steering, stop, resume and correction.
+Its delegated-model panel can repair a failed creation or change an existing target's model.
+Selections use current caller authorization and configuration CAS; the original delegation,
+root identity and execution receipts remain unchanged. Retry after a concurrent or busy response.
 Control actions follow the exact delegated Message, never an unrelated Run.
 Correction records intent before retirement, then atomically commits the replacement,
 attachments and queued delivery. Recovery can finish after the coordinator Run ends;

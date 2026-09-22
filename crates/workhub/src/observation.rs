@@ -52,6 +52,7 @@ pub struct Page {
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
     pub operation_id: String,
+    pub title: String,
     pub source: Invocation,
     pub delivery: Option<Delivery>,
     pub retired: bool,
@@ -67,6 +68,12 @@ impl Assignments {
             entries: assignments
                 .into_iter()
                 .map(|assignment| Summary {
+                    title: match &assignment.request.target {
+                        crate::assignment::Target::Create { request } => request.name.clone(),
+                        crate::assignment::Target::Existing { .. } => {
+                            assignment.request.content.text.chars().take(160).collect()
+                        }
+                    },
                     operation_id: assignment.request.operation_id,
                     source: assignment.request.source,
                     delivery: assignment.delivery,
