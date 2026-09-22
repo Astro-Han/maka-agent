@@ -156,6 +156,7 @@ export interface DesktopRuntimeHostCandidateDeps {
   readonly completeDesktopInteractionTurn: (
     sessionId: string,
   ) => void | Promise<void>;
+  readonly beginSessionRead?: (scope: DesktopTargetScope, sessionId: string) => (summary: import('./runtime-host-session-catalog-ipc-main.js').DesktopHostSessionSummary | null) => boolean;
   readonly e2eInteractions?: RuntimeHostSessionExecutionIpcDeps["e2eInteractions"];
   readonly transcriptHistoryBytes?: number;
   readonly renderer?: {
@@ -883,6 +884,10 @@ export async function createDesktopRuntimeHostCandidate(
         {
           client,
           runningTurnIds: (sessionId) => sessionObserver.observedRunningTurnIds(sessionId),
+          beginSessionRead: (sessionId) => {
+            const accept = deps.beginSessionRead?.(scope, sessionId);
+            return (summary) => isTargetActive() && (accept?.(summary) ?? true);
+          },
           resolveCreateProject: (input) => deps.resolveSessionCreateProject(input, target),
           emitSessionsChanged,
           releaseSessionResources: releaseNativeSession,

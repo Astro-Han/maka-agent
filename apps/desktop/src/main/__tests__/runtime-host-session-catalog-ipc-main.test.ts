@@ -56,7 +56,7 @@ test('exact Session reads retain revision and live execution without depending o
   assert.equal(result.revision, 7);
   assert.deepEqual(result.runningTurnIds, ['live']);
   present = false;
-  await assert.rejects(ipc.invoke('sessions:get', 'managed'), /not found/);
+  assert.equal(await ipc.invoke('sessions:get', 'managed'), null);
 });
 
 test('session creation forwards the caller name for a mode that carries none', async () => {

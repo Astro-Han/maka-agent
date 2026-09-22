@@ -127,7 +127,8 @@ import { getDesktopConversationCopy } from './locales/conversation-copy';
 import { ErrorBoundary } from './error-boundary';
 import { useShellAppearance } from './use-shell-appearance';
 import { useSessionSettingIntent } from './features/session-settings';
-import { deriveStaleSessionIds } from './stale-sessions';
+import { deriveStaleSessionIds } from './application/contracts/session-catalog/stale-sessions';
+import { prepareDesktopExecution } from './platform/desktop/prepare-execution.js';
 import { pendingSessionView } from './pending-session-view';
 import { useAppShellTurnPresentation } from './app-shell-turn-view-model';
 import { readScrollMotionBehavior } from './scroll-motion-policy';
@@ -299,6 +300,7 @@ function AppShellContent({
     authoritativeSessionIds,
     sessionsRef,
     refreshSessions,
+    refreshSession,
     activeId,
     activeIdRef,
     requestedSessionId,
@@ -1417,15 +1419,9 @@ function AppShellContent({
     const target = taskEntry.selectors.target;
     if (sharedSessionActive || (!sessionId && !target)) return false;
     try {
-      // Settings may have just committed without a renderer update yet (for
-      // example, explicit bypass-and-retry). Read the accepted Session mode.
-      const mode = sessionId
-        ? (await window.maka.sessions.get(sessionId)).sandboxMode
-        : activeSandboxMode;
-      if (mode === 'danger-full-access') return true;
-      return await window.maka.permissions.ensureSandbox(sessionId
-        ? {sessionId}
-        : {host: target!});
+      return await prepareDesktopExecution(sessionId
+        ? { sessionId }
+        : { host: target!, sandboxMode: activeSandboxMode });
     } catch (error) {
       const copy = getDesktopConversationCopy(uiLocale).actions;
       toastApi.error(copy.operationFailedTitle,
@@ -1847,6 +1843,7 @@ function AppShellContent({
     refreshProjects,
     refreshShellSettings,
     refreshSessions,
+    refreshSession,
     rendererMountedRef,
     retireSession: clearSessionRendererState,
     retiredSessionIds,

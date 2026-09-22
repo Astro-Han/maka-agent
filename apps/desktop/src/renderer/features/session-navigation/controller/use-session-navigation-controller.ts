@@ -26,7 +26,7 @@ import {
   type SessionHistoryGroup,
   type SessionRailSelection,
 } from '@maka/ui';
-import { useExternalStoreSelector } from '../../../use-external-store-selector.js';
+import { useExternalStoreSelector } from '../../../application/contracts/session-catalog/use-external-store-selector.js';
 import { runtimeHostProjectKey } from '../../../application/contracts/runtime-host-project-key.js';
 import { deriveSessionNavigationGroups } from '../model/session-navigation-groups.js';
 import { deriveWorktreeSessionIds } from '../model/session-project-grouping.js';

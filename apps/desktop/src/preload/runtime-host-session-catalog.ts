@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import type { DesktopSessionSummary } from '../shared/desktop-session-projection.js';
+import { compareDesktopSessionCatalogSummaries, type DesktopSessionSummary } from '../shared/desktop-session-projection.js';
 
 export interface RuntimeHostSessionCatalogRequest {
   readonly hostId: string;
@@ -41,6 +41,7 @@ export interface RuntimeHostSessionCatalogRefresher {
   refresh(): Promise<RuntimeHostSessionCatalogCoverage>;
   /** Commit a newly created Session and fence any catalog read started before it. */
   admit(session: DesktopSessionSummary): void;
+  beginRowRead(sessionId: string): { commit(summary: DesktopSessionSummary | null): boolean };
   /** Begin an asynchronous bootstrap read whose result may later seed the catalog. */
   beginSeed(): {
     commit(catalog: RuntimeHostSessionCatalogCoverage): boolean;
@@ -97,6 +98,21 @@ export function createRuntimeHostSessionCatalogRefresher(input: {
           session,
         ]),
       });
+    },
+    beginRowRead(sessionId) {
+      const previous = JSON.stringify(input.currentCatalog().sessions.find(({ id }) => id === sessionId));
+      const generation = catalogGeneration;
+      return { commit(summary) {
+        const current = input.currentCatalog();
+        const row = current.sessions.find(({ id }) => id === sessionId);
+        if (JSON.stringify(row) !== previous || (!row && generation !== catalogGeneration)) return false;
+        if (summary && summary.id !== sessionId) throw new Error('Session read identity changed');
+        dirty = true;
+        commitCatalog({ ...current, sessions: sortSessionCatalogs([
+          ...current.sessions.filter(({ id }) => id !== sessionId), ...(summary ? [summary] : []),
+        ]) });
+        return true;
+      } };
     },
     beginSeed() {
       const admittedCatalogGeneration = catalogGeneration;
@@ -209,12 +225,5 @@ function sortSessionCatalogs(sessions: DesktopSessionSummary[]): DesktopSessionS
       unique.set(session.id, session);
     }
   }
-  return [...unique.values()].sort((left, right) => {
-    const leftActivity = left.localState === 'pending' ? left.localCreatedAt : left.activityAt;
-    const rightActivity = right.localState === 'pending' ? right.localCreatedAt : right.activityAt;
-    if (leftActivity === undefined || rightActivity === undefined) {
-      throw new Error('Runtime Host Session Catalog activity is unavailable');
-    }
-    return rightActivity - leftActivity || left.id.localeCompare(right.id);
-  });
+  return [...unique.values()].sort(compareDesktopSessionCatalogSummaries);
 }

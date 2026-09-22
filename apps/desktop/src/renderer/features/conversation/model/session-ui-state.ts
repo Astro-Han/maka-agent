@@ -20,7 +20,7 @@
 import type { MessageQueueEntryProjection, ShellRunUpdate } from '@maka/core/events';
 import type { SessionEventStreamSnapshot } from '@maka/core/session-event-health';
 import { createTranscriptViewportNavigation, type InteractionQueues, type LiveTurnBuffer } from '@maka/ui';
-import { createObservableState } from './observable-state.js';
+import { createObservableState } from '../../../application/contracts/session-catalog/observable-state.js';
 import type { SessionExecutionProjection } from '../../../../shared/session-execution-projection.js';
 
 type StateUpdater<T> = (updater: (current: T) => T) => void;

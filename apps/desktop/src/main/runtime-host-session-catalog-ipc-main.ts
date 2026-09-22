@@ -77,6 +77,7 @@ export interface RuntimeHostSessionCatalogIpcDeps {
   client: RuntimeHostSessionCatalogClient;
   /** Observer state supplements the Host catalog without falling back to the durable header. */
   runningTurnIds: (sessionId: string) => readonly string[];
+  beginSessionRead?: (sessionId: string) => (summary: DesktopHostSessionSummary | null) => boolean;
   resolveCreateProject: (
     input: Pick<CreateSessionRequestInput, 'cwd' | 'projectId'>,
   ) => Promise<WorkspaceTarget>;
@@ -122,9 +123,11 @@ export function registerRuntimeHostSessionCatalogIpc(
   handleReconnectableRead(ipcMain, 'sessions:get', async (_event, sessionId: string) => {
     await recoveryTask;
     if (pendingCleanup.has(sessionId)) throw new Error('Session copy cleanup is pending');
+    const accept = deps.beginSessionRead?.(sessionId);
     const session = await deps.client.getSession(sessionId);
-    if (!session) throw new Error(`Runtime Host Session not found: ${sessionId}`);
-    return toDesktopHostSessionListSummary(session, deps.runningTurnIds(sessionId));
+    const summary = session ? toDesktopHostSessionListSummary(session, deps.runningTurnIds(sessionId)) : null;
+    if (accept && !accept(summary)) throw new Error('Session read was superseded');
+    return summary;
   });
   ipcMain.handle('sessions:cleanupSessionCopy', async (_event, sessionId: string) => {
     await deps.sessionCopyCleanup.cleanup(sessionId);

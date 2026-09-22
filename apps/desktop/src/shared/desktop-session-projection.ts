@@ -51,6 +51,15 @@ export interface DesktopSessionSummary extends SessionSummary {
 
 export type DesktopSessionSummaryInput = SessionSummary & { readonly approvalPolicy: ApprovalPolicy | null; readonly revision: number; readonly localState?: 'pending' | 'cached'; readonly localCreatedAt?: number };
 
+export function compareDesktopSessionCatalogSummaries(left: DesktopSessionSummary, right: DesktopSessionSummary): number {
+  const leftActivity = left.localState === 'pending' ? left.localCreatedAt : left.activityAt;
+  const rightActivity = right.localState === 'pending' ? right.localCreatedAt : right.activityAt;
+  if (leftActivity === undefined || rightActivity === undefined) {
+    throw new Error('Runtime Host Session Catalog activity is unavailable');
+  }
+  return rightActivity - leftActivity || left.id.localeCompare(right.id);
+}
+
 export type DesktopSessionUpdateFailureCode =
   | 'session_busy'
   | 'operation_conflict'

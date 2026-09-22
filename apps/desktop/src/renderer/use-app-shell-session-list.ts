@@ -17,104 +17,36 @@
  * under the License.
  */
 
-import { useCallback, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { useUiLocale } from '@maka/ui';
 import { getDesktopConversationCopy } from './locales/conversation-copy.js';
 import { localizedShellErrorMessage } from './locales/shell-copy.js';
+import { normalizeSessionSummaryForDisplay } from './session-status-presentation.js';
 import {
-  normalizeSessionSummaryForDisplay,
-} from './session-status-presentation.js';
-import {
-  createSessionListRefresher,
-  type SessionListRefresher,
-} from './session-read-state.js';
-import {
-  selectAuthoritativeSessionIds,
-  selectCatalogRevision,
-  selectSessions,
-  type SessionCatalogController,
-} from './session-catalog-state.js';
+  selectAuthoritativeSessionIds, selectCatalogRevision, selectSessions, type SessionCatalogController,
+} from './application/contracts/session-catalog/session-catalog-state.js';
 import { sessionIdSetsEqual } from './features/conversation/index.js';
-import { useExternalStoreSelector } from './use-external-store-selector.js';
-import type { DesktopSessionSummary } from '../preload/bridge-contract.js';
-
-type ToastApi = {
-  error(title: string, description?: string): void;
-};
-
-type RefBox<T> = { current: T };
+import { useExternalStoreSelector } from './application/contracts/session-catalog/use-external-store-selector.js';
+import { createDesktopSessionCatalogSync } from './platform/desktop/session-catalog-sync.js';
 
 export function useAppShellSessionList(
-  toastApi: ToastApi,
-  options: {
-    catalog: SessionCatalogController;
-  },
+  toastApi: { error(title: string, description?: string): void },
+  { catalog }: { catalog: SessionCatalogController },
 ) {
   const uiLocale = useUiLocale();
-  const uiLocaleRef = useRef(uiLocale);
-  uiLocaleRef.current = uiLocale;
-  const { catalog } = options;
-  // Selected from the catalog store rather than held here: the rail follows the
-  // same authority without the shell carrying it down a prop chain (#4109).
+  const presentation = useRef({ uiLocale, toastApi });
+  presentation.current = { uiLocale, toastApi };
   const sessions = useExternalStoreSelector(catalog, selectSessions);
   const catalogRevision = useExternalStoreSelector(catalog, selectCatalogRevision);
   const authoritativeSessionIds = useExternalStoreSelector(
-    catalog,
-    selectAuthoritativeSessionIds,
-    undefined,
-    sessionIdSetsEqual,
+    catalog, selectAuthoritativeSessionIds, undefined, sessionIdSetsEqual,
   );
-  const sessionsRef = useRef<DesktopSessionSummary[]>([]);
-  const refresherRef = useRef<SessionListRefresher<DesktopSessionSummary> | null>(null);
-
-  function commitSessions(next: DesktopSessionSummary[]): void {
-    sessionsRef.current = next;
-    catalog.commitSessions(next);
-  }
-
-  if (!refresherRef.current) {
-    refresherRef.current = createSessionListRefresher({
-      listSessions: () => window.maka.sessions.list(),
-      currentSessions: () => sessionsRef.current,
-      commitSessions: (next) => commitSessions(next.map(normalizeSessionSummaryForDisplay)),
-      onError: (error) => {
-        const locale = uiLocaleRef.current;
-        const copy = getDesktopConversationCopy(locale).actions;
-        toastApi.error(
-          copy.refreshSessionsFailedTitle,
-          localizedShellErrorMessage(error, copy.refreshSessionsFailedFallback, locale),
-        );
-      },
-    });
-  }
-
-  // Fixed identities for the renderer's lifetime: both close over ref boxes and
-  // a state setter only, and consumers list them in dep arrays and hand them
-  // down as props (see `session-workspace-actions.ts`).
-  const actionsRef = useRef<{
-    refreshSessions(): Promise<DesktopSessionSummary[]>;
-    seedSessions(
-      snapshotSessions: readonly DesktopSessionSummary[],
-    ): DesktopSessionSummary[];
-  } | null>(null);
-  actionsRef.current ??= {
-    async refreshSessions() {
-      return refresherRef.current!.refresh();
-    },
-    seedSessions(snapshotSessions) {
-      const next = snapshotSessions.map(normalizeSessionSummaryForDisplay);
-      commitSessions(next);
-      return next;
-    },
-  };
-  const { refreshSessions, seedSessions } = actionsRef.current;
-
-  return {
-    sessions,
-    catalogRevision,
-    authoritativeSessionIds,
-    sessionsRef,
-    refreshSessions,
-    seedSessions,
-  };
+  const sessionsRef = useMemo(() => ({ get current() { return catalog.getState().sessions; } }), [catalog]);
+  const actions = useMemo(() => createDesktopSessionCatalogSync(catalog, normalizeSessionSummaryForDisplay, (error) => {
+    const { uiLocale: locale, toastApi } = presentation.current;
+    const copy = getDesktopConversationCopy(locale).actions;
+    toastApi.error(copy.refreshSessionsFailedTitle,
+      localizedShellErrorMessage(error, copy.refreshSessionsFailedFallback, locale));
+  }), [catalog]);
+  return { sessions, catalogRevision, authoritativeSessionIds, sessionsRef, ...actions };
 }

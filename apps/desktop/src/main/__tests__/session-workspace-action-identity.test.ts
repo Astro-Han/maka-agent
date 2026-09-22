@@ -68,10 +68,10 @@ describe('session workspace action identity', () => {
     act(() => root.render(createElement(LocaleProvider, {
       locale: 'en', children: createElement(Probe),
     })));
-    act(() => workspace.seedSessions([sessionA, sessionB, sessionC].map((id) => ({
+    act(() => workspace.sessionCatalogController.commitSessions([sessionA, sessionB, sessionC].map((id) => ({
       id, name: id, isFlagged: false, isArchived: false, labels: [],
       hasUnread: false, status: 'active' as const, backend: 'ai-sdk' as const,
-      revision: 1, runtimeHostId: 'local', profileId: 'local', profileName: 'Local',
+      revision: 1, activityAt: 1, runtimeHostId: 'local', profileId: 'local', profileName: 'Local',
       llmConnectionSlug: 'test', connectionLocked: false, model: 'test',
       sandboxMode: 'workspace-write' as const, profileKind: 'local' as const,
       approvalPolicy: { kind: 'on-request' as const },

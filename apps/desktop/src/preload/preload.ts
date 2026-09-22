@@ -1995,7 +1995,12 @@ const makaBridge = {
     },
     async get(sessionId: string) {
       const session = await runtimeHostSessionRef(sessionId);
-      return projectSessionSummary(session.scope, await invokeWhenReady('sessions:get', session.scope, session.sessionId));
+      const read = desktopSessionCatalogRefresher.beginRowRead(sessionId);
+      const summary = await invokeWhenReady('sessions:get', session.scope, session.sessionId) as DesktopSessionSummaryInput | null;
+      if (summary && summary.id !== session.sessionId) throw new Error('Session query identity changed');
+      const projected = summary && projectSessionSummary(session.scope, summary);
+      if (!read.commit(projected)) throw new Error('Session read was superseded');
+      return projected;
     },
     list(filter?: SessionListFilter): Promise<DesktopSessionSummary[]> {
       return listDesktopSessions(filter);

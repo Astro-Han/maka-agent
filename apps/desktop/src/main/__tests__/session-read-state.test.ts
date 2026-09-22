@@ -21,7 +21,7 @@ import { deferred } from '@maka/core/test-only/async-primitives';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { SessionSummary } from '@maka/core/session';
-import { createSessionListRefresher } from '../../renderer/session-read-state.js';
+import { createSessionListRefresher } from '../../renderer/application/contracts/session-catalog/session-list-refresher.js';
 
 describe('renderer session read state', () => {
   it('coalesces concurrent refreshes into one in-flight request and one trailing request', async () => {
@@ -31,6 +31,7 @@ describe('renderer session read state', () => {
     let listCalls = 0;
     let currentSessions: SessionSummary[] = [];
     const refresher = createSessionListRefresher({
+      observe: () => 0,
       listSessions: async () => {
         const result = listResults[listCalls];
         listCalls += 1;
@@ -65,6 +66,7 @@ describe('renderer session read state', () => {
     const errors: unknown[] = [];
     let currentSessions = original;
     const refresher = createSessionListRefresher({
+      observe: () => 0,
       listSessions: async () => {
         throw new Error('list failed');
       },
@@ -90,6 +92,7 @@ describe('renderer session read state', () => {
     let currentSessions: SessionSummary[] = [];
     const current = session({ id: 'current', lastMessageAt: 2 });
     const refresher = createSessionListRefresher({
+      observe: () => 0,
       listSessions: () => {
         listCalls += 1;
         return listCalls === 1 ? firstList.promise : Promise.resolve([current]);

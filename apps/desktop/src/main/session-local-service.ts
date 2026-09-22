@@ -19,6 +19,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
+import { isDeepStrictEqual } from 'node:util';
 import type { IpcMain } from 'electron';
 import { AttachmentIngestBlockedError, MAX_ATTACHMENT_COUNT } from '@maka/core/attachments';
 import type { CreateSessionRequestInput } from '@maka/core/runtime-inputs';
@@ -123,6 +124,29 @@ export class DesktopSessionLocalService {
     if (!target || this.#revoked.has(target.partition))
       throw new Error('The local intent belongs to a removed or different Host authority');
     return target;
+  }
+
+  locallyOwned(scope: DesktopTargetScope, sessionId: string): boolean {
+    try { return this.store.creation(this.target(scope).partition, sessionId) !== undefined; }
+    catch { return true; } // A retired authority cannot support a targeted Host read.
+  }
+
+  beginSessionRead(scope: DesktopTargetScope, sessionId: string): (summary: DesktopSessionSummaryInput | null) => boolean {
+    const { partition } = this.target(scope);
+    const previous = this.store.session(partition, sessionId);
+    const revision = this.store.revision;
+    return (summary) => {
+      if (this.target(scope).partition !== partition) return false;
+      if (this.store.creation(partition, sessionId)) return false;
+      if (!previous && this.store.revision !== revision) return false;
+      if (!isDeepStrictEqual(previous, this.store.session(partition, sessionId))) return false;
+      if (summary && previous && summary.revision < previous.revision) return false;
+      if (summary) {
+        if (summary.id !== sessionId) throw new Error('Session cache identity changed');
+        this.store.saveSession(partition, summary);
+      } else this.store.removeSession(partition, sessionId);
+      return true;
+    };
   }
 
   changed(scope?: DesktopTargetScope): void {

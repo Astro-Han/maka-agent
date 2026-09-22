@@ -1113,7 +1113,7 @@ export interface MakaBridge {
     ): () => void;
   };
   sessions: {
-    get(sessionId: string): Promise<DesktopSessionSummary>;
+    get(sessionId: string): Promise<DesktopSessionSummary | null>;
     list(filter?: SessionListFilter): Promise<DesktopSessionSummary[]>;
     listWithCoverage(): Promise<{
       sessions: DesktopSessionSummary[];

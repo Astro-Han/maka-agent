@@ -22,6 +22,8 @@ import { useHotkeys } from '@astryxdesign/core/hooks';
 import type { ConnectionEvent } from '@maka/core/connections';
 import type { SessionChangedEvent, SessionSummary } from '@maka/core/session';
 import type { SessionEvent } from '@maka/core/events';
+import type { SessionPatchResult } from './application/contracts/session-catalog/session-catalog-state.js';
+import { handleSessionChangedEvent } from './application/contracts/session-catalog/session-change-effects.js';
 import type { SessionEventStreamSnapshot } from '@maka/core/session-event-health';
 import type { ThemePalette, ThemePreference } from '@maka/core/settings';
 import type { UiLocale } from '@maka/core/ui-locale';
@@ -38,9 +40,8 @@ import type { NavigationState } from './nav-selection.js';
 import {
   createSessionEventStreamSubscription,
   evaluateSessionEventStreamSnapshot,
-  recordSessionEventStreamChange,
   recordSessionEventStreamEvent,
-} from './session-event-health';
+} from './application/contracts/session-catalog/session-event-health';
 import type {
   DesktopRuntimeHostProfileChangedEvent,
   WindowCommand,
@@ -160,6 +161,7 @@ export function useAppShellBootstrapSubscriptions(options: {
   refreshProjects: () => Promise<unknown>;
   refreshShellSettings: () => Promise<void>;
   refreshSessions: () => Promise<SessionSummary[]>;
+  refreshSession: (sessionId: string) => Promise<SessionPatchResult>;
   rendererMountedRef: RefBox<boolean>;
   retireSession: (sessionId: string) => void;
   retiredSessionIds(sessions: readonly { id: string }[]): string[];
@@ -194,42 +196,12 @@ export function useAppShellBootstrapSubscriptions(options: {
     else if (command.id === 'openSettings') options.openSettings();
     else if (command.id === 'openHelp') options.openHelp();
   });
-  const handleSessionChange = useEffectEvent(
-    (event: SessionChangedEvent) => {
-      const refreshedSessions = options.refreshSessions();
-      if (event.reason === 'archived' && event.sessionId) options.retireSession(event.sessionId);
-      if (event.reason === 'created' || event.reason === 'migrated') {
-        void options.refreshProjects();
-      }
-    if (event.sessionId) {
-      options.setSessionEventHealthBySession((current) => {
-        const previous = current[event.sessionId!];
-        if (!previous) return current;
-        return {
-          ...current,
-          [event.sessionId!]: recordSessionEventStreamChange(previous, event.ts),
-        };
-      });
-    }
-    if (
-      event.sessionId &&
-      (event.reason === 'turn-status-change' || event.reason === 'message-appended' || event.reason === 'deleted')
-    ) {
-      options.clearPendingTurnActionsForSession(event.sessionId);
-    }
-    const changedSessionId = event.sessionId;
-    if (event.reason === 'message-appended' && changedSessionId && changedSessionId === options.activeIdRef.current) {
-      void options.refreshMessages(changedSessionId);
-    }
-    if (event.reason === 'rebound') {
+  const handleSessionChange = useEffectEvent((event: SessionChangedEvent) => {
+    handleSessionChangedEvent(event, { ...options, notifyModelRebound(modelId) {
       const copy = getDesktopConversationCopy(options.uiLocale).actions;
-      options.toastApi.info(copy.modelReboundTitle, copy.modelReboundDescription(event.modelId));
-    }
-    void refreshedSessions.then((sessions) => {
-      options.retiredSessionIds(sessions).forEach(options.retireSession);
-    });
-    },
-  );
+      options.toastApi.info(copy.modelReboundTitle, copy.modelReboundDescription(modelId));
+    } });
+  });
   // Both shortcuts fire while the composer has focus — they always did, and
   // that is the point of a global new-task / settings key — so both opt out of
   // the hook's default "stay silent while typing" rule.

@@ -72,7 +72,11 @@ export function createDesktopWorkHubServices(
     },
     presentation: bridge.workHubPresentation,
     control: bridge.workHubControl,
-    getSession: (sessionId) => bridge.sessions.get(sessionId),
+    getSession: async (sessionId) => {
+      const session = await bridge.sessions.get(sessionId);
+      if (!session) throw new Error(`Session not found: ${sessionId}`);
+      return session;
+    },
     subscribeAvailability: (handler) => bridge.connections.subscribeEvents(() => handler()),
     listSessions: () => bridge.sessions.list(),
     subscribeSessions: (handler) => bridge.sessions.subscribeChanges(handler),

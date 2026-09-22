@@ -18,7 +18,7 @@
  */
 
 import { useMemo } from 'react';
-import { useExternalStoreSelector } from '../../../use-external-store-selector.js';
+import { useExternalStoreSelector } from '../../../application/contracts/session-catalog/use-external-store-selector.js';
 import { deriveBranchBanner, type BranchBanner } from '../model/branch-banner.js';
 import { sessionMatchesRail } from '../model/session-nav-filter.js';
 import { deriveSessionRail, type SessionRailProjection } from '../model/session-rail.js';

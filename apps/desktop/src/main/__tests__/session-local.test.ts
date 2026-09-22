@@ -223,7 +223,7 @@ test('normal application shutdown preserves intentions when the manager removes 
   assert.equal(store.stagedAttachments('authority', 'message-1').length, 1);
 });
 
-test('a catalog read begun before local creation cannot erase that Session or its intent', async (t) => {
+test('local intent and exact Host observations survive late catalog and row reads', async (t) => {
   const { store, beforeClose } = await database(t);
   const listed =
     deferred<
@@ -244,10 +244,23 @@ test('a catalog read begun before local creation cannot erase that Session or it
   service.catalog();
   store.saveSession('authority', { id: 'session-1', name: 'new' } as DesktopSessionSummaryInput);
   store.enqueue('authority', intent());
+  const oldPositive = service.beginSessionRead(target.scope, 'session-1');
+  const oldNull = service.beginSessionRead(target.scope, 'session-1');
+  const updated = { id: 'session-1', name: 'updated', revision: 2 } as DesktopSessionSummaryInput;
+  assert.equal(service.beginSessionRead(target.scope, 'session-1')(updated), true);
+  assert.equal(oldPositive({ ...updated, revision: 1 }), false);
+  assert.equal(oldNull(null), false);
   listed.resolve([]);
   await nextTurn();
   assert.equal(store.sessions('authority').length, 1);
   assert.equal(store.list('authority').length, 1);
+  assert.equal(store.session('authority', 'session-1')?.name, 'updated');
+  assert.equal(service.beginSessionRead(target.scope, 'session-1')(null), true);
+  assert.equal(service.catalog()[0]?.sessions.length, 0, 'cached catalogs must not resurrect a proven absence');
+  store.saveSession('authority', updated, { sessionId: 'session-1', workspace: { kind: 'host_path', path: '/workspace' } });
+  assert.equal(service.locallyOwned(target.scope, 'session-1'), true);
+  assert.equal(service.beginSessionRead(target.scope, 'session-1')(null), false);
+  assert.equal(store.sessions('authority').length, 1, 'Host absence does not own local creation intent');
 });
 
 test('an authorization failure quarantines the still-connected authority from cache and admission', async (t) => {

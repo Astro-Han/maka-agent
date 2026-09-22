@@ -219,6 +219,27 @@ test('rejects a delayed bootstrap seed after a Session is created', async () => 
   assert.deepEqual(current.sessions.map(({ id }) => id), ['created', 'existing']);
 });
 
+test('row responses cannot reverse a newer catalog observation or removal', async () => {
+  const original = ownerSession('one', 1);
+  let current = { sessions: [original], completeHostIds: ['owner-host'] };
+  const refresher = createRuntimeHostSessionCatalogRefresher({
+    listCatalog: async () => current,
+    currentCatalog: () => current,
+    commitCatalog: (next) => { current = next; },
+  });
+  const stalePositive = refresher.beginRowRead(original.id);
+  const staleNull = refresher.beginRowRead(original.id);
+  const latest = { ...original, activityAt: 2, revision: 2 };
+  refresher.admit(latest);
+  assert.equal(stalePositive.commit(original), false);
+  assert.equal(staleNull.commit(null), false);
+  assert.deepEqual(current.sessions, [latest]);
+  const readBeforeRemoval = refresher.beginRowRead(original.id);
+  assert.equal(refresher.beginRowRead(original.id).commit(null), true);
+  assert.equal(readBeforeRemoval.commit(latest), false);
+  assert.deepEqual(current.sessions, []);
+});
+
 test('collects every healthy Owner catalog and reports only complete Hosts', async () => {
   const catalog = await collectRuntimeHostSessionCatalogsWithCoverage([
     { hostId: 'older', sessions: Promise.resolve([session('older', 1)]) },

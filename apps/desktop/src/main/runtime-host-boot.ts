@@ -443,7 +443,8 @@ const attachmentApprovals = createAttachmentApprovalRegistry();
 const sessionLocalStore = new DesktopSessionLocalStore(join(userDataDir, 'session-experience.sqlite'));
 const localSessionChanged = (scope: DesktopTargetScope, sessionId?: string): void => {
   mainWindowController.send('session-local:changed', scope, { sessionId });
-  mainWindowController.send('sessions:changed', scope, { reason: 'updated', ts: Date.now(), ...(sessionId ? { sessionId } : {}) });
+  const hostOwnedId = sessionId && !sessionLocal.locallyOwned(scope, sessionId) ? sessionId : undefined;
+  mainWindowController.send('sessions:changed', scope, { reason: 'updated', ts: Date.now(), ...(hostOwnedId ? { sessionId: hostOwnedId } : {}) });
 };
 const sessionLocal = new DesktopSessionLocalService(sessionLocalStore, {
   targets: () => (runtimeHostManager?.entries() ?? []).flatMap((state) => {
@@ -1174,6 +1175,7 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
     },
     emitSessionsChanged,
     cacheTranscript: (scope, snapshot) => sessionLocal.cacheTranscript(scope, snapshot),
+    beginSessionRead: (scope, sessionId) => sessionLocal.beginSessionRead(scope, sessionId),
     ...(e2eFixture?.scenario === "chat-partial-history"
       ? { transcriptHistoryBytes: PARTIAL_HISTORY_TRANSCRIPT_BYTES }
       : {}),

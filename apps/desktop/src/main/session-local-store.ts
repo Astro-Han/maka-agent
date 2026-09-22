@@ -310,6 +310,11 @@ export class DesktopSessionLocalStore {
     return row?.creation ? (JSON.parse(String(row.creation)) as SessionCreateInput) : undefined;
   }
 
+  session(partition: string, sessionId: string): DesktopSessionSummaryInput | undefined {
+    const row = this.#db.prepare('SELECT summary FROM sessions WHERE partition = ? AND session_id = ?').get(partition, sessionId);
+    return row ? JSON.parse(String(row.summary)) as DesktopSessionSummaryInput : undefined;
+  }
+
   saveCatalog(partition: string, summaries: readonly DesktopSessionSummaryInput[]): void {
     this.#transaction(() => {
       const seen = new Set(summaries.map((summary) => summary.id));

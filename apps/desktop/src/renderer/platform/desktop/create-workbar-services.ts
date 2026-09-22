@@ -26,6 +26,7 @@ import {
 import type { WorkbarServices } from '../../features/workbar';
 import { readSettledMessagesFrom } from './session-message-settlement.js';
 import { expectSessionUpdate } from './create-session-settings-services.js';
+import { prepareDesktopExecution } from './prepare-execution.js';
 
 export type DesktopWorkbarBridge = Pick<
   MakaBridge,
@@ -73,12 +74,7 @@ export function createDesktopWorkbarServices(
   bridge: DesktopWorkbarBridge = window.maka,
   dependencies: DesktopWorkbarServiceDependencies = DEFAULT_DEPENDENCIES,
 ): WorkbarServices {
-  const prepareExecution = async (sessionId: string): Promise<boolean> => {
-    const session = await bridge.sessions.get(sessionId);
-    if (!session) return false;
-    return session.sandboxMode === 'danger-full-access' ||
-      await bridge.permissions.ensureSandbox({ sessionId });
-  };
+  const prepareExecution = (sessionId: string) => prepareDesktopExecution({ sessionId }, bridge);
   const submitSideChatFollowUp: WorkbarServices['sideChat']['submitFollowUp'] = async (
     sessionId,
     placement,

@@ -23,15 +23,16 @@ export interface SessionListRefresher<T extends SessionSummary = SessionSummary>
   refresh(): Promise<T[]>;
 }
 
-export interface SessionListRefresherOptions<T extends SessionSummary> {
+export interface SessionListRefresherOptions<T extends SessionSummary, Observation> {
   listSessions: () => Promise<T[]>;
   currentSessions: () => T[];
-  commitSessions: (sessions: T[]) => void;
+  observe: () => Observation;
+  commitSessions: (sessions: T[], observation: Observation) => void;
   onError: (error: unknown) => void;
 }
 
-export function createSessionListRefresher<T extends SessionSummary>(
-  options: SessionListRefresherOptions<T>,
+export function createSessionListRefresher<T extends SessionSummary, Observation>(
+  options: SessionListRefresherOptions<T, Observation>,
 ): SessionListRefresher<T> {
   let requestedGeneration = 0;
   let completedGeneration = 0;
@@ -42,11 +43,12 @@ export function createSessionListRefresher<T extends SessionSummary>(
       let result = options.currentSessions();
       while (completedGeneration < requestedGeneration) {
         const generation = requestedGeneration;
+        const observation = options.observe();
         try {
           const listed = await options.listSessions();
           if (generation === requestedGeneration) {
-            result = listed;
-            options.commitSessions(result);
+            options.commitSessions(listed, observation);
+            result = options.currentSessions();
           } else {
             result = options.currentSessions();
           }

@@ -18,43 +18,78 @@
  */
 
 import { useRef } from 'react';
-import type { DesktopSessionSummary } from '../preload/bridge-contract.js';
+import { valuesEqual } from '@maka/ui';
+import { compareDesktopSessionCatalogSummaries, type DesktopSessionSummary } from '../../../../shared/desktop-session-projection.js';
 import { createObservableState } from './observable-state.js';
 
-/**
- * The session catalog and the selection, as one external store (#4109).
- *
- * They were `useState` inside a hook AppShell calls, which made the shell the
- * carrier: every catalog commit and every selection change re-rendered the
- * whole tree, and anything that wanted to follow them — the Session rail above
- * all — had to be handed them down a prop chain. As a store they have readers
- * instead of a carrier, and each reader re-renders only for the reading it
- * selects. Same mechanism as `app-shell-session-ui-state.ts` (#1985); this is
- * the second store, not a second way of having stores.
- *
- * The list and its observation revision are one committed snapshot. A failed
- * refresh changes neither, so consumers can fence transient writes against
- * successful catalog observations without a parallel error flag.
- */
+/** Rows and selection publish atomically; failed reads do not prove deletion. */
 export interface SessionCatalogState {
   readonly sessions: readonly DesktopSessionSummary[];
   readonly revision: number;
+  readonly hasSnapshot: boolean;
   readonly activeSessionId: string | undefined;
 }
 
+export type SessionPatchResult =
+  | { kind: 'observed'; session: DesktopSessionSummary | null }
+  | { kind: 'superseded' };
+
 export function createSessionCatalogController() {
+  const patchedAt = new Map<string, number>();
+  let lastListObservation = 0;
   const state = createObservableState<SessionCatalogState>({
     sessions: [],
     revision: 0,
+    hasSnapshot: false,
     activeSessionId: undefined,
   });
 
   return {
     getState: state.getState,
     subscribe: state.subscribe,
-    commitSessions(next: readonly DesktopSessionSummary[]): void {
+    beginRowRead(sessionId: string) {
+      const before = state.getState();
+      const previous = before.sessions.find(({ id }) => id === sessionId);
+      return () => {
+        const current = state.getState();
+        const row = current.sessions.find(({ id }) => id === sessionId);
+        return valuesEqual(row, previous) && (!!row || before.revision === current.revision);
+      };
+    },
+    commitSessions(next: readonly DesktopSessionSummary[], observedAt = state.getState().revision): void {
+      if (observedAt < lastListObservation) return;
       const current = state.getState();
-      state.replaceState({ ...current, sessions: next, revision: current.revision + 1 });
+      const previous = new Map(current.sessions.map((session) => [session.id, session]));
+      const rows = new Map(next.map((session) => [session.id, session]));
+      for (const [id, revision] of patchedAt) {
+        if (revision > observedAt) {
+          const row = previous.get(id);
+          if (row) rows.set(id, row);
+          else rows.delete(id);
+        } else patchedAt.delete(id);
+      }
+      const sessions = [...rows.values()].map((row) => {
+        const old = previous.get(row.id);
+        return old && valuesEqual(old, row) ? old : row;
+      }).sort(compareDesktopSessionCatalogSummaries);
+      lastListObservation = observedAt;
+      state.replaceState({ ...current, hasSnapshot: true,
+        sessions: sessions.length === current.sessions.length && sessions.every((row, index) => row === current.sessions[index]) ? current.sessions : sessions,
+        revision: current.revision + 1,
+      });
+    },
+    commitPatch(sessionId: string, summary: DesktopSessionSummary | null): void {
+      if (summary && summary.id !== sessionId) throw new Error('Session patch identity changed');
+      const current = state.getState();
+      const revision = current.revision + 1;
+      patchedAt.set(sessionId, revision);
+      const old = current.sessions.find(({ id }) => id === sessionId);
+      const unchanged = summary ? old && valuesEqual(old, summary) : !old;
+      state.replaceState({ ...current, revision,
+        sessions: unchanged ? current.sessions : [
+          ...current.sessions.filter(({ id }) => id !== sessionId), ...(summary ? [summary] : []),
+        ].sort(compareDesktopSessionCatalogSummaries),
+      });
     },
     setActiveSessionId(next: string | undefined): void {
       const current = state.getState();
@@ -82,7 +117,7 @@ export const selectAuthoritativeSessionIds = (
   state: SessionCatalogState,
 ): ReadonlySet<string> | undefined =>
   // The initial empty catalog cannot prove that persisted Sessions were deleted.
-  state.revision > 0 ? new Set(state.sessions.map(({ id }) => id)) : undefined;
+  state.hasSnapshot ? new Set(state.sessions.map(({ id }) => id)) : undefined;
 
 /**
  * Owns the controller for the component's lifetime. Deliberately does NOT
