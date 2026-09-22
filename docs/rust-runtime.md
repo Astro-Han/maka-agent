@@ -395,6 +395,9 @@ npm native packages are convenience builds of the corresponding source archive,
 not a separate source release. Keep their source version and build provenance;
 the current source audit does not certify binary licensing.
 
+Source verification rejects SQLite database bytes, regardless of filename or inventory entry.
+Historical database fixtures ship as SQL and are reconstructed only during tests.
+
 ```sh
 cargo fmt --all --check
 cargo nextest run --locked --workspace -j 4

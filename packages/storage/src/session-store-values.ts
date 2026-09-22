@@ -117,7 +117,7 @@ export function buildSessionHeader(
     sandboxMode: input.sandboxMode,
     collaborationMode: input.collaborationMode ?? 'agent',
     orchestrationMode: input.orchestrationMode ?? 'default',
-    ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
+    ...(input.thinkingLevel != null ? { thinkingLevel: input.thinkingLevel } : {}),
     // Born on the ledger: a Session created here records its execution facts as
     // RuntimeEvents from its first turn, so there is no transcript to convert.
     // Only an imported transcript (staged at 0) and a Session written before

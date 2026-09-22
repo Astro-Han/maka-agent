@@ -308,6 +308,8 @@ Rust 许可证检查沿用 [OpenDAL 的 cargo-deny 做法](https://github.com/ap
 ASF 投票制品是源码归档，许可审阅针对实际随包源码，包括根 `LICENSE` 和 `NOTICE`
 记录的 Codex 补丁改编代码与 Deno telemetry 拷贝；lockfile 引用不等于打包代码。
 npm 原生包是对应源码归档的便利构建，不是另一份源码发布；须保留来源版本和构建溯源。
+源码验证拒绝 SQLite 数据库二进制，不因文件名或清单登记而放行。
+历史数据库样本以 SQL 分发，仅在测试时还原。
 当前源码审计不作二进制许可认证。
 
 ```sh

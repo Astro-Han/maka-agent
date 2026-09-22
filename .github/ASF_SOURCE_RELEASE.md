@@ -167,6 +167,10 @@ the vote email.
 
 ## Independent verification
 
+Inspect a fresh, unbuilt extraction before installation or tests; distinguish shipped files from generated output. A provenance inventory does not make a binary suitable for source distribution. Ship historical SQLite fixtures as SQL, preserving their schema and rows rather than regenerating them through current application APIs.
+
+Check bundled files against the paths attributed in root `LICENSE`, including dependency patches and adapted source. Verify any outstanding `DISCLAIMER-WIP` claims against current ASF records. Before a vote, download the staged artifacts and published `KEYS` again and verify their signatures and identity against the signed tag.
+
 Before casting a binding `+1`, every voter must download all signed source
 packages and the published `KEYS` over HTTPS onto their own hardware, validate
 ASF release-policy compliance and all cryptographic signatures, inspect the
@@ -220,6 +224,8 @@ same immutable candidate bytes. Apply the requirements above independently to
 this Incubator PMC vote.
 
 ## Publish after approval
+
+If a repair changes the archive, cancel the current vote, retain its RC directory and tag, and qualify a new RC from an explicit commit. Repeat verification and both votes for the new bytes; previous approvals apply only to the previous candidate. Keep responses and named vote results in the public vote thread.
 
 Only after both required votes pass, copy the exact approved files from the
 development distribution area to the appropriate Apache release distribution
