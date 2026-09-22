@@ -17,6 +17,7 @@
  * under the License.
  */
 mod instructions;
+pub mod plan;
 mod prompt;
 pub mod recall;
 pub mod todo;

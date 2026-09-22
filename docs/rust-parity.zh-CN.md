@@ -75,7 +75,7 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 
 | 领域 | 剩余功能 | 目标归属／必要边界 |
 | --- | --- | --- |
-| Plan | 查询、控制、启动，规划产物、审批及转入执行；目前非 Agent collaboration mode 会被拒绝。 | **插件 + Host。** 插件拥有流程与记录，Host 拥有审批证据、授权和 Turn 准入。使用公共 Behavior 注册，不为每种流程重建执行引擎。 |
+| Plan | 状态与持久回执层完成：修订／放弃、版本与重规划来源检查、冻结提交、进度／中断／恢复／取消、精确重试及固定水位历史分页。工具、Behavior、Remote／Desktop 和实际执行观察尚未接入，非 Agent collaboration mode 仍拒绝准入。 | **插件 + Host。** 插件通过公共存储拥有流程与记录；审批计划不授予沙箱权限，Host 保留授权和 Turn 准入。没有 Host 回执只表示待准入，不能标记正在执行。 |
 | Goal | 查询、arm、控制、续跑、终止、预算与恢复语义。 | **插件 + Host。** Goal 决定后续提交；Host 执行已准入的硬限制并记录用量。插件退休后不能继续提交。 |
 | Deep research | 研究流程、进度查询、结果与恢复。 | **插件。** 复用 Graph／Swarm、Web、有界模型调用及可靠提交，不新增通用编排引擎。 |
 | Daily review／recap | daily-review 查询／修改、定时复盘、`session.recap.generate`。 | **插件 + Host。** 选择、总结及输出由插件负责，复用 Scheduler 和授权历史／模型服务；规范 Session 元数据的提交仍归 Host。 |

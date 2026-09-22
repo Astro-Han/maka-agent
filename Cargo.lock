@@ -4329,12 +4329,16 @@ name = "maka-assistant"
 version = "0.2.0"
 dependencies = [
  "futures-util",
+ "maka-event-log",
  "maka-plugins",
  "maka-runtime",
  "maka-tool-catalog",
  "schemars",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-util",
  "unicode-normalization",
