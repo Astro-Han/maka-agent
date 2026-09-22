@@ -460,6 +460,9 @@ The plugin platform supports linked Rust packages, shared/dedicated-V8 JavaScrip
 scoped Host services, external executors, and Desktop Slots/Remote streams.
 Graph/Swarm and scheduling are built-in plugins. Graph implementation workers use
 Host-owned gix worktrees and publish immutable patches without automatic merging.
+`agent_list` returns ready-to-use `target` values for Graph work. Agent targets inherit
+the parent backend, presets select their configured model, and executor targets select
+a plugin backend without native tool-profile constraints.
 Per-Turn orchestration survives yield and resume without changing Session defaults;
 Swarm checkpoints carry status and final-result IDs, with paged history for retrieval.
 See the [plugin SDK](../packages/plugin-sdk/README.md) for contracts and limits.

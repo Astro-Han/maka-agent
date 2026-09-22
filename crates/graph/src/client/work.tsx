@@ -106,7 +106,9 @@ export function WorkDetails(props: {
                 ? detail.target.agentId
                 : detail.target.kind === 'preset'
                   ? detail.target.presetId
-                  : detail.target.operatorId}
+                  : detail.target.kind === 'executor'
+                    ? detail.target.executorId
+                    : detail.target.operatorId}
             </p>
             <p>{detail.instruction}</p>
             {detail.nextOffset !== null ? (

@@ -360,6 +360,8 @@ Recall 是会话历史检索，不属于排除的 Memory 子系统。原生部�
 插件平台支持静态链接 Rust 包、共享／独立 V8 的 JavaScript 包、作用域 Host 服务、外部 Executor，
 以及 Desktop Slot／Remote stream。Graph／Swarm 与定时任务是内置插件。
 Graph 实现类工作使用 Host 管理的 gix worktree，发布不可变补丁，不自动合并。
+`agent_list` 返回可直接用于 Graph 工作的 `target`：Agent 继承父级后端，Preset 选择配置的模型，
+Executor 选择插件后端，不能叠加原生工具 Profile 限制。
 单次 Turn 编排跨 yield 和 resume 保留，不改变 Session 默认值；Swarm checkpoint 提供状态和最终结果 ID，
 通过历史分页取回正文。接口与限制见[插件 SDK](../packages/plugin-sdk/README.zh-CN.md)。
 OS 沙箱暂缓。Memory 留待单独重做，不移植旧实现，也不纳入本次重写。内容脱敏不实现。

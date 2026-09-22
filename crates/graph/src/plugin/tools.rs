@@ -50,7 +50,7 @@ pub(super) fn register(staged: &mut Staged, manager: Arc<super::Manager>) -> Res
         ),
         (
             "agent_list",
-            "List available agents for new Graph work. Use exact returned IDs.",
+            "List agents, presets and executors for new Graph work. Copy an available entry's target verbatim into update_agent_graph work; do not infer IDs from display names. Agent targets inherit the parent's backend; presets choose their configured model; executor targets use the named plugin backend.",
             schemars::schema_for!(Empty).into(),
             ToolSemantics::Parallel,
         ),

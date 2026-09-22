@@ -85,7 +85,6 @@ mod tests {
             work_id: WorkId::new(),
             target: Target::Agent {
                 agent_id: "general".into(),
-                executor_id: None,
             },
             instruction: instruction.clone(),
             input_ids: (0..64)

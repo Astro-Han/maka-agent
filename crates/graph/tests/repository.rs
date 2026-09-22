@@ -100,7 +100,6 @@ fn update(graph_id: GraphId) -> Update {
                 work_id: WorkId::new(),
                 target: Target::Agent {
                     agent_id: "general".into(),
-                    executor_id: None,
                 },
                 instruction: "source\n".repeat(7000),
                 input_ids: vec![],

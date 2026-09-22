@@ -322,7 +322,7 @@ async fn scenario(implementation: bool) {
                 .await
                 .unwrap();
         } else {
-            presets(&mut peer, json!([{"id":"reader","name":"Review worker","description":"Read-only review",
+            presets(&mut peer, json!([{"id":"general","name":"Review worker","description":"Read-only review",
                 "profile":if implementation { "implementation" } else { "local_read" },"connectionSlug":model.connection_slug,"model":model.model,"enabled":true}])).await;
             let created = peer.rpc("session.create", json!({
                 "sessionId":"graph-root", "workspace":{"kind":"host_path","path":fixture.workspace},
@@ -388,9 +388,28 @@ async fn scenario(implementation: bool) {
                 .send(tool("list", "agent_list", json!({})))
                 .unwrap();
             let scheduling = next(&mut requests, "available preset catalog").await;
-            assert!(scheduling.body.to_string().contains("Review worker"));
+            let output = scheduling.body["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|message| message["role"] == "tool")
+                .unwrap();
+            let catalog: Value = serde_json::from_str(output["content"].as_str().unwrap()).unwrap();
+            let preset = &catalog["presets"][0];
+            assert_eq!(preset["name"], "Review worker");
+            assert_eq!(preset["availability"]["status"], "available");
+            // Display names are not selectors; an identical profile/preset ID is unambiguous.
+            assert_eq!(
+                catalog["agents"][0]["target"],
+                json!({"kind":"agent","agentId":"general"})
+            );
+            assert_eq!(
+                preset["target"],
+                json!({"kind":"preset","presetId":"general"})
+            );
             scheduling.reply.send(tool("schedule", "update_agent_graph", json!({
-                "operation":"add_work","work":[{"target":{"kind":"preset","presetId":"reader"},"instruction":instruction}]
+                "operation":"add_work","work":[{"target":preset["target"],"instruction":instruction}]
             }))).unwrap();
             let mut child = None;
             let mut yielded = false;

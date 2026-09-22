@@ -34,16 +34,14 @@ pub enum Target {
     Agent {
         #[schemars(length(min = 1, max = 256))]
         agent_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[schemars(length(min = 1, max = 256))]
-        executor_id: Option<String>,
     },
     Preset {
         #[schemars(length(min = 1, max = 256))]
         preset_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+    },
+    Executor {
         #[schemars(length(min = 1, max = 256))]
-        executor_id: Option<String>,
+        executor_id: String,
     },
     Operator {
         operator_id: OperatorId,
@@ -130,24 +128,9 @@ impl Update {
             }
             bounded_text(&work.instruction, 60_000)?;
             match &work.target {
-                Target::Agent {
-                    agent_id,
-                    executor_id,
-                } => {
-                    identity(agent_id)?;
-                    if let Some(id) = executor_id {
-                        identity(id)?;
-                    }
-                }
-                Target::Preset {
-                    preset_id,
-                    executor_id,
-                } => {
-                    identity(preset_id)?;
-                    if let Some(id) = executor_id {
-                        identity(id)?;
-                    }
-                }
+                Target::Agent { agent_id } => identity(agent_id)?,
+                Target::Preset { preset_id } => identity(preset_id)?,
+                Target::Executor { executor_id } => identity(executor_id)?,
                 Target::Operator { .. } => {}
             }
             if work.input_ids.len() + work.selected_result_inputs.len() > 64 {

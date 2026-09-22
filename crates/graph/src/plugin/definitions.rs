@@ -17,6 +17,7 @@
  * under the License.
  */
 
+use crate::schedule::Target;
 use crate::settings::{Preset as SubagentPreset, Profile as SubagentProfile};
 use maka_plugins::execution::{CreateChild, Target as ExecutionTarget};
 use maka_runtime::execution::{ModelBinding, SandboxMode};
@@ -49,7 +50,7 @@ enum Reason {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Agent {
-    agent_id: &'static str,
+    target: Target,
     description: &'static str,
     availability: Availability,
     tools: Option<BTreeSet<String>>,
@@ -57,18 +58,22 @@ struct Agent {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Preset {
-    preset_id: String,
+    target: Target,
     name: String,
     description: String,
     profile: SubagentProfile,
     availability: Availability,
 }
 #[derive(Serialize)]
+struct Executor {
+    target: Target,
+}
+#[derive(Serialize)]
 pub(super) struct Listing {
     agents: Vec<Agent>,
     presets: Vec<Preset>,
     /// Executor targets use general agents; native tool ceilings cannot constrain an external backend.
-    executors: Vec<String>,
+    executors: Vec<Executor>,
 }
 
 impl Definitions {
@@ -109,7 +114,7 @@ impl Definitions {
         ]
         .into_iter()
         .map(|(profile, description)| Agent {
-            agent_id: profile.id(),
+            target: Target::Agent { agent_id: profile.id().into() },
             description,
             availability: Self::availability(&capabilities, profile),
             tools: profile.tools(),
@@ -130,7 +135,9 @@ impl Definitions {
                         reason: Reason::ModelUnavailable,
                     }
                 },
-                preset_id: preset.id,
+                target: Target::Preset {
+                    preset_id: preset.id,
+                },
                 name: preset.name,
                 description: preset.description,
                 profile: preset.profile,
@@ -139,7 +146,11 @@ impl Definitions {
         let executors = capabilities
             .executors
             .into_iter()
-            .map(|id| id.as_str().to_owned())
+            .map(|id| Executor {
+                target: Target::Executor {
+                    executor_id: id.as_str().to_owned(),
+                },
+            })
             .collect();
         Ok(Listing {
             agents,
@@ -155,39 +166,33 @@ impl Definitions {
         operation_id: String,
         parent_session_id: String,
     ) -> Result<CreateChild, String> {
-        use crate::schedule::Target;
-        let (profile, name, selected, executor) = match target {
-            Target::Agent {
-                agent_id,
-                executor_id,
-            } => {
+        let capabilities = self
+            .commands
+            .capabilities(self.root.clone())
+            .await
+            .map_err(super::error)?;
+        let (profile, name, selected) = match target {
+            Target::Agent { agent_id } => {
                 let profile = match agent_id.as_str() {
                     "general" => Profile::General,
                     "local-read" => Profile::LocalRead,
                     "web-research" => Profile::WebResearch,
                     "implementation" => Profile::Implementation,
-                    _ => return Err("Agent definition does not exist".into()),
+                    _ => {
+                        return Err(format!(
+                            "Unknown agent {agent_id:?}. Call agent_list and use an available entry's target verbatim."
+                        ));
+                    }
                 };
-                (
-                    profile,
-                    format!("Graph {}", profile.id()),
-                    None,
-                    executor_id,
-                )
+                (profile, format!("Graph {}", profile.id()), None)
             }
-            Target::Preset {
-                preset_id,
-                executor_id,
-            } => {
-                if executor_id.is_some() {
-                    return Err("A model preset cannot also select an executor".into());
-                }
+            Target::Preset { preset_id } => {
                 let preferences = self.settings.read().await.map_err(super::error)?;
                 let preset = preferences
                     .presets
                     .iter()
                     .find(|preset| preset.id == *preset_id && preset.enabled)
-                    .ok_or("Agent preset is missing or disabled")?;
+                    .ok_or_else(|| format!("Preset {preset_id:?} is missing or disabled. Call agent_list and use an available entry's target verbatim."))?;
                 (
                     preset.profile.into(),
                     preset.name.clone(),
@@ -195,38 +200,33 @@ impl Definitions {
                         model: self.preset_model(preset).await?,
                         thinking_level: preset.thinking_level,
                     }),
-                    executor_id,
+                )
+            }
+            Target::Executor { executor_id } => {
+                let id = capabilities.executors.iter().find(|id| id.as_str() == executor_id)
+                    .ok_or_else(|| format!("Executor {executor_id:?} is unavailable. Call agent_list and use an available entry's target verbatim."))?;
+                (
+                    Profile::General,
+                    format!("Graph {}", id.as_str()),
+                    Some(ExecutionTarget::Executor {
+                        executor_id: id.clone(),
+                        settings: Default::default(),
+                    }),
                 )
             }
             Target::Operator { .. } => {
                 return Err("Expected the original operator definition".into());
             }
         };
-        let capabilities = self
-            .commands
-            .capabilities(self.root.clone())
-            .await
-            .map_err(super::error)?;
         if !matches!(
             Self::availability(&capabilities, profile),
             Availability::Available
         ) {
             return Err(format!(
-                "Agent {} is unavailable: required tools or workspace isolation are absent",
+                "Agent {} requires tools not currently available. Call agent_list and choose an available target",
                 profile.id()
             ));
         }
-        let selected = if let Some(executor) = executor {
-            if !matches!(profile, Profile::General) {
-                return Err("External executors cannot enforce native agent tool profiles".into());
-            }
-            Some(ExecutionTarget::Executor {
-                executor_id: executor.clone().try_into().map_err(super::error)?,
-                settings: Default::default(),
-            })
-        } else {
-            selected
-        };
         Ok(CreateChild {
             workspace: matches!(profile, Profile::Implementation)
                 .then_some(maka_plugins::execution::ChildWorkspace::IsolatedGit),
@@ -253,6 +253,6 @@ impl Definitions {
             .await
             .map_err(super::error)?
             .map(|choice| choice.model)
-            .ok_or_else(|| "Preset model is missing, disabled or retired".into())
+            .ok_or_else(|| "Preset model is missing, disabled or retired. Call agent_list and choose an available target, or repair the preset's model in settings.".into())
     }
 }

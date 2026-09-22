@@ -83,8 +83,9 @@ export type Work = {
   } | null;
 };
 export type Target =
-  | { kind: 'agent'; agentId: string; executorId?: string }
-  | { kind: 'preset'; presetId: string; executorId?: string }
+  | { kind: 'agent'; agentId: string }
+  | { kind: 'preset'; presetId: string }
+  | { kind: 'executor'; executorId: string }
   | { kind: 'operator'; operatorId: string };
 export type Detail = {
   workId: string;
