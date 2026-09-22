@@ -25,7 +25,7 @@ use maka_plugins::{
     call::Scope,
     session::{
         catalog::Summary,
-        history::{Chunk, Queries, Role},
+        history::{Chunk, History, Role},
     },
 };
 use maka_runtime::tools::ToolError;
@@ -43,6 +43,7 @@ pub(super) struct Source {
 pub(super) struct Hit {
     pub session: usize,
     pub position: usize,
+    pub sequence: u64,
     pub message_id: String,
     pub turn_id: String,
     pub timestamp: u64,
@@ -59,7 +60,7 @@ pub(super) struct Scan {
     pub gaps: Vec<String>,
 }
 pub(super) async fn search(
-    history: Arc<dyn Queries>,
+    history: Arc<dyn History>,
     call: &Scope,
     query: &Query,
     permit: Arc<OwnedSemaphorePermit>,
@@ -185,6 +186,7 @@ fn inspect(session: usize, position: usize, message: Chunk, terms: &[String]) ->
     Some(Hit {
         session,
         position,
+        sequence: message.sequence,
         message_id: message.message_id,
         turn_id: message.turn_id,
         timestamp: message.timestamp,
@@ -273,6 +275,7 @@ mod tests {
                     offset: 0,
                     total_bytes: text.len() as u64,
                     text: text.into(),
+                    attachments: vec![],
                 },
                 &[term.into()],
             )

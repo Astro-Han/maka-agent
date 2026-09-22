@@ -24,7 +24,7 @@ use super::{
 };
 use maka_plugins::{
     call::Scope,
-    session::history::{Chunk, Queries},
+    session::history::{Chunk, History},
 };
 use maka_runtime::tools::ToolError;
 use std::sync::Arc;
@@ -32,7 +32,7 @@ use tokio::sync::OwnedSemaphorePermit;
 use unicode_normalization::UnicodeNormalization;
 
 pub(super) async fn build(
-    history: Arc<dyn Queries>,
+    history: Arc<dyn History>,
     call: &Scope,
     sources: &[Source],
     hits: &[Hit],
@@ -46,6 +46,7 @@ pub(super) async fn build(
             session_id: sources[hit.session].summary.session.session_id.clone(),
             session_title: sources[hit.session].summary.session.name.clone(),
             anchor_message_id: hit.message_id.clone(),
+            anchor_sequence: hit.sequence,
             turn_id: hit.turn_id.clone(),
             messages: Vec::new(),
             matched_terms: terms
@@ -127,7 +128,13 @@ pub(super) async fn build(
         let mut budget = 12 * 1024;
         let mut keep = std::collections::BTreeSet::new();
         for index in order {
-            let size = passage.messages[index].text.len() + 256;
+            let size = passage.messages[index].text.len()
+                + 256
+                + passage.messages[index]
+                    .attachments
+                    .iter()
+                    .map(|a| a.text_bytes() + 128)
+                    .sum::<usize>();
             if size <= budget {
                 keep.insert(index);
                 budget -= size;
@@ -164,5 +171,6 @@ fn excerpt(message: &Chunk, text: &str, anchor: bool, requested: usize) -> Passa
         is_anchor: anchor,
         offset,
         next_offset: (end < text.len()).then_some(end),
+        attachments: message.attachments.clone(),
     }
 }

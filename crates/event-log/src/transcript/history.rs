@@ -71,7 +71,9 @@ impl EventLog {
                         json_extract(payload, '$.ts') AS timestamp,
                         json_extract(payload, '$.type') AS role,
                         CAST(COALESCE(CASE json_extract(payload, '$.type')
-                            WHEN 'user' THEN COALESCE(json_extract(payload, '$.displayText'), json_extract(payload, '$.text'))
+                            WHEN 'user' THEN COALESCE(json_extract(payload, '$.displayText'), json_extract(payload, '$.text'), '')
+                                || COALESCE((SELECT char(10) || group_concat(json_extract(value, '$.name'), char(10))
+                                    FROM json_each(payload, '$.attachments')), '')
                             WHEN 'assistant' THEN json_extract(payload, '$.text')
                             WHEN 'tool_call' THEN COALESCE(json_extract(payload, '$.intent'), json_extract(payload, '$.args.intent'), '')
                             WHEN 'tool_result' THEN CASE json_extract(payload, '$.content.kind')
@@ -89,7 +91,9 @@ impl EventLog {
                 "SELECT source.sequence, source.message_id, source.turn_id,
                     cached.sequence IS NOT NULL AS cached, timestamp, role,
                     COALESCE(length(body), 0) AS total,
-                    substr(body, CASE WHEN sequence = ?2 THEN ?5 + 1 ELSE 1 END, ?6) AS fragment
+                    substr(body, CASE WHEN sequence = ?2 THEN ?5 + 1 ELSE 1 END, ?6) AS fragment,
+                    CASE WHEN role = 'user' AND (sequence != ?2 OR ?5 = 0)
+                        THEN json_extract(source.payload, '$.attachments') END AS attachments
                 FROM transcript_rows source LEFT JOIN transcript_text cached USING (sequence)
                 WHERE source.session_id = ?1 AND source.sequence >= ?2 AND source.sequence <= ?3
                 ORDER BY source.sequence LIMIT ?4"
@@ -130,6 +134,8 @@ impl EventLog {
                     turn_id: row.try_get("turn_id")?,
                     timestamp: sequence_number(row.try_get("timestamp")?)?,
                     role, sequence, offset, total_bytes, text,
+                    attachments: row.try_get::<Option<String>, _>("attachments")?
+                        .map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default(),
                 });
                 if end < total_bytes {
                     next = Some(Cursor { sequence, offset: end });

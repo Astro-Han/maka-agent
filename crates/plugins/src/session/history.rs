@@ -19,7 +19,28 @@
 
 use crate::{call::Scope, execution::CommandError};
 use futures_util::future::BoxFuture;
+use maka_runtime::attachment::AttachmentRef;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+/// Copy an uploaded historical material into an independently authorized Session.
+/// Identifiers locate content; the history call and destination capability grant access.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CopyMaterial {
+    pub session_id: String,
+    pub artifact_id: String,
+    pub target_session_id: String,
+}
+impl CopyMaterial {
+    pub fn validate(&self) -> Result<(), CommandError> {
+        for id in [&self.session_id, &self.artifact_id, &self.target_session_id] {
+            crate::name(id)
+                .map_err(|_| CommandError::Invalid("invalid history material".into()))?;
+        }
+        Ok(())
+    }
+}
 
 /// Byte offset in one message's UTF-8 text, not a bearer capability.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -74,6 +95,8 @@ pub struct Chunk {
     pub offset: u64,
     pub total_bytes: u64,
     pub text: String,
+    /// User attachment descriptors, present only on the first chunk of a message.
+    pub attachments: Vec<AttachmentRef>,
 }
 
 /// Index preparation is bounded too. Repeat with the returned fence and the
@@ -98,11 +121,17 @@ pub enum Page {
 /// Admitted Agent tools can recall this trusted Host profile's history.
 /// Remote/background calls retain their actual principal's ReadHistory scope.
 /// Every page rechecks current access and Session existence, including old fences.
-pub trait Queries: Send + Sync {
+pub trait History: Send + Sync {
     fn list(
         &self,
         call: Scope,
         input: super::catalog::List,
     ) -> BoxFuture<'_, Result<super::catalog::Page, CommandError>>;
     fn read(&self, call: Scope, input: Read) -> BoxFuture<'_, Result<Page, CommandError>>;
+    fn copy_material(
+        &self,
+        call: Scope,
+        target: Arc<dyn crate::execution::Commands>,
+        input: CopyMaterial,
+    ) -> BoxFuture<'_, Result<AttachmentRef, CommandError>>;
 }

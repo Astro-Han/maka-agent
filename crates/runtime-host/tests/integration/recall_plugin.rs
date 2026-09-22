@@ -25,6 +25,7 @@ use super::{
         peer::Peer,
     },
 };
+use base64::{Engine, engine::general_purpose::STANDARD};
 use maka_plugins::{
     composition::Scope,
     execution::{Progress, Submit},
@@ -53,6 +54,15 @@ async fn scenario() {
     let config = maka_config::ConfigurationStore::for_root(Arc::new(fixture.owner()))
         .await
         .unwrap();
+    let updated = config.update_connection(serde_json::from_value(json!({
+        "expected":{"connectionId":model.connection_id,"revision":1},
+        "changes":{"name":"Recall fixture","baseUrl":provider.base_url,"enabled":true,
+            "enabledModelIds":[model.model],"modelOverrides":{"fixture-model":{"vision":true}}}
+    })).unwrap()).await.unwrap();
+    assert!(matches!(
+        updated,
+        maka_runtime::configuration::CatalogMutationResult::Committed { .. }
+    ));
     config
         .set_chat_defaults(
             0,
@@ -73,7 +83,7 @@ async fn scenario() {
         reply(
             requests.recv().await.unwrap(),
             "tool_search",
-            json!({"query":"Recall RecallMore"}),
+            json!({"query":"Recall RecallMore RecallMaterial"}),
         );
         reply(
             requests.recv().await.unwrap(),
@@ -109,7 +119,76 @@ async fn scenario() {
         let text = latest_tool(&request.body);
         assert!(text.contains("Trailing details."), "{text}");
         assert!(!text.contains("Unrelated background"), "{text}");
-        finish(request, "Recovered the archived exchange");
+        reply(request, "Recall", json!({"terms":["historical-upload"]}));
+        let request = requests.recv().await.unwrap();
+        let text = latest_tool(&request.body);
+        let artifact_id = maka_runtime::artifact::upload_artifact_id("source", "text");
+        assert!(
+            text.contains("historical-upload.txt") && text.contains(&artifact_id),
+            "{text}"
+        );
+        reply(
+            request,
+            "RecallMaterial",
+            json!({"session_id":"source","artifact_id":artifact_id,"offset":1,"limit":1}),
+        );
+        let request = requests.recv().await.unwrap();
+        let page: Value = serde_json::from_str(&latest_tool(&request.body)).unwrap();
+        assert_eq!(page["offset"], 1);
+        assert_eq!(page["partialLine"], true);
+        assert!(
+            page["content"]
+                .as_str()
+                .unwrap()
+                .starts_with("Archived attachment evidence")
+        );
+        assert!(page["content"].as_str().unwrap().len() < 7500);
+        assert!(
+            page["next"]["path"]
+                .as_str()
+                .unwrap()
+                .contains("maka://read/")
+        );
+        reply(request, "Read", page["next"].clone());
+        let request = requests.recv().await.unwrap();
+        assert!(latest_tool(&request.body).contains("evidence-tail"));
+        assert!(!latest_tool(&request.body).contains("last line"));
+        // Retrying a material copy reuses its immutable destination.
+        reply(
+            request,
+            "RecallMaterial",
+            json!({"session_id":"source","artifact_id":artifact_id,"offset":1,"limit":1}),
+        );
+        let request = requests.recv().await.unwrap();
+        assert!(latest_tool(&request.body).contains("Archived attachment evidence"));
+        reply(
+            request,
+            "RecallMaterial",
+            json!({"session_id":"source","artifact_id":maka_runtime::artifact::upload_artifact_id("source", "image")}),
+        );
+        let request = requests.recv().await.unwrap();
+        assert!(
+            request.body["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|message| {
+                    message["role"] == "user"
+                        && message["content"].as_array().is_some_and(|parts| {
+                            parts.iter().any(|part| part["type"] == "image_url")
+                        })
+                }),
+            "recalled image was not delivered to the model: {}",
+            latest_tool(&request.body)
+        );
+        reply(
+            request,
+            "RecallMaterial",
+            json!({"session_id":"source","artifact_id":maka_runtime::artifact::upload_artifact_id("source", "binary")}),
+        );
+        let request = requests.recv().await.unwrap();
+        assert!(latest_tool(&request.body).contains("binary attachment"));
+        finish(request, "Recovered the archived exchange and materials");
     });
     let host = Host::open_with_options(
         fixture.owner(),
@@ -141,7 +220,44 @@ async fn scenario() {
             "sandboxMode":"danger-full-access","modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
         })).await);
     }
-    run(&host, "source", "Remember the exchange").await;
+    let text = upload(
+        &mut peer,
+        "text",
+        "historical-upload.txt",
+        "text/plain",
+        format!(
+            "first line\nArchived attachment evidence {} evidence-tail\nlast line",
+            "x".repeat(11000)
+        )
+        .as_bytes(),
+    )
+    .await;
+    let png = STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=").unwrap();
+    let image = upload(
+        &mut peer,
+        "image",
+        "historical-upload.png",
+        "image/png",
+        &png,
+    )
+    .await;
+    let binary = upload(
+        &mut peer,
+        "binary",
+        "archive.zip",
+        "application/zip",
+        b"PK\0\0binary",
+    )
+    .await;
+    run(
+        &host,
+        "source",
+        serde_json::from_value(
+            json!({"text":"Remember the exchange","attachments":[text,image,binary]}),
+        )
+        .unwrap(),
+    )
+    .await;
     success(
         peer.rpc(
             "session.lifecycle.set",
@@ -152,16 +268,54 @@ async fn scenario() {
     run(
         &host,
         "search",
-        "Find CAFÉ late-needle from earlier history",
+        "Find CAFÉ late-needle from earlier history".into(),
     )
     .await;
     replies.await.unwrap();
-    assert_eq!(provider.requests.lock().unwrap().len(), 5);
+    assert_eq!(provider.requests.lock().unwrap().len(), 11);
+    for upload in ["text", "image", "binary"] {
+        success(peer.rpc("artifact.delete", json!({"sessionId":"source","artifactId":maka_runtime::artifact::upload_artifact_id("source", upload)})).await);
+    }
     peer.close().await;
     drop(cleanup);
     server.await.unwrap().unwrap();
+    let log = fixture.log().await;
+    let copies = log.list_artifacts("search", 0, 128).await.unwrap().records;
+    let copies: Vec<_> = copies
+        .iter()
+        .filter(|artifact| artifact.source == maka_runtime::artifact::ArtifactSource::UserUpload)
+        .collect();
+    assert_eq!(
+        copies.len(),
+        3,
+        "material retry must not create another copy"
+    );
+    for artifact in copies {
+        let content = log
+            .read_artifact_chunk("search", &artifact.id, 0, 1024)
+            .await
+            .unwrap()
+            .unwrap()
+            .bytes;
+        assert!(
+            !content.is_empty(),
+            "source deletion must not break the copied evidence"
+        );
+        if artifact.name.ends_with(".txt") {
+            assert!(
+                String::from_utf8(content)
+                    .unwrap()
+                    .contains("Archived attachment evidence")
+            );
+        } else if artifact.name.ends_with(".png") {
+            assert_eq!(content, png);
+        } else {
+            assert_eq!(content, b"PK\0\0binary");
+        }
+    }
+    log.close().await.unwrap();
 }
-async fn run(host: &Arc<Host>, session: &str, content: &str) {
+async fn run(host: &Arc<Host>, session: &str, content: maka_runtime::input::MessageInput) {
     let driver = Fiber::new("example.driver", session, Scope::Profile).unwrap();
     driver.begin_loading().unwrap();
     let commands = host
@@ -175,7 +329,7 @@ async fn run(host: &Arc<Host>, session: &str, content: &str) {
             orchestration_mode: None,
             operation_id: session.into(),
             session_id: session.into(),
-            content: content.into(),
+            content,
         })
         .await
         .unwrap();
@@ -191,6 +345,18 @@ async fn run(host: &Arc<Host>, session: &str, content: &str) {
         .shutdown(tokio::time::Instant::now() + Duration::from_secs(2))
         .await
         .unwrap();
+}
+async fn upload(peer: &mut Peer, id: &str, name: &str, mime: &str, bytes: &[u8]) -> Value {
+    success(peer.rpc("artifact.ingest", json!({"kind":"begin","sessionId":"source","uploadId":id,"name":name,"mimeType":mime,"totalBytes":bytes.len(),"contentSha256":maka_runtime::artifact::content_digest(bytes)})).await);
+    success(peer.rpc("artifact.ingest", json!({"kind":"chunk","sessionId":"source","uploadId":id,"offset":0,"chunkBase64":STANDARD.encode(bytes)})).await);
+    success(
+        peer.rpc(
+            "artifact.ingest",
+            json!({"kind":"commit","sessionId":"source","uploadId":id}),
+        )
+        .await,
+    )["attachment"]
+        .clone()
 }
 fn latest_tool(body: &Value) -> String {
     body["messages"]

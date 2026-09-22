@@ -22,10 +22,15 @@ use super::*;
 enum Input {
     Search(Query),
     More(More),
+    Material(material::Input),
 }
 impl ToolPreparer for Recall {
     fn names(&self) -> Vec<String> {
-        vec!["Recall".into(), "RecallMore".into()]
+        vec![
+            "Recall".into(),
+            "RecallMore".into(),
+            "RecallMaterial".into(),
+        ]
     }
     fn prepare(
         &self,
@@ -50,6 +55,12 @@ impl ToolPreparer for Recall {
                     more.validate().map_err(invalid)?;
                     Input::More(more)
                 }
+                "RecallMaterial" => {
+                    let material: material::Input =
+                        serde_json::from_value(input).map_err(invalid)?;
+                    material.validate().map_err(invalid)?;
+                    Input::Material(material)
+                }
                 _ => return Err(ToolRejection::Unavailable),
             };
             Ok(PreparedEffect::new(move |_| {
@@ -57,12 +68,16 @@ impl ToolPreparer for Recall {
                     let call = maka_plugins::call::current()
                         .ok_or_else(|| failed("Recall requires an admitted call"))?;
                     recall.check_privacy().await?;
+                    if let Input::Material(input) = input {
+                        return recall.material(call, input).await;
+                    }
                     let permit = tokio::select! {
                         biased;
                         _ = call.cancellation.cancelled() => return Err(failed("Recall cancelled")),
                         permit = recall.workers.clone().acquire_owned() => Arc::new(permit.map_err(failed)?),
                     };
                     let mut result = match input {
+                        Input::Material(_) => unreachable!("material handled before search"),
                         Input::Search(query) => {
                             let scan =
                                 rank::search(recall.history.clone(), &call, &query, permit.clone())
@@ -117,6 +132,7 @@ impl ToolPreparer for Recall {
                                     break rank::Hit {
                                         session: 0,
                                         position,
+                                        sequence: message.sequence,
                                         message_id: message.message_id,
                                         turn_id: message.turn_id,
                                         timestamp: message.timestamp,

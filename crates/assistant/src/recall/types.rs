@@ -113,12 +113,14 @@ pub(super) struct PassageMessage {
     pub is_anchor: bool,
     pub offset: usize,
     pub next_offset: Option<usize>,
+    pub attachments: Vec<maka_runtime::attachment::AttachmentRef>,
 }
 #[derive(Serialize)]
 pub(super) struct Passage {
     pub session_id: String,
     pub session_title: String,
     pub anchor_message_id: String,
+    pub anchor_sequence: u64,
     pub turn_id: String,
     pub messages: Vec<PassageMessage>,
     pub matched_terms: Vec<String>,
@@ -159,6 +161,22 @@ impl ResultSet {
                     message.next_offset,
                     message.text
                 ));
+                for attachment in &message.attachments {
+                    if let maka_runtime::attachment::StorageRef::SessionFile {
+                        session_id,
+                        relative_path,
+                    } = &attachment.storage_ref
+                    {
+                        text.push_str(&format!(
+                            "Attachment: {} ({}, {} bytes); session_id: {}; artifact_id: {}\n",
+                            attachment.name,
+                            attachment.mime_type,
+                            attachment.bytes,
+                            session_id,
+                            relative_path
+                        ));
+                    }
+                }
             }
         }
         text

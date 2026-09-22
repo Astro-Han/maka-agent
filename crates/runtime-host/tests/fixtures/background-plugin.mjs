@@ -51,7 +51,7 @@ export default async function (ctx) {
         throw error;
       });
   });
-  await ctx.remote.method('history', async (_input, caller) =>
+  await ctx.remote.method('history', async (request, caller) =>
     caller.views.authorize(
       {
         operationId: '12d11b66-69c2-42f9-a7ab-cc023092215f',
@@ -71,9 +71,41 @@ export default async function (ctx) {
           input.through = page.through;
           if (page.kind === 'preparing') continue;
           text += page.chunks.map((chunk) => chunk.text).join('\n');
-          if (!page.next) return text;
+          if (!page.next) break;
           input.cursor = page.next;
         }
+        const intent = parseIntent(request);
+        const material = await ctx.withAuthorization(intent.grant, async (target) => {
+          const commands = await target.executions.open();
+          try {
+            const input = {
+              sessionId: 'background-session',
+              artifactId: intent.operation,
+              targetSessionId: 'background-session',
+            };
+            // The execution grant alone cannot manufacture history authority.
+            try {
+              await target.history.copyMaterial(commands, input);
+              throw new Error('execution consent became history authority');
+            } catch (error) {
+              if (error.code !== 'revoked') throw error;
+            }
+            const material = await call.history.copyMaterial(commands, input);
+            try {
+              await call.history.copyMaterial(commands, {
+                ...input,
+                targetSessionId: 'not-authorized',
+              });
+              throw new Error('history access became arbitrary destination authority');
+            } catch (error) {
+              if (error.code !== 'revoked') throw error;
+            }
+            return material;
+          } finally {
+            await commands.close();
+          }
+        });
+        return { text, material: { ...material, ref: { ...material.ref } } };
       },
     ),
   );

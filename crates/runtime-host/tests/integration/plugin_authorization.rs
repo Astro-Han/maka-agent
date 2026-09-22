@@ -106,6 +106,7 @@ async fn scenario() {
     let mut root_grant = Value::Null;
     let mut root_result = Value::Null;
     let mut network_grant = Value::Null;
+    let mut material_copy = Value::Null;
     for reopened in [false, true] {
         let host = Host::open(fixture.owner()).await.unwrap();
         #[cfg(unix)]
@@ -152,6 +153,9 @@ async fn scenario() {
             .clone();
         if !reopened {
             success(peer.rpc("session.create", json!({"sessionId":"background-session", "workspace":{"kind":"host_path","path":fixture.workspace}, "executorId":"example.background","sandboxMode":"danger-full-access"})).await);
+            success(peer.rpc("artifact.ingest", json!({"kind":"begin","sessionId":"background-session","uploadId":"history-material","name":"evidence.txt","mimeType":"text/plain","totalBytes":1,"contentSha256":maka_runtime::artifact::content_digest(b"x")})).await);
+            success(peer.rpc("artifact.ingest", json!({"kind":"chunk","sessionId":"background-session","uploadId":"history-material","offset":0,"chunkBase64":"eA=="})).await);
+            success(peer.rpc("artifact.ingest", json!({"kind":"commit","sessionId":"background-session","uploadId":"history-material"})).await);
         }
         let mut publication = super::plugin_clients::publication("desktop", "inspect");
         let mut scoped = publication.clone();
@@ -291,11 +295,23 @@ async fn scenario() {
             }),
         )
         .await;
-        let history = remote(&mut peer, &client, &document, "history", Value::Null).await;
+        let history = remote(&mut peer, &client, &document, "history", json!({"grant":grant["id"],"operation":maka_runtime::artifact::upload_artifact_id("background-session", "history-material")})).await;
         assert!(
-            history.as_str().unwrap().contains("Run authorized work"),
+            history["text"]
+                .as_str()
+                .unwrap()
+                .contains("Run authorized work"),
             "{history}"
         );
+        assert_eq!(
+            history["material"]["ref"]["sessionId"],
+            "background-session"
+        );
+        if reopened {
+            assert_eq!(history["material"], material_copy);
+        } else {
+            material_copy = history["material"].clone();
+        }
         let managed = success(
             peer.rpc(
                 "session.catalog.query",

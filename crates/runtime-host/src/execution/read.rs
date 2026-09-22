@@ -228,7 +228,11 @@ async fn read_attachment(
             if chunk.total_bytes > MAX_TEXT_BYTES as u64 {
                 return Err(too_large());
             }
-            let text = String::from_utf8_lossy(&chunk.bytes).into_owned();
+            let text = String::from_utf8(chunk.bytes)
+                .map_err(|_| failed("Read cannot decode this binary attachment as UTF-8 text"))?;
+            if text.contains('\0') {
+                return Err(failed("Read cannot decode this binary attachment as text"));
+            }
             let projection = read_projection(request.page(&text));
             Ok(ToolSuccess::projected(ToolOutput::Text(text), projection))
         }

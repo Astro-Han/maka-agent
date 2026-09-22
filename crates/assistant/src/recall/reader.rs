@@ -21,14 +21,14 @@ use maka_plugins::{
     call::Scope,
     session::{
         catalog,
-        history::{Chunk, Page, Queries, Read},
+        history::{Chunk, History, Page, Read},
     },
 };
 use maka_runtime::tools::ToolError;
 use std::{collections::VecDeque, sync::Arc};
 
 pub(super) struct Reader {
-    history: Arc<dyn Queries>,
+    history: Arc<dyn History>,
     call: Scope,
     input: Read,
     chunks: VecDeque<Chunk>,
@@ -37,7 +37,7 @@ pub(super) struct Reader {
 }
 impl Reader {
     pub fn new(
-        history: Arc<dyn Queries>,
+        history: Arc<dyn History>,
         call: Scope,
         session: String,
         through: Option<u64>,
@@ -123,7 +123,7 @@ impl Reader {
 }
 
 pub(super) async fn sessions(
-    history: &dyn Queries,
+    history: &dyn History,
     call: &Scope,
     selected: Option<&str>,
 ) -> Result<(Vec<catalog::Summary>, bool), ToolError> {

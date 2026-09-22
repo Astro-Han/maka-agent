@@ -45,6 +45,8 @@ export interface HistoryChunk extends HistoryCursor {
   readonly role: 'user' | 'assistant' | 'tool_call' | 'tool_result';
   readonly totalBytes: number;
   readonly text: string;
+  /** User attachment descriptors, only in the first chunk of each message. */
+  readonly attachments: readonly import('./execution.js').Attachment[];
 }
 export type HistoryPage =
   | { readonly kind: 'preparing'; readonly through: number }
@@ -55,6 +57,17 @@ export type HistoryPage =
       readonly next: HistoryCursor | null;
     };
 export interface History {
+  /** Source history access and destination execution authority are checked independently.
+   * Copies an immutable user upload; retrying returns the same destination.
+   */
+  copyMaterial(
+    target: import('./execution.js').Executions,
+    input: {
+      sessionId: string;
+      artifactId: string;
+      targetSessionId: string;
+    },
+  ): Promise<import('./execution.js').Attachment>;
   list(input?: SessionCatalogInput): Promise<SessionCatalogPage>;
   /** Keep through fixed across pages. Preparing repeats the same cursor.
    * Chunks contain exact UTF-8 text; next=null alone means the fence is exhausted.

@@ -55,7 +55,7 @@ struct State {
     credentials: Arc<dyn maka_plugins::credentials::Credentials>,
     commands: Arc<dyn Access>,
     sessions: Arc<dyn maka_plugins::session::catalog::Queries>,
-    history: Arc<dyn maka_plugins::session::history::Queries>,
+    history: Arc<dyn maka_plugins::session::history::History>,
     execution_handles: Mutex<BTreeMap<String, Arc<dyn maka_plugins::execution::Commands>>>,
     authorizations: Arc<dyn maka_plugins::authorization::Access>,
     authorized_calls:
@@ -266,6 +266,21 @@ impl State {
             Request::HistoryRead(input) => {
                 let call = self.calls.get(&input.authority)?;
                 encode(self.history.read(call, input.input).await?)
+            }
+            Request::HistoryCopy(input) => {
+                let call = self.calls.get(&input.authority)?;
+                let target = self
+                    .execution_handles
+                    .lock()
+                    .unwrap()
+                    .get(&input.target_handle)
+                    .cloned()
+                    .ok_or_else(|| Error::invalid("execution capability is closed"))?;
+                encode(
+                    self.history
+                        .copy_material(call, target, input.input)
+                        .await?,
+                )
             }
             Request::ResolveModel(input) => encode(self.models.resolve(input).await?),
             Request::Revision(input) => {

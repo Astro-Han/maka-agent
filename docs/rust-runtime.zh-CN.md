@@ -230,15 +230,20 @@ WebFetch 通过获准的 Host HTTP 抓取，不启动浏览器或执行网页 Ja
 
 ## 会话回忆
 
-`maka.recall` 通过公共历史能力发布动态加载的 `Recall` 和 `RecallMore`。
+`maka.recall` 通过公共历史能力发布动态加载的 `Recall`、`RecallMore` 和 `RecallMaterial`。
 Recall 搜索最近有消息的 200 个 Session 的完整文本（含归档），使用 Unicode
 规范化字面词匹配与 BM25 排序，排除当前 Turn，明确报告无法读取的来源和片段截断。
-RecallMore 扩展邻近消息，或通过 UTF-8 偏移继续读取长锚点。隐私模式撤下两种工具；
+RecallMore 扩展邻近消息，或通过 UTF-8 偏移继续读取长锚点。附件名称也可搜索。
+RecallMaterial 将用户上传的附件复制到调用 Session 后读取；重试复用同一不可变副本，
+来源删除不影响副本。文本沿用 Read 的有界分页与续读，图片保留视觉内容，
+不支持的二进制格式明确失败。隐私模式撤下全部三种工具；
 历史陈述不是经过验证的事实。
 
 Host 提供固定日志水位下的有界文本分页，排序和片段组装属于插件。
 SQLx 管理的可重建文本投影避免反复解析大型 JSON 结果。
 其它插件可以使用相同的 Rust／JS 历史 API。
+`history.copyMaterial` 分别检查来源历史访问权与目标的 Host 执行能力句柄；
+附件标识本身不授予任何一端的权限。
 
 ## 代码组织
 

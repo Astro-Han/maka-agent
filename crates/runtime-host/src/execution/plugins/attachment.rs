@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{BoundCommands, Commands, Error, storage};
+use super::{BoundCommands, Commands, Context, Error, Executions, storage};
 use maka_plugins::execution::CopyAttachment;
 use maka_runtime::attachment::{AttachmentRef, StorageRef};
 use std::sync::Arc;
@@ -50,6 +50,16 @@ impl BoundCommands {
         };
         source.authorize(&host, session_id).await?;
         self.authorize(&host, &request.target_session_id).await?;
+        self.copy_admitted(host, request, (gate, source_lease, target_lease))
+            .await
+    }
+
+    async fn copy_admitted(
+        &self,
+        host: Arc<Executions>,
+        request: CopyAttachment,
+        admission: impl Send + 'static,
+    ) -> Result<AttachmentRef, Error> {
         let namespace = self.namespace.clone();
         let (send, receive) = tokio::sync::oneshot::channel();
         let worker = host.clone();
@@ -68,13 +78,68 @@ impl BoundCommands {
                     }
                     storage(error)
                 });
-            drop(gate);
-            drop(source_lease);
-            drop(target_lease);
+            drop(admission);
             let _ = send.send(result);
         });
         receive
             .await
             .map_err(|_| Error::OutcomeUnknown("attachment copy owner disappeared".into()))?
+    }
+}
+
+impl Executions {
+    pub(crate) async fn plugin_history_copy(
+        self: &Arc<Self>,
+        owner: Context,
+        call: maka_plugins::call::Scope,
+        target: Arc<dyn Commands>,
+        input: maka_plugins::session::history::CopyMaterial,
+    ) -> Result<AttachmentRef, Error> {
+        use maka_runtime::{artifact::ArtifactSource, attachment::AttachmentKind};
+        input.validate()?;
+        let target = (&*target as &dyn std::any::Any)
+            .downcast_ref::<BoundCommands>()
+            .ok_or(Error::Denied)?;
+        if !Arc::ptr_eq(self, &target.executions()?) {
+            return Err(Error::Denied);
+        }
+        let gate = self.interactions.own_admission().await;
+        let source_lease = owner.admit().map_err(|_| Error::Revoked)?;
+        let target_lease = target.context.admit().map_err(|_| Error::Revoked)?;
+        self.check_history_target(&call, &input.session_id).await?;
+        target.authorize(self, &input.target_session_id).await?;
+        let artifact = self
+            .log
+            .get_artifact(&input.session_id, &input.artifact_id)
+            .await
+            .map_err(storage)?
+            .record
+            .ok_or(Error::NotFound)?;
+        if artifact.source != ArtifactSource::UserUpload {
+            return Err(Error::Denied);
+        }
+        let mime_type = artifact
+            .mime_type
+            .ok_or_else(|| Error::Invalid("material has no MIME type".into()))?;
+        let attachment = AttachmentRef {
+            kind: AttachmentKind::from_metadata(&mime_type, &artifact.name),
+            name: artifact.name,
+            mime_type,
+            bytes: artifact.size_bytes,
+            storage_ref: StorageRef::SessionFile {
+                session_id: input.session_id,
+                relative_path: input.artifact_id,
+            },
+        };
+        target
+            .copy_admitted(
+                self.clone(),
+                CopyAttachment {
+                    target_session_id: input.target_session_id,
+                    attachment,
+                },
+                (gate, source_lease, target_lease),
+            )
+            .await
     }
 }

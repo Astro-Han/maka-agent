@@ -302,16 +302,22 @@ tools and UI without deleting the checklist; re-enabling or restarting restores 
 
 ## Conversation recall
 
-`maka.recall` publishes lazy `Recall` and `RecallMore` tools through public history
+`maka.recall` publishes lazy `Recall`, `RecallMore` and `RecallMaterial` through public history
 capabilities. Recall searches complete text in the 200 Sessions with the most recent
 messages, including archives, using Unicode-normalized literal terms and BM25 ranking.
 It excludes the current Turn and reports unread sources and clipped passages.
 RecallMore expands neighboring messages or resumes a long anchor by UTF-8 offset.
-Incognito mode withdraws both tools. Historical statements are not verified facts.
+Attachment names are searchable. `RecallMaterial` copies a user upload into the calling
+Session before reading it; retries reuse the immutable copy, independently of later source
+deletion. Text uses bounded Read pages and continuations; images retain their visual content.
+Unsupported binary formats fail explicitly. Incognito mode withdraws all three tools.
+Historical statements are not verified facts.
 
 Host supplies bounded text pages under a fixed log fence; sorting and passage assembly
 belong to the plugin. A SQLx-managed, rebuildable text projection avoids repeatedly
 parsing large JSON results. The same Rust/JS history API is available to other plugins.
+`history.copyMaterial` independently checks source history access and the destination's
+Host-issued execution capability; attachment identifiers alone never grant either.
 
 ## Code layout
 

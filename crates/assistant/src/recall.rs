@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod material;
 mod passages;
 mod rank;
 mod reader;
@@ -29,7 +30,7 @@ use maka_plugins::{
     contributions::Staged,
     kernel::{Plugin, PluginContext},
     preferences::Preferences,
-    session::history::Queries,
+    session::history::History,
 };
 use maka_runtime::{
     tool_call::ToolRejection,
@@ -51,7 +52,9 @@ pub const ID: &str = "maka.recall";
 pub struct Builtin;
 #[derive(Clone)]
 struct Recall {
-    history: Arc<dyn Queries>,
+    history: Arc<dyn History>,
+    executions: Arc<dyn maka_plugins::execution::Access>,
+    files: Arc<dyn maka_plugins::filesystem::Files>,
     preferences: Arc<dyn Preferences>,
     workers: Arc<Semaphore>,
 }
@@ -77,6 +80,8 @@ impl Plugin for Builtin {
             let host = context.host.ok_or("Recall requires Host history")?;
             let recall = Arc::new(Recall {
                 history: host.history,
+                executions: host.executions,
+                files: host.files,
                 preferences: host.preferences,
                 workers: Arc::new(Semaphore::new(2)),
             });
@@ -103,7 +108,7 @@ impl Plugin for Builtin {
         })
     }
 }
-fn definitions() -> [(&'static str, &'static str, Value); 2] {
+fn definitions() -> [(&'static str, &'static str, Value); 3] {
     [
         (
             "Recall",
@@ -114,6 +119,11 @@ fn definitions() -> [(&'static str, &'static str, Value); 2] {
             "RecallMore",
             "Expand a Recall anchor using its Session and message IDs. before/after select 0–8 neighboring messages (default 8 each). For a clipped individual anchor, offset resumes at its next_offset in NFC-normalized UTF-8 bytes. The current Turn remains excluded; deleted or unavailable sources fail explicitly.",
             schemars::schema_for!(More).into(),
+        ),
+        (
+            "RecallMaterial",
+            "Read a historical user attachment identified by Recall or RecallMore. Supply its source session_id and artifact_id. Copies the material into this Session before reading, so later source deletion does not break the evidence. Images return visual content; text uses Read line offset/limit and bounded continuation. Unsupported binary formats fail explicitly.",
+            schemars::schema_for!(material::Input).into(),
         ),
     ]
 }

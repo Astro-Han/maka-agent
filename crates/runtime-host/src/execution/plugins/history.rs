@@ -52,7 +52,11 @@ impl Executions {
         Ok(page)
     }
 
-    async fn check_history_target(&self, call: &Scope, session: &str) -> Result<(), Error> {
+    pub(super) async fn check_history_target(
+        &self,
+        call: &Scope,
+        session: &str,
+    ) -> Result<(), Error> {
         let boundary = self.history_boundary(call).await?;
         let record = self
             .log
