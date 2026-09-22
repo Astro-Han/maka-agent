@@ -1477,7 +1477,8 @@ function registerHostClientIpc(
     chooseDirectory: async () => {
       const result = await mainWindowController.showOpenDialog({
         title: projectPickerTitle(await desktopLocale.resolve()),
-        properties: ["openDirectory"],
+        // Enable the native New Folder action on macOS.
+        properties: ["openDirectory", "createDirectory"],
       });
       return result.canceled ? undefined : result.filePaths[0];
     },

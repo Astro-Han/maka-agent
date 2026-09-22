@@ -138,6 +138,7 @@ import {
   type TurnMessageSubmitInput,
   type TurnMessageSubmitResult,
   type WorkspaceProjection,
+  type WorkspaceTarget,
 } from "@maka/runtime-host/protocol";
 
 const decodeStoredMessage = (value: unknown): StoredMessage =>
@@ -984,6 +985,24 @@ export class DesktopRuntimeHostClient {
         patch: definedPatch,
       }),
     );
+  }
+
+  /**
+   * Do not retry: the target cwd belongs to the supplied revision.
+   * Replaying it against a newer revision could undo a concurrent move.
+   */
+  async relocateSessionWorkspace(
+    sessionId: string,
+    expectedRevision: number,
+    workspace: WorkspaceTarget,
+  ): Promise<SessionCatalogProjection> {
+    const result = await this.request("session.workspace.relocate", {
+      sessionId,
+      expectedRevision,
+      workspace,
+    });
+    if (result.kind === "committed") return result.session;
+    throw revisionConflict("relocate", sessionId);
   }
 
   async setSessionReadMarker(

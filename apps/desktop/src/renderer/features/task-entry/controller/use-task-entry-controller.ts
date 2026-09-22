@@ -90,6 +90,7 @@ export interface TaskEntryControllerCommands {
   restoreProject(projectKey: string): Promise<void>;
   relinkProject(projectKey: string): Promise<void>;
   addProject(): void;
+  openNewProject(): void;
   chooseProjectForProfile(profileId: string): Promise<void>;
   resolveWorkBoardTarget(item: WorkBoardItem): WorkBoardStartTargetResult;
   prepareWorkBoardDraft(target: TaskEntryTarget, draft: string): string | undefined;
@@ -108,13 +109,19 @@ const EMPTY_CATALOG: TaskEntryCatalog = {
 
 type DirectoryHandoff = TaskEntryHostRef & {
   readonly name: string;
+  /** The name typed in the New project dialog, applied once a folder is picked. */
+  readonly projectName?: string;
 };
 
-function directoryHandoffForHost(host: ReadyTaskEntryHost): DirectoryHandoff {
+function directoryHandoffForHost(
+  host: ReadyTaskEntryHost,
+  projectName?: string,
+): DirectoryHandoff {
   return {
     profileId: host.profile.id,
     hostId: host.hostId,
     name: host.profile.name,
+    ...(projectName ? { projectName } : {}),
   };
 }
 
@@ -154,6 +161,7 @@ export function useTaskEntryController(
   const [refreshing, setRefreshing] = useState(true);
   const [error, setError] = useState<string>();
   const [directoryHost, setDirectoryHost] = useState<DirectoryHandoff>();
+  const [newProjectHost, setNewProjectHost] = useState<TaskEntryHostRef>();
   const directoryOpenerRef = useRef<HTMLElement | null>(null);
   const committedCatalogRef = useRef<TaskEntryCatalog>(EMPTY_CATALOG);
   const refreshRequestSequenceRef = useRef(0);
@@ -283,12 +291,12 @@ export function useTaskEntryController(
     }
   }, [copy.projectUpdateFailedFallback, copy.projectUpdateFailedTitle, locale, refresh, reportError]);
 
-  const addProjectForHost = useCallback(async (host: ReadyTaskEntryHost): Promise<void> => {
+  const addProjectForHost = useCallback(async (host: ReadyTaskEntryHost, name?: string): Promise<void> => {
     if (projectMutationPendingRef.current) return;
     if (host.capabilities.chooseHostDirectory) {
       directoryOpenerRef.current =
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      setDirectoryHost(directoryHandoffForHost(host));
+      setDirectoryHost(directoryHandoffForHost(host, name));
       return;
     }
     if (!host.capabilities.chooseClientDirectory) return;
@@ -297,10 +305,13 @@ export function useTaskEntryController(
     try {
       let result: TaskEntryProjectMutationResult;
       try {
-        result = await service.addProject({
-          profileId: host.profile.id,
-          hostId: host.hostId,
-        });
+        result = await service.addProject(
+          {
+            profileId: host.profile.id,
+            hostId: host.hostId,
+          },
+          name,
+        );
       } catch (cause) {
         reportError({
           title: copy.selectDirectoryFailedTitle,
@@ -425,7 +436,7 @@ export function useTaskEntryController(
         : {}),
       branch: selectedProjectId === null ? null : selectedBranch,
       pending: pending || (refreshing && catalog.hosts.length === 0),
-      selectedGroupId: selectedProfileId,
+      selectedGroupId: selectedHost ? JSON.stringify([selectedHost.profile.id, selectedHost.hostId]) : undefined,
       groups: catalog.hosts.map((host) => {
         if (!isReadyTaskEntryHost(host)) {
           return {
@@ -442,13 +453,13 @@ export function useTaskEntryController(
           ? selectedProjectId
           : host.selectedProjectId;
         return {
-          id: host.profile.id,
+          id: JSON.stringify([host.profile.id, host.hostId]),
           label: host.profile.name,
           projects: host.projects.filter((project) => project.archivedAt === undefined),
           selectedProjectId: groupSelectedProjectId,
           onSelectProject: (projectId: string) => selectProject(host, projectId),
           ...(host.capabilities.chooseClientDirectory || host.capabilities.chooseHostDirectory
-            ? { onAdd: () => void addProjectForHost(host) }
+            ? { onAdd: (name: string) => void addProjectForHost(host, name) }
             : {}),
           ...(host.capabilities.chooseClientDirectory
             ? { onRelink: (projectId: string) => void relinkProject(host, projectId) }
@@ -597,6 +608,21 @@ export function useTaskEntryController(
       : undefined,
     [selectedHost],
   );
+
+  const openNewProject = useCallback(() => {
+    if (selectedHost) setNewProjectHost({ profileId: selectedHost.profile.id, hostId: selectedHost.hostId });
+  }, [selectedHost]);
+  const newProjectDialog = useMemo(() => {
+    if (!newProjectHost) return undefined;
+    const target = catalog.hosts.find((host): host is ReadyTaskEntryHost =>
+      isReadyTaskEntryHost(host) && host.profile.id === newProjectHost.profileId && host.hostId === newProjectHost.hostId);
+    const available = target && (target.capabilities.chooseClientDirectory || target.capabilities.chooseHostDirectory);
+    return {
+      disabled: !available,
+      close: () => setNewProjectHost(undefined),
+      submit: (name: string) => { if (available) void addProjectForHost(target, name); },
+    };
+  }, [newProjectHost, catalog.hosts, addProjectForHost]);
   return useMemo(() => ({
     host: {
       ...(directoryHost
@@ -605,9 +631,11 @@ export function useTaskEntryController(
               profileId: directoryHost.profileId,
               hostId: directoryHost.hostId,
               name: directoryHost.name,
+              ...(directoryHost.projectName ? { projectName: directoryHost.projectName } : {}),
             },
           }
         : {}),
+      newProjectDialog,
       directoryOpener: directoryOpenerRef.current,
       closeDirectoryPicker,
       acceptRegisteredProject,
@@ -648,6 +676,7 @@ export function useTaskEntryController(
         if (host) await relinkProject(host, scope.project.id);
       },
       addProject: addSelectedProject,
+      openNewProject,
       chooseProjectForProfile,
       resolveWorkBoardTarget,
       prepareWorkBoardDraft,
@@ -672,6 +701,8 @@ export function useTaskEntryController(
   }), [
     acceptRegisteredProject,
     addSelectedProject,
+    newProjectDialog,
+    openNewProject,
     catalog.defaultProfileId,
     catalog.hosts.length,
     chooseProjectForProfile,

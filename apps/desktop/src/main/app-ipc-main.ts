@@ -133,8 +133,11 @@ export function registerAppIpc(
   handleReconnectableRead(targetIpc, 'projects:getSnapshot', () =>
     deps.projectManagement.getSnapshot(),
   );
-  targetIpc.handle('projects:add', (_event, options?: { select?: unknown }) =>
-    deps.projectManagement.add({ select: options?.select !== false }));
+  targetIpc.handle('projects:add', (_event, options?: { select?: unknown; name?: unknown }) =>
+    deps.projectManagement.add({
+      select: options?.select !== false,
+      ...(options?.name === undefined ? {} : { name: requireProjectName(options.name) }),
+    }));
   handleReconnectableRead(targetIpc, 'projects:directoryRoots', () =>
     deps.projectManagement.directoryRoots());
   handleReconnectableRead(targetIpc, 'projects:listDirectory', (_event, input: unknown) =>
@@ -217,4 +220,11 @@ function isAppUpdateInstallRequest(input: unknown): input is AppUpdateInstallReq
     input !== null &&
     'allowInterruptActiveTasks' in input &&
     typeof input.allowInterruptActiveTasks === 'boolean';
+}
+
+function requireProjectName(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 200 || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw new TypeError('Invalid project name.');
+  }
+  return value;
 }

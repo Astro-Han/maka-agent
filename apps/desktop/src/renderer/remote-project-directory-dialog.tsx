@@ -35,7 +35,7 @@ import type {
 } from '../preload/bridge-contract.js';
 import { getShellCopy } from './locales/shell-copy.js';
 
-type DirectoryHost = DesktopRuntimeHostRef & { readonly name?: string };
+type DirectoryHost = DesktopRuntimeHostRef & { readonly name?: string; readonly projectName?: string };
 type DirectoryLoad =
   | { readonly kind: 'initial'; readonly host: DirectoryHost }
   | {
@@ -165,6 +165,7 @@ export function RemoteProjectDirectoryDialog(props: {
       const project = await window.maka.projects.registerDirectory({
         rootId: root.id,
         segments,
+        name: host.projectName,
       }, host);
       if (request.current !== sequence) return;
       props.onRegistered(project, host);

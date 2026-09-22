@@ -26,6 +26,36 @@ import { SessionRail, type SessionRailStoryProps } from './session-rail-harness.
 
 const NOW = Date.now();
 
+function ProjectMoveFixture() {
+  const [projectId, setProjectId] = useState<string | null>('source');
+  const session = makeSession({ id: 'move-task', name: 'Move task', projectId });
+  const projects = [makeProject({ id: 'source', name: 'Source' }), makeProject({ id: 'destination', name: 'Destination' })];
+  return <StoryFrame><SessionRail {...panelProps({ sessions: [session], viewMode: 'project' })}
+    groups={projects.map(project => ({ id: project.id, label: project.name, project, sessions: project.id === projectId ? [session] : [] }))}
+    rowActions={{ ...rowActions, onMoveToProject: (_id, target) => setProjectId(target) }}
+    moveDropGroupKeys={new Set(projects.map(project => project.id))}
+    moveTargets={() => projects.filter(project => project.id !== projectId).map(project => ({ groupKey: project.id, projectId: project.id, name: project.name }))}
+  /></StoryFrame>;
+}
+
+// Real path: a task's row menu → Move to project. Host-scoped destinations enter through the rail contract.
+export const ProjectMoveMenu: Story = {
+  render: () => <ProjectMoveFixture />,
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    page.getByRole('button', { name: 'Move task' }).focus();
+    await userEvent.click(page.getByRole('button', { name: 'Move task 任务操作' }));
+    await userEvent.hover(page.getByRole('menuitem', { name: '移动到项目' }));
+    const destination = await page.findByRole('menuitem', { name: 'Destination' });
+    await userEvent.click(destination);
+    await waitFor(() => expect(canvasElement.querySelector('[data-project-id="destination"] [data-session-id="move-task"]')).not.toBeNull());
+    page.getByRole('button', { name: 'Move task' }).focus();
+    await userEvent.click(page.getByRole('button', { name: 'Move task 任务操作' }));
+    await userEvent.hover(page.getByRole('menuitem', { name: '移动到项目' }));
+    await expect(await page.findByRole('menuitem', { name: 'Source' })).toBeVisible();
+  },
+};
+
 // Fidelity convention (#1433): every story below names the real app path
 // that reaches it. See apps/desktop/stories/FIDELITY.md.
 

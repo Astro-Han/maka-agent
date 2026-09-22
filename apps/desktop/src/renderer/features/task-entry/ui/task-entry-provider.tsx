@@ -72,6 +72,7 @@ const EMPTY_CONTROLLER: TaskEntryController = {
     async restoreProject() {},
     async relinkProject() {},
     addProject() {},
+    openNewProject() {},
     async chooseProjectForProfile() {},
     resolveWorkBoardTarget: (
       _item: Parameters<TaskEntryControllerCommands['resolveWorkBoardTarget']>[0],
@@ -123,6 +124,7 @@ function createTaskEntryOwner(): TaskEntryOwner & {
       relinkProject: (projectKey: string) =>
         current.commands.relinkProject(projectKey),
       addProject: () => current.commands.addProject(),
+      openNewProject: () => current.commands.openNewProject(),
       chooseProjectForProfile: (profileId: string) =>
         current.commands.chooseProjectForProfile(profileId),
       resolveWorkBoardTarget: (
@@ -230,9 +232,11 @@ const selectHost = (controller: TaskEntryController): TaskEntryHostModel => cont
 
 function sameHost(previous: TaskEntryHostModel, next: TaskEntryHostModel): boolean {
   return (
+    previous.newProjectDialog === next.newProjectDialog &&
     previous.directoryHost?.profileId === next.directoryHost?.profileId &&
     previous.directoryHost?.hostId === next.directoryHost?.hostId &&
     previous.directoryHost?.name === next.directoryHost?.name &&
+    previous.directoryHost?.projectName === next.directoryHost?.projectName &&
     previous.directoryOpener === next.directoryOpener &&
     previous.closeDirectoryPicker === next.closeDirectoryPicker &&
     previous.acceptRegisteredProject === next.acceptRegisteredProject

@@ -21,6 +21,7 @@ import type { RefObject } from 'react';
 import type { SessionSummary } from '@maka/core/session';
 import type { ProjectRecord } from '@maka/core/project';
 import type { RuntimeHostProfileKind } from '@maka/runtime-host/profile-kind';
+import type { DesktopSessionUpdateFailureCode } from '../../../shared/desktop-session-projection.js';
 
 export type SessionNavigationRemoveDisposition = 'removed' | 'restored';
 
@@ -105,7 +106,13 @@ export interface SessionNavigationSessionService {
    * estimating from the catalog projection.
    */
   previewRemoval(sessionId: string): Promise<number>;
+  /** Move to a project, or detach (`null`); expected refusals retain their Host code. */
+  moveToProject(sessionId: string, projectId: string | null): Promise<SessionMoveOutcome>;
 }
+
+export type SessionMoveOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: DesktopSessionUpdateFailureCode };
 
 export interface SessionNavigationServices {
   readonly sessions: SessionNavigationSessionService;

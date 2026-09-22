@@ -27,6 +27,7 @@ import {
   Button,
   EmptyState,
   MoreMenu,
+  NewProjectDialog,
   TextInput,
   useMountedRef,
   useToast,
@@ -92,7 +93,7 @@ export function ProjectsSettingsPage(props: {
   const [homePath, setHomePath] = useState<string | undefined>(undefined);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
-  const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
+  const [projectDialog, setProjectDialog] = useState<{ kind: 'new' } | { kind: 'directory'; name: string } | null>(null);
   const directoryPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const reloadGeneration = useRef(0);
 
@@ -106,7 +107,19 @@ export function ProjectsSettingsPage(props: {
     }
   }, [host, mountedRef, props.runtimeHostTargetVerified]);
 
+  async function addNamedProject(name: string) {
+    if (!host || !props.runtimeHostTargetVerified) return;
+    if (capabilities.chooseHostDirectory) {
+      setProjectDialog({ kind: 'directory', name });
+      return;
+    }
+    await runRowAction('add', async () => {
+      await window.maka.projects.add(host, { name });
+    }, copy.actionFailed);
+  }
+
   useEffect(() => {
+    setProjectDialog(null);
     if (!host || !props.runtimeHostTargetVerified) {
       reloadGeneration.current += 1;
       setProjects([]);
@@ -268,15 +281,9 @@ export function ProjectsSettingsPage(props: {
               variant="secondary"
               size="sm"
               label={copy.addProject}
-              clickAction={capabilities.chooseHostDirectory
-                ? () => {
-                    if (props.runtimeHostTargetVerified) setDirectoryPickerOpen(true);
-                  }
-                : async () => {
-                    if (!props.runtimeHostTargetVerified) return;
-                    const result = await window.maka.projects.add(host);
-                    if (result.ok) await reload();
-                  }}
+              clickAction={() => {
+                if (props.runtimeHostTargetVerified) setProjectDialog({ kind: 'new' });
+              }}
             />
           ) : undefined}
         >
@@ -496,14 +503,25 @@ export function ProjectsSettingsPage(props: {
         )}
         </SettingsSection>
         <RemoteProjectDirectoryDialog
-          host={directoryPickerOpen && props.runtimeHostTargetVerified ? host : undefined}
+          host={projectDialog?.kind === 'directory' && props.runtimeHostTargetVerified && host
+            ? { ...host, projectName: projectDialog.name } : undefined}
           returnFocusTo={directoryPickerTriggerRef.current}
-          onClose={() => setDirectoryPickerOpen(false)}
+          onClose={() => setProjectDialog(null)}
           onRegistered={() => {
-            setDirectoryPickerOpen(false);
+            setProjectDialog(null);
             void reload();
           }}
         />
+        {projectDialog?.kind === 'new' && props.runtimeHostTargetVerified ? (
+          <NewProjectDialog
+            onOpenChange={(open) => {
+              if (!open) setProjectDialog(null);
+            }}
+            onSubmit={(name) => {
+              void addNamedProject(name);
+            }}
+          />
+        ) : null}
       </RuntimeHostInteractionBoundary>
     </SettingsPage>
   );

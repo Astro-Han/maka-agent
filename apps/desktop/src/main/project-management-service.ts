@@ -36,7 +36,8 @@ type SelectedDirectoryActionResult =
 export interface ProjectManagementService {
   current(): Promise<CurrentProjectSelection>;
   getSnapshot(): Promise<DesktopProjectSnapshot>;
-  add(options?: { select?: boolean }): Promise<SelectedDirectoryActionResult>;
+  /** Register the chosen directory and apply its name before selecting it. */
+  add(options?: { select?: boolean; name?: string }): Promise<SelectedDirectoryActionResult>;
   select(
     projectId: unknown,
   ): Promise<{ project: ProjectRecord | null; path: string }>;
@@ -121,7 +122,13 @@ export function createProjectManagementService(deps: {
       requireLocalDirectoryActions(deps);
       const path = await deps.chooseDirectory();
       if (!path) return { ok: false, reason: 'cancelled' };
-      const project = await deps.catalog.register(path);
+      const registered = await deps.catalog.register(path);
+      // Rename before selecting, so the value the caller reads back (and the
+      // one the selection records) is the name the user typed, not the folder
+      // basename it was registered under. A blank name is not a name: it leaves
+      // the folder-derived one alone rather than failing the whole add.
+      const name = options?.name?.trim();
+      const project = name ? await deps.catalog.rename(registered.id, name) : registered;
       const selected = requireSelectableProject(project);
       if (options?.select !== false) {
         deps.selection.setSelection(selected.id, selected.preferredPath);
@@ -176,12 +183,17 @@ export function createProjectManagementService(deps: {
       );
     },
 
-    registerDirectory(input) {
+    async registerDirectory(input) {
       const directory = requireDirectoryInput(input);
-      return requireHostDirectoryActions(deps).registerDirectory(
+      const name = (input as { name?: unknown }).name;
+      if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 200 || /[\u0000-\u001f\u007f]/u.test(name))) {
+        throw new TypeError('Invalid project name.');
+      }
+      const registered = await requireHostDirectoryActions(deps).registerDirectory(
         directory.rootId,
         directory.segments,
       );
+      return typeof name === 'string' ? deps.catalog.rename(registered.id, name.trim()) : registered;
     },
 
     async pathFor(projectId) {

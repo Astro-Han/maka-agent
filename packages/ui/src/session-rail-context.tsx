@@ -29,17 +29,17 @@ import type {
 
 export type SessionViewMode = 'conversation' | 'project';
 
-/**
- * What the rail's rows are made of.
- *
- * One declaration, read by the list and by every row under it. It used to be
- * the same eleven props redeclared at each of `SessionListPanel`,
- * `SessionHistoryList` and `SessionListGroups`, threaded by hand and kept
- * identity-stable by hand, because the state lived above the whole shell and
- * had no other way down (#4109). Read from here it has one producer, so its
- * identity is the producer's business alone: hold this value still and the
- * ~1,000 fibers below do not render.
- */
+/** One place a Session may be moved to, and the row that offers it. */
+export interface SessionMoveTarget {
+  /** The rail row's `data-project-id`. */
+  readonly groupKey: string;
+  /** Host-local project ID, not a scoped rail key; null detaches. */
+  readonly projectId: string | null;
+  /** Omitted for detach, whose label is localized by the rail. */
+  readonly name?: string;
+}
+
+/** Session projection shared by all rows, independently of rail chrome. */
 export interface SessionRailData {
   sessions: readonly SessionSummary[];
   activeId?: string;
@@ -56,6 +56,12 @@ export interface SessionRailData {
   onSelectSession(sessionId: string): void;
   rowActions?: SessionRowActions;
   projectActions?: ProjectRowActions;
+  /** Candidate rows marked for the window's capture-phase drop guard. */
+  moveDropGroupKeys?: ReadonlySet<string>;
+  /** Current permitted destinations, restricted to the Session's Host. */
+  moveTargets?(sessionId: string): readonly SessionMoveTarget[];
+  /** Omitted when the selected Host cannot create projects. */
+  onNewProject?: () => void;
   /** Opaque Project ids whose Host can choose a replacement client directory. */
   relinkableProjectIds?: ReadonlySet<string>;
 }

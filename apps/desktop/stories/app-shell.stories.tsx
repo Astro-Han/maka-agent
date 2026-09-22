@@ -1386,6 +1386,35 @@ export const NewChatComposerEmptyLocalHost: Story = {
   ),
 };
 
+const namedProject = fn();
+const namedProjectSend = fn();
+// Real path: 新任务 → 项目选择器 → 新建项目。名称表单必须在 composer form 之外。
+export const NewChatComposerNamedProject: Story = {
+  render: () => <ComposedShell session={null} chat={{ messages: [] }} composer={{
+    onSend: namedProjectSend,
+    workspacePicker: { groups: [{ id: 'local-host', label: 'This device', projects: [], onAdd: namedProject }] },
+  }} />,
+  play: async ({ canvasElement }) => {
+    namedProject.mockClear(); namedProjectSend.mockClear();
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole('button', { name: /选择项目/ }));
+    await userEvent.click(page.getByRole('menuitem', { name: '新建项目' }));
+    const dialog = await page.findByRole('dialog', { name: '新建项目' });
+    const input = within(dialog).getByRole('textbox', { name: '项目名称' });
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(dialog.parentElement?.closest('form')).toBeNull();
+    expect(within(dialog).getByRole('button', { name: '选择文件夹' })).toBeDisabled();
+    await userEvent.type(input, '  Named project  ');
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(namedProject).toHaveBeenCalledOnce());
+    expect(namedProject).toHaveBeenCalledWith('Named project');
+    expect(namedProjectSend).not.toHaveBeenCalled();
+    await userEvent.click(page.getByRole('button', { name: /选择项目/ }));
+    await userEvent.click(page.getByRole('menuitem', { name: '新建项目' }));
+    await waitFor(() => expect(page.getByRole('textbox', { name: '项目名称' })).toHaveFocus());
+  },
+};
+
 // Real path: 新任务 → 切换项目 → 项目 picker 处于 pending（切换中）。
 // Production passes `pending: projectPickerPending` while a project switch is
 // in flight; the trigger locks with a spinner and every menu row disables,

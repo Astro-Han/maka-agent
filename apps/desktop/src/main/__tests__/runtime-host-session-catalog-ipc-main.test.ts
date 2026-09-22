@@ -19,6 +19,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { DesktopRuntimeHostClientError } from '../runtime-host-client.js';
 import type { IpcMain } from 'electron';
 import type { SessionCatalogProjection, SessionCreateInput } from '@maka/runtime-host/protocol';
 import {
@@ -100,6 +101,40 @@ test('session creation forwards a plugin executor without a model target', async
     }),
     /cannot include a model target/,
   );
+});
+
+test('moves only the requested Session and keeps detach cwd paired with its revision', async () => {
+  const ipc = ipcHarness();
+  const deps = createDeps([]);
+  const moves: unknown[] = [];
+  const changed: unknown[] = [];
+  let current: SessionCatalogProjection | null = projection({ revision: 7 });
+  let conflict = false;
+  deps.client.getSession = async () => current;
+  deps.client.relocateSessionWorkspace = async (id, revision, workspace) => {
+    moves.push({ id, revision, workspace });
+    if (conflict) throw new DesktopRuntimeHostClientError('revision_conflict', 'Concurrent move');
+    assert.ok(current);
+    current = projection({ revision: revision + 1, workspace: { target: workspace,
+      hostCwd: workspace.kind === 'host_path' ? workspace.path : '/destination' } });
+    return current;
+  };
+  deps.emitSessionsChanged = (...args) => { changed.push(args); };
+  registerRuntimeHostSessionCatalogIpc(deps, ipc as unknown as IpcMain);
+  assert.equal((await ipc.invoke('sessions:moveToProject', 'session-1', 'project-2') as { ok: boolean }).ok, true);
+  assert.equal((await ipc.invoke('sessions:moveToProject', 'session-1', null) as { ok: boolean }).ok, true);
+  conflict = true;
+  assert.deepEqual(await ipc.invoke('sessions:moveToProject', 'session-1', null), { ok: false, code: 'operation_conflict' });
+  assert.deepEqual(moves, [
+    { id: 'session-1', revision: 7, workspace: { kind: 'project', projectId: 'project-2' } },
+    { id: 'session-1', revision: 8, workspace: { kind: 'host_path', path: '/destination' } },
+    { id: 'session-1', revision: 9, workspace: { kind: 'host_path', path: '/destination' } },
+  ]);
+  assert.deepEqual(changed, [['updated', 'session-1'], ['updated', 'session-1']]);
+  await assert.rejects(ipc.invoke('sessions:moveToProject', 'session-1', {}), /Invalid project/);
+  current = null;
+  assert.deepEqual(await ipc.invoke('sessions:moveToProject', 'session-1', null), { ok: false, code: 'not_found' });
+  assert.equal(moves.length, 3);
 });
 
 type IpcHandler = Parameters<Pick<IpcMain, 'handle'>['handle']>[1];

@@ -166,6 +166,43 @@ test('can register a draft Project without changing the Host selection', async (
   assert.equal(selected, false);
 });
 
+test('local and Host directory registration return the requested name and surface rename failure', async () => {
+  for (const remote of [false, true]) {
+    const calls: string[] = [];
+    let failRename = false;
+    const project = { id: 'project', name: 'folder', locations: [], available: true, preferredPath: '/workspace' };
+    const register = async () => { calls.push('register'); return project; };
+    const service = createProjectManagementService({
+      capabilities: remote ? REMOTE_CAPABILITIES : LOCAL_CAPABILITIES,
+      catalog: { list: unexpected, register, relink: unexpected, archive: unexpected, restore: unexpected,
+        rename: async (id, name) => {
+          assert.equal(id, 'project');
+          calls.push(`rename:${name}`);
+          if (failRename) throw new Error('Rename unavailable');
+          return { ...project, name };
+        },
+      },
+      directoryCatalog: { listDirectoryRoots: unexpected, listDirectories: unexpected, registerDirectory: register },
+      chooseDirectory: async () => '/workspace',
+      selection: { currentSelection: unexpected, setSelection: () => { calls.push('select'); } },
+    });
+    const create = () => remote
+      ? service.registerDirectory({ rootId: 'home', segments: [], name: '  Named project  ' })
+      : service.add({ name: '  Named project  ' }).then(result => { assert.ok(result.ok); return result.project; });
+    assert.equal((await create()).name, 'Named project');
+    assert.deepEqual(calls, remote ? ['register', 'rename:Named project'] : ['register', 'rename:Named project', 'select']);
+    calls.length = 0;
+    failRename = true;
+    await assert.rejects(create(), /Rename unavailable/);
+    assert.deepEqual(calls, ['register', 'rename:Named project']);
+    if (remote) {
+      calls.length = 0;
+      await assert.rejects(service.registerDirectory({ rootId: 'home', segments: [], name: 1 }), /Invalid project name/);
+      assert.deepEqual(calls, []);
+    }
+  }
+});
+
 test('rejects malformed Project identities before catalog access', async () => {
   const service = createProjectManagementService({
     capabilities: LOCAL_CAPABILITIES,

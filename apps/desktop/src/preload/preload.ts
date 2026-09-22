@@ -1790,11 +1790,11 @@ const makaBridge = {
         for (const unsubscribe of unsubscribes) unsubscribe();
       };
     },
-    async addProject(host: DesktopNewTaskHostRef) {
+    async addProject(host: DesktopNewTaskHostRef, name?: string) {
       const result = await invokeWhenReady(
         'projects:add',
         await runtimeHostScope(host),
-        { select: false },
+        { select: false, name },
       ) as
         | { ok: true; project: ProjectRecord; path: string }
         | { ok: false; reason: 'cancelled' };
@@ -2339,6 +2339,9 @@ const makaBridge = {
     setSandboxMode(sessionId: string, mode: SandboxMode): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>> {
       return invokeSessionUpdate('sessions:setSandboxMode', sessionId, mode);
     },
+    moveToProject(sessionId: string, projectId: string | null): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>> {
+      return invokeSessionUpdate('sessions:moveToProject', sessionId, projectId);
+    },
     setApprovalPolicy(sessionId: string, policy: import('@maka/core/execution-permissions').ApprovalPolicy): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>> {
       return invokeSessionUpdate('sessions:setApprovalPolicy', sessionId, policy);
     },
@@ -2714,10 +2717,10 @@ const makaBridge = {
         if (runtimeHostMetadataFor(scope)?.profileKind === 'local') handler();
       });
     },
-    add(host?: DesktopRuntimeHostRef): Promise<
+    add(host?: DesktopRuntimeHostRef, options?: { name?: string }): Promise<
       { ok: true; project: ProjectRecord; path: string } | { ok: false; reason: 'cancelled' }
     > {
-      return invokeSelectedRuntimeHost(host, 'projects:add');
+      return invokeSelectedRuntimeHost(host, 'projects:add', options);
     },
     getDirectoryRoots(host: DesktopRuntimeHostRef) {
       return invokeSelectedRuntimeHost(host, 'projects:directoryRoots');
@@ -2729,7 +2732,7 @@ const makaBridge = {
       return invokeSelectedRuntimeHost(host, 'projects:listDirectory', input);
     },
     registerDirectory(
-      input: { readonly rootId: string; readonly segments: readonly string[] },
+      input: { readonly rootId: string; readonly segments: readonly string[]; readonly name?: string },
       host: DesktopRuntimeHostRef,
     ) {
       return invokeSelectedRuntimeHost(host, 'projects:registerDirectory', input);

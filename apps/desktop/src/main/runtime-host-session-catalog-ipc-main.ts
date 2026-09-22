@@ -60,6 +60,7 @@ type RuntimeHostSessionCatalogClient = Pick<
   | 'listSessions'
   | 'getSession'
   | 'previewSessionRemoval'
+  | 'relocateSessionWorkspace'
   | 'removeSession'
   | 'setSessionLifecycle'
   | 'updateSessionConfiguration'
@@ -258,6 +259,51 @@ export function registerRuntimeHostSessionCatalogIpc(
     // Read-only: how many subtasks the delete would archive, for the confirm.
     return deps.client.previewSessionRemoval(sessionId);
   });
+  ipcMain.handle(
+    'sessions:moveToProject',
+    async (_event, sessionId: string, projectId: unknown) => {
+      if (projectId !== null && (typeof projectId !== 'string' || projectId.length === 0)) {
+        throw new Error('Invalid project id');
+      }
+      return moveSessionToProject(deps, sessionId, projectId);
+    },
+  );
+}
+
+/**
+ * Move one Session, not its revision family. Detach preserves the cwd from
+ * the same revision used for admission; a conflict is reported without retry.
+ */
+async function moveSessionToProject(
+  deps: RuntimeHostSessionCatalogIpcDeps,
+  sessionId: string,
+  projectId: string | null,
+): Promise<DesktopSessionUpdateResult<DesktopHostSessionSummary>> {
+  let session: SessionCatalogProjection;
+  try {
+    const current = await deps.client.getSession(sessionId);
+    if (!current) {
+      throw new DesktopRuntimeHostClientError(
+        'session_not_found',
+        `No such Session: ${sessionId}`,
+      );
+    }
+    const workspace: WorkspaceTarget =
+      projectId === null
+        ? { kind: 'host_path', path: current.workspace.hostCwd }
+        : { kind: 'project', projectId };
+    session = await deps.client.relocateSessionWorkspace(
+      sessionId,
+      current.revision,
+      workspace,
+    );
+  } catch (error) {
+    const code = updateFailureCode(error);
+    if (code) return { ok: false, code };
+    throw error;
+  }
+  deps.emitSessionsChanged('updated', sessionId);
+  return { ok: true, session: toDesktopHostSessionSummary(session) };
 }
 
 /**

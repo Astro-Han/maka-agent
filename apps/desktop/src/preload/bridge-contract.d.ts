@@ -974,7 +974,7 @@ export interface MakaBridge {
     searchExecutors(host: DesktopNewTaskHostRef, query: { query: string }): Promise<import('@maka-agent/plugin-sdk/host').ExecutorChoices>;
     getCatalog(): Promise<DesktopNewTaskCatalog>;
     subscribeChanges(handler: () => void): () => void;
-    addProject(host: DesktopNewTaskHostRef): Promise<
+    addProject(host: DesktopNewTaskHostRef, name?: string): Promise<
       { ok: true; project: ProjectRecord } | { ok: false; reason: 'cancelled' }
     >;
     relinkProject(host: DesktopNewTaskHostRef, projectId: string): Promise<
@@ -1280,6 +1280,8 @@ export interface MakaBridge {
     setFlagged(sessionId: string, isFlagged: boolean, options?: { revisionFamily?: boolean }): Promise<void>;
     rename(sessionId: string, name: string, options?: { revisionFamily?: boolean }): Promise<void>;
     setSandboxMode(sessionId: string, mode: SandboxMode): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>>;
+    /** Move one idle Session; null clears its project without changing its cwd. */
+    moveToProject(sessionId: string, projectId: string | null): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>>;
     setApprovalPolicy(sessionId: string, policy: import('@maka/core/execution-permissions').ApprovalPolicy): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>>;
     setExecutionPolicy(sessionId: string, policy: import('@maka/core/execution-permissions').ExecutionPolicy): Promise<DesktopSessionUpdateResult<DesktopSessionSummary>>;
     /**
@@ -1389,7 +1391,13 @@ export interface MakaBridge {
     subscribeChanges(handler: () => void, sessionId?: string, host?: DesktopRuntimeHostRef): () => void;
     getLocalSnapshot(): Promise<DesktopProjectSnapshot>;
     subscribeLocalChanges(handler: () => void): () => void;
-    add(host?: DesktopRuntimeHostRef): Promise<
+    /**
+     * Register a directory the user picks as a project, optionally naming it in
+     * the same step. The folder picker still decides the directory; `name` is
+     * what the New project dialog collected, applied before the call returns so
+     * the caller never sees the folder-derived placeholder.
+     */
+    add(host?: DesktopRuntimeHostRef, options?: { readonly name?: string }): Promise<
       { ok: true; project: ProjectRecord; path: string } | { ok: false; reason: 'cancelled' }
     >;
     getDirectoryRoots(host: DesktopRuntimeHostRef): Promise<readonly DesktopProjectDirectoryRoot[]>;
@@ -1398,7 +1406,7 @@ export interface MakaBridge {
       host: DesktopRuntimeHostRef,
     ): Promise<readonly DesktopProjectDirectoryEntry[]>;
     registerDirectory(
-      input: { readonly rootId: string; readonly segments: readonly string[] },
+      input: { readonly rootId: string; readonly segments: readonly string[]; readonly name?: string },
       host: DesktopRuntimeHostRef,
     ): Promise<ProjectRecord>;
     select(

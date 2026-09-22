@@ -209,7 +209,6 @@ describe('Overlays feature boundary', () => {
       }
     }
     assert.deepEqual(imports.sort(), [
-      'src/renderer/app-shell-command-actions.ts: Command',
       'src/renderer/app-shell-overlays.tsx: *',
       'src/renderer/app-shell-overlays.tsx: OverlaysShellProjection',
       'src/renderer/app-shell.tsx: *',
@@ -261,7 +260,7 @@ describe('Overlays feature boundary', () => {
         'OverlaysRoot',
         'OverlaysConsumer',
         'KeyboardHelpModal',
-        'CommandPalette',
+        'SessionCommandPalette',
         'SearchModalHost',
       ]) {
         const count = jsxMounts(source, path, name, isFeatureEntry);
@@ -271,10 +270,10 @@ describe('Overlays feature boundary', () => {
       }
     }
     assert.deepEqual(mounts.sort(), [
-      'src/renderer/app-shell-overlays.tsx: CommandPalette',
       'src/renderer/app-shell-overlays.tsx: KeyboardHelpModal',
       'src/renderer/app-shell-overlays.tsx: OverlaysConsumer',
       'src/renderer/app-shell-overlays.tsx: SearchModalHost',
+      'src/renderer/app-shell-overlays.tsx: SessionCommandPalette',
       'src/renderer/app-shell.tsx: OverlaysRoot',
     ]);
   });

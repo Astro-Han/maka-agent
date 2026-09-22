@@ -103,7 +103,7 @@ export type TaskEntryProjectMutationResult =
 export interface TaskEntryCatalogService {
   getCatalog(): Promise<TaskEntryCatalog>;
   subscribeChanges(handler: () => void): TaskEntryUnsubscribe;
-  addProject(host: TaskEntryHostRef): Promise<TaskEntryProjectMutationResult>;
+  addProject(host: TaskEntryHostRef, name?: string): Promise<TaskEntryProjectMutationResult>;
   relinkProject(
     host: TaskEntryHostRef,
     projectId: string,

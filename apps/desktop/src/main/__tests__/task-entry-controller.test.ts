@@ -316,8 +316,8 @@ describe('useTaskEntryController', () => {
 
     await act(async () => renderController(root, services));
     await act(async () => {
-      controller().selectors.workspacePicker.groups[0]?.onAdd?.();
-      controller().selectors.workspacePicker.groups[0]?.onAdd?.();
+      controller().selectors.workspacePicker.groups[0]?.onAdd?.('New project');
+      controller().selectors.workspacePicker.groups[0]?.onAdd?.('New project');
     });
     assert.equal(addCalls, 1);
     assert.equal(controller().selectors.workspacePicker.pending, true);
@@ -325,6 +325,32 @@ describe('useTaskEntryController', () => {
     await act(async () => added.resolve({ ok: true, project: project('project-b') }));
     assert.equal(controller().selectors.target?.projectId, 'project-b');
     assert.equal(controller().selectors.workspacePicker.pending, false);
+  });
+
+  it('keeps a named project bound to its original Host while the catalog changes', async () => {
+    const { root } = installReactRenderer();
+    let current = readyHost({ hostId: 'host-a' });
+    const calls: unknown[] = [];
+    const services = createFakeTaskEntryServices({ catalog: {
+      ...createFakeTaskEntryServices().catalog,
+      getCatalog: async () => catalog(current),
+      addProject: async (host, name) => { calls.push({ host, name }); return { ok: false, reason: 'cancelled' }; },
+    } });
+    await act(async () => renderController(root, services));
+    const originalGroup = controller().selectors.workspacePicker.groups[0]!.id;
+    await act(async () => controller().commands.openNewProject());
+    assert.equal(controller().host.newProjectDialog?.disabled, false);
+    current = readyHost({ hostId: 'host-b' });
+    await act(async () => controller().commands.refresh());
+    assert.notEqual(controller().selectors.workspacePicker.groups[0]!.id, originalGroup);
+    assert.equal(controller().host.newProjectDialog?.disabled, true);
+    await act(async () => controller().host.newProjectDialog?.submit('Preserved name'));
+    assert.deepEqual(calls, []);
+    current = readyHost({ hostId: 'host-a' });
+    await act(async () => controller().commands.refresh());
+    assert.equal(controller().host.newProjectDialog?.disabled, false);
+    await act(async () => controller().host.newProjectDialog?.submit('Preserved name'));
+    assert.deepEqual(calls, [{ host: { profileId: 'local', hostId: 'host-a' }, name: 'Preserved name' }]);
   });
 
   it('deduplicates relink requests and selects the returned Project before refreshing', async () => {
@@ -725,7 +751,7 @@ describe('useTaskEntryController', () => {
 
     await act(async () => renderController(root, services, errors));
     await act(async () => {
-      controller().selectors.workspacePicker.groups[0]?.onAdd?.();
+      controller().selectors.workspacePicker.groups[0]?.onAdd?.('New project');
       await Promise.resolve();
     });
     assert.equal(controller().selectors.workspacePicker.pending, true);
