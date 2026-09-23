@@ -83,7 +83,7 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | 后台健康 | BackgroundTaskHealth 的进程和端点检查。 | **插件 + Host。** 插件解释健康状态并提供工具；Host 提供授权资源观察和有界探测。保存 PID 不等于拥有进程。 |
 | Session 谱系 | 已实现公共 Rust／JS 历史复制和原始输入读取、原生分支／修订创建与放弃、继承历史独立裁剪、Desktop 规范输入编辑及完整持久草稿。已移除 regenerate，修改请求使用编辑重发。 | **Host。** 谱系及工作区只有一个事务权威；插件请求命令，不在私有存储中重做谱系。 |
 | Session 生命周期 | 已实现原生与公共插件删除／预览／回执接口、原子家族退休及队列取消、重启清理和共享 worktree 所有权。无引用对话正文、工具载荷与请求表面已支持可恢复的分批回收，保留计量、回执及被引用历史；shared 查询仍待完成。 | **Host。** 保留被引用历史及已接受回执；进程清理不确定时不得删除工作目录。shared 查询需要真实协作授权。 |
-| Session 迁入迁出 | 公共 Rust／JS 历史导入已支持有界暂存、精确重试、当前权限上限检查和原子发布。Codex、Claude Code、OpenCode 的转换、有界目录、来源配置及持久规范化意图已实现。插件 Remote 处理器重新授权已保存的目标并恢复规范回执；内置激活、客户端入口及原生 bundle 导入／导出仍待完成。 | **插件 + Host。** adapter 拥有发现与解析；Host 拥有规范材料、身份和发布。导入对话参与历史、分支及压缩，不声称发生了本机执行或用量。原生 bundle 格式仍是 Host 契约。 |
+| Session 迁入迁出 | 公共 Rust／JS 历史导入已支持有界暂存、精确重试、当前权限上限检查和原子发布。内置插件拥有 Codex、Claude Code、OpenCode 的转换、目录、来源配置及持久意图；Desktop 设置页与独立 Remote 共用目标重新授权和回执恢复。专用 TUI 导入界面及原生 bundle 导入／导出仍待完成。 | **插件 + Host。** adapter 拥有发现与解析；Host 拥有规范材料、身份和发布。导入对话参与历史、分支及压缩，不声称发生了本机执行或用量。原生 bundle 格式仍是 Host 契约。 |
 | Runtime policy | shell／external-agent 消费，普通 named tool profiles。 | **拆分。** shell 启动策略和能力上限留在 Host；外部 agent 设置由对应领域消费。Profile 提供定义，Host 在准入和每步捕获时取能力交集。只保存设置不算完成。 |
 | 接入／协作 | credential rotation prepare/revoke、principal revoke；collaboration access、邀请、grant revoke、principal rename/revoke；Turn-request create/query/decide/acknowledge/withdraw。 | **Host。** 复用凭据和持久化准入权威。插件可以提供流程／UI，但不能决定授权、绕过撤销或拥有规范的已接受 Turn request。 |
 | Peer Mesh | create/query/invite/join/leave/remove/close/reconcile，rename/display-name、transit 控制。 | **本次重写保留 Host 实现。** 身份、路由与传输恢复必须在插件不可用时工作，不为补这些协议再造传输插件平台。 |

@@ -21,6 +21,7 @@ use crate::{Error, catalog, intent, source};
 use futures_util::future::BoxFuture;
 use maka_plugins::{
     execution::{Access, CommandError},
+    llm::{Choices, Models, Search},
     remote::{Caller, Error as RemoteError, Method},
     storage::{Store, StoreError},
 };
@@ -33,10 +34,15 @@ use uuid::Uuid;
 pub struct Import {
     store: Arc<dyn Store>,
     access: Arc<dyn Access>,
+    models: Arc<dyn Models>,
 }
 impl Import {
-    pub fn new(store: Arc<dyn Store>, access: Arc<dyn Access>) -> Self {
-        Self { store, access }
+    pub fn new(store: Arc<dyn Store>, access: Arc<dyn Access>, models: Arc<dyn Models>) -> Self {
+        Self {
+            store,
+            access,
+            models,
+        }
     }
 }
 #[derive(Deserialize)]
@@ -47,6 +53,9 @@ impl Import {
     deny_unknown_fields
 )]
 pub enum Request {
+    Models {
+        query: Search,
+    },
     Sources,
     SaveSources {
         expected_revision: Option<u64>,
@@ -77,6 +86,7 @@ pub enum Request {
     rename_all_fields = "camelCase"
 )]
 enum Response {
+    Models { choices: Choices },
     Sources { snapshot: source::Snapshot },
     Catalog { page: catalog::Page },
     Copy { copy: intent::Copy },
@@ -106,6 +116,13 @@ impl Import {
     async fn handle(&self, request: Request, caller: Caller) -> Result<Response, Error> {
         let repository = intent::Repository::new(self.store.clone());
         match request {
+            Request::Models { query } => Ok(Response::Models {
+                choices: self
+                    .models
+                    .search(query)
+                    .await
+                    .map_err(|error| Error::Remote(RemoteError::Provider(error.to_string())))?,
+            }),
             Request::Sources => Ok(Response::Sources {
                 snapshot: source::read(self.store.as_ref()).await?,
             }),

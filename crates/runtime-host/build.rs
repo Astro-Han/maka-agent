@@ -27,6 +27,8 @@ fn main() {
         "../web/src/client.tsx",
         "../insights/src/client.tsx",
         "../insights/src/client",
+        "../session-import/src/client.tsx",
+        "../session-import/src/client",
         "../assistant/src/todo/client.tsx",
         "../scheduler/src/client",
         "../scheduler/src/client.tsx",

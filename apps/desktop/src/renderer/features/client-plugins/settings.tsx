@@ -50,7 +50,9 @@ export function ClientPluginSettings(props: {
   const unavailable = <Banner status="warning" title={props.locale === 'en'
     ? 'This extension page is unavailable. Select a page from the navigation.'
     : props.locale === 'zh-TW' ? '此擴充功能頁面已不可用，請從導覽選擇頁面。' : '此扩展页面已不可用，请从导航选择页面。'} />;
-  const host = props.verified && props.epoch ? props.host : undefined;
+  // A verified catalog can precede the first lifecycle event. The Client runtime
+  // acquires and checks the current transport and Host epoch itself.
+  const host = props.verified ? props.host : undefined;
   const { runtime, session, report } = useClientHost(host);
   const entries = useClientSlots(runtime).filter((entry) => entry.slot === 'settings.page' && entry.label !== undefined);
   const hostKey = JSON.stringify([host?.profileId, host?.hostId, props.epoch]);

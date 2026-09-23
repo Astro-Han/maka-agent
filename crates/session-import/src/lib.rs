@@ -25,6 +25,7 @@ pub mod codex;
 pub mod intent;
 mod jsonl;
 pub mod opencode;
+pub mod plugin;
 pub mod remote;
 pub mod source;
 mod transcript;
