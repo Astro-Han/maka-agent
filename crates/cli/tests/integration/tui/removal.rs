@@ -62,8 +62,7 @@ fn deletion_confirms_cas_and_remote_retirement_preserves_recoverable_draft() {
     tui.wait_for("Local deletion");
     tui.click_text("Local deletion");
     tui.wait_for("Message…");
-    tui.send(b"\x10");
-    tui.wait_for("Delete session");
+    tui.filter_command("Delete session");
     tui.click_text("Delete session");
     tui.wait_for("Permanently deletes");
     tui.send(b"\r"); // Cancel is the initial focus.
@@ -74,8 +73,7 @@ fn deletion_confirms_cas_and_remote_retirement_preserves_recoverable_draft() {
             .unwrap()
             .is_some()
     );
-    tui.send(b"\x10");
-    tui.wait_for("Delete session");
+    tui.filter_command("Delete session");
     tui.click_text("Delete session");
     tui.wait_for("Permanently deletes");
     runtime.block_on(async {
@@ -105,8 +103,7 @@ fn deletion_confirms_cas_and_remote_retirement_preserves_recoverable_draft() {
     tui.wait_until(|s| {
         s.contains("Concurrent deletion target") && !s.contains("This session changed elsewhere.")
     });
-    tui.send(b"\x10");
-    tui.wait_for("Delete session");
+    tui.filter_command("Delete session");
     tui.click_text("Delete session");
     tui.wait_for("Permanently deletes");
     tui.click_last_text("Delete");
@@ -129,8 +126,7 @@ fn deletion_confirms_cas_and_remote_retirement_preserves_recoverable_draft() {
     tui.wait_for("Message…");
     tui.send(b"recover this local draft");
     tui.wait_for("recover this local draft");
-    tui.send(b"\x10");
-    tui.wait_for("Delete session");
+    tui.filter_command("Delete session");
     tui.click_text("Delete session");
     tui.wait_for("Permanently deletes");
     runtime.block_on(async {

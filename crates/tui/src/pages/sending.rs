@@ -461,6 +461,9 @@ mod tests {
             assert!(app.submission().is_none());
             app.apply(Action::Palette);
             app.palette = Some(index);
+            terminal
+                .draw(|frame| crate::view::draw(frame, &mut app))
+                .unwrap();
             assert_eq!(
                 app.input(crossterm::event::Event::Key(
                     crossterm::event::KeyEvent::new(

@@ -75,10 +75,13 @@ fn skills_candidates_page_without_execution_and_restore_exact_selection_before_s
     tui.wait_for("Candidate session");
     tui.click_text("Candidate session");
     tui.wait_for("No messages yet.");
-    tui.send(b"\x10");
-    tui.wait_for("Commands");
+    tui.filter_command("Skills");
     tui.click_text("Skills");
     tui.wait_for("Candidate 000");
+    assert!(
+        !tui.screen.snapshot().unwrap().cursor.visible,
+        "composer cursor must not leak through the Skills picker"
+    );
     tui.send(b"\x1b[C"); // Next provider page, not local list scrolling.
     tui.wait_for("Candidate 128");
     tui.click_text("Candidate 128");

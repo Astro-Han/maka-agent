@@ -210,8 +210,7 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
 }
 
 fn open(tui: &mut Pty, clear: bool) {
-    tui.send(b"\x10");
-    tui.wait_for("Clear API key");
+    tui.filter_command("API key");
     if clear {
         tui.click_text("Clear API key");
     } else {

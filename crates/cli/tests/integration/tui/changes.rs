@@ -274,8 +274,7 @@ fn code_mode_patch_stops_after_failure_and_keeps_real_tools_visible() {
             .screen
             .contains("Delete · later.txt")
     );
-    tui.send(b"\x10");
-    tui.wait_for("Show execution details");
+    tui.filter_command("Show execution details");
     tui.click_text("Show execution details");
     tui.wait_for("exec");
     tui.send(b"\x11");

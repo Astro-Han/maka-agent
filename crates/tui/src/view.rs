@@ -409,8 +409,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         crate::pages::interactions::draw(frame, app, area, base);
     } else if app.queue.edit.is_some() {
         queue::edit(frame, app, area, base);
-    } else if let Some(selected) = app.palette {
-        draw_palette(frame, app, area, base, selected);
+    } else if app.palette.is_some() {
+        crate::pages::commands::draw(frame, app, area, base);
     } else if app.tooltip_visible() {
         draw_tooltip(frame, app, area, base);
     }
@@ -811,44 +811,6 @@ fn page_lines(app: &App) -> Vec<Line<'static>> {
             .lines()
             .map(|line| Line::raw(line.to_owned()))
             .collect(),
-    }
-}
-
-fn draw_palette(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style, selected: usize) {
-    app.hits.clear();
-    let width = area.width.min(64).saturating_sub(4);
-    let height = (app.commands().len() as u16 + 2).min(area.height.saturating_sub(2));
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    app.modal_area = Some(popup);
-    clear_overlay(frame, popup);
-    let block = Block::bordered()
-        .title(app.i18n.text("palette-title"))
-        .style(base)
-        .border_style(Style::default().fg(app.theme.colors().accent));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-    let offset = (selected + 1).saturating_sub(inner.height as usize);
-    for (index, (action, key)) in app
-        .commands()
-        .into_iter()
-        .enumerate()
-        .skip(offset)
-        .take(inner.height as usize)
-    {
-        let row = Rect::new(inner.x, inner.y + (index - offset) as u16, inner.width, 1);
-        list_item(
-            frame,
-            app,
-            row,
-            &app.i18n.text(key),
-            action,
-            selected == index,
-        );
     }
 }
 

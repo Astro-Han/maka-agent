@@ -49,8 +49,7 @@ fn oauth_entry_uses_host_enrollment_mouse_keyboard_and_never_starts_on_dismiss()
     tui.click_text("◉ Host");
     tui.wait_for("Host epoch:");
     tui.click_text("▤ Workspace");
-    tui.send(b"\x10");
-    tui.wait_for("Sign in to a provider");
+    tui.filter_command("Sign in to a provider");
     tui.click_text("Sign in to a provider");
     tui.wait_for("Sign-in for this provider is disabled");
     tui.wait_for("Continue");
@@ -74,8 +73,7 @@ fn oauth_entry_uses_host_enrollment_mouse_keyboard_and_never_starts_on_dismiss()
     });
     tui.resize(100, 30);
     tui.wait_for("▤ Workspace");
-    tui.send(b"\x10");
-    tui.wait_for("Sign in to a provider");
+    tui.filter_command("Sign in to a provider");
     tui.click_text("Sign in to a provider");
     tui.wait_for("Choose a provider");
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
@@ -122,8 +120,7 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
         tui.click_text("◉ Host");
         tui.wait_for("Host epoch:");
         tui.click_text("▤ Workspace");
-        tui.send(b"\x10");
-        tui.wait_for("Sign in to a provider");
+        tui.filter_command("Sign in to a provider");
         tui.click_text("Sign in to a provider");
         tui.wait_for("Choose a provider.");
         custom_identity(&mut tui);
@@ -166,8 +163,7 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
         reopened.wait_for("Workspace");
         reopened.click_text("◉ Host");
         reopened.wait_for("Host epoch:");
-        reopened.send(b"\x10");
-        reopened.wait_for("View sign-in");
+        reopened.filter_command("View sign-in");
         reopened.click_text("View sign-in");
         reopened.wait_for("The outcome is unknown.");
         reopened.wait_for("Close   Check   Cancel");

@@ -85,7 +85,17 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
             .saturating_sub(prefix_width + count_width + controls + 1),
         1,
     );
-    let focused = app.palette.is_none() && !app.interactions.visible && app.queue.edit.is_none();
+    let focused = app.palette.is_none()
+        && app.theme.editor.is_none()
+        && app.attachments.dialog.is_none()
+        && app.skills.dialog.is_none()
+        && !app.branch.visible
+        && !app.revision.visible
+        && !app.recap.visible
+        && !app.interactions.visible
+        && app.management.dialog.is_none()
+        && app.onboarding.dialog.is_none()
+        && app.queue.edit.is_none();
     app.chat
         .view
         .search

@@ -208,8 +208,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
         .block_on(client.connection_catalog(Query::Start))
         .unwrap()["revision"]
         .clone();
-    reopened.send(b"\x10");
-    reopened.wait_for("Change service address");
+    reopened.filter_command("Change service address");
     reopened.click_text("Change service address");
     reopened.wait_for("Review");
     reopened.send(b"not a URL\r");
@@ -225,8 +224,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
             .unwrap()["revision"],
         before_endpoint
     );
-    reopened.send(b"\x10");
-    reopened.wait_for("Change service address");
+    reopened.filter_command("Change service address");
     reopened.click_text("Change service address");
     reopened.wait_for("Review");
     reopened.send(b"http://127.0.0.1:9/v2\r");
@@ -279,8 +277,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
         );
     });
     for (command, enabled) in [("Disable connection", false), ("Enable connection", true)] {
-        reopened.send(b"\x10");
-        reopened.wait_for(command);
+        reopened.filter_command(command);
         reopened.click_text(command);
         reopened.wait_for("Cancel");
         reopened.send(b"\t\r");
@@ -315,8 +312,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
             .unwrap();
     });
     reopened.wait_for("Default: model-0");
-    reopened.send(b"\x10");
-    reopened.wait_for("Remove connection");
+    reopened.filter_command("Remove connection");
     reopened.click_text("Remove connection");
     reopened.wait_for("Permanently removes");
     reopened.wait_for("Cancel");
@@ -328,8 +324,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
             .unwrap()["connectionCount"],
         18
     );
-    reopened.send(b"\x10");
-    reopened.wait_for("Remove connection");
+    reopened.filter_command("Remove connection");
     reopened.click_text("Remove connection");
     reopened.wait_for("Cancel");
     reopened.send(b"\t\r");

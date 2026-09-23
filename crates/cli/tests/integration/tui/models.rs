@@ -215,8 +215,7 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
     // Host defaults use catalog CAS, not the open session's revision.
     tui.send(b"default-keeps-draft");
     tui.wait_for("default-keeps-draft");
-    tui.send(b"\x10");
-    tui.wait_for("Default model");
+    tui.filter_command("Default model");
     tui.click_text("Default model");
     tui.wait_for("No default model");
     tui.wait_for("Alternate model");
@@ -237,8 +236,7 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
         assert_eq!(neighbor.llm_connection_id.as_deref(),default["connectionId"].as_str());
         client.session("managed").await.unwrap().unwrap().revision
     });
-    tui.send(b"\x10");
-    tui.wait_for("Default model");
+    tui.filter_command("Default model");
     tui.click_text("Default model");
     tui.wait_for("No default model");
     tui.wait_for("Alternate model · Current default");
@@ -257,8 +255,7 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
             alternate["connectionId"]
         );
     });
-    tui.send(b"\x10");
-    tui.wait_for("Default model");
+    tui.filter_command("Default model");
     tui.click_text("Default model");
     tui.wait_for("No default model");
     tui.wait_for("Current default");

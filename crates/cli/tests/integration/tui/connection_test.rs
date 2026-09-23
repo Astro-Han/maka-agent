@@ -23,9 +23,7 @@ use maka_protocol::Operation;
 use serde_json::json;
 
 fn open(tui: &mut Pty) {
-    tui.send(b"\x10");
-    tui.wait_for("Commands · Esc closes");
-    tui.wait_for("Test connection");
+    tui.filter_command("Test connection");
     tui.click_text("Test connection");
     tui.wait_for("incur usage");
     tui.wait_for("Cancel");
@@ -172,8 +170,7 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
         });
         tui.wait_for(name);
         if name == "Before menu open" {
-            tui.send(b"\x10");
-            tui.wait_for("Test connection");
+            tui.filter_command("Test connection");
         }
     }
     assert!(

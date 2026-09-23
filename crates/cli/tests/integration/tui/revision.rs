@@ -110,8 +110,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.send(b"Composer stays here");
     tui.wait_for("Composer stays here");
     tui.click_text("Original reply.");
-    tui.send(b"\x10");
-    tui.wait_for("Revise this turn");
+    tui.filter_command("Revise this turn");
     tui.click_text("Revise this turn");
     tui.wait_for("Input  1 / 2");
     tui.send("\x1b[200~中文 \x1b[201~".as_bytes());
@@ -181,8 +180,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     reopened.wait_for("Composer stays here");
     reopened.wait_for("Original reply.");
-    reopened.send(b"\x10");
-    reopened.wait_for("Continue revision");
+    reopened.filter_command("Continue revision");
     reopened.click_text("Continue revision");
     reopened.wait_for("Input  2 / 2");
     reopened.send(b"\x1b[200~revised \x1b[201~");
@@ -275,8 +273,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     );
     let mut recovered = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     recovered.wait_for("Original reply.");
-    recovered.send(b"\x10");
-    recovered.wait_for("Continue revision");
+    recovered.filter_command("Continue revision");
     recovered.click_text("Continue revision");
     recovered.wait_for("Result not confirmed.");
     recovered.click_text("Check result");

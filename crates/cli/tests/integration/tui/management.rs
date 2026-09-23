@@ -52,8 +52,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
     tui.click_text("Original session");
     tui.wait_for("Message…");
     tui.send(b"draft remains here");
-    tui.send(b"\x10");
-    tui.wait_for("Rename session");
+    tui.filter_command("Rename session");
     tui.click_text("Rename session");
     tui.wait_for("Cancel");
     tui.send("\x1b[200~我的新名称\x1b[201~".as_bytes());
@@ -80,8 +79,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
     assert!(tui.screen.snapshot().unwrap().screen.contains("我的新名称"));
     tui.send(b"\r\x1b"); // Disabled Save cannot overwrite the concurrent writer.
     tui.wait_until(|text| text.contains("Changed elsewhere") && !text.contains("Cancel"));
-    tui.send(b"\x10");
-    tui.wait_for("Rename session");
+    tui.filter_command("Rename session");
     tui.click_text("Rename session");
     tui.wait_for("Cancel");
     tui.send("\x1b[200~中文会话\x1b[201~".as_bytes());
@@ -94,8 +92,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
             .screen
             .contains("draft remains here")
     );
-    tui.send(b"\x10");
-    tui.wait_for("Archive session");
+    tui.filter_command("Archive session");
     tui.click_text("Archive session");
     tui.wait_for("History is kept.");
     tui.send(b"\r"); // Default focus is Cancel.
@@ -107,8 +104,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
             .unwrap()
             .is_archived
     );
-    tui.send(b"\x10");
-    tui.wait_for("Archive session");
+    tui.filter_command("Archive session");
     tui.click_text("Archive session");
     tui.wait_for("History is kept.");
     tui.send(b"\t\r");
@@ -125,8 +121,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
     tui.wait_for("中文会话 · Archived");
     tui.click_text("中文会话 · Archived");
     tui.wait_for("draft remains here");
-    tui.send(b"\x10");
-    tui.wait_for("Restore session");
+    tui.filter_command("Restore session");
     tui.click_text("Restore session");
     tui.wait_for("History is kept.");
     tui.send(b"\t\r");
@@ -142,8 +137,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
     });
     let moved = directory.path().join("中文 workspace");
     std::fs::create_dir(&moved).unwrap();
-    tui.send(b"\x10");
-    tui.wait_for("Change workspace");
+    tui.filter_command("Change workspace");
     tui.click_text("Change workspace");
     tui.wait_for("Absolute directory on the Host.");
     tui.send(format!("\x1b[200~{}/missing\x1b[201~\r", directory.path().display()).as_bytes());
@@ -190,8 +184,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
             }),
         )
         .unwrap();
-    tui.send(b"\x10");
-    tui.wait_for("Change project");
+    tui.filter_command("Change project");
     tui.click_text("Change project");
     tui.wait_for("Selected project");
     tui.send(b"\r"); // Opening the chooser does not implicitly select the first row.
@@ -246,8 +239,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
     tui.wait_for("This session changed elsewhere.");
     tui.send(b"\x1b");
     tui.wait_until(|text| text.contains("Concurrent project edit") && !text.contains("Cancel"));
-    tui.send(b"\x10");
-    tui.wait_for("Change project");
+    tui.filter_command("Change project");
     tui.click_text("Change project");
     tui.wait_for("Selected project");
     tui.click_text("Selected project");

@@ -167,6 +167,12 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
     let focused = app.focus == Focus::Composer
         && app.chat.view.search.is_none()
         && app.palette.is_none()
+        && app.theme.editor.is_none()
+        && app.attachments.dialog.is_none()
+        && app.skills.dialog.is_none()
+        && !app.branch.visible
+        && !app.revision.visible
+        && !app.recap.visible
         && !app.interactions.visible
         && app.management.dialog.is_none()
         && app.onboarding.dialog.is_none()

@@ -441,12 +441,10 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.click_text("ⓘ");
     tui.wait_for("Last input 9.5k / 128.0k"); // Diagnostics only, not current context occupancy.
     tui.click_text("ⓘ");
-    tui.send(b"\x10");
-    tui.wait_for("Show execution details");
+    tui.filter_command("Show execution details");
     tui.click_text("Show execution details");
     tui.wait_for("Completed"); // Durable terminal state is available in the opt-in trace.
-    tui.send(b"\x10");
-    tui.wait_for("Hide execution details");
+    tui.filter_command("Hide execution details");
     tui.click_text("Hide execution details");
     tui.wait_until(|screen| !screen.contains("Completed"));
     tui.wait_for("Read × 2 · Search × 1");
@@ -907,6 +905,13 @@ impl Pty {
     }
     fn send(&mut self, bytes: &[u8]) {
         self.master.write_all(bytes).unwrap();
+    }
+    fn filter_command(&mut self, label: &str) {
+        self.send(b"\x10");
+        self.wait_for("Search commands…");
+        self.send(format!("\x1b[200~{}\x1b[201~", label.to_lowercase()).as_bytes());
+        // Lowercase query differs from the command's title: await the filtered row.
+        self.wait_until(|screen| !screen.contains("Search commands…") && screen.contains(label));
     }
     fn click_text(&mut self, text: &str) {
         self.click_matching_text(text, false);

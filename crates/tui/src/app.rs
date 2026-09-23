@@ -147,7 +147,7 @@ pub struct App {
     // Local to this Root/client instance. Reconnects must not discard drafts.
     pub drafts: HashMap<String, crate::editor::Editor>,
     pub palette: Option<usize>,
-    palette_commands: Vec<(Action, &'static str)>,
+    pub command_palette: crate::pages::commands::State,
     pub hits: Vec<Hit>,
     pub modal_area: Option<Rect>,
     pub hover: Option<Action>,
@@ -195,7 +195,7 @@ impl App {
             sending: HashMap::new(),
             drafts: HashMap::new(),
             palette: None,
-            palette_commands: Vec::new(),
+            command_palette: Default::default(),
             hits: Vec::new(),
             modal_area: None,
             hover: None,
@@ -215,7 +215,7 @@ impl App {
     }
     pub fn commands(&self) -> Vec<(Action, &'static str)> {
         if self.palette.is_some() {
-            return self.palette_commands.clone();
+            return self.command_palette.filtered(&self.i18n);
         }
         let mut commands = vec![
             (Action::Visit(Route::Workspace), "command-workspace"),
@@ -655,7 +655,7 @@ impl App {
                 self.invalidate_editor_geometry();
                 self.hover = None;
                 // Background updates may disable an action, never move its hit target.
-                self.palette_commands = self.commands();
+                self.command_palette = crate::pages::commands::State::new(self.commands());
                 self.palette = Some(0);
             }
             Action::ToggleTheme => self.theme.cycle(),
@@ -1065,6 +1065,7 @@ impl App {
         }
         self.management.invalidate_geometry();
         self.skills.invalidate_geometry();
+        self.command_palette.invalidate();
         self.management.oauth.invalidate_identity_geometry();
         self.branch.invalidate_geometry();
         self.recap.invalidate_geometry();
@@ -1268,6 +1269,14 @@ impl App {
             }
             return self.interaction_input(event);
         }
+        if self.palette.is_some()
+            && !matches!(
+                event,
+                Event::Resize(_, _) | Event::FocusGained | Event::FocusLost
+            )
+        {
+            return self.palette_input(event);
+        }
         if self.palette.is_none()
             && let Event::Key(key) = &event
             && key.kind != KeyEventKind::Release
@@ -1401,35 +1410,6 @@ impl App {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
                     Some(Action::Quit)
-                } else if let Some(selected) = self.palette {
-                    match key.code {
-                        KeyCode::Esc => {
-                            self.palette = None;
-                            None
-                        }
-                        KeyCode::Up => {
-                            self.palette = Some(selected.saturating_sub(1));
-                            None
-                        }
-                        KeyCode::Down => {
-                            self.palette = Some((selected + 1).min(self.commands().len() - 1));
-                            None
-                        }
-                        KeyCode::Home => {
-                            self.palette = Some(0);
-                            None
-                        }
-                        KeyCode::End => {
-                            self.palette = Some(self.commands().len().saturating_sub(1));
-                            None
-                        }
-                        KeyCode::Enter => {
-                            let action = self.commands()[selected].0.clone();
-                            self.palette = None;
-                            Some(action)
-                        }
-                        _ => return (false, None),
-                    }
                 } else if key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.code == KeyCode::Char('f')
                     && matches!(self.navigation.current(), Route::Session(_))
@@ -1814,17 +1794,6 @@ impl App {
                             self.palette = None;
                         }
                         target
-                    }
-                    MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
-                        if self.palette.is_some() =>
-                    {
-                        let selected = self.palette.unwrap();
-                        self.palette = Some(if mouse.kind == MouseEventKind::ScrollDown {
-                            (selected + 1).min(self.commands().len() - 1)
-                        } else {
-                            selected.saturating_sub(1)
-                        });
-                        None
                     }
                     MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
                         if self.navigation.current() == Route::Connections

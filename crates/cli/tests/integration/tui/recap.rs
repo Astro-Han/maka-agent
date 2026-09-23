@@ -103,15 +103,13 @@ fn recap_uses_native_remote_preserves_draft_and_reads_saved_result_after_reopen(
     tui.click_text("Message…");
     tui.send(b"Keep this unsent draft");
     tui.wait_for("Keep this unsent draft");
-    tui.send(b"\x10");
-    tui.wait_for("Session recap");
+    tui.filter_command("Session recap");
     tui.click_text("Session recap");
     tui.wait_for("No recap has been saved");
     tui.send(b"\r"); // default focus closes; it cannot charge the model.
     tui.wait_until(|s| !s.contains("No recap has been saved"));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    tui.send(b"\x10");
-    tui.wait_for("Session recap");
+    tui.filter_command("Session recap");
     tui.click_text("Session recap");
     tui.wait_for("No recap has been saved");
     tui.click_text("Generate new");
@@ -152,8 +150,7 @@ fn recap_uses_native_remote_preserves_draft_and_reads_saved_result_after_reopen(
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     reopened.wait_for("Keep this unsent draft");
     reopened.wait_for("Original verified answer.");
-    reopened.send(b"\x10");
-    reopened.wait_for("Session recap");
+    reopened.filter_command("Session recap");
     reopened.click_text("Session recap");
     reopened.wait_for("Recap confirmed:");
     assert_eq!(calls.load(Ordering::SeqCst), 2);

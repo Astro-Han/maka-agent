@@ -76,8 +76,7 @@ fn host_directory_reference_survives_restart_and_sends_without_text_or_registrat
     tui.wait_for("Reference session");
     tui.click_text("Reference session");
     tui.wait_for("No messages yet.");
-    tui.send(b"\x10");
-    tui.wait_for("Host directories");
+    tui.filter_command("Host directories");
     tui.click_text("Host directories");
     tui.wait_for("Published folders");
     tui.click_text("Published folders");

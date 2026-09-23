@@ -203,20 +203,17 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Renamed project"); // Restored route re-queries after connection, not a false empty state.
     tui.click_text("Renamed project");
-    tui.send(b"\x10");
-    tui.wait_for("Rename project");
+    tui.filter_command("Rename project");
     tui.click_text("Rename project");
     tui.wait_for("Cancel");
     tui.send("\x1b[200~TUI 项目\x1b[201~\r".as_bytes());
     tui.wait_until(|text| text.contains("TUI 项目") && !text.contains("Cancel"));
-    tui.send(b"\x10");
-    tui.wait_for("Archive project");
+    tui.filter_command("Archive project");
     tui.click_text("Archive project");
     tui.wait_for("Archiving prevents");
     tui.send(b"\r"); // Default focus cancels instead of archiving.
     tui.wait_until(|text| !text.contains("Cancel") && text.contains("TUI 项目"));
-    tui.send(b"\x10");
-    tui.wait_for("Archive project");
+    tui.filter_command("Archive project");
     tui.click_text("Archive project");
     tui.wait_for("Archiving prevents");
     tui.wait_until(|text| {
@@ -225,8 +222,7 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
     });
     tui.click_last_text("Archive project");
     tui.wait_until(|text| text.contains("TUI 项目 · Archived") && !text.contains("Cancel"));
-    tui.send(b"\x10");
-    tui.wait_for("Restore project");
+    tui.filter_command("Restore project");
     tui.click_text("Restore project");
     tui.wait_for("Archiving prevents");
     tui.send(b"\t\r");
@@ -298,16 +294,14 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
         target
     });
     tui.click_text("TUI 项目");
-    tui.send(b"\x10");
-    tui.wait_for("Relink project");
+    tui.filter_command("Relink project");
     tui.click_text("Relink project");
     tui.wait_for("Replacement absolute directory");
     tui.send(format!("\x1b[200~{}/missing\x1b[201~\r", directory.path().display()).as_bytes());
     tui.wait_for("Relink this project?");
     tui.send(b"\r"); // Reviewing defaults to Cancel, without a write.
     tui.wait_until(|text| text.contains("TUI 项目") && !text.contains("Cancel"));
-    tui.send(b"\x10");
-    tui.wait_for("Relink project");
+    tui.filter_command("Relink project");
     tui.click_text("Relink project");
     tui.wait_for("Replacement absolute directory");
     tui.send(format!("\x1b[200~{}/missing\x1b[201~\r", directory.path().display()).as_bytes());
@@ -346,8 +340,7 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
         assert!(client.session(&session.id).await.unwrap().unwrap().revision > before.revision);
     });
     assert!(project_path.is_dir(), "relink changes metadata, not files");
-    tui.send(b"\x10");
-    tui.wait_for("Project locations");
+    tui.filter_command("Project locations");
     tui.click_text("Project locations");
     tui.wait_for("Preferred Host directory");
     tui.wait_for(browse_target.to_str().unwrap());

@@ -147,7 +147,9 @@ fn imported_observations_remain_readable_without_offering_executable_turn_action
     for message in ["Original imported question", "Original imported answer"] {
         tui.click_text(message);
         tui.send(b"\x10");
-        tui.wait_for("Commands · Esc closes");
+        tui.wait_for("Search commands…");
+        tui.send(b"branch from this turn");
+        tui.wait_for("No matching commands.");
         assert!(
             !tui.screen
                 .snapshot()

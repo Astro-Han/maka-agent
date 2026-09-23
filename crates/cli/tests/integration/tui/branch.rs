@@ -82,14 +82,12 @@ fn branch_preserves_selected_history_and_draft_and_reopens_by_original_receipt()
     tui.send(b"Preserved branch draft");
     tui.wait_for("Preserved branch draft");
     tui.click_text("Selected branch point");
-    tui.send(b"\x10");
-    tui.wait_for("Branch from this turn");
+    tui.filter_command("Branch from this turn");
     tui.click_text("Branch from this turn");
     tui.wait_for("same working directory.");
     tui.send(b"\r"); // Initial focus is Cancel.
     tui.wait_until(|s| !s.contains("same working directory."));
-    tui.send(b"\x10");
-    tui.wait_for("Branch from this turn");
+    tui.filter_command("Branch from this turn");
     tui.click_text("Branch from this turn");
     tui.wait_for("same working directory.");
     tui.click_text("Create branch");
@@ -138,8 +136,7 @@ fn branch_preserves_selected_history_and_draft_and_reopens_by_original_receipt()
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     reopened.wait_for("Preserved branch draft");
     reopened.wait_for("Later reply."); // Restored draft alone does not mean Host is connected.
-    reopened.send(b"\x10");
-    reopened.wait_for("Check session branch");
+    reopened.filter_command("Check session branch");
     reopened.click_text("Check session branch");
     reopened.wait_for("Result not yet confirmed.");
     reopened.click_text("Check result");

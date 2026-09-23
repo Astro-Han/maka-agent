@@ -20,6 +20,7 @@
 pub mod attachments;
 pub mod branch;
 pub mod chat;
+pub mod commands;
 pub mod connections;
 pub mod interactions;
 pub mod manage;

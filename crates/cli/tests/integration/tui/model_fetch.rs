@@ -210,8 +210,7 @@ fn row<'a>(page: &'a Value, id: &str) -> &'a Value {
         .unwrap()
 }
 fn open(tui: &mut Pty) {
-    tui.send(b"\x10");
-    tui.wait_for("Fetch models");
+    tui.filter_command("Fetch models");
     tui.click_text("Fetch models");
     tui.wait_for("Queries the currently configured service");
     tui.wait_for("Cancel");

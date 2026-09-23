@@ -44,8 +44,7 @@ fn ids(items: &[Value]) -> Vec<String> {
         .collect()
 }
 fn open(tui: &mut Pty) {
-    tui.send(b"\x10");
-    tui.wait_for("Enabled models");
+    tui.filter_command("Enabled models");
     tui.click_text("Enabled models");
     tui.wait_for("Search models");
     tui.wait_for("130 enabled.");

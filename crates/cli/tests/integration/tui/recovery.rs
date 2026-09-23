@@ -75,8 +75,7 @@ fn recover(after_acceptance: bool) {
             tui.send(b"\x1b[200~ storage offline edit\x1b[201~");
             tui.wait_for("storage offline edit");
             std::fs::remove_dir(&checkpoint).unwrap();
-            tui.send(b"\x10");
-            tui.wait_for("Retry original message");
+            tui.filter_command("Retry original message");
             assert!(proxy.requests.lock().unwrap().is_empty(), "storage recovery must not automatically resend");
             tui.click_text("Retry original message");
         }
@@ -105,8 +104,7 @@ fn recover(after_acceptance: bool) {
         tui.wait_for("plus new edits");
         tui.wait_for("Delivery uncertain");
         assert_eq!(proxy.requests.lock().unwrap().len(), 1, "reopening must not automatically replay");
-        tui.send(b"\x10");
-        tui.wait_for("Retry original message");
+        tui.filter_command("Retry original message");
         // wait_for already waits for a complete synchronized frame. An unrelated
         // last command may be below the viewport when a live turn adds actions.
         tui.click_text("Retry original message");

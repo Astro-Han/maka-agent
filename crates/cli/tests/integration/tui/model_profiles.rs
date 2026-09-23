@@ -23,8 +23,7 @@ use maka_protocol::Operation;
 use serde_json::{Value, json};
 
 fn open(tui: &mut Pty) {
-    tui.send(b"\x10");
-    tui.wait_for("Model settings");
+    tui.filter_command("Model settings");
     tui.click_text("Model settings");
     tui.wait_for("Choose a model");
     tui.send(b"fixture-model");

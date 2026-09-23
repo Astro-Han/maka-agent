@@ -76,8 +76,7 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
     tui.wait_for("Attachment session");
     tui.click_text("Attachment session");
     tui.wait_for("No messages yet.");
-    tui.send(b"\x10");
-    tui.wait_for("Attach files");
+    tui.filter_command("Attach files");
     tui.click_text("Attach files");
     tui.wait_for("Local files");
     tui.wait_for("attachment 中文.txt");
