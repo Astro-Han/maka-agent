@@ -54,6 +54,22 @@ This plugin provides manual generation and durable inspection. Automatic idle
 recaps, Daily review, and the old TS `session.recap.generate` protocol operation
 are not implemented by this plugin. No broad background model grant is created.
 
+## Native terminal client
+
+In a Session, press Ctrl+P and choose **Session recap**. Opening the dialog only
+reads the saved result. **Generate new** explicitly uses the Session's selected
+model and may incur charges. Esc or an outside click closes the dialog without
+editing or sending the composer draft. Arrow keys scroll longer results.
+
+The TUI writes the original operation identity to its Root-bound checkpoint
+before generation. After disconnect or restart, **Resolve pending recap** reads
+Host state; **Retry original** explicitly reuses that identity. It does not
+silently start a replacement request. A recorded Pending receipt remains an
+unconfirmed result; generating a new recap is a separate explicit request.
+The dialog calls the existing standalone `manage` Remote on the current Client
+connection and closes its document after each request. It implements no summary,
+model, credential, or permission policy.
+
 ## Verification
 
 - `cargo test -p maka-session-recap --lib`: persistence/retry, restart, concurrent

@@ -61,6 +61,7 @@ pub enum Action {
     Copy(crate::pages::chat::render::selection::CopyMode),
     CopyFile(String),
     Branch(crate::pages::branch::Command),
+    Recap(crate::pages::recap::Command),
     Attachment(crate::pages::attachments::Command),
     References,
     Revision(crate::pages::revision::Command),
@@ -129,6 +130,7 @@ pub struct App {
     pub inbox: crate::pages::sessions::Sessions,
     pub management: crate::pages::manage::Management,
     pub branch: crate::pages::branch::State,
+    pub recap: crate::pages::recap::State,
     pub attachments: crate::pages::attachments::State,
     pub directories:
         std::collections::BTreeMap<String, Vec<maka_protocol::turn::DirectoryReference>>,
@@ -177,6 +179,7 @@ impl App {
             inbox: crate::pages::sessions::Sessions::inbox(),
             management: Default::default(),
             branch: Default::default(),
+            recap: Default::default(),
             attachments: Default::default(),
             directories: Default::default(),
             revision: Default::default(),
@@ -230,6 +233,7 @@ impl App {
         ];
         commands.extend(self.management_commands());
         commands.extend(self.branch_commands());
+        commands.extend(self.recap_commands());
         commands.extend(self.revision_commands());
         commands.extend(self.oauth_commands());
         if let Some(action) = self.default_model_action() {
@@ -440,6 +444,7 @@ impl App {
     pub fn begin_frame(&mut self, area: Rect) {
         self.attachments.begin_frame();
         self.branch.invalidate_geometry();
+        self.recap.invalidate_geometry();
         self.revision.begin_frame();
         for item in &self.sessions.items {
             self.tabs.rename(&item.id, &item.name);
@@ -504,6 +509,7 @@ impl App {
     pub fn tooltip_visible(&self) -> bool {
         self.theme.editor.is_none()
             && !self.branch.visible
+            && !self.recap.visible
             && !self.revision.visible
             && self.attachments.dialog.is_none()
             && self.palette.is_none()
@@ -579,6 +585,7 @@ impl App {
             Action::Attachment(command) => return self.attachment_action(command),
             Action::References => self.open_references(),
             Action::Branch(command) => return self.branch_action(command),
+            Action::Recap(command) => return self.recap_action(command),
             Action::Revision(command) => return self.revision_action(command),
             Action::Onboard(command) => return self.onboarding_action(command),
             Action::Project(command) => return self.project_action(command),
@@ -773,6 +780,9 @@ impl App {
         }
         if let Action::Revision(command) = action {
             return self.revision_enabled(command);
+        }
+        if let Action::Recap(command) = action {
+            return self.recap_enabled(command);
         }
         if let Action::Branch(command) = action {
             return self.branch_enabled(command);
@@ -1030,6 +1040,7 @@ impl App {
         self.management.invalidate_geometry();
         self.management.oauth.invalidate_identity_geometry();
         self.branch.invalidate_geometry();
+        self.recap.invalidate_geometry();
         self.revision.invalidate_geometry();
         self.onboarding.invalidate_geometry();
         self.tabs.invalidate_geometry();
@@ -1117,6 +1128,7 @@ impl App {
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && (self.theme.editor.is_some()
                 || self.branch.visible
+                || self.recap.visible
                 || self.revision.visible
                 || self.attachments.dialog.is_some()
                 || self.palette.is_some()
@@ -1139,6 +1151,8 @@ impl App {
                 Some(Action::Manage(crate::pages::manage::Command::Close))
             } else if self.revision.visible {
                 Some(Action::Revision(crate::pages::revision::Command::Close))
+            } else if self.recap.visible {
+                Some(Action::Recap(crate::pages::recap::Command::Close))
             } else if self.branch.visible {
                 Some(Action::Branch(crate::pages::branch::Command::Close))
             } else if self.onboarding.dialog.is_some() {
@@ -1173,6 +1187,9 @@ impl App {
         }
         if self.revision.visible && !matches!(event, Event::Resize(_, _)) {
             return self.revision_input(event);
+        }
+        if self.recap.visible && !matches!(event, Event::Resize(_, _)) {
+            return self.recap_input(event);
         }
         if self.branch.visible && !matches!(event, Event::Resize(_, _)) {
             return self.branch_input(event);
