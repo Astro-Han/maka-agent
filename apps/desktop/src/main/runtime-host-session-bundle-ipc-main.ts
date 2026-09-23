@@ -17,15 +17,16 @@
  * under the License.
  */
 
-import { createHash } from 'node:crypto';
 import type { IpcMain } from 'electron';
 import type { SessionChangedReason } from '@maka/core/session';
 import { RuntimeHostOperationError } from '@maka/runtime-host/client';
+import type { WorkspaceTarget } from '@maka/runtime-host/protocol';
 import type {
   SessionBundleExportIpcResult,
   SessionBundleFailure,
   SessionBundleFailureReason,
   SessionBundleImportIpcResult,
+  SessionBundlePreviewIpcResult,
 } from '../preload/bridge-contract.js';
 
 /**
@@ -38,6 +39,9 @@ import type {
  * require stopping the Host the user is looking at.
  */
 type SessionBundleClient = {
+  previewSessionBundle(sessionId: string): Promise<{
+    readonly sessionCount: number; readonly subtreeDigest: string;
+  }>;
   exportSessionBundle(input: {
     readonly sessionId: string;
     readonly destination: string;
@@ -45,6 +49,7 @@ type SessionBundleClient = {
   }): Promise<{ readonly sessionCount: number; readonly compressedBytes: number }>;
   importSessionBundle(input: {
     readonly source: string;
+    readonly workspace: WorkspaceTarget;
   }): Promise<{ readonly sessionCount: number; readonly artifactFiles: number }>;
 };
 
@@ -75,11 +80,18 @@ export function registerRuntimeHostSessionBundleIpc(
   deps: RuntimeHostSessionBundleIpcDeps,
   ipcMain: { handle(channel: string, listener: Parameters<IpcMain['handle']>[1]): void },
 ): void {
+  ipcMain.handle('session-bundle:preview', async (_event, sessionId: string) => {
+    try {
+      return { ok: true, ...await deps.client.previewSessionBundle(sessionId) } satisfies SessionBundlePreviewIpcResult;
+    } catch (error) {
+      return failure(error) satisfies SessionBundlePreviewIpcResult;
+    }
+  });
   ipcMain.handle('session-bundle:export', async (_event, ...args: unknown[]) => {
-    const [sessionId, suggestedName, confirmedSubtree] = args as [
+    const [sessionId, suggestedName, expectedSubtreeDigest] = args as [
       string,
       string,
-      readonly string[] | undefined,
+      string,
     ];
     const picked = await deps.mainWindowController.showSaveDialog({
       defaultPath: `${bundleFileName(suggestedName)}.${BUNDLE_EXTENSION}`,
@@ -92,12 +104,7 @@ export function registerRuntimeHostSessionBundleIpc(
       const result = await deps.client.exportSessionBundle({
         sessionId,
         destination: picked.filePath,
-        // The digest is computed here rather than sent from the renderer: this
-        // is the first place the ids are the Host's own, and it is the last
-        // place before the protocol frame, which only carries the 64 characters.
-        ...(confirmedSubtree
-          ? { expectedSubtreeDigest: subtreeDigest(confirmedSubtree) }
-          : {}),
+        expectedSubtreeDigest,
       });
       return {
         ok: true,
@@ -119,7 +126,18 @@ export function registerRuntimeHostSessionBundleIpc(
       return { ok: false, reason: 'canceled' } satisfies SessionBundleImportIpcResult;
     }
     try {
-      const result = await deps.client.importSessionBundle({ source });
+      const destination = await deps.mainWindowController.showOpenDialog({
+        title: 'Workspace for imported sessions',
+        properties: ['openDirectory'],
+      });
+      const path = destination.filePaths[0];
+      if (destination.canceled || !path) {
+        return { ok: false, reason: 'canceled' } satisfies SessionBundleImportIpcResult;
+      }
+      const result = await deps.client.importSessionBundle({
+        source,
+        workspace: { kind: 'host_path', path },
+      });
       // The Host republishes the catalog, but the desktop shell keeps its own
       // list and only reads again when told.
       // No ids: the result is a count, because a list that grows with the
@@ -149,13 +167,6 @@ function bundleFileName(name: unknown): string {
     .slice(0, 80)
     .trim();
   return proposed.length > 0 ? proposed : 'maka-session';
-}
-
-/** Must match the Host: sorted, newline-joined, hex `sha256`. */
-function subtreeDigest(sessionIds: readonly string[]): string {
-  return createHash('sha256')
-    .update([...sessionIds].sort().join('\n'))
-    .digest('hex');
 }
 
 function failure(error: unknown): SessionBundleFailure {

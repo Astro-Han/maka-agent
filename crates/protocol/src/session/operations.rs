@@ -24,6 +24,9 @@ pub fn supports(operation: Operation) -> bool {
     matches!(
         operation,
         Operation::SessionCreate
+            | Operation::SessionBundlePreview
+            | Operation::SessionBundleExport
+            | Operation::SessionBundleImport
             | Operation::SessionBranchCreate
             | Operation::SessionRevisionCreate
             | Operation::SessionRevisionAbandon
@@ -43,6 +46,15 @@ pub fn supports(operation: Operation) -> bool {
 
 pub fn decode_input(operation: Operation, value: &Value) -> crate::Result<Value> {
     match operation {
+        Operation::SessionBundlePreview => {
+            bundle::decode_preview(value)?;
+        }
+        Operation::SessionBundleExport => {
+            bundle::decode_export(value)?;
+        }
+        Operation::SessionBundleImport => {
+            bundle::decode_import(value)?;
+        }
         Operation::SessionRemove => {
             decode_session_remove_input(value)?;
         }
@@ -91,7 +103,13 @@ pub fn decode_input(operation: Operation, value: &Value) -> crate::Result<Value>
 }
 
 pub fn decode_output(operation: Operation, value: &Value) -> crate::Result<Value> {
-    if operation == Operation::SessionRemove {
+    if operation == Operation::SessionBundlePreview {
+        bundle::decode_previewed(value)?;
+    } else if operation == Operation::SessionBundleExport {
+        bundle::decode_exported(value)?;
+    } else if operation == Operation::SessionBundleImport {
+        bundle::decode_imported(value)?;
+    } else if operation == Operation::SessionRemove {
         decode_session_remove_result(value)?;
     } else if operation == Operation::SessionRemovePreview {
         decode_session_remove_preview_result(value)?;
@@ -191,6 +209,9 @@ pub const CONFIGURATION_ERRORS: &[OperationErrorCode] = &[
 
 pub fn errors(operation: Operation) -> Option<&'static [OperationErrorCode]> {
     match operation {
+        Operation::SessionBundlePreview
+        | Operation::SessionBundleExport
+        | Operation::SessionBundleImport => Some(bundle::ERRORS),
         Operation::SessionBranchCreate
         | Operation::SessionRevisionCreate
         | Operation::SessionRevisionAbandon

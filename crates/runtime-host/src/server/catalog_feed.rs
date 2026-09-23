@@ -50,7 +50,14 @@ impl CatalogFeed {
     }
 
     pub(crate) async fn publish_session(&self, session_id: &str) -> Result<(), HostError> {
-        self.cursor.lock().await.publish(&self.changes, session_id)
+        self.cursor
+            .lock()
+            .await
+            .publish(&self.changes, Some(session_id))
+    }
+
+    pub(super) async fn publish_all(&self) -> Result<(), HostError> {
+        self.cursor.lock().await.publish(&self.changes, None)
     }
 
     /// Processes one bounded page. True asks the connection loop to schedule
@@ -71,7 +78,7 @@ impl CatalogFeed {
         let mut seen = HashSet::new();
         for (sequence, session_id) in rows.iter().take(PAGE_SIZE) {
             if seen.insert(session_id) {
-                cursor.publish(&self.changes, session_id)?;
+                cursor.publish(&self.changes, Some(session_id))?;
             }
             cursor.after = *sequence;
         }
@@ -86,15 +93,17 @@ impl Cursor {
     fn publish(
         &mut self,
         changes: &broadcast::Sender<Value>,
-        session_id: &str,
+        session_id: Option<&str>,
     ) -> Result<(), HostError> {
         if self.revision == MAX_NOTICE_REVISION {
             return Err("session notice revision exhausted".into());
         }
         self.revision += 1;
-        let _ = changes.send(json!({
-            "kind": "session.catalog.changed", "revision": self.revision, "sessionId": session_id,
-        }));
+        let mut notice = json!({"kind": "session.catalog.changed", "revision": self.revision});
+        if let Some(id) = session_id {
+            notice["sessionId"] = id.into();
+        }
+        let _ = changes.send(notice);
         Ok(())
     }
 }

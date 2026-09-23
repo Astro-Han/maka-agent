@@ -18,7 +18,6 @@
  */
 
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import test from 'node:test';
 import type { IpcMain } from 'electron';
 import { RuntimeHostOperationError } from '@maka/runtime-host/client';
@@ -48,7 +47,7 @@ test('writes to the picked destination and reports what travelled', async () => 
 
   const result = await ipc.invoke('session-bundle:export', 'session-1', 'Hello');
 
-  assert.deepEqual(asked, [{ sessionId: 'session-1', destination: '/picked/Hello.maka-session' }]);
+  assert.deepEqual(asked, [{ sessionId: 'session-1', destination: '/picked/Hello.maka-session', expectedSubtreeDigest: undefined }]);
   // The count is the subtree, not one: a bundle rooted at a Session carries the
   // subagent conversations under it, and the page says so.
   assert.deepEqual(result, {
@@ -80,13 +79,17 @@ test('closing the save dialog asks the Host for nothing', async () => {
   assert.equal(called, false, 'a cancelled dialog is a decision, not a request');
 });
 
-test('publishes each imported Session so the shell reads the catalog again', async () => {
+test('binds imported sessions to the selected workspace and invalidates the catalog once', async () => {
   const events: Array<{ reason: string; sessionId?: string }> = [];
+  const calls: unknown[] = [];
   const ipc = ipcHarness();
   registerRuntimeHostSessionBundleIpc(
     deps({
       client: {
-        importSessionBundle: async () => ({ sessionCount: 2, artifactFiles: 3 }),
+        importSessionBundle: async (input) => {
+          calls.push(input);
+          return { sessionCount: 2, artifactFiles: 3 };
+        },
       },
       dialog: { open: { canceled: false, filePaths: ['/picked/bundle.maka-session'] } },
       onSessionsChanged: (reason, sessionId) => events.push({ reason, ...(sessionId ? { sessionId } : {}) }),
@@ -97,6 +100,10 @@ test('publishes each imported Session so the shell reads the catalog again', asy
   const result = await ipc.invoke('session-bundle:import');
 
   assert.deepEqual(result, { ok: true, sessionCount: 2 });
+  assert.deepEqual(calls, [{
+    source: '/picked/bundle.maka-session',
+    workspace: { kind: 'host_path', path: '/selected/workspace' },
+  }]);
   // The Host republishes its own catalog; the desktop keeps a separate list and
   // only re-reads when told, so an imported task is invisible without this. No
   // id: a list that grows with the subtree can outgrow a frame after the
@@ -157,18 +164,22 @@ function deps(input: {
   dialog?: {
     save?: { canceled: boolean; filePath?: string };
     open?: { canceled: boolean; filePaths: string[] };
+    workspace?: { canceled: boolean; filePaths: string[] };
   };
   onSessionsChanged?: (reason: string, sessionId?: string) => void;
 }): RuntimeHostSessionBundleIpcDeps {
   return {
     client: {
+      previewSessionBundle: async () => ({ sessionCount: 1, subtreeDigest: '0'.repeat(64) }),
       exportSessionBundle: async () => ({ sessionCount: 0, compressedBytes: 0 }),
       importSessionBundle: async () => ({ sessionCount: 0, artifactFiles: 0 }),
       ...input.client,
     },
     mainWindowController: {
       showSaveDialog: async () => input.dialog?.save ?? { canceled: true },
-      showOpenDialog: async () => input.dialog?.open ?? { canceled: true, filePaths: [] },
+      showOpenDialog: async (options) => options.properties?.includes('openDirectory')
+        ? input.dialog?.workspace ?? { canceled: false, filePaths: ['/selected/workspace'] }
+        : input.dialog?.open ?? { canceled: true, filePaths: [] },
     },
     emitSessionsChanged: (reason, sessionId) => input.onSessionsChanged?.(reason, sessionId),
   };
@@ -199,30 +210,34 @@ test('proposes a filename a task name cannot steer', () => {
   assert.ok(bundleFileName('x'.repeat(500)).length <= 80, 'bounded for the filesystem');
 });
 
-test('the digest it sends is over the ids the Host knows', async () => {
+test('passes the Host preview unchanged through export and stops when workspace selection is canceled', async () => {
   let sent: unknown;
   const ipc = ipcHarness();
   registerRuntimeHostSessionBundleIpc(
     deps({
       client: {
+        previewSessionBundle: async (id) => {
+          assert.equal(id, 'root');
+          return { sessionCount: 3, subtreeDigest: 'a'.repeat(64) };
+        },
+        importSessionBundle: async () => { throw new Error('canceled import must not reach Host'); },
         exportSessionBundle: async (input) => {
           sent = input.expectedSubtreeDigest;
           return { sessionCount: 2, compressedBytes: 1 };
         },
       },
-      dialog: { save: { canceled: false, filePath: '/picked/Hello.maka-session' } },
+      dialog: {
+        save: { canceled: false, filePath: '/picked/Hello.maka-session' },
+        open: { canceled: false, filePaths: ['/picked/source.maka-session'] },
+        workspace: { canceled: true, filePaths: [] },
+      },
     }),
     ipc,
   );
 
-  await ipc.invoke('session-bundle:export', 'root', 'Hello', ['child', 'root']);
-
-  // Sorted and newline-joined, so the order a walk happened to produce cannot
-  // change it, and over the Host's own ids -- a digest taken further upstream
-  // would be over host-scoped ids and could never match what the Host fenced.
-  assert.equal(
-    sent,
-    createHash('sha256').update('child\nroot').digest('hex'),
-    'both sides must hash the same thing',
-  );
+  const preview = await ipc.invoke('session-bundle:preview', 'root');
+  assert.deepEqual(preview, { ok: true, sessionCount: 3, subtreeDigest: 'a'.repeat(64) });
+  await ipc.invoke('session-bundle:export', 'root', 'Hello', 'a'.repeat(64));
+  assert.equal(sent, 'a'.repeat(64));
+  assert.deepEqual(await ipc.invoke('session-bundle:import'), { ok: false, reason: 'canceled' });
 });

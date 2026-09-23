@@ -92,7 +92,9 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
     const tui = await connectClient(root);
     try {
       const catalogChanged = new Promise<string>((resolve) => {
-        tui.subscribeSessionCatalogChanges(({ sessionId }) => resolve(sessionId));
+        tui.subscribeSessionCatalogChanges(({ sessionId }) => {
+          if (sessionId) resolve(sessionId);
+        });
       });
       const createInput: SessionCreateInput = {
         sessionId: 'stable-session',

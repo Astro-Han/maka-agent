@@ -5099,6 +5099,7 @@ dependencies = [
 name = "maka-runtime-host"
 version = "0.2.0"
 dependencies = [
+ "async-compression",
  "base64 0.22.1",
  "cap-fs-ext",
  "cap-std",

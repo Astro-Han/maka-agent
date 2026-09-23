@@ -46,22 +46,15 @@ export type SessionBundleImportOutcome =
   | { readonly ok: false; readonly reason: SessionBundleFailureReason; readonly detail?: string };
 
 export interface SessionBundleServices {
+  previewBundle(sessionId: string): Promise<
+    | { readonly ok: true; readonly sessionCount: number; readonly subtreeDigest: string }
+    | { readonly ok: false; readonly reason: SessionBundleFailureReason; readonly detail?: string }
+  >;
   /** Picks a destination, then writes the Session and its subagent subtree. */
   exportBundle(input: {
     readonly sessionId: string;
     readonly suggestedName: string;
-    /**
-     * The Session ids the user was shown, root included.
-     *
-     * Read from the catalog this renderer has; the save dialog opens, and only
-     * then does the Host discover and fence the real subtree. Another client
-     * can finish spawning a child in that gap, so the file would hold Sessions
-     * nobody was asked about. These become a digest at the boundary where the
-     * ids are already the Host's own, and the Host compares it against what it
-     * fenced -- a digest, because two subtrees of the same size are not the
-     * same subtree.
-     */
-    readonly confirmedSubtree?: readonly string[];
+    readonly expectedSubtreeDigest: string;
   }): Promise<SessionBundleExportOutcome>;
   /** Picks a `.maka-session` file and merges it into this workspace. */
   importBundle(): Promise<SessionBundleImportOutcome>;

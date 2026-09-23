@@ -24,6 +24,7 @@ use super::{
 };
 use crate::{EventLog, StoreError, sequence_number};
 use sqlx::{Connection, SqliteConnection};
+use std::{io, time::Duration};
 use tokio::io::AsyncWrite;
 
 /// Inventory and checksum of a complete uncompressed transfer, not permission
@@ -47,7 +48,9 @@ impl EventLog {
         let (root, expected) = (root.to_owned(), expected_subtree_digest.to_owned());
         self.connection.read(move |db| Box::pin(async move {
             let mut tx = db.begin().await?;
-            let result = async {
+            // Bound snapshot ownership even when a reader keeps making tiny
+            // progress, or the caller disappears without cancelling owned work.
+            let result = tokio::time::timeout(Duration::from_secs(300), async {
                 let inventory = super::inventory(&mut tx, &root).await?;
                 inventory.verify_confirmation(&expected)?;
                 require_idle(&mut tx, &inventory).await?;
@@ -68,7 +71,9 @@ impl EventLog {
                 accounting(&mut tx, &closure, &mut writer).await?;
                 let (output, bytes, digest) = writer.finish().await?;
                 Ok((output, BundleSummary { inventory, bytes, digest }))
-            }.await;
+            }).await.unwrap_or_else(|_| Err(StoreError::Io(io::Error::new(
+                io::ErrorKind::TimedOut, "Session bundle export deadline exceeded",
+            )).into()));
             tx.rollback().await?;
             Ok(result)
         })).await?

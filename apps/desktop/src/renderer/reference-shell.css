@@ -137,8 +137,3 @@
 .maka-export-name {
   font-size: var(--font-size-base);
 }
-
-.maka-export-carries {
-  font-size: var(--font-size-sm);
-  color: var(--muted-foreground);
-}

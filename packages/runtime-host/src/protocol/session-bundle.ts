@@ -24,7 +24,9 @@ import {
   requireShapedRecord,
   requireUtf8String,
 } from './codec.js';
-import { defineHostPathOperation } from './operation-spec.js';
+import { defineHostPathOperation, defineOperation } from './operation-spec.js';
+import { invalidProtocolFrame } from './errors.js';
+import { decodeHostPath, decodeWorkspaceTarget, type WorkspaceTarget } from './workspace.js';
 
 /** A destination or source path, named on the Host's filesystem. */
 export const SESSION_BUNDLE_PATH_MAX_BYTES = 4 * 1024;
@@ -48,6 +50,7 @@ const BUNDLE_ERRORS = [
   // The subtree changed between what the caller confirmed and what was fenced.
   'candidate_set_stale',
   'persistence_failed',
+  'commit_outcome_unknown',
   'internal_failure',
 ] as const;
 
@@ -58,12 +61,7 @@ export interface SessionBundleExportInput {
   /**
    * Digest of the subtree the caller told the user this would carry.
    *
-   * `sha256` over the Session ids, sorted and newline-joined, root included.
-   * The caller reads them from the catalog it holds and the Host discovers the
-   * real subtree later, under its fence; a child finishing in that gap would
-   * put Sessions in the file that nobody was asked about. A digest rather than
-   * a count because two subtrees of the same size are not the same subtree,
-   * and rather than the ids themselves because this has to stay bounded.
+   * Returned by session-bundle.preview. Export rejects a changed subtree.
    */
   readonly expectedSubtreeDigest?: string;
 }
@@ -77,6 +75,8 @@ export interface SessionBundleExportResult {
 export interface SessionBundleImportInput {
   /** Absolute path of the `.maka-session` file to read. */
   readonly source: string;
+  /** Destination binding; source execution settings are never imported as grants. */
+  readonly workspace: WorkspaceTarget;
 }
 
 /**
@@ -93,6 +93,29 @@ export interface SessionBundleImportResult {
 }
 
 export const SESSION_BUNDLE_OPERATION_SPECS = {
+  'session-bundle.preview': defineOperation<
+    { readonly sessionId: string },
+    { readonly sessionCount: number; readonly subtreeDigest: string },
+    (typeof BUNDLE_ERRORS)[number]
+  >({
+    mode: 'query',
+    availability: 'ready',
+    errors: BUNDLE_ERRORS,
+    decodeInput: (value) => {
+      const record = requireExactRecord(value, 'Session bundle preview input', ['sessionId']);
+      return { sessionId: requireEntityId(record.sessionId, 'Session id') };
+    },
+    decodeOutput: (value) => {
+      const record = requireExactRecord(value, 'Session bundle preview result', [
+        'sessionCount',
+        'subtreeDigest',
+      ]);
+      return {
+        sessionCount: requireCount(record.sessionCount, 'Session bundle Session count'),
+        subtreeDigest: decodeDigest(record.subtreeDigest),
+      };
+    },
+  }),
   // Both name paths on the Host's filesystem: the desktop picks them with a
   // native dialog, which is the Host's machine in the local case and would be
   // the remote one otherwise.
@@ -129,18 +152,14 @@ export function decodeSessionBundleExportInput(value: unknown): SessionBundleExp
   );
   return {
     sessionId: requireEntityId(record.sessionId, 'Session id'),
-    destination: requireUtf8String(
+    destination: decodeBundlePath(
       record.destination,
       'Session bundle destination',
       SESSION_BUNDLE_PATH_MAX_BYTES,
     ),
     ...(Object.hasOwn(record, 'expectedSubtreeDigest')
       ? {
-          expectedSubtreeDigest: requireUtf8String(
-            record.expectedSubtreeDigest,
-            'Session bundle expected subtree digest',
-            SESSION_BUNDLE_DIGEST_MAX_BYTES,
-          ),
+          expectedSubtreeDigest: decodeDigest(record.expectedSubtreeDigest),
         }
       : {}),
   };
@@ -158,13 +177,10 @@ export function decodeSessionBundleExportResult(value: unknown): SessionBundleEx
 }
 
 export function decodeSessionBundleImportInput(value: unknown): SessionBundleImportInput {
-  const record = requireExactRecord(value, 'Session bundle import input', ['source']);
+  const record = requireExactRecord(value, 'Session bundle import input', ['source', 'workspace']);
   return {
-    source: requireUtf8String(
-      record.source,
-      'Session bundle source',
-      SESSION_BUNDLE_PATH_MAX_BYTES,
-    ),
+    workspace: decodeWorkspaceTarget(record.workspace),
+    source: decodeBundlePath(record.source, 'Session bundle source', SESSION_BUNDLE_PATH_MAX_BYTES),
   };
 }
 
@@ -177,4 +193,16 @@ export function decodeSessionBundleImportResult(value: unknown): SessionBundleIm
     sessionCount: requireCount(record.sessionCount, 'Session bundle Session count'),
     artifactFiles: requireCount(record.artifactFiles, 'Session bundle artifact files'),
   };
+}
+
+function decodeDigest(value: unknown): string {
+  const digest = requireUtf8String(value, 'Subtree digest', SESSION_BUNDLE_DIGEST_MAX_BYTES);
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw invalidProtocolFrame('Invalid subtree digest');
+  return digest;
+}
+
+function decodeBundlePath(value: unknown, label: string, maxBytes: number): string {
+  const path = decodeHostPath(value, label, maxBytes);
+  if (path.includes('\0')) throw invalidProtocolFrame(`${label} contains NUL`);
+  return path;
 }

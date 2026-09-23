@@ -148,6 +148,8 @@ const MAX_OPTIMISTIC_ATTEMPTS = 3;
 const MAX_SESSION_REVISION_ATTEMPTS = 8;
 const MAX_PRICING_SNAPSHOT_ATTEMPTS = 3;
 const RUNTIME_HOST_RETIREMENT_TIMEOUT_MS = 15_000;
+// A timed-out waiter does not cancel or retry accepted bundle publication.
+const SESSION_BUNDLE_TRANSFER_TIMEOUT_MS = 15 * 60_000;
 
 export type DesktopSessionConfigurationPatch = SessionConfigurationPatch;
 
@@ -944,18 +946,25 @@ export class DesktopRuntimeHostClient {
     return result;
   }
 
+  previewSessionBundle(sessionId: string): Promise<{
+    readonly sessionCount: number; readonly subtreeDigest: string;
+  }> {
+    return this.request("session-bundle.preview", { sessionId }, 30_000);
+  }
+
   exportSessionBundle(input: {
     readonly sessionId: string;
     readonly destination: string;
     readonly expectedSubtreeDigest?: string;
   }): Promise<{ readonly sessionCount: number; readonly compressedBytes: number }> {
-    return this.request("session-bundle.export", input);
+    return this.request("session-bundle.export", input, SESSION_BUNDLE_TRANSFER_TIMEOUT_MS);
   }
 
   importSessionBundle(input: {
     readonly source: string;
+    readonly workspace: WorkspaceTarget;
   }): Promise<{ readonly sessionCount: number; readonly artifactFiles: number }> {
-    return this.request("session-bundle.import", input);
+    return this.request("session-bundle.import", input, SESSION_BUNDLE_TRANSFER_TIMEOUT_MS);
   }
 
   updateSessionMetadata(

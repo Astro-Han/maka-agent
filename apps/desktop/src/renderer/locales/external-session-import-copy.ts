@@ -106,7 +106,6 @@ type ExternalSessionImportCopy = {
   exportDescription: string;
   exportAction: string;
   exportActionFor: (name: string) => string;
-  exportCarriesSubagents: (count: number) => string;
   exportSubtreeConfirmTitle: (count: number) => string;
   exportSubtreeConfirmBody: string;
   exportEmpty: string;
@@ -132,7 +131,6 @@ const COPY = {
     exportDescription: '把一个任务写成 .maka-session 文件，在另一台机器或另一个版本的 Maka 里导入。它下面的子 Agent 对话会一起导出。',
     exportAction: '导出',
     exportActionFor: (name) => `导出「${name}」`,
-    exportCarriesSubagents: (count) => `含 ${count} 个子 Agent 对话`,
     exportSubtreeConfirmTitle: (count) => `连同 ${count} 个子 Agent 对话一起导出？`,
     exportSubtreeConfirmBody:
       '文件里会包含这个任务和它下面的全部子 Agent 对话。子 Agent 的对话是这个任务某次工具调用的结果，单独留下会让记录不完整。',
@@ -214,7 +212,6 @@ const COPY = {
     exportDescription: '把一個任務寫成 .maka-session 檔案，在另一台機器或另一個版本的 Maka 匯入。它底下的子 Agent 對話會一起匯出。',
     exportAction: '匯出',
     exportActionFor: (name) => `匯出「${name}」`,
-    exportCarriesSubagents: (count) => `含 ${count} 個子 Agent 對話`,
     exportSubtreeConfirmTitle: (count) => `連同 ${count} 個子 Agent 對話一起匯出？`,
     exportSubtreeConfirmBody:
       '檔案裡會包含這個任務和它底下的全部子 Agent 對話。子 Agent 的對話是這個任務某次工具呼叫的結果，單獨留下會讓紀錄不完整。',
@@ -296,7 +293,6 @@ const COPY = {
     exportDescription: 'Write a task to a .maka-session file to import on another machine, or in another build of Maka. The subagent conversations under it are carried with it.',
     exportAction: 'Export',
     exportActionFor: (name) => `Export ${name}`,
-    exportCarriesSubagents: (count) => `Carries ${count} subagent ${count === 1 ? 'conversation' : 'conversations'}`,
     exportSubtreeConfirmTitle: (count) =>
       `Export with ${count} subagent ${count === 1 ? 'conversation' : 'conversations'}?`,
     exportSubtreeConfirmBody:

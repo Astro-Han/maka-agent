@@ -27,6 +27,7 @@ export function createDesktopSessionBundleServices(
   bridge: DesktopSessionBundleBridge = window.maka,
 ): SessionBundleServices {
   return {
+    previewBundle: (sessionId) => bridge.sessionBundles.preview(sessionId),
     // No host argument: a Session belongs to the Host that holds it, not to
     // whichever one Settings happens to be pointed at, and the bridge routes by
     // the projected id for exactly that reason.

@@ -915,14 +915,12 @@ export async function createDesktopRuntimeHostCandidate(
         },
         ipc,
       );
-      registerRuntimeHostSessionBundleIpc(
-        {
-          client,
-          mainWindowController: deps.mainWindowController,
-          emitSessionsChanged,
-        },
-        ipc,
-      );
+      if (target.kind === 'local') {
+        registerRuntimeHostSessionBundleIpc(
+          { client, mainWindowController: deps.mainWindowController, emitSessionsChanged },
+          ipc,
+        );
+      }
     }
     const stopSession = sessionCopyCleanup
       ? registerRuntimeHostSessionExecutionIpc(

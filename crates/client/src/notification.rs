@@ -50,8 +50,10 @@ pub(crate) fn decode(value: &Value) -> Result<Notification> {
             None
         }
         "session.catalog.changed" => {
-            codec::exact(row, &["kind", "revision", "sessionId"])?;
-            Some(codec::string(&value["sessionId"], "sessionId", 128)?)
+            codec::shaped(row, &["kind", "revision"], &["sessionId"])?;
+            row.get("sessionId")
+                .map(|id| codec::string(id, "sessionId", 128))
+                .transpose()?
         }
         _ => {
             return Err(ProtocolError::invalid(format!(
