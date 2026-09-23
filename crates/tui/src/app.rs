@@ -815,6 +815,8 @@ impl App {
                     return false;
                 };
                 connected
+                    && !(self.chat.session.as_deref() == Some(&id) && self.chat.removed)
+                    && !matches!(&self.sessions.detail, crate::pages::sessions::Detail::Missing { id: missing } if *missing == id)
                     && self
                         .drafts
                         .get(&id)

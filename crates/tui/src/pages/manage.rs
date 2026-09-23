@@ -29,6 +29,7 @@ mod model_inventory;
 pub mod models;
 pub mod oauth;
 mod project;
+pub mod removal;
 pub(crate) mod view;
 pub use view::draw;
 
@@ -84,6 +85,7 @@ pub enum Kind {
     Model,
     Archive,
     Restore,
+    Remove,
     Connection(connection::Change),
     Credential(credentials::Change),
 }
@@ -115,6 +117,7 @@ impl Kind {
                 Self::Project => "session-project-change",
                 Self::Archive => "session-archive",
                 Self::Restore => "session-restore",
+                Self::Remove => "session-remove",
             },
         }
     }
@@ -147,6 +150,7 @@ impl Kind {
 pub enum Command {
     Oauth(oauth::Command),
     CredentialRetry,
+    RemovalQuery,
     Open(Target, Kind),
     Browse,
     Directory(directory::Command),
@@ -165,6 +169,7 @@ impl Command {
             Self::Open(target, kind) => kind.label(target),
             Self::Browse => "directory-browse",
             Self::CredentialRetry => "credential-retry",
+            Self::RemovalQuery => "session-remove-query",
             Self::Directory(command) => command.label(),
             Self::ChooseProject(command) => command.label(),
             Self::Locations(command) => command.label(),
@@ -198,6 +203,7 @@ pub enum Updated {
     Credential(maka_protocol::configuration::CredentialMutationResult),
     Catalog(maka_protocol::configuration::CatalogMutationResult),
     Session(SessionUpdateResult),
+    Removal(SessionRemoveResult),
     Project(maka_protocol::project::Project),
 }
 
@@ -218,6 +224,8 @@ pub struct Management {
     enabled_models_pending: Option<enabled_models::Request>,
     credential_sequence: u64,
     credential_pending: Option<credentials::Request>,
+    removal_sequence: u64,
+    removal_pending: Option<removal::Request>,
 }
 pub struct Dialog {
     connection_test: Option<maka_protocol::connection_effects::ConnectionTestProjection>,
@@ -235,6 +243,7 @@ pub struct Dialog {
     models: Option<models::Models>,
     enabled_models: Option<enabled_models::State>,
     credentials: Option<credentials::State>,
+    removal: Option<removal::State>,
 }
 
 pub async fn execute(
@@ -290,6 +299,15 @@ pub async fn execute(
         return project::execute(client, ticket).await.map(Updated::Project);
     };
     let result = match ticket.kind {
+        Kind::Remove => {
+            return client
+                .remove_session(SessionRemoveInput {
+                    session_id: id.clone(),
+                    expected_revision: *revision,
+                })
+                .await
+                .map(Updated::Removal);
+        }
         Kind::Model => {
             let choice = ticket.model.as_ref().ok_or_else(|| {
                 RequestFailure::NotDispatched(maka_client::ClientError::Protocol(
@@ -437,6 +455,7 @@ impl App {
                 kinds.push(Kind::Model);
             }
         }
+        kinds.push(Kind::Remove);
         kinds
             .into_iter()
             .map(|kind| {
@@ -449,6 +468,7 @@ impl App {
         match command {
             Command::Oauth(command) => self.oauth_enabled(*command),
             Command::CredentialRetry => self.credential_retry_enabled(),
+            Command::RemovalQuery => self.removal_query_enabled(),
             Command::Models(command) => self.models_enabled(command),
             Command::EnabledModels(command) => self.enabled_models_enabled(command),
             Command::Locations(command) => self.locations_enabled(command),
@@ -485,6 +505,7 @@ impl App {
                                     | Kind::Model
                                     | Kind::Archive
                                     | Kind::Restore
+                                    | Kind::Remove
                             )
                             | (
                                 Entity::Project { .. },
@@ -509,6 +530,7 @@ impl App {
                 dialog.kind != Kind::Oauth
                     && dialog.visible
                     && self.credential_can_save()
+                    && dialog.removal.as_ref().is_none_or(|state| state.can_save())
                     && dialog.locations.is_none()
                     && dialog
                         .enabled_models
@@ -545,6 +567,9 @@ impl App {
                 return None;
             }
             Command::Models(command) => return self.models_action(command),
+            Command::RemovalQuery => {
+                self.request_removal_query();
+            }
             Command::EnabledModels(command) => return self.enabled_models_action(command),
             Command::Locations(command) => return self.locations_action(command),
             Command::ChooseProject(command) => return self.choose_project_action(command),
@@ -681,6 +706,12 @@ impl App {
                     None
                 };
                 self.management.dialog = Some(Dialog {
+                    removal: if kind == Kind::Remove {
+                        self.management.removal_sequence += 1;
+                        Some(removal::State::new(self.management.removal_sequence))
+                    } else {
+                        None
+                    },
                     connection_test: None,
                     target,
                     kind,
@@ -800,7 +831,20 @@ impl App {
         }
         self.management.pending = None;
         if !self.management_identity(&ticket.target) {
+            if ticket.kind == Kind::Remove
+                && let Some(state) = self
+                    .management
+                    .dialog
+                    .as_mut()
+                    .and_then(|d| d.removal.as_mut())
+            {
+                state.uncertain = true;
+            }
             self.abandon_management();
+            return;
+        }
+        if ticket.kind == Kind::Remove {
+            self.removal_written(ticket, result);
             return;
         }
         if let Ok(Updated::Session(SessionUpdateResult::Committed { session })) = &result {
@@ -879,6 +923,7 @@ impl App {
             return;
         };
         match result {
+            Ok(Updated::Removal(_)) => unreachable!("removal handled separately"),
             Ok(Updated::ConnectionTest(result)) => {
                 use maka_protocol::connection_effects::ConnectionTestRunResult as Test;
                 dialog.focus = 0;
@@ -1046,6 +1091,7 @@ impl App {
         }
     }
     pub fn abandon_management(&mut self) {
+        self.abandon_removal();
         self.management.directory_pending = None;
         self.management.chooser_pending = None;
         self.management.locations_pending = None;
@@ -1068,6 +1114,14 @@ impl App {
         }
     }
     pub fn management_input(&mut self, event: Event) -> (bool, Option<Action>) {
+        if self
+            .management
+            .dialog
+            .as_ref()
+            .is_some_and(|d| d.kind == Kind::Remove)
+        {
+            return self.removal_input(event);
+        }
         if self
             .management
             .dialog
@@ -1234,6 +1288,9 @@ impl App {
 }
 
 impl Management {
+    pub(crate) fn is_removal(&self) -> bool {
+        self.dialog.as_ref().is_some_and(|d| d.kind == Kind::Remove)
+    }
     pub fn invalidate_geometry(&mut self) {
         if let Some(dialog) = &mut self.dialog {
             dialog.visible = false;

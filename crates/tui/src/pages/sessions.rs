@@ -51,6 +51,7 @@ pub struct Sessions {
     detail_generation: u64,
     detail_requested: bool,
     detail_inflight: bool,
+    discard_page: bool,
 }
 
 #[derive(Default)]
@@ -85,6 +86,19 @@ pub struct DetailRequest {
 }
 
 impl Sessions {
+    pub fn retire(&mut self, id: &str) {
+        self.items.retain(|item| item.id != id);
+        if self.selected.as_deref() == Some(id) {
+            self.selected = None;
+        }
+        self.discard_page |= self.loading;
+        self.refresh();
+        if self.detail.id() == Some(id) {
+            self.detail_generation += 1;
+            self.detail_requested = false;
+            self.detail = Detail::Missing { id: id.into() };
+        }
+    }
     pub fn inbox() -> Self {
         Self {
             pending_only: true,
@@ -179,6 +193,9 @@ impl Sessions {
     }
     pub fn complete(&mut self, result: Result<SessionCatalogQueryResult, String>) {
         self.loading = false;
+        if std::mem::take(&mut self.discard_page) {
+            return;
+        }
         match result {
             Ok(SessionCatalogQueryResult::Page {
                 revision,
@@ -547,6 +564,22 @@ pub(crate) mod tests {
         assert!(
             matches!(&state.detail, Detail::Ready(item) if item.revision == 9 && item.is_archived)
         );
+        let old_detail = state.detail_query().unwrap();
+        state.query().unwrap();
+        state.retire("A");
+        state.complete_detail(old_detail, Ok(Some(Box::new(item("A")))));
+        state.complete(Ok(SessionCatalogQueryResult::Page {
+            revision: "old".into(),
+            sessions: vec![item("A")],
+            next_cursor: None,
+        }));
+        assert!(matches!(&state.detail, Detail::Missing { id } if id == "A"));
+        assert!(
+            state.items.is_empty(),
+            "pre-removal reads cannot resurrect a retired row"
+        );
+        assert!(state.detail_query().is_none());
+        assert!(state.query().is_some(), "catalog refresh remains scheduled");
     }
 
     #[test]

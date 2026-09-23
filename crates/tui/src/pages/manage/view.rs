@@ -91,6 +91,16 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         .management
         .dialog
         .as_ref()
+        .is_some_and(|d| d.kind == Kind::Remove)
+    {
+        app.hits.clear();
+        super::removal::draw(frame, app, area, base);
+        return;
+    }
+    if app
+        .management
+        .dialog
+        .as_ref()
         .is_some_and(|dialog| dialog.kind == Kind::Oauth)
     {
         super::oauth::draw(frame, app, area, base);
@@ -192,7 +202,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 })
             }
             Kind::Rename => None,
-            Kind::Oauth | Kind::Project | Kind::Locations | Kind::Model | Kind::Credential(_) => {
+            Kind::Oauth
+            | Kind::Project
+            | Kind::Locations
+            | Kind::Model
+            | Kind::Remove
+            | Kind::Credential(_) => {
                 unreachable!("readers drawn separately")
             }
             Kind::Register => Some("project-register-note"),

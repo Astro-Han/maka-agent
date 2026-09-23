@@ -77,7 +77,6 @@ fn recover(after_acceptance: bool) {
             std::fs::remove_dir(&checkpoint).unwrap();
             tui.send(b"\x10");
             tui.wait_for("Retry original message (same ID and text)");
-            tui.wait_for("Show execution details");
             assert!(proxy.requests.lock().unwrap().is_empty(), "storage recovery must not automatically resend");
             tui.click_text("Retry original message (same ID and text)");
         }
@@ -108,7 +107,8 @@ fn recover(after_acceptance: bool) {
         assert_eq!(proxy.requests.lock().unwrap().len(), 1, "reopening must not automatically replay");
         tui.send(b"\x10");
         tui.wait_for("Retry original message (same ID and text)");
-        tui.wait_for("Show execution details");
+        // wait_for already waits for a complete synchronized frame. An unrelated
+        // last command may be below the viewport when a live turn adds actions.
         tui.click_text("Retry original message (same ID and text)");
         // Closing the palette can temporarily cover/erase the old feedback before
         // the checkpoint releases the explicit retry. Observe the real relay too.

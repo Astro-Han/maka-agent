@@ -82,6 +82,7 @@ pub struct Chat {
     reading_history: bool,
     paging: bool,
     pub error: Option<String>,
+    pub removed: bool,
     pub view: render::Transcript,
     live_revision: u64,
     pub area: Option<Rect>,
@@ -89,6 +90,21 @@ pub struct Chat {
     cadence: streaming::Cadence,
 }
 impl Chat {
+    pub fn retire(&mut self) {
+        if self.removed {
+            return;
+        }
+        let session = self.session.clone();
+        let generation = self.generation + 1;
+        self.readings.retain(|(id, _)| Some(id) != session.as_ref());
+        *self = Self {
+            readings: std::mem::take(&mut self.readings),
+            session,
+            generation,
+            removed: true,
+            ..Self::default()
+        };
+    }
     pub fn reader(&self) -> Option<&render::Transcript> {
         if let Some(history) = self
             .view
@@ -520,8 +536,12 @@ impl Chat {
                 self.dirty = true;
             }
             ObservationFrame::Assistant(AssistantObservationFrame::Closed { reason, .. }) => {
-                self.error = Some(format!("Subscription closed: {reason:?}"));
-                self.subscription = None;
+                if reason == SubscriptionClosedReason::SessionRemoved {
+                    self.retire();
+                } else {
+                    self.error = Some(format!("Subscription closed: {reason:?}"));
+                    self.subscription = None;
+                }
             }
             _ => {}
         }
@@ -608,6 +628,14 @@ impl Chat {
         ascii: bool,
     ) -> Vec<crate::app::Hit> {
         self.area = Some(area);
+        if self.removed {
+            frame.render_widget(
+                Paragraph::new(i18n.text("session-removed-draft"))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
+                area,
+            );
+            return vec![];
+        }
         if self.error.is_some() {
             self.view.invalidate_scrollbar();
             frame.render_widget(Paragraph::new(i18n.text("chat-failed")), area);

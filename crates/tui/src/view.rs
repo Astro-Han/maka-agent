@@ -849,12 +849,20 @@ fn control(
         return;
     }
     let enabled = app.enabled(&action);
+    let destructive = matches!(action, Action::Manage(crate::pages::manage::Command::Save))
+        && app.management.is_removal();
     let style = if !enabled {
         Style::default()
             .fg(app.theme.colors().subtle)
             .add_modifier(Modifier::DIM)
     } else if focused || app.hover.as_ref() == Some(&action) {
-        tone::selection(app.theme.colors()).fg(tone::accent(app.theme.colors()))
+        tone::selection(app.theme.colors()).fg(if destructive {
+            app.theme.colors().error
+        } else {
+            tone::accent(app.theme.colors())
+        })
+    } else if destructive {
+        Style::default().fg(app.theme.colors().error)
     } else if matches!(
         action,
         Action::SendMessage | Action::SteerMessage | Action::StopTurn(_)

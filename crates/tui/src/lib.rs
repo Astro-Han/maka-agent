@@ -48,6 +48,10 @@ pub struct Options {
 }
 
 enum Completed {
+    Removal(
+        pages::manage::removal::Request,
+        Result<pages::manage::removal::Output, maka_client::RequestFailure>,
+    ),
     Oauth(
         pages::manage::oauth::Request,
         Result<pages::manage::oauth::Output, maka_client::RequestFailure>,
@@ -373,6 +377,13 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 jobs.spawn(async move {
                     let result = client.credential_status(request.locator()).await;
                     Completed::Credential(request, result)
+                });
+            }
+            if let Some(request) = app.removal_request() {
+                let client = client.clone();
+                jobs.spawn(async move {
+                    let result = pages::manage::removal::read(&client, &request).await;
+                    Completed::Removal(request, result)
                 });
             }
         }
@@ -758,7 +769,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
                         }
                         if let Some(state) = &mut state { state.changed(); }
                     }
-                    Some(Ok(Completed::Managed(ticket, result))) => app.management_completed(*ticket, result),
+                    Some(Ok(Completed::Managed(ticket, result))) => {
+                        app.management_completed(*ticket, result);
+                        if let Some(state) = &mut state { state.changed(); }
+                    },
+                    Some(Ok(Completed::Removal(request, result))) => {
+                        app.removal_read(request, result);
+                        if let Some(state) = &mut state { state.changed(); }
+                    },
                     Some(Ok(Completed::Directory(request, result))) => app.directory_completed(request, result),
                     Some(Ok(Completed::ChooseProject(request, result))) => app.choose_project_completed(request, result),
                     Some(Ok(Completed::Locations(request,result))) => app.locations_completed(request,result),
@@ -854,7 +872,13 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     Some(Ok(Completed::Inbox(result))) => app.inbox.complete(result),
                     Some(Ok(Completed::Projects(result))) => app.projects.complete(result),
                     Some(Ok(Completed::Connections(result))) => app.connections.complete(result),
-                    Some(Ok(Completed::Session(request, result))) => app.sessions.complete_detail(request, result),
+                    Some(Ok(Completed::Session(request, result))) => {
+                        app.sessions.complete_detail(request, result);
+                        if let pages::sessions::Detail::Missing { id } = &app.sessions.detail {
+                            let id = id.clone();
+                            app.session_removed(&id, false);
+                        }
+                    },
                     Some(Ok(Completed::Status(result))) => {
                         app.refreshing = false;
                         match result {
@@ -902,6 +926,9 @@ pub async fn run(options: Options) -> Result<(), Error> {
                         if let Err(error) = app.chat.accept(*frame) {
                             app.chat.error = Some(error.to_string());
                             if let Some(client) = &client { client.disconnect(); }
+                        }
+                        if app.chat.removed && let Some(id) = app.chat.session.clone() {
+                            app.session_removed(&id, false);
                         }
                     }
                     None => notifications = None,
