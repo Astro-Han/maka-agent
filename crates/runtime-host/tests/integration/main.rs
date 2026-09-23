@@ -52,6 +52,7 @@ mod host_drain;
 mod input_plugin;
 mod insights_plugin;
 mod javascript_plugins;
+mod jev_plugin;
 mod large_outputs;
 mod live_pipes;
 mod live_pty_stream;
