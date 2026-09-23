@@ -539,10 +539,7 @@ impl Chat {
                 )
                 .into_any_element(),
             Kind::Assistant => match self.markdown.get(&item.key) {
-                Some((state, _)) => TextView::new(state)
-                    .selectable(true)
-                    .stream_fade(true)
-                    .into_any_element(),
+                Some((state, _)) => TextView::new(state).selectable(true).into_any_element(),
                 None => div().child(item.text.clone()).into_any_element(),
             },
             Kind::Thinking => div()

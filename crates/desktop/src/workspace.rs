@@ -38,7 +38,7 @@ use std::{path::PathBuf, time::Duration};
 use tokio::sync::mpsc;
 
 /// Deltas arrive at the provider's chunk rate; one repaint per window is enough.
-const STREAM_FRAME: Duration = Duration::from_millis(40);
+const STREAM_FRAME: Duration = Duration::from_millis(100);
 
 enum Connection {
     Connecting,
