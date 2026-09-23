@@ -39,7 +39,7 @@ use tokio_util::sync::CancellationToken;
 struct Prepared<T> {
     operation: Operation,
     capability: Capability,
-    effect: BoxFuture<'static, Result<T, ToolError>>,
+    effect: Box<dyn FnOnce(uuid::Uuid) -> BoxFuture<'static, Result<T, ToolError>> + Send>,
 }
 type Evidence = (Outcome, Option<Vec<u8>>);
 trait Recorded {
@@ -114,7 +114,7 @@ impl Executions {
             Prepared {
                 operation: Operation::File(input),
                 capability,
-                effect,
+                effect: Box::new(move |_| effect),
             },
             cancellation,
         )
@@ -178,8 +178,14 @@ impl Executions {
         let result = if cancellation.is_cancelled() {
             Err(failed("cancelled before effect"))
         } else {
-            prepared.effect.await
+            (prepared.effect)(id).await
         };
+        if matches!(result, Err(ToolError::Persistence(_))) {
+            // A nested canonical commit is uncertain. Preserve the pending
+            // outer effect for exclusive recovery; do not issue another write.
+            self.begin_drain();
+            return result;
+        }
         let (outcome, payload) = match &result {
             Ok(value) => value.evidence().inspect_err(|_| {
                 self.begin_drain();
@@ -419,17 +425,21 @@ impl Executions {
                 thinking_level: thinking,
             },
             capability: Capability::Models,
-            effect: Box::pin(async move {
-                let provider = provider
-                    .admit(&host.oauth)
-                    .map_err(|error| failed(error.message))?;
-                super::llm::generate(
-                    models,
-                    super::llm::request(provider, input),
-                    adapter,
-                    cancellation,
-                )
-                .await
+            effect: Box::new(move |id| {
+                Box::pin(async move {
+                    let provider = provider
+                        .admit(&host.oauth)
+                        .map_err(|error| failed(error.message))?;
+                    super::llm::generate(
+                        models,
+                        super::llm::request(provider, input),
+                        adapter,
+                        cancellation,
+                        host.log.clone(),
+                        maka_event_log::usage::AuxiliarySource::HostEffect { id },
+                    )
+                    .await
+                })
             }),
         })
     }

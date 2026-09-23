@@ -19,19 +19,21 @@
 
 use super::{Error, Executions};
 use crate::execution::provider;
-use maka_model::{ModelExecutor, ModelRequest, StepBuilder, prompt::Message};
+use maka_model::{ModelRequest, prompt::Message};
 use maka_plugins::{
     fiber::Context,
     llm::{Generate, ModelGeneration},
 };
 use maka_runtime::{
-    model::{ModelEvent, ModelPart, TextKind},
     tool_call::{ToolCallIdentity, ToolOrigin},
     tool_output::ToolOutput,
     tools::{PreparedEffect, ToolError, ToolJournal},
 };
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
+
+mod generate;
+pub(super) use generate::generate;
 
 impl Executions {
     pub(crate) async fn search_plugin_models(
@@ -228,14 +230,19 @@ impl Executions {
         )
         .map_err(|error| Error::Invalid(error.to_string()))?;
         let models = self.models.clone();
+        let operation_id = uuid::Uuid::new_v4().to_string();
+        let source = maka_event_log::usage::AuxiliarySource::Agent {
+            invocation: invocation.clone(),
+            operation_id: operation_id.clone(),
+        };
+        let log = self.log.clone();
         let effect = PreparedEffect::new(move |cancellation| {
             Box::pin(async move {
-                generate(models, request, adapter, cancellation)
+                generate(models, request, adapter, cancellation, log, source)
                     .await
                     .map(|output| ToolOutput::Model(Box::new(output)).into())
             })
         });
-        let operation_id = uuid::Uuid::new_v4().to_string();
         let journal = ToolJournal::new(self.log.clone(), invocation);
         let host = self.clone();
         let (send, receive) = tokio::sync::oneshot::channel();
@@ -304,66 +311,4 @@ pub(super) fn request(prepared: provider::PreparedProvider, input: Generate) -> 
         provider_options: prepared.options,
         max_output_tokens,
     }
-}
-
-pub(super) async fn generate(
-    models: ModelExecutor,
-    request: ModelRequest,
-    adapter: maka_plugins::model::Binding,
-    cancellation: CancellationToken,
-) -> Result<ModelGeneration, ToolError> {
-    let model_id = request.provider.model.clone();
-    let mut stream = models
-        .stream_with_adapter(request, cancellation, None, adapter)
-        .await
-        .map_err(failed)?;
-    let result = async {
-        let mut builder = StepBuilder::default();
-        let mut bytes = 0usize;
-        while let Some(event) = stream.next().await {
-            let event = event.map_err(failed)?;
-            bytes = bytes.saturating_add(serde_json::to_vec(&event).map_err(failed)?.len());
-            if bytes > 2 * 1024 * 1024 {
-                return Err(failed("model generation exceeds 2 MiB stream limit"));
-            }
-            if matches!(
-                event,
-                ModelEvent::ToolCall(_) | ModelEvent::ProviderToolResult { .. }
-            ) {
-                return Err(failed("auxiliary model generation cannot call tools"));
-            }
-            builder.push(event).map_err(failed)?;
-        }
-        builder.finish().map_err(failed)
-    }
-    .await;
-    // EOF alone does not release the shared worker's permits and transport.
-    stream.cancel_and_wait().await;
-    let step = result?;
-    if step.finish_reason == maka_runtime::model::ModelFinishReason::ToolCalls {
-        return Err(failed(
-            "auxiliary model generation cannot finish with tool calls",
-        ));
-    }
-    let text = step
-        .parts
-        .into_iter()
-        .filter_map(|part| match part {
-            ModelPart::Text {
-                text_kind: TextKind::Text,
-                text,
-                ..
-            } => Some(text),
-            _ => None,
-        })
-        .collect();
-    Ok(ModelGeneration {
-        text,
-        model_id,
-        finish_reason: step.finish_reason,
-        usage: step.usage,
-    })
-}
-fn failed(error: impl ToString) -> ToolError {
-    ToolError::Failed(error.to_string())
 }

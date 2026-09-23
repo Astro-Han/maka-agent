@@ -292,6 +292,91 @@ CREATE UNIQUE INDEX operation_fact ON event_log(operation_id, kind)
 CREATE UNIQUE INDEX invocation_boundary ON event_log(invocation_id, kind)
     WHERE kind IN ('invocation_opened', 'invocation_ended');
 
+CREATE INDEX model_usage_requests ON event_log(sequence) WHERE kind = 'model_requested';
+
+CREATE INDEX model_usage_observation ON event_log(
+    invocation_id, json_extract(event_json, '$.fact.step_id'), sequence DESC
+) WHERE kind = 'model_observed' AND json_extract(event_json, '$.fact.event.kind') = 'finished';
+
+-- Count physical admissions, not history memberships or accepted responses.
+-- A rejected response can still have provider-reported usage. No mutable
+-- Session metadata or current provider configuration participates in this view.
+CREATE VIEW agent_model_usage AS
+WITH attempts AS (
+    SELECT request.sequence, request.event_id,
+        json_extract(request.event_json, '$.invocation') AS invocation,
+        json_extract(opening.event_json, '$.fact.configuration.model') AS binding,
+        json_extract(request.event_json, '$.fact.model_id') AS model_id,
+        json_extract(request.event_json, '$.fact.purpose') AS purpose,
+        json_extract(request.event_json, '$.recorded_at') AS started,
+        COALESCE(json_extract(completed.event_json, '$.recorded_at'),
+                 json_extract(interrupted.event_json, '$.recorded_at'),
+                 json_extract(terminal.event_json, '$.recorded_at')) AS ended,
+        CASE
+            WHEN completed.sequence IS NOT NULL THEN 'success'
+            WHEN json_extract(interrupted.event_json, '$.fact.status') = 'cancelled' THEN 'aborted'
+            WHEN interrupted.sequence IS NOT NULL THEN 'error'
+            WHEN json_extract(terminal.event_json, '$.fact.outcome.kind') = 'cancelled' THEN 'aborted'
+            WHEN terminal.sequence IS NOT NULL THEN 'unknown'
+        END AS outcome,
+        COALESCE(json_extract(completed.event_json, '$.fact.output.usage'), (
+            SELECT json_extract(observed.event_json, '$.fact.event.data.usage')
+            FROM event_log observed INDEXED BY model_usage_observation
+            WHERE observed.kind = 'model_observed'
+              AND json_extract(observed.event_json, '$.fact.event.kind') = 'finished'
+              AND observed.invocation_id = request.invocation_id
+              AND json_extract(observed.event_json, '$.fact.step_id') = request.operation_id
+            ORDER BY observed.sequence DESC LIMIT 1
+        ), '{}') AS usage
+    FROM runtime_events request
+    JOIN runtime_events opening ON opening.invocation_id = request.invocation_id
+        AND opening.kind = 'invocation_opened'
+    LEFT JOIN runtime_events completed ON completed.operation_id = request.operation_id
+        AND completed.kind = 'model_completed'
+    LEFT JOIN runtime_events interrupted ON interrupted.operation_id = request.operation_id
+        AND interrupted.kind = 'model_interrupted'
+    LEFT JOIN runtime_events terminal ON terminal.invocation_id = request.invocation_id
+        AND terminal.kind = 'invocation_ended'
+    WHERE request.kind = 'model_requested'
+)
+SELECT sequence, event_id,
+    json_object('kind', 'agent', 'invocation', json(invocation), 'purpose', purpose) AS origin,
+    binding, model_id, outcome, usage,
+    json_extract(invocation, '$.session_id') AS session_id,
+    json_extract(started, '$.secs_since_epoch') * 1000.0
+        + json_extract(started, '$.nanos_since_epoch') / 1000000.0 AS started_at,
+    json_extract(ended, '$.secs_since_epoch') * 1000.0
+        + json_extract(ended, '$.nanos_since_epoch') / 1000000.0 AS completed_at
+FROM attempts;
+
+CREATE UNIQUE INDEX auxiliary_model_source ON event_log(json_extract(event_json, '$.source'))
+    WHERE kind = 'auxiliary_model_started';
+CREATE UNIQUE INDEX auxiliary_model_outcome ON event_log(
+    json_extract(event_json, '$.request_id'), kind
+) WHERE kind IN ('auxiliary_model_settled', 'auxiliary_model_usage');
+
+CREATE VIEW auxiliary_model_usage AS
+SELECT started.sequence, started.event_id,
+    json_object('kind', 'auxiliary', 'source', json_extract(started.event_json, '$.source')) AS origin,
+    json_extract(started.event_json, '$.binding') AS binding,
+    json_extract(started.event_json, '$.binding.model') AS model_id,
+    json_extract(settled.event_json, '$.outcome') AS outcome,
+    COALESCE(json_extract(observed.event_json, '$.usage'), '{}') AS usage,
+    json_extract(started.event_json, '$.session_id') AS session_id,
+    json_extract(started.event_json, '$.started_at.secs_since_epoch') * 1000.0
+        + json_extract(started.event_json, '$.started_at.nanos_since_epoch') / 1000000.0 AS started_at,
+    json_extract(settled.event_json, '$.completed_at.secs_since_epoch') * 1000.0
+        + json_extract(settled.event_json, '$.completed_at.nanos_since_epoch') / 1000000.0 AS completed_at
+FROM event_log started
+LEFT JOIN event_log settled ON settled.kind = 'auxiliary_model_settled'
+    AND json_extract(settled.event_json, '$.request_id') = started.event_id
+LEFT JOIN event_log observed ON observed.kind = 'auxiliary_model_usage'
+    AND json_extract(observed.event_json, '$.request_id') = started.event_id
+WHERE started.kind = 'auxiliary_model_started';
+
+CREATE VIEW model_usage AS
+SELECT * FROM agent_model_usage UNION ALL SELECT * FROM auxiliary_model_usage;
+
 CREATE UNIQUE INDEX message_steering_identity ON event_log(
     json_extract(event_json, '$.invocation.session_id'),
     json_extract(event_json, '$.fact.message.message_id')

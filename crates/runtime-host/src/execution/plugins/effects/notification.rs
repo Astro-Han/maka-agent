@@ -97,19 +97,21 @@ impl Executions {
             Prepared {
                 operation,
                 capability: Capability::Notifications,
-                effect: Box::pin(async move {
-                    accepted
-                        .start()
-                        .await
-                        .map(|_| serde_json::Value::Null)
-                        .map_err(|error| match error {
-                            CallError::OutcomeUnknown(_) => {
-                                ToolError::CleanupUnconfirmed(error.to_string())
-                            }
-                            // Provider acceptance is not an assurance that a notification
-                            // was unseen. Do not automatically send it a second time.
-                            error => ToolError::OutcomeUnknown(error.to_string()),
-                        })
+                effect: Box::new(move |_| {
+                    Box::pin(async move {
+                        accepted
+                            .start()
+                            .await
+                            .map(|_| serde_json::Value::Null)
+                            .map_err(|error| match error {
+                                CallError::OutcomeUnknown(_) => {
+                                    ToolError::CleanupUnconfirmed(error.to_string())
+                                }
+                                // Provider acceptance is not an assurance that a notification
+                                // was unseen. Do not automatically send it a second time.
+                                error => ToolError::OutcomeUnknown(error.to_string()),
+                            })
+                    })
                 }),
             },
             cancellation,

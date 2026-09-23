@@ -1,0 +1,300 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use maka_event_log::{
+    EventLog,
+    sessions::{SessionCopy, SessionCopyResult, SessionRetirement},
+    usage::{Outcome, Query},
+};
+use maka_runtime::{
+    context::ModelPurpose,
+    event::{
+        EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, LogScope,
+        ModelInterruption, RuntimeEvent,
+    },
+    model::{ModelEvent, ModelFinishReason, ModelStep, ModelUsage},
+    session::CopyPurpose,
+};
+use serde_json::json;
+use std::time::{Duration, UNIX_EPOCH};
+
+fn event(fact: Fact, micros: u64) -> EventWrite {
+    let mut event = RuntimeEvent::new(
+        Invocation {
+            session_id: "source".into(),
+            turn_id: "turn".into(),
+            run_id: "run".into(),
+            invocation_id: "invocation".into(),
+        },
+        fact,
+    );
+    event.recorded_at = UNIX_EPOCH + Duration::from_micros(micros);
+    EventWrite::plain(event).unwrap()
+}
+
+fn request(id: &str, micros: u64) -> EventWrite {
+    event(
+        Fact::ModelRequested {
+            step_id: id.into(),
+            model_id: "model".into(),
+            purpose: ModelPurpose::Main,
+            source_scope: LogScope::Session {
+                id: "source".into(),
+            },
+            source_high_water: 0,
+            source_digest: "fixture".into(),
+            input_digest: "frozen-input".into(),
+            route_identity: "frozen-route".into(),
+            checkpoint_event_id: None,
+            context: None,
+            effective_source_digest: None,
+        },
+        micros,
+    )
+}
+
+fn query() -> Query {
+    Query {
+        from: 0.0,
+        to: 100.0,
+        session_id: None,
+    }
+}
+
+#[tokio::test]
+async fn physical_attempt_usage_survives_rejection_copy_removal_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("usage.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    log.create_session("source", "fixture", &json!({}), 1)
+        .await
+        .unwrap();
+    let rejected = request("rejected", 1000);
+    let retry = request("retry", 2000);
+    let success = request("success", 3000);
+    let reported = ModelUsage {
+        input_tokens: Some(100),
+        output_tokens: Some(20),
+        cache_read_tokens: Some(80),
+        ..Default::default()
+    };
+    let writes = [
+        event(
+            Fact::InvocationOpened {
+                input: InvocationInput::Message {
+                    content: "question".into(),
+                    source_messages: vec![],
+                    request_fingerprint: None,
+                },
+                configuration: None,
+            },
+            0,
+        ),
+        rejected.clone(),
+        event(
+            Fact::ModelObserved {
+                step_id: "rejected".into(),
+                event: ModelEvent::Finished {
+                    reason: ModelFinishReason::Length,
+                    usage: reported.clone(),
+                    provider_options: None,
+                },
+            },
+            10000,
+        ),
+        event(
+            Fact::ModelInterrupted {
+                step_id: "rejected".into(),
+                status: ModelInterruption::Failed,
+            },
+            10250,
+        ),
+        retry.clone(),
+        event(
+            Fact::ModelInterrupted {
+                step_id: "retry".into(),
+                status: ModelInterruption::RetryableFailure,
+            },
+            11500,
+        ),
+        success.clone(),
+        event(
+            Fact::ModelCompleted {
+                step_id: "success".into(),
+                output: ModelStep {
+                    parts: vec![],
+                    finish_reason: ModelFinishReason::Stop,
+                    usage: ModelUsage {
+                        input_tokens: Some(0),
+                        ..Default::default()
+                    },
+                    provider_options: None,
+                    response_id: None,
+                    model: None,
+                    timestamp: None,
+                },
+            },
+            11500,
+        ),
+    ];
+    log.append_batch(&writes).await.unwrap();
+    let terminal = event(
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Completed,
+        },
+        12750,
+    );
+    log.append(&terminal).await.unwrap();
+    log.append(&terminal).await.unwrap(); // Exact replay cannot count a second call.
+    let first = log.model_attempts(query(), 0, 2).await.unwrap();
+    assert_eq!(first.total, 3);
+    assert_eq!(first.next_offset, Some(2));
+    assert_eq!(first.attempts[0].request_id, success.event().id);
+    assert_eq!(first.attempts[0].usage.input_tokens, Some(0));
+    assert_eq!(first.attempts[0].usage.output_tokens, None);
+    assert_eq!(first.attempts[1].request_id, retry.event().id);
+    assert_eq!(first.attempts[1].outcome, Outcome::Error);
+    assert_eq!(first.attempts[1].usage, ModelUsage::default());
+    let second = log.model_attempts(query(), 2, 2).await.unwrap();
+    assert_eq!(second.next_offset, None);
+    assert_eq!(second.attempts[0].request_id, rejected.event().id);
+    assert_eq!(second.attempts[0].outcome, Outcome::Error);
+    assert_eq!(second.attempts[0].usage, reported);
+    assert_eq!(second.attempts[0].completed_at, 10.25);
+    assert!(
+        second.attempts[0].binding.is_none(),
+        "do not invent provider identity"
+    );
+    let mut fractional = query();
+    fractional.from = 10.25;
+    fractional.to = 10.25;
+    assert_eq!(
+        log.model_attempts(fractional.clone(), 0, 100)
+            .await
+            .unwrap()
+            .total,
+        1
+    );
+    fractional.from = 10.251;
+    fractional.to = 100.0;
+    assert_eq!(
+        log.model_attempts(fractional, 0, 100).await.unwrap().total,
+        2
+    );
+
+    let revision = log
+        .get_session::<serde_json::Value>("source")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    assert!(matches!(
+        log.copy_session(
+            SessionCopy {
+                source_session_id: "source".into(),
+                target_session_id: "branch".into(),
+                expected_source_revision: revision,
+                purpose: CopyPurpose::Branch {
+                    turn_id: None,
+                    side_conversation: false
+                },
+            },
+            &json!({}),
+            2
+        )
+        .await
+        .unwrap(),
+        SessionCopyResult::Committed(_)
+    ));
+    let snapshot = log.model_attempts(query(), 0, 100).await.unwrap().attempts;
+    assert_eq!(
+        snapshot.len(),
+        3,
+        "history membership is not another physical request"
+    );
+    let mut branch = query();
+    branch.session_id = Some("branch".into());
+    assert_eq!(log.model_attempts(branch, 0, 100).await.unwrap().total, 0);
+
+    log.begin_session_removal("source", revision).await.unwrap();
+    assert_eq!(
+        log.finish_session_retirement("source").await.unwrap(),
+        SessionRetirement::Removed
+    );
+    assert_eq!(
+        log.model_attempts(query(), 0, 100).await.unwrap().attempts,
+        snapshot
+    );
+    log.close().await.unwrap();
+    let reopened = EventLog::open(&path).await.unwrap();
+    assert_eq!(
+        reopened
+            .model_attempts(query(), 0, 100)
+            .await
+            .unwrap()
+            .attempts,
+        snapshot
+    );
+    reopened.close().await.unwrap();
+}
+#[tokio::test]
+async fn lost_request_outcome_is_unknown_not_a_success_with_zero_usage() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&directory.path().join("lost.sqlite"))
+        .await
+        .unwrap();
+    log.append_batch(&[
+        event(
+            Fact::InvocationOpened {
+                configuration: None,
+                input: InvocationInput::Message {
+                    content: "question".into(),
+                    source_messages: vec![],
+                    request_fingerprint: None,
+                },
+            },
+            0,
+        ),
+        request("lost", 13000),
+    ])
+    .await
+    .unwrap();
+    assert_eq!(log.model_attempts(query(), 0, 100).await.unwrap().total, 0);
+    log.append(&event(
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Failed {
+                class: "worker_lost".into(),
+                message: None,
+            },
+        },
+        12750,
+    ))
+    .await
+    .unwrap();
+    let page = log.model_attempts(query(), 0, 100).await.unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.attempts[0].outcome, Outcome::Unknown);
+    assert_eq!(page.attempts[0].usage, ModelUsage::default());
+    assert_eq!(
+        page.attempts[0].latency_ms(),
+        0.0,
+        "wall clock moved backwards"
+    );
+    log.close().await.unwrap();
+}

@@ -27,6 +27,49 @@ use maka_runtime::{
 };
 
 pub(super) async fn verify(log: &EventLog, expected: usize) {
+    use maka_event_log::usage::{Origin, Outcome, Query};
+    let usage = log
+        .model_attempts(
+            Query {
+                from: 0.0,
+                to: f64::MAX,
+                session_id: Some("js-session".into()),
+            },
+            0,
+            100,
+        )
+        .await
+        .unwrap();
+    let auxiliary: Vec<_> = usage
+        .attempts
+        .iter()
+        .filter(|attempt| matches!(attempt.origin, Origin::Auxiliary { .. }))
+        .collect();
+    assert_eq!(
+        auxiliary
+            .iter()
+            .filter(|attempt| attempt.outcome == Outcome::Success)
+            .count(),
+        expected
+    );
+    assert!(
+        auxiliary
+            .iter()
+            .any(|attempt| attempt.outcome == Outcome::Aborted),
+        "retirement must settle the abandoned model request"
+    );
+    for attempt in auxiliary {
+        if attempt.outcome == Outcome::Success {
+            assert_eq!(attempt.usage.input_tokens, Some(3));
+            assert_eq!(attempt.usage.output_tokens, Some(5));
+        } else {
+            assert_eq!(
+                attempt.usage,
+                Default::default(),
+                "cancelled stream did not report usage"
+            );
+        }
+    }
     let prefix = log.prefix(2000, 8 * 1024 * 1024).await.unwrap();
     let mut metered = Vec::new();
     for row in &prefix.events {

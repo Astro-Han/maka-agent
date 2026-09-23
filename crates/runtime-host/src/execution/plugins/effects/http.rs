@@ -46,7 +46,7 @@ impl Executions {
                     Prepared {
                         operation,
                         capability: Capability::Network,
-                        effect,
+                        effect: Box::new(move |_| effect),
                     },
                     cancellation,
                 )

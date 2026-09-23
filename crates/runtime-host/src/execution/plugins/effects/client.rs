@@ -201,17 +201,19 @@ impl Executions {
             Prepared {
                 operation,
                 capability: Capability::ClientCapabilities,
-                effect: Box::pin(async move {
-                    accepted
-                        .admit()
-                        .await
-                        .map(|result| ToolOutput::Mcp(result).into_json())
-                        .map_err(|error| match error {
-                            CallError::OutcomeUnknown(_) => {
-                                ToolError::CleanupUnconfirmed(error.to_string())
-                            }
-                            error => failed(error),
-                        })
+                effect: Box::new(move |_| {
+                    Box::pin(async move {
+                        accepted
+                            .admit()
+                            .await
+                            .map(|result| ToolOutput::Mcp(result).into_json())
+                            .map_err(|error| match error {
+                                CallError::OutcomeUnknown(_) => {
+                                    ToolError::CleanupUnconfirmed(error.to_string())
+                                }
+                                error => failed(error),
+                            })
+                    })
                 }),
             },
             cancellation,

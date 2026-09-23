@@ -55,6 +55,7 @@ mod tool_calls;
 mod tool_payloads;
 pub mod transcript;
 pub mod turns;
+pub mod usage;
 pub mod workspace;
 
 use std::path::Path;

@@ -211,6 +211,7 @@ impl Host {
         )?;
         log.recover_shell_runs(recovered_at).await?;
         log.recover_host_effects().await?;
+        log.recover_auxiliary_models().await?;
         let configuration = Arc::new(ConfigurationStore::for_root(root.clone()).await?);
         let draining = CancellationToken::new();
         let startup_guard = draining.clone().drop_guard();

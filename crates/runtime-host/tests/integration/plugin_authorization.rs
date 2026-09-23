@@ -536,6 +536,34 @@ async fn scenario() {
             .unwrap()
             .is_none()
     );
+    let usage = log
+        .model_attempts(
+            maka_event_log::usage::Query {
+                from: 0.0,
+                to: f64::MAX,
+                session_id: Some("background-session".into()),
+            },
+            0,
+            100,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        usage.total, 3,
+        "count actual model requests, not successful tool payloads twice"
+    );
+    // This fixture uses a plugin executor, not the Agent model loop: all three
+    // requests come from authorized Remote/background SDK resource calls.
+    assert!(usage.attempts.iter().all(|attempt| matches!(
+        attempt.origin,
+        maka_event_log::usage::Origin::Auxiliary { .. }
+    )));
+    assert!(
+        usage
+            .attempts
+            .iter()
+            .all(|attempt| attempt.outcome == maka_event_log::usage::Outcome::Success)
+    );
     log.close().await.unwrap();
     assert_eq!(
         model_server.requests.lock().unwrap().len(),
