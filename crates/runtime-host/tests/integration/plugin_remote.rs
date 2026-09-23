@@ -113,6 +113,47 @@ async fn scenario() {
     let binding = json!({"client":client,"method":"echo","sessionId":null});
     let target = rpc(&mut peer, json!({"kind":"bind","binding":binding})).await["target"].clone();
     let document = rpc(&mut peer, json!({"kind":"open_document"})).await["document"].clone();
+    // A native plugin consumes the same Host-path capability as external JS.
+    // Keep the writer open: the selected OpenCode rows live in a real WAL.
+    let database_path = fixture.workspace.join("opencode.sqlite");
+    let database = rusqlite::Connection::open(&database_path).unwrap();
+    database
+        .execute_batch(
+            "PRAGMA journal_mode=WAL;
+        CREATE TABLE session(id TEXT,parent_id TEXT,directory TEXT,title TEXT,revert TEXT);
+        CREATE TABLE message(id TEXT,session_id TEXT,time_created INTEGER,data TEXT);
+        CREATE TABLE part(id TEXT,message_id TEXT,session_id TEXT,time_created INTEGER,data TEXT);
+        INSERT INTO session VALUES('selected',NULL,'/source/project','Selected conversation',NULL);
+        INSERT INTO message VALUES('m','selected',10,'{\"role\":\"user\"}');
+        INSERT INTO part VALUES('p','m','selected',10,'{\"type\":\"text\",\"text\":\"From WAL\"}');
+        INSERT INTO session VALUES('other',NULL,'/source/other','Excluded',NULL);
+        INSERT INTO message VALUES('other-m','other',10,'broken JSON');",
+        )
+        .unwrap();
+    let import_binding = json!({"client":client,"method":"import-history","sessionId":null});
+    let import_target =
+        rpc(&mut peer, json!({"kind":"bind","binding":import_binding})).await["target"].clone();
+    let import_call = json!({"kind":"call","binding":import_binding,"target":import_target,
+        "document":document,"input":{"path":database_path,"session":"selected"}});
+    let imported = rpc(&mut peer, import_call.clone()).await;
+    let transcript: maka_session_import::Transcript =
+        serde_json::from_value(imported["value"].clone()).unwrap();
+    assert_eq!(transcript.title, "Selected conversation");
+    assert_eq!(transcript.records.len(), 1);
+    assert!(
+        matches!(&transcript.records[0].content, maka_runtime::import::Content::User { text } if text == "From WAL")
+    );
+    database
+        .execute(
+            "UPDATE session SET parent_id='parent' WHERE id='selected'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(peer.rpc("plugin.remote", import_call).await["ok"], false);
+    database
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    drop(database);
     let call = json!({"kind":"call","binding":binding,"target":target,"document":document,"input":{"hello":"world"}});
     let mut uncertain = call.clone();
     uncertain["input"] = json!("uncertain");

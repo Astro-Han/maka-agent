@@ -133,6 +133,7 @@ impl Bridge for HostBridge {
     fn max_output_bytes(&self, method: &str) -> usize {
         match method {
             "model.io" => 32 * 1024 * 1024,
+            "remote.queryDatabase" => maka_plugins::filesystem::database::MAX_BYTES + 1024,
             // A 1 MiB byte page expands to at most 4 MiB in a JSON array.
             "inputs.read" | "view.read" | "pinnedFile.read" => 5 * 1024 * 1024,
             _ => 1024 * 1024,
@@ -422,6 +423,10 @@ impl State {
             Request::WorkspaceView(input) => {
                 let caller = self.calls.remote(&input.authority)?;
                 self.session_view(&input.authority, caller.views.workspace(input.input).await?)
+            }
+            Request::QueryDatabase(input) => {
+                let caller = self.calls.remote(&input.authority)?;
+                encode(caller.views.query_database(input.input).await?)
             }
             Request::CredentialRead(input) => encode(self.credentials.read(input.key).await?),
             Request::CredentialWrite(input) => encode(self.credentials.write(input).await?),

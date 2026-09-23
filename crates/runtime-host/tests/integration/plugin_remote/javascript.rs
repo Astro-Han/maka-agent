@@ -26,12 +26,25 @@ use tokio_util::sync::CancellationToken;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn javascript_remote_replaces_exact_registration_and_closes_late_vm_streams() {
-    tokio::time::timeout(Duration::from_secs(30), scenario())
-        .await
-        .unwrap();
+    tokio::time::timeout(Duration::from_secs(45), async {
+        for vm in ["shared", "dedicated"] {
+            scenario(vm).await;
+        }
+    })
+    .await
+    .unwrap();
 }
-async fn scenario() {
+async fn scenario(vm: &str) {
     let fixture = ClientFixture::new("maka-js-remote-");
+    let database_path = fixture.workspace.join("source.sqlite");
+    let source = rusqlite::Connection::open(&database_path).unwrap();
+    source.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE source(value INTEGER); INSERT INTO source VALUES(7)").unwrap();
+    source
+        .execute_batch("CREATE TABLE large(payload TEXT)")
+        .unwrap();
+    source
+        .execute("INSERT INTO large VALUES(?1)", ["0".repeat(1_000_000)])
+        .unwrap();
     let canonical_workspace = fixture.workspace.canonicalize().unwrap();
     let expected_cwd = maka_fs_tools::workspace::project::host_path(&canonical_workspace).unwrap();
     let path = fixture.workspace.join("plugin");
@@ -46,13 +59,19 @@ async fn scenario() {
         path.join("maka.extension.json"),
         serde_json::to_vec(&json!({
             "schemaVersion":1,"id":"example.remote",
-            "runtime":{"entry":"host.mjs","sdkVersion":1,"vm":"dedicated"},
+            "runtime":{"entry":"host.mjs","sdkVersion":1,"vm":vm},
             "client":{"entry":"client.js","sdkVersion":1},
         }))
         .unwrap(),
     )
     .unwrap();
-    let host = Host::open(fixture.owner()).await.unwrap();
+    let owner = fixture.owner();
+    let denied_path = owner.canonical_path().join("private.sqlite");
+    rusqlite::Connection::open(&denied_path)
+        .unwrap()
+        .execute_batch("CREATE TABLE source(value INTEGER)")
+        .unwrap();
+    let host = Host::open(owner).await.unwrap();
     #[cfg(unix)]
     let endpoint = fixture.workspace.parent().unwrap().join("js-remote.sock");
     #[cfg(windows)]
@@ -120,6 +139,55 @@ async fn scenario() {
     .await;
     // Business uncertainty does not fence a fully settled provider or revoke
     // the caller's document: normal calls below must still succeed.
+    for (method, path, sql, allowed) in [
+        (
+            "database",
+            &database_path,
+            "SELECT value, ? AS precise, x'00ff' AS bytes FROM source",
+            true,
+        ),
+        (
+            "database",
+            &database_path,
+            "SELECT value, ? AS precise, x'00ff' AS bytes FROM source",
+            true,
+        ),
+        ("denied-database", &database_path, "SELECT ?", false),
+        ("database", &denied_path, "SELECT ?", false),
+        (
+            "database",
+            &database_path,
+            "UPDATE source SET value=?",
+            false,
+        ),
+    ] {
+        let (binding, target) = bind(&mut peer, &client, method).await;
+        let result = peer.rpc("plugin.remote", json!({"kind":"call", "binding":binding, "target":target, "document":document,
+            "input":{"path":path,"queries":[{"sql":sql,"parameters":[{"kind":"integer","value":"9223372036854775807"}]}]}})).await;
+        assert_eq!(result["ok"], allowed, "{result}");
+        if allowed {
+            assert_eq!(
+                result["result"]["value"][0]["rows"],
+                json!([[{"kind":"integer","value":"7"},{"kind":"integer","value":"9223372036854775807"},{"kind":"blob","value":"AP8="}]])
+            );
+        }
+    }
+    assert_eq!(
+        source
+            .query_row("SELECT value FROM source", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+    let (binding, target) = bind(&mut peer, &client, "database-summary").await;
+    let large = peer.rpc("plugin.remote", json!({"kind":"call", "binding":binding, "target":target, "document":document,
+        "input":{"path":database_path,"queries":[{"sql":"WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<35) SELECT payload FROM large,n"}]}})).await;
+    if large["ok"] != true {
+        let status = peer
+            .rpc("plugin.platform.query", json!({"view":"failures"}))
+            .await;
+        panic!("{vm}: {large}; platform: {status}");
+    }
+    assert_eq!(large["result"]["value"], 35_000_000);
     for method in ["workspace", "workspace", "denied-workspace"] {
         let (binding, target) = bind(&mut peer, &client, method).await;
         let result = peer

@@ -31,6 +31,7 @@ export type * from './terminal.js';
 export type * from './credentials.js';
 export type * from './http.js';
 export type * from './filesystem.js';
+export type * from './database.js';
 export type * from './llm.js';
 export type * from './models.js';
 export type * from './providers.js';
@@ -81,6 +82,9 @@ export interface RemoteCaller {
     ): Promise<T>;
     session(): Promise<SessionView>;
     workspace(input: WorkspaceViewInput): Promise<SessionView>;
+    queryDatabase(
+      input: import('./database.js').DatabaseRead,
+    ): Promise<readonly import('./database.js').DatabaseTable[]>;
   };
 }
 export interface WorkspaceViewInput {

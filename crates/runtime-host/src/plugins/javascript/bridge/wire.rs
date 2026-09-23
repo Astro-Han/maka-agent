@@ -61,6 +61,8 @@ pub(super) enum Request {
     SessionView(Authority),
     #[serde(rename = "remote.workspace")]
     WorkspaceView(WorkspaceView),
+    #[serde(rename = "remote.queryDatabase")]
+    QueryDatabase(DatabaseRead),
     #[serde(rename = "remote.authorize")]
     AuthorizeRemote(RemoteAuthorization),
     #[serde(rename = "authorization.open")]
@@ -333,6 +335,12 @@ pub(super) struct WorkspaceView {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct DatabaseRead {
+    pub authority: String,
+    pub input: maka_plugins::filesystem::database::Read,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct ProcessWrite {
     #[serde(flatten)]
     pub target: ProcessHandle,
@@ -418,6 +426,7 @@ pub(super) enum Code {
     Unavailable,
     Busy,
     NotFound,
+    LimitExceeded,
 }
 #[derive(Serialize)]
 pub(super) struct Error {
@@ -455,6 +464,23 @@ impl From<maka_plugins::filesystem::ReadError> for Error {
             ReadError::Invalid(_) => Code::Invalid,
             ReadError::Io(error) if error.kind() == std::io::ErrorKind::NotFound => Code::NotFound,
             ReadError::Io(_) | ReadError::ScanLimit { .. } => Code::Unavailable,
+        };
+        Self {
+            code,
+            message: error.to_string(),
+        }
+    }
+}
+impl From<maka_plugins::filesystem::database::Error> for Error {
+    fn from(error: maka_plugins::filesystem::database::Error) -> Self {
+        use maka_plugins::filesystem::database::Error as Database;
+        let code = match &error {
+            Database::Denied | Database::Cancelled => Code::Revoked,
+            Database::Busy => Code::Busy,
+            Database::NotFound => Code::NotFound,
+            Database::Invalid(_) => Code::Invalid,
+            Database::Limit(_) => Code::LimitExceeded,
+            Database::Unavailable(_) => Code::Unavailable,
         };
         Self {
             code,

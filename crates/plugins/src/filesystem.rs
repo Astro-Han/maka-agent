@@ -18,6 +18,7 @@
  */
 
 //! Source-scoped filesystem operations. Host supplies authority, not callers.
+pub mod database;
 mod directory;
 pub mod entries;
 mod read;

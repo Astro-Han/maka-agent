@@ -86,6 +86,15 @@ pub trait Views: Send + Sync {
     ) -> BoxFuture<'_, Result<crate::call::Owned, Error>>;
     fn session(&self) -> BoxFuture<'_, Result<SessionView, Error>>;
     fn workspace(&self, input: WorkspaceViewInput) -> BoxFuture<'_, Result<SessionView, Error>>;
+    /// Consistent SELECT batch over an explicit trusted Host pathname and its
+    /// SQLite sidecars. Requires HostPaths; never accepts a read-view handle.
+    fn query_database(
+        &self,
+        input: crate::filesystem::database::Read,
+    ) -> BoxFuture<
+        '_,
+        Result<Vec<crate::filesystem::database::Table>, crate::filesystem::database::Error>,
+    >;
 }
 
 #[derive(Clone, Debug, thiserror::Error)]

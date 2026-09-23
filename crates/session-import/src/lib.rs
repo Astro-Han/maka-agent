@@ -23,6 +23,7 @@ pub mod catalog;
 pub mod claude;
 pub mod codex;
 mod jsonl;
+pub mod opencode;
 mod transcript;
 
 pub use transcript::{Error, Fingerprint, Transcript};

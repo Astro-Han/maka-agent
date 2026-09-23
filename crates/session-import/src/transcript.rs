@@ -25,6 +25,8 @@ use serde::{Deserialize, Serialize};
 pub enum Error {
     #[error(transparent)]
     Read(#[from] ReadError),
+    #[error(transparent)]
+    Database(#[from] maka_plugins::filesystem::database::Error),
     #[error("invalid source record at line {line}: {source}")]
     Decode {
         line: u64,
