@@ -26,7 +26,6 @@ const entries = [
   ['--sandbox-workspace', 'client-sandbox-entry.mjs'],
   ['--skills-client-workspace', 'client-skills-entry.mjs'],
   ['--scheduler-workspace', 'client-scheduler-entry.mjs'],
-  ['--plugin-remote', 'client-plugin-remote-entry.mjs'],
   ['--onboarding-workspace', 'client-onboarding-entry.mjs'],
   ['--project-workspace', 'client-project-entry.mjs'],
   ['--native-candidate', 'client-candidate-entry.mjs'],

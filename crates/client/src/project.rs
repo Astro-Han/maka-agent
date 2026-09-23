@@ -84,6 +84,7 @@ impl Client {
                 },
             ) => revision == expected && expected != actual,
             (Query::DirectoryRoots, QueryResult::DirectoryRoots { .. }) => true,
+            (Query::DirectoryResolve { .. }, QueryResult::DirectoryPath { .. }) => true,
             (
                 Query::DirectoryListStart { segments, .. },
                 QueryResult::DirectoryPage {

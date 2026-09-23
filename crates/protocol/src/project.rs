@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Epoch-141 Project catalog and bounded directory wire contracts.
+//! Project catalog and bounded directory wire contracts.
 //! Decode at the JSON boundary; the owned types do not replace wire validation.
 
 mod decode;
@@ -59,6 +59,11 @@ pub enum Query {
         cursor: String,
     },
     DirectoryRoots,
+    /// Resolve a published selection for path-bearing input; requires Host path authority.
+    DirectoryResolve {
+        root_id: String,
+        segments: Vec<String>,
+    },
     DirectoryListStart {
         root_id: String,
         segments: Vec<String>,
@@ -182,6 +187,11 @@ pub enum QueryResult {
     DirectoryRoots {
         roots: Vec<DirectoryRoot>,
     },
+    DirectoryPath {
+        root_id: String,
+        segments: Vec<String>,
+        path: String,
+    },
     DirectoryPage {
         root_id: String,
         segments: Vec<String>,
@@ -205,7 +215,7 @@ impl Query {
             } | Self::ListContinue {
                 view: View::Locations,
                 ..
-            }
+            } | Self::DirectoryResolve { .. }
         )
     }
 }
@@ -213,5 +223,39 @@ impl Query {
 impl Mutation {
     pub fn uses_host_paths(&self) -> bool {
         matches!(self, Self::Register { .. } | Self::Relink { .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn directory_resolution_requires_path_authority_and_exact_selection() {
+        let input = json!({"kind":"directory_resolve","rootId":"root-1","segments":["目录"]});
+        let query = decode_query(&input).unwrap();
+        assert!(query.uses_host_paths());
+        assert!(!Query::DirectoryRoots.uses_host_paths());
+        for path in ["/workspace/目录", "C:\\workspace\\目录"] {
+            let output =
+                json!({"kind":"directory_path","rootId":"root-1","segments":["目录"],"path":path});
+            assert_query_output(&query, &decode_query_result(&output).unwrap()).unwrap();
+            for (field, value) in [("rootId", json!("other")), ("segments", json!([]))] {
+                let mut wrong = output.clone();
+                wrong[field] = value;
+                assert!(
+                    assert_query_output(&query, &decode_query_result(&wrong).unwrap()).is_err()
+                );
+            }
+            let mut relative = output;
+            relative["path"] = json!("workspace/目录");
+            assert!(decode_query_result(&relative).is_err());
+        }
+        for segment in ["..", ".", "a/b", "a\\b", ""] {
+            let mut invalid = input.clone();
+            invalid["segments"] = json!([segment]);
+            assert!(decode_query(&invalid).is_err());
+        }
     }
 }

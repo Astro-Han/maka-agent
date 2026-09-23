@@ -331,6 +331,38 @@ mod tests {
         credential.principal_kind = ManagedPrincipalKind::RemoteOwner;
         let mut owner = Authority::Managed(Box::new(credential));
         assert!(owner.receives(&notice));
+        for (input, allowed) in [
+            (json!({"kind":"directory_roots"}), true),
+            (
+                json!({"kind":"directory_list_start","rootId":"root-1","segments":[]}),
+                true,
+            ),
+            (
+                json!({"kind":"directory_resolve","rootId":"root-1","segments":[]}),
+                false,
+            ),
+        ] {
+            let request = Request {
+                request_id: "directory".into(),
+                operation: Operation::ProjectCatalogQuery,
+                input,
+            };
+            assert_eq!(owner.authorizes(&request), allowed);
+            assert!(Authority::LocalOwner.authorizes(&request));
+            let mut authorized = owner.clone();
+            let Authority::Managed(credential) = &mut authorized else {
+                unreachable!()
+            };
+            credential.can_use_host_paths = true;
+            assert!(authorized.authorizes(&request));
+            let Authority::Managed(credential) = &mut authorized else {
+                unreachable!()
+            };
+            credential
+                .grants
+                .retain(|name| name != "project.catalog.query");
+            assert!(!authorized.authorizes(&request));
+        }
         let owner_identity = owner.capability_identity("client".into()).unwrap();
         assert!(!owner_identity.trusted());
         assert_ne!(

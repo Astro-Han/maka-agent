@@ -24,6 +24,8 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
+mod client;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn javascript_remote_replaces_exact_registration_and_closes_late_vm_streams() {
     tokio::time::timeout(Duration::from_secs(45), async {
@@ -342,25 +344,7 @@ async fn scenario(vm: &str) {
         status["value"],
         json!({"generation":1,"opening":0,"active":0,"stopped":2})
     );
-    let client = tokio::process::Command::new("node")
-        .kill_on_drop(true)
-        .arg(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../tests/fixtures/client.mjs"),
-        )
-        .arg("--socket")
-        .arg(&endpoint)
-        .args(["--root-id", host.root_id(), "--plugin-remote"])
-        .output()
-        .await
-        .unwrap();
-    assert!(
-        client.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&client.stdout),
-        String::from_utf8_lossy(&client.stderr)
-    );
-    assert!(String::from_utf8_lossy(&client.stdout).contains("original-client-plugin-remote"));
+    client::verify(host, &endpoint).await;
     peer.close().await;
     stop.cancel();
     server.await.unwrap().unwrap();

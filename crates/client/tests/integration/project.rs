@@ -40,6 +40,27 @@ async fn project_catalog_checks_variant_revision_directory_identity_and_progress
     for (input, result) in [
         (start.clone(), json!({"kind":"directory_roots","roots":[]})),
         (
+            Query::DirectoryResolve {
+                root_id: "root".into(),
+                segments: vec!["chosen".into()],
+            },
+            json!({"kind":"directory_path","rootId":"other","segments":["chosen"],"path":"/resolved"}),
+        ),
+        (
+            Query::DirectoryResolve {
+                root_id: "root".into(),
+                segments: vec!["chosen".into()],
+            },
+            json!({"kind":"directory_path","rootId":"root","segments":["other"],"path":"/resolved"}),
+        ),
+        (
+            Query::DirectoryResolve {
+                root_id: "root".into(),
+                segments: vec![],
+            },
+            json!({"kind":"directory_page","rootId":"root","segments":[],"entries":[],"nextCursor":null}),
+        ),
+        (
             start.clone(),
             json!({"kind":"revision_changed","view":"summary","expected":revision,"actual":other}),
         ),

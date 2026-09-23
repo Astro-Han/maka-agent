@@ -69,6 +69,14 @@ pub fn decode_query_result(value: &Value) -> Result<QueryResult> {
             }).collect::<Result<_>>()?;
             QueryResult::DirectoryRoots { roots }
         }
+        Some("directory_path") => {
+            exact(value, &["kind", "rootId", "segments", "path"])?;
+            QueryResult::DirectoryPath {
+                root_id: id(&value["rootId"])?,
+                segments: segments(&value["segments"])?,
+                path: path(&value["path"])?,
+            }
+        }
         Some("directory_page") => {
             exact(
                 value,
@@ -159,6 +167,13 @@ pub fn assert_query_output(input: &Query, output: &QueryResult) -> Result<()> {
             }
         }
         Query::DirectoryRoots => {}
+        Query::DirectoryResolve { root_id, segments } => {
+            if !matches!(output, QueryResult::DirectoryPath { root_id: actual, segments: selected, .. }
+                if actual == root_id && selected == segments)
+            {
+                return Err(invalid());
+            }
+        }
     }
     Ok(())
 }

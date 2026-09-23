@@ -139,6 +139,16 @@ impl Directories {
     pub(super) async fn query(&self, input: Query) -> Result<QueryResult> {
         let (root_id, segments, cursor) = match input {
             Query::DirectoryRoots => return Ok(self.roots()),
+            Query::DirectoryResolve { root_id, segments } => {
+                let (_, path) = self.resolve(&root_id, segments.clone()).await?;
+                return Ok(QueryResult::DirectoryPath {
+                    root_id,
+                    segments,
+                    path: maka_fs_tools::workspace::project::host_path(&path)
+                        .map_err(invalid)?
+                        .into(),
+                });
+            }
             Query::DirectoryListStart { root_id, segments } => (root_id, segments, None),
             Query::DirectoryListContinue {
                 root_id,

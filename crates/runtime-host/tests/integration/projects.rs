@@ -23,6 +23,9 @@ use maka_runtime_host::{
     session::SessionConfiguration,
 };
 
+#[cfg(unix)]
+mod directories;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn original_client_projects_relink_sessions_and_reopen_without_changing_runtime_facts() {
     let fixture = ClientFixture::new("maka-project-client-");

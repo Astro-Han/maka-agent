@@ -42,6 +42,13 @@ pub fn decode_query(value: &Value) -> Result<Query> {
             codec::exact(map, &["kind"])?;
             Query::DirectoryRoots
         }
+        Some("directory_resolve") => {
+            codec::exact(map, &["kind", "rootId", "segments"])?;
+            Query::DirectoryResolve {
+                root_id: id(&value["rootId"])?,
+                segments: segments(&value["segments"])?,
+            }
+        }
         Some("directory_list_start") => {
             codec::exact(map, &["kind", "rootId", "segments"])?;
             Query::DirectoryListStart {
