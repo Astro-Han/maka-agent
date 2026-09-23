@@ -32,6 +32,13 @@ use unicode_width::UnicodeWidthStr;
 fn buttons(app: &App) -> Vec<Command> {
     let state = &app.revision;
     let mut buttons = vec![Command::Close];
+    if state.phase == Phase::Editing && !state.confirm_discard {
+        buttons.push(if state.resources.visible {
+            Command::Content
+        } else {
+            Command::Resources
+        });
+    }
     if state.problem.is_some() && !state.confirm_discard {
         buttons.push(Command::Details);
     }
@@ -49,6 +56,12 @@ fn buttons(app: &App) -> Vec<Command> {
 }
 impl App {
     pub fn revision_input(&mut self, event: Event) -> (bool, Option<Action>) {
+        if let Some(command) = super::resources::input(self, &event) {
+            return (
+                true,
+                command.and_then(|command| self.apply(Action::Revision(command))),
+            );
+        }
         let mut command = None;
         let controls = buttons(self);
         match &event {
@@ -65,13 +78,22 @@ impl App {
                         (self.revision.focus + 1) % count
                     };
                 }
-                KeyCode::PageUp | KeyCode::PageDown if !self.revision.show_problem => {
+                KeyCode::PageUp | KeyCode::PageDown
+                    if !self.revision.show_problem && !self.revision.resources.visible =>
+                {
                     let index = if key.code == KeyCode::PageUp {
                         self.revision.selected.saturating_sub(1)
                     } else {
                         self.revision.selected + 1
                     };
                     command = Some(Command::Select(index));
+                }
+                KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    command = Some(if self.revision.resources.visible {
+                        Command::Content
+                    } else {
+                        Command::Resources
+                    })
                 }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::ALT) => {
                     command = Some(Command::Display)
@@ -155,6 +177,7 @@ impl App {
             || state.phase != Phase::Editing
             || state.focus != 0
             || state.confirm_discard
+            || state.resources.visible
         {
             return;
         }
@@ -220,6 +243,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
             "revision-discard-note"
         } else {
             match app.revision.phase {
+                Phase::Editing if app.revision.resources.visible => "revision-resources-note",
                 Phase::Editing => "revision-note",
                 Phase::Ready => "revision-prepared",
                 Phase::Done => "revision-started",
@@ -275,10 +299,14 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     } else {
         &mut app.revision.editor
     };
-    let editor_rows = editor
-        .preferred_height(width.saturating_sub(8), 15)
-        .max(3)
-        .min(available);
+    let editor_rows = if app.revision.resources.visible && !app.revision.show_problem {
+        app.revision.saved.as_ref().map_or(3, |saved| {
+            (saved.inputs[app.revision.selected].resources().len() * 3).clamp(3, 15) as u16
+        })
+    } else {
+        editor.preferred_height(width.saturating_sub(8), 15).max(3)
+    }
+    .min(available);
     let height = fixed + editor_rows;
     let popup = Rect::new(
         area.x + (area.width - width) / 2,
@@ -369,7 +397,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
             .as_ref()
             .and_then(|s| s.inputs.get(selected))
     {
-        let content = &input.content;
+        let message = input.message();
+        let content = &message.content;
         let counts = [
             (
                 "revision-attachments",
@@ -383,7 +412,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
             ),
             (
                 "revision-selections",
-                input.original.input_selections.values().map(Vec::len).sum(),
+                message.input_selections.values().map(Vec::len).sum(),
             ),
         ];
         let label = counts
@@ -410,6 +439,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
             .as_mut()
             .unwrap()
             .draw(frame, text_area, false, colors);
+    } else if count > 0 && app.revision.resources.visible {
+        super::resources::draw(frame, app, text_area, editing);
     } else if count > 0 {
         app.revision
             .editor

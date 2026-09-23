@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::draft::{self, Input};
+use super::draft::Input;
 use crate::editor::saved::Cursor;
 use maka_protocol::{
     Operation,
@@ -148,23 +148,7 @@ impl Checkpoint {
             {
                 return Err("Invalid frozen revision".into());
             }
-            let target = sources::Output {
-                session_id: batch.session_id.clone(),
-                turn_id: turn_id.clone(),
-                messages: self
-                    .inputs
-                    .iter()
-                    .zip(&batch.messages)
-                    .map(|(input, message)| {
-                        let mut source = input.original.clone();
-                        source.content.attachments = message.content.attachments.clone();
-                        source
-                    })
-                    .collect(),
-            };
-            if draft::batch(&self.inputs, &target, &self.turn_id)? != *batch {
-                return Err("Frozen revision changed its inputs".into());
-            }
+            super::resources::validate_frozen(&self.inputs, batch)?;
         }
         Ok(())
     }

@@ -20,6 +20,7 @@
 mod draft;
 mod editing;
 mod request;
+mod resources;
 mod saved;
 mod view;
 
@@ -55,6 +56,9 @@ pub enum Command {
     Select(usize),
     Display,
     Details,
+    Resources,
+    Content,
+    ToggleResource(resources::Resource),
 }
 impl Command {
     pub fn label(&self) -> &'static str {
@@ -70,6 +74,8 @@ impl Command {
             Self::Select(_) => "revision-input",
             Self::Display => "revision-display",
             Self::Details => "revision-details",
+            Self::Resources | Self::ToggleResource(_) => "revision-resources",
+            Self::Content => "revision-content",
         }
     }
 }
@@ -103,6 +109,7 @@ pub struct State {
     editor: Editor,
     problem: Option<Editor>,
     show_problem: bool,
+    resources: resources::Browser,
     editors: std::collections::VecDeque<((usize, bool), Editor)>,
     focus: usize,
     confirm_discard: bool,
@@ -132,6 +139,8 @@ impl State {
     }
     pub fn invalidate_geometry(&mut self) {
         self.rendered = false;
+        self.resources.area = None;
+        self.resources.dragging = false;
         self.editor.invalidate_geometry();
         if let Some(problem) = &mut self.problem {
             problem.invalidate_geometry();
@@ -200,6 +209,11 @@ impl App {
                 }),
             Command::Select(index) => available && state.phase == Phase::Editing && !state.confirm_discard
                 && state.saved.as_ref().is_some_and(|s| *index < s.inputs.len()),
+            Command::Resources | Command::Content => available && state.phase == Phase::Editing && !state.confirm_discard
+                && state.saved.as_ref().is_some_and(|s| !s.inputs[state.selected].resources().is_empty()),
+            Command::ToggleResource(resource) => available && state.phase == Phase::Editing && state.resources.visible && !state.confirm_discard
+                && !matches!(resource, resources::Resource::Inline{..})
+                && state.saved.as_ref().is_some_and(|s| s.inputs[state.selected].resources().contains(resource)),
             Command::Details => available && state.problem.is_some() && !state.confirm_discard,
             Command::Display => available && state.phase == Phase::Editing && !state.confirm_discard
                 && state.saved.as_ref().is_some_and(|s| s.inputs[state.selected].content.display_text.is_some()),
@@ -236,6 +250,21 @@ impl App {
                 state.visible = false;
                 state.confirm_discard = false;
                 state.invalidate_geometry();
+            }
+            Command::Resources | Command::Content => {
+                state.resources.visible = matches!(command, Command::Resources);
+                state.show_problem = false;
+                state.focus = 0;
+                state.invalidate_geometry();
+            }
+            Command::ToggleResource(resource) => {
+                let input = &mut state.saved.as_mut()?.inputs[state.selected];
+                if let Some(index) = input.resources().iter().position(|key| key == &resource) {
+                    state.resources.selected = index;
+                }
+                input.toggle(&resource);
+                state.focus = 0;
+                state.error = None;
             }
             Command::Details => {
                 state.show_problem = !state.show_problem;
@@ -274,14 +303,7 @@ impl App {
                     // Validate aggregate limits before creating a target.
                     // Admission validation uses original resources here; target-owned
                     // storage is resolved only after the copy has committed.
-                    let messages = saved
-                        .inputs
-                        .iter()
-                        .map(|input| maka_protocol::turn::TurnStartMessage {
-                            content: input.content.clone(),
-                            input_selections: input.original.input_selections.clone(),
-                        })
-                        .collect();
+                    let messages = saved.inputs.iter().map(Input::message).collect();
                     let preview = TurnBatchStartInput {
                         session_id: saved.copy.source_session_id.clone(),
                         turn_id: saved.turn_id.clone(),

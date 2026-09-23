@@ -53,6 +53,7 @@ impl State {
         }
     }
     pub(super) fn clear_editors(&mut self) {
+        self.resources = Default::default();
         self.problem = None;
         self.show_problem = false;
         self.editors.clear();
@@ -67,6 +68,7 @@ impl State {
             (self.selected, self.display),
             std::mem::take(&mut self.editor),
         ));
+        self.resources = Default::default();
         self.selected = selected;
         self.display = display;
         self.focus = 0;

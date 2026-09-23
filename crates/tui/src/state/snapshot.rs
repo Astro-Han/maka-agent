@@ -59,7 +59,7 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 9,
+            version: 10,
             root: root.into(),
             tabs: app.tabs.entries.iter().map(|tab| tab.id.clone()).collect(),
             drafts: app
@@ -87,7 +87,7 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if self.version != 9
+        if self.version != 10
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
@@ -282,7 +282,7 @@ mod tests {
         assert!(restored.retry_submission().is_none());
         assert!(restored.reconciliation().is_some());
         let mut invalid: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        invalid["version"] = serde_json::json!(10);
+        invalid["version"] = serde_json::json!(u32::MAX);
         assert!(
             serde_json::from_value::<Snapshot>(invalid)
                 .unwrap()
@@ -334,7 +334,7 @@ mod tests {
         request.input().validate().unwrap();
         original.sending.get_mut("a").unwrap().request = request.clone();
         let saved = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
-        assert_eq!(saved["version"], 9);
+        assert_eq!(saved["version"], 10);
         let mut restored = app();
         serde_json::from_value::<Snapshot>(saved.clone())
             .unwrap()

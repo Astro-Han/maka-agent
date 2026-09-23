@@ -49,12 +49,17 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
             "sessionId":"revision-source","name":"Revision source",
             "workspace":{"kind":"host_path","path":directory.path()},"modelTarget":{"kind":"default"}
         })).unwrap()).await.unwrap();
-        for input in [
-            json!({"kind":"begin","sessionId":"revision-source","uploadId":"file","name":"note.txt","mimeType":"text/plain","totalBytes":1,
-                "contentSha256":maka_runtime::artifact::content_digest(b"x")}),
-            json!({"kind":"chunk","sessionId":"revision-source","uploadId":"file","offset":0,"chunkBase64":"eA=="}),
-        ] { client.request(Operation::ArtifactIngest,input).await.unwrap(); }
-        let artifact=client.request(Operation::ArtifactIngest,json!({"kind":"commit","sessionId":"revision-source","uploadId":"file"})).await.unwrap();
+        let mut attachments=Vec::new();
+        for (index,name) in ["note.txt","omit.txt"].into_iter().enumerate() {
+            let upload_id=format!("file-{index}");
+            for input in [
+                json!({"kind":"begin","sessionId":"revision-source","uploadId":upload_id,"name":name,"mimeType":"text/plain","totalBytes":1,
+                    "contentSha256":maka_runtime::artifact::content_digest(b"x")}),
+                json!({"kind":"chunk","sessionId":"revision-source","uploadId":upload_id,"offset":0,"chunkBase64":"eA=="}),
+            ] { client.request(Operation::ArtifactIngest,input).await.unwrap(); }
+            let artifact=client.request(Operation::ArtifactIngest,json!({"kind":"commit","sessionId":"revision-source","uploadId":upload_id})).await.unwrap();
+            attachments.push(artifact["attachment"].clone());
+        }
         let model=tokio::spawn(async move {
             let mut bodies=Vec::new();
             for content in ["Original reply.","Revised reply."] {
@@ -70,7 +75,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
             "sessionId":"revision-source","turnId":"original-turn","maxSteps":1,"messages":[
                 {"content":{"text":"🦀 @a.rs first","inlineReferences":[
                     {"kind":"workspace_file","value":"@a.rs","label":"a.rs","start":3}]}},
-                {"content":{"text":"second original","quotes":[{"text":"Keep quotation"}],"attachments":[artifact["attachment"]]}}
+                {"content":{"text":"second original","quotes":[{"text":"Keep quotation"}],"attachments":attachments}}
             ]
         })).unwrap()).await.unwrap();
         wait_completed(&client,"revision-source","original-turn").await;
@@ -102,6 +107,18 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.wait_for("Input  2 / 2");
     tui.send(b"\x1b[200~edited \x1b[201~");
     tui.wait_for("edited second original");
+    tui.click_text("Resources");
+    tui.wait_for("note.txt");
+    tui.click_text("Quotation");
+    tui.wait_for("[ ] Quotation");
+    tui.click_text("note.txt");
+    tui.wait_for("[ ] note.txt");
+    tui.click_text("note.txt");
+    tui.wait_for("[✓] note.txt");
+    tui.click_text("omit.txt");
+    tui.wait_for("[ ] omit.txt");
+    tui.click_text("Edit text");
+    tui.wait_for("edited second original");
     tui.send(b"\x1b[1;2H"); // Select the inserted prefix; restore must preserve the selection.
     tui.resize(80, 24);
     tui.wait_for("edited second original");
@@ -110,8 +127,12 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.send(b"\x11");
     tui.finish();
     let saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
-    assert_eq!(saved["version"], 9);
+    assert_eq!(saved["version"], 10);
     assert_eq!(saved["revision"]["stage"], "draft");
+    assert_eq!(
+        saved["revision"]["inputs"][1]["excluded"],
+        json!([{"kind":"quote","index":0},{"kind":"attachment","index":1}])
+    );
     assert_eq!(
         saved["revision"]["inputs"][1]["content"]["text"],
         "edited second original"
@@ -161,8 +182,37 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
         6
     );
     assert_eq!(revised.messages[1].content.text, "revised second original");
+    assert!(revised.messages[1].content.quotes.is_none());
     assert_eq!(
-        revised.messages[1].content.quotes.as_ref().unwrap()[0].text,
+        revised.messages[1]
+            .content
+            .attachments
+            .as_ref()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        revised.messages[1].content.attachments.as_ref().unwrap()[0].name,
+        "note.txt"
+    );
+    let unchanged = runtime
+        .block_on(client.session_turn_sources(sources::Input {
+            session_id: "revision-source".into(),
+            turn_id: "original-turn".into(),
+        }))
+        .unwrap();
+    assert_eq!(
+        unchanged.messages[1]
+            .content
+            .attachments
+            .as_ref()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        unchanged.messages[1].content.quotes.as_ref().unwrap()[0].text,
         "Keep quotation"
     );
     assert!(

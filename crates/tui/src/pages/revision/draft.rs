@@ -19,7 +19,7 @@
 
 use maka_protocol::{
     session::sources,
-    turn::{self, MessageContent, TurnBatchStartInput, TurnStartMessage},
+    turn::{self, MessageContent, TurnBatchStartInput},
 };
 use serde::{Deserialize, Serialize};
 
@@ -28,12 +28,14 @@ use serde::{Deserialize, Serialize};
 pub struct Input {
     pub original: sources::Source,
     pub content: MessageContent,
+    pub excluded: Vec<super::resources::Resource>,
 }
 
 impl Input {
     pub fn new(original: sources::Source) -> Self {
         Self {
             content: original.content.clone(),
+            excluded: vec![],
             original,
         }
     }
@@ -88,7 +90,8 @@ impl Input {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        // Text and display offsets are editable; resource identities and intent are not.
+        self.validate_resources()?;
+        // The original resource identities remain immutable; exclusions apply at submission.
         let mut metadata = self.content.clone();
         metadata.text = self.original.content.text.clone();
         metadata.display_text = self.original.content.display_text.clone();
@@ -159,22 +162,34 @@ pub fn batch(
         if old.len() != new.len() {
             return Err("revision-changed".into());
         }
-        for (original, mapped) in old.iter().zip(new) {
+        for (index, (original, mapped)) in old.iter().zip(new).enumerate() {
             let mut metadata = mapped.clone();
             metadata.storage_ref = original.storage_ref.clone();
             if metadata != *original
-                || !matches!(&mapped.storage_ref,
-                turn::StorageRef::SessionFile { session_id, .. } if *session_id == target.session_id)
+                || (input.included(&super::resources::Resource::Attachment { index })
+                    && !matches!(&mapped.storage_ref,
+                turn::StorageRef::SessionFile { session_id, .. } if *session_id == target.session_id))
             {
                 return Err("revision-changed".into());
             }
         }
-        let mut content = input.content.clone();
-        content.attachments = mapped.content.attachments.clone();
-        messages.push(TurnStartMessage {
-            content,
-            input_selections: original.input_selections.clone(),
-        });
+        let mut message = input.message();
+        message.content.attachments = mapped
+            .content
+            .attachments
+            .as_ref()
+            .map(|attachments| {
+                attachments
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| {
+                        input.included(&super::resources::Resource::Attachment { index: *index })
+                    })
+                    .map(|(_, attachment)| attachment.clone())
+                    .collect()
+            })
+            .filter(|attachments: &Vec<_>| !attachments.is_empty());
+        messages.push(message);
     }
     let request = TurnBatchStartInput {
         session_id: target.session_id.clone(),

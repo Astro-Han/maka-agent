@@ -742,3 +742,9 @@ revision-save-failed = Could not save recovery information. This attempt was not
 revision-attachments = Files { $count }
 revision-references = References { $count }
 revision-selections = Selections { $count }
+
+revision-resources = Resources
+revision-content = Edit text
+revision-resources-note = Only checked items go into this revision. Original files are not deleted.
+revision-resource-quote = Quotation
+revision-resource-inline = Inline reference · keep its token intact in the text

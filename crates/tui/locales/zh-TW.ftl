@@ -742,3 +742,9 @@ revision-save-failed = 無法儲存復原資訊，本次嘗試尚未送出。
 revision-attachments = 附件 { $count }
 revision-references = 引用 { $count }
 revision-selections = 選擇項 { $count }
+
+revision-resources = 附加內容
+revision-content = 編輯正文
+revision-resources-note = 僅將勾選項用於本次修訂，不會刪除原始檔案。
+revision-resource-quote = 引用
+revision-resource-inline = 行內引用 · 正文中需保留完整標記
