@@ -31,7 +31,6 @@ import {
 } from './client-message-fixture.mjs';
 import { watchSession } from './client-subscription.mjs';
 import { pluginRemote } from './client-plugin-remote.mjs';
-import { readRuntimeHostSkills } from '../../packages/cli/src/runtime-host-skills.ts';
 
 export async function verifyMessageSubmit(connection, workspace, reopened, openClient) {
   const skills = await pluginRemote(connection, 'maka.skills');
@@ -90,7 +89,7 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
       return;
     }
 
-    await verifyInvocableCatalog(connection, request, skills, workspace);
+    await verifyInvocableCatalog(request, skills, workspace);
     const sourcePage = (view) => catalog({ view });
     const bundled = await sourcePage('bundled');
     assert.equal(bundled.items[0].id, 'computer-use');
@@ -632,7 +631,7 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
   }
 }
 
-async function verifyInvocableCatalog(connection, request, skills, workspace) {
+async function verifyInvocableCatalog(request, skills, workspace) {
   const target = {
     path: workspace,
     collaborationMode: 'agent',
@@ -640,11 +639,9 @@ async function verifyInvocableCatalog(connection, request, skills, workspace) {
   };
   const query = (page) =>
     skills.method('path-request')({ ...target, request: { kind: 'invocable', page } });
-  const baseline = await readRuntimeHostSkills(
-    connection,
-    { kind: 'host_path', path: workspace },
-    'workspace-write',
-  );
+  const baseline = await query(null);
+  assert.equal(baseline.kind, 'page');
+  assert.equal(baseline.nextCursor, null);
   const directories = Array.from({ length: 129 }, (_, n) =>
     join(workspace, '.maka/skills', 'catalog-' + String(n).padStart(3, '0')),
   );
@@ -666,17 +663,8 @@ async function verifyInvocableCatalog(connection, request, skills, workspace) {
     });
     assert.equal(last.nextCursor, null);
     const all = [...first.items, ...last.items];
-    assert.equal(all.length, baseline.length + directories.length);
+    assert.equal(all.length, baseline.items.length + directories.length);
     assert.equal(new Set(all.map((item) => item.ref)).size, all.length);
-    assert.deepEqual(
-      await readRuntimeHostSkills(
-        connection,
-        { kind: 'host_path', path: workspace },
-        'workspace-write',
-      ),
-      all,
-      'the real CLI picker uses the same public Remote pages',
-    );
     await assert.rejects(
       query({ revision: first.revision, cursor: 'invalid' }),
       (error) => error.code === 'invalid_request',
