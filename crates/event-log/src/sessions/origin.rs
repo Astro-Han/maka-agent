@@ -30,6 +30,9 @@ pub struct PluginSession {
     /// Stable identity of the original creation request.
     pub fingerprint: String,
     pub managed: bool,
+    /// Session whose current authority the Host used to create this root.
+    /// This is a lifecycle dependency, not a business parent or a new grant.
+    pub authority_session_id: Option<String>,
 }
 
 impl EventLog {

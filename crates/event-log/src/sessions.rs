@@ -20,8 +20,8 @@
 //! Durable session control metadata. Execution history remains in runtime_events.
 
 mod activity;
-mod copy;
-pub use copy::{SessionCopy, SessionCopyResult};
+pub(crate) mod copy;
+pub use copy::{AbandonRevision, SessionCopy, SessionCopyResult};
 mod execution;
 mod metadata;
 mod origin;
@@ -62,6 +62,7 @@ pub struct SessionRecord<T> {
     #[serde(skip)]
     pub pending_interaction_since: Option<u64>,
     pub lineage: Option<Box<maka_runtime::session::Lineage>>,
+    pub copy_state: Option<maka_runtime::session::CopyState>,
 }
 
 #[derive(Clone, Debug)]
@@ -120,12 +121,18 @@ impl EventLog {
         if claim.creator.scope() == &maka_plugins::composition::Scope::DesktopUi {
             return Err(invalid("Desktop UI cannot create Host Sessions"));
         }
+        if let Some(source) = &claim.authority_session_id {
+            validate_id(source)?;
+            if source == &claim.session_id {
+                return Err(invalid("Session cannot authorize its own creation"));
+            }
+        }
         self.create_session_owned(
             &claim.session_id,
             &claim.fingerprint,
             configuration,
             now,
-            Some((claim.creator.clone(), claim.managed)),
+            Some(claim.clone()),
         )
         .await
     }
@@ -136,7 +143,7 @@ impl EventLog {
         fingerprint: &str,
         configuration: &T,
         now: u64,
-        origin: Option<(maka_plugins::storage::Namespace, bool)>,
+        origin: Option<PluginSession>,
     ) -> Result<SessionRecord<T>, StoreError> {
         self.validate_root()?;
         validate_id(id)?;
@@ -151,24 +158,32 @@ impl EventLog {
                 Box::pin(async move {
                     let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
                     if let Some(record) = probe(&mut tx, &id, &fingerprint).await? {
-                        let stored: Option<(String, String, bool)> = sqlx::query_as(
-                            "SELECT package_id, scope_id, managed FROM plugin_sessions WHERE session_id = ?",
+                        let stored: Option<(String, String, bool, Option<String>)> = sqlx::query_as(
+                            "SELECT package_id, scope_id, managed, authority_session_id FROM plugin_sessions WHERE session_id = ?",
                         ).bind(&id).fetch_optional(&mut *tx).await?;
-                        let requested = origin.as_ref().map(|(owner, managed)| (
-                            owner.package().to_owned(), String::from(owner.scope().clone()), *managed,
+                        let requested = origin.as_ref().map(|origin| (
+                            origin.creator.package().to_owned(), String::from(origin.creator.scope().clone()), origin.managed,
+                            origin.authority_session_id.clone(),
                         ));
                         if stored != requested {
                             return Err(StoreError::SessionConflict);
                         }
                         return Ok(record);
                     }
-                    if let Some((creator, managed)) = origin {
-                        sqlx::query("INSERT INTO plugin_sessions VALUES (?, ?, ?, ?, ?)")
+                    if let Some(origin) = origin {
+                        if let Some(source) = &origin.authority_session_id {
+                            let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM session_control WHERE id=?)")
+                                .bind(source).fetch_one(&mut *tx).await?;
+                            if !exists { return Err(StoreError::SessionNotFound); }
+                            copy::retain(&mut tx, source).await?;
+                        }
+                        sqlx::query("INSERT INTO plugin_sessions VALUES (?, ?, ?, ?, ?, ?)")
                             .bind(&id)
-                            .bind(creator.package())
-                            .bind(String::from(creator.scope().clone()))
+                            .bind(origin.creator.package())
+                            .bind(String::from(origin.creator.scope().clone()))
                             .bind(&fingerprint)
-                            .bind(managed)
+                            .bind(origin.managed)
+                            .bind(origin.authority_session_id)
                             .execute(&mut *tx)
                             .await?;
                     }
@@ -342,13 +357,15 @@ pub(crate) async fn insert(
     }
     let inserted = sqlx::query(
         "INSERT INTO session_control SELECT ?, ?, 1, ?, ?, 0, ?
-         WHERE NOT EXISTS (SELECT 1 FROM session_control WHERE id = ?)",
+         WHERE NOT EXISTS (SELECT 1 FROM session_control WHERE id = ?)
+           AND NOT EXISTS (SELECT 1 FROM session_history_copies WHERE session_id = ?)",
     )
     .bind(id)
     .bind(fingerprint)
     .bind(now as i64)
     .bind(now as i64)
     .bind(configuration)
+    .bind(id)
     .bind(id)
     .execute(&mut *tx)
     .await?;
@@ -364,7 +381,8 @@ pub(crate) async fn read<T: DeserializeOwned>(
 ) -> Result<Option<SessionRecord<T>>, StoreError> {
     let raw = sqlx::query(
         "SELECT id, revision, created_at, updated_at, archived, configuration,
-            (SELECT lineage_json FROM session_history_copies WHERE session_id = id)
+            (SELECT lineage_json FROM session_history_copies WHERE session_id = id),
+            (SELECT state FROM session_history_copies WHERE session_id = id)
          FROM session_control WHERE id = ?",
     )
     .bind(id)
@@ -380,6 +398,10 @@ pub(crate) async fn read<T: DeserializeOwned>(
         let lineage = row
             .try_get::<Option<String>, _>(6)?
             .map(|json| serde_json::from_str(&json))
+            .transpose()?;
+        let copy_state = row
+            .try_get::<Option<String>, _>(7)?
+            .map(|state| state.parse().map_err(invalid))
             .transpose()?;
         let execution = execution::read(connection, id).await?;
         let read_state = read_state::read(connection, id).await?;
@@ -407,6 +429,7 @@ pub(crate) async fn read<T: DeserializeOwned>(
             read_state,
             pending_interaction_since,
             lineage,
+            copy_state,
         }))
     } else {
         Ok(None)

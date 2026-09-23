@@ -95,6 +95,13 @@ pub(crate) struct ProcessAdmission {
 }
 
 impl Executions {
+    pub(crate) async fn retain_plugin_process_session(
+        &self,
+        session: &str,
+    ) -> Result<(), StoreError> {
+        self.log.retain_session(session).await
+    }
+
     pub(crate) async fn admit_plugin_process(
         &self,
         scope: &maka_plugins::call::Scope,

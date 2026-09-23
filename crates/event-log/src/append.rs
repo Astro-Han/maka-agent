@@ -107,6 +107,7 @@ impl EventLog {
         ).bind(id).fetch_optional(&mut *transaction).await?;
         match (&event.fact, opening) {
             (Fact::InvocationOpened { .. }, None) => {
+                crate::sessions::copy::retain(transaction, &event.invocation.session_id).await?;
                 let archived: bool = sqlx::query_scalar(
                     "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ? AND archived = 1)",
                 )

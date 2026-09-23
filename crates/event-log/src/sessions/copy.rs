@@ -23,11 +23,14 @@ use crate::{
     context::{HistoryCut, history, safety},
     sequence_number,
 };
-use maka_runtime::session::{BranchOrigin, CopyPurpose, Lineage};
+use maka_runtime::session::{BranchOrigin, CopyPurpose, CopyState, Lineage};
 use serde::{Serialize, de::DeserializeOwned};
 use sqlx::Connection;
 
 pub use maka_runtime::session::CopyRequest as SessionCopy;
+mod lifecycle;
+pub use lifecycle::AbandonRevision;
+pub(crate) use lifecycle::retain;
 
 #[derive(Debug)]
 pub enum SessionCopyResult<T> {
@@ -109,9 +112,14 @@ impl EventLog {
             safety::require_safe_through(&mut tx, &request.source_session_id, None, through).await?;
             let lineage = lineage(&mut tx, &request).await?;
             super::insert(&mut tx, &request.target_session_id, &fingerprint, &configuration, now).await?;
-            sqlx::query("INSERT INTO session_history_copies VALUES (?, ?, ?, ?, ?, ?, ?)")
+            let state = match request.purpose {
+                CopyPurpose::Revision { .. } => CopyState::Preparing,
+                _ => CopyState::Committed,
+            };
+            sqlx::query("INSERT INTO session_history_copies VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(&request.target_session_id).bind(&request.source_session_id)
                 .bind(actual as i64).bind(through as i64).bind(observed).bind(encoded).bind(serde_json::to_string(&lineage)?)
+                .bind(state.as_str())
                 .execute(&mut *tx).await?;
             // Each inherited row carries its original archive visibility, not the
             // new parent's current view. Later source pruning cannot alter a copy.
@@ -139,6 +147,7 @@ impl EventLog {
                 if retained.rows_affected() == 0 { return Err(super::invalid("revision Turn has no editable input")); }
                 crate::artifacts::history::retain_revision(&mut tx, &request.source_session_id, &request.target_session_id, now).await?;
             }
+            retain(&mut tx, &request.source_session_id).await?;
             let session = super::read(&mut tx, &request.target_session_id).await?
                 .ok_or(StoreError::SessionNotFound)?;
             tx.commit().await.map_err(StoreError::CommitUnknown)?;

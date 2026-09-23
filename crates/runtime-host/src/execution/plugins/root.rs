@@ -307,6 +307,10 @@ impl BoundCommands {
                                     creator: namespace.clone(),
                                     fingerprint: fingerprint.clone(),
                                     managed: request.managed,
+                                    authority_session_id: approval
+                                        .source
+                                        .as_ref()
+                                        .map(|source| source.session_id.clone()),
                                 },
                                 &expected,
                                 now()?,

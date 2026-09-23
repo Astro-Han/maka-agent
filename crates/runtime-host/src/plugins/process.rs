@@ -125,6 +125,7 @@ impl Processes {
             .target
             .session()
             .map(|id| host.own_plugin_process(id));
+        let session = handle.target.session().map(str::to_owned);
         let execution =
             self.0
                 .owner
@@ -139,19 +140,27 @@ impl Processes {
                         Lifetime::Invocation => authority.cancellation.clone(),
                         Lifetime::Instance => CancellationToken::new(),
                     };
-                    let result = worker::run(
-                        command,
-                        receive,
-                        send,
-                        state,
-                        worker::Stops {
-                            launch,
-                            explicit: stop,
-                            retiring,
-                            invocation: cancellation,
-                        },
-                        admission,
-                    )
+                    let result = async {
+                        if let Some(session) = session {
+                            host.retain_plugin_process_session(&session)
+                                .await
+                                .map_err(|error| error.to_string())?;
+                        }
+                        worker::run(
+                            command,
+                            receive,
+                            send,
+                            state,
+                            worker::Stops {
+                                launch,
+                                explicit: stop,
+                                retiring,
+                                invocation: cancellation,
+                            },
+                            admission,
+                        )
+                        .await
+                    }
                     .await;
                     if result.is_err() {
                         host.begin_drain();

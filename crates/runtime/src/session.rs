@@ -21,6 +21,34 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CopyState {
+    Preparing,
+    Committed,
+    Abandoned,
+}
+impl CopyState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Preparing => "preparing",
+            Self::Committed => "committed",
+            Self::Abandoned => "abandoned",
+        }
+    }
+}
+impl std::str::FromStr for CopyState {
+    type Err = &'static str;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "preparing" => Ok(Self::Preparing),
+            "committed" => Ok(Self::Committed),
+            "abandoned" => Ok(Self::Abandoned),
+            _ => Err("invalid Session copy state"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CopyPurpose {

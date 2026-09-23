@@ -202,13 +202,15 @@ CREATE VIEW runtime_events AS
 -- Copies retain original facts, never execution authority. Flatten membership
 -- at creation so descendants do not query mutable parent Session metadata.
 CREATE TABLE session_history_copies (
-    session_id TEXT PRIMARY KEY REFERENCES session_control(id),
+    session_id TEXT PRIMARY KEY,
     source_session_id TEXT NOT NULL,
     source_revision INTEGER NOT NULL CHECK(source_revision > 0),
     through_sequence INTEGER NOT NULL CHECK(through_sequence >= 0),
     observed_through INTEGER NOT NULL CHECK(observed_through >= through_sequence),
     request_json TEXT NOT NULL,
     lineage_json TEXT NOT NULL CHECK(json_valid(lineage_json)),
+    state TEXT NOT NULL CHECK(state IN ('preparing', 'committed', 'abandoned')),
+    CHECK(state = 'committed' OR json_extract(lineage_json, '$.kind') = 'revision'),
     CHECK(session_id != source_session_id)
 );
 
@@ -360,7 +362,9 @@ CREATE TABLE plugin_sessions (
     package_id TEXT NOT NULL,
     scope_id TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
-    managed INTEGER NOT NULL CHECK(managed IN (0, 1))
+    managed INTEGER NOT NULL CHECK(managed IN (0, 1)),
+    authority_session_id TEXT,
+    CHECK(authority_session_id IS NULL OR authority_session_id != session_id)
 );
 
 CREATE TABLE host_effects (

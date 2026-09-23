@@ -93,6 +93,7 @@ impl EventLog {
                     if inserted.rows_affected() != 1 {
                         return Err(StoreError::ShellConflict);
                     }
+                    crate::sessions::copy::retain(&mut tx, &record.session_id).await?;
                     tx.commit().await.map_err(StoreError::CommitUnknown)?;
                     // Publish on the independent SQL owner even if the caller
                     // abandoned its response after admission.

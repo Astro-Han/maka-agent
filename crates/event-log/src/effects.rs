@@ -93,10 +93,17 @@ impl EventLog {
         )
         .map_err(|error| invalid(error.to_string()))?;
         let raw = serde_json::to_string(&request)?;
+        let session = match &request.boundary {
+            maka_plugins::authorization::Boundary::Session { boundary, .. } => {
+                Some(boundary.session_id.clone())
+            }
+            _ => None,
+        };
         let id = Uuid::new_v4();
         self.connection.run(move |connection| {
             Box::pin(async move {
             let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
+            if let Some(session) = session { crate::sessions::copy::retain(&mut tx, &session).await?; }
             sqlx::query("INSERT INTO host_effects (id, package_id, scope_id, request) VALUES (?, ?, ?, ?)")
                 .bind(id.to_string()).bind(namespace.package()).bind(String::from(namespace.scope().clone())).bind(raw)
                 .execute(&mut *tx).await?;

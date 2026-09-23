@@ -30,6 +30,7 @@ async fn plugin_creation_is_atomic_and_cannot_adopt_or_reassign_existing_session
         creator: Namespace::new("example.workflow", Scope::Profile).unwrap(),
         fingerprint: "owned-creation".into(),
         managed: true,
+        authority_session_id: None,
     };
     let log = EventLog::open(&path).await.unwrap();
     let configuration = json!({"name":"inbox"});

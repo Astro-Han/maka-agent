@@ -718,4 +718,229 @@ async fn revisions_own_excluded_inputs_and_allocate_one_durable_family() {
             .is_none(),
         "another draft's excluded source is not inherited history"
     );
+    assert_eq!(
+        log.abandon_revision("revision-b").await.unwrap(),
+        maka_event_log::sessions::AbandonRevision::Abandoned
+    );
+    assert!(matches!(
+        log.list_artifacts("revision-b", 0, 32).await,
+        Err(StoreError::SessionNotFound)
+    ));
+    assert!(
+        log.editable_turn("revision-b", "first")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn draft_abandonment_serializes_with_acceptance_and_preserves_identity_after_reopen() {
+    use maka_event_log::{message_admissions::PendingMessageAdmission, sessions::AbandonRevision};
+    use maka_runtime::{
+        input::DeliveredMessage,
+        message::{MessageDisposition, Placement, RootSourceMessage},
+        session::{CopyPurpose, CopyState, Lineage},
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("drafts.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    log.create_session("source", "source", &json!({}), 1)
+        .await
+        .unwrap();
+    turn(&log, "source", "first", false).await;
+    let source = log.get_session::<Value>("source").await.unwrap().unwrap();
+    let request = |target: &str| SessionCopy {
+        source_session_id: "source".into(),
+        target_session_id: target.into(),
+        expected_source_revision: source.revision,
+        purpose: CopyPurpose::Revision {
+            turn_id: "first".into(),
+        },
+    };
+    let admission = |session: &str| PendingMessageAdmission {
+        invocation: Invocation {
+            session_id: session.into(),
+            turn_id: format!("turn-{session}"),
+            run_id: format!("run-{session}"),
+            invocation_id: format!("inv-{session}"),
+        },
+        steering_invocation: None,
+        source: RootSourceMessage {
+            unprepared_content: "new input".into(),
+            message: DeliveredMessage {
+                message_id: format!("new-{session}"),
+                content: "new input".into(),
+                submitted_content_digest: maka_runtime::input::MessageInput::from("new input")
+                    .content_digest()
+                    .unwrap(),
+            },
+            submitted_placement: Placement::CurrentTurn,
+            disposition: MessageDisposition::TurnStarted,
+            submitted_intent: None,
+        },
+        required_tools: Default::default(),
+        admitted_at: 25,
+    };
+    for target in [
+        "discarded",
+        "accepted",
+        "racing",
+        "dependent",
+        "failed-child",
+        "native",
+    ] {
+        assert_eq!(
+            copy(&log, request(target)).await.copy_state,
+            Some(CopyState::Preparing)
+        );
+    }
+    assert_eq!(
+        log.abandon_revision("discarded").await.unwrap(),
+        AbandonRevision::Abandoned
+    );
+    assert!(matches!(
+        log.admit_message(admission("discarded")).await,
+        Err(StoreError::SessionNotFound)
+    ));
+    log.admit_message(admission("accepted")).await.unwrap();
+    assert_eq!(
+        log.abandon_revision("accepted").await.unwrap(),
+        AbandonRevision::Retained
+    );
+    assert!(
+        log.root_message("accepted", "new-accepted")
+            .await
+            .unwrap()
+            .is_none(),
+        "pending work is not yet canonical history"
+    );
+    let (accepted, abandoned) = tokio::join!(
+        log.admit_message(admission("racing")),
+        log.abandon_revision("racing")
+    );
+    match abandoned.unwrap() {
+        AbandonRevision::Abandoned => assert!(matches!(accepted, Err(StoreError::SessionNotFound))),
+        AbandonRevision::Retained => assert!(accepted.is_ok()),
+    }
+    let dependent = log
+        .get_session::<Value>("dependent")
+        .await
+        .unwrap()
+        .unwrap();
+    copy(
+        &log,
+        SessionCopy {
+            source_session_id: "dependent".into(),
+            target_session_id: "child".into(),
+            expected_source_revision: dependent.revision,
+            purpose: CopyPurpose::EmptySideConversation,
+        },
+    )
+    .await;
+    assert_eq!(
+        log.abandon_revision("dependent").await.unwrap(),
+        AbandonRevision::Retained
+    );
+    let claim = maka_event_log::sessions::PluginSession {
+        session_id: "discarded".into(),
+        creator: maka_plugins::storage::Namespace::new(
+            "external.workflow",
+            maka_plugins::composition::Scope::Profile,
+        )
+        .unwrap(),
+        fingerprint: "new-root".into(),
+        managed: false,
+        authority_session_id: Some("failed-child".into()),
+    };
+    assert!(matches!(
+        log.create_plugin_session(&claim, &json!({}), 26).await,
+        Err(StoreError::SessionConflict)
+    ));
+    assert_eq!(
+        log.abandon_revision("failed-child").await.unwrap(),
+        AbandonRevision::Abandoned,
+        "rejected dependent creation must not retain a draft"
+    );
+    turn(&log, "native", "own-turn", false).await;
+    assert_eq!(
+        log.abandon_revision("native").await.unwrap(),
+        AbandonRevision::Retained
+    );
+
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(
+        log.abandon_revision("discarded").await.unwrap(),
+        AbandonRevision::Abandoned
+    );
+    assert_eq!(
+        log.abandon_revision("accepted").await.unwrap(),
+        AbandonRevision::Retained
+    );
+    assert!(
+        log.get_session::<Value>("discarded")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(matches!(
+        log.copy_session(request("discarded"), &json!({}), 30).await,
+        Err(StoreError::SessionNotFound)
+    ));
+    assert!(matches!(
+        log.create_session("discarded", "new-identity", &json!({}), 30)
+            .await,
+        Err(StoreError::SessionConflict)
+    ));
+    assert!(log.retain_session("discarded").await.is_err());
+    let late = admission("discarded");
+    assert!(
+        log.append(
+            &EventWrite::plain(RuntimeEvent::new(
+                late.invocation,
+                Fact::InvocationOpened {
+                    configuration: None,
+                    input: InvocationInput::Message {
+                        content: late.source.message.content.clone(),
+                        source_messages: vec![late.source],
+                        request_fingerprint: None,
+                    },
+                }
+            ))
+            .unwrap()
+        )
+        .await
+        .is_err(),
+        "late opening must not recreate an abandoned draft"
+    );
+    let next = copy(&log, request("next")).await;
+    assert!(
+        matches!(
+            next.lineage.as_deref(),
+            Some(Lineage::Revision { index: 8, .. })
+        ),
+        "abandoned family indexes must not be reused"
+    );
+    let claim = maka_event_log::sessions::PluginSession {
+        session_id: "plugin-root".into(),
+        authority_session_id: Some("next".into()),
+        ..claim
+    };
+    log.create_plugin_session(&claim, &json!({}), 31)
+        .await
+        .unwrap();
+    assert_eq!(
+        log.abandon_revision("next").await.unwrap(),
+        AbandonRevision::Retained
+    );
+    assert_eq!(
+        log.get_session::<Value>("next")
+            .await
+            .unwrap()
+            .unwrap()
+            .copy_state,
+        Some(CopyState::Committed)
+    );
+    log.close().await.unwrap();
 }
