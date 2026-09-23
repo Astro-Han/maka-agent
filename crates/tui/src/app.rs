@@ -494,7 +494,8 @@ impl App {
         self.chrome.session_fullscreen && matches!(self.navigation.current(), Route::Session(_))
     }
     pub fn tooltip_wait(&self) -> Option<Duration> {
-        if self.theme.editor.is_some()
+        if self.extensions.consent_visible()
+            || self.theme.editor.is_some()
             || self.branch.visible
             || self.recap.visible
             || self.revision.visible
@@ -512,7 +513,8 @@ impl App {
         (!remaining.is_zero()).then_some(remaining)
     }
     pub fn selection_wait(&self, now: Instant) -> Option<Duration> {
-        if self.theme.editor.is_some()
+        if self.extensions.consent_visible()
+            || self.theme.editor.is_some()
             || self.branch.visible
             || self.recap.visible
             || self.revision.visible
@@ -538,7 +540,8 @@ impl App {
                 .is_some_and(|reader| reader.selection_scroll(now))
     }
     pub fn tooltip_visible(&self) -> bool {
-        self.theme.editor.is_none()
+        !self.extensions.consent_visible()
+            && self.theme.editor.is_none()
             && !self.branch.visible
             && !self.recap.visible
             && !self.revision.visible
@@ -1182,7 +1185,8 @@ impl App {
     fn dispatch_input(&mut self, event: Event) -> (bool, Option<Action>) {
         if let Event::Mouse(mouse) = &event
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
-            && (self.theme.editor.is_some()
+            && (self.extensions.consent_visible()
+                || self.theme.editor.is_some()
                 || self.branch.visible
                 || self.recap.visible
                 || self.revision.visible
@@ -1198,7 +1202,11 @@ impl App {
                 .is_some_and(|area| !area.contains(Position::new(mouse.column, mouse.row)))
         {
             // Dismiss only the displayed overlay. Never forward this press to the page.
-            let action = if self.theme.editor.is_some() {
+            let action = if self.extensions.consent_visible() {
+                Some(Action::Extension(
+                    crate::pages::extensions::Command::DismissConsent,
+                ))
+            } else if self.theme.editor.is_some() {
                 Some(Action::Theme(crate::theme::editor::Command::Close))
             } else if self.skills.dialog.is_some() {
                 Some(Action::Skills(crate::pages::skills::Command::Close))
@@ -1234,6 +1242,9 @@ impl App {
             self.modal_area = None;
             self.hits.clear();
             return (true, action.and_then(|action| self.apply(action)));
+        }
+        if self.extensions.consent_visible() && !matches!(event, Event::Resize(_, _)) {
+            return self.extensions_consent_input(event);
         }
         if self.theme.editor.is_some() && !matches!(event, Event::Resize(_, _)) {
             return self.theme_input(event);

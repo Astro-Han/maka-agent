@@ -290,12 +290,15 @@ mod tests {
             "packageId":"example","scopeId":"profile","method":"manage",
             "target":{"entryId":"example","activation":uuid::Uuid::new_v4().to_string(),
                 "registration":uuid::Uuid::new_v4()},
-            "descriptor":{"version":1,"title":{"fallback":"Manage","translations":{}},
+            "descriptor":{"version":maka_plugins::terminal_ui::VERSION,"title":{"fallback":"Manage","translations":{}},
                 "context":"application"}
         }]});
         decode_output(Operation::PluginPlatformQuery, &page).unwrap();
         for (pointer, invalid) in [
-            ("/items/0/descriptor/version", json!(2)),
+            (
+                "/items/0/descriptor/version",
+                json!(maka_plugins::terminal_ui::VERSION + 1),
+            ),
             ("/items/0/target", Value::Null),
             ("/items/0/method", json!("not a method")),
         ] {

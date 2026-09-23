@@ -123,7 +123,11 @@ impl Method for View {
                     revision,
                     action,
                     fields,
+                    grant,
                 } => {
+                    if grant.is_some() {
+                        return Err(invalid("Unexpected authorization"));
+                    }
                     let route: Route = serde_json::from_value(route).map_err(invalid)?;
                     let reference = route
                         .reference

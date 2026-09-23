@@ -224,7 +224,11 @@ impl Backend {
         }
         Ok(grant)
     }
-    async fn authorization(&self, origin: Origin, effect: Effect) -> Result<Authorization, Error> {
+    pub(super) async fn authorization(
+        &self,
+        origin: Origin,
+        effect: Effect,
+    ) -> Result<Authorization, Error> {
         let explicit = match &origin {
             Origin::User { grant } => *grant,
             Origin::Agent(call) => {
@@ -288,9 +292,7 @@ impl Backend {
                 Err(error) => return Err(error),
             }
         }
-        Err(invalid(
-            "Approve background access in the Scheduler UI before creating this task",
-        ))
+        Err(Error::AuthorizationRequired)
     }
     async fn execute(
         &self,

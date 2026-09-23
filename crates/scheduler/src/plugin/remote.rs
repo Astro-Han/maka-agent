@@ -154,7 +154,9 @@ pub(super) fn error(error: crate::Error) -> Error {
             | maka_runtime::tools::ToolError::Persistence(_),
         ) => Error::CleanupUnconfirmed,
         crate::Error::Closed => Error::Retired,
-        crate::Error::Invalid(_) | crate::Error::Time(_) => Error::Invalid(error.to_string()),
+        crate::Error::Invalid(_) | crate::Error::Time(_) | crate::Error::AuthorizationRequired => {
+            Error::Invalid(error.to_string())
+        }
         _ => Error::Provider(error.to_string()),
     }
 }

@@ -25,7 +25,7 @@ use crate::Error;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// Presentation text is distinct from the stable identity used for navigation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn navigation_metadata_has_bounded_text_and_explicit_version_and_language_fallback() {
-        let value = json!({"version":1,"title":{
+        let value = json!({"version":VERSION,"title":{
             "fallback":"Skills", "translations":{"en":"Skills","zh":"技能","zh-TW":"技能管理"}
         },"context":"session"});
         let descriptor: Descriptor = serde_json::from_value(value.clone()).unwrap();
@@ -160,7 +160,7 @@ mod tests {
         invalid.title.translations = (0..9).map(|n| (format!("x-{n}"), "Title".into())).collect();
         assert!(invalid.validate().is_err());
         for (field, replacement) in [
-            ("version", json!(2)),
+            ("version", json!(VERSION + 1)),
             (
                 "title",
                 json!({"fallback":"\u{001b}[31m","translations":{}}),

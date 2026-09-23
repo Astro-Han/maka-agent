@@ -58,58 +58,104 @@ pub async fn execute(client: &Client, request: &Request) -> Result<Output, Failu
                 _ => Err(Failure { unknown: false }),
             }
         }
-        Work::Page { view, input } => {
-            input.validate().map_err(|_| Failure { unknown: false })?;
-            let RemoteResult::Document { document } = client
-                .plugin_remote(RemoteRequest::OpenDocument)
+        Work::Page { view, input } => call_page(client, view, input, session(view, request)).await,
+        Work::Authorize {
+            view,
+            input,
+            proposal,
+        } => {
+            let result = client
+                .plugin_authorization(maka_protocol::plugin::AuthorizationInput::Remote {
+                    binding: binding(view, session(view, request)),
+                    target: view.target.clone(),
+                    command: maka_protocol::plugin::AuthorizationCommand::Approve {
+                        request: proposal.clone(),
+                    },
+                })
                 .await
-                .map_err(|error| failure(error, false))?
+                .map_err(|error| failure(error, true))?;
+            let maka_protocol::plugin::AuthorizationResult::Grant { grant: Some(grant) } = result
             else {
+                return Err(Failure { unknown: true });
+            };
+            if grant.revoked {
+                return Err(Failure { unknown: false });
+            }
+            let mut input = input.clone();
+            let Input::Submit { grant: receipt, .. } = &mut input else {
                 return Err(Failure { unknown: false });
             };
-            let result = client
-                .plugin_remote(RemoteRequest::Call {
-                    binding: RemoteBinding::Package {
-                        package_id: view.package_id.clone(),
-                        method: view.method.clone(),
-                        session_id: request.session.clone(),
-                    },
-                    target: view.target.clone(),
-                    document,
-                    input: serde_json::to_value(input).expect("terminal request"),
-                })
-                .await;
-            // The finite call always owns cleanup, even after navigation. Do not
-            // replace a known write receipt with a CloseDocument failure.
-            let closed = client
-                .plugin_remote(RemoteRequest::CloseDocument { document })
-                .await;
-            let writing = matches!(input, Input::Submit { .. });
-            let RemoteResult::Value { value } = result.map_err(|error| failure(error, writing))?
-            else {
-                return Err(Failure { unknown: writing });
-            };
-            let reply: Reply =
-                serde_json::from_value(value).map_err(|_| Failure { unknown: writing })?;
-            reply.validate().map_err(|_| Failure { unknown: writing })?;
-            if !matches!(
-                (&input, &reply),
-                (
-                    Input::Read { .. },
-                    Reply::Page { .. } | Reply::Conflict | Reply::Rejected { .. }
-                ) | (
-                    Input::Submit { .. },
-                    Reply::Applied { .. } | Reply::Conflict | Reply::Rejected { .. }
-                )
-            ) {
-                return Err(Failure { unknown: writing });
-            }
-            if !writing {
-                closed.map_err(|error| failure(error, false))?;
-            }
-            Ok(Output::Page(reply))
+            *receipt = Some(grant.id);
+            call_page(client, view, &input, session(view, request)).await
         }
     }
+}
+
+fn session(view: &TerminalViewProjection, request: &Request) -> Option<String> {
+    match view.descriptor.context {
+        maka_plugins::terminal_ui::Context::Application => None,
+        maka_plugins::terminal_ui::Context::Session => request.session.clone(),
+    }
+}
+fn binding(view: &TerminalViewProjection, session_id: Option<String>) -> RemoteBinding {
+    RemoteBinding::Package {
+        package_id: view.package_id.clone(),
+        method: view.method.clone(),
+        session_id,
+    }
+}
+async fn call_page(
+    client: &Client,
+    view: &TerminalViewProjection,
+    input: &Input,
+    session: Option<String>,
+) -> Result<Output, Failure> {
+    input.validate().map_err(|_| Failure { unknown: false })?;
+    let RemoteResult::Document { document } = client
+        .plugin_remote(RemoteRequest::OpenDocument)
+        .await
+        .map_err(|error| failure(error, false))?
+    else {
+        return Err(Failure { unknown: false });
+    };
+    let result = client
+        .plugin_remote(RemoteRequest::Call {
+            binding: binding(view, session),
+            target: view.target.clone(),
+            document,
+            input: serde_json::to_value(input).expect("terminal request"),
+        })
+        .await;
+    // The finite call always owns cleanup, even after navigation. Do not
+    // replace a known write receipt with a CloseDocument failure.
+    let closed = client
+        .plugin_remote(RemoteRequest::CloseDocument { document })
+        .await;
+    let writing = matches!(input, Input::Submit { .. });
+    let RemoteResult::Value { value } = result.map_err(|error| failure(error, writing))? else {
+        return Err(Failure { unknown: writing });
+    };
+    let reply: Reply = serde_json::from_value(value).map_err(|_| Failure { unknown: writing })?;
+    reply.validate().map_err(|_| Failure { unknown: writing })?;
+    if !(matches!(
+        (&input, &reply),
+        (
+            Input::Read { .. },
+            Reply::Page { .. } | Reply::Conflict | Reply::Rejected { .. }
+        ) | (
+            Input::Submit { .. },
+            Reply::Applied { .. } | Reply::Conflict | Reply::Rejected { .. }
+        )
+    ) || matches!(
+        (input, &reply),
+        (Input::Submit { grant: None, .. }, Reply::Consent { .. })
+    )) {
+        return Err(Failure { unknown: writing });
+    }
+    if !writing {
+        closed.map_err(|error| failure(error, false))?;
+    }
+    Ok(Output::Page(reply))
 }
 
 #[cfg(test)]

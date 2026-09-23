@@ -90,6 +90,7 @@ pub enum Request {
         revision: String,
         action: String,
         fields: BTreeMap<String, Value>,
+        grant: Option<crate::authorization::Id>,
     },
 }
 
@@ -98,10 +99,20 @@ pub enum Request {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reply {
-    Page { page: Page },
-    Applied { route: Value },
+    Page {
+        page: Page,
+    },
+    Applied {
+        route: Value,
+    },
     Conflict,
-    Rejected { message: Text },
+    Rejected {
+        message: Text,
+    },
+    /// Inert proposal. Only an explicit application consent action may approve it.
+    Consent {
+        request: crate::authorization::Request,
+    },
 }
 
 fn invalid() -> Error {
@@ -256,6 +267,7 @@ impl Page {
             revision: self.revision.clone(),
             action: action.id.clone(),
             fields,
+            grant: None,
         };
         request.validate()?;
         Ok(request)
@@ -270,6 +282,7 @@ impl Request {
                 revision,
                 action,
                 fields,
+                ..
             } => {
                 route(value)?;
                 identifier(revision)?;
@@ -297,6 +310,7 @@ impl Reply {
             Self::Applied { route: value } => route(value)?,
             Self::Rejected { message } => message.validate()?,
             Self::Conflict => {}
+            Self::Consent { request } => request.validate()?,
         }
         bounded(self, MAX_BYTES)
     }

@@ -198,7 +198,7 @@ export default async function activate(ctx) {
   );
   const state = { generation: 0, opening: 0, active: 0, stopped: 0 };
   const terminalView = {
-    version: 1,
+    version: 2,
     context: 'application',
     title: { fallback: 'Echo', translations: { 'zh-CN': '回显', 'zh-TW': '回顯' } },
   };

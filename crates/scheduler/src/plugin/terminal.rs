@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod create;
 mod timing;
 
 use super::{ID, Service, remote::error};
@@ -49,6 +50,7 @@ struct Route {
     offset: usize,
     task: Option<String>,
     timing: bool,
+    creation: Option<create::Route>,
 }
 
 pub(super) fn publish(service: Service, staged: &mut Staged) -> Result<(), String> {
@@ -79,9 +81,17 @@ impl Method for View {
                     revision,
                     action,
                     fields,
+                    grant,
                 } => {
                     let route = decode(route)?;
-                    submit(&service, route, revision, action, fields).await?
+                    if let Some(creation) = route.creation {
+                        create::submit(&service, creation, revision, action, fields, grant).await?
+                    } else {
+                        if grant.is_some() {
+                            return Err(invalid("Unexpected authorization"));
+                        }
+                        submit(&service, route, revision, action, fields).await?
+                    }
                 }
             };
             reply.validate().map_err(invalid)?;
@@ -171,6 +181,12 @@ fn decode(value: Value) -> Result<Route, Error> {
         serde_json::from_value(value).map_err(invalid)?
     };
     if route.offset >= 64
+        || route.creation.is_some()
+            && (route.task.is_some()
+                || route.cursor.is_some()
+                || route.revision.is_some()
+                || route.offset != 0
+                || route.timing)
         || route.timing && route.task.is_none()
         || !route.offset.is_multiple_of(WINDOW)
         || route.task.is_some()
@@ -181,6 +197,9 @@ fn decode(value: Value) -> Result<Route, Error> {
     Ok(route)
 }
 fn read(service: &Service, route: Route) -> Result<Reply, Error> {
+    if let Some(creation) = route.creation {
+        return create::read(service, creation);
+    }
     if let Some(task_id) = route.task {
         return match service.query(Query::Get { task_id }).map_err(error)? {
             QueryResult::Task {
@@ -217,6 +236,7 @@ fn read(service: &Service, route: Route) -> Result<Reply, Error> {
                 Text::localized("Scheduled tasks", "计划任务", "排程任務"),
                 revision,
             );
+            page.rows.push(create::entry());
             if route.offset > tasks.len() {
                 return Err(invalid("Unknown scheduled-task offset"));
             }
@@ -239,6 +259,7 @@ fn read(service: &Service, route: Route) -> Result<Reply, Error> {
                     offset: route.offset + WINDOW,
                     task: None,
                     timing: false,
+                    creation: None,
                 })
             } else {
                 next_cursor.map(|cursor| Route {

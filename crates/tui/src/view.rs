@@ -68,6 +68,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         && !app.interactions.visible
         && app.management.dialog.is_none()
         && !app.branch.visible
+        && !app.extensions.consent_visible()
         && !app.recap.visible
         && !app.revision.visible
         && app.attachments.dialog.is_none()
@@ -293,7 +294,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     };
     let hint = if app.closing {
         app.i18n.text("state-closing")
-    } else if app.theme.editor.is_some()
+    } else if app.extensions.consent_visible()
+        || app.theme.editor.is_some()
         || app.branch.visible
         || app.recap.visible
         || app.revision.visible
@@ -393,7 +395,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
             action: Action::Visit(Route::Host),
         });
     }
-    if app.theme.editor.is_some() {
+    if app.extensions.consent_visible() {
+        crate::pages::extensions::draw_consent(frame, app, area, base);
+    } else if app.theme.editor.is_some() {
         crate::theme::editor::draw(frame, app, area);
     } else if app.skills.dialog.is_some() {
         crate::pages::skills::draw(frame, app, area, base);

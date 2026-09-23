@@ -56,34 +56,7 @@ fn date(at: i64, timezone: &str) -> Result<String, Error> {
 pub(super) fn page(task: &Task, revision: u64, timezone: &str) -> Result<Page, Error> {
     let mut page = empty(title(&task.schedule), revision);
     page.body = format!("{}\n{}", display(&task.title, 512, false), timezone);
-    page.fields.push(field(
-        "at",
-        Text::localized(
-            "Start · UTC offset",
-            "开始时间 · 时区偏移",
-            "開始時間 · 時區偏移",
-        ),
-        date(anchor(&task.schedule), timezone)?,
-        64,
-        false,
-    ));
-    match &task.schedule {
-        Schedule::Interval { every_seconds, .. } => page.fields.push(field(
-            "seconds",
-            Text::localized("Every (seconds)", "间隔（秒）", "間隔（秒）"),
-            every_seconds.to_string(),
-            16,
-            false,
-        )),
-        Schedule::Cron { expression, .. } => page.fields.push(field(
-            "expression",
-            Text::localized("Cron expression", "Cron 表达式", "Cron 表達式"),
-            expression.clone(),
-            256,
-            false,
-        )),
-        _ => {}
-    }
+    page.fields = fields(&task.schedule, timezone)?;
     let enabled = matches!(task.status, Status::Active | Status::Paused);
     for field in &mut page.fields {
         field.enabled = enabled;
@@ -95,6 +68,40 @@ pub(super) fn page(task: &Task, revision: u64, timezone: &str) -> Result<Page, E
         fields: page.fields.iter().map(|field| field.id.clone()).collect(),
     });
     Ok(page)
+}
+pub(super) fn fields(
+    schedule: &Schedule,
+    timezone: &str,
+) -> Result<Vec<maka_plugins::terminal_ui::page::Field>, Error> {
+    let mut fields = vec![field(
+        "at",
+        Text::localized(
+            "Start · UTC offset",
+            "开始时间 · 时区偏移",
+            "開始時間 · 時區偏移",
+        ),
+        date(anchor(schedule), timezone)?,
+        64,
+        false,
+    )];
+    match schedule {
+        Schedule::Interval { every_seconds, .. } => fields.push(field(
+            "seconds",
+            Text::localized("Every (seconds)", "间隔（秒）", "間隔（秒）"),
+            every_seconds.to_string(),
+            16,
+            false,
+        )),
+        Schedule::Cron { expression, .. } => fields.push(field(
+            "expression",
+            Text::localized("Cron expression", "Cron 表达式", "Cron 表達式"),
+            expression.clone(),
+            256,
+            false,
+        )),
+        _ => {}
+    }
+    Ok(fields)
 }
 pub(super) fn update(
     original: &Schedule,

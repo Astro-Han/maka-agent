@@ -41,6 +41,8 @@ pub enum Error {
     NotFound,
     #[error("scheduled task changed since it was read")]
     RevisionConflict,
+    #[error("Approve background access in the Scheduler UI before creating this task")]
+    AuthorizationRequired,
     #[error("scheduler is closed")]
     Closed,
     #[error("scheduler command queue is full")]

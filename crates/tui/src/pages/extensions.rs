@@ -17,8 +17,10 @@
  * under the License.
  */
 
+mod consent;
 pub(crate) mod io;
 mod view;
+pub use consent::draw as draw_consent;
 pub use io::{Output, execute};
 pub use view::draw;
 
@@ -42,6 +44,8 @@ pub enum Command {
     Row(usize),
     Field(usize),
     Submit(usize),
+    ApproveConsent,
+    DismissConsent,
     Back,
     Refresh,
     Discard,
@@ -58,6 +62,8 @@ impl Command {
             Self::Row(_) => "extensions-open",
             Self::Field(_) => "extensions-edit",
             Self::Submit(_) => "extensions-save",
+            Self::ApproveConsent => "extensions-authorize",
+            Self::DismissConsent => "session-cancel",
         }
     }
 }
@@ -76,6 +82,11 @@ pub(super) enum Work {
     Page {
         view: Box<TerminalViewProjection>,
         input: Input,
+    },
+    Authorize {
+        view: Box<TerminalViewProjection>,
+        input: Input,
+        proposal: maka_plugins::authorization::Request,
     },
 }
 pub(super) enum Message {
@@ -97,6 +108,7 @@ pub struct State {
     pub(super) drafts: BTreeMap<String, Value>,
     pub(super) editors: BTreeMap<String, Editor>,
     pending: Option<Work>,
+    consent: Option<consent::Consent>,
     pub(super) busy: bool,
     writing: bool,
     pub(super) blocked: bool,
@@ -108,6 +120,9 @@ pub struct State {
     pub(super) area: Option<ratatui::layout::Rect>,
 }
 impl State {
+    pub fn consent_visible(&self) -> bool {
+        self.consent.is_some()
+    }
     fn dirty_field(&self, field: &maka_plugins::terminal_ui::page::Field) -> bool {
         let value = match &field.control {
             Control::Toggle { value } => Value::Bool(*value),
@@ -122,11 +137,15 @@ impl State {
     }
     pub fn invalidate_geometry(&mut self) {
         self.area = None;
+        if let Some(consent) = &mut self.consent {
+            consent.rendered = false;
+        }
         for editor in self.editors.values_mut() {
             editor.invalidate_geometry();
         }
     }
     pub fn disconnect(&mut self) {
+        self.consent = None;
         self.generation += 1;
         self.pending = None;
         self.busy = false;
@@ -244,7 +263,7 @@ impl App {
             Work::Page {
                 input: Input::Submit { .. },
                 ..
-            }
+            } | Work::Authorize { .. }
         );
         self.extensions.message = None;
         Some(Request {
@@ -279,6 +298,30 @@ impl App {
                 state.reveal = true;
             }
             Ok(Output::Page(Reply::Page { page })) => state.install(page),
+            Ok(Output::Page(Reply::Consent { request: proposal })) => {
+                // Preparing consent does not authorize anything. Leaving the page
+                // cancels presentation, without discarding the form or opening a
+                // delayed modal over another destination.
+                if self.navigation.current() != Route::Extensions {
+                    return;
+                }
+                if let Work::Page {
+                    view,
+                    input: input @ Input::Submit { grant: None, .. },
+                } = request.work
+                {
+                    state.consent = Some(consent::Consent {
+                        view,
+                        input,
+                        proposal,
+                        focus: 0,
+                        rendered: false,
+                    });
+                } else {
+                    state.blocked = true;
+                    state.message = Some(Message::Local("extensions-failed"));
+                }
+            }
             Ok(Output::Page(Reply::Applied { route })) => {
                 state.applied = match &request.work {
                     Work::Page {
@@ -322,6 +365,19 @@ impl App {
     }
     pub fn extensions_enabled(&self, command: &Command) -> bool {
         let state = &self.extensions;
+        if let Some(consent) = &state.consent {
+            return match command {
+                Command::DismissConsent => true,
+                Command::ApproveConsent => {
+                    consent.rendered
+                        && !state.busy
+                        && !state.blocked
+                        && self.navigation.current() == Route::Extensions
+                        && matches!(self.connection, ConnectionState::Connected { .. })
+                }
+                _ => false,
+            };
+        }
         if *command == Command::Open {
             return matches!(self.connection, ConnectionState::Connected { .. })
                 && !state.busy
@@ -374,6 +430,7 @@ impl App {
                     })
             }
             Command::Open => false,
+            Command::ApproveConsent | Command::DismissConsent => false,
         }
     }
     pub fn extensions_action(&mut self, command: Command) {
@@ -399,6 +456,17 @@ impl App {
         let state = &mut self.extensions;
         state.applied = None;
         match command {
+            Command::ApproveConsent => {
+                let consent = state.consent.take().unwrap();
+                state.pending = Some(Work::Authorize {
+                    view: consent.view,
+                    input: consent.input,
+                    proposal: consent.proposal,
+                });
+            }
+            Command::DismissConsent => {
+                state.consent = None;
+            }
             Command::Choose(index) => {
                 state.view = Some(state.directory[index].clone());
                 state.route = Value::Null;
@@ -452,6 +520,9 @@ impl App {
                 } else {
                     state.page = None;
                     state.view = None;
+                    state.directory.clear();
+                    state.next = None;
+                    state.loaded = false;
                     state.drafts.clear();
                     state.editors.clear();
                     state.pending = Some(Work::Directory(None));
@@ -461,6 +532,9 @@ impl App {
                 state.generation += 1;
                 state.page = None;
                 state.view = None;
+                state.directory.clear();
+                state.next = None;
+                state.loaded = false;
                 state.drafts.clear();
                 state.editors.clear();
                 state.blocked = false;
@@ -845,6 +919,101 @@ mod tests {
             })),
         );
         assert_eq!(app.extensions.directory.len(), 1);
+    }
+
+    #[test]
+    fn consent_requires_visible_explicit_confirmation_and_never_steals_another_page() {
+        use maka_plugins::authorization::{Capability, Request as Proposal, Target};
+        let proposal = Proposal {
+            operation_id: uuid::Uuid::new_v4(),
+            title: "Untrusted title".into(),
+            target: Target::Profile,
+            capabilities: [Capability::Notifications].into(),
+        };
+        let mut app = app();
+        app.extensions.drafts.insert("name".into(), json!("Draft"));
+        let prepare = |app: &mut App| {
+            app.extensions_action(Command::Submit(0));
+            let request = app.extensions_request().unwrap();
+            app.extensions_complete(
+                request,
+                Ok(Output::Page(Reply::Consent {
+                    request: proposal.clone(),
+                })),
+            );
+        };
+        prepare(&mut app);
+        assert!(app.extensions_request().is_none());
+        assert!(!app.extensions_enabled(&Command::ApproveConsent));
+        let screen = draw(&mut app, 90, 28);
+        assert!(screen.contains("Send notifications"));
+        assert!(!screen.contains("Untrusted title"));
+        app.input(Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )));
+        assert!(
+            !app.extensions.consent_visible(),
+            "Enter defaults to cancel"
+        );
+        assert_eq!(app.extensions.drafts["name"], json!("Draft"));
+        assert!(app.extensions_request().is_none());
+
+        prepare(&mut app);
+        draw(&mut app, 90, 28);
+        app.input(Event::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        }));
+        assert!(!app.extensions.consent_visible());
+        assert_eq!(app.navigation.current(), Route::Extensions);
+        assert!(app.extensions_request().is_none());
+
+        prepare(&mut app);
+        draw(&mut app, 30, 10);
+        app.extensions_action(Command::ApproveConsent);
+        assert!(
+            app.extensions.consent_visible(),
+            "hidden terms cannot be approved"
+        );
+        draw(&mut app, 90, 28);
+        app.input(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+        app.input(Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )));
+        let request = app.extensions_request().unwrap();
+        let Work::Authorize {
+            view,
+            input,
+            proposal: actual,
+        } = &request.work
+        else {
+            panic!("explicit approval")
+        };
+        assert_eq!(view.target, app.extensions.view.as_ref().unwrap().target);
+        assert_eq!(actual, &proposal);
+        let Input::Submit { fields, grant, .. } = input else {
+            panic!("submit")
+        };
+        assert_eq!(fields["name"], json!("Draft"));
+        assert!(grant.is_none());
+        app.extensions_complete(request, Err(io::Failure { unknown: true }));
+        assert!(!app.extensions_enabled(&Command::Submit(0)));
+        assert!(app.extensions_request().is_none());
+
+        let mut app = self::app();
+        app.extensions_action(Command::Submit(0));
+        let request = app.extensions_request().unwrap();
+        app.apply(Action::Visit(Route::Workspace));
+        app.extensions_complete(
+            request,
+            Ok(Output::Page(Reply::Consent { request: proposal })),
+        );
+        assert!(!app.extensions.consent_visible());
+        assert!(app.extensions_request().is_none());
     }
 
     #[test]

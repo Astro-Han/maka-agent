@@ -161,6 +161,137 @@ fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_mode
     client.disconnect();
 }
 
+#[test]
+fn scheduler_creation_requires_consent_then_reuses_only_a_live_grant() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut host = super::super::candidate::CandidateFixture::new(directory.path().join("root"));
+    host.child = Some(
+        Command::new(env!("CARGO_BIN_EXE_maka"))
+            .args(["host", "serve", "--root"])
+            .arg(&host.root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    host.wait_for_registration();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let (client, listener) = runtime.block_on(async {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = support::model_client(
+            &host.root,
+            &format!("http://{}/v1", listener.local_addr().unwrap()),
+        )
+        .await;
+        client
+            .create_session(
+                maka_protocol::session::decode_session_create_input(&json!({
+                    "sessionId":"reminder-source", "name":"Reminder source",
+                    "workspace":{"kind":"host_path","path":directory.path()},
+                    "sandboxMode":"read-only", "modelTarget":{"kind":"default"}
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        (client, listener)
+    });
+    let list = || {
+        runtime.block_on(remote(
+            &client,
+            "request",
+            json!({"kind":"query","query":{"kind":"list"}}),
+        ))
+    };
+    let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
+    tui.wait_for("Reminder source");
+    tui.click_text("Reminder source");
+    tui.wait_for("fixture-model");
+    tui.filter_command("Plugin pages");
+    tui.click_text("Plugin pages");
+    tui.wait_for("Scheduled tasks");
+    tui.click_text("Scheduled tasks");
+    tui.wait_for("New reminder");
+    tui.click_text("New reminder");
+    tui.wait_for("Interval");
+    tui.click_text("Interval");
+    tui.wait_for("Every (seconds)");
+    tui.click_text("Title");
+    tui.send(b"\x1b[200~Consent fixture\x1b[201~");
+    tui.click_text("Content");
+    tui.send(b"\x1b[200~First reminder\x1b[201~");
+    tui.click_text("Create reminder");
+    tui.wait_for("Allow plugin access?");
+    tui.send(b"\r"); // Default focus cancels; no authorization or task mutation.
+    tui.wait_until(|screen| {
+        !screen.contains("Allow plugin access?") && screen.contains("First reminder")
+    });
+    assert!(list()["tasks"].as_array().unwrap().is_empty());
+    assert!(
+        runtime
+            .block_on(remote(&client, "request", json!({"kind":"grants"})))
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    tui.click_text("Create reminder");
+    tui.wait_for("Allow plugin access?");
+    tui.click_text("Allow and continue");
+    tui.wait_for("Pause");
+    let tasks = list();
+    let task = &tasks["tasks"][0];
+    assert_eq!(tasks["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(task["title"], "Consent fixture");
+    assert_eq!(task["intent"]["body"], "First reminder");
+    assert_eq!(task["schedule"]["everySeconds"], 3600);
+    assert_eq!(task["effect"], json!({"kind":"notify","channel":"local"}));
+    let grants = runtime.block_on(remote(&client, "request", json!({"kind":"grants"})));
+    assert_eq!(grants.as_array().unwrap().len(), 1);
+
+    // Fresh reads keep creation identity separate while reusing actual authority.
+    tui.send(b"\x1b");
+    tui.wait_for("maka.scheduler");
+    tui.click_text("Scheduled tasks");
+    tui.wait_for("New reminder");
+    tui.click_text("New reminder");
+    tui.wait_for("Once");
+    tui.click_text("Once");
+    tui.wait_for("Content");
+    tui.click_text("Title");
+    tui.send(b"\x1b[200~Second reminder\x1b[201~");
+    tui.click_text("Content");
+    tui.send(b"\x1b[200~No second consent\x1b[201~");
+    tui.click_text("Create reminder");
+    tui.wait_for("Pause");
+    assert_eq!(list()["tasks"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        runtime.block_on(remote(&client, "request", json!({"kind":"grants"}))),
+        grants
+    );
+    tui.send(b"\x11");
+    tui.finish();
+    runtime.block_on(async {
+        let binding = RemoteBinding::Package { package_id: "maka.scheduler".into(), method: "terminal".into(), session_id: None };
+        let RemoteResult::Bound { target, .. } = client.plugin_remote(RemoteRequest::Bind { binding: binding.clone() }).await.unwrap() else { panic!("terminal") };
+        client.request(Operation::PluginAuthorization, json!({"binding":binding,"target":target,
+            "command":{"kind":"revoke","id":grants[0]["id"]}})).await.unwrap();
+        let page = remote(&client, "terminal", json!({"kind":"read","route":{"creation":{"kind":"form","schedule":"daily"}}})).await;
+        let mut fields = page["page"]["fields"].as_array().unwrap().iter().map(|field| (field["id"].as_str().unwrap().to_owned(), field["control"]["value"].clone())).collect::<serde_json::Map<_, _>>();
+        fields.insert("title".into(), json!("Needs fresh consent"));
+        fields.insert("intent".into(), json!("Revoked authority cannot be reused"));
+        let result = remote(&client, "terminal", json!({"kind":"submit", "route":{"creation":{"kind":"form","schedule":"daily"}}, "revision":page["page"]["revision"], "action":"create", "fields":fields})).await;
+        assert_eq!(result["kind"], "consent");
+        let tasks = remote(&client, "request", json!({"kind":"query","query":{"kind":"list"}})).await;
+        assert_eq!(tasks["tasks"].as_array().unwrap().len(), 2);
+        for task in tasks["tasks"].as_array().unwrap() {
+            remote(&client, "request", json!({"kind":"mutate","mutation":{"kind":"delete","taskId":task["id"]}})).await;
+        }
+        assert!(tokio::time::timeout(Duration::from_millis(50), listener.accept()).await.is_err());
+    });
+    client.disconnect();
+}
+
 async fn remote(client: &maka_client::Client, method: &str, input: Value) -> Value {
     let binding = RemoteBinding::Package {
         package_id: "maka.scheduler".into(),

@@ -38,6 +38,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
         return;
     }
     let colors = app.theme.colors();
+    let consent = app.extensions.consent_visible();
     let locale = app.i18n.locale().id();
     let form_width = area.width.saturating_sub(1).min(52);
     let mut lines = Vec::new();
@@ -259,6 +260,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
                 app.focus == Focus::List
                     && index == app.extensions.selected
                     && app.palette.is_none()
+                    && !consent
                     && !app.extensions.busy
                     && !app.extensions.blocked
                     && field.enabled,

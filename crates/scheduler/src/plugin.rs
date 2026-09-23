@@ -117,9 +117,10 @@ impl Plugin for Builtin {
             let host = context.host.ok_or("Host capabilities are unavailable")?;
             let repository =
                 Repository::new(host.storage.clone(), &identity.entry_id).map_err(display)?;
+            let timezone = config.timezone()?;
             let controller = Controller::open(
                 repository,
-                config.timezone()?,
+                timezone.clone(),
                 jiff::Timestamp::now().as_millisecond(),
             )
             .await
@@ -143,6 +144,7 @@ impl Plugin for Builtin {
                 )
                 .map_err(display)?;
             let service = Service {
+                timezone,
                 context: context.lifecycle,
                 handle,
                 backend,
@@ -162,6 +164,7 @@ impl Plugin for Builtin {
 }
 #[derive(Clone)]
 struct Service {
+    timezone: String,
     context: Context,
     handle: Handle,
     backend: Arc<backend::Backend>,
