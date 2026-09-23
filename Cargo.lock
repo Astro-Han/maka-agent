@@ -5143,6 +5143,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "maka-session-import"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "maka-plugins",
+ "maka-runtime",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "maka-skills"
 version = "0.2.0"
 dependencies = [
