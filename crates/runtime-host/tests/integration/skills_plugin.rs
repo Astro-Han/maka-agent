@@ -27,6 +27,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 pub(super) mod client;
+mod native;
 
 pub(super) async fn converged(peer: &mut Peer) {
     tokio::time::timeout(Duration::from_secs(5), async {

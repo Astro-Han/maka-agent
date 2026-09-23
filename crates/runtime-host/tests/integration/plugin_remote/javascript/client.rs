@@ -19,37 +19,10 @@
 
 use crate::support::peer::Peer;
 use maka_client::{Client, ClientError, RequestFailure};
-use maka_protocol::{Operation, OperationErrorCode, OperationRegistry, Result, plugin};
+use maka_protocol::{Operation, OperationErrorCode, plugin};
 use maka_runtime_host::server::Host;
 use serde_json::{Value, json};
 use std::{path::Path, sync::Arc};
-
-// Compose plugin codecs for this transport probe without widening the app registry.
-struct Operations;
-impl OperationRegistry for Operations {
-    fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
-        if plugin::supports(operation) {
-            plugin::decode_input(operation, value)?;
-            Ok(value.clone())
-        } else {
-            maka_client::Operations.decode_input(operation, value)
-        }
-    }
-    fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
-        if plugin::supports(operation) {
-            plugin::decode_output(operation, value)
-        } else {
-            maka_client::Operations.decode_output(operation, value)
-        }
-    }
-    fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
-        if plugin::supports(operation) {
-            Some(plugin::ERRORS)
-        } else {
-            maka_client::Operations.error_codes(operation)
-        }
-    }
-}
 
 pub(super) async fn verify(host: Arc<Host>, endpoint: &Path) {
     let (peer, hello) = Peer::handshake(host.clone(), "remote-socket-bootstrap").await;
@@ -58,14 +31,17 @@ pub(super) async fn verify(host: Arc<Host>, endpoint: &Path) {
         maka_client::local::open_stream(endpoint).await.unwrap(),
         host.root_id(),
         hello["hostEpoch"].as_str().unwrap(),
-        Operations,
+        maka_client::Operations,
     )
     .await
     .unwrap();
-    let snapshot = client
-        .request(Operation::PluginClientQuery, json!({"kind":"snapshot"}))
-        .await
-        .unwrap();
+    let snapshot = serde_json::to_value(
+        client
+            .plugin_clients(plugin::ClientQuery::Snapshot { cursor: None })
+            .await
+            .unwrap(),
+    )
+    .unwrap();
     let descriptor = snapshot["entries"]
         .as_array()
         .unwrap()
@@ -142,10 +118,13 @@ pub(super) async fn verify(host: Arc<Host>, endpoint: &Path) {
     client.disconnect();
 }
 async fn remote(client: &Client, input: Value) -> Value {
-    client
-        .request(Operation::PluginRemote, input)
-        .await
-        .unwrap()
+    serde_json::to_value(
+        client
+            .plugin_remote(serde_json::from_value(input).unwrap())
+            .await
+            .unwrap(),
+    )
+    .unwrap()
 }
 async fn bind(client: &Client, identity: &Value, method: &str) -> (Value, Value) {
     let binding = json!({"client":identity,"method":method,"sessionId":null});

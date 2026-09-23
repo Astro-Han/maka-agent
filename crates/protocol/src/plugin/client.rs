@@ -28,7 +28,7 @@ pub struct ClientCursor {
     pub after_entry: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
