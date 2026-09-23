@@ -36,6 +36,7 @@ export type * from './models.js';
 export type * from './providers.js';
 export type * from './clients.js';
 export type * from './history.js';
+export type * from './session-import.js';
 export type * from './usage.js';
 export type * from './pricing.js';
 

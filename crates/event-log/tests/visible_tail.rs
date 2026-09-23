@@ -261,13 +261,7 @@ async fn visible_ids_match_presentation_for_accepted_and_partial_parts_across_ca
             .unwrap();
         assert_eq!(Some(&tail), ids.last());
         let session = log.get_session::<Value>("a").await.unwrap().unwrap();
-        let last_message = session
-            .execution
-            .as_ref()
-            .unwrap()
-            .last_message
-            .as_ref()
-            .unwrap();
+        let last_message = session.last_message.as_ref().unwrap();
         assert_eq!(last_message.recorded_at, 2000);
         assert_eq!(last_message.preview.as_deref(), Some("answer"));
         let source = canonical(&db);

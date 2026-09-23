@@ -253,6 +253,12 @@ export interface Executions {
    * Never creates or reconfigures it; null does not rule out a concurrent creation.
    */
   restoreRoot(operationId: string): Promise<{ sessionId: string } | null>;
+  /** Same workspace grant as root creation. Append at most eight records per
+   * request; exact retries retain their receipt. Only publish exposes the Session.
+   */
+  importSession(
+    command: import('./session-import.js').SessionImportCommand,
+  ): Promise<import('./session-import.js').SessionImportReceipt>;
   /** Only unused owned revisions disappear. Accepted work and exact retries retain their facts. */
   abandonRevision(operationId: string): Promise<'abandoned' | 'retained'>;
   /** Reads only an authorized Session, never the global catalog. */

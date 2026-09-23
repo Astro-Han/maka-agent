@@ -259,6 +259,53 @@ export default async function (ctx) {
         if (error.code !== 'revoked') throw error;
       }
       const root = await commands.createRoot(request);
+      const importId = `${intent.operation}-import`;
+      const importing = await commands.importSession({
+        action: 'begin',
+        root: { ...request, operationId: importId, managed: false },
+        source: { adapter: 'external-test-format', sessionId: 'source' },
+      });
+      if (importing.state === 'collecting' && (await commands.restoreRoot(importId)) !== null)
+        throw new Error('unpublished import escaped into the Session catalog');
+      /** @type {import('../../../../packages/plugin-sdk/src/host.js').SessionImportRecord[]} */
+      const importedRecords = [
+        {
+          sourceMessageId: 'user',
+          sourceTurnId: 'turn',
+          content: { kind: 'user', text: 'imported-question' },
+        },
+        {
+          sourceMessageId: 'assistant',
+          sourceTurnId: 'turn',
+          content: { kind: 'assistant', text: 'original-answer'.repeat(80_000) },
+        },
+      ];
+      const appended = await commands.importSession({
+        action: 'append',
+        operationId: importId,
+        position: 0,
+        records: importedRecords,
+      });
+      if (appended.records !== 2 || appended.bytes <= 1024 * 1024)
+        throw new Error('import bridge truncated a large record');
+      const published = await commands.importSession({
+        action: 'publish',
+        operationId: importId,
+        records: 2,
+      });
+      const inspected = await commands.importSession({ action: 'inspect', operationId: importId });
+      if (
+        published.state !== 'published' ||
+        JSON.stringify(published) !== JSON.stringify(inspected)
+      )
+        throw new Error('import lost its durable publication receipt');
+      if ((await commands.session(published.sessionId)).target.kind !== 'executor')
+        throw new Error('published import lost its authorized execution settings');
+      const importedActivity = await commands.activity(published.sessionId);
+      if (importedActivity.execution !== null || importedActivity.busy)
+        throw new Error(
+          `historical import fabricated local execution: ${JSON.stringify(importedActivity)}`,
+        );
       let deletion = await ctx.storage.read('removal-intent');
       if (!deletion) {
         const target = await commands.createRoot({ ...request, operationId: 'removal-target' });

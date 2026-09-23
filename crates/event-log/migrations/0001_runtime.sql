@@ -88,6 +88,19 @@ CREATE TABLE session_catalog_revision (
     revision INTEGER NOT NULL CHECK(revision >= 0)
 );
 
+-- Canonical import admission, distinct from executable Session/Run admission.
+-- Record bodies already have immutable ledger positions while this is collecting.
+CREATE TABLE session_imports (
+    session_id TEXT PRIMARY KEY,
+    source_json TEXT NOT NULL CHECK(json_valid(source_json)),
+    configuration TEXT NOT NULL CHECK(json_valid(configuration)),
+    created_at INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('collecting','published','abandoned')),
+    records INTEGER NOT NULL CHECK(records BETWEEN 0 AND 7500),
+    bytes INTEGER NOT NULL CHECK(bytes BETWEEN 0 AND 6291456),
+    conversation INTEGER NOT NULL CHECK(conversation BETWEEN 0 AND records)
+);
+
 -- Retirement fences new admissions before asynchronous resource cleanup. Keep
 -- its identity after cleanup so a lost reply cannot resurrect the Session.
 CREATE TABLE session_retirements (

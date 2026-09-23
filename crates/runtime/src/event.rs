@@ -87,10 +87,16 @@ pub enum ToolOutcome {
     },
 }
 
-/// Canonical execution facts, independent of the public wire projection.
+/// Canonical facts, independent of the public wire projection.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Fact {
+    /// Host-recorded foreign history. Header identities address imported rows;
+    /// they do not admit a Run. There is no opening, dispatch or terminal event.
+    MessageImported {
+        source: crate::import::Source,
+        record: Box<crate::import::Record>,
+    },
     ExecutorStarted {
         binding: crate::executor::Binding,
         settings: crate::executor::Settings,
@@ -171,6 +177,7 @@ pub enum Fact {
 impl Fact {
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::MessageImported { .. } => "message_imported",
             Self::ExecutorStarted { .. } => "executor_started",
             Self::ExecutorObserved { .. } => "executor_observed",
             Self::ExecutorCompleted { .. } => "executor_completed",
@@ -300,7 +307,8 @@ impl LogPrefix {
                         unfinished_executor = false;
                     }
                 }
-                Fact::InvocationOpened { .. }
+                Fact::MessageImported { .. }
+                | Fact::InvocationOpened { .. }
                 | Fact::MessageSteered { .. }
                 | Fact::ContextCheckpointRecorded { .. }
                 | Fact::ToolResultArchived { .. }

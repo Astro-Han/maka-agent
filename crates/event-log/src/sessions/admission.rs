@@ -27,6 +27,17 @@ pub(crate) async fn retain(
     session: &str,
 ) -> Result<(), StoreError> {
     super::removal::require_accepting(connection, session).await?;
+    let importing: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM session_imports WHERE session_id=? AND state!='published')",
+    )
+    .bind(session)
+    .fetch_one(&mut *connection)
+    .await?;
+    if importing {
+        return Err(StoreError::InvalidTransition(
+            "Session import is not published".into(),
+        ));
+    }
     super::copy::retain(connection, session).await
 }
 

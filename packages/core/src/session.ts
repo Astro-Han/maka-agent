@@ -886,7 +886,7 @@ export interface ToolCallMessage {
    */
   stepId?: string;
   /** Execution surface and replay policy retained for missing-ledger recovery. */
-  origin?: 'provider' | 'code_mode' | 'host_sdk';
+  origin?: 'provider' | 'code_mode' | 'host_sdk' | 'imported';
   modelVisibility?: 'visible' | 'hidden';
   parentToolCallId?: string;
   parentOperationId?: string;
@@ -907,7 +907,7 @@ export interface ToolResultMessage {
   providerOutput?: unknown;
   durationMs?: number;
   /** Execution surface and replay policy retained for missing-ledger recovery. */
-  origin?: 'provider' | 'code_mode' | 'host_sdk';
+  origin?: 'provider' | 'code_mode' | 'host_sdk' | 'imported';
   modelVisibility?: 'visible' | 'hidden';
   parentToolCallId?: string;
   parentOperationId?: string;
@@ -1247,7 +1247,10 @@ export const RETIRED_SYSTEM_NOTE_KINDS = [
 ] as const;
 
 export type RuntimeSystemNoteKind = (typeof RUNTIME_SYSTEM_NOTE_KINDS)[number];
-export type SystemNoteKind = RuntimeSystemNoteKind | (typeof RETIRED_SYSTEM_NOTE_KINDS)[number];
+export type SystemNoteKind =
+  | RuntimeSystemNoteKind
+  | (typeof RETIRED_SYSTEM_NOTE_KINDS)[number]
+  | 'imported';
 
 export function isRuntimeSystemNoteKind(kind: string): kind is RuntimeSystemNoteKind {
   return (RUNTIME_SYSTEM_NOTE_KINDS as readonly string[]).includes(kind);
@@ -1513,6 +1516,7 @@ const ASSISTANT_THINKING_SHAPE = defineObjectShape<AssistantThinking>()(
   ['signature', 'providerOptions', 'parts'],
 );
 const SYSTEM_NOTE_KINDS = new Set<string>([
+  'imported',
   ...RUNTIME_SYSTEM_NOTE_KINDS,
   ...RETIRED_SYSTEM_NOTE_KINDS,
 ]);
@@ -1914,6 +1918,7 @@ function isToolActivityIdentity(value: Record<string, unknown>): boolean {
     (value.origin === undefined ||
       value.origin === 'provider' ||
       value.origin === 'code_mode' ||
+      (value.origin === 'imported' && value.modelVisibility === 'hidden') ||
       value.origin === 'host_sdk') &&
     (value.modelVisibility === undefined ||
       value.modelVisibility === 'visible' ||

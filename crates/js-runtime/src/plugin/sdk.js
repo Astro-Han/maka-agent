@@ -228,6 +228,7 @@
       restoreChild: (input) => call('restoreChild', input),
       createChild: (input) => call('createChild', input),
       createRoot: (input) => call('createRoot', input),
+      importSession: (input) => call('importSession', input),
       restoreRoot: (operationId) => call('restoreRoot', { operationId }),
       abandonRevision: (operationId) => call('abandonRevision', { operationId }),
       workspacePatch: (operationId) => call('workspacePatch', { operationId }),

@@ -25,6 +25,8 @@ pub(crate) use admission::retain;
 pub(crate) mod copy;
 pub use copy::{AbandonRevision, SessionCopy, SessionCopyResult};
 mod execution;
+mod import;
+pub use import::{ImportProgress, ImportState};
 mod material;
 pub use material::MaterialCollection;
 mod metadata;
@@ -67,6 +69,9 @@ pub struct SessionRecord<T> {
     /// Bounded execution projection read in the same snapshot as metadata.
     #[serde(skip)]
     pub execution: Option<SessionExecution>,
+    /// Message activity does not imply a local execution (for example, imported history).
+    #[serde(skip)]
+    pub last_message: Option<CatalogMessage>,
     /// Oldest unresolved interaction, read from canonical facts in the same snapshot.
     #[serde(skip)]
     pub pending_interaction_since: Option<u64>,
@@ -356,13 +361,15 @@ pub(crate) async fn insert(
         "INSERT INTO session_control SELECT ?, ?, 1, ?, ?, 0, ?
          WHERE NOT EXISTS (SELECT 1 FROM session_control WHERE id = ?)
            AND NOT EXISTS (SELECT 1 FROM session_history_copies WHERE session_id = ?)
-           AND NOT EXISTS (SELECT 1 FROM session_retirements WHERE session_id = ?)",
+           AND NOT EXISTS (SELECT 1 FROM session_retirements WHERE session_id = ?)
+           AND NOT EXISTS (SELECT 1 FROM session_imports WHERE session_id = ? AND state != 'published')",
     )
     .bind(id)
     .bind(fingerprint)
     .bind(now as i64)
     .bind(now as i64)
     .bind(configuration)
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)
@@ -403,6 +410,7 @@ pub(crate) async fn read<T: DeserializeOwned>(
             .map(|state| state.parse().map_err(invalid))
             .transpose()?;
         let execution = execution::read(connection, id).await?;
+        let last_message = execution::last_message(connection, id).await?;
         let read_state = read_state::read(connection, id).await?;
         let pending_since: Option<i64> = sqlx::query_scalar(
             "SELECT MIN(created_at) FROM interaction_requests request
@@ -425,6 +433,7 @@ pub(crate) async fn read<T: DeserializeOwned>(
             configuration,
             configuration_digest,
             execution,
+            last_message,
             read_state,
             pending_interaction_since,
             lineage,

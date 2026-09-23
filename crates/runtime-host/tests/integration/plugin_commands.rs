@@ -36,6 +36,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 mod attachments;
 mod boundary;
+mod import;
 mod interaction;
 mod messages;
 
@@ -86,6 +87,9 @@ async fn scenario() {
     let mut offered = None;
     let mut queued = None;
     for reopened in [false, true] {
+        if reopened {
+            import::tighten(&fixture).await;
+        }
         let host = Host::open_with_options(
             fixture.owner(),
             None,

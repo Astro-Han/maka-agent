@@ -71,7 +71,9 @@ pub(crate) async fn initialize_execution(
         // Startup only: at most 128 small row identifiers, never event JSON in Rust.
         let rows = sqlx::query_scalar::<_, i64>(
                 "SELECT sequence FROM runtime_events WHERE sequence > ?
-             AND kind IN ('invocation_opened', 'message_steered', 'model_completed', 'model_interrupted', 'invocation_ended')
+             AND kind IN ('message_imported', 'invocation_opened', 'message_steered', 'model_completed', 'model_interrupted', 'invocation_ended')
+             AND NOT EXISTS(SELECT 1 FROM session_retirements r
+                 WHERE r.session_id=runtime_events.event_session AND r.remove_session=1 AND r.completed=1)
              ORDER BY sequence LIMIT 128",
             ).bind(through).fetch_all(&mut *tx).await?;
         if rows.is_empty() {
@@ -151,7 +153,19 @@ pub(crate) async fn project_execution(
     .fetch_optional(&mut *connection)
     .await?
     .unwrap_or(0);
-    if kind == "invocation_opened" {
+    if kind == "message_imported" {
+        sqlx::query(
+            "INSERT OR IGNORE INTO catalog_messages
+             SELECT sequence,0,?2,catalog_time(json_extract(event_json,'$.recorded_at')),
+                catalog_preview(json_extract(event_json,'$.fact.record.content.text')),event_id
+             FROM runtime_events WHERE sequence=?1
+               AND json_extract(event_json,'$.fact.record.content.kind') IN ('user','assistant')",
+        )
+        .bind(sequence)
+        .bind(&session)
+        .execute(&mut *connection)
+        .await?;
+    } else if kind == "invocation_opened" {
         sqlx::query(
             "INSERT OR IGNORE INTO catalog_messages
              SELECT sequence, 0, ?2, catalog_time(json_extract(event_json, '$.recorded_at')),

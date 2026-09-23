@@ -36,6 +36,9 @@ pub(super) fn build<'a>(
 ) -> Result<Vec<Message>, RunError> {
     let cuts = replay.map(|policy| super::replay::Cuts::new(events.clone(), policy));
     let mut messages = Vec::new();
+    // Leading foreign assistant history is retained for display, but cannot
+    // become an assistant-prefill request. Only a real user opens model input.
+    let mut has_user = false;
     let mut calls = HashMap::new();
     let mut dispatched = HashSet::new();
     let openings: HashMap<_, _> = events
@@ -110,6 +113,27 @@ pub(super) fn build<'a>(
             continue;
         }
         match &stored.event.fact {
+            Fact::MessageImported { record, .. } => {
+                use maka_runtime::import::Content;
+                match &record.content {
+                    Content::User { text } if record.is_conversation() => {
+                        has_user = true;
+                        messages.push(Message::user(text.clone()));
+                    }
+                    Content::Assistant { text, .. } if has_user && record.is_conversation() => {
+                        messages.push(Message::Assistant {
+                            content: vec![AssistantPart::Text {
+                                text: text.clone(),
+                                provider_options: None,
+                            }],
+                            provider_options: None,
+                        });
+                    }
+                    // Foreign tool observations are not executable provider
+                    // call/result pairs. Thinking and notes stay in the ledger/UI.
+                    _ => {}
+                }
+            }
             Fact::InvocationOpened { input, .. } => {
                 if input.inherited_claim().is_some() {
                     continue;
@@ -119,6 +143,7 @@ pub(super) fn build<'a>(
                         "invocation has no model-history input".into(),
                     ));
                 };
+                has_user = true;
                 messages.push(user::project(
                     content,
                     resources,
@@ -129,6 +154,7 @@ pub(super) fn build<'a>(
                 )?);
             }
             Fact::MessageSteered { message, .. } => {
+                has_user = true;
                 message
                     .validate()
                     .map_err(|reason| RunError::ReconciliationRequired(reason.into()))?;

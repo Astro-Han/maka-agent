@@ -96,10 +96,7 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(
-            during.session.execution.unwrap().last_message,
-            read.execution.as_ref().unwrap().last_message
-        );
+        assert_eq!(during.session.last_message, read.last_message);
         assert_eq!(during.session.read_state, read.read_state);
         // Existing subscribers still receive the main closer at a fence which
         // includes a later summary. No summary event consumes delivery budget.
@@ -149,10 +146,7 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
             assert!(view.push(&interrupted).unwrap().is_empty());
         }
         let unchanged = log.get_session::<Value>("session").await.unwrap().unwrap();
-        assert_eq!(
-            unchanged.execution.as_ref().unwrap().last_message,
-            read.execution.as_ref().unwrap().last_message
-        );
+        assert_eq!(unchanged.last_message, read.last_message);
         assert_eq!(unchanged.read_state, read.read_state);
         if ending != "cancelled" {
             let (later, later_id) = step(

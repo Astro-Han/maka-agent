@@ -189,6 +189,8 @@ pub(super) enum Request {
     CreateChild(Execution<CreateChild>),
     #[serde(rename = "execution.createRoot")]
     CreateRoot(Execution<CreateRoot>),
+    #[serde(rename = "execution.importSession")]
+    ImportSession(Execution<maka_plugins::session::import::Command>),
     #[serde(rename = "execution.restoreRoot")]
     RestoreRoot(Execution<Operation>),
     #[serde(rename = "execution.abandonRevision")]

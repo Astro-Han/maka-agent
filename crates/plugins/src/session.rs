@@ -19,6 +19,7 @@
 
 pub mod catalog;
 pub mod history;
+pub mod import;
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};

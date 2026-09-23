@@ -56,6 +56,11 @@ impl ProjectionArtifactWrite {
 impl EventWrite {
     pub fn plain(event: RuntimeEvent) -> Result<Self, CommitError> {
         match &event.fact {
+            Fact::MessageImported { .. } => {
+                return Err(CommitError::Rejected(
+                    "imported history requires Session import admission".into(),
+                ));
+            }
             Fact::ExecutorStarted { binding, settings } => binding
                 .validate()
                 .and_then(|()| settings.validate())

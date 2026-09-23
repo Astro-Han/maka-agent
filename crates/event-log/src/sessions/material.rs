@@ -122,6 +122,7 @@ impl EventLog {
 /// a RuntimeEvent and must never enter replay, input projection or recovery.
 fn retained(event: &RuntimeEvent) -> Value {
     let fact = match &event.fact {
+        Fact::MessageImported { source, .. } => json!({"source":source}),
         Fact::InvocationOpened { configuration, .. } => json!({
             "configuration": configuration.as_ref().map(|config| json!({"model": config.model}))
         }),

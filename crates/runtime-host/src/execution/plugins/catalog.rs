@@ -78,10 +78,7 @@ impl Executions {
                         session,
                         labels: record.configuration.labels,
                         updated_at: record.updated_at,
-                        last_message_at: record
-                            .execution
-                            .and_then(|execution| execution.last_message)
-                            .map(|message| message.recorded_at),
+                        last_message_at: record.last_message.map(|message| message.recorded_at),
                     }
                 })
                 .collect(),

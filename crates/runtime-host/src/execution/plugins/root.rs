@@ -68,7 +68,7 @@ impl From<RootApproval> for RootGrant {
 }
 
 impl BoundCommands {
-    fn root_id(&self, operation_id: &str) -> Result<String, Error> {
+    pub(super) fn root_id(&self, operation_id: &str) -> Result<String, Error> {
         if operation_id.is_empty()
             || operation_id.len() > 256
             || operation_id
@@ -123,7 +123,7 @@ impl BoundCommands {
         Ok(Some(ChildSession { session_id: id }))
     }
 
-    async fn owned_root(
+    pub(super) async fn owned_root(
         &self,
         host: &Executions,
         id: &str,
@@ -147,7 +147,17 @@ impl BoundCommands {
         {
             return Err(Error::Denied);
         }
-        let current = &record.configuration;
+        self.check_root_configuration(host, &record.configuration, approval)
+            .await?;
+        Ok(Some(record))
+    }
+
+    pub(super) async fn check_root_configuration(
+        &self,
+        host: &Executions,
+        current: &SessionConfiguration,
+        approval: &RootGrant,
+    ) -> Result<(), Error> {
         if current.workspace != approval.workspace
             || current.workspace_origin != approval.workspace_origin
             || rank(current.sandbox_mode) > rank(approval.sandbox_mode)
@@ -188,7 +198,7 @@ impl BoundCommands {
                 return Err(Error::Denied);
             }
         }
-        Ok(Some(record))
+        Ok(())
     }
 
     pub(super) async fn abandon_created_revision(
@@ -518,7 +528,7 @@ impl BoundCommands {
 }
 
 // Filesystem observation never holds Host-wide admission.
-async fn observe_workspace(
+pub(super) async fn observe_workspace(
     host: &Executions,
     approval: &RootGrant,
 ) -> Result<Option<maka_event_log::projects::ProjectRecord>, Error> {
@@ -562,7 +572,7 @@ async fn observe_workspace(
     Ok(project)
 }
 
-async fn recheck_project(
+pub(super) async fn recheck_project(
     host: &Executions,
     project: Option<maka_event_log::projects::ProjectRecord>,
 ) -> Result<(), Error> {
@@ -580,7 +590,7 @@ async fn recheck_project(
     Ok(())
 }
 
-async fn configuration(
+pub(super) async fn configuration(
     host: &Arc<Executions>,
     id: &str,
     request: &CreateRoot,
@@ -693,14 +703,14 @@ async fn configuration(
     }
     Ok(config)
 }
-fn rank(mode: SandboxMode) -> u8 {
+pub(super) fn rank(mode: SandboxMode) -> u8 {
     match mode {
         SandboxMode::ReadOnly => 0,
         SandboxMode::WorkspaceWrite => 1,
         SandboxMode::DangerFullAccess => 2,
     }
 }
-fn now() -> Result<u64, Error> {
+pub(super) fn now() -> Result<u64, Error> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| Error::Host(error.to_string()))?

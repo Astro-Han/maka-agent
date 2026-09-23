@@ -150,6 +150,7 @@ pub(super) async fn verify(
         Err(CommandError::Denied)
     ));
     let root_workspace = workspace.parent().unwrap().join("root-workspace");
+    super::import::verify(host, peer, &fiber, workspace, &request, reopened).await;
     std::fs::create_dir_all(&root_workspace).unwrap();
     let cwd = maka_fs_tools::workspace::project::host_path(&root_workspace.canonicalize().unwrap())
         .unwrap()

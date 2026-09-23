@@ -97,6 +97,10 @@ pub struct Message {
     rename_all_fields = "camelCase"
 )]
 pub enum Content {
+    SystemNote {
+        kind: ImportedNoteKind,
+        data: ImportedNote,
+    },
     User {
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -222,6 +226,9 @@ pub(crate) fn message(
     rename_all_fields = "camelCase"
 )]
 pub enum ToolMetadata {
+    Imported {
+        model_visibility: Hidden,
+    },
     HostSdk {
         model_visibility: Hidden,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -237,6 +244,17 @@ pub enum ToolMetadata {
         parent_tool_call_id: String,
         parent_operation_id: String,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportedNoteKind {
+    Imported,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ImportedNote {
+    pub text: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -73,14 +73,7 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
         SessionExecutionState::Live { recorded_at: 1001 }
     );
     assert_eq!(
-        live.execution
-            .as_ref()
-            .unwrap()
-            .last_message
-            .as_ref()
-            .unwrap()
-            .preview
-            .as_deref(),
+        live.last_message.as_ref().unwrap().preview.as_deref(),
         Some(format!("{}…", "答".repeat(95)).as_str())
     );
     assert!(matches!(
@@ -192,27 +185,10 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
     let answered = log.get_session::<Value>("a").await.unwrap().unwrap();
     assert_eq!(answered.revision, 3);
     assert_eq!(
-        answered
-            .execution
-            .as_ref()
-            .unwrap()
-            .last_message
-            .as_ref()
-            .unwrap()
-            .preview,
+        answered.last_message.as_ref().unwrap().preview,
         Some(format!("{}…", "答".repeat(95)))
     );
-    assert_eq!(
-        answered
-            .execution
-            .as_ref()
-            .unwrap()
-            .last_message
-            .as_ref()
-            .unwrap()
-            .recorded_at,
-        2000
-    );
+    assert_eq!(answered.last_message.as_ref().unwrap().recorded_at, 2000);
     // A later terminal sequence can carry an earlier wall clock. It changes status,
     // not the visible-message timestamp or preview.
     log.append(
@@ -258,10 +234,7 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
         }
     );
     assert_eq!(ended, ended_before);
-    assert_eq!(
-        ended.execution.as_ref().unwrap().last_message,
-        answered.execution.as_ref().unwrap().last_message
-    );
+    assert_eq!(ended.last_message, answered.last_message);
     assert_eq!(
         source_bytes,
         source
@@ -292,18 +265,12 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
     log.append(&EventWrite::plain((at(rollback, 1500)).clone()).unwrap())
         .await
         .unwrap();
-    let rollback = log
-        .get_session::<Value>("a")
-        .await
-        .unwrap()
-        .unwrap()
-        .execution
-        .unwrap();
+    let rollback = log.get_session::<Value>("a").await.unwrap().unwrap();
     assert_eq!(
-        rollback.state,
+        rollback.execution.as_ref().unwrap().state,
         SessionExecutionState::Live { recorded_at: 1500 }
     );
-    assert_eq!(rollback.last_message, ended.execution.unwrap().last_message);
+    assert_eq!(rollback.last_message, ended.last_message);
     log.close().await.unwrap();
     // Rebuild commit-order guards from canonical facts, not max(time)/latest(text).
     source
@@ -317,7 +284,7 @@ async fn execution_projection_is_bounded_and_catalog_revision_tracks_committed_f
             .unwrap()
             .execution
             .unwrap(),
-        rollback
+        rollback.execution.unwrap()
     );
     assert_eq!(
         log.get_session::<Value>("b")

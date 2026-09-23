@@ -127,8 +127,8 @@ pub(super) async fn run(
                 .read_model_context(
                     &input.invocation.session_id,
                     Some(&input.invocation.invocation_id),
-                    10_000,
-                    8 * 1024 * 1024,
+                    maka_runtime::context::MAX_HISTORY_EVENTS,
+                    maka_runtime::context::MAX_HISTORY_BYTES,
                 )
                 .await?;
             if tools.code_idle()

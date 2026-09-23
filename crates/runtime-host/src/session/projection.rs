@@ -43,6 +43,7 @@ pub fn catalog_projection(
     mut record: SessionRecord<SessionConfiguration>,
 ) -> SessionCatalogProjection {
     let execution = record.execution.take();
+    let last_message = record.last_message.take();
     let lineage = record.lineage.take();
     let copy_state = record.copy_state;
     let pending_since = record.pending_interaction_since;
@@ -74,6 +75,11 @@ pub fn catalog_projection(
         projection.branch_of_turn_id = branch.turn_id.clone();
     }
     projection.activity_at = projection.created_at;
+    if let Some(message) = last_message {
+        projection.activity_at = message.recorded_at;
+        projection.last_message_at = Some(message.recorded_at);
+        projection.last_message_preview = message.preview;
+    }
     if let Some(since) = pending_since {
         projection.status = SessionStatus::WaitingForUser;
         projection.status_updated_at = Some(since);
@@ -115,10 +121,5 @@ pub fn catalog_projection(
         schema_version: 1,
         running_turn_ids,
     });
-    if let Some(message) = execution.last_message {
-        projection.activity_at = message.recorded_at;
-        projection.last_message_at = Some(message.recorded_at);
-        projection.last_message_preview = message.preview;
-    }
     projection
 }

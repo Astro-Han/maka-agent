@@ -140,6 +140,7 @@ impl Bridge for HostBridge {
             // A byte can take four JSON bytes, plus bounded headers and URL.
             "http.request" => 5 * 1024 * 1024,
             "files.invoke" => 7 * 1024 * 1024,
+            "execution.importSession" => 7 * 1024 * 1024,
             "llm.generate" => 2 * 1024 * 1024,
             "model.io" => 32 * 1024 * 1024,
             _ => 1024 * 1024,
@@ -678,6 +679,10 @@ impl State {
             Request::CreateRoot(input) => {
                 let (commands, input) = self.execution(input)?;
                 encode(commands.create_root(input).await?)
+            }
+            Request::ImportSession(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.import_session(input).await?)
             }
             Request::RestoreRoot(input) => {
                 let (commands, input) = self.execution(input)?;

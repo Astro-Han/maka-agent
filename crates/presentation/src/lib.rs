@@ -21,6 +21,7 @@
 //! a separate projection; retaining interrupted text here never accepts it there.
 mod compact;
 mod executor;
+mod import;
 mod message;
 pub mod navigation;
 pub mod shell;
@@ -142,6 +143,13 @@ impl InvocationView {
         let base = watermark(stored.sequence)? - 255;
         let mut messages = Vec::new();
         match &event.fact {
+            Fact::MessageImported { record, .. } => {
+                if !matches!(self.state, State::Vacant) {
+                    return Err(ProjectionError::Invalid("import inside execution"));
+                }
+                messages.extend(import::project(event, record, ts, self.max_text_bytes)?);
+                self.state = State::Ended;
+            }
             Fact::InvocationOpened { input, .. } => {
                 if !matches!(self.state, State::Vacant) {
                     return Err(ProjectionError::Invalid("duplicate invocation opening"));
@@ -323,7 +331,7 @@ impl InvocationView {
                     | Fact::ToolRejected { .. } => {
                         messages.extend(self.tools.boundary(event, ts, resolved)?);
                     }
-                    Fact::InvocationOpened { .. } => unreachable!(),
+                    Fact::InvocationOpened { .. } | Fact::MessageImported { .. } => unreachable!(),
                     Fact::ContextCheckpointRecorded { .. } | Fact::ToolResultArchived { .. } => {}
                 }
             }

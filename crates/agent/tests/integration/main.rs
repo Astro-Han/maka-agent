@@ -35,6 +35,7 @@ mod lifetime;
 mod model_interruption;
 mod plugin_composition;
 mod pruning;
+mod session_import;
 mod stale_pruning;
 mod startup_recovery;
 mod startup_recovery_limits;

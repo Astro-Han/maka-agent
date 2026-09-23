@@ -25,7 +25,6 @@ use sqlx::{Row, SqliteConnection};
 pub struct SessionExecution {
     pub turn_id: String,
     pub state: SessionExecutionState,
-    pub last_message: Option<CatalogMessage>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -93,7 +92,19 @@ pub(super) async fn read(
             })
         })
         .transpose()?;
-    let last_message = sqlx::query(
+    Ok(Some(SessionExecution {
+        turn_id,
+        state: terminal.unwrap_or(SessionExecutionState::Live {
+            recorded_at: opened_at,
+        }),
+    }))
+}
+
+pub(super) async fn last_message(
+    connection: &mut SqliteConnection,
+    id: &str,
+) -> Result<Option<CatalogMessage>, StoreError> {
+    sqlx::query(
         "SELECT message_at, (
             SELECT preview FROM catalog_messages INDEXED BY catalog_latest_preview
             WHERE session_id = ?1 AND preview IS NOT NULL
@@ -110,14 +121,7 @@ pub(super) async fn read(
             preview: row.try_get(1)?,
         })
     })
-    .transpose()?;
-    Ok(Some(SessionExecution {
-        turn_id,
-        state: terminal.unwrap_or(SessionExecutionState::Live {
-            recorded_at: opened_at,
-        }),
-        last_message,
-    }))
+    .transpose()
 }
 
 pub(crate) async fn advance_revision(

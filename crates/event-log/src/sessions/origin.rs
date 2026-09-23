@@ -89,7 +89,24 @@ pub(super) async fn insert(
     connection: &mut SqliteConnection,
     origin: &PluginSession,
 ) -> Result<(), StoreError> {
-    if let Some(source) = &origin.authority_session_id {
+    retain_authority(connection, origin.authority_session_id.as_deref()).await?;
+    sqlx::query("INSERT INTO plugin_sessions VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(&origin.session_id)
+        .bind(origin.creator.package())
+        .bind(String::from(origin.creator.scope().clone()))
+        .bind(&origin.fingerprint)
+        .bind(origin.managed)
+        .bind(&origin.authority_session_id)
+        .execute(connection)
+        .await?;
+    Ok(())
+}
+
+pub(super) async fn retain_authority(
+    connection: &mut SqliteConnection,
+    source: Option<&str>,
+) -> Result<(), StoreError> {
+    if let Some(source) = source {
         let exists: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM session_control WHERE id=?)")
                 .bind(source)
@@ -100,15 +117,6 @@ pub(super) async fn insert(
         }
         super::retain(connection, source).await?;
     }
-    sqlx::query("INSERT INTO plugin_sessions VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(&origin.session_id)
-        .bind(origin.creator.package())
-        .bind(String::from(origin.creator.scope().clone()))
-        .bind(&origin.fingerprint)
-        .bind(origin.managed)
-        .bind(&origin.authority_session_id)
-        .execute(connection)
-        .await?;
     Ok(())
 }
 

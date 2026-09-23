@@ -141,10 +141,10 @@ pub(crate) async fn resolve_cut(
                    AND json_extract(event_json,'$.invocation.turn_id') = ?2
                    AND sequence <= ?3
                    AND EXISTS(SELECT 1 FROM session_history_events opening
-                       WHERE opening.kind = 'invocation_opened'
+                       WHERE (opening.kind = 'message_imported' OR (opening.kind = 'invocation_opened'
+                         AND json_extract(opening.event_json,'$.fact.input.kind') IN ('message','continuation','handoff')))
                          AND opening.owner_session_id = ?1
                          AND json_extract(opening.event_json,'$.invocation.turn_id') = ?2
-                         AND json_extract(opening.event_json,'$.fact.input.kind') IN ('message','continuation','handoff')
                          AND opening.sequence <= ?3)",
             )
             .bind(session)

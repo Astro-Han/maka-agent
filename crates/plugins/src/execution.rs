@@ -537,6 +537,10 @@ pub trait Commands: Send + Sync + std::any::Any {
         &self,
         request: CreateRoot,
     ) -> futures_util::future::BoxFuture<'_, Result<ChildSession, CommandError>>;
+    fn import_session(
+        &self,
+        command: crate::session::import::Command,
+    ) -> futures_util::future::BoxFuture<'_, Result<crate::session::import::Receipt, CommandError>>;
     /// Recover a root created by this namespace without replaying its creation settings.
     /// Rechecks the current workspace and source ceilings. Absence is only an
     /// observation: a concurrent creation may still commit with this operation ID.

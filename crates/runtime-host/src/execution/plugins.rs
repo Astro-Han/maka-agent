@@ -37,6 +37,7 @@ mod submit;
 use root::RootGrant;
 mod catalog;
 mod history;
+mod import;
 mod scopes;
 mod usage;
 pub(crate) use scopes::ResourceTarget;
@@ -729,6 +730,12 @@ impl Commands for BoundCommands {
         operation_id: String,
     ) -> BoxFuture<'_, Result<Option<ChildSession>, Error>> {
         Box::pin(self.restore_created_root(operation_id))
+    }
+    fn import_session(
+        &self,
+        command: maka_plugins::session::import::Command,
+    ) -> BoxFuture<'_, Result<maka_plugins::session::import::Receipt, Error>> {
+        Box::pin(self.import_session_command(command))
     }
     fn abandon_revision(
         &self,

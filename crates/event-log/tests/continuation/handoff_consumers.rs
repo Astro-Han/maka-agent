@@ -253,13 +253,7 @@ async fn handoff_output_keeps_one_public_identity_and_all_physical_evidence_afte
     let log = EventLog::open(&path).await.unwrap();
     let session = log.get_session::<Value>("session").await.unwrap().unwrap();
     assert_eq!(
-        session
-            .execution
-            .unwrap()
-            .last_message
-            .unwrap()
-            .preview
-            .as_deref(),
+        session.last_message.unwrap().preview.as_deref(),
         Some("second answer")
     );
     assert_eq!(

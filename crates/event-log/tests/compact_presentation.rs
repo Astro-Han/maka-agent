@@ -158,10 +158,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         assert!(matches!(root.state, InvocationState::Running));
         assert!(running.active_streams.is_empty());
         assert_eq!(running.session.read_state, previous.read_state);
-        assert_eq!(
-            running.session.execution.unwrap().last_message,
-            previous.execution.as_ref().unwrap().last_message
-        );
+        assert_eq!(running.session.last_message, previous.last_message);
         assert!(
             log.active_transcript(&compact, delta.sequence)
                 .await
@@ -247,10 +244,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
             matches!(&execution.state, SessionExecutionState::Ended { status: actual, .. }
             if *actual == status)
         );
-        assert_eq!(
-            execution.last_message,
-            previous.execution.as_ref().unwrap().last_message
-        );
+        assert_eq!(ended.session.last_message, previous.last_message);
         let page = log
             .session_stream_events("session", old_end.sequence, terminal.sequence, 1, 4096)
             .await
@@ -283,10 +277,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         let log = EventLog::open(&path).await.unwrap();
         let rebuilt = log.get_session::<Value>("session").await.unwrap().unwrap();
         assert_eq!(rebuilt.read_state, previous.read_state);
-        assert_eq!(
-            rebuilt.execution.as_ref().unwrap().last_message,
-            previous.execution.as_ref().unwrap().last_message
-        );
+        assert_eq!(rebuilt.last_message, previous.last_message);
         assert!(
             log.prepare_transcript("session", terminal.sequence, 32)
                 .await

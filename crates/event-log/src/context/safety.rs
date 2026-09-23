@@ -129,7 +129,7 @@ pub(super) async fn closed_boundary(
     through: u64,
 ) -> Result<(), StoreError> {
     let closed: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM session_history_events WHERE sequence = ? AND kind = 'invocation_ended'
+        "SELECT EXISTS(SELECT 1 FROM session_history_events WHERE sequence = ? AND kind IN ('invocation_ended','message_imported')
          AND owner_session_id = ?)",
     ).bind(i64::try_from(through).map_err(|_| invalid("coverage overflow"))?).bind(session).fetch_one(connection).await?;
     if !closed {

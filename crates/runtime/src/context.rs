@@ -33,6 +33,10 @@ pub enum ModelPurpose {
     Summary,
 }
 
+/// Complete bounded material read by an ordinary model or summary step.
+pub const MAX_HISTORY_EVENTS: usize = 10_000;
+pub const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
+
 /// Frozen facts about this request's selected model, not prompt contents.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

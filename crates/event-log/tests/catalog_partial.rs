@@ -162,17 +162,7 @@ async fn interrupted_and_terminal_fallback_catalog_match_committed_presentation_
         }
         // Deltas alone do not advertise a sealed catalog message.
         let before = log.get_session::<Value>("a").await.unwrap().unwrap();
-        assert_eq!(
-            before
-                .execution
-                .as_ref()
-                .unwrap()
-                .last_message
-                .as_ref()
-                .unwrap()
-                .recorded_at,
-            1000
-        );
+        assert_eq!(before.last_message.as_ref().unwrap().recorded_at, 1000);
         let mut assistant = None;
         if interrupt {
             // The preview becomes full before a giant later delta. The boundary
@@ -263,13 +253,7 @@ async fn interrupted_and_terminal_fallback_catalog_match_committed_presentation_
             normalized
         };
         let ended = log.get_session::<Value>("a").await.unwrap().unwrap();
-        let message = ended
-            .execution
-            .as_ref()
-            .unwrap()
-            .last_message
-            .as_ref()
-            .unwrap();
+        let message = ended.last_message.as_ref().unwrap();
         assert_eq!(message.recorded_at, assistant.ts);
         assert_eq!(message.recorded_at, 2000); // Not interruption@3000 or terminal@900.
         assert_eq!(message.preview.as_deref(), Some(expected.as_str()));
