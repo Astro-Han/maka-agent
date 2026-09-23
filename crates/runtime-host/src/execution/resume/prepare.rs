@@ -97,6 +97,7 @@ impl Executions {
         }
         configuration.system_prompt = system_prompt;
         Ok(RunInput {
+            provider_id: provider.provider_id,
             invocation: Invocation {
                 session_id: session_id.clone(),
                 turn_id,

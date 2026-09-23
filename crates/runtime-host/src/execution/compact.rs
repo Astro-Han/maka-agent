@@ -81,6 +81,7 @@ impl Executions {
         .await?;
         let snapshot = self
             .launch(RunInput {
+                provider_id: provider.provider_id,
                 invocation: Invocation {
                     session_id: input.session_id,
                     turn_id: input.turn_id,

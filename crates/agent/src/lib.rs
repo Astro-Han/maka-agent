@@ -26,6 +26,7 @@ mod handoff;
 pub use handoff::{HandoffGate, HandoffReservation, HeldHandoff, PendingSeal};
 mod history;
 mod model_attempt;
+pub mod pricing;
 mod request_composition;
 pub use history::project as project_model_history;
 mod prune;
@@ -75,6 +76,8 @@ pub enum RunError {
 }
 
 pub struct RunInput {
+    /// Public access-path identity; not the transport protocol or adapter name.
+    pub provider_id: String,
     pub invocation: Invocation,
     pub context: Option<maka_runtime::context::ModelRequestContext>,
     pub work: RunWork,
@@ -110,6 +113,7 @@ pub enum RunWork {
 }
 
 struct Inner {
+    pricing: Option<Arc<dyn pricing::Pricing>>,
     log: Arc<EventLog>,
     model: ModelExecutor,
     cells: CodeExecutor,
@@ -137,7 +141,26 @@ impl PreparedContinuation {
 
 impl Engine {
     pub fn new(log: Arc<EventLog>, model: ModelExecutor, cells: CodeExecutor) -> Self {
+        Self::create(log, model, cells, None)
+    }
+
+    pub fn with_pricing(
+        log: Arc<EventLog>,
+        model: ModelExecutor,
+        cells: CodeExecutor,
+        pricing: Arc<dyn pricing::Pricing>,
+    ) -> Self {
+        Self::create(log, model, cells, Some(pricing))
+    }
+
+    fn create(
+        log: Arc<EventLog>,
+        model: ModelExecutor,
+        cells: CodeExecutor,
+        pricing: Option<Arc<dyn pricing::Pricing>>,
+    ) -> Self {
         Self(Arc::new(Inner {
+            pricing,
             log,
             model,
             cells,

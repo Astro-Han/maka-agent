@@ -34,6 +34,7 @@ mod options;
 mod output;
 
 pub(super) struct PreparedProvider {
+    pub provider_id: String,
     pub tool_mode: maka_runtime::execution::ToolMode,
     pub editing_tools: maka_runtime::execution::EditingTools,
     pub config: ProviderConfig,
@@ -216,6 +217,7 @@ pub(super) async fn observe_binding(
         }),
     };
     Ok(PreparedProvider {
+        provider_id: row.provider_type.clone(),
         tool_mode,
         editing_tools,
         binding,

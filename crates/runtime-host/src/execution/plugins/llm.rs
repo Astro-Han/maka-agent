@@ -219,6 +219,7 @@ impl Executions {
         .map_err(|error| Error::Host(error.to_string()))?;
         let evidence =
             serde_json::to_value(&input).map_err(|error| Error::Invalid(error.to_string()))?;
+        let provider_id = prepared.provider_id.clone();
         let request = request(prepared, input);
         let adapter = maka_model::adapters::resolve(
             &self
@@ -236,9 +237,14 @@ impl Executions {
             operation_id: operation_id.clone(),
         };
         let log = self.log.clone();
+        let prices = self.configuration.clone();
         let effect = PreparedEffect::new(move |cancellation| {
             Box::pin(async move {
-                generate(models, request, adapter, cancellation, log, source)
+                let quote = prices
+                    .quote_model(provider_id, request.provider.model.clone())
+                    .await
+                    .map_err(|error| ToolError::Persistence(error.to_string()))?;
+                generate(models, request, adapter, cancellation, log, source, quote)
                     .await
                     .map(|output| ToolOutput::Model(Box::new(output)).into())
             })

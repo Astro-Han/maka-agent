@@ -217,7 +217,8 @@ user/project content paths stay separate from private journals.
   outcomes remain unknown. History copies do not duplicate usage, and Session removal
   retains accounting facts. Pricing queries and CAS edits use a bounded, revision-pinned
   catalog; custom rates survive restart and bundled-rate updates invalidate old cursors.
-  Usage screens and per-call valuation are not yet connected.
+  Each admission captures its public provider identity and rate decision; estimates commit
+  with reported usage and survive rejection, edits and recovery. Usage screens are not yet connected.
 - Subscriptions deliver frames only after `subscription.ready`. Reconnection replays
   active text from the committed log under backpressure; no copied transcript overlay.
 - Model messages, content and tool outcomes are typed through provider projection.

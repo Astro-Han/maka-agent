@@ -129,7 +129,21 @@ fn conflict(expected: u64, actual: u64) -> Result<()> {
     Ok(())
 }
 fn decode<T: serde::de::DeserializeOwned>(value: &Value) -> Result<T> {
-    serde_json::from_value(value.clone()).map_err(invalid)
+    let mut value = value.clone();
+    for field in [
+        "revision",
+        "offset",
+        "expectedRevision",
+        "actualRevision",
+        "nextOffset",
+    ] {
+        if let Some(number) = value.get_mut(field)
+            && !number.is_null()
+        {
+            *number = crate::codec::count(number, field)?.into();
+        }
+    }
+    serde_json::from_value(value).map_err(invalid)
 }
 fn invalid(error: impl std::fmt::Display) -> ProtocolError {
     ProtocolError::invalid(error.to_string())

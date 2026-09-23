@@ -37,12 +37,13 @@ pub(crate) async fn generate(
     cancellation: CancellationToken,
     log: Arc<EventLog>,
     source: AuxiliarySource,
+    quote: maka_runtime::pricing::Quote,
 ) -> Result<ModelGeneration, ToolError> {
     if cancellation.is_cancelled() {
         return Err(failed("model cancelled before dispatch"));
     }
     let id = log
-        .begin_auxiliary_model(source)
+        .begin_auxiliary_model(source, Some(quote))
         .await
         .map_err(persistence)?;
     let model_id = request.provider.model.clone();

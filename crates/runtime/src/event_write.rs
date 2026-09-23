@@ -26,6 +26,7 @@ use std::{sync::Arc, time::SystemTime};
 #[derive(Clone, Debug)]
 pub struct EventWrite {
     composition: Option<Arc<crate::composition::FrozenComposition>>,
+    quote: Option<crate::pricing::Quote>,
     event: RuntimeEvent,
     raw_payload: Option<Arc<[u8]>>,
     projection_artifacts: Vec<ProjectionArtifactWrite>,
@@ -168,6 +169,7 @@ impl EventWrite {
         }
         Ok(Self {
             composition: None,
+            quote: None,
             event,
             raw_payload: None,
             projection_artifacts: Vec::new(),
@@ -195,6 +197,7 @@ impl EventWrite {
         Ok((
             Self {
                 composition: None,
+                quote: None,
                 event: RuntimeEvent {
                     id,
                     recorded_at,
@@ -231,6 +234,21 @@ impl EventWrite {
     }
     pub fn composition(&self) -> Option<&crate::composition::FrozenComposition> {
         self.composition.as_deref()
+    }
+    pub fn with_quote(mut self, quote: crate::pricing::Quote) -> Result<Self, CommitError> {
+        let Fact::ModelRequested { model_id, .. } = &self.event.fact else {
+            return Err(CommitError::Rejected(
+                "model quote requires a model request".into(),
+            ));
+        };
+        quote
+            .validate(model_id)
+            .map_err(|error| CommitError::Rejected(error.into()))?;
+        self.quote = Some(quote);
+        Ok(self)
+    }
+    pub fn quote(&self) -> Option<&crate::pricing::Quote> {
+        self.quote.as_ref()
     }
     pub fn raw_payload(&self) -> Option<&[u8]> {
         self.raw_payload.as_deref()

@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Connection, Row, sqlite::SqliteRow};
 
 mod auxiliary;
+pub(crate) mod valuation;
 pub use auxiliary::Source as AuxiliarySource;
 
 #[derive(Clone, Debug)]
@@ -72,6 +73,8 @@ pub struct ModelAttempt {
     pub completed_at: f64,
     pub outcome: Outcome,
     pub usage: ModelUsage,
+    pub quote: Option<maka_runtime::pricing::Quote>,
+    pub cost_usd: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -130,7 +133,7 @@ impl EventLog {
                     .await?;
                     let rows = sqlx::query(
                         "SELECT event_id, origin, binding, model_id,
-                        started_at, completed_at, outcome, usage
+                        started_at, completed_at, outcome, usage, quote_json, usd
                  FROM model_usage
                  WHERE completed_at >= ?1 AND completed_at <= ?2
                  AND (?3 IS NULL OR session_id = ?3)
@@ -172,6 +175,11 @@ fn read(row: &SqliteRow) -> Result<ModelAttempt, StoreError> {
         completed_at: row.try_get("completed_at")?,
         outcome: serde_json::from_value(serde_json::Value::String(outcome))?,
         usage: serde_json::from_str(row.try_get("usage")?)?,
+        quote: row
+            .try_get::<Option<&str>, _>("quote_json")?
+            .map(serde_json::from_str)
+            .transpose()?,
+        cost_usd: row.try_get("usd")?,
     })
 }
 

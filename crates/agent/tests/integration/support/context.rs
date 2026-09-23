@@ -48,6 +48,7 @@ pub fn input(base: &str, id: &str, compact: bool) -> RunInput {
         model: "test".into(),
     });
     RunInput {
+        provider_id: "fixture".into(),
         main_output_limit: None,
         context: None,
         invocation: Invocation {

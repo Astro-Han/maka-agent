@@ -62,7 +62,11 @@ impl EventLog {
     /// Called inside an already-admitted Host SDK effect, before model dispatch.
     /// The source journal supplies the binding; plugins cannot invent accounting
     /// identity by supplying a Session ID or current provider configuration.
-    pub async fn begin_auxiliary_model(&self, source: Source) -> Result<Uuid, StoreError> {
+    pub async fn begin_auxiliary_model(
+        &self,
+        source: Source,
+        quote: Option<maka_runtime::pricing::Quote>,
+    ) -> Result<Uuid, StoreError> {
         self.validate_root()?;
         let commits = self.commits.clone();
         self.connection
@@ -70,6 +74,9 @@ impl EventLog {
                 Box::pin(async move {
                     let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
                     let (binding, session_id) = binding(&mut tx, &source).await?;
+                    if let Some(quote) = &quote {
+                        quote.validate(&binding.model).map_err(invalid)?;
+                    }
                     let record = Admission {
                         source,
                         binding,
@@ -78,6 +85,9 @@ impl EventLog {
                     };
                     let id = Uuid::new_v4();
                     let sequence = insert(&mut tx, id, "auxiliary_model_started", &record).await?;
+                    if let Some(quote) = &quote {
+                        super::valuation::capture(&mut tx, &id.to_string(), quote).await?;
+                    }
                     tx.commit().await.map_err(StoreError::CommitUnknown)?;
                     commits.send_replace(sequence);
                     Ok(id)
@@ -99,6 +109,7 @@ impl EventLog {
                 Box::pin(async move {
                     let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
                     require_pending(&mut tx, id).await?;
+                    super::valuation::value(&mut tx, &id.to_string(), &usage).await?;
                     let sequence = insert(
                         &mut tx,
                         Uuid::new_v4(),

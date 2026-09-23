@@ -79,7 +79,7 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | Goal | 查询、arm、控制、续跑、终止、预算与恢复语义。 | **插件 + Host。** Goal 决定后续提交；Host 执行已准入的硬限制并记录用量。插件退休后不能继续提交。 |
 | Daily review／recap | daily-review 查询／修改、定时复盘、`session.recap.generate`。 | **插件 + Host。** 选择、总结及输出由插件负责，复用 Scheduler 和授权历史／模型服务；规范 Session 元数据的提交仍归 Host。 |
 | 外部 agent | setup start/query/cancel；具体执行适配、配置、鉴权、对话身份，以及附件／交互／resume／fork。 | **插件 + Host。** CLI／ACP 适配作为 Executor 插件，使用受管理进程／HTTP。已有 Executor 框架不等于已有具体 adapter。Host 负责授权、取消和外部事件落盘。 |
-| Usage／Pricing | 已实现 Agent 与辅助 SDK 的物理计量、有界事实读取及原生报价查询／CAS 修改。公共插件计量／报价能力、一致版本的 Usage 视图与活动分页、逐调用估价仍待接入。 | **插件 + Host。** 报表和可重建投影可归 Insights 领域；Host 不依赖插件存活来记录用量，并提供一致快照。缺失用量不能视为零。 |
+| Usage／Pricing | 已实现 Agent 与辅助 SDK 的物理计量、冻结的逐调用估价、有界事实读取及原生报价查询／CAS 修改。公共插件计量／报价能力、一致版本的 Usage 视图与活动分页仍待接入。 | **插件 + Host。** 报表和可重建投影可归 Insights 领域；Host 不依赖插件存活来记录用量，并提供一致快照。缺失用量不能视为零。 |
 | 后台健康 | BackgroundTaskHealth 的进程和端点检查。 | **插件 + Host。** 插件解释健康状态并提供工具；Host 提供授权资源观察和有界探测。保存 PID 不等于拥有进程。 |
 | Session 谱系 | 已实现公共 Rust／JS 历史复制和原始输入读取、原生分支／修订创建与放弃、继承历史独立裁剪、Desktop 规范输入编辑及完整持久草稿。已移除 regenerate，修改请求使用编辑重发。 | **Host。** 谱系及工作区只有一个事务权威；插件请求命令，不在私有存储中重做谱系。 |
 | Session 生命周期 | 已实现原生与公共插件删除／预览／回执接口、原子家族退休及队列取消、重启清理和共享 worktree 所有权。无引用规范材料回收及 shared 查询仍待完成。 | **Host。** 保留被引用历史及已接受回执；进程清理不确定时不得删除工作目录。shared 查询需要真实协作授权。 |

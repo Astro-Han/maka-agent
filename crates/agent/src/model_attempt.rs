@@ -263,7 +263,14 @@ async fn execute_once(
                 .map(|baseline| baseline.event_id.clone()),
         },
     );
-    let write = maka_runtime::event::EventWrite::plain(event)?.with_composition(composition)?;
+    let mut write = maka_runtime::event::EventWrite::plain(event)?.with_composition(composition)?;
+    if let Some(pricing) = &inner.pricing {
+        write = write.with_quote(
+            pricing
+                .quote(&input.provider_id, &input.provider.model)
+                .await?,
+        )?;
+    }
     use maka_runtime::event::EventSink;
     inner.log.clone().commit(write).await?;
     let result: Result<_, RunError> = async {

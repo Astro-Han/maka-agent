@@ -74,6 +74,7 @@ impl ToolExecutor for Effect {
 
 pub(crate) fn input(base: &str, suffix: &str, effect: Arc<Effect>) -> RunInput {
     RunInput {
+        provider_id: "fixture".into(),
         main_output_limit: None,
         context: None,
         invocation: Invocation {

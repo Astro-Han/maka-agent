@@ -39,6 +39,7 @@ use tokio_util::sync::CancellationToken;
 
 fn input(base: &str, suffix: &str) -> RunInput {
     RunInput {
+        provider_id: "fixture".into(),
         main_output_limit: None,
         context: None,
         invocation: Invocation {

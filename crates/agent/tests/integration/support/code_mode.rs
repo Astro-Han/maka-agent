@@ -104,6 +104,7 @@ pub fn input(base: &str, suffix: &str, effects: Arc<Effects>) -> RunInput {
         handler: ToolHandler::Immediate(effects.clone()),
     })).unwrap();
     RunInput {
+        provider_id: "fixture".into(),
         main_output_limit: None,
         context: None,
         invocation: Invocation {

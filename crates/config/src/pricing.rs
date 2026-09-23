@@ -30,6 +30,36 @@ const PAGE_ITEMS: usize = 128;
 const PAGE_ENTRY_BYTES: usize = 47 * 1024;
 
 impl ConfigurationStore {
+    /// Provider identity comes from the selected connection, never its wire adapter.
+    pub async fn quote_model(
+        &self,
+        provider_id: String,
+        model: String,
+    ) -> Result<maka_runtime::pricing::Quote> {
+        let key = format!("{provider_id}:{model}");
+        self.transaction(TransactionMode::Deferred, move |connection| {
+            Box::pin(async move {
+                let revision = revision(connection).await?;
+                let record: Option<String> = sqlx::query_scalar(
+                    "SELECT record_json FROM effective_pricing WHERE model_key = ?",
+                )
+                .bind(key)
+                .fetch_optional(&mut *connection)
+                .await?;
+                let quote = maka_runtime::pricing::Quote {
+                    provider_id,
+                    revision,
+                    pricing: record
+                        .map(|record| serde_json::from_str(&record))
+                        .transpose()?,
+                };
+                quote.validate(&model).map_err(invalid)?;
+                Ok(quote)
+            })
+        })
+        .await
+    }
+
     /// Continuations are valid only while both bundled and custom rates are unchanged.
     pub async fn query_pricing(&self, query: Query) -> Result<Page> {
         self.transaction(TransactionMode::Deferred, move |connection| Box::pin(async move {
@@ -76,29 +106,6 @@ impl ConfigurationStore {
             let next_offset = more.then_some(offset + entries.len() as u64);
             Ok(Page::Page { revision, offset, entries, next_offset })
         })).await
-    }
-
-    /// A quote is a value, not a live lookup. Persist it with the model accounting fact.
-    pub async fn model_pricing(&self, model_key: String) -> Result<(u64, Option<Pricing>)> {
-        maka_runtime::pricing::validate_key(&model_key).map_err(invalid)?;
-        self.transaction(TransactionMode::Deferred, move |connection| {
-            Box::pin(async move {
-                let revision = revision(connection).await?;
-                let record: Option<String> = sqlx::query_scalar(
-                    "SELECT record_json FROM effective_pricing WHERE model_key = ?",
-                )
-                .bind(model_key)
-                .fetch_optional(&mut *connection)
-                .await?;
-                Ok((
-                    revision,
-                    record
-                        .map(|record| serde_json::from_str(&record))
-                        .transpose()?,
-                ))
-            })
-        })
-        .await
     }
 
     pub async fn update_pricing(&self, update: Update) -> Result<Updated> {

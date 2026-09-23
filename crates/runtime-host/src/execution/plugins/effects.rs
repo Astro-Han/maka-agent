@@ -430,6 +430,11 @@ impl Executions {
                     let provider = provider
                         .admit(&host.oauth)
                         .map_err(|error| failed(error.message))?;
+                    let quote = host
+                        .configuration
+                        .quote_model(provider.provider_id.clone(), provider.config.model.clone())
+                        .await
+                        .map_err(|error| ToolError::Persistence(error.to_string()))?;
                     super::llm::generate(
                         models,
                         super::llm::request(provider, input),
@@ -437,6 +442,7 @@ impl Executions {
                         cancellation,
                         host.log.clone(),
                         maka_event_log::usage::AuxiliarySource::HostEffect { id },
+                        quote,
                     )
                     .await
                 })

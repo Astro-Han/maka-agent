@@ -193,6 +193,7 @@ impl PreparedHandoff {
         )
         .await?;
         let run = RunInput {
+            provider_id: observed.provider_id.clone(),
             invocation: self.pause.intent.successor(&self.source.invocation),
             request_fingerprint: None,
             provider: observed.config.clone(),

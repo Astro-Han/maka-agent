@@ -294,6 +294,18 @@ CREATE UNIQUE INDEX invocation_boundary ON event_log(invocation_id, kind)
 
 CREATE INDEX model_usage_requests ON event_log(sequence) WHERE kind = 'model_requested';
 
+-- Quote admission and provider-usage valuation share their source fact's commit.
+-- These immutable records are canonical accounting, not recalculated projections.
+CREATE TABLE model_accounting (
+    request_id TEXT PRIMARY KEY REFERENCES event_log(event_id),
+    quote_json TEXT NOT NULL CHECK(json_valid(quote_json) AND length(CAST(quote_json AS BLOB)) <= 8192)
+);
+CREATE TABLE model_valuations (
+    request_id TEXT PRIMARY KEY REFERENCES model_accounting(request_id),
+    usage_json TEXT NOT NULL CHECK(json_valid(usage_json)),
+    usd REAL CHECK(usd IS NULL OR usd >= 0)
+);
+
 CREATE INDEX model_usage_observation ON event_log(
     invocation_id, json_extract(event_json, '$.fact.step_id'), sequence DESC
 ) WHERE kind = 'model_observed' AND json_extract(event_json, '$.fact.event.kind') = 'finished';
@@ -375,7 +387,10 @@ LEFT JOIN event_log observed ON observed.kind = 'auxiliary_model_usage'
 WHERE started.kind = 'auxiliary_model_started';
 
 CREATE VIEW model_usage AS
-SELECT * FROM agent_model_usage UNION ALL SELECT * FROM auxiliary_model_usage;
+SELECT calls.*, accounting.quote_json, valuation.usd
+FROM (SELECT * FROM agent_model_usage UNION ALL SELECT * FROM auxiliary_model_usage) calls
+LEFT JOIN model_accounting accounting ON accounting.request_id = calls.event_id
+LEFT JOIN model_valuations valuation ON valuation.request_id = calls.event_id;
 
 CREATE UNIQUE INDEX message_steering_identity ON event_log(
     json_extract(event_json, '$.invocation.session_id'),

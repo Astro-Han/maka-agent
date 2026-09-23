@@ -32,6 +32,7 @@ mod plugins;
 pub(crate) use plugins::ResourceTarget;
 pub(crate) mod permissions;
 mod prepare;
+mod pricing;
 mod processes;
 mod provider;
 mod read;
@@ -129,10 +130,11 @@ impl Executions {
                 log.clone(),
                 shutdown.clone(),
             )),
-            engine: Engine::new(
+            engine: Engine::with_pricing(
                 log.clone(),
                 models.clone(),
                 CodeExecutor::new(4, CellLimits::default())?,
+                Arc::new(pricing::Prices(configuration.clone())),
             ),
             log,
             models,

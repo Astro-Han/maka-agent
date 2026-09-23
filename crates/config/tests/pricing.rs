@@ -53,6 +53,15 @@ fn price(entry: &Entry) -> &Pricing {
     }
 }
 
+async fn quote(store: &ConfigurationStore, key: &str) -> (u64, Option<Pricing>) {
+    let (provider, model) = key.split_once(':').unwrap();
+    let quote = store
+        .quote_model(provider.into(), model.into())
+        .await
+        .unwrap();
+    (quote.revision, quote.pricing)
+}
+
 #[tokio::test]
 async fn pricing_cas_pages_and_quotes_survive_reopen_and_bundled_rate_replacement() {
     let temp = tempfile::tempdir().unwrap();
@@ -119,7 +128,7 @@ async fn pricing_cas_pages_and_quotes_survive_reopen_and_bundled_rate_replacemen
             .unwrap(),
         Updated::Unchanged { revision: 1 }
     );
-    let captured = store.model_pricing(custom.model_key.clone()).await.unwrap();
+    let captured = quote(&store, &custom.model_key).await;
     assert_eq!(captured, (1, Some(custom.clone())));
     assert!(entries(&store).await.1.iter().any(|entry| *entry
         == Entry::Custom {
@@ -180,7 +189,7 @@ async fn pricing_cas_pages_and_quotes_survive_reopen_and_bundled_rate_replacemen
 
     let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
     assert_eq!(
-        store.model_pricing(custom.model_key.clone()).await.unwrap(),
+        quote(&store, &custom.model_key).await,
         (3, Some(custom.clone()))
     );
     assert_eq!(
@@ -195,10 +204,7 @@ async fn pricing_cas_pages_and_quotes_survive_reopen_and_bundled_rate_replacemen
             .unwrap(),
         Updated::Committed { revision: 4 }
     );
-    assert_eq!(
-        store.model_pricing(custom.model_key.clone()).await.unwrap(),
-        (4, Some(original))
-    );
+    assert_eq!(quote(&store, &custom.model_key).await, (4, Some(original)));
     assert_eq!(
         captured,
         (1, Some(custom)),
@@ -241,13 +247,6 @@ async fn pricing_cas_pages_and_quotes_survive_reopen_and_bundled_rate_replacemen
             ..
         }
     ));
-    assert_eq!(
-        store
-            .model_pricing("fixture:\u{e000}".into())
-            .await
-            .unwrap()
-            .0,
-        5
-    );
+    assert_eq!(quote(&store, "fixture:\u{e000}").await.0, 5);
     store.close().await.unwrap();
 }

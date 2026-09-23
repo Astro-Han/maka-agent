@@ -69,15 +69,26 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
     let path = directory.path().join("auxiliary.sqlite");
     let log = EventLog::open(&path).await.unwrap();
     assert!(
-        log.begin_auxiliary_model(AuxiliarySource::HostEffect { id: Uuid::new_v4() })
+        log.begin_auxiliary_model(AuxiliarySource::HostEffect { id: Uuid::new_v4() }, None)
             .await
             .is_err()
     );
     let parent = log.begin_host_effect(request()).await.unwrap();
     let source = AuxiliarySource::HostEffect { id: parent };
-    let id = log.begin_auxiliary_model(source.clone()).await.unwrap();
+    let quote = serde_json::from_value::<maka_runtime::pricing::Quote>(serde_json::json!({
+        "providerId":"fixture", "revision":9, "pricing":{
+            "modelKey":"fixture:chosen-model", "inputUsdPer1M":1, "outputUsdPer1M":2
+        }
+    }))
+    .unwrap();
+    let id = log
+        .begin_auxiliary_model(source.clone(), Some(quote.clone()))
+        .await
+        .unwrap();
     assert!(
-        log.begin_auxiliary_model(source.clone()).await.is_err(),
+        log.begin_auxiliary_model(source.clone(), None)
+            .await
+            .is_err(),
         "one accepted generation cannot be physically dispatched twice"
     );
     let usage = ModelUsage {
@@ -110,13 +121,19 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
             .await
             .is_err()
     );
-    assert!(log.begin_auxiliary_model(source.clone()).await.is_err());
+    assert!(
+        log.begin_auxiliary_model(source.clone(), None)
+            .await
+            .is_err()
+    );
     let before = log.model_attempts(query(), 0, 100).await.unwrap();
     assert_eq!(before.total, 1);
     let attempt = &before.attempts[0];
     assert_eq!(attempt.origin, Origin::Auxiliary { source });
     assert_eq!(attempt.outcome, Outcome::Error);
     assert_eq!(attempt.usage, usage);
+    assert_eq!(attempt.quote, Some(quote.clone()));
+    assert_eq!(attempt.cost_usd, None, "partial usage is not free");
     let binding = attempt.binding.as_ref().unwrap();
     assert_eq!(binding.connection_slug, "named-connection");
     assert_eq!(binding.model, "chosen-model");
@@ -124,10 +141,18 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
     // Crash after usage arrives but before the effect or model outcome commits.
     let parent = log.begin_host_effect(request()).await.unwrap();
     let interrupted = log
-        .begin_auxiliary_model(AuxiliarySource::HostEffect { id: parent })
+        .begin_auxiliary_model(
+            AuxiliarySource::HostEffect { id: parent },
+            Some(quote.clone()),
+        )
         .await
         .unwrap();
-    log.observe_auxiliary_model(interrupted, usage.clone())
+    let complete_usage = ModelUsage {
+        input_tokens: Some(1_000_000),
+        output_tokens: Some(2_000_000),
+        ..Default::default()
+    };
+    log.observe_auxiliary_model(interrupted, complete_usage.clone())
         .await
         .unwrap();
     log.close().await.unwrap();
@@ -139,7 +164,9 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
     assert_eq!(after.total, 2);
     assert_eq!(after.attempts[0].request_id, interrupted.to_string());
     assert_eq!(after.attempts[0].outcome, Outcome::Unknown);
-    assert_eq!(after.attempts[0].usage, usage);
+    assert_eq!(after.attempts[0].usage, complete_usage);
+    assert_eq!(after.attempts[0].quote, Some(quote));
+    assert_eq!(after.attempts[0].cost_usd, Some(5.0));
     assert_eq!(after.attempts[1], *attempt);
     log.close().await.unwrap();
 }

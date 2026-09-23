@@ -59,6 +59,10 @@ pub(super) async fn verify(log: &EventLog, expected: usize) {
         "retirement must settle the abandoned model request"
     );
     for attempt in auxiliary {
+        let quote = attempt.quote.as_ref().expect("public SDK request quote");
+        assert_eq!(quote.provider_id, "openai-compatible");
+        assert_eq!(quote.pricing, None, "no invented price for a fixture model");
+        assert_eq!(attempt.cost_usd, None, "unpriced is not free");
         if attempt.outcome == Outcome::Success {
             assert_eq!(attempt.usage.input_tokens, Some(3));
             assert_eq!(attempt.usage.output_tokens, Some(5));

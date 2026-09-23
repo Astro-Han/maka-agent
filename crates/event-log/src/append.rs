@@ -99,6 +99,7 @@ impl EventLog {
             }
             crate::tool_payloads::verify_replay(transaction, write).await?;
             crate::composition::verify_replay(transaction, write).await?;
+            crate::usage::valuation::verify_replay(transaction, write).await?;
             crate::archive::verify_replay(transaction, event).await?;
             return Ok(AppendResult::Existing(sequence_number(sequence)?));
         }
@@ -255,6 +256,7 @@ impl EventLog {
         crate::message_sources::insert(transaction, event).await?;
         crate::tool_payloads::insert(transaction, write).await?;
         crate::composition::insert(transaction, write).await?;
+        crate::usage::valuation::append(transaction, write).await?;
         if matches!(event.fact, Fact::InvocationEnded { .. }) {
             crate::sessions::read_state::mark_unread(
                 transaction,
