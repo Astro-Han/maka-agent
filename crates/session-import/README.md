@@ -28,6 +28,7 @@ Converts Codex, Claude Code and OpenCode conversations into historical records t
 - OpenCode reads the selected root Session, messages and parts in one SQLite snapshot, applying whole-message and partial-message reverts. Invalid cells, duplicate identities, orphan parts and missing completed-tool outcomes fail the import; pending calls remain pending.
 - Tool calls and results retain their source order and correlation. Missing outcomes stay missing.
 - Filesystem catalogs read bounded summaries (Codex: 512 KiB; Claude: 256 KiB head and tail), apply workspace/archive filters, and paginate by modification time and relative path. Query-bound cursors resume after the last delivered entry, including when the 48 KiB wire budget cuts a page short.
+- OpenCode catalogs read root Sessions in bounded database batches, ordered by source time and identity. Workspace and text matching use the same normalization as filesystem catalogs; cursors bind the query and database. Pages observe a live source, not a retained snapshot.
 - Source workspace/model values are observations, not execution configuration. No credentials or provider options enter the result.
 - Corrupt interior JSON, inconsistent source identity and changing multi-pass input fail the import. Only an unfinished final JSON write is omitted and identified in the fingerprint.
 

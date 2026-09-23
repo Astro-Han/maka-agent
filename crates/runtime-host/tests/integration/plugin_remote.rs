@@ -120,13 +120,14 @@ async fn scenario() {
     database
         .execute_batch(
             "PRAGMA journal_mode=WAL;
-        CREATE TABLE session(id TEXT,parent_id TEXT,directory TEXT,title TEXT,revert TEXT);
+        CREATE TABLE session(id TEXT PRIMARY KEY,parent_id TEXT,directory TEXT,title TEXT,revert TEXT,
+                             time_created INTEGER,time_updated INTEGER,time_archived INTEGER);
         CREATE TABLE message(id TEXT,session_id TEXT,time_created INTEGER,data TEXT);
         CREATE TABLE part(id TEXT,message_id TEXT,session_id TEXT,time_created INTEGER,data TEXT);
-        INSERT INTO session VALUES('selected',NULL,'/source/project','Selected conversation',NULL);
+        INSERT INTO session VALUES('selected',NULL,'/source/project','Selected conversation',NULL,10,20,NULL);
         INSERT INTO message VALUES('m','selected',10,'{\"role\":\"user\"}');
         INSERT INTO part VALUES('p','m','selected',10,'{\"type\":\"text\",\"text\":\"From WAL\"}');
-        INSERT INTO session VALUES('other',NULL,'/source/other','Excluded',NULL);
+        INSERT INTO session VALUES('other',NULL,'/source/other','Excluded',NULL,10,20,NULL);
         INSERT INTO message VALUES('other-m','other',10,'broken JSON');",
         )
         .unwrap();
@@ -134,7 +135,7 @@ async fn scenario() {
     let import_target =
         rpc(&mut peer, json!({"kind":"bind","binding":import_binding})).await["target"].clone();
     let import_call = json!({"kind":"call","binding":import_binding,"target":import_target,
-        "document":document,"input":{"path":database_path,"session":"selected"}});
+        "document":document,"input":{"path":database_path,"action":"read","session":"selected"}});
     let imported = rpc(&mut peer, import_call.clone()).await;
     let transcript: maka_session_import::Transcript =
         serde_json::from_value(imported["value"].clone()).unwrap();
@@ -143,6 +144,62 @@ async fn scenario() {
     assert!(
         matches!(&transcript.records[0].content, maka_runtime::import::Content::User { text } if text == "From WAL")
     );
+    database
+        .execute_batch(
+            "INSERT INTO session VALUES
+        ('child','selected','/source/project','Child',NULL,10,50,NULL),
+        ('archive',NULL,'/source/project','Archived',NULL,10,60,70),
+        ('drive','','C:\\Café\\Repo','Drive',NULL,10,40,NULL)",
+        )
+        .unwrap();
+    let catalog_call = json!({"kind":"call","binding":import_binding,"target":import_target,
+        "document":document,"input":{"path":database_path,"action":"catalog",
+        "query":{"limit":1}}});
+    let mut request = catalog_call.clone();
+    let mut ids = Vec::new();
+    loop {
+        let page = rpc(&mut peer, request.clone()).await["value"].clone();
+        assert!(serde_json::to_vec(&page).unwrap().len() <= 48 * 1024);
+        ids.extend(
+            page["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| entry["id"].as_str().unwrap().to_owned()),
+        );
+        if page["next"].is_null() {
+            break;
+        }
+        request["input"]["query"]["cursor"] = page["next"].clone();
+    }
+    assert_eq!(ids, ["drive", "selected", "other"]);
+    // A cursor cannot silently change its query, even on the same database.
+    request["input"]["query"]["includeArchived"] = json!(true);
+    assert_eq!(peer.rpc("plugin.remote", request).await["ok"], false);
+    let mut scoped = catalog_call.clone();
+    scoped["input"]["query"] = json!({"cwd":"c:/CAFÉ/repo", "includeArchived":true});
+    let page = rpc(&mut peer, scoped).await["value"].clone();
+    assert_eq!(page["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(page["entries"][0]["id"], "drive");
+    let mut archived = catalog_call.clone();
+    archived["input"]["query"] = json!({"includeArchived":true});
+    let page = rpc(&mut peer, archived).await["value"].clone();
+    assert_eq!(page["entries"].as_array().unwrap().len(), 4);
+    assert_eq!(page["entries"][0]["id"], "archive");
+    // Matching is applied after SQL ordering, and must cross raw batch boundaries.
+    database.execute_batch("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<270)
+        INSERT INTO session SELECT 'skip-'||x,NULL,'/excluded','Not selected',NULL,100+x,100+x,NULL FROM n;
+        INSERT INTO session VALUES('unknown-time',NULL,'/source/project','Unknown time',NULL,NULL,NULL,NULL)").unwrap();
+    let mut filtered = catalog_call;
+    filtered["input"]["query"] = json!({"cwd":"/source/project", "text":"Selected conversation"});
+    let page = rpc(&mut peer, filtered.clone()).await["value"].clone();
+    assert_eq!(page["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(page["entries"][0]["id"], "selected");
+    assert!(page["next"].is_null());
+    filtered["input"]["query"]["text"] = json!("Unknown time");
+    let page = rpc(&mut peer, filtered).await["value"].clone();
+    assert_eq!(page["entries"][0]["id"], "unknown-time");
+    assert!(page["entries"][0]["updatedAt"].is_null());
     database
         .execute(
             "UPDATE session SET parent_id='parent' WHERE id='selected'",

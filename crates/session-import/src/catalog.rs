@@ -19,8 +19,10 @@
 
 //! Live, bounded filesystem catalogs. Cursors bind the query and root, not a
 //! snapshot of a source application that may keep appending between requests.
+mod database;
 mod summary;
 use crate::{Error, transcript::source_cwd};
+pub use database::opencode;
 use maka_plugins::filesystem::{
     OpenFile, ReadDirectory, ReadError, Reader, Symlinks, entries::Kind,
 };
@@ -58,7 +60,8 @@ fn page_size() -> usize {
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
     pub id: String,
-    /// Relative to the supplied read capability; not permission to open a path.
+    /// Source artifact, not permission to open it. Filesystem catalogs return a
+    /// relative path; database catalogs return the explicitly selected database.
     pub path: String,
     pub title: String,
     pub cwd: Option<String>,
@@ -98,7 +101,7 @@ struct Cursor {
     key: Key,
 }
 
-pub async fn list(view: &ReadDirectory, format: Format, mut query: Query) -> Result<Page, Error> {
+fn prepare(mut query: Query) -> Result<Query, Error> {
     if query.limit == 0
         || query.limit > 100
         || query.text.len() > 1024
@@ -117,6 +120,11 @@ pub async fn list(view: &ReadDirectory, format: Format, mut query: Query) -> Res
     }
     query.text = normalize_text(&query.text);
     query.cwd = query.cwd.map(|cwd| normalize_path(&cwd));
+    Ok(query)
+}
+
+pub async fn list(view: &ReadDirectory, format: Format, query: Query) -> Result<Page, Error> {
+    let query = prepare(query)?;
     let encoded = serde_json::to_vec(&(
         format,
         view.location(),
@@ -240,22 +248,35 @@ fn scan(
             }
         }
     }
+    page(
+        query.limit,
+        candidates.into_iter().map(|(key, entry)| {
+            let cursor = serde_json::to_string(&Cursor {
+                query: hash.clone(),
+                key,
+            })
+            .map_err(|_| Error::Invalid("invalid catalog cursor"))?;
+            Ok((cursor, entry))
+        }),
+    )
+}
+
+fn page(
+    limit: usize,
+    candidates: impl IntoIterator<Item = Result<(String, Entry), Error>>,
+) -> Result<Page, Error> {
     let mut entries = Vec::new();
     let mut bytes = 256;
     let mut last = None;
     let mut more = false;
-    for (key, entry) in candidates {
+    for candidate in candidates {
+        let (continuation, entry) = candidate?;
         let encoded =
             serde_json::to_vec(&entry).map_err(|_| Error::Invalid("invalid catalog entry"))?;
-        let continuation = serde_json::to_string(&Cursor {
-            query: hash.clone(),
-            key,
-        })
-        .map_err(|_| Error::Invalid("invalid catalog cursor"))?;
         let cursor_bytes = serde_json::to_vec(&continuation)
             .map_err(|_| Error::Invalid("invalid catalog cursor"))?
             .len();
-        if entries.len() == query.limit || bytes + encoded.len() + cursor_bytes > PAGE_BYTES {
+        if entries.len() == limit || bytes + encoded.len() + cursor_bytes > PAGE_BYTES {
             more = true;
             break;
         }
