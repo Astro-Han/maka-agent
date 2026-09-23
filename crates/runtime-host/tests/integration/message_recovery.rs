@@ -56,6 +56,7 @@ async fn pending(log: &EventLog, owner: &Invocation, id: &str, disposition: Disp
         },
         admitted_at: 2,
         source: RootSourceMessage {
+            unprepared_content: content.clone(),
             message: DeliveredMessage {
                 message_id: id.into(),
                 submitted_content_digest: content.content_digest().unwrap(),

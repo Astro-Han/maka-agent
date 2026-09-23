@@ -296,6 +296,7 @@ async fn scenario() {
         )
         .await;
         let history = remote(&mut peer, &client, &document, "history", json!({"grant":grant["id"],"operation":maka_runtime::artifact::upload_artifact_id("background-session", "history-material")})).await;
+        assert_eq!(history["original"], "Run authorized work", "{history}");
         assert!(
             history["text"]
                 .as_str()

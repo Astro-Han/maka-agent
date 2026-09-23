@@ -157,12 +157,14 @@ pub(super) async fn execute(
                     .expect("checked entry");
                 let mut source = entry.source.clone();
                 let required_tools;
-                source.message.content = super::update::content(source.message.content, &i.text)?;
+                source.message.content =
+                    super::update::content(source.unprepared_content, &i.text)?;
                 if let Some(references) = &mut source.message.content.inline_references {
                     references.retain(|reference| {
                         reference.kind != maka_runtime::input::InlineReferenceKind::Skill
                     });
                 }
+                source.unprepared_content = source.message.content.clone();
                 {
                     let active_tools = (source.disposition
                         == maka_runtime::message::MessageDisposition::Steering)
@@ -219,6 +221,7 @@ pub(super) async fn execute(
                     required_tools,
                     message_id: i.entry_id.clone(),
                     content: Box::new(source.message.content),
+                    unprepared_content: Box::new(source.unprepared_content),
                 }
             }
             Input::Reorder(i) => QueueEdit::Reorder {

@@ -106,6 +106,26 @@ impl Executions {
                 });
             }
             let preparation = content.preparation.clone();
+            let unprepared_content: maka_runtime::input::MessageInput =
+                input.content.clone().into();
+            let source = maka_runtime::message::RootSourceMessage {
+                message: maka_runtime::input::DeliveredMessage {
+                    message_id: Uuid::new_v4().to_string(),
+                    content: content.clone(),
+                    submitted_content_digest: unprepared_content
+                        .content_digest()
+                        .map_err(internal)?,
+                },
+                unprepared_content,
+                submitted_placement: maka_runtime::message::Placement::CurrentTurn,
+                disposition: maka_runtime::message::MessageDisposition::TurnStarted,
+                submitted_intent: (!input.input_selections.is_empty()
+                    || input.turn_orchestration.is_some())
+                .then(|| maka_runtime::message::SubmittedTurnIntent {
+                    input_selections: input.input_selections.clone(),
+                    turn_orchestration: input.turn_orchestration.clone(),
+                }),
+            };
             input.input_selections.clear();
             input.content = content.clone().into();
             let mut run = self
@@ -113,7 +133,7 @@ impl Executions {
                     input,
                     super::prepare::MessageOrigin::Client { root_id },
                     Some(fingerprint),
-                    Vec::new(),
+                    vec![source],
                     environment,
                 )
                 .await?;

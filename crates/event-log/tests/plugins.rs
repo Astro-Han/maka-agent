@@ -229,6 +229,7 @@ fn pending(
         },
         steering_invocation: None,
         source: RootSourceMessage {
+            unprepared_content: request.content.clone(),
             message: DeliveredMessage {
                 message_id: uuid::Uuid::new_v4().to_string(),
                 submitted_content_digest: request.content.content_digest().unwrap(),

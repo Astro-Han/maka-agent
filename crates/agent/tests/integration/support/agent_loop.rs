@@ -123,6 +123,7 @@ fn source(
     disposition: maka_runtime::message::MessageDisposition,
 ) -> maka_runtime::message::RootSourceMessage {
     maka_runtime::message::RootSourceMessage {
+        unprepared_content: content.clone(),
         message: maka_runtime::input::DeliveredMessage {
             message_id: id.into(),
             content,

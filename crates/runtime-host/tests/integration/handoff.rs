@@ -479,6 +479,7 @@ async fn stop_sealed_turn_uses_public_identity_without_provider_and_survives_res
                         required_tools: Default::default(),
                         admitted_at: 1,
                         source: maka_runtime::message::RootSourceMessage {
+                            unprepared_content: content.clone(),
                             message: maka_runtime::input::DeliveredMessage {
                                 message_id: "followup".into(),
                                 submitted_content_digest: content.content_digest().unwrap(),

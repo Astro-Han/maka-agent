@@ -49,6 +49,7 @@ pub enum QueueEdit {
     Update {
         message_id: String,
         content: Box<MessageInput>,
+        unprepared_content: Box<MessageInput>,
         required_tools: std::collections::BTreeSet<String>,
     },
     Reorder {

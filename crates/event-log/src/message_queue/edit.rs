@@ -93,11 +93,13 @@ pub(crate) async fn apply(
         QueueEdit::Update {
             message_id,
             content,
+            unprepared_content,
             required_tools,
         } => {
             let index = queued(&queue, &message_id)?;
             let entry = &mut queue.entries[index];
             entry.source.message.content = *content;
+            entry.source.unprepared_content = *unprepared_content;
             // Edits change delivery, not the original submission identity used
             // to prove admission after an Epoch change.
             entry.required_tools = required_tools;

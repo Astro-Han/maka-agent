@@ -97,6 +97,56 @@ impl RootMessageProof {
 }
 
 impl EventLog {
+    /// Resolve one exact root source from owned history. A Turn can contain
+    /// several queued messages; neither its aggregate nor a UI row is the input.
+    pub async fn editable_message(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        message_id: &str,
+    ) -> Result<Option<maka_runtime::message::EditableMessage>, StoreError> {
+        self.validate_root()?;
+        for id in [session_id, turn_id, message_id] {
+            crate::sessions::validate_id(id)?;
+        }
+        let (session, turn, message) = (
+            session_id.to_owned(),
+            turn_id.to_owned(),
+            message_id.to_owned(),
+        );
+        self.connection.run(move |connection| Box::pin(async move {
+            let mut tx = connection.begin().await?;
+            let row: Option<(i64, Option<String>)> = sqlx::query_as(
+                "SELECT e.sequence, CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1048576 THEN e.event_json END
+                 FROM message_sources s JOIN runtime_events e ON e.event_id=s.event_id
+                 LEFT JOIN session_history_members h ON h.sequence=e.sequence AND h.session_id=?1
+                 WHERE s.message_id=?2 AND e.kind='invocation_opened'
+                   AND json_extract(e.event_json,'$.invocation.turn_id')=?3
+                   AND (s.session_id=?1 OR h.sequence IS NOT NULL)"
+            ).bind(&session).bind(&message).bind(&turn).fetch_optional(&mut *tx).await?;
+            let Some((sequence, json)) = row else { return Ok(None); };
+            let proof = decode_root(sequence, json, &message)?;
+            if proof.opening.event.invocation.turn_id != turn {
+                return Err(invalid("source proof Turn changed"));
+            }
+            let source = proof.source();
+            let mut content = source.unprepared_content.clone();
+            if proof.opening.event.invocation.session_id != session {
+                for attachment in content.attachments.iter_mut().flatten() {
+                    if let maka_runtime::attachment::StorageRef::SessionFile { session_id, relative_path } = &attachment.storage_ref {
+                        attachment.storage_ref = crate::artifacts::history::resolve(&mut tx, &session, session_id, relative_path)
+                            .await?.ok_or_else(|| invalid("editable source Artifact is missing"))?;
+                    }
+                }
+            }
+            let result = maka_runtime::message::EditableMessage {
+                message_id: message, turn_id: turn, content, intent: source.submitted_intent.clone(),
+            };
+            tx.commit().await?;
+            Ok(Some(result))
+        })).await
+    }
+
     /// Resolve an original source identity without inferring ownership from UI rows.
     pub async fn root_message(
         &self,
@@ -115,17 +165,43 @@ impl EventLog {
                  WHERE s.session_id = ? AND s.message_id = ? AND e.kind = 'invocation_opened'"
             ).bind(&session).bind(&message).fetch_optional(connection).await?;
             let Some((sequence, json)) = row else { return Ok(None); };
-            let event: RuntimeEvent = serde_json::from_str(&json.ok_or(StoreError::PrefixTooLarge)?)?;
-            let Fact::InvocationOpened { input: InvocationInput::Message { content, source_messages, .. }, .. } = &event.fact else {
-                return Err(invalid("source proof is not a message opening"));
-            };
-            maka_runtime::message::validate_sources(content, source_messages).map_err(invalid)?;
-            if event.invocation.session_id != session { return Err(invalid("source proof Session changed")); }
-            let index = source_messages.iter().position(|s| s.message.message_id == message)
-                .ok_or_else(|| invalid("source proof identity changed"))?;
-            Ok(Some(RootMessageProof { opening: StoredEvent { sequence: sequence_number(sequence)?, event }, index }))
+            let proof = decode_root(sequence, json, &message)?;
+            if proof.opening.event.invocation.session_id != session { return Err(invalid("source proof Session changed")); }
+            Ok(Some(proof))
         })).await
     }
+}
+
+fn decode_root(
+    sequence: i64,
+    json: Option<String>,
+    message: &str,
+) -> Result<RootMessageProof, StoreError> {
+    let event: RuntimeEvent = serde_json::from_str(&json.ok_or(StoreError::PrefixTooLarge)?)?;
+    let Fact::InvocationOpened {
+        input:
+            InvocationInput::Message {
+                content,
+                source_messages,
+                ..
+            },
+        ..
+    } = &event.fact
+    else {
+        return Err(invalid("source proof is not a message opening"));
+    };
+    maka_runtime::message::validate_sources(content, source_messages).map_err(invalid)?;
+    let index = source_messages
+        .iter()
+        .position(|s| s.message.message_id == message)
+        .ok_or_else(|| invalid("source proof identity changed"))?;
+    Ok(RootMessageProof {
+        opening: StoredEvent {
+            sequence: sequence_number(sequence)?,
+            event,
+        },
+        index,
+    })
 }
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidTransition(message.into())

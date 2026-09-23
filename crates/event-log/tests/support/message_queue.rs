@@ -70,6 +70,7 @@ pub fn admission(
         required_tools: Default::default(),
         admitted_at: 1,
         source: RootSourceMessage {
+            unprepared_content: id.into(),
             message: DeliveredMessage {
                 message_id: id.into(),
                 content: id.into(),

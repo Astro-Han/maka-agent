@@ -132,6 +132,7 @@ impl BoundCommands {
                 invocation: request.invocation.clone(),
                 steering_invocation: None,
                 source: RootSourceMessage {
+                    unprepared_content: request.content.clone(),
                     message: DeliveredMessage {
                         message_id: request.message_id.clone(),
                         submitted_content_digest: request

@@ -111,6 +111,7 @@ impl BoundCommands {
                 },
                 steering_invocation: None,
                 source: RootSourceMessage {
+                    unprepared_content: request.content.clone(),
                     message: DeliveredMessage {
                         message_id: Uuid::new_v4().to_string(),
                         submitted_content_digest: request

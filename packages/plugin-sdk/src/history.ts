@@ -57,6 +57,21 @@ export type HistoryPage =
       readonly next: HistoryCursor | null;
     };
 export interface History {
+  /** Exact input before preparation, not the displayed or aggregated message.
+   * A new submission needs its own identity and current authorization.
+   */
+  source(input: { sessionId: string; turnId: string; messageId: string }): Promise<{
+    readonly messageId: string;
+    readonly turnId: string;
+    readonly content: import('./execution.js').MessageContent;
+    readonly intent: {
+      readonly input_selections: Readonly<Record<string, readonly string[]>>;
+      readonly turn_orchestration: {
+        readonly mode: string;
+        readonly source: 'slash_command' | 'host_api';
+      } | null;
+    } | null;
+  } | null>;
   /** Source history access and destination execution authority are checked independently.
    * Copies an immutable user upload; retrying returns the same destination.
    */

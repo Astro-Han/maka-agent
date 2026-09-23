@@ -104,4 +104,20 @@ impl Executions {
         self.check_history_target(&call, &input.session_id).await?;
         Ok(result)
     }
+
+    pub(crate) async fn plugin_history_source(
+        &self,
+        call: Scope,
+        input: maka_plugins::session::history::SourceRead,
+    ) -> Result<Option<maka_plugins::session::history::EditableMessage>, Error> {
+        input.validate()?;
+        self.check_history_target(&call, &input.session_id).await?;
+        let result = self
+            .log
+            .editable_message(&input.session_id, &input.turn_id, &input.message_id)
+            .await
+            .map_err(storage)?;
+        self.check_history_target(&call, &input.session_id).await?;
+        Ok(result)
+    }
 }

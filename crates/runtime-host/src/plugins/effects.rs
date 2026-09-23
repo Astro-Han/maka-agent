@@ -271,6 +271,30 @@ impl maka_plugins::session::catalog::Queries for Effects {
 }
 
 impl maka_plugins::session::history::History for Effects {
+    fn source(
+        &self,
+        call: Authority,
+        input: maka_plugins::session::history::SourceRead,
+    ) -> BoxFuture<
+        '_,
+        Result<
+            Option<maka_plugins::session::history::EditableMessage>,
+            maka_plugins::execution::CommandError,
+        >,
+    > {
+        Box::pin(async move {
+            let host = self
+                .host
+                .upgrade()
+                .ok_or(maka_plugins::execution::CommandError::Draining)?;
+            let _lease = self
+                .owner
+                .admit()
+                .map_err(|_| maka_plugins::execution::CommandError::Revoked)?;
+            host.plugin_history_source(call, input).await
+        })
+    }
+
     fn copy_material(
         &self,
         call: Authority,

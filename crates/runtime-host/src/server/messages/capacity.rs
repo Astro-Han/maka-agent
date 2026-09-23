@@ -44,6 +44,7 @@ pub(super) fn check(
         QueueEdit::Update {
             message_id,
             content,
+            unprepared_content,
             required_tools,
         } => {
             let entry = prospective
@@ -52,6 +53,7 @@ pub(super) fn check(
                 .find(|e| &e.source.message.message_id == message_id)
                 .expect("validated entry");
             entry.source.message.content = (**content).clone();
+            entry.source.unprepared_content = (**unprepared_content).clone();
             entry.required_tools = required_tools.clone();
         }
         QueueEdit::RetractAll { .. } => prospective
@@ -247,6 +249,7 @@ mod tests {
             required_tools: Default::default(),
             admitted_at: 2,
             source: RootSourceMessage {
+                unprepared_content: "short".into(),
                 message: DeliveredMessage {
                     message_id: "queued".into(),
                     content: "short".into(),
@@ -287,6 +290,7 @@ mod tests {
             let observation = log.session_projection("session").await.unwrap().unwrap();
             let edit = QueueEdit::Update {
                 message_id: "queued".into(),
+                unprepared_content: Box::new("x".repeat(bytes).into()),
                 content: Box::new("x".repeat(bytes).into()),
                 required_tools: Default::default(),
             };

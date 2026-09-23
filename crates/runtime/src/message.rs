@@ -73,13 +73,33 @@ pub enum MessageDisposition {
 pub struct RootSourceMessage {
     #[serde(flatten)]
     pub message: DeliveredMessage,
+    /// Input before plugin preparation, including the last accepted queue edit.
+    /// Unlike the original submission digest, this follows edits to delivery.
+    pub unprepared_content: MessageInput,
     pub submitted_placement: Placement,
     pub disposition: MessageDisposition,
     pub submitted_intent: Option<SubmittedTurnIntent>,
 }
+
+/// A Session-owned editing view, not proof that the Session admitted this message.
+/// Reusing its content requires a fresh message identity and current preparation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditableMessage {
+    pub message_id: String,
+    pub turn_id: String,
+    pub content: MessageInput,
+    pub intent: Option<SubmittedTurnIntent>,
+}
+
 impl RootSourceMessage {
     pub fn validate(&self) -> Result<(), &'static str> {
         self.message.validate()?;
+        if !self.unprepared_content.preparation.is_empty()
+            || self.unprepared_content.text_bytes() > 64 * 1024
+        {
+            return Err("invalid unprepared source content");
+        }
         if let Some(intent) = &self.submitted_intent {
             intent.validate()?;
             if self.submitted_placement != Placement::CurrentTurn {
@@ -104,6 +124,7 @@ pub fn validate_sources(
     }
     let mut ids = HashSet::new();
     let mut bytes = 0usize;
+    let mut unprepared_bytes = 0usize;
     for source in sources {
         source.validate()?;
         if !ids.insert(&source.message.message_id)
@@ -114,8 +135,10 @@ pub fn validate_sources(
             return Err("conflicting root message sources");
         }
         bytes = bytes.saturating_add(source.message.content.text_bytes());
+        unprepared_bytes = unprepared_bytes.saturating_add(source.unprepared_content.text_bytes());
     }
     if bytes > 64 * 1024
+        || unprepared_bytes > 64 * 1024
         || content.text_bytes() > 64 * 1024
         || serde_json::to_vec(sources)
             .map_err(|_| "invalid root sources")?

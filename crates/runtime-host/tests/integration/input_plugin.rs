@@ -298,5 +298,29 @@ export default async function(ctx) {
         "example.javascript"
     );
     assert_eq!(content.preparation[1].receipt, json!({"transformed":true}));
+    let source = prefix
+        .events
+        .iter()
+        .find_map(|event| match &event.event.fact {
+            Fact::InvocationOpened {
+                input:
+                    maka_runtime::input::InvocationInput::Message {
+                        source_messages, ..
+                    },
+                ..
+            } if event.event.invocation.turn_id == "ticket" => source_messages.first(),
+            _ => None,
+        })
+        .unwrap();
+    let editable = log
+        .editable_message("business", "ticket", &source.message.message_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        editable.content.text, "ticket:42",
+        "editing must not reverse either plugin's transformation"
+    );
+    assert!(editable.content.preparation.is_empty());
     log.shutdown().await.unwrap();
 }

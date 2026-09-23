@@ -335,6 +335,7 @@ mod tests {
             required_tools: Default::default(),
             admitted_at: 1,
             source: RootSourceMessage {
+                unprepared_content: "a".repeat(bytes).into(),
                 message: DeliveredMessage {
                     message_id: id.into(),
                     content: "a".repeat(bytes).into(),

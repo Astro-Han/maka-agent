@@ -297,6 +297,7 @@
     history: Object.freeze({
       list: (input = {}) => host('history.list', { authority, input }),
       read: (input) => host('history.read', { authority, input }),
+      source: (input) => host('history.source', { authority, input }),
       copyMaterial: (target, input) => {
         const targetHandle = executionHandles.get(target);
         if (targetHandle === undefined) throw new TypeError('Expected a Host execution capability');

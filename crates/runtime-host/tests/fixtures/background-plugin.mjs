@@ -66,11 +66,27 @@ export default async function (ctx) {
         /** @type {Parameters<typeof call.history.read>[0]} */
         const input = { sessionId: 'background-session' };
         let text = '';
+        let original = '';
         for (;;) {
           const page = await call.history.read(input);
           input.through = page.through;
           if (page.kind === 'preparing') continue;
           text += page.chunks.map((chunk) => chunk.text).join('\n');
+          for (const chunk of page.chunks) {
+            if (chunk.role !== 'user' || chunk.offset !== 0 || chunk.text !== 'Run authorized work')
+              continue;
+            const locator = {
+              sessionId: input.sessionId,
+              turnId: chunk.turnId,
+              messageId: chunk.messageId,
+            };
+            const source = await call.history.source(locator);
+            if (source?.messageId !== chunk.messageId || source.turnId !== chunk.turnId)
+              throw new Error('original input lost its canonical identity');
+            original = source.content.text;
+            if (await call.history.source({ ...locator, turnId: 'not-this-turn' }))
+              throw new Error('source lookup ignored its Turn');
+          }
           if (!page.next) break;
           input.cursor = page.next;
         }
@@ -105,7 +121,7 @@ export default async function (ctx) {
             await commands.close();
           }
         });
-        return { text, material: { ...material, ref: { ...material.ref } } };
+        return { text, original, material: { ...material, ref: { ...material.ref } } };
       },
     ),
   );
@@ -121,6 +137,16 @@ export default async function (ctx) {
       try {
         await call.history.read({ sessionId: 'background-session' });
         throw new Error('metadata-only consent became history authority');
+      } catch (error) {
+        if (error.code !== 'revoked') throw error;
+      }
+      try {
+        await call.history.source({
+          sessionId: 'background-session',
+          turnId: 'unknown',
+          messageId: 'unknown',
+        });
+        throw new Error('metadata-only consent became source input authority');
       } catch (error) {
         if (error.code !== 'revoked') throw error;
       }

@@ -23,6 +23,24 @@ use maka_runtime::attachment::AttachmentRef;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub use maka_runtime::message::EditableMessage;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourceRead {
+    pub session_id: String,
+    pub turn_id: String,
+    pub message_id: String,
+}
+impl SourceRead {
+    pub fn validate(&self) -> Result<(), CommandError> {
+        for id in [&self.session_id, &self.turn_id, &self.message_id] {
+            crate::name(id).map_err(|_| CommandError::Invalid("invalid message source".into()))?;
+        }
+        Ok(())
+    }
+}
+
 /// Copy an uploaded historical material into an independently authorized Session.
 /// Identifiers locate content; the history call and destination capability grant access.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -122,6 +140,13 @@ pub enum Page {
 /// Remote/background calls retain their actual principal's ReadHistory scope.
 /// Every page rechecks current access and Session existence, including old fences.
 pub trait History: Send + Sync {
+    /// Preparation-free input, scoped like every other history read. Neither
+    /// its identities nor its returned intent grant execution authority.
+    fn source(
+        &self,
+        call: Scope,
+        input: SourceRead,
+    ) -> BoxFuture<'_, Result<Option<EditableMessage>, CommandError>>;
     fn list(
         &self,
         call: Scope,

@@ -50,6 +50,19 @@ async fn turn(log: &EventLog, session: &str, turn: &str, file: bool) {
     if file {
         content.attachments = Some(vec![attachment()]);
     }
+    let mut unprepared = content.clone();
+    unprepared.text = format!("{turn} before preparation");
+    let source = maka_runtime::message::RootSourceMessage {
+        message: maka_runtime::input::DeliveredMessage {
+            message_id: format!("message-{turn}"),
+            content: content.clone(),
+            submitted_content_digest: unprepared.content_digest().unwrap(),
+        },
+        unprepared_content: unprepared,
+        submitted_placement: maka_runtime::message::Placement::CurrentTurn,
+        disposition: maka_runtime::message::MessageDisposition::TurnStarted,
+        submitted_intent: None,
+    };
     let invocation = Invocation {
         session_id: session.into(),
         turn_id: turn.into(),
@@ -61,7 +74,7 @@ async fn turn(log: &EventLog, session: &str, turn: &str, file: bool) {
             configuration: None,
             input: InvocationInput::Message {
                 content,
-                source_messages: Vec::new(),
+                source_messages: vec![source],
                 request_fingerprint: None,
             },
         },
@@ -257,6 +270,39 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
             2
         );
         let files = log.list_artifacts(session, 0, 32).await.unwrap().records;
+        let editable = log
+            .editable_message(session, "first", "message-first")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(editable.content.text, "first before preparation");
+        assert_eq!(
+            editable.content.attachments.as_ref().unwrap()[0].storage_ref,
+            StorageRef::SessionFile {
+                session_id: session.into(),
+                relative_path: files[0].id.clone()
+            }
+        );
+        assert!(
+            log.root_message(session, "message-first")
+                .await
+                .unwrap()
+                .is_none(),
+            "historical source access is not proof of target execution admission"
+        );
+        assert!(
+            log.editable_message(session, "later", "message-later")
+                .await
+                .unwrap()
+                .is_none(),
+            "a source beyond the inherited cut is not editable in the copy"
+        );
+        assert!(
+            log.editable_message(session, "first", "message-later")
+                .await
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(
             log.read_artifact_chunk(session, &files[0].id, 0, 64)
                 .await
@@ -326,6 +372,13 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
             .unwrap(),
             serde_json::to_value(history).unwrap(),
             "rebuilding cannot depend on source metadata or cache state"
+        );
+        assert_eq!(
+            log.editable_message(session, "first", "message-first")
+                .await
+                .unwrap()
+                .unwrap(),
+            editable
         );
     }
     assert_eq!(

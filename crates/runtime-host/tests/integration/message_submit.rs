@@ -173,9 +173,10 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
     else {
         panic!("missing legacy opening")
     };
-    assert!(
-        source_messages.is_empty(),
-        "legacy admission must not fabricate a Message identity"
+    assert_eq!(source_messages.len(), 1);
+    assert_eq!(
+        source_messages[0].unprepared_content.text,
+        "legacy input /skill:legacy"
     );
     assert_eq!(content.preparation[0].receipt["loaded"][0]["id"], "legacy");
     let saved: serde_json::Value = serde_json::from_slice(
@@ -188,7 +189,7 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
         .iter()
         .find(|row| row["turnId"] == "legacy-skills" && row["type"] == "user")
         .unwrap();
-    assert_eq!(user["id"], legacy.event.id);
+    assert_eq!(user["id"], source_messages[0].message.message_id);
     assert_eq!(user["displayText"], "legacy input /skill:legacy");
     for id in ["original-user-id", "cancelled-user-id"] {
         let proof = log
@@ -198,6 +199,20 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
             .unwrap();
         assert_eq!(proof.source().message.message_id, id);
         assert_eq!(proof.source().disposition, MessageDisposition::TurnStarted);
+        let editable = log
+            .editable_message(
+                "message-submit",
+                &proof.opening().event.invocation.turn_id,
+                id,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(editable.content, proof.source().unprepared_content);
+        assert_eq!(
+            editable.content.content_digest().unwrap(),
+            proof.source().message.submitted_content_digest
+        );
         assert_ne!(proof.opening().event.invocation.turn_id, id);
         assert_eq!(
             proof.source().message.submitted_content_digest,

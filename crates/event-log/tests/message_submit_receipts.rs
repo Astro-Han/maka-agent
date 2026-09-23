@@ -78,6 +78,7 @@ async fn submit_receipt_is_atomic_and_survives_edit_delivery_cancellation_and_ep
             receipt.queue_revision,
             QueueEdit::Update {
                 message_id: "queued".into(),
+                unprepared_content: Box::new("edited".into()),
                 content: Box::new("edited".into()),
                 required_tools: Default::default(),
             },
@@ -110,6 +111,7 @@ async fn submit_receipt_is_atomic_and_survives_edit_delivery_cancellation_and_ep
         .unwrap()
         .unwrap();
     assert_eq!(edited.source.message.content.text, "edited");
+    assert_eq!(edited.source.unprepared_content.text, "edited");
     assert_eq!(
         edited.source.message.submitted_content_digest,
         pending.source.message.submitted_content_digest,

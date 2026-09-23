@@ -146,6 +146,7 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
             4,
             QueueEdit::Update {
                 message_id: "two".into(),
+                unprepared_content: Box::new("edited 😀".into()),
                 content: Box::new(content),
                 required_tools: ["Read".into()].into(),
             },

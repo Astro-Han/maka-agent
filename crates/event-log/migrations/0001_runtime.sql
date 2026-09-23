@@ -377,6 +377,8 @@ CREATE TABLE message_sources (
     PRIMARY KEY(session_id, message_id)
 );
 
+CREATE INDEX message_source_identity ON message_sources(message_id, event_id);
+
 CREATE TABLE transcript_rows (
     sequence INTEGER NOT NULL CHECK(sequence >= 0),
     session_id TEXT NOT NULL,

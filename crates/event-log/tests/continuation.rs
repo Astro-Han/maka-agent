@@ -66,6 +66,7 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
     } = &mut source.fact
     {
         source_messages.push(maka_runtime::message::RootSourceMessage {
+            unprepared_content: content.clone(),
             message: maka_runtime::input::DeliveredMessage {
                 message_id: "origin-message".into(),
                 submitted_content_digest: content.content_digest().unwrap(),

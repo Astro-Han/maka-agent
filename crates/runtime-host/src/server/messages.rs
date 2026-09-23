@@ -189,6 +189,7 @@ mod tests {
                 },
                 steering_invocation: None,
                 source: RootSourceMessage {
+                    unprepared_content: content.clone(),
                     message: DeliveredMessage {
                         message_id: "message".into(),
                         submitted_content_digest: content.content_digest().unwrap(),

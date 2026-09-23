@@ -117,6 +117,14 @@ pub(crate) async fn retain(
                 for message in source_messages {
                     references.extend(
                         message
+                            .unprepared_content
+                            .attachments
+                            .iter()
+                            .flatten()
+                            .map(|a| (&a.storage_ref, Some(a))),
+                    );
+                    references.extend(
+                        message
                             .message
                             .content
                             .attachments

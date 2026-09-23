@@ -141,6 +141,7 @@ impl Executions {
                 ));
             }
             let source = RootSourceMessage {
+                unprepared_content: content.clone(),
                 message: DeliveredMessage {
                     message_id: input.message_id.clone(),
                     content,

@@ -34,6 +34,7 @@ mod support;
 
 fn source(id: &str, text: &str) -> RootSourceMessage {
     RootSourceMessage {
+        unprepared_content: text.into(),
         message: DeliveredMessage {
             message_id: id.into(),
             content: text.into(),
@@ -87,6 +88,7 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
             .unwrap();
     }
     let mut first = source("client-source", "prepared");
+    first.unprepared_content = "original input".into();
     first.message.content.display_text = Some("visible".into());
     first.disposition = MessageDisposition::TurnStarted;
     first.submitted_intent = Some(SubmittedTurnIntent {
@@ -163,6 +165,13 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
         .unwrap();
     assert_eq!(proof.opening().event, event);
     assert_eq!(proof.source(), &first);
+    let editable = log
+        .editable_message("a", "first", "client-source")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(editable.content.text, "original input");
+    assert_eq!(editable.intent, first.submitted_intent);
     assert!(
         matches!(log.message_execution("a", "client-source").await.unwrap(), MessageExecution::Owned(owner) if owner.invocation == event.invocation)
     );
@@ -254,6 +263,19 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
             .unwrap();
         assert_eq!(proof.opening().event, combined);
         assert_eq!(proof.source(), source);
+        assert_eq!(
+            log.editable_message(
+                "a",
+                &combined.invocation.turn_id,
+                &source.message.message_id
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .content,
+            source.unprepared_content,
+            "editing selects the exact source, not the batch aggregate"
+        );
         assert!(
             matches!(log.message_execution("a", &source.message.message_id).await.unwrap(), MessageExecution::Shared(owner) if owner.invocation == combined.invocation)
         );
