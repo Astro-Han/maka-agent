@@ -103,6 +103,7 @@ type MessageContextOptions = {
 };
 type SendOptions = MessageContextOptions & {
   waitForHostAdmission?: boolean;
+  inputSelections?: import('@maka/runtime-host/protocol').InputSelections;
   turnOrchestration?: TurnOrchestration;
   displayText?: string;
   onSessionResolved?: (sessionId: string, newTaskDraftKey?: string) => void;
@@ -367,9 +368,11 @@ export function createAppShellChatActions(deps: {
         return submitAndProject({
           sessionId,
           messageId,
-          placement: options.turnOrchestration !== undefined ? 'current_turn' : 'next_turn',
+          placement: options.turnOrchestration !== undefined ||
+            Object.keys(options.inputSelections ?? {}).length > 0 ? 'current_turn' : 'next_turn',
           command: {
             ...sendCommand,
+            ...(options.inputSelections ? { inputSelections: options.inputSelections } : {}),
             ...(options.turnOrchestration ? { turnOrchestration: options.turnOrchestration } : {}),
           },
           ...(options.displayText ? { displayText: options.displayText } : {}),

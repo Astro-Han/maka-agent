@@ -680,6 +680,7 @@ test("sends Side Conversation intent and metadata atomically to Runtime Host", a
   const sessionCopyCleanup = {
     ownCreation: <T>(_creation: unknown, operation: () => Promise<T>) => operation(),
     async rejectCreation() {},
+    async releaseCreation() {},
     async cleanup() {},
     async schedule() {},
     async abandonOwner(ownerId: string) {
@@ -2444,6 +2445,7 @@ function unusedSessionCopyCleanup(): RuntimeHostSessionExecutionIpcDeps['session
   return {
     ownCreation: async (_creation, operation) => operation(),
     async rejectCreation() {},
+    async releaseCreation() {},
     async cleanup() {},
     async schedule() {},
     async abandonOwner() {},

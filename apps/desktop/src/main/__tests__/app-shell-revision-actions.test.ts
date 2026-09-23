@@ -17,171 +17,137 @@
  * under the License.
  */
 
-import { strict as assert } from 'node:assert';
-import { describe, it } from 'node:test';
 
-import type { StoredMessage } from '@maka/core/session';
+import { strict as assert } from 'node:assert';
+import { it, type TestContext } from 'node:test';
+import type { MessageContent } from '@maka/core/events';
+import type { SessionSourceMessage } from '@maka/runtime-host/protocol';
 import { createAppShellRevisionActions, type TurnRevisionDraft } from '../../renderer/app-shell-revision-actions.js';
 
-function userMessage(turnId: string, text: string, extra: Record<string, unknown> = {}): StoredMessage {
-  return {
-    id: `msg-${turnId}`,
-    type: 'user',
-    turnId,
-    ts: 1,
-    text,
-    ...extra,
-  } as StoredMessage;
-}
-
-function createActions(input: { messages: StoredMessage[] }) {
-  const drafts: unknown[] = [];
-  let composerText = '';
-  const revisionDraftRef: { current: unknown } = { current: null };
-  const actions = createAppShellRevisionActions({
-    uiLocale: 'en' as never,
-    activeIdRef: { current: 'session-1' },
-    composerRef: {
-      current: {
-        getText: () => composerText,
-        setText: (text: string) => {
-          composerText = text;
-        },
-        focus: () => {},
-        setDraft: (_sessionId: string, text: string) => {
-          composerText = text;
-        },
-        clearDraft: () => {},
-      } as never,
-    },
-    messages: input.messages,
-    hasPendingAttachments: () => false,
-    openSessionInChat: () => {},
-    refreshMessages: async () => true,
-    refreshSessions: async () => [],
-    setMessages: () => {},
-    commitRevisionDraft: (draft: unknown) => {
-      revisionDraftRef.current = draft;
-      drafts.push(draft);
-    },
-    revisionDraftRef,
-    toastApi: {
-      info: () => {},
-      error: () => {},
-    },
-  } as never);
-  return Object.assign(actions, { drafts, composerState: { get text(): string { return composerText; } } });
-}
-
-describe('app-shell revision actions with structured context (#5109)', () => {
-  it('keeps editing allowed when only earlier turns carry attachments', () => {
-    const h = createActions({
-      messages: [
-        userMessage('turn-1', 'with image', {
-          attachments: [
-            {
-              kind: 'image',
-              name: 'chart.png',
-              mimeType: 'image/png',
-              bytes: 10,
-              ref: { kind: 'session_file', sessionId: 'session-1', relativePath: 'a.png' },
-            },
-          ],
-        }),
-        userMessage('turn-2', 'plain follow-up'),
-      ],
-    });
-
-    h.beginEditUserMessage('turn-2');
-
-    assert.ok(h.drafts.at(-1), 'a retained historical attachment must not block the edit');
-    assert.equal(h.composerState.text, 'plain follow-up');
-  });
-
-  it('rejects a source message that itself carries attachments', () => {
-    const h = createActions({
-      messages: [
-        userMessage('turn-1', 'with image', {
-          attachments: [
-            {
-              kind: 'image',
-              name: 'chart.png',
-              mimeType: 'image/png',
-              bytes: 10,
-              ref: { kind: 'session_file', sessionId: 'session-1', relativePath: 'a.png' },
-            },
-          ],
-        }),
-      ],
-    });
-
-    h.beginEditUserMessage('turn-1');
-
-    assert.equal(h.drafts.at(-1), undefined, 'attachment-bearing sources stay explicitly rejected');
-  });
-});
-
-it('preserves prepared revision text on retry, restores it on cancel, and settles only its own draft', async (t) => {
-  const previousText = 'previous unsent draft /skill:project-only ';
-  const editedText = 'edited with skill /skill:workspace-only ';
-  const prepared: TurnRevisionDraft = {
-    sourceSessionId: 'revision-source', sourceTurnId: 'turn', copyId: 'revision-child',
-    copyPhase: 'started', draftSessionId: 'revision-child', originalText: 'original',
-    previousComposerText: previousText,
-  };
-  const revisionDraftRef: { current: TurnRevisionDraft | null } = { current: prepared };
-  const activeIdRef = { current: prepared.draftSessionId };
-  const drafts = new Map([[prepared.sourceSessionId, previousText], [prepared.draftSessionId, editedText]]);
+function harness(t: TestContext, sources: SessionSourceMessage[]) {
+  const sourceId: string = crypto.randomUUID();
+  const activeIdRef = { current: sourceId };
+  const revisionDraftRef: { current: TurnRevisionDraft | null } = { current: null };
+  const drafts = new Map([[sourceId, 'my unrelated unsent work']]);
+  const restored: Array<{ id: string; content: MessageContent }> = [];
   const abandoned: string[] = [];
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: { maka: { sessions: {
-      reviseBeforeTurn() { assert.fail('A prepared revision must reuse its child on retry'); },
-      async abandonSessionCopy(source: string, copyId: string) {
-        assert.equal(source, prepared.sourceSessionId);
-        abandoned.push(copyId);
-      },
-    } } },
-  });
+  const errors: string[] = [];
+  let gate: Promise<void> = Promise.resolve();
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { maka: { sessions: {
+    async reviseBeforeTurn(_id: string, { copyId }: { copyId: string }) {
+      await gate;
+      return { id: copyId };
+    },
+    async readTurnSources(id: string) {
+      return sources.map((source) => ({
+        ...source,
+        content: { ...source.content, attachments: source.content.attachments?.map((attachment) => ({
+          ...attachment, ref: { kind: 'session_file', sessionId: id, relativePath: 'image.png' },
+        })) },
+      }));
+    },
+    async abandonSessionCopy(_source: string, id: string) { abandoned.push(id); },
+  } } } });
   t.after(() => {
-    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    if (previous) Object.defineProperty(globalThis, 'window', previous);
     else Reflect.deleteProperty(globalThis, 'window');
   });
-  const actions = createAppShellRevisionActions({
-    uiLocale: 'en', activeIdRef, revisionDraftRef,
-    captureSelection: () => { const id = activeIdRef.current; return () => id === activeIdRef.current; },
-    composerRef: { current: {
-      getText: () => drafts.get(activeIdRef.current) ?? '',
-      setText: (text) => { drafts.set(activeIdRef.current, text); },
-      appendText: (text) => { drafts.set(activeIdRef.current, (drafts.get(activeIdRef.current) ?? '') + text); },
-      getDraft: (id) => drafts.get(id) ?? '',
-      setDraft: (id, text) => { drafts.set(id, text); },
-      clearDraft: (id) => { drafts.delete(id); },
-      focus() {}, openModelPicker() {},
-    } },
-    messages: [], hasPendingAttachments: () => false,
-    openSessionInChat: (id) => { activeIdRef.current = id; },
-    refreshSessions: async () => [], setMessages() {},
-    commitRevisionDraft: (draft) => { revisionDraftRef.current = draft; },
-    toastApi: { info() {}, error() { assert.fail('Unexpected revision error'); } },
-  });
-  assert.equal(await actions.prepareRevisionSend(editedText), true);
-  assert.equal(drafts.get(prepared.draftSessionId), editedText);
-  await actions.cancelRevisionDraft();
-  assert.deepEqual(abandoned, [prepared.copyId]);
-  assert.equal(activeIdRef.current, prepared.sourceSessionId);
-  assert.equal(drafts.get(prepared.sourceSessionId), previousText);
-  assert.equal(drafts.has(prepared.draftSessionId), false);
-  assert.equal(revisionDraftRef.current, null);
+  function actions() {
+    return createAppShellRevisionActions({
+      uiLocale: 'en', activeIdRef, revisionDraftRef,
+      captureSelection: () => { const id = activeIdRef.current; return () => id === activeIdRef.current; },
+      composerRef: { current: {
+        getText: () => drafts.get(activeIdRef.current) ?? '',
+        setText: (text) => { drafts.set(activeIdRef.current, text); },
+        appendText: (text) => { drafts.set(activeIdRef.current, (drafts.get(activeIdRef.current) ?? '') + text); },
+        getDraft: (id) => drafts.get(id) ?? '',
+        setDraft: (id, text) => { drafts.set(id, text); },
+        clearDraft: (id) => { drafts.delete(id); },
+        focus() {}, openModelPicker() {},
+      } },
+      hasPendingContext: () => false,
+      restoreContext: (session, content) => { restored.push({ id: session.id, content }); },
+      openSessionInChat: (id) => { activeIdRef.current = id; },
+      refreshSessions: async () => [],
+      commitRevisionDraft: (draft) => { revisionDraftRef.current = draft; },
+      toastApi: { info() {}, error(_title, description) { errors.push(description ?? 'error'); } },
+    });
+  }
+  return { actions, sourceId, activeIdRef, revisionDraftRef, drafts, restored, abandoned, errors,
+    holdCreation() { let resolve!: () => void; gate = new Promise<void>((done) => { resolve = done; }); return resolve; },
+  };
+}
 
-  const newer = { ...prepared, copyId: 'next-copy', draftSessionId: 'next-child' };
-  revisionDraftRef.current = newer;
-  drafts.set(newer.draftSessionId, editedText);
-  actions.completeRevisionSend(prepared);
-  assert.equal(revisionDraftRef.current, newer, 'A late admission must not clear a newer edit');
-  assert.equal(drafts.get(newer.sourceSessionId), previousText);
-  actions.completeRevisionSend(newer);
-  assert.equal(revisionDraftRef.current, null);
-  assert.equal(drafts.size, 0, 'Confirmed send clears both source and child drafts');
+it('edits the complete original batch with target-owned context and keeps the source draft', async (t) => {
+  const sources: SessionSourceMessage[] = [{
+    messageId: 'first', content: {
+      text: 'raw request', displayText: 'a different display projection',
+      attachments: [{ kind: 'image', name: 'image.png', mimeType: 'image/png', bytes: 10,
+        ref: { kind: 'session_file', sessionId: 'source', relativePath: 'image.png' } }],
+      quotes: [{ text: 'q'.repeat(40_000), source: {
+        sessionId: 'quote-origin', sessionName: 'Evidence', capturedAt: 1, truncated: false,
+      } }],
+      directoryReferences: [{ hostId: 'host', path: '/workspace' }],
+    }, inputSelections: { 'custom-plugin': ['first'] },
+  }, {
+    messageId: 'second', content: { text: 'follow-up @file.ts',
+      inlineReferences: [{ kind: 'workspace_file', value: '@file.ts', label: 'file.ts', start: 10 }] },
+    inputSelections: { 'custom-plugin': ['second'] },
+  }];
+  const h = harness(t, sources);
+  await h.actions().beginEditUserMessage('turn');
+  assert.deepEqual(h.errors, []);
+  const draft = h.revisionDraftRef.current;
+  assert.ok(draft);
+  assert.notEqual(draft.draftSessionId, h.sourceId);
+  assert.equal(h.drafts.get(draft.draftSessionId), 'raw request\n\nfollow-up @file.ts');
+  assert.deepEqual(draft.inputSelections, { 'custom-plugin': ['first', 'second'] });
+  const attachment = h.restored[0]?.content.attachments?.[0];
+  assert.equal(attachment?.ref.kind, 'session_file');
+  assert.ok(attachment?.ref.kind === 'session_file');
+  assert.equal(attachment.ref.sessionId, draft.draftSessionId);
+  assert.deepEqual(h.restored[0]?.content.quotes, sources[0]?.content.quotes);
+  assert.deepEqual(h.restored[0]?.content.directoryReferences, sources[0]?.content.directoryReferences);
+  assert.equal(h.restored[0]?.content.inlineReferences?.length, 1);
+
+  await h.actions().cancelRevisionDraft();
+  assert.equal(h.activeIdRef.current, h.sourceId);
+  assert.equal(h.drafts.get(h.sourceId), 'my unrelated unsent work');
+  assert.equal(h.drafts.has(draft.draftSessionId), false);
+  assert.deepEqual(h.abandoned, [draft.copyId]);
+  await h.actions().beginEditUserMessage('turn');
+  const newer = h.revisionDraftRef.current;
+  assert.ok(newer);
+  h.actions().completeRevisionSend(draft);
+  assert.equal(h.revisionDraftRef.current, newer, 'Late admission cannot clear a newer edit');
+  h.drafts.set(newer.draftSessionId, 'typed while awaiting admission');
+  h.actions().completeRevisionSend(newer);
+  assert.equal(h.revisionDraftRef.current, null);
+  assert.equal(h.drafts.get(newer.draftSessionId), 'typed while awaiting admission');
+  assert.equal(h.drafts.get(h.sourceId), 'my unrelated unsent work');
+});
+
+it('does not overwrite new typing or restore context after cancellation during creation', async (t) => {
+  const h = harness(t, [{ messageId: 'source', content: { text: 'original' } }]);
+  let release = h.holdCreation();
+  const preparation = h.actions().beginEditUserMessage('turn');
+  h.drafts.set(h.sourceId, 'new typing during copy');
+  release();
+  await preparation;
+  assert.equal(h.drafts.get(h.sourceId), 'new typing during copy');
+  assert.equal(h.restored.length, 0);
+  assert.equal(h.revisionDraftRef.current, null);
+  assert.equal(h.abandoned.length, 1);
+
+  release = h.holdCreation();
+  const cancelled = h.actions().beginEditUserMessage('turn');
+  await h.actions().cancelRevisionDraft();
+  release();
+  await cancelled;
+  assert.equal(h.drafts.get(h.sourceId), 'new typing during copy');
+  assert.equal(h.restored.length, 0);
+  assert.equal(h.revisionDraftRef.current, null);
+  assert.equal(h.abandoned.length, 2);
+  assert.deepEqual(h.errors, []);
 });

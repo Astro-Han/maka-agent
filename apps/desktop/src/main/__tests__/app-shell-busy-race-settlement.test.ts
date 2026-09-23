@@ -38,6 +38,28 @@ import {
 } from './app-shell-chat-actions-fixture.js';
 
 describe('busy-raced send settlement', () => {
+  it('submits restored plugin selections as exact current-turn intent', async () => {
+    const inputSelections = { 'custom-plugin': ['first', 'second'] };
+    let submitted = false;
+    const restoreWindow = installWindow({ sessions: {
+      submitMessage: async (_sessionId: string, placement: string,
+        command: { inputSelections?: unknown }) => {
+        assert.equal(placement, 'current_turn');
+        assert.deepEqual(command.inputSelections, inputSelections);
+        submitted = true;
+        return { ok: true, disposition: 'admitted', turnId: 'turn',
+          attachments: [], inlineReferences: [], preparation: [] };
+      },
+    } });
+    try {
+      const actions = createAppShellChatActions({
+        ...createActionsDeps(), activeIdRef: { current: 'revision' },
+      });
+      assert.equal(await actions.send('edited', undefined,
+        { inputSelections, waitForHostAdmission: true }), true);
+      assert.equal(submitted, true);
+    } finally { restoreWindow(); }
+  });
   it('submits ordinary messages as next-turn intent without an execution witness', async () => {
     const restoreWindow = installWindow({ sessions: {
       submitMessage: async (_sessionId: string, placement: string) => {

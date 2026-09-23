@@ -62,6 +62,7 @@ interface SessionCopyCleanupStore {
   markLive(sessionId: string): Promise<PersistedSessionCopyLease | undefined>;
   requestCleanup(sessionId: string): Promise<PersistedSessionCopyLease>;
   markCleanup(sessionId: string): Promise<PersistedSessionCopyLease | undefined>;
+  releaseLive(sessionId: string): Promise<void>;
   forget(sessionId: string): Promise<void>;
 }
 
@@ -75,6 +76,8 @@ export interface SessionCopyCleanupRecovery {
 export interface SessionCopyCleanupAuthority {
   ownCreation<T>(creation: SessionCopyCreationLease, operation: () => Promise<T>): Promise<T>;
   rejectCreation(sessionId: string): Promise<void>;
+  /** Transfer a completed copy to its persistent Session lifecycle, preserving requested cleanup. */
+  releaseCreation(sessionId: string): Promise<void>;
   cleanup(sessionId: string): Promise<void>;
   schedule(sessionId: string): Promise<void>;
   abandonOwner(ownerId: string): Promise<void>;
@@ -161,6 +164,12 @@ class SessionCopyCleanupAuthorityImpl implements SessionCopyCleanupAuthority {
     await this.store.forget(normalized);
   }
 
+  async releaseCreation(sessionId: string): Promise<void> {
+    const normalized = normalizeSessionId(sessionId);
+    await this.creations.get(normalized)?.operation;
+    await this.store.releaseLive(normalized);
+  }
+
   async cleanup(sessionId: string): Promise<void> {
     const normalized = normalizeSessionId(sessionId);
     const active = this.cleanups.get(normalized);
@@ -185,7 +194,13 @@ class SessionCopyCleanupAuthorityImpl implements SessionCopyCleanupAuthority {
       const currentIncarnation = this.processLifetimeOwner
         ? record.ownerLifetimeRef === this.processLifetimeOwner.reference
         : record.ownerProcessId === this.processId;
-      return currentIncarnation && record.ownerId === normalizedOwnerId;
+      // Revisions are independent drafts, not window-owned companions. This
+      // also applies when a released creation is retried under the same ID.
+      return (
+        currentIncarnation &&
+        record.ownerId === normalizedOwnerId &&
+        record.creation?.kind !== 'revision'
+      );
     });
     await Promise.all(owned.map((record) => this.schedule(record.sessionId)));
   }
@@ -270,6 +285,18 @@ class SessionCopyCleanupAuthorityImpl implements SessionCopyCleanupAuthority {
     failed: SessionCopyCleanupRecovery['failed'],
   ): Promise<void> {
     try {
+      if (record.creation?.kind === 'revision' && !record.cancelRequested) {
+        if (record.phase === 'creating') {
+          if (!this.resumeSessionCopy)
+            throw new Error(`Session copy ${record.sessionId} cannot resume`);
+          await this.resumeSessionCopy({ sessionId: record.sessionId, ...record.creation });
+          await this.store.markLive(record.sessionId);
+        }
+        await this.store.releaseLive(record.sessionId);
+        // An explicit cancellation may race recovery; never discard it.
+        const current = await this.store.read(record.sessionId);
+        if (!current?.cancelRequested) return;
+      }
       await this.store.requestCleanup(record.sessionId);
       const disposition = await this.settleCleanup(record.sessionId);
       if (disposition === 'removed') removed.push(record.sessionId);
@@ -407,6 +434,16 @@ class SqliteSessionCopyCleanupStore implements SessionCopyCleanupStore {
     this.withDatabase('write', (database) => {
       database
         .prepare('DELETE FROM workflow_quote_companion_cleanup WHERE session_id = ?')
+        .run(sessionId);
+    });
+  }
+
+  async releaseLive(sessionId: string): Promise<void> {
+    this.withDatabase('write', (database) => {
+      database
+        .prepare(`DELETE FROM workflow_quote_companion_cleanup
+        WHERE session_id = ? AND json_extract(record_json, '$.phase') = 'live'
+          AND json_extract(record_json, '$.cancelRequested') = 0`)
         .run(sessionId);
     });
   }

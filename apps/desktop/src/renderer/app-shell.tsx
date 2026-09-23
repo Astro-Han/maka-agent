@@ -381,6 +381,7 @@ function AppShellContent({
     pickAttachments,
     attachFilePaths,
     restoreAttachments,
+    restoreDirectories,
     removeAttachment,
     clearSubmittedContext,
     imageNoticeLifecycle,
@@ -401,6 +402,10 @@ function AppShellContent({
     clearQuotes,
     restoreQuotes,
   } = useAppShellComposerQuotes({ draftKey: attachmentDraftKey });
+  const pendingComposerContextRef = useRef(false);
+  useLayoutEffect(() => {
+    pendingComposerContextRef.current = hasPendingContext || pendingQuotes.length > 0;
+  }, [hasPendingContext, pendingQuotes]);
   // Held for the whole of sendOwningItsTarget; see ChatComposerRegion.
   const [newTaskSendPending, setNewTaskSendPending] = useState(false);
   // What a new chat will start with, held the way the Session holds it: a
@@ -608,9 +613,8 @@ function AppShellContent({
     if (!draft) return;
     return Conversation.observeRevisionDraftRetirement(sessionCatalogController, draft, () => {
       if (revisionDraftRef.current !== draft) return;
-      composerRef.current?.clearDraft(draft.draftSessionId);
       if (draft.sourceSessionId !== draft.draftSessionId)
-        composerRef.current?.clearDraft(draft.sourceSessionId);
+        composerRef.current?.clearDraft(draft.draftSessionId);
       if (draft.copyPhase === 'reserved') completeTurnRevisionCopyAttempt(draft);
       else void abandonTurnRevisionCopyAttempt(draft);
       commitRevisionDraft(null);
@@ -1352,7 +1356,6 @@ function AppShellContent({
   });
   const {
     beginEditUserMessage,
-    prepareRevisionSend,
     completeRevisionSend,
     cancelRevisionDraft,
   } = useStableActions(createAppShellRevisionActions, {
@@ -1360,11 +1363,17 @@ function AppShellContent({
     activeIdRef,
     captureSelection,
     composerRef,
-    messages,
-    hasPendingAttachments: () => hasPendingContext,
+    hasPendingContext: () => pendingComposerContextRef.current,
+    restoreContext: (session, content) => {
+      restoreAttachments(session.id, content.attachments ?? []);
+      restoreDirectories(session.id,
+        session.profileKind === 'local' ? session.runtimeHostId : undefined,
+        content.directoryReferences ?? []);
+      restoreQuotes(session.id, content.quotes ?? []);
+      retractedWorkspaceReferencesRef.current[session.id] = content.inlineReferences ?? [];
+    },
     openSessionInChat,
     refreshSessions,
-    setMessages,
     commitRevisionDraft,
     revisionDraftRef,
     toastApi,
@@ -1472,27 +1481,14 @@ function AppShellContent({
       if (queued) delete retractedWorkspaceReferencesRef.current[sessionId];
       return queued;
     }
-    if (
-      revisionSend &&
-      revision &&
-      text.trim() === revision.originalText.trim() &&
-      !hasPendingContext
-    ) {
-      const actionCopy = getDesktopConversationCopy(uiLocale).actions;
-      toastApi.info(actionCopy.revisionReadyTitle, actionCopy.revisionUnchanged);
-      return false;
-    }
     if (revisionSend && revision) {
       const actionCopy = getDesktopConversationCopy(uiLocale).actions;
-      if (hasPendingContext) {
-        toastApi.info(actionCopy.revisionUnavailableTitle, actionCopy.revisionAttachmentsUnsupported);
+      if (revision.draftSessionId === revision.sourceSessionId || revision.copyPhase === 'abandoning')
         return false;
-      }
       if (slashCommand) {
         toastApi.info(actionCopy.revisionUnavailableTitle, actionCopy.revisionCommandUnsupported);
         return false;
       }
-      if (!(await prepareRevisionSend(text))) return false;
     }
     if (slashCommand?.kind === 'compact') {
       const sessionId = activeIdRef.current;
@@ -1646,6 +1642,10 @@ function AppShellContent({
     const quotes = pendingQuotes.length ? pendingQuotes : undefined;
     const ok = await send(text, pending, {
       waitForHostAdmission: revisionSend,
+      ...(expectedRevisionDraft ? {
+        inputSelections: expectedRevisionDraft.inputSelections,
+        turnOrchestration: expectedRevisionDraft.turnOrchestration,
+      } : {}),
       onSessionResolved: workbar.commands.bindNewTaskSessionResolver(readSelectionRevision()),
       ...directoryOptions,
       ...(quotes ? { quotes } : {}),
@@ -2002,11 +2002,7 @@ function AppShellContent({
 
   const canStageComposerContext =
     activeId !== undefined || taskEntry.selectors.target !== undefined;
-  // #4804: attachment-only sends are opt-in per host surface, and the Desktop
-  // host now admits them. The pickers share the same edit-mode condition.
-  const contextPickEnabled =
-    canStageComposerContext &&
-    !(revisionDraft && activeId === revisionDraft.draftSessionId);
+  const contextPickEnabled = canStageComposerContext;
 
   const activeMessageLoadError = activeId ? messageLoadErrorBySession[activeId] : undefined;
   const activeTranscriptReadingAnchor = activeId
@@ -2378,7 +2374,7 @@ function AppShellContent({
                   stop={stop}
                   directoryComposerProps={directoryComposerProps}
                   directoryPickerEnabled={Boolean(
-                    canStageComposerContext && directoryHostId && !revisionDraft
+                    canStageComposerContext && directoryHostId
                   )}
                   // #646: Stop must be available for the WHOLE turn - the moment the
                   // user most wants to interrupt is a long wait with nothing on

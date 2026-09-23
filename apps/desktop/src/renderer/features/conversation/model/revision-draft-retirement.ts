@@ -25,7 +25,8 @@ export function observeRevisionDraftRetirement(
   draft: { sourceSessionId: string; draftSessionId: string },
   retire: () => void,
 ): () => void {
-  const ids = new Set([draft.sourceSessionId, draft.draftSessionId]);
+  // A prepared revision owns its history and no longer depends on the source.
+  const ids = new Set([draft.draftSessionId]);
   const seen = new Set<string>();
   let retired = false;
   const observe = () => {

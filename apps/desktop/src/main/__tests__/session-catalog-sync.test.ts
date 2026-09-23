@@ -48,6 +48,9 @@ test('revision drafts wait for admission, retire once on observed removal, and r
   catalog.commitSessions([source]);
   assert.equal(retirements, 0, 'a not-yet-published draft is not a deletion');
   catalog.commitPatch(owner.id, owner);
+  catalog.commitPatch(source.id, { ...source, isArchived: true });
+  catalog.commitPatch(source.id, null);
+  assert.equal(retirements, 0, 'an independent revision survives source retirement');
   catalog.commitPatch(owner.id, null);
   catalog.commitPatch(source.id, null);
   assert.equal(retirements, 1);

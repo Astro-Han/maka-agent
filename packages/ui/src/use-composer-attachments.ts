@@ -428,6 +428,13 @@ export function useComposerAttachments(options: {
     for (const item of staged) lifecycle.stagedKeys.add(item.stagingKey);
   }
 
+  function restoreDirectories(ownerKey: string, hostId: string | undefined,
+    directories: readonly DirectoryReference[]): void {
+    if (!lifecycle.mounted || directories.length === 0) return;
+    const key = `${ownerKey}:${hostId ?? 'unresolved'}`;
+    updateDirectories((all) => ({ ...all, [key]: [...(all[key] ?? []), ...directories] }));
+  }
+
   function removeAttachment(index: number): void {
     const ownerKey = options.draftKey;
     updateAttachments((map) => removePending(map, ownerKey, index));
@@ -493,6 +500,7 @@ export function useComposerAttachments(options: {
     pickAttachments,
     attachFilePaths,
     restoreAttachments,
+    restoreDirectories,
     removeAttachment,
     clearSubmittedContext,
     clearSubmittedAttachments,

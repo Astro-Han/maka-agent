@@ -285,6 +285,7 @@ test('drives the renderer Session catalog facade through real UDS framing', asyn
       createSessionCopyCleanup: () => ({
         ownCreation: (_creation, operation) => operation(),
         rejectCreation: async () => undefined,
+        releaseCreation: async () => undefined,
         cleanup: async () => undefined,
         schedule: async () => undefined,
         abandonOwner: async () => undefined,
@@ -577,6 +578,7 @@ function unusedSessionCopyCleanup() {
   return {
     ownCreation: async <T>(_creation: unknown, operation: () => Promise<T>) => operation(),
     async rejectCreation() {},
+    async releaseCreation() {},
     async cleanup() {},
     async schedule() {},
     async abandonOwner() {},

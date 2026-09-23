@@ -433,7 +433,6 @@ export const TurnView = memo(function TurnView(props: {
    */
   onEditUserMessage?: (turnId: string) => void;
   /** True when the stored model text differs from the user-facing prompt. */
-  editUserMessageTransformed?: boolean;
   /** True while the turn is still running — edit is disabled until terminal. */
   editUserMessageDisabled?: boolean;
   /** True when a search result just navigated to this turn. */
@@ -593,29 +592,12 @@ export const TurnView = memo(function TurnView(props: {
                 ? () => props.onEditUserMessage?.(turn.turnId)
                 : undefined
             }
-            // A revision restages neither attachments, directory references,
-            // nor quotes, so a turn carrying any of them can't be edited
-            // without silently dropping context the answer was grounded in.
             editDisabled={
-              (turn.user.attachments?.length ?? 0) > 0 ||
-              (turn.user.directoryReferences?.length ?? 0) > 0 ||
-              (turn.user.quotes?.length ?? 0) > 0 ||
-              props.editUserMessageTransformed === true ||
               props.editUserMessageDisabled === true ||
               turn.status === 'running' ||
               !!props.liveStreaming
             }
-            editDisabledReason={
-              (turn.user.attachments?.length ?? 0) > 0
-                ? copy.editMessageDisabledAttachments
-                : (turn.user.directoryReferences?.length ?? 0) > 0
-                  ? copy.editMessageDisabledDirectoryReferences
-                  : (turn.user.quotes?.length ?? 0) > 0
-                    ? copy.editMessageDisabledQuotes
-                    : props.editUserMessageTransformed
-                      ? copy.editMessageDisabledTransformedText
-                      : copy.editMessageDisabledRunning
-            }
+            editDisabledReason={copy.editMessageDisabledRunning}
           />
 
         </LocalizedChatMessage>

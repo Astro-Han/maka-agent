@@ -42,6 +42,74 @@ afterEach(async () => {
 });
 
 describe('session copy cleanup authority', () => {
+  it('hands a live revision to its persistent lifecycle without discarding racing cleanup', async () => {
+    const workspaceRoot = await createWorkspace();
+    const removed: string[] = [];
+    const authority = createSessionCopyCleanupAuthority({
+      workspaceRoot,
+      processId: 'owner',
+      removeSession: async (id) => {
+        removed.push(id);
+      },
+    });
+    const creation = {
+      sessionId: 'persistent-revision',
+      kind: 'revision' as const,
+      sourceSessionId: 'source',
+      sourceTurnId: 'turn',
+      ownerId: 'window',
+    };
+    await authority.ownCreation(creation, async () => creation.sessionId);
+    await authority.releaseCreation(creation.sessionId);
+    await authority.abandonOwner('window');
+    await createSessionCopyCleanupAuthority({
+      workspaceRoot,
+      processId: 'replacement',
+      removeSession: async (id) => {
+        removed.push(id);
+      },
+    }).recover();
+    assert.equal(removed.length, 0);
+    assert.deepEqual(await readPendingIds(workspaceRoot), []);
+
+    await assert.rejects(
+      authority.ownCreation(creation, async () => {
+        throw new Error('Lost retry reply');
+      }),
+      /Lost retry reply/,
+    );
+    await authority.abandonOwner('window');
+    let resumed = false;
+    const recovery = await createSessionCopyCleanupAuthority({
+      workspaceRoot,
+      processId: 'replacement',
+      resumeSessionCopy: async ({ sessionId }) => {
+        assert.equal(sessionId, creation.sessionId);
+        resumed = true;
+      },
+      removeSession: async () => {
+        assert.fail('A retried persistent draft must survive');
+      },
+    }).recover();
+    assert.equal(resumed, true);
+    assert.deepEqual(recovery, { removed: [], failed: [] });
+    assert.deepEqual(await readPendingIds(workspaceRoot), []);
+
+    let resolveCreation!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      resolveCreation = resolve;
+    });
+    const cancelled = { ...creation, sessionId: 'cancelled-revision' };
+    const pending = authority.ownCreation(cancelled, () => gate);
+    const release = authority.releaseCreation(cancelled.sessionId);
+    await authority.schedule(cancelled.sessionId);
+    resolveCreation();
+    await pending;
+    await release;
+    await authority.cleanup(cancelled.sessionId);
+    assert.ok(removed.includes(cancelled.sessionId));
+    assert.deepEqual(await readPendingIds(workspaceRoot), []);
+  });
   it('forgets a known rejected creation without trying to resume or remove it', async () => {
     const workspaceRoot = await createWorkspace();
     let resumes = 0;

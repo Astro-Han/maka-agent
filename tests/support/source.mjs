@@ -20,6 +20,7 @@
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -93,9 +94,11 @@ export function currentSourcePlugin(temporary) {
           const entry = metadata.exports[subpath.length ? './' + subpath.join('/') : '.'];
           const exported = typeof entry === 'string' ? entry : entry?.default;
           if (typeof exported !== 'string' || !exported.startsWith('./dist/')) throw Error(path);
-          return {
-            path: join(packageRoot, exported.replace('./dist/', 'src/').replace(/\.js$/, '.ts')),
-          };
+          const source = join(
+            packageRoot,
+            exported.replace('./dist/', 'src/').replace(/\.js$/, '.ts'),
+          );
+          return { path: existsSync(source) ? source : `${source}x` };
         },
       );
       build.onResolve({ filter: /^[^./]/ }, ({ path, resolveDir }) => {

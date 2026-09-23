@@ -882,13 +882,17 @@ export function registerRuntimeHostSessionExecutionIpc(
   );
   ipcMain.handle(
     "sessions:reviseBeforeTurn",
-    async (_event, sessionId: string, input: unknown) => {
+    async (event, sessionId: string, input: unknown) => {
       const normalized = normalizeRuntimeHostReviseBeforeTurnInput(input);
-      const revision = await deps.client.copySession("revision", {
-        sourceSessionId: sessionId,
-        targetSessionId: normalized.copyId,
-        sourceTurnId: normalized.sourceTurnId,
-      });
+      const revision = await deps.sessionCopyCleanup.ownCreation({
+        sessionId: normalized.copyId, kind: 'revision', sourceSessionId: sessionId,
+        sourceTurnId: normalized.sourceTurnId, ownerId: bindCopyOwner(event),
+      }, () => deps.client.copySession("revision", {
+          sourceSessionId: sessionId,
+          targetSessionId: normalized.copyId,
+          sourceTurnId: normalized.sourceTurnId,
+        }));
+      await deps.sessionCopyCleanup.releaseCreation(normalized.copyId);
       deps.emitSessionsChanged("created", revision.id);
       return toDesktopHostSessionSummary(revision);
     },

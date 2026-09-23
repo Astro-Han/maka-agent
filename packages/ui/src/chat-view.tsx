@@ -411,18 +411,6 @@ export function ChatView(props: {
       : undefined;
   const boundaryOverlayTurnId = activeContent?.turnId
     ?? (streamingActive ? tailTurnId : undefined);
-  const transformedUserTurnIds = useMemo(
-    () => new Set(
-      props.messages.flatMap((message) =>
-        message.type === 'user' &&
-        message.displayText !== undefined &&
-        message.displayText !== message.text
-          ? [message.turnId]
-          : [],
-      ),
-    ),
-    [props.messages],
-  );
   // One rail tick per turn that carries a user prompt. The rail's entries
   // change only when a turn's persisted prompt/answer text does, but `turns`
   // gets a new array on every delta. Handing the previous array back when
@@ -823,7 +811,6 @@ export function ChatView(props: {
                           FooterExtension={props.TurnFooterExtension}
                           DetailExtension={props.ToolDetailExtension}
                           onEditUserMessage={props.onEditUserMessage ? stableEditUserMessage : undefined}
-                          editUserMessageTransformed={transformedUserTurnIds.has(turn.turnId)}
                           editUserMessageDisabled={props.activeTurn !== undefined}
                           failedReasonLabel={turnPresentation?.failedReasonLabels[turn.turnId]}
                           failedSeverity={turnPresentation?.failedSeverities[turn.turnId]}
