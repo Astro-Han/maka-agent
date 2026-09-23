@@ -67,10 +67,14 @@ impl EventLog {
         self.connection.run(move |connection| Box::pin(async move {
             let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
             let session: Option<String> = sqlx::query_scalar(
-                "SELECT session_id FROM session_retirements r WHERE remove_session=1 AND completed=1
-                 AND (?1 IS NULL OR session_id>?1) AND EXISTS (SELECT 1 FROM event_log e
-                     WHERE e.event_session=r.session_id AND e.event_json IS NOT NULL)
-                 ORDER BY session_id LIMIT 1"
+                "SELECT DISTINCT e.event_session FROM event_log e INDEXED BY event_material_owner
+                 WHERE e.event_json IS NOT NULL AND e.event_session IS NOT NULL
+                 AND (?1 IS NULL OR e.event_session>?1) AND (
+                   EXISTS(SELECT 1 FROM session_retirements r WHERE r.session_id=e.event_session
+                     AND r.remove_session=1 AND r.completed=1)
+                   OR (NOT EXISTS(SELECT 1 FROM session_control WHERE id=e.event_session)
+                     AND EXISTS(SELECT 1 FROM imported_invocations i WHERE i.invocation_id=e.invocation_id)))
+                 ORDER BY e.event_session LIMIT 1"
             ).bind(after).fetch_optional(&mut *tx).await?;
             let Some(session) = session else {
                 tx.rollback().await?;

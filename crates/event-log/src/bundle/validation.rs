@@ -34,6 +34,14 @@ mod copies;
 mod material;
 
 pub(super) async fn validate(staged: &mut SqliteConnection) -> Result<(), StoreError> {
+    prepare(staged, None).await?.close().await?;
+    Ok(())
+}
+
+pub(super) async fn prepare(
+    staged: &mut SqliteConnection,
+    positions: Option<&super::relocation::Positions>,
+) -> Result<SqliteConnection, StoreError> {
     let mut original = SqliteConnection::connect_with(
         &SqliteConnectOptions::new()
             .filename("")
@@ -47,18 +55,24 @@ pub(super) async fn validate(staged: &mut SqliteConnection) -> Result<(), StoreE
     let result = async {
         crate::schema::initialize_connection(&mut original).await?;
         let mut tx = original.begin().await?;
-        let result = replay(staged, &mut tx).await;
-        tx.rollback().await?;
-        result
+        replay(staged, &mut tx, positions).await?;
+        tx.commit().await?;
+        Ok::<_, StoreError>(())
     }
     .await;
-    original.close().await?;
-    result
+    match result {
+        Ok(()) => Ok(original),
+        Err(error) => {
+            original.close().await?;
+            Err(error)
+        }
+    }
 }
 
 async fn replay(
     staged: &mut SqliteConnection,
     original: &mut SqliteConnection,
+    positions: Option<&super::relocation::Positions>,
 ) -> Result<(), StoreError> {
     let header: String = sqlx::query_scalar("SELECT record_json FROM frames WHERE number=1")
         .fetch_one(&mut *staged)
@@ -70,7 +84,8 @@ async fn replay(
     else {
         return Err(invalid("missing staged header"));
     };
-    let mut copies = copies::Copies::read(staged, source_high_water).await?;
+    let mut copies = copies::Copies::read(staged, source_high_water, positions).await?;
+    let source_high_water = positions.map_or(source_high_water, |p| p.fence(source_high_water));
     let mut after = 0i64;
     loop {
         let row: Option<String> = sqlx::query_scalar(
@@ -82,7 +97,15 @@ async fn replay(
         let Record::Event { sequence, json } = serde_json::from_str(&row)? else {
             unreachable!()
         };
-        copies.install(staged, original, sequence - 1).await?;
+        after = sequence as i64;
+        let sequence = positions.map_or(Ok(sequence), |p| p.event(sequence))?;
+        copies
+            .install(staged, original, sequence - 1, positions)
+            .await?;
+        let json = match positions {
+            Some(positions) => positions.json(original, sequence, json).await?,
+            None => json,
+        };
         let event: RuntimeEvent = serde_json::from_str(&json)?;
         for id in [
             &event.id,
@@ -134,10 +157,11 @@ async fn replay(
                 .await?;
         }
         material::composition(staged, original, &event).await?;
-        after = sequence as i64;
     }
     // The fence can fall in a gap, or after the last exported proof event.
-    copies.install(staged, original, source_high_water).await?;
+    copies
+        .install(staged, original, source_high_water, positions)
+        .await?;
     let mixed: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM runtime_events GROUP BY invocation_id
            HAVING SUM(kind='message_imported')>0 AND COUNT(*)>1)

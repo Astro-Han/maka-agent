@@ -31,7 +31,10 @@ mod blobs;
 mod closure;
 mod export;
 mod format;
+mod import;
+pub use import::ImportReceipt;
 mod reader;
+mod relocation;
 mod stage;
 mod validation;
 pub use export::BundleSummary;
@@ -117,7 +120,7 @@ async fn inventory(
     let mut frontier = vec![root.to_owned()];
     while !frontier.is_empty() {
         // A recursive CTE LIMIT does not bound a high-fanout expansion's queue.
-        // UNION ALL streams at most two rows per identity (one per parent edge).
+        // UNION ALL streams at most three rows per identity (one per parent edge).
         let children: Vec<(String, i64)> = sqlx::query_as(
             "SELECT live.id,live.revision FROM session_history_copies c
                JOIN session_control live ON live.id=c.session_id
@@ -132,11 +135,18 @@ async fn inventory(
                AND live.id NOT IN (SELECT value FROM json_each(?2))
                AND NOT EXISTS(SELECT 1 FROM session_retirements
                  WHERE session_id=live.id AND remove_session=1)
+             UNION ALL
+             SELECT live.id,live.revision FROM session_bundle_members b
+               JOIN session_control live ON live.id=b.session_id
+             WHERE b.parent_session_id IN (SELECT value FROM json_each(?1))
+               AND live.id NOT IN (SELECT value FROM json_each(?2))
+               AND NOT EXISTS(SELECT 1 FROM session_retirements
+                 WHERE session_id=live.id AND remove_session=1)
              LIMIT ?3",
         )
         .bind(serde_json::to_string(&frontier).map_err(StoreError::from)?)
         .bind(serde_json::to_string(&seen).map_err(StoreError::from)?)
-        .bind(((MAX_SESSIONS - rows.len() + 1) * 2) as i64)
+        .bind(((MAX_SESSIONS - rows.len() + 1) * 3) as i64)
         .fetch_all(&mut *connection)
         .await
         .map_err(StoreError::from)?;

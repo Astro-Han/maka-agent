@@ -55,6 +55,7 @@ pub(super) async fn read(
          WHERE invocation_id IS NOT NULL
          AND kind IN ('invocation_opened', 'model_completed') AND kind = 'invocation_opened'
          AND json_extract(event_json, '$.invocation.session_id') = ?
+         AND NOT EXISTS(SELECT 1 FROM imported_invocations i WHERE i.invocation_id=event_log.invocation_id)
          ORDER BY sequence DESC LIMIT 1",
     )
     .bind(id)

@@ -30,6 +30,8 @@ use serde_json::{Value, json};
 mod fixtures;
 #[path = "frames.rs"]
 mod frames;
+#[path = "import.rs"]
+mod import;
 #[path = "materials.rs"]
 mod materials;
 #[path = "tamper.rs"]
@@ -208,6 +210,7 @@ async fn branch_export_keeps_archive_proofs_and_owned_bytes_without_parent_futur
     assert_eq!(staged.summary().inventory, report.inventory);
     staged.validate_history().await.unwrap();
     staged.close().await.unwrap();
+    import::roundtrip(&bytes).await;
     tamper::verify_original_proofs(&bytes, &report.digest, &empty_source).await;
     for end in [0, 13, bytes.len() / 2, bytes.len() - 1] {
         assert!(
