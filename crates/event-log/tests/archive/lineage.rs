@@ -31,6 +31,9 @@ mod continuation;
 #[path = "lineage_checkpoint.rs"]
 mod lineage_checkpoint;
 
+#[path = "bundle.rs"]
+mod bundle;
+
 fn selected_ids(source: &ModelContextSource) -> Vec<String> {
     source
         .tail

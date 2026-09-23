@@ -34,7 +34,7 @@ pub(super) async fn evidence(
     selected(connection, &Selection::session(session), through).await
 }
 
-pub(super) async fn selected(
+pub(crate) async fn selected(
     connection: &mut SqliteConnection,
     selection: &Selection,
     through: u64,

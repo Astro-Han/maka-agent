@@ -184,7 +184,7 @@ const INDEPENDENT_CELLS: &str = "WITH RECURSIVE independent(operation_id) AS (
 
 /// The prompt's immutable cut may lag only asynchronous cell events, not a new
 /// model step, direct tool result, checkpoint, or other selected history.
-pub(super) async fn model_source_unchanged(
+pub(crate) async fn model_source_unchanged(
     connection: &mut SqliteConnection,
     selection: &Selection,
     invocation: &str,

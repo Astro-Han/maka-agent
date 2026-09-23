@@ -27,6 +27,9 @@ use maka_runtime::session::CopyPurpose;
 use serde_json::json;
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
 
+#[path = "bundle/export.rs"]
+mod export;
+
 #[tokio::test]
 async fn inventory_confirms_only_selected_descendants_across_history_and_host_parent_edges() {
     let directory = tempfile::tempdir().unwrap();

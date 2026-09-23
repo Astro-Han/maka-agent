@@ -26,6 +26,17 @@ use sha2::{Digest, Sha256};
 use sqlx::{Connection, SqliteConnection};
 use std::collections::HashSet;
 
+mod blobs;
+mod closure;
+mod export;
+mod format;
+mod reader;
+mod stage;
+mod validation;
+pub use export::BundleSummary;
+pub use reader::inspect;
+pub use stage::StagedBundle;
+
 const MAX_SESSIONS: usize = 4096;
 
 #[derive(Debug, thiserror::Error)]
