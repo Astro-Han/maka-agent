@@ -19,7 +19,9 @@
 
 use super::support::{client_probe::ClientFixture, peer::Peer};
 use maka_event_log::sessions::SessionCopyResult;
-use maka_protocol::session::{RevisionState, SandboxMode, WorkspaceProjection, WorkspaceTarget};
+use maka_protocol::session::{
+    RevisionState, SandboxMode, WorkspaceProjection, WorkspaceTarget, copy, sources,
+};
 use maka_runtime::{
     event::{EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent},
     input::DeliveredMessage,
@@ -171,7 +173,15 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
     // A catalog-only observer must hear retention even without a canonical
     // invocation or a Session/PTY subscription driving its connection loop.
     let mut observer = Peer::new(host.clone(), "revision-catalog").await;
-    let mut operator = Peer::new(host.clone(), "revision-shell").await;
+    let (mut operator, hello) = Peer::handshake(host.clone(), "revision-shell").await;
+    let (client, _notices) = maka_client::Client::connect(
+        maka_client::local::open_stream(&endpoint).await.unwrap(),
+        hello["rootId"].as_str().unwrap(),
+        hello["hostEpoch"].as_str().unwrap(),
+        maka_runtime_host::server::HostOperations,
+    )
+    .await
+    .unwrap();
     let started = operator
         .rpc(
             "runtime.resource.start",
@@ -207,34 +217,35 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
         "sourceSessionId":"source", "targetSessionId":"native-revision",
         "sourceTurnId":"turn", "expectedSourceRevision":source["result"]["session"]["revision"]
     });
-    let absent = operator
-        .rpc(
-            "session.copy.query",
-            json!({"targetSessionId":"native-revision"}),
-        )
-        .await;
-    assert_eq!(absent["result"], json!({"receipt":null}), "{absent}");
-    let copied = operator
-        .rpc("session.revision.create", request.clone())
-        .await;
-    assert_eq!(copied["ok"], true, "{copied}");
-    assert_eq!(copied["result"]["kind"], "committed");
-    assert_eq!(copied["result"]["session"]["revisionState"], "preparing");
+    let input =
+        copy::decode_input(maka_protocol::Operation::SessionRevisionCreate, &request).unwrap();
+    assert!(
+        client
+            .query_session_copy(input.clone())
+            .await
+            .unwrap()
+            .receipt
+            .is_none()
+    );
+    let copied = client.copy_session(input.clone()).await.unwrap();
+    assert!(
+        matches!(&copied, copy::Output::Committed { session } if session.revision_state == Some(RevisionState::Preparing))
+    );
     for session in ["source", "branch", "native-revision"] {
-        let sources = operator
-            .rpc(
-                "session.sources.query",
-                json!({"sessionId":session, "turnId":"turn"}),
-            )
-            .await;
+        let sources = client
+            .session_turn_sources(sources::Input {
+                session_id: session.into(),
+                turn_id: "turn".into(),
+            })
+            .await
+            .unwrap();
         assert_eq!(
-            sources["result"],
+            serde_json::to_value(sources).unwrap(),
             json!({
                 "sessionId":session, "turnId":"turn", "messages":[{
                     "messageId":"message", "content":{"text":"unprepared source"}
                 }]
-            }),
-            "{sources}"
+            })
         );
     }
     let renamed = operator
@@ -247,26 +258,18 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
         )
         .await;
     assert_eq!(renamed["result"]["kind"], "committed", "{renamed}");
-    let receipt = operator
-        .rpc(
-            "session.copy.query",
-            json!({"targetSessionId":"native-revision"}),
-        )
-        .await;
+    let receipt = client
+        .query_session_copy(input.clone())
+        .await
+        .unwrap()
+        .receipt
+        .unwrap();
     assert_eq!(
-        receipt["result"],
-        json!({"receipt": {
-            "request": {
-                "sourceSessionId":"source", "targetSessionId":"native-revision",
-                "expectedSourceRevision":request["expectedSourceRevision"],
-                "purpose":{"kind":"revision", "turnId":"turn"}
-            }, "state":"preparing"
-        }}),
-        "{receipt}"
+        receipt.request, input,
+        "receipt preserves its original source revision after a concurrent edit"
     );
-    let replayed = operator
-        .rpc("session.revision.create", request.clone())
-        .await;
+    assert_eq!(receipt.state, maka_runtime::session::CopyState::Preparing);
+    let replayed = client.copy_session(input.clone()).await.unwrap();
     assert_eq!(
         replayed, copied,
         "a lost reply must not recapture changed source settings"
@@ -280,37 +283,52 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
     let conflict = operator.rpc("session.revision.create", stale).await;
     assert_eq!(conflict["result"]["kind"], "source_revision_conflict");
     for _ in 0..2 {
-        let abandoned = operator
-            .rpc(
-                "session.revision.abandon",
-                json!({"targetSessionId":"native-revision"}),
-            )
-            .await;
-        assert_eq!(abandoned["result"]["kind"], "abandoned", "{abandoned}");
+        let abandoned = client
+            .abandon_session_revision(copy::AbandonInput {
+                target_session_id: "native-revision".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            abandoned,
+            copy::AbandonOutput::Abandoned {
+                session_id: "native-revision".into()
+            }
+        );
     }
     let abandoned_retry = operator.rpc("session.revision.create", request).await;
     assert_eq!(abandoned_retry["error"]["code"], "not_found");
-    let tombstone = operator
-        .rpc(
-            "session.copy.query",
-            json!({"targetSessionId":"native-revision"}),
-        )
-        .await;
-    let mut expected = receipt["result"].clone();
-    expected["receipt"]["state"] = json!("abandoned");
-    assert_eq!(tombstone["result"], expected, "{tombstone}");
-    let retained = operator
-        .rpc(
-            "session.revision.abandon",
-            json!({"targetSessionId":"revision"}),
-        )
-        .await;
-    assert_eq!(retained["result"]["kind"], "retained", "{retained}");
-    let side = operator.rpc("session.branch.create", json!({
-        "sourceSessionId":"source", "targetSessionId":"empty-side",
-        "expectedSourceRevision":renamed["result"]["session"]["revision"], "intent":"side_conversation"
-    })).await;
-    assert_eq!(side["result"]["kind"], "committed", "{side}");
+    let tombstone = client
+        .query_session_copy(input)
+        .await
+        .unwrap()
+        .receipt
+        .unwrap();
+    assert_eq!(tombstone.request, receipt.request);
+    assert_eq!(tombstone.state, maka_runtime::session::CopyState::Abandoned);
+    let retained = client
+        .abandon_session_revision(copy::AbandonInput {
+            target_session_id: "revision".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        retained,
+        copy::AbandonOutput::Retained {
+            session_id: "revision".into()
+        }
+    );
+    let side = client
+        .copy_session(copy::Input {
+            source_session_id: "source".into(),
+            target_session_id: "empty-side".into(),
+            expected_source_revision: renamed["result"]["session"]["revision"].as_u64().unwrap(),
+            purpose: copy::Purpose::EmptySideConversation,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(side, copy::Output::Committed { .. }));
+    client.disconnect();
     observer.close().await;
     operator.close().await;
     stop.cancel();

@@ -23,6 +23,8 @@ use maka_protocol::session::*;
 use serde_json::json;
 use std::time::Duration;
 
+mod copy;
+
 #[tokio::test]
 async fn catalog_rejects_wrong_identity_revision_variant_and_nonadvancing_pages() {
     let revision = format!("sha256:{}", "a".repeat(64));
