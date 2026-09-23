@@ -26,7 +26,8 @@ use crate::{EventLog, StoreError, sequence_number};
 
 impl EventLog {
     /// Commit ordered facts atomically, validating each against the preceding
-    /// facts in this transaction. Exact replays return their original sequence.
+    /// facts in this transaction. Exact replays return their original sequence
+    /// until Session removal completes, after which all writes are rejected.
     /// This must not enclose effects: live dispatch and outcome remain separate.
     pub async fn append_batch(&self, events: &[EventWrite]) -> Result<Vec<u64>, CommitError> {
         self.append_batch_checked(events)
@@ -34,6 +35,7 @@ impl EventLog {
             .map_err(|error| match error {
                 StoreError::CommitUnknown(error) => CommitError::OutcomeUnknown(error.to_string()),
                 StoreError::OperationUnknown => CommitError::OutcomeUnknown(error.to_string()),
+                StoreError::SessionRetired => CommitError::Retired,
                 other => CommitError::Rejected(other.to_string()),
             })
     }
@@ -80,6 +82,11 @@ impl EventLog {
         write: &EventWrite,
     ) -> Result<AppendResult, StoreError> {
         let event = write.event();
+        let removal =
+            crate::sessions::removal::read(transaction, &event.invocation.session_id).await?;
+        if removal == Some(crate::sessions::SessionRetirement::Removed) {
+            return Err(StoreError::SessionRetired);
+        }
         let json = serde_json::to_string(event)?;
         let previous: Option<(i64, String)> =
             sqlx::query_as("SELECT sequence, event_json FROM runtime_events WHERE event_id = ?")
@@ -95,6 +102,17 @@ impl EventLog {
             crate::archive::verify_replay(transaction, event).await?;
             return Ok(AppendResult::Existing(sequence_number(sequence)?));
         }
+        if removal.is_some()
+            && matches!(
+                event.fact,
+                Fact::ModelRequested { .. }
+                    | Fact::ToolDispatched { .. }
+                    | Fact::ExecutorStarted { .. }
+                    | Fact::MessageSteered { .. }
+            )
+        {
+            return Err(StoreError::SessionRetired);
+        }
         let id = &event.invocation.invocation_id;
         let sealed: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ? AND kind = 'invocation_ended')",
@@ -107,7 +125,7 @@ impl EventLog {
         ).bind(id).fetch_optional(&mut *transaction).await?;
         match (&event.fact, opening) {
             (Fact::InvocationOpened { .. }, None) => {
-                crate::sessions::copy::retain(transaction, &event.invocation.session_id).await?;
+                crate::sessions::retain(transaction, &event.invocation.session_id).await?;
                 let archived: bool = sqlx::query_scalar(
                     "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ? AND archived = 1)",
                 )

@@ -45,6 +45,8 @@ impl EventLog {
                    json_extract(pause.event_json,'$.fact.outcome.pause.intent.host_epoch')
                  FROM runtime_events pause
                  WHERE pause.sequence > ? AND pause.kind='invocation_ended'
+                   AND NOT EXISTS (SELECT 1 FROM session_retirements r
+                     WHERE r.session_id=json_extract(pause.event_json,'$.invocation.session_id'))
                    AND json_extract(pause.event_json,'$.fact.outcome.kind')='handoff_paused'
                    AND NOT EXISTS (SELECT 1 FROM runtime_events successor
                      WHERE successor.kind='invocation_opened'

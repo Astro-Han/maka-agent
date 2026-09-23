@@ -151,6 +151,12 @@ pub(super) enum Request {
     ResumeExecution(Execution<maka_plugins::execution::Resume>),
     #[serde(rename = "execution.configure")]
     ConfigureExecution(Execution<maka_plugins::execution::Configure>),
+    #[serde(rename = "execution.removeSession")]
+    RemoveSession(Execution<maka_plugins::execution::RemoveSession>),
+    #[serde(rename = "execution.removalReceipt")]
+    RemovalReceipt(Execution<SessionQuery>),
+    #[serde(rename = "execution.previewRemoval")]
+    PreviewRemoval(Execution<SessionQuery>),
     #[serde(rename = "execution.readMessage")]
     ReadMessage(Execution<maka_plugins::execution::SessionMessage>),
     #[serde(rename = "execution.enqueue")]

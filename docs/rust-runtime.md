@@ -327,6 +327,18 @@ remaining inherited tool results and compact its own context without changing it
 siblings or earlier frozen reads. A subsequent copy adopts the parent's current projection;
 archive verification always retains the original tool-call evidence.
 
+Session removal commits its revision-family plan, admission fence and queued-message
+cancellations atomically. Dependent Sessions are archived, not destroyed; restoring one
+after cleanup is not undone by an old removal retry. `session.remove.query` recovers the
+accepted receipt even after the catalog entry disappears. Public Rust/JS execution
+capabilities expose the same removal, preview and receipt semantics, requiring authority
+over every directly removed member; history access alone is insufficient.
+
+Host drains accepted executions and processes before reclaiming owned worktrees, and
+keeps a shared checkout until its last owner retires. Unproven process cleanup leaves
+the workspace intact without blocking unrelated Sessions. Canonical facts and inherited
+archive proofs remain stored; removal is not secure erasure of historical data.
+
 ## Conversation recall
 
 `maka.recall` publishes lazy `Recall`, `RecallMore` and `RecallMaterial` through public history

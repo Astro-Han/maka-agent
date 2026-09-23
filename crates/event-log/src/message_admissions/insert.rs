@@ -112,6 +112,6 @@ pub(crate) async fn insert(
     }
     sqlx::query("INSERT INTO message_admissions (session_id, message_id, position, record_json) VALUES (?, ?, ?, ?)")
         .bind(session).bind(message).bind(position).bind(encoded).execute(&mut *tx).await?;
-    crate::sessions::copy::retain(tx, session).await?;
+    crate::sessions::retain(tx, session).await?;
     crate::message_queue::bump(tx, session).await.map(Some)
 }

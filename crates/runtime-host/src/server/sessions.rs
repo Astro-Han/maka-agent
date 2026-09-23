@@ -22,6 +22,7 @@ pub(super) mod copy;
 pub(super) mod create;
 pub(super) use crate::session::model;
 pub(super) mod mutation;
+pub(super) mod removal;
 pub(super) mod workspace;
 
 use crate::session::SessionConfiguration;
@@ -44,6 +45,9 @@ pub(super) enum Output {
     Abandon(maka_protocol::session::copy::AbandonOutput),
     CopyReceipt(maka_protocol::session::copy::QueryResult),
     Sources(maka_protocol::session::sources::Output),
+    Removed(SessionRemoveResult),
+    RemovalPreview(SessionRemovePreviewResult),
+    RemovalReceipt(SessionRemoveQueryResult),
 }
 
 impl Output {
@@ -70,11 +74,23 @@ pub(super) fn supports(operation: Operation) -> bool {
             | Operation::SessionReadMarkerSet
             | Operation::SessionConfigurationUpdate
             | Operation::SessionWorkspaceRelocate
+            | Operation::SessionRemove
+            | Operation::SessionRemovePreview
+            | Operation::SessionRemoveQuery
     )
 }
 
 pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
     match operation {
+        Operation::SessionRemove => {
+            decode_session_remove_input(value)?;
+        }
+        Operation::SessionRemovePreview => {
+            decode_session_remove_preview_input(value)?;
+        }
+        Operation::SessionRemoveQuery => {
+            decode_session_remove_query_input(value)?;
+        }
         Operation::SessionSourcesQuery => {
             maka_protocol::session::sources::decode_input(value)?;
         }
@@ -114,7 +130,13 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol
 }
 
 pub(super) fn decode_output(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    if matches!(
+    if operation == Operation::SessionRemove {
+        decode_session_remove_result(value)?;
+    } else if operation == Operation::SessionRemovePreview {
+        decode_session_remove_preview_result(value)?;
+    } else if operation == Operation::SessionRemoveQuery {
+        decode_session_remove_query_result(value)?;
+    } else if matches!(
         operation,
         Operation::SessionBranchCreate | Operation::SessionRevisionCreate
     ) {
@@ -147,6 +169,23 @@ pub(super) async fn execute(
 ) -> Result<Output> {
     let log = host.log.as_ref();
     match operation {
+        Operation::SessionRemove => {
+            removal::remove(host, decode_session_remove_input(value).map_err(invalid)?)
+                .await
+                .map(Output::Removed)
+        }
+        Operation::SessionRemovePreview => removal::preview(
+            host,
+            decode_session_remove_preview_input(value).map_err(invalid)?,
+        )
+        .await
+        .map(Output::RemovalPreview),
+        Operation::SessionRemoveQuery => removal::query(
+            host,
+            decode_session_remove_query_input(value).map_err(invalid)?,
+        )
+        .await
+        .map(Output::RemovalReceipt),
         Operation::SessionSourcesQuery => {
             let input = maka_protocol::session::sources::decode_input(value).map_err(invalid)?;
             let messages = log
@@ -359,7 +398,9 @@ fn failure(code: OperationErrorCode, message: &str) -> OperationError {
 
 pub(super) fn stored(error: StoreError) -> OperationError {
     let code = match &error {
-        StoreError::SessionConflict => OperationErrorCode::OperationConflict,
+        StoreError::SessionConflict | StoreError::SessionRetired => {
+            OperationErrorCode::OperationConflict
+        }
         StoreError::SessionNotFound => OperationErrorCode::NotFound,
         StoreError::SessionBusy => OperationErrorCode::SessionBusy,
         StoreError::CommitUnknown(_) | StoreError::OperationUnknown => {

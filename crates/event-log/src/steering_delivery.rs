@@ -36,6 +36,7 @@ impl EventLog {
             .map_err(|error| match error {
                 StoreError::CommitUnknown(error) => CommitError::OutcomeUnknown(error.to_string()),
                 StoreError::OperationUnknown => CommitError::OutcomeUnknown(error.to_string()),
+                StoreError::SessionRetired => CommitError::Retired,
                 other => CommitError::Rejected(other.to_string()),
             })
     }

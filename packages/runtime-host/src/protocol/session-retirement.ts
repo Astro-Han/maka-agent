@@ -59,6 +59,18 @@ export interface SessionRemovePreviewInput {
   readonly sessionId: string;
 }
 
+export interface SessionRemoveQueryInput {
+  readonly sessionId: string;
+}
+
+export type SessionRemoveQueryResult =
+  | { readonly kind: 'missing' }
+  | {
+      readonly kind: 'removed';
+      readonly sessionId: string;
+      readonly archivedSubtaskCount: number;
+    };
+
 export interface SessionRemovePreviewResult {
   /**
    * How many ordinary linked subagent subtasks a delete of this parent would
@@ -141,6 +153,42 @@ export const SESSION_RETIREMENT_OPERATION_SPECS = {
     errors: LIFECYCLE_ERRORS,
     decodeInput: decodeSessionRemovePreviewInput,
     decodeOutput: decodeSessionRemovePreviewResult,
+  }),
+  'session.remove.query': defineOperation<
+    SessionRemoveQueryInput,
+    SessionRemoveQueryResult,
+    (typeof LIFECYCLE_ERRORS)[number]
+  >({
+    mode: 'query',
+    availability: 'ready',
+    errors: LIFECYCLE_ERRORS,
+    decodeInput: (value) => {
+      const input = requireExactRecord(value, 'Session removal receipt query', ['sessionId']);
+      return { sessionId: requireEntityId(input.sessionId, 'sessionId') };
+    },
+    decodeOutput: (value) => {
+      const result = requireRecord(value, 'Session removal receipt');
+      if (result.kind === 'missing') {
+        requireExactRecord(result, 'Missing Session removal receipt', ['kind']);
+        return { kind: 'missing' };
+      }
+      if (result.kind !== 'removed') throw invalidProtocolFrame('Invalid Session removal receipt');
+      const exact = requireExactRecord(result, 'Session removal receipt', [
+        'kind',
+        'sessionId',
+        'archivedSubtaskCount',
+      ]);
+      return {
+        kind: 'removed',
+        sessionId: requireEntityId(exact.sessionId, 'sessionId'),
+        archivedSubtaskCount: requireCount(exact.archivedSubtaskCount, 'archivedSubtaskCount'),
+      };
+    },
+    assertOutputForInput: (input, output) => {
+      if (output.kind === 'removed' && output.sessionId !== input.sessionId) {
+        throw invalidProtocolFrame('Session removal receipt belongs to another Session');
+      }
+    },
   }),
 } as const;
 

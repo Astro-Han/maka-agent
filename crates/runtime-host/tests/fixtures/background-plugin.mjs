@@ -219,6 +219,47 @@ export default async function (ctx) {
         if (error.code !== 'revoked') throw error;
       }
       const root = await commands.createRoot(request);
+      let deletion = await ctx.storage.read('removal-intent');
+      if (!deletion) {
+        const target = await commands.createRoot({ ...request, operationId: 'removal-target' });
+        const view = await commands.session(target.sessionId);
+        [deletion] = await ctx.storage.batch([
+          {
+            key: 'removal-intent',
+            expectedRevision: null,
+            data: {
+              kind: 'present',
+              value: { sessionId: target.sessionId, expectedRevision: view.revision },
+            },
+          },
+        ]);
+        if ((await commands.previewRemoval(target.sessionId)) !== 0)
+          throw new Error('independent root acquired unrelated dependents');
+        const stale = await commands.removeSession({
+          sessionId: target.sessionId,
+          expectedRevision: view.revision + 1,
+        });
+        if (stale.kind !== 'revision_conflict')
+          throw new Error('removal ignored its revision fence');
+      }
+      const removal = deletion.data.value;
+      const previousRemoval = await commands.removalReceipt(removal.sessionId);
+      if (!previousRemoval) {
+        const removed = await commands.removeSession(removal);
+        if (removed.kind !== 'removed') throw new Error('authorized removal did not commit');
+      }
+      const durableRemoval = await commands.removalReceipt(removal.sessionId);
+      if (
+        durableRemoval?.sessionId !== removal.sessionId ||
+        durableRemoval.archivedSubtaskCount !== 0
+      )
+        throw new Error('removal receipt did not survive retirement or restart');
+      const repeatedRemoval = await commands.removeSession(removal);
+      if (
+        repeatedRemoval.kind !== 'removed' ||
+        repeatedRemoval.receipt.sessionId !== removal.sessionId
+      )
+        throw new Error('removal retry required the removed catalog record');
       const session = await commands.session(root.sessionId);
       const configured = await commands.configure({
         sessionId: root.sessionId,

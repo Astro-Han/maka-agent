@@ -93,6 +93,7 @@ pub(super) async fn create(
             host.executions.executor_binding(&id, executor_id)?;
         }
         let config = resolve(&host.configuration, prepared, thinking, workspace).await?;
+        host.executions.validate_workspace(&config)?;
         super::super::projects::record_usage(host, &config.workspace).await?;
         let record = log
             .create_session(

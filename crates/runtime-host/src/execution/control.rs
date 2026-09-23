@@ -22,6 +22,62 @@ use maka_protocol::OperationErrorCode as Code;
 use maka_runtime::event::Invocation;
 
 impl Executions {
+    /// The durable fence survives a lost requester. Never hold global admission
+    /// while waiting for another Session's resources to release native handles.
+    pub(crate) async fn drain_retiring_session(&self, session: &str) -> Result<bool> {
+        let admission = self.lock_admission().await;
+        if self
+            .log
+            .session_retirement(session)
+            .await
+            .map_err(internal)?
+            .is_none()
+        {
+            return Err(failure(
+                Code::OperationConflict,
+                "Session has no removal intent",
+            ));
+        }
+        let runs: Vec<_> = self
+            .active
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|run| run.invocation.session_id == session)
+            .cloned()
+            .collect();
+        let mut completed = self.plugin_processes.stop(session);
+        for run in &runs {
+            run.cancellation.cancel();
+            completed.push(run.completed.clone());
+        }
+        for run in &runs {
+            self.interactions.stop_run(&run.invocation).await?;
+        }
+        drop(admission);
+        let drain = async {
+            self.shells.stop_session(session).await.map_err(|error| {
+                self.begin_drain();
+                internal(error)
+            })?;
+            for completed in completed {
+                completed.cancelled().await;
+            }
+            Ok::<(), maka_protocol::OperationError>(())
+        };
+        match tokio::time::timeout(std::time::Duration::from_secs(30), drain).await {
+            Err(_) => return Ok(false),
+            Ok(result) => result?,
+        }
+        if self.shutdown.is_cancelled() {
+            return Err(failure(
+                Code::HostDraining,
+                "Resource cleanup requires Host recovery",
+            ));
+        }
+        Ok(true)
+    }
+
     pub(crate) fn active_session_owner(&self, session: &str) -> Option<Invocation> {
         self.active
             .lock()

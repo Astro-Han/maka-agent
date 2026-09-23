@@ -155,7 +155,7 @@ async fn quiescent(
         }
         let session = &member.session_id;
         if host.has_session_work(session).await.map_err(storage)?
-            || host.plugin_processes.lock().unwrap().contains_key(session)
+            || host.plugin_processes.has(session)
             || host
                 .log
                 .has_unsettled_shells(session)

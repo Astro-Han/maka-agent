@@ -124,13 +124,13 @@ impl Processes {
         let activity = handle
             .target
             .session()
-            .map(|id| host.own_plugin_process(id));
+            .map(|id| host.own_plugin_process(id, stop.clone()));
         let session = handle.target.session().map(str::to_owned);
         let execution =
             self.0
                 .owner
                 .spawn_resource("protocol process", move |retiring| async move {
-                    let _activity = activity;
+                    let mut activity = activity;
                     let mut ticket = ticket;
                     if let Some(ticket) = &mut ticket {
                         ticket.start();
@@ -141,10 +141,11 @@ impl Processes {
                         Lifetime::Instance => CancellationToken::new(),
                     };
                     let result = async {
-                        if let Some(session) = session {
-                            host.retain_plugin_process_session(&session)
-                                .await
-                                .map_err(|error| error.to_string())?;
+                        if let Some(activity) = &mut activity {
+                            activity.start().await.map_err(|error| error.to_string())?;
+                        }
+                        if let Some(session) = &session {
+                            host.publish_session_change(session).await;
                         }
                         worker::run(
                             command,
@@ -162,6 +163,14 @@ impl Processes {
                         .await
                     }
                     .await;
+                    let result = match activity {
+                        Some(activity) => activity
+                            .settle(result.is_ok())
+                            .await
+                            .map_err(|error| error.to_string())
+                            .and(result),
+                        None => result,
+                    };
                     if result.is_err() {
                         host.begin_drain();
                     }

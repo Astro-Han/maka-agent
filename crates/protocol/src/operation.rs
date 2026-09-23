@@ -219,6 +219,7 @@ operations! {
     SessionRecapGenerate => ("session.recap.generate", Command, Ready),
     SessionRemove => ("session.remove", Command, Ready),
     SessionRemovePreview => ("session.remove.preview", Query, Ready),
+    SessionRemoveQuery => ("session.remove.query", Query, Ready),
     SessionRevisionAbandon => ("session.revision.abandon", Command, Ready),
     SessionRevisionCreate => ("session.revision.create", Command, Ready),
     SessionSharedQuery => ("session.shared.query", Query, Ready),

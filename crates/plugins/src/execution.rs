@@ -29,8 +29,10 @@ pub use message::{
     Enqueue, Excerpt, MessageObservation, MessageReceipt, MessageResult, MessageState,
     SessionMessage,
 };
+mod removal;
 mod root;
 pub use interaction::{OfferInteraction, Prompt};
+pub use removal::{RemovalReceipt, RemoveSession, RemovedSession};
 pub use root::{CreateRoot, RootApproval, RootTemplate, Settings as RootSettings};
 
 /// Persisted constraints, not a bearer capability. Only an explicit Host grant
@@ -416,6 +418,23 @@ pub enum RevisionDisposition {
 
 /// An acquired execution capability retains its captured permission ceiling.
 pub trait Commands: Send + Sync + std::any::Any {
+    /// Remove an authorized revision family; every directly removed member must
+    /// be covered. Accepted work settles independently of the caller's lifetime.
+    fn remove_session(
+        &self,
+        request: RemoveSession,
+    ) -> futures_util::future::BoxFuture<'_, Result<RemovedSession, CommandError>>;
+    /// Read only an accepted removal. No catalog record or active execution is
+    /// required; current plugin identity and access are still checked.
+    fn removal_receipt(
+        &self,
+        session_id: String,
+    ) -> futures_util::future::BoxFuture<'_, Result<Option<RemovalReceipt>, CommandError>>;
+    /// Advisory count; removal recomputes and authorizes the plan at commit.
+    fn preview_removal(
+        &self,
+        session_id: String,
+    ) -> futures_util::future::BoxFuture<'_, Result<u64, CommandError>>;
     /// Copy an immutable attachment between two Host-issued capabilities. Both
     /// endpoints are reauthorized; a source Session ID alone grants nothing.
     fn copy_attachment(

@@ -267,6 +267,9 @@ impl OperationRegistry for Operations {
                 Operation::SessionSourcesQuery => Some(maka_protocol::session::sources::ERRORS),
                 Operation::SessionCatalogQuery => Some(sessions::QUERY_ERRORS),
                 Operation::SessionLifecycleSet => Some(sessions::LIFECYCLE_ERRORS),
+                Operation::SessionRemove
+                | Operation::SessionRemovePreview
+                | Operation::SessionRemoveQuery => Some(sessions::removal::ERRORS),
                 Operation::SessionMetadataUpdate => Some(sessions::mutation::METADATA_ERRORS),
                 Operation::SessionReadMarkerSet => Some(sessions::mutation::READ_MARKER_ERRORS),
                 Operation::SessionConfigurationUpdate | Operation::SessionWorkspaceRelocate => {

@@ -142,6 +142,7 @@ pub(super) async fn create(host: &Host, input: Input) -> Result<Output> {
 }
 
 async fn finish(host: &Host, input: Input, configuration: &SessionConfiguration) -> Result<Output> {
+    host.executions.validate_workspace(configuration)?;
     let result = host
         .log
         .copy_session(

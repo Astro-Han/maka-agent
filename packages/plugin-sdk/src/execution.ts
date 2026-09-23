@@ -177,7 +177,25 @@ export type Configured =
   | { kind: 'committed'; session: SessionConfiguration }
   | { kind: 'revision_conflict'; expectedRevision: number; actualRevision: number };
 
+/** Durable acceptance; resource cleanup may still be pending. */
+export interface RemovalReceipt {
+  sessionId: string;
+  archivedSubtaskCount: number;
+}
+
 export interface Executions {
+  /** Every directly removed revision-family member must be authorized. */
+  removeSession(input: {
+    sessionId: string;
+    expectedRevision: number;
+  }): Promise<
+    | { kind: 'removed'; receipt: RemovalReceipt }
+    | { kind: 'revision_conflict'; expectedRevision: number; actualRevision: number }
+  >;
+  /** Recover acceptance without requiring the deleted catalog record. */
+  removalReceipt(sessionId: string): Promise<RemovalReceipt | null>;
+  /** Advisory dependent-family count, recomputed and authorized on removal. */
+  previewRemoval(sessionId: string): Promise<number>;
   /** Host-local immutable copy; both capability endpoints require current authority. */
   copyAttachment(
     source: Executions,

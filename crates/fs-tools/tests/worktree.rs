@@ -205,6 +205,18 @@ fn linked_worktree_is_git_compatible_and_reopening_preserves_child_changes() {
             git(&source, &["status", "--porcelain"]).is_empty(),
             "export is reversible against its base"
         );
+        let child_commit = git(&source, &["rev-parse", "child-owned"]);
+        manager.remove(&binding).unwrap();
+        Worktrees::open(&root).unwrap().remove(&binding).unwrap();
+        assert!(!binding.directory().exists());
+        assert!(manager.ensure(&binding, &cancel).is_err());
+        assert_eq!(git(&source, &["rev-parse", "child-owned"]), child_commit);
+        assert!(
+            !git(&source, &["worktree", "list", "--porcelain"])
+                .contains(binding.directory().to_str().unwrap())
+        );
+        assert!(git(&source, &["for-each-ref", "refs/maka/", "refs/heads/maka/"]).is_empty());
+        assert!(git(&source, &["status", "--porcelain"]).is_empty());
     }
 }
 
@@ -249,6 +261,8 @@ fn worktree_recovery_rejects_dirty_sources_foreign_owners_and_missing_published_
     let bytes = fs::read(&owner).unwrap();
     fs::write(&owner, "{}").unwrap();
     assert!(manager.ensure(&binding, &cancel).is_err());
+    assert!(manager.remove(&binding).is_err());
+    assert!(binding.directory().exists());
     fs::write(&owner, bytes).unwrap();
     fs::rename(binding.directory(), allocation.join("user-recovered")).unwrap();
     assert!(
@@ -256,4 +270,50 @@ fn worktree_recovery_rejects_dirty_sources_foreign_owners_and_missing_published_
         "never reset a published but missing directory"
     );
     assert!(!binding.directory().exists());
+    manager.remove(&binding).unwrap();
+    assert_eq!(
+        fs::read_to_string(allocation.join("user-recovered/source.txt")).unwrap(),
+        "ready bytes preserved",
+        "cleanup only removes its known checkout paths"
+    );
+}
+
+#[test]
+fn interrupted_removal_preserves_advanced_branches_and_cannot_resurrect() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("repository");
+    repository(&source, "sha1");
+    let root = temp.path().join("host");
+    let manager = Worktrees::open(&root).unwrap();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let id = "3".repeat(64);
+    let binding = manager.plan(&source, &id, cancel.clone()).unwrap();
+    manager.ensure(&binding, &cancel).unwrap();
+    fs::write(binding.directory().join("source.txt"), "committed\n").unwrap();
+    git(binding.directory(), &["commit", "-am", "keep this commit"]);
+    let branch = format!("refs/heads/maka/{id}");
+    let commit = git(&source, &["rev-parse", &branch]);
+    let allocation = binding.directory().parent().unwrap();
+    let admin = source.join(".git/worktrees").join(format!("maka-{id}"));
+    let owner = admin.join("maka-owner.json");
+    let proof = fs::read(&owner).unwrap();
+    fs::write(&owner, "{}").unwrap();
+    assert!(manager.remove(&binding).is_err());
+    assert!(!allocation.join("retired").exists());
+    assert!(binding.directory().exists());
+    fs::write(&owner, proof).unwrap();
+    // Crash after fencing and partially removing the checkout/admin payload.
+    fs::write(allocation.join("retired"), "retired\n").unwrap();
+    fs::remove_file(binding.directory().join("source.txt")).unwrap();
+    fs::remove_file(admin.join("index")).unwrap();
+    assert!(manager.ensure(&binding, &cancel).is_err());
+    manager.remove(&binding).unwrap();
+    assert_eq!(git(&source, &["rev-parse", &branch]), commit);
+    // Crash in the owner-unlink/rmdir gap leaves an empty admin directory.
+    fs::create_dir(&admin).unwrap();
+    Worktrees::open(&root).unwrap().remove(&binding).unwrap();
+    assert!(!admin.exists());
+    assert!(manager.ensure(&binding, &cancel).is_err());
+    assert_eq!(git(&source, &["rev-parse", &branch]), commit);
+    assert!(git(&source, &["status", "--porcelain"]).is_empty());
 }

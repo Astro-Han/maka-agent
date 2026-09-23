@@ -89,6 +89,8 @@ pub enum StoreError {
     ShellNotFound,
     #[error("session not found")]
     SessionNotFound,
+    #[error("session retired")]
+    SessionRetired,
     #[error("session has an unsealed invocation")]
     SessionBusy,
     #[error("catalog revision changed from {expected} to {actual}")]

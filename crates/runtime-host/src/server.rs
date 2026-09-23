@@ -371,6 +371,7 @@ impl Host {
         }
         startup_guard.disarm();
         host.executions.start_handoff_recovery(host.epoch.clone());
+        host.executions.start_removal_recovery();
         host.record_diagnostic(format_args!("Host ready: epoch {}", host.epoch));
         Ok(host)
     }

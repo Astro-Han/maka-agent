@@ -132,6 +132,25 @@ pub struct SessionRemovePreviewInput {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionRemoveQueryInput {
+    pub session_id: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum SessionRemoveQueryResult {
+    Missing,
+    Removed {
+        session_id: String,
+        archived_subtask_count: u64,
+    },
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionRemovePreviewResult {
     pub archivable_subtask_count: u64,
 }
@@ -190,6 +209,8 @@ decoder!(
 decoder!(decode_session_lifecycle_set_input, SessionLifecycleSetInput);
 decoder!(decode_session_remove_input, SessionRemoveInput);
 decoder!(decode_session_remove_result, SessionRemoveResult);
+decoder!(decode_session_remove_query_input, SessionRemoveQueryInput);
+decoder!(decode_session_remove_query_result, SessionRemoveQueryResult);
 decoder!(
     decode_session_remove_preview_input,
     SessionRemovePreviewInput

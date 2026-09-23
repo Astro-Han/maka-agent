@@ -34,6 +34,32 @@ pub struct WorkspaceSession {
 }
 
 impl EventLog {
+    /// Ownership, not quiescence: another retained Session keeps a managed
+    /// checkout alive regardless of how many past users shared that directory.
+    pub async fn workspace_has_other_session(
+        &self,
+        cwd: &str,
+        session: &str,
+    ) -> Result<bool, StoreError> {
+        self.validate_root()?;
+        crate::sessions::validate_id(session)?;
+        let (cwd, session) = (cwd.to_owned(), session.to_owned());
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    Ok(sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM session_control
+                WHERE json_extract(configuration, '$.workspace.hostCwd')=? AND id<>?)",
+                    )
+                    .bind(cwd)
+                    .bind(session)
+                    .fetch_one(connection)
+                    .await?)
+                })
+            })
+            .await
+    }
+
     pub async fn workspace_fence(&self, cwd: &str) -> Result<WorkspaceFence, StoreError> {
         self.validate_root()?;
         let cwd = cwd.to_owned();

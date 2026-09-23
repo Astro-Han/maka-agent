@@ -138,7 +138,10 @@ export type SessionRevisionOperationKey =
   | 'session.branch.create'
   | 'session.revision.create'
   | 'session.revision.abandon';
-export type SessionRetirementOperationKey = keyof typeof SESSION_RETIREMENT_OPERATION_SPECS;
+export type SessionRetirementOperationKey = Exclude<
+  keyof typeof SESSION_RETIREMENT_OPERATION_SPECS,
+  'session.remove.query'
+>;
 export type SessionEffectOperationKey = keyof typeof SESSION_EFFECT_OPERATION_SPECS;
 export type SessionTodoOperationKey = keyof typeof SESSION_TODO_OPERATION_SPECS;
 export type SessionCatalogOperationKey =

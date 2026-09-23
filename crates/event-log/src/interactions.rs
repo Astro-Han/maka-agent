@@ -60,6 +60,8 @@ impl EventLog {
                         record.outcome = outcome;
                         return Ok(InteractionCommit { matches, record });
                     }
+                    crate::sessions::removal::require_accepting(&mut tx, &request.session_id)
+                        .await?;
                     permissions::require_revision(&mut tx, &request).await?;
                     sqlx::query("INSERT INTO interaction_requests VALUES (?, ?, ?, ?)")
                         .bind(&request.request_id)

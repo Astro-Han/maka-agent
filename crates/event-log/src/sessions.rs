@@ -20,12 +20,19 @@
 //! Durable session control metadata. Execution history remains in runtime_events.
 
 mod activity;
+mod admission;
+pub(crate) use admission::retain;
 pub(crate) mod copy;
 pub use copy::{AbandonRevision, SessionCopy, SessionCopyResult};
 mod execution;
 mod metadata;
 mod origin;
+mod processes;
+pub(crate) mod removal;
 pub use origin::PluginSession;
+pub use removal::{
+    RemovalAuthority, RemovalPlan, RemoveFamilyResult, SessionRemovalResult, SessionRetirement,
+};
 pub(crate) mod read_state;
 pub(crate) use activity::{initialize_execution, project_execution, register_functions};
 pub(crate) use execution::advance_revision;
@@ -178,6 +185,12 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
+                    if removal::read(&mut tx, &id)
+                        .await?
+                        .is_some_and(SessionRetirement::removes)
+                    {
+                        return Ok(None);
+                    }
                     read(&mut tx, &id).await
                 })
             })
@@ -265,6 +278,7 @@ impl EventLog {
                     }
                     let ids = sqlx::query_scalar::<_, String>(
                         "SELECT id FROM session_control WHERE id > ?
+                         AND NOT EXISTS (SELECT 1 FROM session_retirements WHERE session_id=id AND remove_session=1)
                          AND (? = 0 OR archived = 0)
                          AND (? IS NULL OR id = ?)
                          AND (? IS NULL OR json_extract(configuration, '$.workspace.hostCwd') = ?)
@@ -327,13 +341,15 @@ pub(crate) async fn insert(
     let inserted = sqlx::query(
         "INSERT INTO session_control SELECT ?, ?, 1, ?, ?, 0, ?
          WHERE NOT EXISTS (SELECT 1 FROM session_control WHERE id = ?)
-           AND NOT EXISTS (SELECT 1 FROM session_history_copies WHERE session_id = ?)",
+           AND NOT EXISTS (SELECT 1 FROM session_history_copies WHERE session_id = ?)
+           AND NOT EXISTS (SELECT 1 FROM session_retirements WHERE session_id = ?)",
     )
     .bind(id)
     .bind(fingerprint)
     .bind(now as i64)
     .bind(now as i64)
     .bind(configuration)
+    .bind(id)
     .bind(id)
     .bind(id)
     .execute(&mut *tx)
@@ -450,6 +466,7 @@ async fn probe<T: DeserializeOwned>(
     id: &str,
     fingerprint: &str,
 ) -> Result<Option<SessionRecord<T>>, StoreError> {
+    removal::require_accepting(connection, id).await?;
     if fingerprint.is_empty() || fingerprint.len() > 512 {
         return Err(invalid("invalid session fingerprint length"));
     }

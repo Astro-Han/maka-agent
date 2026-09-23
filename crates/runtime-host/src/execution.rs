@@ -32,9 +32,11 @@ mod plugins;
 pub(crate) use plugins::ResourceTarget;
 pub(crate) mod permissions;
 mod prepare;
+mod processes;
 mod provider;
 mod read;
 mod recovery;
+mod removal;
 mod resume;
 mod shell;
 pub(crate) mod snapshot;
@@ -78,9 +80,10 @@ pub(crate) struct Executions {
     interactions: Arc<crate::server::interactions::Interactions>,
     active: Mutex<HashMap<String, ActiveRun>>,
     submissions: message::Submissions,
-    plugin_processes: Arc<Mutex<HashMap<String, usize>>>,
+    plugin_processes: processes::Registry,
     workers: TaskTracker,
     handoff_wake: tokio::sync::Notify,
+    removal_wake: tokio::sync::Notify,
     shutdown: CancellationToken,
 }
 
@@ -140,9 +143,10 @@ impl Executions {
             interactions,
             writes: Arc::new(maka_fs_tools::WriteCoordinator::default()),
             active: Mutex::new(HashMap::new()),
-            plugin_processes: Arc::default(),
+            plugin_processes: Default::default(),
             workers,
             handoff_wake: tokio::sync::Notify::new(),
+            removal_wake: tokio::sync::Notify::new(),
             shutdown,
         })
     }
@@ -293,8 +297,10 @@ impl Executions {
 fn requires_drain(error: &RunError) -> bool {
     matches!(
         error,
-        RunError::Commit(_)
-            | RunError::Store(StoreError::CommitUnknown(_) | StoreError::OperationUnknown)
+        RunError::Commit(
+            maka_runtime::event::CommitError::Rejected(_)
+                | maka_runtime::event::CommitError::OutcomeUnknown(_)
+        ) | RunError::Store(StoreError::CommitUnknown(_) | StoreError::OperationUnknown)
             | RunError::Tool(ToolError::Persistence(_) | ToolError::CleanupUnconfirmed(_))
     )
 }
@@ -307,6 +313,7 @@ fn execution_error(error: RunError) -> OperationError {
             Code::OutcomeUnknown
         }
         RunError::Busy => Code::SessionBusy,
+        RunError::Commit(maka_runtime::event::CommitError::Retired) => Code::NotFound,
         RunError::ReconciliationRequired(_) => Code::OperationUnavailable,
         RunError::InvalidInput(_) => Code::OperationUnavailable,
         _ => Code::InternalFailure,

@@ -102,6 +102,322 @@ async fn copy(
 }
 
 #[tokio::test]
+async fn removal_does_not_treat_revision_history_as_management_authority() {
+    use maka_event_log::sessions::{PluginSession, RemovalAuthority, RemoveFamilyResult};
+    use maka_plugins::{composition::Scope, storage::Namespace};
+    let temp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&temp.path().join("authority.sqlite"))
+        .await
+        .unwrap();
+    let namespace = Namespace::new("owner", Scope::Profile).unwrap();
+    log.create_session("parent", "parent", &json!({}), 1)
+        .await
+        .unwrap();
+    log.create_plugin_session(
+        &PluginSession {
+            session_id: "managed".into(),
+            creator: namespace.clone(),
+            fingerprint: "managed".into(),
+            managed: true,
+            authority_session_id: None,
+        },
+        &json!({}),
+        1,
+    )
+    .await
+    .unwrap();
+    turn(&log, "managed", "source-turn", false).await;
+    let source = log.get_session::<Value>("managed").await.unwrap().unwrap();
+    log.copy_plugin_session(
+        SessionCopy {
+            source_session_id: source.id,
+            target_session_id: "unmanaged-revision".into(),
+            expected_source_revision: source.revision,
+            purpose: maka_runtime::session::CopyPurpose::Revision {
+                turn_id: "source-turn".into(),
+            },
+        },
+        &json!({}),
+        2,
+        PluginSession {
+            session_id: "unmanaged-revision".into(),
+            creator: namespace.clone(),
+            fingerprint: "revision".into(),
+            managed: false,
+            authority_session_id: Some("parent".into()),
+        },
+    )
+    .await
+    .unwrap();
+    log.retain_session("unmanaged-revision").await.unwrap();
+    let revision = log
+        .get_session::<Value>("unmanaged-revision")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    for authority in [
+        RemovalAuthority::Unmanaged,
+        RemovalAuthority::Granted {
+            namespace,
+            sessions: ["unmanaged-revision".into()].into_iter().collect(),
+        },
+    ] {
+        assert!(matches!(
+            log.remove_session_family("unmanaged-revision", revision, authority)
+                .await,
+            Err(StoreError::SessionConflict)
+        ));
+        assert!(log.session_retirement("managed").await.unwrap().is_none());
+        assert!(
+            log.session_removal_receipt("unmanaged-revision")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    let revision = log
+        .get_session::<Value>("parent")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    let RemoveFamilyResult::Accepted(plan) = log
+        .remove_session_family("parent", revision, RemovalAuthority::Unmanaged)
+        .await
+        .unwrap()
+    else {
+        panic!("unchanged revision");
+    };
+    assert_eq!(plan.archive, ["unmanaged-revision"]);
+    assert!(
+        !log.get_session::<Value>("managed")
+            .await
+            .unwrap()
+            .unwrap()
+            .archived
+    );
+    log.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn family_removal_freezes_one_atomic_plan_and_does_not_rearchive_restored_dependents() {
+    use maka_event_log::sessions::{PluginSession, RemoveFamilyResult, SessionRetirement};
+    use maka_plugins::{composition::Scope, storage::Namespace};
+    use maka_runtime::session::CopyPurpose;
+    use sqlx::Connection;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("family.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    log.create_session("root", "root", &json!({}), 1)
+        .await
+        .unwrap();
+    turn(&log, "root", "root-turn", false).await;
+    for target in ["revision", "draft", "branch"] {
+        let source = log.get_session::<Value>("root").await.unwrap().unwrap();
+        copy(
+            &log,
+            SessionCopy {
+                source_session_id: source.id,
+                target_session_id: target.into(),
+                expected_source_revision: source.revision,
+                purpose: if target == "branch" {
+                    CopyPurpose::EmptySideConversation
+                } else {
+                    CopyPurpose::Revision {
+                        turn_id: "root-turn".into(),
+                    }
+                },
+            },
+        )
+        .await;
+        if target == "revision" {
+            log.retain_session(target).await.unwrap();
+        }
+    }
+    let child = |id: &str, parent: &str| PluginSession {
+        session_id: id.into(),
+        creator: Namespace::new("any-package", Scope::Profile).unwrap(),
+        fingerprint: id.into(),
+        managed: false,
+        authority_session_id: Some(parent.into()),
+    };
+    log.create_plugin_session(&child("child", "revision"), &json!({}), 2)
+        .await
+        .unwrap();
+    turn(&log, "child", "child-turn", false).await;
+    let source = log.get_session::<Value>("child").await.unwrap().unwrap();
+    copy(
+        &log,
+        SessionCopy {
+            source_session_id: source.id,
+            target_session_id: "child-revision".into(),
+            expected_source_revision: source.revision,
+            purpose: CopyPurpose::Revision {
+                turn_id: "child-turn".into(),
+            },
+        },
+    )
+    .await;
+    log.create_plugin_session(&child("grandchild", "child-revision"), &json!({}), 3)
+        .await
+        .unwrap();
+    log.create_plugin_session(&child("already-archived", "root"), &json!({}), 4)
+        .await
+        .unwrap();
+    log.set_session_archived::<Value>("already-archived", true, 5)
+        .await
+        .unwrap();
+    let preview = log.preview_session_removal("revision").await.unwrap();
+    assert_eq!(preview.remove, ["revision", "root"]);
+    assert_eq!(
+        preview.archive,
+        ["already-archived", "child", "child-revision", "grandchild"]
+    );
+    assert_eq!(preview.archived_subtask_count, 2);
+    // Preview does not reserve an old dependency set. Admission recomputes it.
+    log.create_plugin_session(&child("late", "root"), &json!({}), 6)
+        .await
+        .unwrap();
+    let revision = log
+        .get_session::<Value>("revision")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    assert!(matches!(
+        log.remove_session_family(
+            "revision",
+            revision + 1,
+            maka_event_log::sessions::RemovalAuthority::Unmanaged
+        )
+        .await
+        .unwrap(),
+        RemoveFamilyResult::RevisionConflict { .. }
+    ));
+    let mut faults = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(&path),
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER refuse_archive BEFORE INSERT ON session_retirements
+        WHEN NEW.session_id='child' BEGIN SELECT RAISE(ABORT,'archive failure'); END",
+    )
+    .execute(&mut faults)
+    .await
+    .unwrap();
+    assert!(
+        log.remove_session_family(
+            "revision",
+            revision,
+            maka_event_log::sessions::RemovalAuthority::Unmanaged
+        )
+        .await
+        .is_err()
+    );
+    assert!(log.session_retirement("root").await.unwrap().is_none());
+    assert!(
+        !log.get_session::<Value>("child")
+            .await
+            .unwrap()
+            .unwrap()
+            .archived
+    );
+    sqlx::query("DROP TRIGGER refuse_archive")
+        .execute(&mut faults)
+        .await
+        .unwrap();
+    faults.close().await.unwrap();
+    let RemoveFamilyResult::Accepted(plan) = log
+        .remove_session_family(
+            "revision",
+            revision,
+            maka_event_log::sessions::RemovalAuthority::Unmanaged,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("unchanged revision");
+    };
+    assert_eq!(plan.archived_subtask_count, 3);
+    assert!(plan.archive.contains(&"late".into()));
+    assert!(log.get_session::<Value>("root").await.unwrap().is_none());
+    assert!(log.get_session::<Value>("draft").await.unwrap().is_some());
+    assert!(log.get_session::<Value>("branch").await.unwrap().is_some());
+    assert!(
+        log.get_session::<Value>("child")
+            .await
+            .unwrap()
+            .unwrap()
+            .archived
+    );
+    assert!(log.retain_session("child").await.is_err());
+    assert!(matches!(
+        log.set_session_archived::<Value>("child", false, 7).await,
+        Err(StoreError::SessionBusy)
+    ));
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    for session in &plan.remove {
+        assert_eq!(
+            log.finish_session_retirement(session).await.unwrap(),
+            SessionRetirement::Removed
+        );
+    }
+    for session in &plan.archive {
+        assert_eq!(
+            log.finish_session_retirement(session).await.unwrap(),
+            SessionRetirement::Archived
+        );
+    }
+    let receipt = log
+        .session_copy_receipt("child-revision")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(copy(&log, receipt.request).await.id, "child-revision");
+    let archived = log.get_session::<Value>("child").await.unwrap().unwrap();
+    let branch = copy(
+        &log,
+        SessionCopy {
+            source_session_id: archived.id,
+            target_session_id: "from-archived".into(),
+            expected_source_revision: archived.revision,
+            purpose: CopyPurpose::EmptySideConversation,
+        },
+    )
+    .await;
+    assert_eq!(branch.id, "from-archived");
+    assert!(
+        log.retain_session("child").await.is_err(),
+        "copying history grants no execution"
+    );
+    log.set_session_archived::<Value>("child", false, 8)
+        .await
+        .unwrap();
+    turn(&log, "child", "restored-turn", false).await;
+    assert_eq!(
+        log.remove_session_family(
+            "revision",
+            revision,
+            maka_event_log::sessions::RemovalAuthority::Unmanaged
+        )
+        .await
+        .unwrap(),
+        RemoveFamilyResult::Accepted(plan)
+    );
+    assert!(
+        !log.get_session::<Value>("child")
+            .await
+            .unwrap()
+            .unwrap()
+            .archived
+    );
+    log.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn copies_own_history_and_files_without_replaying_execution_across_retries_and_reopen() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("history.sqlite");
@@ -236,20 +552,19 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
         .await,
         Err(StoreError::SessionConflict)
     ));
-    // Remove source catalog state, not retained canonical facts. History reads
-    // and exact receipts must not rely on a live source Session.
-    let inspect = rusqlite::Connection::open(&path).unwrap();
-    inspect
-        .execute_batch(
-            "PRAGMA foreign_keys=ON;
-        BEGIN;
-        DELETE FROM artifact_catalog WHERE session_id='source';
-        DELETE FROM session_read_state WHERE session_id='source';
-        DELETE FROM session_control WHERE id='source';
-        COMMIT;",
-        )
-        .unwrap();
-    drop(inspect);
+    // Real removal releases source resources without removing another Session's
+    // retained evidence. Receipt recovery cannot depend on source catalog state.
+    let revision = log
+        .get_session::<Value>("source")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    log.begin_session_removal("source", revision).await.unwrap();
+    assert_eq!(
+        log.finish_session_retirement("source").await.unwrap(),
+        maka_event_log::sessions::SessionRetirement::Removed
+    );
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(

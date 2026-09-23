@@ -132,6 +132,7 @@ impl BoundCommands {
         let grants = self.grants.clone();
         let submission_stop = self.submission_stop.clone();
         let worker = host.clone();
+        let creator = self.namespace.clone();
         let (send, receive) = tokio::sync::oneshot::channel();
         host.workers.spawn(async move {
             let result = async {
@@ -225,6 +226,9 @@ impl BoundCommands {
                         child.boundary_revision = 0;
                         child.collaboration_mode = CollaborationMode::Agent;
                         child.orchestration_mode = BehaviorId::default();
+                        worker
+                            .validate_workspace(&child)
+                            .map_err(|error| Error::Invalid(error.message))?;
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .map_err(|e| Error::Host(e.to_string()))?
@@ -233,7 +237,17 @@ impl BoundCommands {
                             .map_err(|_| Error::Host("system clock overflow".into()))?;
                         worker
                             .log
-                            .create_session(&id, &fingerprint, &child, now)
+                            .create_plugin_session(
+                                &maka_event_log::sessions::PluginSession {
+                                    session_id: id.clone(),
+                                    creator,
+                                    fingerprint: fingerprint.clone(),
+                                    managed: false,
+                                    authority_session_id: Some(request.parent_session_id.clone()),
+                                },
+                                &child,
+                                now,
+                            )
                             .await
                             .map_err(storage)?
                     }

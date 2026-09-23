@@ -98,7 +98,7 @@ pub(super) async fn insert(
         if !exists {
             return Err(StoreError::SessionNotFound);
         }
-        super::copy::retain(connection, source).await?;
+        super::retain(connection, source).await?;
     }
     sqlx::query("INSERT INTO plugin_sessions VALUES (?, ?, ?, ?, ?, ?)")
         .bind(&origin.session_id)

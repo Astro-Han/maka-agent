@@ -1027,28 +1027,30 @@ export class DesktopRuntimeHostClient {
 
   /**
    * Removes a Session, optionally only while it is still archived.
-   *
-   * Replaying a rejected write at the fresh revision is right for a rename or a
-   * configuration patch — the write means the same thing either way. It is
-   * wrong for a remove: a lifecycle write bumps the revision, so a conflict can
-   * be the task being restored, and replaying then destroys a task whose
-   * deletion nobody asked for any more.
-   *
-   * `requireArchived` states the premise the caller decided on. Re-asserting it
-   * against each fresh read is enough to hold it through the commit, because
-   * the Host serializes the two writes that could disagree: `session.remove`
-   * and `session.lifecycle.set` both enter `#withStableFamily`, which queues
-   * per Session id through the admission gate, and the remove compares the
-   * revision on the way in. So a restore either lands before that comparison —
-   * bumping `metadataVersion` and rejecting the remove — or waits until the
-   * retirement has finished. It cannot land between the check and the delete.
+   * The receipt survives catalog removal. Fresh writes recheck the caller's
+   * archived premise at each CAS revision, so a concurrent restore wins.
    */
   async removeSession(
     sessionId: string,
     options: { requireArchived?: boolean } = {},
   ): Promise<SessionRemoveOutcome> {
+    const receipt = await this.request('session.remove.query', { sessionId });
+    if (receipt.kind === 'removed') {
+      return { disposition: 'removed', archivedSubtaskCount: receipt.archivedSubtaskCount };
+    }
     for (let attempt = 0; attempt < MAX_SESSION_REVISION_ATTEMPTS; attempt += 1) {
-      const current = await this.#requireSession(sessionId);
+      const current = await this.getSession(sessionId);
+      if (current === null) {
+        // A removal may have committed after the first receipt read.
+        const settled = await this.request('session.remove.query', { sessionId });
+        if (settled.kind === 'removed') {
+          return { disposition: 'removed', archivedSubtaskCount: settled.archivedSubtaskCount };
+        }
+        throw new DesktopRuntimeHostClientError(
+          'session_not_found',
+          `Runtime Host Session not found: ${sessionId}`,
+        );
+      }
       if (options.requireArchived && !current.isArchived) {
         return { disposition: "restored", archivedSubtaskCount: 0 };
       }

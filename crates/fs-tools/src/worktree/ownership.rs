@@ -26,7 +26,7 @@ use std::{
     path::Path,
 };
 
-const OWNER: &str = "maka-owner.json";
+pub(super) const OWNER: &str = "maka-owner.json";
 
 pub(super) struct AllocationLock(File);
 impl Drop for AllocationLock {

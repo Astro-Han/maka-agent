@@ -148,8 +148,9 @@ pub async fn run(
         }
     }
     .await;
-    let result = if matches!(&result, Ok((outcome, _)) if !matches!(outcome, InvocationOutcome::HandoffPaused { .. }))
-        && cancellation.is_cancelled()
+    let result = if matches!(&result, Err(RunError::Commit(CommitError::Retired)))
+        || (matches!(&result, Ok((outcome, _)) if !matches!(outcome, InvocationOutcome::HandoffPaused { .. }))
+            && cancellation.is_cancelled())
     {
         Err(RunError::Cancelled)
     } else {

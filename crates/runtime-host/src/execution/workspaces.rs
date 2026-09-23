@@ -31,22 +31,31 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 impl Executions {
-    pub(crate) fn own_plugin_process(&self, session: &str) -> ProcessActivity {
-        *self
-            .plugin_processes
-            .lock()
-            .unwrap()
-            .entry(session.into())
-            .or_default() += 1;
-        ProcessActivity {
-            registry: self.plugin_processes.clone(),
-            session: session.into(),
+    /// Managed checkouts cannot acquire an untracked owner through a path-only
+    /// selection. Shared children inherit the binding and its lifecycle instead.
+    pub(crate) fn validate_workspace(&self, session: &SessionConfiguration) -> super::Result<()> {
+        let root = self.paths.state_root.join("subagent-worktrees");
+        let root = maka_fs_tools::workspace::project::host_path(&root).map_err(internal)?;
+        let cwd = std::path::Path::new(&session.workspace.host_cwd);
+        if session
+            .worktree
+            .as_ref()
+            .is_some_and(|binding| binding.directory() != cwd)
+            || (session.worktree.is_none() && cwd.starts_with(root))
+        {
+            return Err(failure(
+                Code::OperationConflict,
+                "Managed workspaces require their owning Session binding",
+            ));
         }
+        Ok(())
     }
+
     pub(super) async fn prepare_worktree(
         &self,
         session: &SessionConfiguration,
     ) -> super::Result<()> {
+        self.validate_workspace(session)?;
         let Some(binding) = session.worktree.clone() else {
             return Ok(());
         };
@@ -69,22 +78,6 @@ impl Executions {
             Worktrees::open(&root)?.plan(std::path::Path::new(&source), &id, cancel)
         })
         .await
-    }
-}
-
-/// Instance-lifetime plugin processes outlive Turns but still write their Session workspace.
-pub(crate) struct ProcessActivity {
-    registry: Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
-    session: String,
-}
-impl Drop for ProcessActivity {
-    fn drop(&mut self) {
-        let mut registry = self.registry.lock().unwrap();
-        let count = registry.get_mut(&self.session).expect("registered process");
-        *count -= 1;
-        if *count == 0 {
-            registry.remove(&self.session);
-        }
     }
 }
 

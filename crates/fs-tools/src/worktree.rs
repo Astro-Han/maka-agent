@@ -22,6 +22,7 @@
 mod checkout;
 mod ownership;
 mod patch;
+mod removal;
 
 use crate::workspace::{git, invalid};
 use serde::{Deserialize, Serialize};
@@ -132,6 +133,7 @@ impl Worktrees {
         self.validate(binding)?;
         interrupted(cancel)?;
         let _owner = ownership::lock(&self.root, binding)?;
+        removal::require_live(binding)?;
         if binding.directory.try_exists()? {
             return self.inspect(binding);
         }
@@ -142,6 +144,7 @@ impl Worktrees {
     pub fn inspect(&self, binding: &Binding) -> io::Result<()> {
         self.validate(binding)?;
         ownership::verify(&self.root.join(&binding.id), binding)?;
+        removal::require_live(binding)?;
         ownership::verify(&binding.admin(), binding)?;
         let repo = git::discover(&binding.directory)?;
         if repo

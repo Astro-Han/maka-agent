@@ -244,6 +244,9 @@ fn path_free(request: &Request) -> bool {
         | Operation::SessionTurnsQuery
         | Operation::SessionTurnLandmarksQuery
         | Operation::SessionLifecycleSet
+        | Operation::SessionRemove
+        | Operation::SessionRemovePreview
+        | Operation::SessionRemoveQuery
         | Operation::SessionMetadataUpdate
         | Operation::SessionReadMarkerSet
         | Operation::SessionConfigurationUpdate

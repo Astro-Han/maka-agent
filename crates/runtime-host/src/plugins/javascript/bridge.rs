@@ -596,6 +596,18 @@ impl State {
                 let (commands, input) = self.execution(input)?;
                 encode(commands.configure(input).await?)
             }
+            Request::RemoveSession(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.remove_session(input).await?)
+            }
+            Request::RemovalReceipt(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.removal_receipt(input.session_id).await?)
+            }
+            Request::PreviewRemoval(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.preview_removal(input.session_id).await?)
+            }
             Request::ReadMessage(input) => {
                 let (commands, input) = self.execution(input)?;
                 encode(commands.read_message(input).await?)

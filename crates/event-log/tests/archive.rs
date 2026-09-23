@@ -39,6 +39,81 @@ mod lineage;
 use fixtures::*;
 
 #[tokio::test]
+async fn retirement_fences_new_effects_without_rejecting_accepted_results_or_exact_replay() {
+    use maka_event_log::sessions::SessionRetirement;
+    use maka_runtime::event::CommitError;
+    let directory = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&directory.path().join("retirement.sqlite"))
+        .await
+        .unwrap();
+    log.create_session("session", "create", &json!({}), 1)
+        .await
+        .unwrap();
+    open(&log, "run", false).await;
+    let accepted = request("run", "step", None);
+    let sequence = log.append(&accepted).await.unwrap();
+    let revision = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    log.begin_session_removal("session", revision)
+        .await
+        .unwrap();
+    assert_eq!(log.append(&accepted).await.unwrap(), sequence);
+    let output = serde_json::from_value(json!({
+        "parts":[{"kind":"tool_call","call":{"id":"call","name":"Read","input":{"path":"file"},"provider_executed":false}}],
+        "finish_reason":"tool-calls","usage":{}
+    })).unwrap();
+    log.append(&event(
+        "run",
+        Fact::ModelCompleted {
+            step_id: "step".into(),
+            output,
+        },
+    ))
+    .await
+    .unwrap();
+    assert!(matches!(
+        log.append(&request("run", "next", None)).await,
+        Err(CommitError::Retired)
+    ));
+    assert!(matches!(
+        log.append(&event(
+            "run",
+            Fact::ToolDispatched {
+                operation_id: "step:call".into(),
+                call: ToolCallIdentity::provider("step".into(), "call".into()),
+                name: "Read".into(),
+                input: json!({"path":"file"}),
+            }
+        ))
+        .await,
+        Err(CommitError::Retired)
+    ));
+    log.append(&event(
+        "run",
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Cancelled {
+                source: "session_removal".into(),
+            },
+        },
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        log.finish_session_retirement("session").await.unwrap(),
+        SessionRetirement::Removed
+    );
+    assert!(matches!(
+        log.append(&accepted).await,
+        Err(CommitError::Retired)
+    ));
+    log.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("archive.sqlite");
@@ -695,6 +770,19 @@ async fn inherited_results_prune_and_compact_without_changing_siblings_or_frozen
             .unwrap()
             .event_id,
         checkpoint.event().id
+    );
+    // Nested pins still need the intermediate writer's inherited ownership and
+    // checkpoint evidence even after its live Session and materials are gone.
+    let revision = log
+        .get_session::<serde_json::Value>("branch")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    log.begin_session_removal("branch", revision).await.unwrap();
+    assert_eq!(
+        log.finish_session_retirement("branch").await.unwrap(),
+        maka_event_log::sessions::SessionRetirement::Removed
     );
     assert_eq!(
         log.read_model_context("nested", None, 100, 65536)

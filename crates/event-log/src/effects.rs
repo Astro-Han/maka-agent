@@ -103,7 +103,7 @@ impl EventLog {
         self.connection.run(move |connection| {
             Box::pin(async move {
             let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-            if let Some(session) = session { crate::sessions::copy::retain(&mut tx, &session).await?; }
+            if let Some(session) = session { crate::sessions::retain(&mut tx, &session).await?; }
             sqlx::query("INSERT INTO host_effects (id, package_id, scope_id, request) VALUES (?, ?, ?, ?)")
                 .bind(id.to_string()).bind(namespace.package()).bind(String::from(namespace.scope().clone())).bind(raw)
                 .execute(&mut *tx).await?;

@@ -138,7 +138,12 @@ impl ToolJournal {
                         .map_err(|error| ToolError::Persistence(error.to_string()))?,
                 )
                 .await
-                .map_err(|error| ToolError::Persistence(error.to_string()))?;
+                .map_err(|error| match error {
+                    crate::event::CommitError::Retired => {
+                        ToolError::Failed("session retired before effect".into())
+                    }
+                    other => ToolError::Persistence(other.to_string()),
+                })?;
 
             let result = if cancellation.is_cancelled() {
                 Err(ToolError::Failed("cancelled before effect".into()))

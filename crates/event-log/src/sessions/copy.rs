@@ -146,6 +146,7 @@ impl EventLog {
             ).bind(&request.target_session_id).fetch_optional(&mut *tx).await?;
             if let Some(previous) = previous {
                 if previous != encoded { return Err(StoreError::SessionConflict); }
+                super::removal::require_mutable(&mut tx, &request.target_session_id).await?;
                 super::origin::check(&mut tx, &request.target_session_id, origin.as_ref()).await?;
                 let session = super::read(&mut tx, &request.target_session_id).await?
                     .ok_or(StoreError::SessionNotFound)?;
@@ -217,6 +218,9 @@ impl EventLog {
                 if retained.rows_affected() == 0 { return Err(super::invalid("revision Turn has no editable input")); }
                 crate::artifacts::history::retain_revision(&mut tx, &request.source_session_id, &request.target_session_id, now).await?;
             }
+            // History ownership is not execution admission: a fully archived
+            // source can seed a branch without becoming executable again.
+            super::removal::require_mutable(&mut tx, &request.source_session_id).await?;
             retain(&mut tx, &request.source_session_id).await?;
             let session = super::read(&mut tx, &request.target_session_id).await?
                 .ok_or(StoreError::SessionNotFound)?;

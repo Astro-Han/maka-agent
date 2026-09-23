@@ -88,6 +88,9 @@ pub(super) async fn relocate(host: &Host, value: &Value) -> Result<SessionUpdate
             "Archived Session workspace cannot be relocated",
         ));
     }
+    let mut destination = current.configuration.clone();
+    destination.workspace = workspace.clone();
+    host.executions.validate_workspace(&destination)?;
     let committed = host
         .log
         .update_session_metadata(

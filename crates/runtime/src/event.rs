@@ -326,6 +326,9 @@ impl LogPrefix {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CommitError {
+    /// This Session has stopped accepting work. No effect was admitted.
+    #[error("session retired")]
+    Retired,
     #[error("event rejected: {0}")]
     Rejected(String),
     #[error("event commit outcome unknown: {0}")]

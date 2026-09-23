@@ -44,6 +44,7 @@ impl EventLog {
         let id = id.to_owned();
         self.connection.run(move |connection| Box::pin(async move {
         let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
+        super::removal::require_mutable(&mut tx, &id).await?;
         let record: SessionRecord<T> = read(&mut tx, &id).await?.ok_or(StoreError::SessionNotFound)?;
         let active: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM runtime_events AS opening
@@ -57,6 +58,10 @@ impl EventLog {
         }
         if record.archived == archived {
             return Ok(record);
+        }
+        if !archived {
+            sqlx::query("DELETE FROM session_retirements WHERE session_id=? AND remove_session=0 AND completed=1")
+                .bind(&id).execute(&mut *tx).await?;
         }
         let changed = sqlx::query(
             "UPDATE session_control SET archived = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision < ?",
@@ -126,6 +131,7 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
+                    super::removal::require_mutable(&mut tx, &id).await?;
                     let mut record: SessionRecord<T> = read(&mut tx, &id)
                         .await?
                         .ok_or(StoreError::SessionNotFound)?;

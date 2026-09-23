@@ -59,23 +59,6 @@ async fn state(
 }
 
 impl EventLog {
-    /// Host-owned native process acceptance has no canonical invocation. The
-    /// caller pins the admission gate through this commit and actual launch.
-    pub async fn retain_session(&self, session: &str) -> Result<(), StoreError> {
-        self.validate_root()?;
-        sessions::validate_id(session)?;
-        let session = session.to_owned();
-        self.connection
-            .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-                    retain(&mut tx, &session).await?;
-                    tx.commit().await.map_err(StoreError::CommitUnknown)
-                })
-            })
-            .await
-    }
-
     /// Only unused revisions can disappear. Acceptance, dependent creation and
     /// this decision serialize on the same durable writer; replies are replayable.
     pub async fn abandon_revision(&self, session: &str) -> Result<AbandonRevision, StoreError> {

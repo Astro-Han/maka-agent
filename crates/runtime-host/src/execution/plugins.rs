@@ -30,6 +30,7 @@ mod interactions;
 mod llm;
 mod messages;
 mod network;
+mod removal;
 mod resume;
 mod root;
 mod submit;
@@ -95,15 +96,6 @@ pub(crate) struct ProcessAdmission {
 }
 
 impl Executions {
-    pub(crate) async fn retain_plugin_process_session(
-        &self,
-        session: &str,
-    ) -> Result<(), StoreError> {
-        self.log.retain_session(session).await?;
-        self.publish_session_change(session).await;
-        Ok(())
-    }
-
     pub(crate) async fn admit_plugin_process(
         &self,
         scope: &maka_plugins::call::Scope,
@@ -346,6 +338,28 @@ impl BoundCommands {
     }
 
     async fn authorize(&self, host: &Executions, session: &str) -> Result<(), Error> {
+        let current = self.authorize_session_control(host, session).await?;
+        if host
+            .log
+            .session_retirement(session)
+            .await
+            .map_err(storage)?
+            .is_some()
+        {
+            return Err(Error::Revoked);
+        }
+        if current.archived {
+            return Err(Error::Denied);
+        }
+        Ok(())
+    }
+
+    /// Lifecycle control may inspect archived Sessions, but grants no execution.
+    async fn authorize_session_control(
+        &self,
+        host: &Executions,
+        session: &str,
+    ) -> Result<maka_event_log::sessions::SessionRecord<SessionConfiguration>, Error> {
         self.authorize_origin(host).await?;
         if host
             .log
@@ -369,8 +383,7 @@ impl BoundCommands {
             .await
             .map_err(storage)?
             .ok_or(Error::NotFound)?;
-        if current.archived
-            || current.configuration.boundary_revision != grant.boundary_revision
+        if current.configuration.boundary_revision != grant.boundary_revision
             || current.configuration.sandbox_mode != grant.sandbox_mode
             || current.configuration.approval_policy != grant.approval_policy
             || current.configuration.workspace.host_cwd != grant.cwd
@@ -378,7 +391,7 @@ impl BoundCommands {
         {
             return Err(Error::Denied);
         }
-        Ok(())
+        Ok(current)
     }
 
     async fn receipt(&self, host: &Executions, operation: &str) -> Result<Receipt, Error> {
@@ -394,6 +407,21 @@ impl BoundCommands {
 }
 
 impl Commands for BoundCommands {
+    fn remove_session(
+        &self,
+        request: maka_plugins::execution::RemoveSession,
+    ) -> BoxFuture<'_, Result<maka_plugins::execution::RemovedSession, Error>> {
+        Box::pin(self.remove(request))
+    }
+    fn removal_receipt(
+        &self,
+        session_id: String,
+    ) -> BoxFuture<'_, Result<Option<maka_plugins::execution::RemovalReceipt>, Error>> {
+        Box::pin(self.read_removal_receipt(session_id))
+    }
+    fn preview_removal(&self, session_id: String) -> BoxFuture<'_, Result<u64, Error>> {
+        Box::pin(self.preview_session_removal(session_id))
+    }
     fn copy_attachment(
         &self,
         source: Arc<dyn Commands>,
@@ -864,6 +892,7 @@ fn storage(error: StoreError) -> Error {
         StoreError::EventConflict | StoreError::SessionConflict => Error::Conflict,
         StoreError::SessionBusy => Error::Busy,
         StoreError::SessionNotFound => Error::NotFound,
+        StoreError::SessionRetired => Error::Revoked,
         StoreError::CommitUnknown(_) | StoreError::OperationUnknown => {
             Error::OutcomeUnknown(error.to_string())
         }

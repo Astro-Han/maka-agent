@@ -33,6 +33,193 @@ mod support;
 use support::{admission, append, command, invocation, opening};
 
 #[tokio::test]
+async fn removal_atomically_cancels_pending_work_and_keeps_accepted_settlement_across_restart() {
+    use maka_event_log::sessions::{SessionRemovalResult as Result, SessionRetirement as State};
+    for active in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("removal.sqlite");
+        let log = EventLog::open(&path).await.unwrap();
+        log.create_session("session", "create", &json!({}), 1)
+            .await
+            .unwrap();
+        let process = uuid::Uuid::new_v4();
+        log.admit_session_process("session", process).await.unwrap();
+        let owner = invocation("first");
+        if active {
+            append(&log, &owner, opening()).await;
+        }
+        let pending = admission(
+            &owner,
+            "pending",
+            if active {
+                Disposition::Followup
+            } else {
+                Disposition::TurnStarted
+            },
+        );
+        log.admit_message(pending.clone()).await.unwrap();
+        let revision = log
+            .get_session::<serde_json::Value>("session")
+            .await
+            .unwrap()
+            .unwrap()
+            .revision;
+        assert!(matches!(
+            log.begin_session_removal("session", revision + 1)
+                .await
+                .unwrap(),
+            Result::RevisionConflict { .. }
+        ));
+        let inspect = rusqlite::Connection::open(&path).unwrap();
+        inspect
+            .execute_batch(
+                "CREATE TRIGGER reject_retirement BEFORE INSERT ON message_cancellations
+            BEGIN SELECT RAISE(ABORT, 'cancellation failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            log.begin_session_removal("session", revision)
+                .await
+                .is_err()
+        );
+        assert_eq!(log.session_retirement("session").await.unwrap(), None);
+        assert_eq!(
+            log.pending_messages("session").await.unwrap(),
+            vec![pending.clone()]
+        );
+        inspect
+            .execute_batch("DROP TRIGGER reject_retirement")
+            .unwrap();
+        drop(inspect);
+        assert_eq!(
+            log.begin_session_removal("session", revision)
+                .await
+                .unwrap(),
+            Result::Accepted(State::Removing)
+        );
+        assert!(!log.session_retirement_ready("session").await.unwrap());
+        assert!(
+            log.admit_session_process("session", uuid::Uuid::new_v4())
+                .await
+                .is_err()
+        );
+        assert!(log.message_cancelled("session", "pending").await.unwrap());
+        assert!(
+            log.get_session::<serde_json::Value>("session")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            log.list_sessions::<serde_json::Value>(None, None, 32)
+                .await
+                .unwrap()
+                .sessions
+                .is_empty()
+        );
+        assert!(
+            log.retiring_session::<serde_json::Value>("session")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(log.pending_message_sessions(None).await.unwrap().is_empty());
+        assert!(log.admit_message(pending).await.is_err());
+        assert!(matches!(
+            log.retain_session("session").await,
+            Err(StoreError::SessionRetired)
+        ));
+        assert!(
+            log.update_session_metadata(
+                "session",
+                revision + 1,
+                |_: &mut serde_json::Value| Ok(())
+            )
+            .await
+            .is_err()
+        );
+        if active {
+            assert_eq!(
+                log.finish_session_retirement("session").await.unwrap(),
+                State::Removing
+            );
+            append(
+                &log,
+                &owner,
+                Fact::InvocationEnded {
+                    outcome: InvocationOutcome::Cancelled {
+                        source: "session_removal".into(),
+                    },
+                },
+            )
+            .await;
+        }
+        log.close().await.unwrap();
+        let log = EventLog::open(&path).await.unwrap();
+        assert!(
+            !log.session_retirement_ready("session").await.unwrap(),
+            "losing the native process handle does not prove cleanup"
+        );
+        assert_eq!(
+            log.finish_session_retirement("session").await.unwrap(),
+            State::Removing
+        );
+        log.clean_session_process(process).await.unwrap();
+        assert!(log.session_retirement_ready("session").await.unwrap());
+        assert_eq!(
+            log.pending_session_retirements(None).await.unwrap(),
+            ["session"]
+        );
+        assert_eq!(
+            log.begin_session_removal("session", revision)
+                .await
+                .unwrap(),
+            Result::Accepted(State::Removing)
+        );
+        assert_eq!(
+            log.finish_session_retirement("session").await.unwrap(),
+            State::Removed
+        );
+        assert_eq!(
+            log.finish_session_retirement("session").await.unwrap(),
+            State::Removed
+        );
+        assert_eq!(
+            log.begin_session_removal("session", revision)
+                .await
+                .unwrap(),
+            Result::Accepted(State::Removed)
+        );
+        assert!(
+            log.get_session::<serde_json::Value>("session")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            log.create_session("session", "create", &json!({}), 2)
+                .await
+                .is_err()
+        );
+        assert!(
+            log.append(
+                &EventWrite::plain(RuntimeEvent::new(invocation("late"), opening())).unwrap()
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            log.pending_session_retirements(None)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(log.message_cancelled("session", "pending").await.unwrap());
+        log.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ownership() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("queue.sqlite");

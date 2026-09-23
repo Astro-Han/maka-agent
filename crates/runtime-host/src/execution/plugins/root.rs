@@ -148,8 +148,7 @@ impl BoundCommands {
             return Err(Error::Denied);
         }
         let current = &record.configuration;
-        if record.archived
-            || current.workspace != approval.workspace
+        if current.workspace != approval.workspace
             || current.workspace_origin != approval.workspace_origin
             || rank(current.sandbox_mode) > rank(approval.sandbox_mode)
             || !current
@@ -422,6 +421,7 @@ impl BoundCommands {
                 }
                 let expected =
                     configuration(&worker, &id, &request, &approval, existing.is_none()).await?;
+                worker.validate_workspace(&expected).map_err(|error| Error::Invalid(error.message))?;
                 let record = match existing {
                     Some(record) => record,
                     None => {

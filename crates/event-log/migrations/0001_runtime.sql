@@ -44,6 +44,27 @@ CREATE TABLE session_catalog_revision (
     revision INTEGER NOT NULL CHECK(revision >= 0)
 );
 
+-- Retirement fences new admissions before asynchronous resource cleanup. Keep
+-- its identity after cleanup so a lost reply cannot resurrect the Session.
+CREATE TABLE session_retirements (
+    session_id TEXT PRIMARY KEY,
+    remove_session INTEGER NOT NULL DEFAULT 1 CHECK(remove_session IN (0, 1)),
+    completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0, 1))
+);
+
+CREATE TABLE session_removal_receipts (
+    session_id TEXT PRIMARY KEY,
+    plan_json TEXT NOT NULL
+);
+
+-- A Host crash loses native handles, not proof that a process may still write.
+CREATE TABLE session_processes (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    cleaned INTEGER NOT NULL DEFAULT 0 CHECK(cleaned IN (0, 1))
+);
+CREATE INDEX session_processes_pending ON session_processes(session_id) WHERE cleaned=0;
+
 CREATE TABLE session_read_state (
     session_id TEXT PRIMARY KEY REFERENCES session_control(id),
     has_unread INTEGER NOT NULL CHECK(has_unread IN (0, 1)),

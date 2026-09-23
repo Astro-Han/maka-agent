@@ -120,6 +120,7 @@ impl Operation {
                 | Self::SessionRecapGenerate
                 | Self::SessionRemove
                 | Self::SessionRemovePreview
+                | Self::SessionRemoveQuery
                 | Self::SessionRevisionAbandon
                 | Self::SessionRevisionCreate
                 | Self::SessionTranscriptPage
