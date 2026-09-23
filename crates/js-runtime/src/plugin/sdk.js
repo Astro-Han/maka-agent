@@ -302,7 +302,10 @@
       ...pricing,
       update: (input) => host('pricing.update', { authority, input }),
     }),
-    usage: Object.freeze({ activity: (input) => host('usage.activity', { authority, input }) }),
+    usage: Object.freeze({
+      activity: (input) => host('usage.activity', { authority, input }),
+      summary: (input) => host('usage.summary', { authority, input }),
+    }),
     sessions: Object.freeze({ list: (input = {}) => host('sessions.list', { authority, input }) }),
     history: Object.freeze({
       list: (input = {}) => host('history.list', { authority, input }),

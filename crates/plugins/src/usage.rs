@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 pub use maka_runtime::accounting::{
     Activity, ActivityKind, ActivityStatus, AuxiliarySource, ModelAttempt, Origin, Outcome,
-    Selection, ToolAttempt, ToolResult, ToolStatus,
+    Selection, Summary, ToolAttempt, ToolResult, ToolStatus,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -79,4 +79,6 @@ pub struct Page {
 pub trait Usage: Send + Sync {
     /// At most 100 rows / 48 KiB. Every continuation rechecks current authority.
     fn activity(&self, call: Scope, input: Read) -> BoxFuture<'_, Result<Page, CommandError>>;
+    /// Headline totals for an activity cursor's range/scope/fence, not its list filters.
+    fn summary(&self, call: Scope, cursor: String) -> BoxFuture<'_, Result<Summary, CommandError>>;
 }

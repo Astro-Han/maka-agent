@@ -92,6 +92,10 @@ impl Probe {
         )
         .await;
         assert_eq!(empty["page"]["total"], 0, "{empty}");
+        assert!(
+            empty["summary"]["models"]["calls"].as_u64().unwrap() > 0,
+            "activity filters must not erase headline usage: {empty}"
+        );
         let repeated = read(
             peer,
             client,

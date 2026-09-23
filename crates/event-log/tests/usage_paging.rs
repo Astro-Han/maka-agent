@@ -52,7 +52,7 @@ async fn accounting_pages_bound_bytes_without_dropping_records_or_reading_respon
         log.append_batch(&[
             event(Fact::ModelRequested {
                 step_id: format!("step-{i}"),
-                model_id: "model".repeat(400),
+                model_id: format!("{i}-{}", "model".repeat(400)),
                 purpose: ModelPurpose::Main,
                 source_scope: LogScope::Session { id: "usage".into() },
                 source_high_water: 0,
@@ -124,6 +124,12 @@ async fn accounting_pages_bound_bytes_without_dropping_records_or_reading_respon
         }
     }
     assert_eq!(seen.len(), 80);
+    assert!(
+        matches!(log.usage_summary(query).await,
+        Err(maka_event_log::StoreError::InvalidTransition(message))
+            if message.contains("response capacity")),
+        "oversized complete breakdowns fail rather than silently dropping groups"
+    );
     log.close().await.unwrap();
 }
 

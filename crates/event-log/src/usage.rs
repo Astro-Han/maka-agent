@@ -28,6 +28,8 @@ use sqlx::{Row, sqlite::SqliteRow};
 
 mod auxiliary;
 mod reads;
+mod summary;
+pub use summary::Report;
 pub(crate) mod valuation;
 
 #[derive(Clone, Debug)]
@@ -41,6 +43,32 @@ pub struct Query {
 }
 
 impl Query {
+    /// Capture inside the same read transaction as every section of the result.
+    async fn fence(&self, connection: &mut sqlx::SqliteConnection) -> Result<u64, StoreError> {
+        let current = crate::sequence_number(
+            sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM event_log")
+                .fetch_one(connection)
+                .await?,
+        )?;
+        let through = self.through.unwrap_or(current);
+        if through > current {
+            return Err(invalid("Usage fence is in the future"));
+        }
+        Ok(through)
+    }
+
+    fn restrict(&self, sql: &mut sqlx::QueryBuilder<sqlx::Sqlite>, through: u64) {
+        sql.push(" WHERE completed_at >= ")
+            .push_bind(self.from)
+            .push(" AND completed_at <= ")
+            .push_bind(self.to)
+            .push(" AND completed_sequence <= ")
+            .push_bind(through as i64);
+        if let Some(session) = &self.session_id {
+            sql.push(" AND session_id = ").push_bind(session.clone());
+        }
+    }
+
     fn validate(&self) -> Result<(), StoreError> {
         if !self.from.is_finite() || !self.to.is_finite() || self.from < 0.0 || self.to < self.from
         {

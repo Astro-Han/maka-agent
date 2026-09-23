@@ -22,10 +22,18 @@ use futures_util::future::BoxFuture;
 use maka_plugins::{
     call::Scope,
     execution::CommandError,
-    usage::{Page, Read, Usage},
+    usage::{Page, Read, Summary, Usage},
 };
 
 impl Usage for Effects {
+    fn summary(&self, call: Scope, cursor: String) -> BoxFuture<'_, Result<Summary, CommandError>> {
+        Box::pin(async move {
+            let _lease = self.owner.admit().map_err(|_| CommandError::Revoked)?;
+            let host = self.host.upgrade().ok_or(CommandError::Draining)?;
+            host.plugin_usage_summary(call, cursor).await
+        })
+    }
+
     fn activity(&self, call: Scope, input: Read) -> BoxFuture<'_, Result<Page, CommandError>> {
         Box::pin(async move {
             let _lease = self.owner.admit().map_err(|_| CommandError::Revoked)?;

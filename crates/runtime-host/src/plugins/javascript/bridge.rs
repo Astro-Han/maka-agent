@@ -309,6 +309,10 @@ impl State {
                 let call = self.calls.get(&input.authority)?;
                 encode(self.usage.activity(call, input.input).await?)
             }
+            Request::UsageSummary(input) => {
+                let call = self.calls.get(&input.authority)?;
+                encode(self.usage.summary(call, input.input).await?)
+            }
             Request::PricingQuery(input) => encode(self.pricing.query(input).await?),
             Request::PricingUpdate(input) => {
                 let call = self.calls.get(&input.authority)?;

@@ -457,6 +457,13 @@ export default async function (ctx) {
             )
           )
             throw new Error('Agent accounting lost usage or escaped its Session');
+          const summary = await call.usage.summary(usage.cursor);
+          if (
+            summary.models.calls === 0 ||
+            summary.models.input.known < 3 ||
+            summary.models.output.known < 5
+          )
+            throw new Error('Agent summary lost auxiliary model counters');
           try {
             await call.pricing.update({
               expectedRevision: rates.revision,

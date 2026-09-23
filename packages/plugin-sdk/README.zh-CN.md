@@ -153,6 +153,8 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 
 每页最多 100 条／48 KiB。`{ kind: 'continue', cursor }` 重读该页，`nextCursor` 在相同筛选条件与结算快照下翻页。Host 重启使游标失效；每次读取都重新检查当前授权。
 
+`call.usage.summary(cursor)` 复用相同的范围、Session 和快照，忽略活动列表筛选。Token 和费用小计保留缺失调用数；未报价与已报价但用量不完整分别统计。提供商／模型／工具分组必须完整，否则明确报错（各最多 128 组，整体 48 KiB）。待结算数按范围内的准入时间统计，不计入已完成总额。非有限值或无法精确表示的整数会报错，不变成零。
+
 ## 报价
 
 `ctx.pricing.query({ kind: 'start' })` 在激活期间即可读取公共报价。使用返回的 revision 与 `nextOffset` 继续分页，遇到 `revision_changed` 则重新读取。`call.pricing.update({ expectedRevision, mutation })` 需要 profile 范围的 `manage_pricing` 明确授权。修改复用原生 CAS 与配置通知，只影响后续准入；已接受的修改不会因调用者停止等待而中断。丢回复后重试可能返回 `revision_conflict`，应先查询再决定下一次修改。

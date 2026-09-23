@@ -23,8 +23,13 @@ use crate::{context::ModelPurpose, event::Invocation, execution::ModelBinding, m
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 mod activity;
+mod summary;
 mod tool;
 pub use activity::{Activity, ActivityKind, ActivityStatus, Selection};
+pub use summary::{
+    Cost, ModelSummary, ModelTotals, Pending, ProviderSummary, Summary, Tokens, ToolSummary,
+    ToolTotals,
+};
 pub use tool::{ToolAttempt, ToolResult, ToolStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

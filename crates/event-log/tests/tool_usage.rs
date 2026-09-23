@@ -163,6 +163,22 @@ async fn tool_accounting_preserves_dispatch_truth_and_snapshot_without_private_b
     );
     let page = log.tool_attempts(query(), 0, 100).await.unwrap();
     assert_eq!(page.total, 6);
+    let totals = log.usage_summary(query()).await.unwrap().summary.tools;
+    assert_eq!(
+        (
+            totals.calls,
+            totals.success,
+            totals.error,
+            totals.unknown,
+            totals.rejected
+        ),
+        (6, 1, 1, 2, 2)
+    );
+    assert_eq!(
+        totals.mean_latency_ms,
+        Some(3.875),
+        "refusals and unknown effects do not invent execution latency"
+    );
     let find = |id: &str| {
         page.attempts
             .iter()

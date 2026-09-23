@@ -79,6 +79,8 @@ pub(super) enum Request {
     HistoryRead(HistoryRead),
     #[serde(rename = "usage.activity")]
     UsageActivity(Authorized<maka_plugins::usage::Read>),
+    #[serde(rename = "usage.summary")]
+    UsageSummary(Authorized<String>),
     #[serde(rename = "pricing.query")]
     PricingQuery(maka_runtime::pricing::Query),
     #[serde(rename = "pricing.update")]

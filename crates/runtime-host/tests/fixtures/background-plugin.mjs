@@ -49,8 +49,12 @@ export default async function (ctx) {
       input.read
     );
     try {
-      const page = await ctx.withAuthorization(input.grant, (call) => call.usage.activity(read));
-      return JSON.parse(JSON.stringify({ page }));
+      const result = await ctx.withAuthorization(input.grant, async (call) => {
+        const page = await call.usage.activity(read);
+        const summary = await call.usage.summary(page.cursor);
+        return { page, summary };
+      });
+      return JSON.parse(JSON.stringify(result));
     } catch (error) {
       return { error: error.code };
     }

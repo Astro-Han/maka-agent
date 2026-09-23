@@ -112,4 +112,43 @@ export interface Usage {
    * with a profile or Session target. No conversation bodies are exposed.
    */
   activity(input: UsageRead): Promise<UsagePage>;
+  /** Uses the activity cursor's scope, time range and fence, ignoring list filters.
+   * Known subtotals retain missing-call coverage; a zero estimate is not missing.
+   */
+  summary(cursor: string): Promise<UsageSummary>;
+}
+
+export interface UsageTokens {
+  known: number;
+  missing: number;
+}
+export interface UsageSummary {
+  /** Unsettled admissions within the time range at this fence, excluded from completed totals. */
+  pending: { models: number; tools: number };
+  /** Complete breakdowns, at most 128 groups each / 48 KiB overall; overflow fails explicitly. */
+  byProvider: readonly { providerId: string | null; totals: UsageSummary['models'] }[];
+  byModel: readonly { modelId: string; totals: UsageSummary['models'] }[];
+  byTool: readonly { name: string; totals: UsageSummary['tools'] }[];
+  models: {
+    calls: number;
+    success: number;
+    error: number;
+    aborted: number;
+    unknown: number;
+    input: UsageTokens;
+    output: UsageTokens;
+    cacheRead: UsageTokens;
+    cacheWrite: UsageTokens;
+    reasoning: UsageTokens;
+    cost: { knownUsd: number; unvalued: number; unpriced: number };
+  };
+  tools: {
+    calls: number;
+    success: number;
+    error: number;
+    unknown: number;
+    rejected: number;
+    /** Only known success/error settlements contribute to latency. */
+    meanLatencyMs: number | null;
+  };
 }

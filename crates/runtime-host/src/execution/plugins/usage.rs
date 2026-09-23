@@ -22,7 +22,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use maka_plugins::{
     authorization::{Boundary, Capability},
     call::Scope,
-    usage::{Filter, Page, Read},
+    usage::{Filter, Page, Read, Summary},
 };
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +72,36 @@ fn invalid_cursor() -> Error {
 }
 
 impl Executions {
+    pub(crate) async fn plugin_usage_summary(
+        &self,
+        call: Scope,
+        cursor: String,
+    ) -> Result<Summary, Error> {
+        let cursor = Cursor::decode(&cursor, self.interactions.epoch())?;
+        self.check_usage_filter(&call, &cursor.filter).await?;
+        let report = self
+            .log
+            .usage_summary(maka_event_log::usage::Query {
+                from: cursor.filter.from,
+                to: cursor.filter.to,
+                session_id: cursor.filter.session_id.clone(),
+                through: Some(cursor.through),
+            })
+            .await
+            .map_err(usage_error)?;
+        self.check_usage_filter(&call, &cursor.filter).await?;
+        Ok(report.summary)
+    }
+
+    async fn check_usage_filter(&self, call: &Scope, filter: &Filter) -> Result<(), Error> {
+        let mut checked = filter.clone();
+        restrict(self.usage_boundary(call).await?, &mut checked)?;
+        if &checked != filter {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
     async fn usage_boundary(&self, call: &Scope) -> Result<Boundary, Error> {
         if call.identity.agent().is_some() {
             self.plugin_execution_boundary(call).await
@@ -113,16 +143,9 @@ impl Executions {
                 100,
             )
             .await
-            .map_err(|error| match error {
-                maka_event_log::StoreError::InvalidTransition(message) => Error::Invalid(message),
-                other => storage(other),
-            })?;
+            .map_err(usage_error)?;
         // Reading can yield to consent revocation or a Session boundary change.
-        let mut checked = filter.clone();
-        restrict(self.usage_boundary(&call).await?, &mut checked)?;
-        if checked != filter {
-            return Err(Error::Revoked);
-        }
+        self.check_usage_filter(&call, &filter).await?;
         if result.through > MAX_NUMBER || result.total > MAX_NUMBER || offset > result.total {
             return Err(invalid_cursor());
         }
@@ -172,5 +195,12 @@ fn restrict(boundary: Boundary, filter: &mut Filter) -> Result<(), Error> {
             Ok(())
         }
         Boundary::Workspace { .. } | Boundary::Directory { .. } => Err(Error::Denied),
+    }
+}
+
+fn usage_error(error: maka_event_log::StoreError) -> Error {
+    match error {
+        maka_event_log::StoreError::InvalidTransition(message) => Error::Invalid(message),
+        other => storage(other),
     }
 }

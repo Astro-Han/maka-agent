@@ -149,6 +149,8 @@ Activity entries are tagged `model` or `tool`. Optional `activity` filters selec
 
 Each page contains at most 100 attempts / 48 KiB. `{ kind: 'continue', cursor }` re-reads that page; `nextCursor` advances under the same filter and settlement fence. Host restart invalidates cursors; every read checks current authorization.
 
+`call.usage.summary(cursor)` uses the same range, Session and fence, ignoring activity-only filters. Token and cost subtotals include missing-call coverage; unpriced calls differ from priced calls with incomplete usage. Provider/model/tool breakdowns are complete or fail explicitly (128 groups each, 48 KiB overall). Pending counts use admission time within the range and are excluded from completed totals. Nonfinite or inexact integer aggregates fail rather than becoming zero.
+
 ## Pricing
 
 `ctx.pricing.query({ kind: 'start' })` reads the public rate catalog during activation. Continue with the returned revision and `nextOffset`; `revision_changed` requires a new scan. `call.pricing.update({ expectedRevision, mutation })` requires explicit profile `manage_pricing` consent. Edits share the native CAS and configuration notices, affect future admissions only, and finish after admission even if the caller stops waiting. A lost reply can yield `revision_conflict` on retry; query before choosing another edit.

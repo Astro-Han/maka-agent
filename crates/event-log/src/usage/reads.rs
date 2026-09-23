@@ -48,15 +48,7 @@ impl View {
     }
 
     fn restrict(&self, sql: &mut QueryBuilder<sqlx::Sqlite>, query: &Query, through: u64) {
-        sql.push(" WHERE completed_at >= ")
-            .push_bind(query.from)
-            .push(" AND completed_at <= ")
-            .push_bind(query.to)
-            .push(" AND completed_sequence <= ")
-            .push_bind(through as i64);
-        if let Some(session) = &query.session_id {
-            sql.push(" AND session_id = ").push_bind(session.clone());
-        }
+        query.restrict(sql, through);
         if let Self::Activity(selection) = self {
             if let Some(kind) = selection.kind {
                 sql.push(" AND kind = ").push_bind(match kind {
@@ -99,15 +91,7 @@ pub(super) async fn page<T: Serialize + Send + 'static>(
         .run(move |connection| {
             Box::pin(async move {
                 let mut tx = connection.begin().await?;
-                let current = crate::sequence_number(
-                    sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM event_log")
-                        .fetch_one(&mut *tx)
-                        .await?,
-                )?;
-                let through = query.through.unwrap_or(current);
-                if through > current {
-                    return Err(invalid("Usage fence is in the future"));
-                }
+                let through = query.fence(&mut tx).await?;
                 // Only closed internal view/column identifiers are interpolated.
                 let mut count = QueryBuilder::new("SELECT COUNT(*) FROM ");
                 count.push(view.table());
