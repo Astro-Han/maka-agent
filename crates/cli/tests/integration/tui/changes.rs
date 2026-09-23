@@ -138,6 +138,9 @@ fn real_edits_show_request_diff_without_claiming_a_file_snapshot_and_copy_withou
     tui.resize(120, 40);
     tui.wait_until(|screen| screen.contains("▤ Workspace") && !screen.contains("Loaded"));
     tui.send(b"\x10");
+    tui.wait_for("Commands · Esc closes");
+    // Command additions may put execution details below the initial viewport.
+    tui.send(b"\x1b[F"); // End scrolls to the last command without activating it.
     tui.wait_for("Show execution details");
     tui.click_text("Show execution details");
     tui.wait_for("old_string:");

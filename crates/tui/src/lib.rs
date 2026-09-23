@@ -58,6 +58,10 @@ enum Completed {
             String,
         >,
     ),
+    Recap(
+        pages::recap::Request,
+        Result<Option<pages::recap::Receipt>, maka_client::RequestFailure>,
+    ),
     Revised(
         pages::revision::Request,
         Result<pages::revision::Output, maka_client::RequestFailure>,
@@ -249,6 +253,25 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     jobs.spawn(async move {
                         let result = pages::revision::execute(&client, &request).await;
                         Completed::Revised(request, result)
+                    });
+                }
+                dirty = true;
+            }
+            if let Some(request) = app.recap_request() {
+                if request.needs_checkpoint() {
+                    if let Some(state) = &mut state {
+                        state.submit_recap(request);
+                    } else {
+                        app.recap_after_checkpoint(
+                            &request,
+                            &Err("TUI checkpoint unavailable".into()),
+                        );
+                    }
+                } else {
+                    let client = client.clone();
+                    jobs.spawn(async move {
+                        let result = pages::recap::execute(&client, &request).await;
+                        Completed::Recap(request, result)
                     });
                 }
                 dirty = true;
@@ -577,6 +600,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 Action::Quit => {
                     app.attachments.disconnect();
                     app.skills.disconnect();
+                    app.recap.disconnect();
                     app.branch.disconnect();
                     app.revision.disconnect();
                     if let Some(state) = &mut state {
@@ -605,6 +629,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     app.abandon_pending_submissions();
                     app.attachments.disconnect();
                     app.skills.disconnect();
+                    app.recap.disconnect();
                     app.creating = false;
                     jobs = JoinSet::new();
                     history_job = None;
@@ -765,6 +790,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     None => std::future::pending().await,
                 }
             } => {
+                if let Some(request) = written.recap
+                    && app.recap_after_checkpoint(&request, &written.result)
+                    && let Some(client) = client.clone() {
+                    jobs.spawn(async move {
+                        let result=pages::recap::execute(&client,&request).await;
+                        Completed::Recap(request,result)
+                    });
+                }
                 if let Some(ticket) = written.attachment
                     && let Some((prepared, transfer)) = app.attachment_after_checkpoint(&ticket, &written.result)
                     && let Some(client) = client.clone() {
@@ -904,6 +937,10 @@ pub async fn run(options: Options) -> Result<(), Error> {
                         if let Some(service) = app.oauth_completed(request, result) {
                             oauth_service = Some(service);
                         }
+                        if let Some(state) = &mut state { state.changed(); }
+                    }
+                    Some(Ok(Completed::Recap(request,result))) => {
+                        app.recap_completed(request,result);
                         if let Some(state) = &mut state { state.changed(); }
                     }
                     Some(Ok(Completed::Managed(ticket, result))) => {
@@ -1086,6 +1123,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 app.abandon_pending_submissions();
                 app.attachments.disconnect();
                 app.skills.disconnect();
+                    app.recap.disconnect();
                 app.abandon_management();
                 app.branch.disconnect();
                     app.revision.disconnect();
@@ -1109,6 +1147,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
     }
     app.attachments.disconnect();
     app.skills.disconnect();
+    app.recap.disconnect();
     attachment_jobs.abort_all();
     jobs.abort_all();
     // Once Save was pressed, finish the bounded local write and checkpoint the
