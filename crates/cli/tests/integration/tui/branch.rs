@@ -165,7 +165,11 @@ fn branch_preserves_selected_history_and_draft_and_reopens_by_original_receipt()
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(checkpoint).unwrap()).unwrap();
     assert!(saved["branch"].is_null());
-    assert_eq!(saved["route"]["session"], request.target_session_id);
+    let cursor = saved["navigation"]["cursor"].as_u64().unwrap() as usize;
+    assert_eq!(
+        saved["navigation"]["entries"][cursor]["session"],
+        request.target_session_id
+    );
     let receipt = runtime
         .block_on(client.query_session_copy(request))
         .unwrap()

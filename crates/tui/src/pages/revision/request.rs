@@ -50,7 +50,7 @@ pub enum Output {
     Missing,
     Conflict,
     Started,
-    Blocked,
+    Blocked(String),
     Abandoned,
     Retained,
 }
@@ -86,7 +86,7 @@ pub async fn execute(client: &Client, request: &Request) -> Result<Output, Reque
         Job::Start(input) => {
             return Ok(match client.start_turn_batch(input.clone()).await? {
                 TurnStartResult::Started { .. } => Output::Started,
-                TurnStartResult::Blocked { .. } => Output::Blocked,
+                TurnStartResult::Blocked { message, .. } => Output::Blocked(message),
             });
         }
         Job::TurnQuery(input) => {

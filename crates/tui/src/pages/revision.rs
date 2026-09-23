@@ -18,6 +18,7 @@
  */
 
 mod draft;
+mod editing;
 mod request;
 mod saved;
 mod view;
@@ -25,7 +26,7 @@ mod view;
 use super::branch::Basis;
 use crate::{
     app::{Action, App, ConnectionState},
-    editor::{Editor, saved::Saved},
+    editor::Editor,
     navigation::Route,
 };
 use draft::Input;
@@ -53,6 +54,7 @@ pub enum Command {
     Close,
     Select(usize),
     Display,
+    Details,
 }
 impl Command {
     pub fn label(&self) -> &'static str {
@@ -67,6 +69,7 @@ impl Command {
             Self::Close => "session-remove-close",
             Self::Select(_) => "revision-input",
             Self::Display => "revision-display",
+            Self::Details => "revision-details",
         }
     }
 }
@@ -98,6 +101,9 @@ pub struct State {
     selected: usize,
     display: bool,
     editor: Editor,
+    problem: Option<Editor>,
+    show_problem: bool,
+    editors: std::collections::VecDeque<((usize, bool), Editor)>,
     focus: usize,
     confirm_discard: bool,
 }
@@ -106,7 +112,10 @@ impl State {
         self.rendered = false;
     }
     pub fn checkpoint(&self) -> Option<Checkpoint> {
-        self.saved.clone()
+        self.saved.clone().map(|mut saved| {
+            saved.view = self.capture_view();
+            saved
+        })
     }
     pub fn restore(&mut self, saved: Checkpoint) {
         self.phase = match saved.stage {
@@ -114,6 +123,9 @@ impl State {
             Stage::Copy | Stage::Abandon => Phase::UnknownCopy,
             Stage::Batch => Phase::UnknownTurn,
         };
+        self.clear_editors();
+        self.selected = saved.view.selected;
+        self.display = saved.view.display;
         self.saved = Some(saved);
         self.load_editor();
         self.visible = false;
@@ -121,10 +133,15 @@ impl State {
     pub fn invalidate_geometry(&mut self) {
         self.rendered = false;
         self.editor.invalidate_geometry();
+        if let Some(problem) = &mut self.problem {
+            problem.invalidate_geometry();
+        }
     }
     pub fn disconnect(&mut self) {
         self.pending = None;
         self.requested = None;
+        self.problem = None;
+        self.show_problem = false;
         self.confirm_discard = false;
         self.phase = match self.saved.as_ref().map(|saved| saved.stage) {
             Some(Stage::Draft) => Phase::Editing,
@@ -132,32 +149,6 @@ impl State {
             Some(Stage::Copy | Stage::Abandon) => Phase::UnknownCopy,
             None => Phase::Failed,
         };
-    }
-    fn load_editor(&mut self) {
-        let text = self
-            .saved
-            .as_ref()
-            .and_then(|s| s.inputs.get(self.selected))
-            .map(|input| {
-                if self.display {
-                    input
-                        .content
-                        .display_text
-                        .as_deref()
-                        .unwrap_or(&input.content.text)
-                } else {
-                    &input.content.text
-                }
-            })
-            .unwrap_or("");
-        self.editor = Editor::restore(Saved {
-            text: text.into(),
-            cursor: 0,
-            anchor: None,
-            upstream: false,
-        })
-        .expect("validated revision text");
-        self.invalidate_geometry();
     }
     fn primary(&self) -> Option<Command> {
         if self.confirm_discard {
@@ -209,6 +200,7 @@ impl App {
                 }),
             Command::Select(index) => available && state.phase == Phase::Editing && !state.confirm_discard
                 && state.saved.as_ref().is_some_and(|s| *index < s.inputs.len()),
+            Command::Details => available && state.problem.is_some() && !state.confirm_discard,
             Command::Display => available && state.phase == Phase::Editing && !state.confirm_discard
                 && state.saved.as_ref().is_some_and(|s| s.inputs[state.selected].content.display_text.is_some()),
         }
@@ -220,6 +212,7 @@ impl App {
         let state = &mut self.revision;
         match command {
             Command::Open(basis) => {
+                state.clear_editors();
                 state.requested = Some(Job::Load {
                     session: basis.source.clone(),
                     turn: basis.turn.clone(),
@@ -244,16 +237,16 @@ impl App {
                 state.confirm_discard = false;
                 state.invalidate_geometry();
             }
-            Command::Select(index) => {
-                state.selected = index;
-                state.display = false;
+            Command::Details => {
+                state.show_problem = !state.show_problem;
                 state.focus = 0;
-                state.load_editor();
+                state.invalidate_geometry();
+            }
+            Command::Select(index) => {
+                state.switch_editor(index, false);
             }
             Command::Display => {
-                state.display = !state.display;
-                state.focus = 0;
-                state.load_editor();
+                state.switch_editor(state.selected, !state.display);
             }
             Command::Discard => {
                 state.confirm_discard = true;
@@ -264,6 +257,7 @@ impl App {
                 let saved = state.saved.as_mut()?;
                 if saved.stage == Stage::Draft {
                     state.saved = None;
+                    state.clear_editors();
                     state.visible = false;
                     state.phase = Phase::Failed;
                 } else {
@@ -334,6 +328,7 @@ impl App {
             }
             Command::Visit => {
                 let target = state.saved.take()?.copy.target_session_id;
+                state.clear_editors();
                 state.visible = false;
                 return self.apply(Action::Visit(Route::Session(target)));
             }
@@ -354,6 +349,8 @@ impl App {
             return None;
         }
         let job = state.requested.take()?;
+        state.problem = None;
+        state.show_problem = false;
         state.sequence += 1;
         let request = Request {
             root: root_id.clone(),
@@ -413,6 +410,8 @@ impl App {
             return;
         }
         state.focus = 0;
+        state.problem = None;
+        state.show_problem = false;
         match result {
             Ok(Output::Sources(output)) if matches!(request.job, Job::Load { .. }) => {
                 let Some(basis) = &state.basis else {
@@ -433,6 +432,7 @@ impl App {
                     inputs: output.messages.into_iter().map(Input::new).collect(),
                     stage: Stage::Draft,
                     batch: None,
+                    view: saved::View::default(),
                 };
                 if saved.validate(&saved.root).is_err() {
                     state.phase = Phase::Failed;
@@ -473,7 +473,27 @@ impl App {
                 state.error = None;
                 self.inbox.refresh();
             }
-            Ok(Output::Blocked) => {
+            Ok(Output::Blocked(message)) => {
+                let mut problem = Editor::default();
+                let message: String = message
+                    .chars()
+                    .map(|c| {
+                        if c.is_control() && !matches!(c, '\n' | '\r' | '\t') {
+                            ' '
+                        } else {
+                            c
+                        }
+                    })
+                    .collect();
+                problem.insert(&message);
+                problem.key(crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Home,
+                    crossterm::event::KeyModifiers::CONTROL,
+                ));
+                problem.clear_history();
+                if !problem.text().trim().is_empty() {
+                    state.problem = Some(problem);
+                }
                 state.phase = Phase::Ready;
                 state.error = Some("revision-blocked");
             }
@@ -483,6 +503,7 @@ impl App {
             }
             Ok(Output::Abandoned) => {
                 state.saved = None;
+                state.clear_editors();
                 state.phase = Phase::Failed;
                 state.visible = false;
             }
@@ -522,16 +543,23 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
     use serde_json::json;
 
-    fn frame(app: &mut App, width: u16, height: u16) {
-        Terminal::new(TestBackend::new(width, height))
-            .unwrap()
+    pub(super) fn frame(app: &mut App, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
             .draw(|f| {
                 app.hits.clear();
                 draw(f, app, f.area(), app.theme.colors().base());
             })
             .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
     }
-    fn sources(session: &str) -> sources::Output {
+    pub(super) fn sources(session: &str) -> sources::Output {
         sources::decode_output(&json!({"sessionId":session,"turnId":"turn","messages":[
             {"messageId":"one","content":{"text":"🦀 @a.rs first","inlineReferences":[
                 {"kind":"workspace_file","value":"@a.rs","label":"a.rs","start":3}]}},
@@ -683,6 +711,36 @@ mod tests {
         assert_eq!(retry.job, start.job);
         app.revision_completed(query, Ok(Output::Started));
         assert_eq!(app.revision.pending.as_ref(), Some(&retry));
+        assert!(app.revision_after_checkpoint(&retry, &Ok(())));
+        let message = format!(
+            "Grant access first.\n{}\nLast requirement",
+            "More information.\n".repeat(80)
+        );
+        app.revision_completed(retry, Ok(Output::Blocked(format!("\u{001b}{message}"))));
+        let summary = frame(&mut app, 80, 24);
+        assert!(summary.contains("Grant access first."));
+        assert!(!summary.contains("Last requirement"));
+        assert!(app.revision_enabled(&Command::Details));
+        app.apply(Action::Revision(Command::Details));
+        frame(&mut app, 48, 22);
+        let before = serde_json::to_value(app.revision.checkpoint().unwrap()).unwrap();
+        app.input(Event::Paste("must not edit the error".into()));
+        assert_eq!(
+            serde_json::to_value(app.revision.checkpoint().unwrap()).unwrap(),
+            before
+        );
+        app.input(Event::Key(KeyEvent::new(
+            KeyCode::End,
+            KeyModifiers::CONTROL,
+        )));
+        let details = frame(&mut app, 48, 22);
+        assert!(details.contains("Last requirement"));
+        assert!(!details.contains('\u{001b}'));
+        assert!(app.revision_enabled(&Command::Send));
+        app.apply(Action::Revision(Command::Send));
+        let retry = app.revision_request().unwrap();
+        assert!(app.revision.problem.is_none() && !app.revision.show_problem);
+        assert_eq!(retry.job, start.job);
         assert!(app.revision_after_checkpoint(&retry, &Ok(())));
         app.revision_completed(retry, Ok(Output::Started));
         frame(&mut app, 80, 24);

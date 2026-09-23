@@ -19,7 +19,6 @@
 
 mod snapshot;
 mod store;
-mod submission;
 
 use crate::{
     app::App,
@@ -288,7 +287,7 @@ mod tests {
                 "purpose":{"kind":"revision","turnId":"old-turn"}},
             "turn_id":"new-turn","inputs":[
                 {"original":{"messageId":"one","content":{"text":"original"}},"content":{"text":"edited"}}
-            ],"stage":"draft","batch":null
+            ],"stage":"draft","batch":null,"view":{"selected":0,"display":false,"positions":[{"input":0,"display":false,"cursor":{"cursor":0,"anchor":null,"upstream":false}}]}
         })).unwrap();
         saved.validate(ROOT).unwrap();
         app.revision.restore(saved);
@@ -321,17 +320,15 @@ mod tests {
         assert_eq!(written.revision, Some(request.clone()));
         assert!(written.result.is_ok());
         let bytes = read(&directory);
-        assert_eq!(bytes["version"], 8);
+        assert_eq!(bytes["version"], 9);
         assert_eq!(bytes["revision"]["copy"]["targetSessionId"], "revised");
         assert_eq!(bytes["revision"]["inputs"][0]["content"]["text"], "edited");
-        let mut obsolete = bytes.clone();
-        obsolete["version"] = json!(7);
-        assert!(
-            serde_json::from_value::<Snapshot>(obsolete)
-                .unwrap()
-                .validate(ROOT)
-                .is_err()
-        );
+        let mut incomplete = bytes.clone();
+        incomplete["revision"]
+            .as_object_mut()
+            .unwrap()
+            .remove("view");
+        assert!(serde_json::from_value::<Snapshot>(incomplete).is_err());
         let mut reopened = App::new(
             "/unused".into(),
             I18n::new(LocalePreference::Auto, Locale::En),
@@ -416,15 +413,6 @@ mod tests {
         assert_eq!(
             serde_json::to_value(reopened.branch.checkpoint()).unwrap(),
             bytes["branch"]
-        );
-        let mut obsolete = bytes.clone();
-        obsolete["version"] = serde_json::json!(5);
-        assert!(
-            serde_json::from_value::<Snapshot>(obsolete)
-                .unwrap()
-                .validate(ROOT)
-                .is_err(),
-            "v5 cannot silently discard branch recovery"
         );
         let mut foreign = bytes;
         foreign["branch"]["root"] = serde_json::json!("foreign");

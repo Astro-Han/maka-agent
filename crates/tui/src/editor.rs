@@ -35,18 +35,11 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use layout::Layout;
+use saved::Cursor as Selection;
 
 const MAX_TEXT_BYTES: usize = 256 * 1024;
 const MAX_HISTORY_BYTES: usize = 1024 * 1024;
 const MAX_HISTORY_EDITS: usize = 128;
-
-#[derive(Clone, Copy, Default)]
-struct Selection {
-    cursor: usize,
-    anchor: Option<usize>,
-    // A soft-wrap boundary has two visual positions for the same byte offset.
-    upstream: bool,
-}
 
 impl Selection {
     fn range(self) -> Range<usize> {
@@ -119,6 +112,11 @@ impl Editor {
     }
     pub fn retained_bytes(&self) -> usize {
         self.text.len() + self.history_bytes
+    }
+    pub fn clear_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+        self.history_bytes = 0;
     }
 
     pub fn preferred_height(&mut self, width: u16, maximum: u16) -> u16 {

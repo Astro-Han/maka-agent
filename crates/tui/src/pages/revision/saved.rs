@@ -18,12 +18,65 @@
  */
 
 use super::draft::{self, Input};
+use crate::editor::saved::Cursor;
 use maka_protocol::{
     Operation,
     session::{copy, sources},
     turn::TurnBatchStartInput,
 };
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct View {
+    pub selected: usize,
+    pub display: bool,
+    pub positions: Vec<Position>,
+}
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Position {
+    pub input: usize,
+    pub display: bool,
+    pub cursor: Cursor,
+}
+impl Default for View {
+    fn default() -> Self {
+        Self {
+            selected: 0,
+            display: false,
+            positions: vec![Position::default()],
+        }
+    }
+}
+impl View {
+    fn validate(&self, inputs: &[Input]) -> Result<(), String> {
+        let mut seen = std::collections::HashSet::new();
+        if self.positions.len() > inputs.len() * 2 {
+            return Err("Invalid revision positions".into());
+        }
+        for position in &self.positions {
+            if !seen.insert((position.input, position.display)) {
+                return Err("Duplicate revision position".into());
+            }
+            let input = inputs.get(position.input).ok_or("Unknown revision input")?;
+            let text = if position.display {
+                input
+                    .content
+                    .display_text
+                    .as_deref()
+                    .ok_or("Missing display text")?
+            } else {
+                &input.content.text
+            };
+            position.cursor.validate(text)?;
+        }
+        if !seen.contains(&(self.selected, self.display)) {
+            return Err("Missing selected revision input".into());
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,6 +97,7 @@ pub struct Checkpoint {
     pub(super) inputs: Vec<Input>,
     pub(super) stage: Stage,
     pub(super) batch: Option<TurnBatchStartInput>,
+    pub(super) view: View,
 }
 impl Checkpoint {
     pub fn validate(&self, root: &str) -> Result<(), String> {
@@ -75,6 +129,7 @@ impl Checkpoint {
         for input in &self.inputs {
             input.validate()?;
         }
+        self.view.validate(&self.inputs)?;
         if (self.stage == Stage::Batch && self.batch.is_none())
             || (matches!(self.stage, Stage::Draft | Stage::Copy) && self.batch.is_some())
             || serde_json::to_vec(self).map_err(|e| e.to_string())?.len() > 2 * 1024 * 1024

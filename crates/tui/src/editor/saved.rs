@@ -19,6 +19,30 @@
 
 use super::*;
 
+/// Persist selection independently when another owner already stores the text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Cursor {
+    pub(super) cursor: usize,
+    pub(super) anchor: Option<usize>,
+    // A soft-wrap boundary has two visual positions for one byte offset.
+    pub(super) upstream: bool,
+}
+impl Cursor {
+    pub fn validate(&self, text: &str) -> Result<(), &'static str> {
+        let boundary = |offset| {
+            offset == text.len()
+                || text
+                    .grapheme_indices(true)
+                    .any(|(start, _)| start == offset)
+        };
+        if !boundary(self.cursor) || self.anchor.is_some_and(|offset| !boundary(offset)) {
+            return Err("Invalid saved cursor");
+        }
+        Ok(())
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Saved {
@@ -30,16 +54,13 @@ pub struct Saved {
 
 impl Saved {
     pub fn validate(&self) -> Result<(), &'static str> {
-        let boundary = |offset| {
-            offset == self.text.len()
-                || self
-                    .text
-                    .grapheme_indices(true)
-                    .any(|(start, _)| start == offset)
-        };
+        Cursor {
+            cursor: self.cursor,
+            anchor: self.anchor,
+            upstream: self.upstream,
+        }
+        .validate(&self.text)?;
         if self.text.len() > MAX_TEXT_BYTES
-            || !boundary(self.cursor)
-            || self.anchor.is_some_and(|offset| !boundary(offset))
             || self
                 .text
                 .chars()
@@ -52,6 +73,17 @@ impl Saved {
 }
 
 impl Editor {
+    pub fn cursor(&self) -> Cursor {
+        self.selection
+    }
+    pub fn restore_cursor(&mut self, cursor: Cursor) -> Result<(), &'static str> {
+        cursor.validate(&self.text)?;
+        self.selection = cursor;
+        self.dragging = false;
+        self.preferred_column = None;
+        self.reveal_cursor();
+        Ok(())
+    }
     pub fn save(&self) -> Saved {
         Saved {
             text: self.text.clone(),

@@ -99,18 +99,6 @@ fn recover(after_acceptance: bool) {
             // SIGKILL cannot run the normal quit flush; only the prior checkpoint survives.
             tui.child.kill().unwrap();
             assert!(!tui.child.wait().unwrap().success());
-            // Reopen an actual v6 text-only checkpoint, not a synthetic Host
-            // response. The migration must retain the same unknown identity.
-            let mut legacy: serde_json::Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
-            legacy["version"] = json!(6);
-            for request in legacy["unresolved"].as_array_mut().unwrap() {
-                let fields = request.as_object_mut().unwrap();
-                let content = fields.remove("content").unwrap();
-                fields.insert("text".into(), content["text"].clone());
-                fields.remove("input_selections");
-                fields.remove("turn_orchestration");
-            }
-            std::fs::write(&checkpoint, serde_json::to_vec(&legacy).unwrap()).unwrap();
         }
         let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
         tui.wait_for(if after_acceptance { "Delivered once." } else { "No messages yet." });
@@ -260,7 +248,7 @@ impl LostReply {
                                 assert_eq!(original["origin_epoch"], value["input"]["originHostEpoch"]);
                                 assert_eq!(original["session"], value["input"]["sessionId"]);
                                 assert_eq!(original["id"], value["input"]["messageId"]);
-                                assert_eq!(saved["version"], 8);
+                                assert_eq!(saved["version"], 9);
                                 assert_eq!(original["content"], value["input"]["content"]);
                                 assert_eq!(original["placement"], value["input"]["placement"]);
                                 assert_eq!(original["input_selections"], value["input"].get("inputSelections").cloned().unwrap_or_else(|| json!({})));

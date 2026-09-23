@@ -102,6 +102,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.wait_for("Input  2 / 2");
     tui.send(b"\x1b[200~edited \x1b[201~");
     tui.wait_for("edited second original");
+    tui.send(b"\x1b[1;2H"); // Select the inserted prefix; restore must preserve the selection.
     tui.resize(80, 24);
     tui.wait_for("edited second original");
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
@@ -109,7 +110,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.send(b"\x11");
     tui.finish();
     let saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
-    assert_eq!(saved["version"], 8);
+    assert_eq!(saved["version"], 9);
     assert_eq!(saved["revision"]["stage"], "draft");
     assert_eq!(
         saved["revision"]["inputs"][1]["content"]["text"],
@@ -131,7 +132,9 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     reopened.send(b"\x10");
     reopened.wait_for("Continue revision");
     reopened.click_text("Continue revision");
-    reopened.wait_for("中文 🦀 @a.rs first");
+    reopened.wait_for("Input  2 / 2");
+    reopened.send(b"\x1b[200~revised \x1b[201~");
+    reopened.wait_for("revised second original");
     reopened.click_text("Run revision");
     reopened.wait_for("Revision accepted.");
     reopened.send(b"\x11");
@@ -139,7 +142,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     runtime.block_on(wait_completed(&client, &request.target_session_id, &turn));
     let bodies = runtime.block_on(model).unwrap();
     assert_eq!(bodies.len(), 2);
-    assert!(bodies[1].to_string().contains("edited second original"));
+    assert!(bodies[1].to_string().contains("revised second original"));
     let revised = runtime
         .block_on(client.session_turn_sources(sources::Input {
             session_id: request.target_session_id.clone(),
@@ -157,7 +160,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
             .start,
         6
     );
-    assert_eq!(revised.messages[1].content.text, "edited second original");
+    assert_eq!(revised.messages[1].content.text, "revised second original");
     assert_eq!(
         revised.messages[1].content.quotes.as_ref().unwrap()[0].text,
         "Keep quotation"

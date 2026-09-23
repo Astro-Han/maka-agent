@@ -22,7 +22,7 @@ use crate::{
     editor::{Editor, saved::Saved},
     i18n::LocalePreference,
     navigation::{Route, tabs::LIMIT},
-    pages::sending::{Delivery, Sending},
+    pages::sending::{Delivery, Sending, Submission},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -32,29 +32,20 @@ use std::collections::{BTreeMap, HashSet};
 pub struct Snapshot {
     version: u32,
     pub root: String,
-    route: Route,
     tabs: Vec<String>,
     drafts: BTreeMap<String, Saved>,
-    unresolved: Vec<super::submission::Saved>,
+    unresolved: Vec<Submission>,
     locale: LocalePreference,
-    terminal_colors: bool,
-    #[serde(default)]
-    theme: Option<crate::theme::Choice>,
+    theme: crate::theme::Choice,
     ascii: bool,
     motion: bool,
     sidebar: Option<bool>,
     fullscreen: bool,
-    #[serde(default)]
     readings: Vec<(String, crate::pages::chat::reading::Checkpoint)>,
-    #[serde(default)]
-    navigation: Option<crate::navigation::Navigation>,
-    #[serde(default)]
+    navigation: crate::navigation::Navigation,
     pages: Vec<(Route, crate::navigation::state::Saved)>,
-    #[serde(default)]
     oauth: Option<crate::pages::manage::oauth::saved::Checkpoint>,
-    #[serde(default)]
     branch: Option<crate::pages::branch::Checkpoint>,
-    #[serde(default)]
     revision: Option<crate::pages::revision::Checkpoint>,
 }
 
@@ -68,28 +59,23 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 8,
+            version: 9,
             root: root.into(),
-            route: app.navigation.current(),
             tabs: app.tabs.entries.iter().map(|tab| tab.id.clone()).collect(),
             drafts: app
                 .drafts
                 .iter()
                 .map(|(id, editor)| (id.clone(), editor.save()))
                 .collect(),
-            unresolved: unresolved
-                .into_iter()
-                .map(|request| super::submission::Saved::Current(Box::new(request)))
-                .collect(),
+            unresolved,
             locale: app.i18n.preference,
-            terminal_colors: app.theme.choice == crate::theme::Choice::Terminal,
-            theme: Some(app.theme.choice),
+            theme: app.theme.choice,
             ascii: app.chrome.ascii,
             motion: app.chrome.motion,
             sidebar: app.chrome.sidebar_expanded,
             fullscreen: app.chrome.session_fullscreen,
             readings: app.chat.checkpoints(),
-            navigation: Some(app.navigation.clone()),
+            navigation: app.navigation.clone(),
             pages: app.saved_pages(),
             oauth: app.management.oauth.checkpoint(),
             branch: app.branch.checkpoint(),
@@ -101,20 +87,13 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if !matches!(self.version, 1..=8)
+        if self.version != 9
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
             || self.unresolved.len() > LIMIT
             || self.readings.len() > LIMIT
-            || (self.version == 1 && !self.readings.is_empty())
-            || (self.version < 3 && (self.navigation.is_some() || !self.pages.is_empty()))
             || self.pages.len() > LIMIT + Route::PAGE_COUNT
-            || (self.version < 4 && self.oauth.is_some())
-            || (self.version < 5 && self.theme.is_some())
-            || (self.version >= 5 && self.theme.is_none())
-            || (self.version < 6 && self.branch.is_some())
-            || (self.version < 8 && self.revision.is_some())
         {
             return Err("Unsupported or mismatched TUI checkpoint".into());
         }
@@ -124,7 +103,6 @@ impl Snapshot {
                 .tabs
                 .iter()
                 .any(|key| !id(key) || !self.drafts.contains_key(key))
-            || matches!(&self.route, Route::Session(key) if !tabs.contains(key))
             || self.drafts.keys().any(|key| !id(key))
         {
             return Err("Invalid TUI checkpoint destinations".into());
@@ -134,9 +112,7 @@ impl Snapshot {
             _ => true,
         };
         let mut pages = Vec::new();
-        if self.navigation.as_ref().is_some_and(|navigation| {
-            !navigation.valid(destination) || navigation.current() != self.route
-        }) || (self.version >= 3 && self.navigation.is_none())
+        if !self.navigation.valid(destination)
             || self.pages.iter().any(|(route, saved)| {
                 let duplicate = pages.contains(&route);
                 pages.push(route);
@@ -165,7 +141,6 @@ impl Snapshot {
         }
         let mut seen = HashSet::new();
         for request in &self.unresolved {
-            let request = request.clone().request(self.version)?;
             if request.root_id != root
                 || !self.drafts.contains_key(&request.session)
                 || !seen.insert(request.session.clone())
@@ -204,7 +179,6 @@ impl Snapshot {
             app.drafts.insert(id, Editor::restore(saved)?);
         }
         for request in self.unresolved {
-            let request = request.request(self.version)?;
             app.sending.insert(
                 request.session.clone(),
                 Sending {
@@ -217,11 +191,7 @@ impl Snapshot {
             app.tabs.open(&id);
         }
         app.chat.restore_checkpoints(self.readings);
-        app.theme.choice = self.theme.unwrap_or(if self.terminal_colors {
-            crate::theme::Choice::Terminal
-        } else {
-            crate::theme::Choice::Maka
-        });
+        app.theme.choice = self.theme;
         app.chrome.ascii = self.ascii;
         app.chrome.motion = self.motion;
         app.chrome.sidebar_expanded = self.sidebar;
@@ -229,16 +199,14 @@ impl Snapshot {
         if !keep_locale {
             app.i18n.preference = self.locale;
         }
-        app.apply(Action::Visit(self.route));
-        if let Some(navigation) = self.navigation {
-            app.navigation = navigation;
-            app.page_states = self
-                .pages
-                .into_iter()
-                .map(|(route, saved)| (route, saved.restore()))
-                .collect();
-            app.enter_page();
-        }
+        app.apply(Action::Visit(self.navigation.current()));
+        app.navigation = self.navigation;
+        app.page_states = self
+            .pages
+            .into_iter()
+            .map(|(route, saved)| (route, saved.restore()))
+            .collect();
+        app.enter_page();
         Ok(())
     }
 }
@@ -260,15 +228,6 @@ mod tests {
             epoch: "old-epoch".into(),
         };
         app
-    }
-    fn text_only_requests(value: &mut serde_json::Value) {
-        for request in value["unresolved"].as_array_mut().unwrap() {
-            let fields = request.as_object_mut().unwrap();
-            let content = fields.remove("content").unwrap();
-            fields.insert("text".into(), content["text"].clone());
-            fields.remove("input_selections");
-            fields.remove("turn_orchestration");
-        }
     }
     #[test]
     fn checkpoint_restores_drafts_preferences_and_original_unknown_identity_without_dispatching() {
@@ -323,33 +282,13 @@ mod tests {
         assert!(restored.retry_submission().is_none());
         assert!(restored.reconciliation().is_some());
         let mut invalid: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        invalid["version"] = serde_json::json!(9);
+        invalid["version"] = serde_json::json!(10);
         assert!(
             serde_json::from_value::<Snapshot>(invalid)
                 .unwrap()
                 .validate("root")
                 .is_err()
         );
-        let mut legacy: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        text_only_requests(&mut legacy);
-        legacy.as_object_mut().unwrap().remove("theme");
-        legacy["version"] = serde_json::json!(1);
-        legacy.as_object_mut().unwrap().remove("readings");
-        legacy.as_object_mut().unwrap().remove("navigation");
-        legacy.as_object_mut().unwrap().remove("pages");
-        let legacy: Snapshot = serde_json::from_value(legacy).unwrap();
-        legacy.validate("root").unwrap();
-        assert!(legacy.readings.is_empty());
-        let mut migrated = app();
-        legacy.restore(&mut migrated, false).unwrap();
-        assert_eq!(migrated.sending["a"].request, request);
-        assert!(matches!(
-            migrated.sending["a"].delivery,
-            Delivery::Unknown(None)
-        ));
-
-        // v4 adds only the original OAuth query basis. A v3 reader must not
-        // silently discard it; current readers still accept v1-v3 without it.
         let mut oauth = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
         oauth["oauth"] = serde_json::json!({"provider":"xai-oauth", "start":{
             "attemptId":"persisted-login", "target":{"kind":"create","providerType":"xai-oauth"}}, "connection":null});
@@ -364,20 +303,6 @@ mod tests {
             serde_json::to_value(Snapshot::capture(&reopened, "root")).unwrap()["oauth"],
             oauth["oauth"]
         );
-        oauth.as_object_mut().unwrap().remove("theme");
-        text_only_requests(&mut oauth);
-        oauth["version"] = serde_json::json!(3);
-        assert!(
-            serde_json::from_value::<Snapshot>(oauth.clone())
-                .unwrap()
-                .validate("root")
-                .is_err()
-        );
-        oauth.as_object_mut().unwrap().remove("oauth");
-        serde_json::from_value::<Snapshot>(oauth)
-            .unwrap()
-            .validate("root")
-            .unwrap();
     }
 
     #[test]
@@ -409,7 +334,7 @@ mod tests {
         request.input().validate().unwrap();
         original.sending.get_mut("a").unwrap().request = request.clone();
         let saved = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
-        assert_eq!(saved["version"], 8);
+        assert_eq!(saved["version"], 9);
         let mut restored = app();
         serde_json::from_value::<Snapshot>(saved.clone())
             .unwrap()
@@ -449,7 +374,6 @@ mod tests {
         assert!(restored.drafts["a"].text().is_empty());
 
         for (pointer, value) in [
-            ("/version", json!(6)),
             ("/unresolved/0/placement", json!("next_turn")),
             ("/unresolved/0/content/inlineReferences/0/start", json!(2)),
             (
@@ -474,7 +398,7 @@ mod tests {
             .remove("input_selections");
         assert!(
             serde_json::from_value::<Snapshot>(incomplete).is_err(),
-            "never downgrade an incomplete structured request to text-only"
+            "incomplete requests must not be restored"
         );
     }
 
@@ -538,6 +462,20 @@ mod tests {
             assert_eq!(reopened.focus, Focus::Composer);
             assert!(reopened.chrome.details);
         }
+        let mut tabs = app();
+        for id in ["a", "b", "a"] {
+            tabs.apply(Action::Visit(Route::Session(id.into())));
+        }
+        let mut reopened = app();
+        Snapshot::capture(&tabs, "root")
+            .restore(&mut reopened, false)
+            .unwrap();
+        assert_eq!(reopened.tabs.reveal, Some(0));
+        assert_eq!(
+            reopened.nav_routes()[reopened.selected_nav],
+            Route::Session("a".into())
+        );
+
         for (pointer, value) in [
             ("/navigation/entries", serde_json::json!([])),
             ("/navigation/cursor", serde_json::json!(128)),
@@ -545,7 +483,6 @@ mod tests {
                 "/navigation/entries/0",
                 serde_json::json!({"page":"session","session":"closed"}),
             ),
-            ("/route", serde_json::json!({"page":"host"})),
             ("/pages/0/1/focus", serde_json::json!("queue")),
         ] {
             let mut invalid = encoded.clone();
@@ -557,21 +494,6 @@ mod tests {
                     .is_err(),
                 "{pointer}"
             );
-        }
-        for version in [1, 2] {
-            let mut legacy = encoded.clone();
-            legacy.as_object_mut().unwrap().remove("theme");
-            legacy["version"] = serde_json::json!(version);
-            let object = legacy.as_object_mut().unwrap();
-            object.remove("navigation");
-            object.remove("pages");
-            let mut reopened = app();
-            serde_json::from_value::<Snapshot>(legacy)
-                .unwrap()
-                .restore(&mut reopened, false)
-                .unwrap();
-            assert_eq!(reopened.navigation.current(), Route::Settings);
-            assert_eq!(reopened.selected_control, 0);
         }
     }
 }

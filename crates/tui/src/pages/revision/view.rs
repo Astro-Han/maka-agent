@@ -32,6 +32,9 @@ use unicode_width::UnicodeWidthStr;
 fn buttons(app: &App) -> Vec<Command> {
     let state = &app.revision;
     let mut buttons = vec![Command::Close];
+    if state.problem.is_some() && !state.confirm_discard {
+        buttons.push(Command::Details);
+    }
     if state.saved.is_some() && !state.confirm_discard {
         buttons.push(Command::Discard);
     }
@@ -62,7 +65,7 @@ impl App {
                         (self.revision.focus + 1) % count
                     };
                 }
-                KeyCode::PageUp | KeyCode::PageDown => {
+                KeyCode::PageUp | KeyCode::PageDown if !self.revision.show_problem => {
                     let index = if key.code == KeyCode::PageUp {
                         self.revision.selected.saturating_sub(1)
                     } else {
@@ -100,6 +103,11 @@ impl App {
                         .revision
                         .editor
                         .contains((mouse.column, mouse.row).into())
+                        || self
+                            .revision
+                            .problem
+                            .as_ref()
+                            .is_some_and(|e| e.contains((mouse.column, mouse.row).into()))
                     {
                         self.revision.focus = 0;
                     }
@@ -117,6 +125,32 @@ impl App {
     }
     fn revision_edit(&mut self, event: &Event) {
         let state = &mut self.revision;
+        if state.rendered && state.show_problem && state.focus == 0 && !state.confirm_discard {
+            if let Some(problem) = &mut state.problem {
+                match event {
+                    Event::Key(key)
+                        if matches!(
+                            key.code,
+                            KeyCode::Left
+                                | KeyCode::Right
+                                | KeyCode::Up
+                                | KeyCode::Down
+                                | KeyCode::Home
+                                | KeyCode::End
+                                | KeyCode::PageUp
+                                | KeyCode::PageDown
+                        ) =>
+                    {
+                        problem.key(*key);
+                    }
+                    Event::Mouse(mouse) => {
+                        problem.mouse(*mouse);
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
         if !state.rendered
             || state.phase != Phase::Editing
             || state.focus != 0
@@ -161,6 +195,7 @@ impl App {
                 state.error = Some(error);
             }
         }
+        state.trim_history();
     }
 }
 
@@ -211,7 +246,20 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
             .unwrap()
             .push((command, label, width, index));
     }
-    let note = crate::pages::manage::view::note_lines(&app.i18n.text(key), width.saturating_sub(4));
+    let mut note = crate::pages::manage::view::note_lines(&app.i18n.text(key), inner_width);
+    if !app.revision.confirm_discard
+        && !app.revision.show_problem
+        && key == "revision-blocked"
+        && let Some(problem) = &app.revision.problem
+    {
+        // Full Host detail stays opt-in and scrollable; it cannot displace the controls.
+        let preview = crate::view::safe(problem.text());
+        let mut lines = crate::pages::manage::view::note_lines(&preview, inner_width);
+        if lines.len() > 2 {
+            lines.truncate(2);
+        }
+        note.extend(lines);
+    }
     let note_height = note.len() as u16;
     let footer = rows.len() as u16;
     let fixed = 9 + note_height + footer;
@@ -222,9 +270,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         frame.render_widget(Paragraph::new(app.i18n.text("terminal-small")), area);
         return;
     }
-    let editor_rows = app
-        .revision
-        .editor
+    let editor = if app.revision.show_problem {
+        app.revision.problem.as_mut().unwrap()
+    } else {
+        &mut app.revision.editor
+    };
+    let editor_rows = editor
         .preferred_height(width.saturating_sub(8), 15)
         .max(3)
         .min(available);
@@ -251,10 +302,18 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     let inner = block.inner(popup).inner(Margin::new(1, 0));
     frame.render_widget(block, popup);
     app.revision.rendered = true;
-    let editing = app.revision.phase == Phase::Editing && !app.revision.confirm_discard;
+    let editing = app.revision.phase == Phase::Editing
+        && !app.revision.confirm_discard
+        && !app.revision.show_problem;
     let selected = app.revision.selected;
     let count = app.revision.saved.as_ref().map_or(0, |s| s.inputs.len());
-    if count > 0 {
+    if app.revision.show_problem {
+        frame.render_widget(
+            Paragraph::new(app.i18n.text("revision-details"))
+                .style(Style::default().fg(colors.warning)),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+    } else if count > 0 {
         let label = format!(
             "{}  {} / {}",
             app.i18n.text("revision-input"),
@@ -303,11 +362,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         }
     }
     let body = Rect::new(inner.x, inner.y + 3, inner.width, editor_rows + 2);
-    if let Some(input) = app
-        .revision
-        .saved
-        .as_ref()
-        .and_then(|s| s.inputs.get(selected))
+    if !app.revision.show_problem
+        && let Some(input) = app
+            .revision
+            .saved
+            .as_ref()
+            .and_then(|s| s.inputs.get(selected))
     {
         let content = &input.content;
         let counts = [
@@ -344,7 +404,13 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     }));
     let text_area = editor_block.inner(body).inner(Margin::new(1, 0));
     frame.render_widget(editor_block, body);
-    if count > 0 {
+    if app.revision.show_problem {
+        app.revision
+            .problem
+            .as_mut()
+            .unwrap()
+            .draw(frame, text_area, false, colors);
+    } else if count > 0 {
         app.revision
             .editor
             .draw(frame, text_area, editing && app.revision.focus == 0, colors);
@@ -370,8 +436,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 app,
                 Rect::new(x, first + row as u16, width, 1),
                 &label,
-                Action::Revision(command),
-                app.revision.focus == index + 1,
+                Action::Revision(command.clone()),
+                app.revision.focus == index + 1
+                    || (command == Command::Details && app.revision.show_problem),
             );
             x += width + 1;
         }
