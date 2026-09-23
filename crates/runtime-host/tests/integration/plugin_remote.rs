@@ -40,6 +40,7 @@ use tokio_util::sync::CancellationToken;
 
 mod catalog;
 mod fixture;
+mod import;
 mod javascript;
 use fixture::{Example, State};
 
@@ -51,6 +52,8 @@ async fn remote_fences_backend_replacement_and_owns_reads_pending_opens_and_docu
 }
 async fn scenario() {
     let fixture = ClientFixture::new("maka-remote-plugin-");
+    let model =
+        super::support::message_recovery::configure(&fixture, "http://127.0.0.1:1/v1").await;
     let package = Package::new(BTreeMap::from([
         (MANIFEST_FILE.into(), serde_json::to_vec(&json!({"schemaVersion":1,"id":"example.remote","client":{"entry":"client.js","sdkVersion":1}})).unwrap()),
         ("client.js".into(), b"immutable fixture".to_vec()),
@@ -143,6 +146,15 @@ async fn scenario() {
         serde_json::from_value(imported["value"].clone()).unwrap();
     assert_eq!(transcript.title, "Selected conversation");
     assert_eq!(transcript.records.len(), 1);
+    import::verify(
+        &mut peer,
+        &fixture,
+        &model,
+        &database_path,
+        &client,
+        &document,
+    )
+    .await;
     assert!(
         matches!(&transcript.records[0].content, maka_runtime::import::Content::User { text } if text == "From WAL")
     );

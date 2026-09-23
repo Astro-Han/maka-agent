@@ -35,4 +35,6 @@ Converts Codex, Claude Code and OpenCode conversations into historical records t
 
 JSONL reads are bounded: 2 GiB per source prefix, 64 MiB per line, one million lines and 65,536 structural JSON tokens per record. OpenCode snapshots also obey the public database row, byte and work limits. Retained payloads are checked before decoding; encoded history is limited to the Runtime's 6 MiB / 7,500-record budget. Claude additionally bounds its lineage index and response fragments. Oversized input is rejected, not truncated.
 
-The returned transcript is not a published Session. Publication and retry receipts belong to the public Session import capability.
+Source configuration uses revision-checked plugin storage. A prepared import atomically saves its explicit destination and normalized payload; removing or changing a source does not change that intent. Delivery reauthorizes the saved destination, queries the Host receipt, appends only the missing suffix, then publishes. Terminal receipts and payload reclamation commit together. Retrying the same operation never creates another copy.
+
+The typed Remote handler exposes source management, catalogs, preparation, delivery, abandonment and paged copy history. It uses only public plugin storage, read and execution APIs. Canonical publication and receipts remain Host-owned; the Host's history limit includes event envelopes, not just converted record bytes.

@@ -19,6 +19,74 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function activate(ctx) {
+  await ctx.remote.method('storage-budget', async () => {
+    const mutations = Array.from({ length: 12 }, (_, index) => ({
+      key: `budget/${index.toString().padStart(2, '0')}`,
+      expectedRevision: null,
+      data: { kind: /** @type {const} */ ('present'), value: 'x'.repeat(750_000) },
+    }));
+    mutations.push({
+      key: 'budget-near',
+      expectedRevision: null,
+      data: { kind: 'present', value: 'n'.repeat(1024 * 1024 - 30) },
+    });
+    const written = await ctx.storage.batch(mutations);
+    const near = await ctx.storage.read('budget-near');
+    if (
+      near?.data.kind !== 'present' ||
+      typeof near.data.value !== 'string' ||
+      near.data.value.length !== 1024 * 1024 - 30
+    )
+      throw new Error('large read was clipped');
+    let total = 0;
+    /** @type {string | undefined} */
+    let after;
+    do {
+      const page = await ctx.storage.scan({ prefix: 'budget/', after });
+      for (const entry of page.entries) {
+        if (entry.record.data.kind !== 'present' || typeof entry.record.data.value !== 'string')
+          throw new Error('invalid stored batch');
+        total += entry.record.data.value.length;
+      }
+      after = page.nextAfter ?? undefined;
+    } while (after);
+    let conflict = false;
+    try {
+      await ctx.storage.batch([
+        { key: 'uncommitted', expectedRevision: null, data: { kind: 'present', value: true } },
+        { key: 'budget/00', expectedRevision: 99, data: { kind: 'deleted' } },
+      ]);
+    } catch {
+      conflict = true;
+    }
+    if (!conflict || (await ctx.storage.read('uncommitted')) !== null)
+      throw new Error('batch conflict published partial data');
+    await ctx.storage.batch(
+      mutations.map((mutation, index) => ({
+        key: mutation.key,
+        expectedRevision: written[index].revision,
+        data: { kind: 'deleted' },
+      })),
+    );
+    // Scan must budget escaped keys and record envelopes as well as SQL values.
+    const escaped = Array.from({ length: 64 }, (_, index) => ({
+      key: 'escaped/' + index.toString().padStart(2, '0') + '"'.repeat(1010),
+      expectedRevision: null,
+      data: { kind: /** @type {const} */ ('present'), value: 'v'.repeat(31600) },
+    }));
+    const rows = await ctx.storage.batch(escaped);
+    const page = await ctx.storage.scan({ prefix: 'escaped/' });
+    if (page.entries.length !== 64 || page.nextAfter)
+      throw new Error('escaped-key scan was clipped');
+    await ctx.storage.batch(
+      escaped.map((entry, index) => ({
+        key: entry.key,
+        expectedRevision: rows[index].revision,
+        data: { kind: 'deleted' },
+      })),
+    );
+    return { written: written.length, bytes: total };
+  });
   /** @type {import('../../../../packages/plugin-sdk/src/host.js').RemoteCaller | undefined} */
   let previousDatabase;
   const database = async (

@@ -107,6 +107,14 @@ async fn scenario(vm: &str) {
     let client = json!({"entryId":entry["entryId"],"extensionId":entry["extensionId"],"activation":entry["activation"],
         "contentDigest":entry["contentDigest"],"clientDigest":entry["clientDigest"]});
     let document = rpc(&mut peer, json!({"kind":"open_document"})).await["document"].clone();
+    let (storage, storage_target) = bind(&mut peer, &client, "storage-budget").await;
+    let budget = rpc(
+        &mut peer,
+        json!({"kind":"call", "binding":storage,
+        "target":storage_target, "document":document, "input":null}),
+    )
+    .await;
+    assert_eq!(budget["value"], json!({"written":13,"bytes":9_000_000}));
     let (uncertain, uncertain_target) = bind(&mut peer, &client, "uncertain").await;
     let failure = peer
         .rpc(

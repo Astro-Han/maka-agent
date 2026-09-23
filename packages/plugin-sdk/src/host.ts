@@ -388,6 +388,7 @@ export interface HostContext {
       nextAfter: string | null;
     }>;
     read(key: string): Promise<StorageRecord | null>;
+    /** Atomic CAS: up to 128 values, 1 MiB per value and 16 MiB total data. */
     batch(mutations: readonly StorageMutation[]): Promise<StorageRecord[]>;
   };
   /** Non-secret selection lookup; grants no model execution permission. */

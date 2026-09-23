@@ -19,7 +19,9 @@
 
 use super::invalid;
 use crate::{EventLog, StoreError};
-use maka_plugins::storage::{Data, Mutation, Namespace, Record, validate_key};
+use maka_plugins::storage::{
+    Data, MAX_BATCH_BYTES, MAX_MUTATIONS, MAX_PAGE_BYTES, Mutation, Namespace, Record, validate_key,
+};
 use sqlx::{Connection, SqliteConnection};
 use std::collections::BTreeSet;
 
@@ -46,13 +48,14 @@ impl EventLog {
                     SELECT key, ROW_NUMBER() OVER (ORDER BY key) AS position,
                         SUM(bytes) OVER (ORDER BY key) AS total FROM candidates
                  ) SELECT data.key, data.revision,
-                    CASE WHEN bounded.position <= 64 AND bounded.total <= 2097152 THEN data.value_json END,
-                    bounded.position <= 64 AND bounded.total <= 2097152
+                    CASE WHEN bounded.position <= 64 AND bounded.total <= ?5 THEN data.value_json END,
+                    bounded.position <= 64 AND bounded.total <= ?5
                  FROM bounded JOIN plugin_data AS data
                    ON data.package_id = ?1 AND data.scope_id = ?2 AND data.key = bounded.key
                  ORDER BY data.key"
             ).bind(namespace.package()).bind(String::from(namespace.scope().clone()))
-                .bind(&query.prefix).bind(query.after.as_deref().unwrap_or("")).fetch_all(connection).await?;
+                .bind(&query.prefix).bind(query.after.as_deref().unwrap_or(""))
+                .bind(MAX_PAGE_BYTES as i64).fetch_all(connection).await?;
             let mut entries: Vec<maka_plugins::storage::Entry> = Vec::new();
             let mut next_after = None;
             for (key, revision, value, fits) in rows {
@@ -90,7 +93,7 @@ impl EventLog {
         mutations: Vec<Mutation>,
     ) -> Result<Vec<Record>, StoreError> {
         self.validate_root()?;
-        if mutations.is_empty() || mutations.len() > 128 {
+        if mutations.is_empty() || mutations.len() > MAX_MUTATIONS {
             return Err(invalid("plugin data batch must contain 1..=128 mutations"));
         }
         let mut keys = BTreeSet::new();
@@ -109,8 +112,8 @@ impl EventLog {
                 .map(serde_json::to_string)
                 .transpose()?;
             total += value.as_ref().map_or(0, String::len);
-            if total > 8 * 1024 * 1024 {
-                return Err(invalid("plugin data batch exceeds 8 MiB"));
+            if total > MAX_BATCH_BYTES {
+                return Err(invalid("plugin data batch exceeds 16 MiB"));
             }
             encoded.push(value);
         }

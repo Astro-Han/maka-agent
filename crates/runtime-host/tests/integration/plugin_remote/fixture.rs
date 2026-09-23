@@ -70,6 +70,20 @@ impl Plugin for Example {
                     )
                     .unwrap();
             } else {
+                let host = context.host.ok_or("Host capabilities required")?;
+                staged
+                    .insert(
+                        key(&identity.package_id, "imports").unwrap(),
+                        Endpoint::new(
+                            bundle.content_digest.clone(),
+                            Handler::Method(Arc::new(maka_session_import::remote::Import::new(
+                                host.storage,
+                                host.executions,
+                            ))),
+                        )
+                        .requiring_host_paths(),
+                    )
+                    .unwrap();
                 staged
                     .insert(
                         key(&identity.package_id, "import-history").unwrap(),

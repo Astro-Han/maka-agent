@@ -134,6 +134,13 @@ impl Bridge for HostBridge {
         match method {
             "model.io" => 32 * 1024 * 1024,
             "remote.queryDatabase" => maka_plugins::filesystem::database::MAX_BYTES + 1024,
+            "storage.batch" => maka_plugins::storage::MAX_BATCH_WIRE_BYTES,
+            "storage.read" => maka_plugins::storage::MAX_VALUE_BYTES + 1024,
+            "storage.scan" => {
+                maka_plugins::storage::MAX_PAGE_BYTES
+                    + 64 * (2 * maka_plugins::storage::MAX_KEY_BYTES + 128)
+                    + 1024
+            }
             // A 1 MiB byte page expands to at most 4 MiB in a JSON array.
             "inputs.read" | "view.read" | "pinnedFile.read" => 5 * 1024 * 1024,
             _ => 1024 * 1024,
@@ -145,6 +152,7 @@ impl Bridge for HostBridge {
             "http.request" => 5 * 1024 * 1024,
             "files.invoke" => 7 * 1024 * 1024,
             "execution.importSession" => 7 * 1024 * 1024,
+            "storage.batch" => maka_plugins::storage::MAX_BATCH_WIRE_BYTES,
             "llm.generate" => 2 * 1024 * 1024,
             "model.io" => 32 * 1024 * 1024,
             _ => 1024 * 1024,
