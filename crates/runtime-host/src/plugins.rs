@@ -19,6 +19,7 @@
 
 pub(crate) mod assistant;
 mod authority;
+pub(crate) mod background_health;
 mod client;
 mod effects;
 mod entrypoint;
