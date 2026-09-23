@@ -18,10 +18,17 @@
  */
 
 pub(super) const FENCE: &str = "
-SELECT MAX(event.sequence) FROM runtime_events event
-JOIN runtime_events opening ON opening.invocation_id = event.invocation_id AND opening.kind = 'invocation_opened'
-WHERE json_extract(event.event_json, '$.invocation.session_id') = ?1
-AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')";
+SELECT MAX(sequence) FROM (
+ SELECT MAX(event.sequence) AS sequence FROM runtime_events event
+ JOIN runtime_events opening ON opening.invocation_id = event.invocation_id AND opening.kind = 'invocation_opened'
+ WHERE json_extract(event.event_json, '$.invocation.session_id') = ?1
+ AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
+ UNION ALL
+ SELECT MAX(h.sequence) FROM session_history_members h
+ JOIN runtime_events event ON event.sequence=h.sequence
+ JOIN runtime_events opening ON opening.invocation_id = event.invocation_id AND opening.kind = 'invocation_opened'
+ WHERE h.session_id = ?1
+ AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff'))";
 
 pub(super) const ROWS: &str = "
 SELECT row.sequence, row.turn_id,
@@ -39,8 +46,8 @@ pub(super) const LANDMARKS: &str = "
 WITH openings AS (
  SELECT opening.invocation_id, opening.sequence,
  ROW_NUMBER() OVER (PARTITION BY json_extract(opening.event_json, '$.invocation.turn_id') ORDER BY opening.sequence) AS first
- FROM runtime_events opening
- WHERE json_extract(opening.event_json, '$.invocation.session_id') = ?1
+ FROM session_history_events opening
+ WHERE opening.owner_session_id = ?1
  AND opening.kind = 'invocation_opened' AND opening.sequence <= ?2
  AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
 ), candidates AS (

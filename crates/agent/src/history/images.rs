@@ -75,16 +75,13 @@ pub(crate) async fn materialize_replay(
     replay: Option<super::Replay<'_>>,
 ) -> Result<Vec<Message>, RunError> {
     let mut targets = Vec::new();
-    let mut messages = super::build(
-        anchor
-            .into_iter()
-            .map(super::EventRef::Canonical)
-            .chain(events.iter().map(super::EventRef::from)),
-        session,
-        &mut targets,
-        vision,
-        replay,
-    )?;
+    let selected = anchor
+        .into_iter()
+        .map(super::EventRef::Canonical)
+        .chain(events.iter().map(super::EventRef::from));
+    let resources =
+        super::resources::Resources::load(log, session, selected.clone(), cancellation).await?;
+    let mut messages = super::build(selected, &resources, &mut targets, vision, replay)?;
     let mut remaining = IMAGE_BUDGET;
     let mut omitted = BTreeMap::<usize, usize>::new();
     for target in targets {
@@ -95,7 +92,10 @@ pub(crate) async fn materialize_replay(
             Target::User { image, .. } => (&image.storage_ref, &image.mime_type),
             Target::Tool { image, .. } => (&image.reference, &image.mime_type),
         };
-        let read = read(log, session, reference, remaining).await?;
+        let read = match resources.resolve(reference) {
+            Some(reference) => read(log, session, reference, remaining).await?,
+            None => ImageRead::Unavailable("session_mismatch"),
+        };
         if cancellation.is_cancelled() {
             return Err(RunError::Cancelled);
         }

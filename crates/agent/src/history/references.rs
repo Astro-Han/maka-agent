@@ -24,7 +24,10 @@ use serde_json::json;
 
 /// The log retains references structurally. Only provider input folds them into
 /// text; UI chips and invocation fingerprints never use this derived string.
-pub(super) fn text(content: &MessageInput) -> Result<String, RunError> {
+pub(super) fn text(
+    content: &MessageInput,
+    resources: &super::resources::Resources<'_>,
+) -> Result<String, RunError> {
     let mut text = content.text.clone();
     if let Some(quotes) = &content.quotes
         && !quotes.is_empty()
@@ -65,7 +68,10 @@ pub(super) fn text(content: &MessageInput) -> Result<String, RunError> {
             if index != 0 {
                 text.push('\n');
             }
-            text.push_str(&attachment_text(attachment));
+            text.push_str(&attachment_text(
+                attachment,
+                resources.resolve(&attachment.storage_ref),
+            ));
         }
     }
     if let Some(references) = &content.directory_references
@@ -88,29 +94,29 @@ pub(super) fn text(content: &MessageInput) -> Result<String, RunError> {
     Ok(text)
 }
 
-fn attachment_text(attachment: &AttachmentRef) -> String {
+fn attachment_text(attachment: &AttachmentRef, reference: Option<&StorageRef>) -> String {
     let mut text = String::from("<attachment>\n");
-    if let Some(resource) = attachment.storage_ref.resource_ref() {
+    if let Some(resource) = reference.and_then(StorageRef::resource_ref) {
         text.push_str(&format!("Read argument: {}\n", json!({"path":resource})));
         if attachment.kind == AttachmentKind::Image {
             text.push_str(&format!("Markdown image source: {}\n", json!(resource)));
         }
         text.push_str("This is a Session resource, not a workspace file. Use the path above; never use the display name as a path.\n");
     } else {
-        match &attachment.storage_ref {
-            StorageRef::WorkspaceFile { relative_path } => {
+        match reference {
+            Some(StorageRef::WorkspaceFile { relative_path }) => {
                 text.push_str(&format!(
                     "Read argument: {}\n",
                     json!({"path":relative_path})
                 ));
             }
-            StorageRef::ExternalFile { absolute_path } => {
+            Some(StorageRef::ExternalFile { absolute_path }) => {
                 text.push_str(&format!(
                     "Read argument: {}\n",
                     json!({"path":absolute_path})
                 ));
             }
-            StorageRef::SessionFile { .. } | StorageRef::SessionContext { .. } => {
+            Some(StorageRef::SessionFile { .. } | StorageRef::SessionContext { .. }) | None => {
                 text.push_str("The attachment content is unavailable to Read.\n")
             }
         }

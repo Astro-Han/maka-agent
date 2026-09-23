@@ -265,6 +265,68 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
                 .bytes,
             b"hello"
         );
+        let fence = log.navigation_fence(session).await.unwrap().unwrap();
+        assert_eq!(
+            fence,
+            maka_presentation::watermark(root.high_water).unwrap()
+        );
+        assert!(
+            log.prepare_transcript(session, root.high_water, 32)
+                .await
+                .unwrap()
+        );
+        let turns = log.navigation_turns(session, fence, 0, 32).await.unwrap();
+        assert_eq!(turns.contributions.len(), 1);
+        assert_eq!(turns.contributions[0].turn_id, "first");
+        assert_eq!(
+            log.navigation_landmarks(session, fence, 8, None)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let history = log
+            .history_text(session, root.high_water, None)
+            .await
+            .unwrap();
+        let maka_plugins::session::history::Page::Ready { chunks, next, .. } = &history else {
+            panic!("prepared history");
+        };
+        assert!(next.is_none());
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text, "first\ninput.txt");
+        assert_eq!(
+            chunks[0].attachments[0].storage_ref,
+            StorageRef::SessionFile {
+                session_id: session.into(),
+                relative_path: files[0].id.clone(),
+            }
+        );
+        let inspect = rusqlite::Connection::open(&path).unwrap();
+        for table in ["transcript_text", "transcript_rows", "transcript_progress"] {
+            inspect
+                .execute(
+                    &format!("DELETE FROM {table} WHERE session_id = ?"),
+                    [session],
+                )
+                .unwrap();
+        }
+        drop(inspect);
+        assert!(
+            log.prepare_transcript(session, root.high_water, 32)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(
+                log.history_text(session, root.high_water, None)
+                    .await
+                    .unwrap()
+            )
+            .unwrap(),
+            serde_json::to_value(history).unwrap(),
+            "rebuilding cannot depend on source metadata or cache state"
+        );
     }
     assert_eq!(
         log.prefix(100, 65536).await.unwrap().events.len(),

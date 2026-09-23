@@ -26,6 +26,56 @@ use maka_runtime::{
 };
 use sqlx::SqliteConnection;
 
+impl crate::EventLog {
+    /// Resolve original provenance only through this Session's immutable copy
+    /// ownership. Knowing a source Session or Artifact ID grants no access.
+    pub async fn resolve_history_artifact(
+        &self,
+        session: &str,
+        source_session: &str,
+        source_artifact: &str,
+    ) -> Result<Option<StorageRef>, StoreError> {
+        self.validate_root()?;
+        for id in [session, source_session, source_artifact] {
+            crate::sessions::validate_id(id)?;
+        }
+        let (session, source_session, source_artifact) = (
+            session.to_owned(),
+            source_session.to_owned(),
+            source_artifact.to_owned(),
+        );
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    resolve(connection, &session, &source_session, &source_artifact).await
+                })
+            })
+            .await
+    }
+}
+
+pub(crate) async fn resolve(
+    connection: &mut SqliteConnection,
+    session: &str,
+    source_session: &str,
+    source_artifact: &str,
+) -> Result<Option<StorageRef>, StoreError> {
+    let id: Option<String> = sqlx::query_scalar(
+        "SELECT h.artifact_id FROM session_history_artifacts h
+         JOIN artifacts a ON a.session_id=h.session_id AND a.id=h.artifact_id
+         WHERE h.session_id=? AND h.source_session_id=? AND h.source_artifact_id=?",
+    )
+    .bind(session)
+    .bind(source_session)
+    .bind(source_artifact)
+    .fetch_optional(connection)
+    .await?;
+    Ok(id.map(|relative_path| StorageRef::SessionFile {
+        session_id: session.into(),
+        relative_path,
+    }))
+}
+
 /// Only typed canonical references convey resource ownership. Never interpret
 /// plugin JSON or strings containing an attachment URI as an access grant.
 pub(crate) async fn retain(

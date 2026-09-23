@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 
 pub(super) fn build<'a>(
     events: impl Iterator<Item = EventRef<'a>> + Clone,
-    session: &str,
+    resources: &super::resources::Resources<'_>,
     images: &mut Vec<images::Target<'a>>,
     vision: bool,
     replay: Option<super::Replay<'a>>,
@@ -50,9 +50,6 @@ pub(super) fn build<'a>(
         .collect();
     let mut purposes = HashMap::new();
     for stored in events.clone().filter_map(EventRef::canonical) {
-        if stored.event.invocation.session_id != session {
-            continue;
-        }
         if let Fact::ModelRequested {
             step_id, purpose, ..
         } = &stored.event.fact
@@ -85,9 +82,6 @@ pub(super) fn build<'a>(
         let stored = match event {
             EventRef::Canonical(stored) => stored,
             EventRef::Archived(archived) => {
-                if archived.invocation.session_id != session {
-                    continue;
-                }
                 let (id, name) = calls.remove(&archived.operation_id).ok_or_else(|| {
                     RunError::ReconciliationRequired("archived result lacks provider call".into())
                 })?;
@@ -112,9 +106,6 @@ pub(super) fn build<'a>(
                 continue;
             }
         };
-        if stored.event.invocation.session_id != session {
-            continue;
-        }
         if compact_invocations.contains(&stored.event.invocation.invocation_id) {
             continue;
         }
@@ -130,6 +121,7 @@ pub(super) fn build<'a>(
                 };
                 messages.push(user::project(
                     content,
+                    resources,
                     false,
                     messages.len(),
                     images,
@@ -142,6 +134,7 @@ pub(super) fn build<'a>(
                     .map_err(|reason| RunError::ReconciliationRequired(reason.into()))?;
                 messages.push(user::project(
                     &message.content,
+                    resources,
                     true,
                     messages.len(),
                     images,

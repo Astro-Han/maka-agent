@@ -253,6 +253,32 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
         .read_model_context("archived-copy", None, 100, 64 * 1024)
         .await
         .unwrap();
+    assert_eq!(
+        log.read_archive("archived-copy", &placeholder.identity)
+            .await
+            .unwrap()
+            .unwrap(),
+        expected,
+        "copy reads its accepted archive without borrowing source Session access"
+    );
+    assert!(
+        log.read_archive("unpruned-copy", &placeholder.identity)
+            .await
+            .unwrap()
+            .is_none(),
+        "a later source archive does not become an accepted archive in an older copy"
+    );
+    for session in ["archived-copy", "unpruned-copy"] {
+        assert_eq!(
+            log.read_tool_result(session, &target.event().id)
+                .await
+                .unwrap()
+                .unwrap()
+                .serialized_result
+                .as_bytes(),
+            expected
+        );
+    }
     assert!(
         adopted
             .tail
@@ -401,6 +427,12 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
         log.read_tool_result("session", &target.event().id)
             .await
             .is_err()
+    );
+    assert!(
+        log.read_archive("archived-copy", &placeholder.identity)
+            .await
+            .is_err(),
+        "history membership never bypasses original evidence integrity"
     );
     assert!(
         log.read_archive("session", &placeholder.identity)

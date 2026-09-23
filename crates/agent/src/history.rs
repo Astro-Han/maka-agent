@@ -54,6 +54,7 @@ impl<'a> From<&'a maka_event_log::context::ContextEvent> for EventRef<'a> {
     }
 }
 mod references;
+mod resources;
 pub(super) use images::materialize;
 pub(super) use images::materialize_replay;
 use projection::build;
@@ -65,6 +66,16 @@ pub fn operation_id(step_id: &str, call_id: &str) -> String {
 /// Only committed semantic facts produce provider input. No UI transcript or
 /// previous isolate state is read, including after process restart.
 pub fn project(prefix: &LogPrefix, session: &str) -> Result<Vec<Message>, RunError> {
+    if !matches!(prefix.scope, maka_runtime::event::LogScope::Root)
+        && prefix
+            .events
+            .iter()
+            .any(|e| e.event.invocation.session_id != session)
+    {
+        return Err(RunError::ReconciliationRequired(
+            "inherited history requires a checked effective context source".into(),
+        ));
+    }
     if prefix.events.iter().any(|stored| {
         matches!(
             stored.event.fact,
@@ -76,8 +87,12 @@ pub fn project(prefix: &LogPrefix, session: &str) -> Result<Vec<Message>, RunErr
         ));
     }
     build(
-        prefix.events.iter().map(EventRef::Canonical),
-        session,
+        prefix
+            .events
+            .iter()
+            .filter(|e| e.event.invocation.session_id == session)
+            .map(EventRef::Canonical),
+        &resources::Resources::native(session),
         &mut Vec::new(),
         false,
         None,

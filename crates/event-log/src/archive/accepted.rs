@@ -209,6 +209,71 @@ pub(crate) async fn archived(
     }))
 }
 
+enum ArchiveCut {
+    Current,
+    Pinned(Option<u64>),
+}
+
+impl ArchiveCut {
+    async fn resolve(
+        &self,
+        connection: &mut SqliteConnection,
+        target: &target::Target,
+    ) -> Result<Option<ArchivedPlaceholder>, StoreError> {
+        let before = match self {
+            Self::Current => i64::MAX as u64,
+            Self::Pinned(None) => return Ok(None),
+            Self::Pinned(Some(sequence)) => sequence + 1,
+        };
+        let found = find(
+            connection,
+            &target.invocation.session_id,
+            &target.event_id,
+            before,
+        )
+        .await?;
+        if let Self::Pinned(expected) = self
+            && found.as_ref().map(|(sequence, _)| *sequence) != *expected
+        {
+            return Err(ArchiveError::Corrupt.into());
+        }
+        Ok(found.map(|(_, placeholder)| placeholder))
+    }
+}
+
+/// Read ownership is separate from the original execution's append authority.
+/// A copied target sees only the archive identity accepted when it was copied.
+async fn owned_target(
+    connection: &mut SqliteConnection,
+    session: &str,
+    event_id: &str,
+) -> Result<Option<(target::Target, ArchiveCut)>, StoreError> {
+    let owner: Option<(String, bool, Option<i64>)> = sqlx::query_as(
+        "SELECT json_extract(e.event_json,'$.invocation.session_id'),
+                h.sequence IS NOT NULL, h.archive_sequence
+         FROM runtime_events e LEFT JOIN session_history_members h
+           ON h.sequence=e.sequence AND h.session_id=?1
+         WHERE e.event_id=?2 AND e.kind='tool_settled'
+           AND (json_extract(e.event_json,'$.invocation.session_id')=?1 OR h.sequence IS NOT NULL)",
+    )
+    .bind(session)
+    .bind(event_id)
+    .fetch_optional(&mut *connection)
+    .await?;
+    let Some((source, inherited, archive_sequence)) = owner else {
+        return Ok(None);
+    };
+    let cut = if inherited {
+        ArchiveCut::Pinned(archive_sequence.map(sequence_number).transpose()?)
+    } else {
+        ArchiveCut::Current
+    };
+    let target = target::read(connection, &source, event_id)
+        .await?
+        .ok_or(ArchiveError::Corrupt)?;
+    Ok(Some((target, cut)))
+}
+
 impl EventLog {
     /// Read the committed model projection with or without a later archive replacement.
     pub async fn read_tool_result(
@@ -223,18 +288,48 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    let Some(target) = target::read(&mut tx, &session, &event_id).await? else {
+                    let Some((mut target, cut)) =
+                        owned_target(&mut tx, &session, &event_id).await?
+                    else {
                         return Ok(None);
                     };
                     target
                         .projection
-                        .validate(&session)
+                        .validate(&target.invocation.session_id)
                         .map_err(|_| ArchiveError::Corrupt)?;
-                    let bytes = match find(&mut tx, &session, &event_id, i64::MAX as u64).await? {
-                        Some((_, placeholder)) => validate(&target, &placeholder)?,
-                        None => maka_runtime::archive::encode_projection(&target.projection)
-                            .map_err(|_| ArchiveError::Corrupt)?,
-                    };
+                    if let Some(placeholder) = cut.resolve(&mut tx, &target).await? {
+                        validate(&target, &placeholder)?;
+                    }
+                    // Verify original evidence before rendering typed media locators.
+                    // Raw archive reads below retain the original digest and bytes.
+                    if target.invocation.session_id != session
+                        && let maka_runtime::tool_output::DurableToolProjection::Content { parts } =
+                            &mut target.projection
+                    {
+                        for part in parts {
+                            if let maka_runtime::tool_output::ProjectionPart::Artifact { image } =
+                                part
+                            {
+                                let maka_runtime::attachment::StorageRef::SessionFile {
+                                    session_id,
+                                    relative_path,
+                                } = &image.reference
+                                else {
+                                    return Err(ArchiveError::Corrupt.into());
+                                };
+                                image.reference = crate::artifacts::history::resolve(
+                                    &mut tx,
+                                    &session,
+                                    session_id,
+                                    relative_path,
+                                )
+                                .await?
+                                .ok_or(ArchiveError::Corrupt)?;
+                            }
+                        }
+                    }
+                    let bytes = maka_runtime::archive::encode_projection(&target.projection)
+                        .map_err(|_| ArchiveError::Corrupt)?;
                     let serialized_result =
                         String::from_utf8(bytes).map_err(|_| ArchiveError::Corrupt)?;
                     tx.commit().await?;
@@ -276,16 +371,22 @@ impl EventLog {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
         let (session, event_id) = (session.to_owned(), event_id.to_owned());
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin().await?;
-            let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE event_id=? AND json_extract(event_json,'$.invocation.session_id')=?)")
-                .bind(&event_id).bind(&session).fetch_one(&mut *tx).await?;
-            if !exists { return Ok(None); }
-            let Some((_, placeholder)) = find(&mut tx, &session, &event_id, i64::MAX as u64).await? else { return Ok(None); };
-            let target = target::read(&mut tx, &session, &event_id).await?.ok_or(ArchiveError::Corrupt)?;
-            let body = validate(&target, &placeholder)?;
-            tx.commit().await?;
-            Ok(Some((placeholder.identity, body)))
-        })).await
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    let Some((target, cut)) = owned_target(&mut tx, &session, &event_id).await?
+                    else {
+                        return Ok(None);
+                    };
+                    let Some(placeholder) = cut.resolve(&mut tx, &target).await? else {
+                        return Ok(None);
+                    };
+                    let body = validate(&target, &placeholder)?;
+                    tx.commit().await?;
+                    Ok(Some((placeholder.identity, body)))
+                })
+            })
+            .await
     }
 }

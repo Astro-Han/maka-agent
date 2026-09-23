@@ -47,7 +47,9 @@ async fn reopened_user_and_typed_tool_images_share_actual_byte_budget_with_curre
         artifact(&log, "invalid", FOUR_MIB + 1, false).await;
         artifact(&log, "overflow", 8, true).await;
         let prior = identity("historical");
-        let message = serde_json::from_value(json!({"text":"historical", "attachments":[attachment("historical")]})).unwrap();
+        let mut historical = attachment("historical");
+        historical["bytes"] = json!(FOUR_MIB);
+        let message = serde_json::from_value(json!({"text":"historical", "attachments":[historical]})).unwrap();
         let facts = [
             Fact::InvocationOpened { input: InvocationInput::Message { source_messages: Vec::new(), content: message, request_fingerprint: None }, configuration: None },
             Fact::ModelRequested { effective_source_digest: None, purpose: maka_runtime::context::ModelPurpose::Main, context: None, checkpoint_event_id: None, step_id: "prior-step".into(), model_id: "test".into(),
@@ -62,6 +64,11 @@ async fn reopened_user_and_typed_tool_images_share_actual_byte_budget_with_curre
         log.append(&EventWrite::tool_success("prior-result".into(), std::time::SystemTime::now(), prior.clone(), "prior-step:read".into(),
             ToolOutput::Image(ImageOutput { mime_type: "image/png".into(), reference: serde_json::from_value(attachment("tool")["ref"].clone()).unwrap() }).into()).unwrap().0).await.unwrap();
         log.append(&EventWrite::plain(RuntimeEvent::new(prior, Fact::InvocationEnded { outcome: InvocationOutcome::Completed })).unwrap()).await.unwrap();
+        let revision = log.get_session::<Value>("session").await.unwrap().unwrap().revision;
+        assert!(matches!(log.copy_session(maka_event_log::sessions::SessionCopy {
+            source_session_id: "session".into(), target_session_id: "branch".into(),
+            expected_source_revision: revision, cut: maka_event_log::context::HistoryCut::End,
+        }, &json!({}), 2).await.unwrap(), maka_event_log::sessions::SessionCopyResult::Committed(_)));
         log.close().await.unwrap();
 
         let log = Arc::new(EventLog::open(&path).await.unwrap());
@@ -106,6 +113,38 @@ async fn reopened_user_and_typed_tool_images_share_actual_byte_budget_with_curre
         let canonical = serde_json::to_string(&prefix).unwrap();
         assert!(!canonical.contains("data:image"), "projection must not persist image bytes");
         assert!(canonical.len() < 32 * 1024);
+        for id in ["historical", "tool"] {
+            assert_eq!(log.delete_user_artifact("session", id).await.unwrap(),
+                maka_event_log::artifacts::ArtifactDeletion::Deleted);
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let copied_request = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let body = request(&mut socket).await;
+            respond(&mut socket).await;
+            body
+        });
+        let mut copied = input(&base, json!([]));
+        copied.invocation = identity("branch-current");
+        copied.invocation.session_id = "branch".into();
+        engine.run(copied, CancellationToken::new()).await.unwrap();
+        let copied_request = copied_request.await.unwrap();
+        let mut inherited_images = Vec::new();
+        collect_images(&copied_request["messages"], &mut inherited_images);
+        assert_eq!(inherited_images.len(), 2, "copy retains both user and typed tool images after source deletion");
+        let reference = log.resolve_history_artifact("branch", "session", "historical").await.unwrap().unwrap();
+        assert!(copied_request["messages"].to_string().contains(&reference.resource_ref().unwrap()),
+            "Read must receive the destination-owned resource URI");
+        let tool_reference = log.resolve_history_artifact("branch", "session", "tool").await.unwrap().unwrap();
+        let maka_runtime::attachment::StorageRef::SessionFile { relative_path, .. } = tool_reference else { panic!("owned tool image") };
+        assert!(log.read_tool_result("branch", "prior-result").await.unwrap().unwrap().serialized_result.contains(&relative_path),
+            "tool-result Read renders the copied image's locator, not the source artifact ID");
+        let original = log.prefix(100, 128 * 1024).await.unwrap();
+        let source_opening = original.events.iter().find(|e| e.event.invocation.invocation_id == "invocation-historical"
+            && matches!(e.event.fact, Fact::InvocationOpened { .. })).unwrap();
+        assert!(!serde_json::to_string(&source_opening.event).unwrap().contains("history-"),
+            "rendering aliases cannot rewrite canonical input");
         engine.drain().await;
     }).await.expect("image projection must make bounded progress");
 }

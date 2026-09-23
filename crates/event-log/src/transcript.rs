@@ -74,8 +74,8 @@ impl EventLog {
                     // and budget-checked separately, one boundary at a time.
                     let boundaries = {
                         let records = sqlx::query(
-                            "SELECT sequence, invocation_id, operation_id FROM runtime_events
-                 WHERE json_extract(event_json, '$.invocation.session_id') = ?1
+                            "SELECT sequence, invocation_id, operation_id FROM session_history_events runtime_events
+                 WHERE owner_session_id = ?1
                    AND sequence > ?2 AND sequence <= ?3
                    AND NOT EXISTS (SELECT 1 FROM runtime_events opening
                        WHERE opening.invocation_id = runtime_events.invocation_id
@@ -148,7 +148,10 @@ impl EventLog {
                             } else {
                                 None
                             };
-                            for row in view.push_with_tool_output(&fact, resolved.as_ref())? {
+                            for mut row in view.push_with_tool_output(&fact, resolved.as_ref())? {
+                                if fact.event.invocation.session_id != session {
+                                    owned_references(&mut tx, &session, &mut row.message).await?;
+                                }
                                 persist(&mut tx, &session, row).await?;
                             }
                         }
@@ -169,6 +172,39 @@ impl EventLog {
             })
             .await
     }
+}
+
+async fn owned_references(
+    tx: &mut SqliteConnection,
+    session: &str,
+    message: &mut maka_presentation::Message,
+) -> Result<(), StoreError> {
+    use maka_presentation::{Content, ToolContent};
+    use maka_runtime::attachment::StorageRef;
+    let references: Vec<_> = match &mut message.content {
+        Content::User { attachments, .. } => attachments
+            .iter_mut()
+            .flatten()
+            .map(|a| &mut a.storage_ref)
+            .collect(),
+        Content::ToolResult {
+            content: ToolContent::Image { reference, .. },
+            ..
+        } => vec![reference],
+        _ => Vec::new(),
+    };
+    for reference in references {
+        if let StorageRef::SessionFile {
+            session_id,
+            relative_path,
+        } = reference
+        {
+            *reference = crate::artifacts::history::resolve(tx, session, session_id, relative_path)
+                .await?
+                .ok_or(StoreError::TranscriptConflict)?;
+        }
+    }
+    Ok(())
 }
 
 async fn persist(tx: &mut SqliteConnection, session: &str, row: Row) -> Result<(), StoreError> {

@@ -26,6 +26,7 @@ use maka_runtime::{attachment::AttachmentKind, input::MessageInput};
 /// is never deduplicated or mistaken for a steering directive.
 pub(super) fn project<'a>(
     content: &'a MessageInput,
+    resources: &super::resources::Resources<'_>,
     steering: bool,
     index: usize,
     images: &mut Vec<images::Target<'a>>,
@@ -44,7 +45,7 @@ pub(super) fn project<'a>(
                 }),
         );
     }
-    let text = references::text(content)?;
+    let text = references::text(content, resources)?;
     let text = if steering {
         format!(
             "The user sent a message while you were working:\n<user_query>\n{text}\n</user_query>"
