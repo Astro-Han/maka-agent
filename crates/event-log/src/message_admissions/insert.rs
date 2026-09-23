@@ -33,6 +33,7 @@ pub(crate) async fn insert(
     owner: Owner,
 ) -> Result<Option<u64>, StoreError> {
     admission.validate()?;
+    crate::recovery::require_local(tx, &admission.invocation.invocation_id).await?;
     if admission.steering_invocation.is_some() {
         return Err(invalid("new admission cannot override steering ownership"));
     }
@@ -76,7 +77,7 @@ pub(crate) async fn insert(
         return Err(StoreError::SessionBusy);
     }
     let active: Option<String> = sqlx::query_scalar(
-        "SELECT json_extract(o.event_json, '$.invocation') FROM runtime_events o
+        "SELECT json_extract(o.event_json, '$.invocation') FROM local_runtime_events o
          WHERE o.kind = 'invocation_opened'
          AND json_extract(o.event_json, '$.invocation.session_id') = ?
          AND (?2 OR NOT EXISTS(SELECT 1 FROM runtime_events t

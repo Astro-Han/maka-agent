@@ -22,6 +22,7 @@
 mod append;
 pub mod archive;
 pub mod artifacts;
+pub mod bundle;
 mod catalog_changes;
 pub mod connection;
 pub mod context;
@@ -76,6 +77,8 @@ pub enum StoreError {
     UnsupportedDatabase,
     #[error("invocation is sealed")]
     Sealed,
+    #[error("imported invocation is historical evidence, not locally accepted work")]
+    ImportedInvocation,
     #[error("event identity conflicts with committed content")]
     EventConflict,
     #[error("session create request conflicts with committed configuration")]

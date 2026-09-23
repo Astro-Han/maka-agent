@@ -17,14 +17,14 @@
  * under the License.
  */
 
-use std::{future::Future, panic::AssertUnwindSafe, pin::Pin};
+use std::{future::Future, panic::AssertUnwindSafe, pin::Pin, sync::Arc};
 
 mod authority;
 pub use authority::ConnectionAuthority;
 
 use futures_util::{FutureExt, future::Shared};
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 
 use crate::StoreError;
 
@@ -34,8 +34,11 @@ type Job = Box<
     dyn for<'c> FnOnce(&'c mut SqliteConnection, Result<(), StoreError>) -> BoxFuture<'c, ()>
         + Send,
 >;
+type ReadJob =
+    Box<dyn FnOnce(Result<SqliteConnection, StoreError>) -> BoxFuture<'static, ()> + Send>;
 enum Command {
     Run(Job),
+    Read(ReadJob),
     Shutdown,
 }
 
@@ -44,6 +47,7 @@ enum Command {
 pub struct OwnedConnection {
     jobs: mpsc::Sender<Command>,
     closed: Shared<BoxFuture<'static, Result<(), String>>>,
+    readers: Arc<Semaphore>,
 }
 
 impl OwnedConnection {
@@ -53,6 +57,7 @@ impl OwnedConnection {
         initialize: for<'c> fn(&'c mut SqliteConnection) -> BoxFuture<'c, Result<(), StoreError>>,
     ) -> Result<Self, StoreError> {
         let (jobs, mut receiver) = mpsc::channel::<Command>(32);
+        let authority = Arc::new(authority);
         let (ready, startup) = oneshot::channel();
         let (completion, closed) = oneshot::channel();
         std::thread::Builder::new()
@@ -66,6 +71,8 @@ impl OwnedConnection {
                     validate()?;
                     let mut connection =
                         runtime.block_on(SqliteConnection::connect_with(&options))?;
+                    let read_options = options.clone().create_if_missing(false).read_only(true);
+                    let mut readers = tokio::task::JoinSet::new();
                     let initialized = std::panic::catch_unwind(AssertUnwindSafe(|| {
                         runtime.block_on(async {
                             initialize(&mut connection).await?;
@@ -77,8 +84,37 @@ impl OwnedConnection {
                     // If open's waiter disappeared, close without accepting work.
                     if ready.send(initialized).is_ok() && success {
                         while let Some(command) = runtime.block_on(receiver.recv()) {
+                            while readers.try_join_next().is_some() {}
                             let job = match command {
                                 Command::Run(job) => job,
+                                Command::Read(job) => {
+                                    let options = read_options.clone();
+                                    let valid = validate();
+                                    let authority = authority.clone();
+                                    readers.spawn_on(
+                                        async move {
+                                            let connection = match valid {
+                                                Ok(()) => SqliteConnection::connect_with(&options)
+                                                    .await
+                                                    .map_err(StoreError::from),
+                                                Err(error) => Err(error),
+                                            };
+                                            let connection = match connection {
+                                                Ok(connection) => match authority.validate() {
+                                                    Ok(()) => Ok(connection),
+                                                    Err(error) => {
+                                                        let _ = connection.close().await;
+                                                        Err(error)
+                                                    }
+                                                },
+                                                Err(error) => Err(error),
+                                            };
+                                            job(connection).await;
+                                        },
+                                        runtime.handle(),
+                                    );
+                                    continue;
+                                }
                                 Command::Shutdown => {
                                     // Reject new sends, then drain every accepted job.
                                     receiver.close();
@@ -94,6 +130,9 @@ impl OwnedConnection {
                             }
                         }
                     }
+                    // Readers share this owner's authority, not the caller's lifetime.
+                    // Close them before releasing the writer lease or acknowledging shutdown.
+                    runtime.block_on(async { while readers.join_next().await.is_some() {} });
                     // Await real close before releasing authority, even after failure.
                     runtime
                         .block_on(connection.close())
@@ -116,6 +155,7 @@ impl OwnedConnection {
                 }
                 .boxed()
                 .shared(),
+                readers: Arc::new(Semaphore::new(2)),
             }),
             Ok(Err(error)) => {
                 drop(jobs);
@@ -153,9 +193,52 @@ impl OwnedConnection {
     }
 
     pub async fn shutdown(&self) -> Result<(), StoreError> {
+        self.readers.close();
         // Closed ingress is also normal for repeated or concurrent shutdown.
         let _ = self.jobs.send(Command::Shutdown).await;
         self.closed.clone().await.map_err(StoreError::CloseFailed)
+    }
+
+    /// Bounded independent readers keep large snapshots off the serialized writer.
+    /// Accepted reads drain on shutdown even if their caller or executor disappears.
+    pub(crate) async fn read<T: Send + 'static>(
+        &self,
+        operation: impl for<'c> FnOnce(&'c mut SqliteConnection) -> BoxFuture<'c, Result<T, StoreError>>
+        + Send
+        + 'static,
+    ) -> Result<T, StoreError> {
+        let permit = self
+            .readers
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| StoreError::ConnectionClosed)?;
+        let (reply, result) = oneshot::channel();
+        self.jobs
+            .send(Command::Read(Box::new(move |connection| {
+                Box::pin(async move {
+                    let _permit = permit;
+                    let result = match connection {
+                        Ok(mut connection) => {
+                            let result =
+                                AssertUnwindSafe(async { operation(&mut connection).await })
+                                    .catch_unwind()
+                                    .await
+                                    .unwrap_or(Err(StoreError::OperationUnknown));
+                            let closed = connection.close().await.map_err(StoreError::from);
+                            match (result, closed) {
+                                (Ok(value), Ok(())) => Ok(value),
+                                (Err(error), _) | (_, Err(error)) => Err(error),
+                            }
+                        }
+                        Err(error) => Err(error),
+                    };
+                    let _ = reply.send(result);
+                })
+            })))
+            .await
+            .map_err(|_| StoreError::ConnectionClosed)?;
+        result.await.map_err(|_| StoreError::OperationUnknown)?
     }
 
     pub async fn close(self) -> Result<(), StoreError> {
@@ -171,6 +254,98 @@ mod tests {
         sync::{Arc, mpsc as blocking},
         time::Duration,
     };
+
+    #[tokio::test]
+    async fn read_snapshot_does_not_block_writes_and_shutdown_drains_abandoned_readers() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("snapshot.sqlite");
+        let lock = directory.path().join("writer.lock");
+        let lease = Arc::new(crate::root::FileLease::acquire(&lock).unwrap());
+        let contender = File::open(&lock).unwrap();
+        let owner = Arc::new(OwnedConnection::open(
+            SqliteConnectOptions::new().filename(&path).create_if_missing(true),
+            ConnectionAuthority::Writer { lease, root: None },
+            |connection| Box::pin(async move {
+                sqlx::raw_sql("PRAGMA journal_mode=WAL; CREATE TABLE facts(value INTEGER); INSERT INTO facts VALUES(1);")
+                    .execute(connection).await?;
+                Ok(())
+            }),
+        ).await.unwrap());
+        let (ready, opened) = oneshot::channel();
+        let (release, gate) = oneshot::channel();
+        let (finished, observed) = oneshot::channel();
+        let reader = owner.clone();
+        let caller = tokio::spawn(async move {
+            reader
+                .read(move |connection| {
+                    Box::pin(async move {
+                        let mut tx = connection.begin().await?;
+                        let first: i64 = sqlx::query_scalar("SELECT SUM(value) FROM facts")
+                            .fetch_one(&mut *tx)
+                            .await?;
+                        ready.send(()).unwrap();
+                        gate.await.unwrap();
+                        let second: i64 = sqlx::query_scalar("SELECT SUM(value) FROM facts")
+                            .fetch_one(&mut *tx)
+                            .await?;
+                        assert!(
+                            sqlx::query("INSERT INTO facts VALUES(99)")
+                                .execute(&mut *tx)
+                                .await
+                                .is_err(),
+                            "reader must not promote to a writer"
+                        );
+                        tx.rollback().await?;
+                        finished.send((first, second)).unwrap();
+                        Ok(())
+                    })
+                })
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), opened)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            owner.run(|connection| {
+                Box::pin(async move {
+                    sqlx::query("INSERT INTO facts VALUES(2)")
+                        .execute(connection)
+                        .await?;
+                    Ok(())
+                })
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        caller.abort();
+        let _ = caller.await;
+        let closing = owner.clone();
+        let shutdown = tokio::spawn(async move { closing.shutdown().await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), owner.closed.clone())
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            contender.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        release.send(()).unwrap();
+        assert_eq!(observed.await.unwrap(), (1, 1));
+        tokio::time::timeout(Duration::from_secs(5), shutdown)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        contender.try_lock().unwrap();
+        assert!(matches!(
+            owner.read(|_| Box::pin(async { Ok(()) })).await,
+            Err(StoreError::ConnectionClosed)
+        ));
+    }
 
     #[test]
     fn dropped_caller_runtime_keeps_authority_until_real_commit_and_close() {

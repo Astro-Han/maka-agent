@@ -30,7 +30,7 @@ use maka_runtime::{
 };
 use serde_json::{Value, json};
 
-async fn seal(
+pub(super) async fn seal(
     log: &EventLog,
     source: &RuntimeEvent,
 ) -> (maka_runtime::handoff::HandoffPause, SessionBase) {

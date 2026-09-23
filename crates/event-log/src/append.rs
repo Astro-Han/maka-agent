@@ -82,6 +82,7 @@ impl EventLog {
         write: &EventWrite,
     ) -> Result<AppendResult, StoreError> {
         let event = write.event();
+        crate::recovery::require_local(transaction, &event.invocation.invocation_id).await?;
         let removal =
             crate::sessions::removal::read(transaction, &event.invocation.session_id).await?;
         if removal == Some(crate::sessions::SessionRetirement::Removed) {
@@ -139,7 +140,7 @@ impl EventLog {
                     ));
                 }
                 let active: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM runtime_events AS opening
+                    "SELECT EXISTS(SELECT 1 FROM local_runtime_events AS opening
                      WHERE opening.kind = 'invocation_opened'
                      AND json_extract(opening.event_json, '$.invocation.session_id') = ?
                      AND NOT EXISTS(SELECT 1 FROM runtime_events AS terminal

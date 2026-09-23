@@ -41,6 +41,8 @@ mod handoff_cancel;
 mod handoff_claim;
 #[path = "continuation/handoff_consumers.rs"]
 mod handoff_consumers;
+#[path = "continuation/imported.rs"]
+mod imported;
 use fixtures::*;
 
 #[tokio::test]
