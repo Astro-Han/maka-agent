@@ -21,8 +21,7 @@ use super::records::{advance, invalid, read_record};
 use crate::StoreError;
 use maka_runtime::{
     attachment::{AttachmentRef, StorageRef},
-    event::{Fact, InvocationInput, RuntimeEvent, ToolOutcome},
-    tool_output::{DurableToolProjection, ProjectionPart},
+    event::RuntimeEvent,
 };
 use sqlx::SqliteConnection;
 
@@ -96,70 +95,7 @@ pub(crate) async fn retain(
         ).bind(target).bind(after).fetch_optional(&mut *tx).await?;
         let Some((sequence, json)) = row else { break };
         let event: RuntimeEvent = serde_json::from_str(&json)?;
-        let mut references: Vec<(&StorageRef, Option<&AttachmentRef>)> = Vec::new();
-        match &event.fact {
-            Fact::InvocationOpened {
-                input:
-                    InvocationInput::Message {
-                        content,
-                        source_messages,
-                        ..
-                    },
-                ..
-            } => {
-                references.extend(
-                    content
-                        .attachments
-                        .iter()
-                        .flatten()
-                        .map(|a| (&a.storage_ref, Some(a))),
-                );
-                for message in source_messages {
-                    references.extend(
-                        message
-                            .unprepared_content
-                            .attachments
-                            .iter()
-                            .flatten()
-                            .map(|a| (&a.storage_ref, Some(a))),
-                    );
-                    references.extend(
-                        message
-                            .message
-                            .content
-                            .attachments
-                            .iter()
-                            .flatten()
-                            .map(|a| (&a.storage_ref, Some(a))),
-                    );
-                }
-            }
-            Fact::MessageSteered { message } => {
-                references.extend(
-                    message
-                        .content
-                        .attachments
-                        .iter()
-                        .flatten()
-                        .map(|a| (&a.storage_ref, Some(a))),
-                );
-            }
-            Fact::ToolSettled {
-                outcome:
-                    ToolOutcome::Succeeded {
-                        model_projection: DurableToolProjection::Content { parts },
-                        ..
-                    },
-                ..
-            } => {
-                references.extend(parts.iter().filter_map(|part| match part {
-                    ProjectionPart::Artifact { image } => Some((&image.reference, None)),
-                    ProjectionPart::Text { .. } => None,
-                }));
-            }
-            _ => {}
-        }
-        for (reference, attachment) in references {
+        for (reference, attachment) in super::references::from_event(&event) {
             retain_one(tx, source, target, reference, attachment, now).await?;
         }
         after = sequence;
@@ -186,32 +122,16 @@ pub(crate) async fn retain_revision(
         .await?;
         let Some((sequence, json)) = row else { break };
         let event: RuntimeEvent = serde_json::from_str(&json)?;
-        let Fact::InvocationOpened {
-            input: InvocationInput::Message {
-                source_messages, ..
-            },
-            ..
-        } = event.fact
-        else {
-            return Err(invalid("revision source is not a message opening"));
-        };
-        for source_message in source_messages {
-            for attachment in source_message
-                .unprepared_content
-                .attachments
-                .iter()
-                .flatten()
-            {
-                retain_one(
-                    tx,
-                    source,
-                    target,
-                    &attachment.storage_ref,
-                    Some(attachment),
-                    now,
-                )
-                .await?;
-            }
+        for attachment in super::references::revision(&event)? {
+            retain_one(
+                tx,
+                source,
+                target,
+                &attachment.storage_ref,
+                Some(attachment),
+                now,
+            )
+            .await?;
         }
         after = sequence;
     }

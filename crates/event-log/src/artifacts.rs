@@ -21,6 +21,7 @@ mod copy;
 pub(crate) mod history;
 mod read;
 mod records;
+pub(crate) mod references;
 use crate::{EventLog, StoreError};
 use maka_runtime::{
     artifact::{Artifact, ArtifactSource, content_digest},
@@ -125,18 +126,8 @@ pub(crate) async fn commit_in_transaction(
     mut artifact: Artifact,
     bytes: &[u8],
 ) -> Result<Artifact, StoreError> {
-    artifact.validate().map_err(invalid)?;
-    if artifact.size_bytes != bytes.len() as u64 || artifact.size_bytes > MAX_ATTACHMENT_BYTES {
-        return Err(invalid("Artifact payload size mismatch or limit exceeded"));
-    }
-    let encoded = serde_json::to_string(&artifact)?;
-    if encoded.len() > MAX_RECORD_BYTES {
-        return Err(invalid("Artifact metadata exceeds limit"));
-    }
     let digest = content_digest(bytes);
-    if artifact.source == ArtifactSource::UserUpload && artifact.summary.as_ref() != Some(&digest) {
-        return Err(StoreError::ArtifactConflict);
-    }
+    let encoded = validate_material(&artifact, bytes.len() as u64, &digest)?;
     require_session(connection, &artifact.session_id).await?;
     if let Some((existing, stored_digest)) =
         read_record(connection, &artifact.session_id, &artifact.id).await?
@@ -167,6 +158,27 @@ pub(crate) async fn commit_in_transaction(
     .await?;
     advance(connection, &artifact.session_id).await?;
     Ok(artifact)
+}
+
+/// Validate immutable metadata against already checked payload length and digest.
+pub(crate) fn validate_material(
+    artifact: &Artifact,
+    bytes: u64,
+    digest: &str,
+) -> Result<String, StoreError> {
+    artifact.validate().map_err(invalid)?;
+    if artifact.size_bytes != bytes || artifact.size_bytes > MAX_ATTACHMENT_BYTES {
+        return Err(invalid("Artifact payload size mismatch or limit exceeded"));
+    }
+    let encoded = serde_json::to_string(artifact)?;
+    if encoded.len() > MAX_RECORD_BYTES {
+        return Err(invalid("Artifact metadata exceeds limit"));
+    }
+    if artifact.source == ArtifactSource::UserUpload && artifact.summary.as_deref() != Some(digest)
+    {
+        return Err(StoreError::ArtifactConflict);
+    }
+    Ok(encoded)
 }
 
 pub(crate) async fn verify_projection_replay(

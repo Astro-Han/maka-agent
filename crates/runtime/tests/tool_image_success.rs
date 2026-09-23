@@ -96,12 +96,13 @@ async fn pending_image_is_normalized_once_and_delivered_only_after_commit_ack() 
         );
         assert_eq!(artifact.artifact().session_id, "session");
         let Fact::ToolSettled {
-            outcome: ToolOutcome::Succeeded { raw, .. },
+            outcome: ToolOutcome::Succeeded { raw, artifacts, .. },
             ..
         } = &write.event().fact
         else {
             panic!()
         };
+        assert_eq!(artifacts, &[artifact.evidence()]);
         let output = decode_raw_tool_result(write.raw_payload().unwrap(), raw).unwrap();
         assert!(matches!(&output, ToolOutput::Image(image) if image.mime_type == "image/gif"));
         let delivered = output.into_json();

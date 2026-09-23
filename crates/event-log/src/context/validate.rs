@@ -178,7 +178,7 @@ pub(super) async fn chain(
     Ok(())
 }
 
-async fn require_terminal(
+pub(crate) async fn require_terminal(
     connection: &mut SqliteConnection,
     checkpoint: &RuntimeEvent,
 ) -> Result<(), StoreError> {

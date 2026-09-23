@@ -18,7 +18,7 @@
  */
 
 mod boundary;
-mod evidence;
+pub(crate) mod evidence;
 pub(crate) mod frozen;
 pub(crate) mod history;
 pub use history::{FrozenSessionHistory, HistoryCapture, HistoryCut};
@@ -40,6 +40,7 @@ use maka_runtime::{
     event::{LogScope, StoredEvent},
     model::ModelUsage,
 };
+pub(crate) use validate::require_terminal as validate_checkpoint_terminal;
 pub(crate) use validate::{validate_append, validate_batch};
 
 #[derive(Clone, Debug)]

@@ -38,6 +38,7 @@ pub(crate) fn verify_binding(event: &RuntimeEvent, bytes: Option<i64>) -> Result
                 ToolOutcome::Succeeded {
                     raw,
                     model_projection,
+                    artifacts,
                 },
             ..
         } => {
@@ -53,6 +54,20 @@ pub(crate) fn verify_binding(event: &RuntimeEvent, bytes: Option<i64>) -> Result
             model_projection
                 .validate(&event.invocation.session_id)
                 .map_err(|_| invalid())?;
+            let mut ids = std::collections::HashSet::new();
+            let references = crate::artifacts::references::from_event(event);
+            for artifact in artifacts {
+                if artifacts.len() > 64 || !ids.insert(&artifact.id)
+                    || maka_runtime::interaction::entity_id(&artifact.id).is_err()
+                    || artifact.bytes > maka_runtime::attachment::MAX_ATTACHMENT_BYTES
+                    || !maka_runtime::archive::valid_projection_digest(&artifact.digest)
+                    || !references.iter().any(|(reference, _)| {
+                        matches!(reference, maka_runtime::attachment::StorageRef::SessionFile { session_id, relative_path }
+                            if session_id == &event.invocation.session_id && relative_path == &artifact.id)
+                    }) {
+                    return Err(invalid());
+                }
+            }
         }
         _ if bytes.is_some() => return Err(invalid()),
         _ => {}
@@ -82,6 +97,19 @@ pub(crate) async fn insert(
     connection: &mut SqliteConnection,
     write: &EventWrite,
 ) -> Result<(), StoreError> {
+    if let Fact::ToolSettled {
+        outcome: ToolOutcome::Succeeded { artifacts, .. },
+        ..
+    } = &write.event().fact
+        && *artifacts
+            != write
+                .projection_artifacts()
+                .iter()
+                .map(|a| a.evidence())
+                .collect::<Vec<_>>()
+    {
+        return Err(invalid());
+    }
     if let Some(payload) = write.raw_payload() {
         sqlx::query("INSERT INTO tool_result_payloads (event_id, payload) VALUES (?, ?)")
             .bind(&write.event().id)

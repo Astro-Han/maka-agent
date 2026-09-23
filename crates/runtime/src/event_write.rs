@@ -51,6 +51,13 @@ impl ProjectionArtifactWrite {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+    pub fn evidence(&self) -> crate::artifact::ArtifactEvidence {
+        crate::artifact::ArtifactEvidence {
+            id: self.artifact.id.clone(),
+            bytes: self.bytes.len() as u64,
+            digest: content_digest(&self.bytes),
+        }
+    }
 }
 
 impl EventWrite {
@@ -212,6 +219,11 @@ impl EventWrite {
                         outcome: ToolOutcome::Succeeded {
                             raw,
                             model_projection: success.projection,
+                            artifacts: success
+                                .artifacts
+                                .iter()
+                                .map(ProjectionArtifactWrite::evidence)
+                                .collect(),
                         },
                     },
                 },

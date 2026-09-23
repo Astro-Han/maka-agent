@@ -77,6 +77,7 @@ async fn large_attachment_results_preserve_raw_without_poisoning_model_history()
                     ToolOutcome::Succeeded {
                         raw,
                         model_projection,
+                        ..
                     },
                 ..
             } = &stored.event.fact

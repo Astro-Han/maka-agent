@@ -17,12 +17,12 @@
  * under the License.
  */
 
-use maka_runtime::event::{
-    CommitError, CommitFuture, EventSink, EventWrite, Fact, InvocationOutcome,
-};
+use maka_runtime::event::{CommitError, CommitFuture, EventSink, EventWrite, Fact};
 use sqlx::{Connection, SqliteConnection};
 
 use crate::{EventLog, StoreError, sequence_number};
+
+pub(crate) mod history;
 
 impl EventLog {
     /// Commit ordered facts atomically, validating each against the preceding
@@ -116,125 +116,38 @@ impl EventLog {
             return Err(StoreError::SessionRetired);
         }
         let id = &event.invocation.invocation_id;
-        let sealed: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ? AND kind = 'invocation_ended')",
-        ).bind(id).fetch_one(&mut *transaction).await?;
-        if sealed {
-            return Err(StoreError::Sealed);
-        }
-        let opening: Option<String> = sqlx::query_scalar(
-            "SELECT event_json FROM runtime_events WHERE invocation_id = ? AND kind = 'invocation_opened'",
-        ).bind(id).fetch_optional(&mut *transaction).await?;
-        match (&event.fact, opening) {
-            (Fact::InvocationOpened { .. }, None) => {
-                crate::sessions::retain(transaction, &event.invocation.session_id).await?;
-                let archived: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ? AND archived = 1)",
-                )
-                .bind(&event.invocation.session_id)
-                .fetch_one(&mut *transaction)
-                .await?;
-                if archived {
-                    return Err(StoreError::InvalidTransition(
-                        "cannot admit an archived session".into(),
-                    ));
-                }
-                let active: bool = sqlx::query_scalar(
+        history::validate(transaction, event).await?;
+        if matches!(event.fact, Fact::InvocationOpened { .. }) {
+            crate::sessions::retain(transaction, &event.invocation.session_id).await?;
+            let archived: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ? AND archived = 1)",
+            )
+            .bind(&event.invocation.session_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+            if archived {
+                return Err(StoreError::InvalidTransition(
+                    "cannot admit an archived session".into(),
+                ));
+            }
+            let active: bool = sqlx::query_scalar(
                     "SELECT EXISTS(SELECT 1 FROM local_runtime_events AS opening
                      WHERE opening.kind = 'invocation_opened'
                      AND json_extract(opening.event_json, '$.invocation.session_id') = ?
                      AND NOT EXISTS(SELECT 1 FROM runtime_events AS terminal
                          WHERE terminal.invocation_id = opening.invocation_id AND terminal.kind = 'invocation_ended'))",
                 ).bind(&event.invocation.session_id).fetch_one(&mut *transaction).await?;
-                if active {
-                    return Err(StoreError::InvalidTransition(
-                        "session already has an unsealed invocation".into(),
-                    ));
-                }
-            }
-            (Fact::InvocationOpened { .. }, Some(_)) => {
+            if active {
                 return Err(StoreError::InvalidTransition(
-                    "invocation already opened".into(),
+                    "session already has an unsealed invocation".into(),
                 ));
-            }
-            (_, None) => {
-                return Err(StoreError::InvalidTransition(
-                    "invocation not opened".into(),
-                ));
-            }
-            (_, Some(opening)) => {
-                if serde_json::from_str::<maka_runtime::event::RuntimeEvent>(&opening)?.invocation
-                    != event.invocation
-                {
-                    return Err(StoreError::InvalidTransition(
-                        "invocation identity changed".into(),
-                    ));
-                }
             }
         }
-        crate::executor::validate(transaction, event).await?;
-        crate::tool_calls::validate(transaction, event).await?;
-        crate::continuation::validate(transaction, event).await?;
-        crate::handoff::validate(transaction, event).await?;
-        crate::steering::validate_append(transaction, event).await?;
+        crate::handoff::validate_admission(transaction, event).await?;
         crate::message_identity::validate(transaction, event).await?;
         crate::message_admissions::consume(transaction, event).await?;
-        crate::context::validate_append(transaction, event).await?;
-        crate::archive::validate_append(transaction, event).await?;
         if matches!(event.fact, Fact::InvocationEnded { .. }) {
             crate::interactions::lifecycle::require_closed(transaction, &event.invocation).await?;
-        }
-        if let Fact::ToolSettled { operation_id, .. } = &event.fact {
-            let dispatched: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ? AND operation_id = ? AND kind = 'tool_dispatched')",
-            ).bind(id).bind(operation_id).fetch_one(&mut *transaction).await?;
-            if !dispatched {
-                return Err(StoreError::InvalidTransition(
-                    "outcome without dispatch".into(),
-                ));
-            }
-        }
-        if let Fact::ModelCompleted { step_id, .. }
-        | Fact::ModelInterrupted { step_id, .. }
-        | Fact::ModelObserved { step_id, .. } = &event.fact
-        {
-            let requested: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ? AND operation_id = ? AND kind = 'model_requested')",
-            ).bind(id).bind(step_id).fetch_one(&mut *transaction).await?;
-            if !requested {
-                return Err(StoreError::InvalidTransition(
-                    "model output without request".into(),
-                ));
-            }
-            let settled: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ? AND operation_id = ? AND kind IN ('model_completed', 'model_interrupted'))",
-            ).bind(id).bind(step_id).fetch_one(&mut *transaction).await?;
-            if settled {
-                return Err(StoreError::InvalidTransition(
-                    "model request already settled".into(),
-                ));
-            }
-        }
-        if matches!(
-            event.fact,
-            Fact::InvocationEnded {
-                outcome: InvocationOutcome::Completed
-            }
-        ) {
-            let pending: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM runtime_events AS dispatch
-                 WHERE dispatch.invocation_id = ? AND dispatch.kind IN ('tool_dispatched', 'model_requested')
-                 AND NOT EXISTS(SELECT 1 FROM runtime_events AS outcome
-                     WHERE outcome.invocation_id = dispatch.invocation_id
-                     AND outcome.operation_id = dispatch.operation_id
-                     AND ((dispatch.kind = 'tool_dispatched' AND outcome.kind = 'tool_settled')
-                       OR (dispatch.kind = 'model_requested' AND outcome.kind IN ('model_completed','model_interrupted')))))",
-            ).bind(id).fetch_one(&mut *transaction).await?;
-            if pending {
-                return Err(StoreError::InvalidTransition(
-                    "cannot complete with an unresolved tool or model outcome".into(),
-                ));
-            }
         }
         let inserted = sqlx::query(
             "INSERT INTO event_log (event_id, invocation_id, kind, operation_id, event_json)
