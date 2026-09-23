@@ -28,4 +28,6 @@ Usage and pricing settings implemented as a public plugin API consumer.
 - Rate edits use catalog revisions and affect future admissions only. Conflicts require a fresh read.
 - Preferences use plugin-scoped storage CAS. Retirement withdraws the UI and Remote registrations, not accepted Host work or accounting.
 
-The native plugin needs no V8. Its Client uses the public `settings.page` slot; package identity is not an authorization shortcut.
+The native plugin needs no V8. Its Client uses public `settings.page` and `session.inspector.overview` slots; package identity is not an authorization shortcut. Inspector reads stay bound to the viewed Session and refresh on accounting events, not streaming text.
+
+Run Client lifecycle acceptance with `node --test crates/insights/tests/client.test.mjs` from the repository root.

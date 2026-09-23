@@ -111,6 +111,7 @@ export interface WorkbarHostModel {
   onActivityStateChange?: (panelId: string, active: boolean) => void;
   activeSideChatPanelIds?: ReadonlySet<string>;
   sourceSession?: SideChatSession;
+  inspectorHost?: { profileId: string; hostId: string };
   modelChoices?: readonly ChatModelChoice[];
   onStartWorkBoardTask?: (item: WorkBoardItem) => void;
   resolveWorkBoardStartTask?: (item: WorkBoardItem) => { ok: boolean; message?: string };
@@ -192,6 +193,7 @@ export function WorkbarHost({ model: props }: { model: WorkbarHostModel }) {
               onActivityStateChange={props.onActivityStateChange}
               activeSideChatPanelIds={props.activeSideChatPanelIds}
               sourceSession={props.sourceSession}
+              inspectorHost={props.inspectorHost}
               modelChoices={props.modelChoices}
               onStartWorkBoardTask={props.onStartWorkBoardTask}
               resolveWorkBoardStartTask={props.resolveWorkBoardStartTask}

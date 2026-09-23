@@ -219,7 +219,6 @@ import {
   createRuntimeHostSettingsModule,
   registerRuntimeHostSettingsIpc,
 } from "./runtime-host-settings-ipc-main.js";
-import { registerRuntimeHostUsageIpc } from "./runtime-host-usage-ipc-main.js";
 import { registerRuntimeHostWorkspaceIpc } from "./runtime-host-workspace-ipc-main.js";
 
 import {
@@ -1662,10 +1661,6 @@ function registerHostClientIpc(
     ipcMain: scopedIpc,
   });
   registerRuntimeHostSearchIpc({ ipcMain: scopedIpc, client });
-  registerRuntimeHostUsageIpc({
-    ipcMain: scopedIpc,
-    client,
-  });
   registerRuntimeHostWorkspaceIpc({
     ipcMain: scopedIpc,
     client,

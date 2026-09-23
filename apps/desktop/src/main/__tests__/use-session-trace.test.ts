@@ -32,7 +32,6 @@ import {
   createFakeWorkbarServices,
   useSessionTrace,
   type SessionTracePage,
-  type SessionUsageSummary,
   type WorkbarServices,
 } from '../../renderer/features/workbar/testing.js';
 
@@ -58,55 +57,14 @@ function trace(sessionId: string): SessionTrace {
   };
 }
 
-function usageSummary(
-  totalRequests = 0,
-  totalCostUsd = 0,
-): SessionUsageSummary {
-  return {
-    range: { from: 0, to: 1 },
-    totalRequests,
-    totalCostUsd,
-    totalTokens: {
-      input: totalRequests,
-      output: 0,
-      cacheMiss: totalRequests,
-      cacheRead: 0,
-      cacheWrite: 0,
-      reasoning: 0,
-      total: totalRequests,
-    },
-    cacheHitRequests: 0,
-    cacheCreateRequests: 0,
-    errorRequests: 0,
-    totalDurationMs: 0,
-    provenance: {
-      coverage: {
-        attempts: totalRequests,
-        pricedAttempts: totalRequests,
-        unpricedAttempts: 0,
-        usageReportedAttempts: totalRequests,
-        usagePartialAttempts: 0,
-        usageMissingAttempts: 0,
-      },
-      legacyRecords: 0,
-      unreadableRecords: 0,
-      pendingRepairs: 0,
-    },
-  };
-}
-
 interface TraceHarness {
   services: WorkbarServices;
   reads: string[];
   traceRequests: Array<{ sessionId: string; cursor?: string }>;
   contextReads: string[];
-  summaryReads: string[];
   emit: (event: SessionEvent) => void;
-  emitUsageChange: () => void;
   subscriptions: number;
   unsubscribes: number;
-  usageSubscriptions: number;
-  usageUnsubscribes: number;
 }
 
 function createTraceHarness(
@@ -116,30 +74,19 @@ function createTraceHarness(
       sessionId: string,
       cursor?: string,
     ) => Promise<Result<SessionTracePage>>;
-    summary?: (
-      sessionId: string,
-      readIndex: number,
-    ) => Promise<Result<SessionUsageSummary>>;
   } = {},
 ): TraceHarness {
   const handlers = new Set<(event: SessionEvent) => void>();
-  const usageChangeHandlers = new Set<() => void>();
   const harness: TraceHarness = {
     services: undefined as never,
     reads: [],
     traceRequests: [],
     contextReads: [],
-    summaryReads: [],
     emit: (event) => {
       for (const handler of [...handlers]) handler(event);
     },
-    emitUsageChange: () => {
-      for (const handler of [...usageChangeHandlers]) handler();
-    },
     subscriptions: 0,
     unsubscribes: 0,
-    usageSubscriptions: 0,
-    usageUnsubscribes: 0,
   };
   const services = createFakeWorkbarServices({
     inspector: {
@@ -157,11 +104,6 @@ function createTraceHarness(
             nextCursor: null,
           },
         };
-      },
-      summary: async (sessionId: string) => {
-        harness.summaryReads.push(sessionId);
-        if (options.summary) return options.summary(sessionId, harness.summaryReads.length);
-        return { ok: true as const, data: usageSummary() };
       },
       // The hook reads the context snapshot on the same signal (#2323). It
       // is counted separately: the assertions below are about how often the
@@ -185,14 +127,6 @@ function createTraceHarness(
         return () => {
           harness.unsubscribes += 1;
           handlers.delete(handler);
-        };
-      },
-      subscribeUsageChanges: (_sessionId: string, handler: () => void) => {
-        harness.usageSubscriptions += 1;
-        usageChangeHandlers.add(handler);
-        return () => {
-          harness.usageUnsubscribes += 1;
-          usageChangeHandlers.delete(handler);
         };
       },
     },
@@ -264,21 +198,18 @@ describe('useSessionTrace', () => {
       root.render(createElement(Probe, { services: harness.services, sessionId: 'session-1', active: false }));
     });
     assert.equal(harness.subscriptions, 0, 'a hidden panel subscribes to nothing');
-    assert.equal(harness.usageSubscriptions, 0, 'a hidden panel subscribes to no usage');
     assert.deepEqual(harness.reads, [], 'and reads nothing');
 
     await act(async () => {
       root.render(createElement(Probe, { services: harness.services, sessionId: 'session-1', active: true }));
     });
     assert.equal(harness.subscriptions, 1);
-    assert.equal(harness.usageSubscriptions, 1);
     assert.deepEqual(harness.reads, ['session-1']);
 
     await act(async () => {
       root.render(createElement(Probe, { services: harness.services, sessionId: 'session-1', active: false }));
     });
     assert.equal(harness.unsubscribes, 1, 'hiding releases the subscription');
-    assert.equal(harness.usageUnsubscribes, 1, 'hiding releases the usage subscription');
   });
 
   it('re-reads once for a burst of ledger-changing events', async () => {
@@ -297,34 +228,6 @@ describe('useSessionTrace', () => {
     await flushRefresh();
 
     assert.equal(harness.reads.length, 2, 'a closing burst is one re-read, not three');
-  });
-
-  it('refreshes Session usage only from the Usage authority signal', async () => {
-    const { root } = installReactRenderer();
-    const harness = createTraceHarness();
-    await act(async () => {
-      root.render(
-        createElement(Probe, {
-          services: harness.services,
-          sessionId: 'session-1',
-          active: true,
-        }),
-      );
-    });
-    assert.equal(harness.summaryReads.length, 1);
-
-    await act(async () => harness.emit(event('tool_result')));
-    await flushRefresh();
-    assert.equal(harness.reads.length, 2);
-    assert.equal(harness.summaryReads.length, 1);
-
-    await act(async () => harness.emit(event('token_usage')));
-    await flushRefresh();
-    assert.equal(harness.summaryReads.length, 1, 'Session events do not own Usage freshness');
-
-    await act(async () => harness.emitUsageChange());
-    await flushRefresh();
-    assert.equal(harness.summaryReads.length, 2);
   });
 
   it('does not re-read for streaming deltas', async () => {
@@ -640,33 +543,5 @@ describe('useSessionTrace', () => {
     );
   });
 
-  it('stops presenting an old Session summary when its refresh fails', async () => {
-    const { root } = installReactRenderer();
-    const harness = createTraceHarness({
-      summary: async (_sessionId, readIndex) =>
-        readIndex === 1
-          ? { ok: true, data: usageSummary(1, 1) }
-          : { ok: false, error: { code: 'FAILED', message: 'failed' } },
-    });
-    let snapshot: ReturnType<typeof useSessionTrace> | undefined;
-    await act(async () => {
-      root.render(
-        createElement(Probe, {
-          services: harness.services,
-          sessionId: 'session-1',
-          active: true,
-          onHookSnapshot: (value) => {
-            snapshot = value;
-          },
-        }),
-      );
-    });
-    assert.equal(snapshot?.summary?.totalCostUsd, 1);
 
-    await act(async () => harness.emitUsageChange());
-    await flushRefresh();
-
-    assert.equal(snapshot?.summary, undefined);
-    assert.equal(snapshot?.summaryError, true);
-  });
 });

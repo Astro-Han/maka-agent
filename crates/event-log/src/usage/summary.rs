@@ -165,6 +165,7 @@ const MODELS: &str = "COUNT(*) AS calls,
     COALESCE(SUM(outcome = 'error'), 0) AS error,
     COALESCE(SUM(outcome = 'aborted'), 0) AS aborted,
     COALESCE(SUM(outcome = 'unknown'), 0) AS unknown,
+    TOTAL(CASE WHEN outcome != 'unknown' THEN MAX(completed_at - started_at, 0.0) END) AS duration,
     TOTAL(json_extract(usage, '$.input_tokens')) AS input,
     COUNT(*) - COUNT(json_extract(usage, '$.input_tokens')) AS input_missing,
     TOTAL(json_extract(usage, '$.output_tokens')) AS output,
@@ -185,6 +186,8 @@ const TOOLS: &str = "COUNT(*) AS calls,
     COALESCE(SUM(json_extract(result, '$.outcome') = 'error'), 0) AS error,
     COALESCE(SUM(json_extract(result, '$.outcome') = 'unknown'), 0) AS unknown,
     COALESCE(SUM(json_extract(result, '$.kind') = 'rejected'), 0) AS rejected,
+    TOTAL(CASE WHEN json_extract(result, '$.outcome') IN ('success', 'error')
+        THEN MAX(completed_at - json_extract(result, '$.startedAt'), 0.0) END) AS duration,
     AVG(CASE WHEN json_extract(result, '$.outcome') IN ('success', 'error')
         THEN MAX(completed_at - json_extract(result, '$.startedAt'), 0.0) END) AS latency
     FROM tool_usage";
@@ -196,6 +199,7 @@ fn read_models(row: &SqliteRow) -> Result<ModelTotals, StoreError> {
         error: count(row, "error")?,
         aborted: count(row, "aborted")?,
         unknown: count(row, "unknown")?,
+        duration_ms: finite(row.try_get("duration")?)?,
         input: tokens(row, "input", "input_missing")?,
         output: tokens(row, "output", "output_missing")?,
         cache_read: tokens(row, "cache_read", "cache_read_missing")?,
@@ -215,6 +219,7 @@ fn read_tools(row: &SqliteRow) -> Result<ToolTotals, StoreError> {
         error: count(row, "error")?,
         unknown: count(row, "unknown")?,
         rejected: count(row, "rejected")?,
+        duration_ms: finite(row.try_get("duration")?)?,
         mean_latency_ms: row
             .try_get::<Option<f64>, _>("latency")?
             .map(finite)

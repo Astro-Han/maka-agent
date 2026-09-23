@@ -145,6 +145,8 @@ Native endpoints accepting caller-supplied Host paths declare `Endpoint::requiri
 
 ## Usage
 
+`session.inspector.overview` receives the viewed Host's canonical `sessionId` and `locale`. It augments the overview without replacing native trace/context controls. Bind Remote reads to that Session; slot props alone grant no execution permission.
+
 `call.usage.activity({ kind: 'start', filter: { from, to, sessionId?, activity? } })` reads physical model and tool attempts, including failed retries, auxiliary calls and pre-dispatch refusals. Agent calls see their Session; independent calls need `read_usage` authorization for a profile or Session. Responses contain no conversation bodies. Missing usage, price and outcome remain distinct unknowns.
 
 Activity entries are tagged `model` or `tool`. Optional `activity` filters select `kind`, `status` and a literal ASCII-case-insensitive `search` (at most 1 KiB UTF-8, no control characters). Refusals have no execution duration; unknown tool effects are not cancellations.
@@ -154,6 +156,8 @@ Each page contains at most 100 attempts / 48 KiB. `{ kind: 'continue', cursor }`
 `{ kind: 'refine', cursor, selection }` changes activity filters and returns the first matching page without changing the original scope, range or fence.
 
 `call.usage.summary(cursor)` uses the same range, Session and fence, ignoring activity-only filters. Token and cost subtotals include missing-call coverage; unpriced calls differ from priced calls with incomplete usage. Provider/model/tool breakdowns are complete or fail explicitly (128 groups each, 48 KiB overall). Pending counts use admission time within the range and are excluded from completed totals. Nonfinite or inexact integer aggregates fail rather than becoming zero.
+
+Summary `durationMs` totals observed model/tool execution time, excluding unknown outcomes and pre-dispatch refusals. Overlapping calls are cumulative, not Session wall-clock time.
 
 ## Pricing
 

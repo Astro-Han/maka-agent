@@ -97,6 +97,7 @@ async fn summary_keeps_missing_and_free_distinct_and_reuses_the_activity_fence()
     let models = &current.summary.models;
     assert_eq!(current.summary.pending.models, 0);
     assert_eq!(models.calls, 4);
+    assert_eq!(models.duration_ms, 1.0, "four 250-microsecond calls");
     assert_eq!(models.success, 4);
     assert_eq!(
         models.input,

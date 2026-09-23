@@ -23,7 +23,6 @@ export { WorkbarServicesProvider } from './services-context.js';
 export type {
   WorkbarServices,
   SessionTracePage,
-  SessionUsageSummary,
   WorkbarIngestInput,
 } from './ports.js';
 
@@ -36,9 +35,6 @@ export * from '../../application/contracts/session-inspector/session-inspector-p
 export {
   compactNumberFormatter,
   InspectorCompositionSection,
-  RING_ACTIVE_MIN_SWEEP,
-  RING_MIN_SWEEP,
-  usageRingArcs,
 } from '../../application/contracts/session-inspector/session-inspector-panel.js';
 export * from '../../application/contracts/session-inspector/session-inspector-overview-model.js';
 export * from './tools/side-chat/quote-companion-panel-state.js';
@@ -114,14 +110,10 @@ export function createFakeWorkbarServices(
       trace: async () => {
         throw new Error('Fake inspector.trace is not configured');
       },
-      summary: async () => {
-        throw new Error('Fake inspector.summary is not configured');
-      },
       context: async () => {
         throw new Error('Fake inspector.context is not configured');
       },
       subscribeSessionEvents: noopSubscription,
-      subscribeUsageChanges: noopSubscription,
     },
     attachments: {
       readBytes: async () => ({ ok: false, reason: 'not_found' }),

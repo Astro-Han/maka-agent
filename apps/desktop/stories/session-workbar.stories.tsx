@@ -40,7 +40,6 @@ import {
   type QuoteCompanionPanelState,
   type SessionWorkbarTab,
   type SessionWorkbarTabKind,
-  type SessionUsageSummary,
   type WorkbarServices,
 } from '../src/renderer/features/workbar/testing';
 
@@ -686,69 +685,6 @@ const olderTrace: SessionTrace = {
   ],
 };
 
-const emptyUsageSummary: SessionUsageSummary = {
-  range: { from: NOW, to: NOW },
-  totalRequests: 0,
-  totalCostUsd: 0,
-  totalDurationMs: 0,
-  totalTokens: {
-    input: 0,
-    output: 0,
-    cacheMiss: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    reasoning: 0,
-    total: 0,
-  },
-  cacheHitRequests: 0,
-  cacheCreateRequests: 0,
-  errorRequests: 0,
-  provenance: {
-    coverage: {
-      attempts: 0,
-      pricedAttempts: 0,
-      unpricedAttempts: 0,
-      usageReportedAttempts: 0,
-      usagePartialAttempts: 0,
-      usageMissingAttempts: 0,
-    },
-    legacyRecords: 0,
-    unreadableRecords: 0,
-    pendingRepairs: 0,
-  },
-};
-
-const populatedUsageSummary: SessionUsageSummary = {
-  range: { from: NOW, to: NOW + 43_600 },
-  totalRequests: 3,
-  totalCostUsd: 0.0243,
-  totalDurationMs: 38_400,
-  totalTokens: {
-    input: 81_300,
-    output: 740,
-    cacheMiss: 7_200,
-    cacheRead: 74_100,
-    cacheWrite: 0,
-    reasoning: 120,
-    total: 82_040,
-  },
-  cacheHitRequests: 2,
-  cacheCreateRequests: 0,
-  errorRequests: 1,
-  provenance: {
-    coverage: {
-      attempts: 3,
-      pricedAttempts: 2,
-      unpricedAttempts: 1,
-      usageReportedAttempts: 2,
-      usagePartialAttempts: 0,
-      usageMissingAttempts: 1,
-    },
-    legacyRecords: 0,
-    unreadableRecords: 1,
-    pendingRepairs: 0,
-  },
-};
 
 // ---- services ------------------------------------------------------------
 
@@ -811,14 +747,6 @@ function bridge(options: {
                     nextCursor: options.traceNextCursor ?? null,
                   },
             },
-      summary: async () => ({
-        ok: true,
-        data:
-          options.trace && options.trace.turns.length > 0
-            ? populatedUsageSummary
-            : emptyUsageSummary,
-      }),
-      subscribeUsageChanges: unsubscribe,
       context: async () => ({
         ok: true,
         data: options.context ?? { status: 'unavailable', reason: 'no_completed_request' },

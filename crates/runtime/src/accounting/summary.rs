@@ -44,6 +44,8 @@ pub struct ModelTotals {
     pub error: u64,
     pub aborted: u64,
     pub unknown: u64,
+    /// Sum of observed durations; unknown outcomes are excluded. Not wall-clock time.
+    pub duration_ms: f64,
     pub input: Tokens,
     pub output: Tokens,
     pub cache_read: Tokens,
@@ -61,6 +63,8 @@ pub struct ToolTotals {
     pub error: u64,
     pub unknown: u64,
     pub rejected: u64,
+    /// Known success/error durations; refusals and unknown effects contribute no time.
+    pub duration_ms: f64,
     /// Only known success/error settlements contribute to observed execution latency.
     pub mean_latency_ms: Option<f64>,
 }

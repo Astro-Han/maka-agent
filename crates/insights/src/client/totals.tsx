@@ -52,6 +52,13 @@ function Cost({ value, zh }: { value: UsageSummary['models']['cost']; zh: boolea
 
 export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; zh: boolean }) {
   const model = summary.models;
+  const cacheRatio =
+    model.input.missing === 0 &&
+    model.cacheRead.missing === 0 &&
+    model.input.known > 0 &&
+    model.cacheRead.known <= model.input.known
+      ? model.cacheRead.known / model.input.known
+      : undefined;
   if (tab === 'overview')
     return (
       <>
@@ -88,6 +95,16 @@ export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; 
           {[model.success, model.error, model.aborted, model.unknown].map(number).join(' / ')}
         </p>
         <dl className="insights-facts">
+          <dt>{zh ? '缓存命中率' : 'Cache hit rate'}</dt>
+          <dd>{cacheRatio === undefined ? '?' : number(cacheRatio * 100) + '%'}</dd>
+          <dt>{zh ? '模型累计耗时' : 'Cumulative model time'}</dt>
+          <dd>
+            {number(model.durationMs)} ms{model.unknown ? ' + ?' : ''}
+          </dd>
+          <dt>{zh ? '工具累计耗时' : 'Cumulative tool time'}</dt>
+          <dd>
+            {number(summary.tools.durationMs)} ms{summary.tools.unknown ? ' + ?' : ''}
+          </dd>
           <dt>{zh ? '缓存读取' : 'Cache read'}</dt>
           <dd>
             <Tokens value={model.cacheRead} zh={zh} />
@@ -111,8 +128,8 @@ export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; 
         </dl>
         <p className="insights-note">
           {zh
-            ? '“+ ?” 表示部分调用缺少计数或报价，不等于零。已完成统计按结算时间；待结算数按准入时间。修改报价不会改变历史费用。'
-            : '“+ ?” means some counters or valuations are missing, not zero. Completed totals use settlement time; pending counts use admission time. Rate edits do not change historical costs.'}
+            ? '“+ ?” 表示部分数据未知，不等于零。累计耗时可能因并行调用而重叠，不是会话经过时间。已完成统计按结算时间，待结算数按准入时间。修改报价不改变历史费用。'
+            : '“+ ?” means some data is unknown, not zero. Cumulative durations may overlap; they are not elapsed session time. Completed totals use settlement time; pending counts use admission time. Rate edits do not change historical costs.'}
         </p>
       </>
     );

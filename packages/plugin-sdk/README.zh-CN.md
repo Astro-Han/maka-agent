@@ -149,6 +149,8 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 
 ## 用量
 
+`session.inspector.overview` 接收当前 Host 的规范 `sessionId` 与 `locale`，补充概览而不替换原生轨迹／上下文控件。Remote 读取应绑定此 Session；插槽参数本身不授予执行权限。
+
 `call.usage.activity({ kind: 'start', filter: { from, to, sessionId?, activity? } })` 读取模型和工具的物理调用，包含失败重试、辅助调用及派发前拒绝。Agent 只读当前 Session；独立调用需要 profile 或 Session 范围的 `read_usage` 授权。结果不包含对话正文，缺失用量、报价和结果分别保持未知。
 
 活动通过 `model`／`tool` 标签区分。可选 `activity` 按 `kind`、`status` 和字面文本 `search` 筛选；搜索仅忽略 ASCII 大小写，最多 1 KiB UTF-8，不接受控制字符。派发前拒绝没有执行耗时；副作用未知不等于取消。
@@ -158,6 +160,8 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 `{ kind: 'refine', cursor, selection }` 修改活动筛选并返回首个匹配页，不改变原作用域、时间范围或快照。
 
 `call.usage.summary(cursor)` 复用相同的范围、Session 和快照，忽略活动列表筛选。Token 和费用小计保留缺失调用数；未报价与已报价但用量不完整分别统计。提供商／模型／工具分组必须完整，否则明确报错（各最多 128 组，整体 48 KiB）。待结算数按范围内的准入时间统计，不计入已完成总额。非有限值或无法精确表示的整数会报错，不变成零。
+
+汇总中的 `durationMs` 累加已观测的模型／工具执行耗时，不计未知结果与派发前拒绝。并发调用会累加，不代表会话墙钟时间。
 
 ## 报价
 

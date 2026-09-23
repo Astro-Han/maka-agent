@@ -21,28 +21,21 @@ import type { SessionEvent } from '@maka/core/events';
 import type { SessionTrace } from '@maka/core/session-trace';
 import type { Result } from '@maka/core/result';
 import type { ContextDiagnosticsResult } from '@maka/runtime-host/protocol';
-import type { MergedUsageSummary } from '@maka/core/usage-ledger-merge';
 
 export interface SessionTracePage {
   readonly trace: SessionTrace;
   readonly nextCursor: string | null;
 }
 
-export type SessionUsageSummary = MergedUsageSummary;
 
 export interface SessionInspectorService {
   trace(
     sessionId: string,
     cursor?: string,
   ): Promise<Result<SessionTracePage>>;
-  summary(sessionId: string): Promise<Result<SessionUsageSummary>>;
   context(sessionId: string): Promise<Result<ContextDiagnosticsResult>>;
   subscribeSessionEvents(
     sessionId: string,
     handler: (event: SessionEvent) => void,
-  ): () => void;
-  subscribeUsageChanges(
-    sessionId: string,
-    handler: () => void,
   ): () => void;
 }

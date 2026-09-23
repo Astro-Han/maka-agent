@@ -63,10 +63,8 @@ function isDesktopTerminal(update: ShellRunUpdate): boolean {
 export function createDesktopInspectorService(bridge: Pick<MakaBridge, 'inspector' | 'sessions'>) {
   return {
     trace: (sessionId: string, cursor?: string) => bridge.inspector.trace(sessionId, cursor),
-    summary: (sessionId: string) => bridge.inspector.summary(sessionId),
     context: (sessionId: string) => bridge.inspector.context(sessionId),
     subscribeSessionEvents: (sessionId: string, handler: Parameters<MakaBridge['sessions']['subscribeEvents']>[1]) => bridge.sessions.subscribeEvents(sessionId, handler),
-    subscribeUsageChanges: (sessionId: string, handler: () => void) => bridge.inspector.subscribeUsageChanges(sessionId, handler),
   };
 }
 

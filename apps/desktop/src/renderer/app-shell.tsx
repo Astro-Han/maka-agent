@@ -1253,6 +1253,8 @@ function AppShellContent({
     available: sessionsSelected && (workHubActive || Boolean(activeHostSession)),
     layoutSessionId: activeId,
     activeSession: activeHostSession,
+    inspectorHost: workHubActive ? workHubSession.host : activeCatalogSession
+      ? { profileId: activeCatalogSession.profileId, hostId: activeCatalogSession.runtimeHostId } : undefined,
     projectId: currentProjectId,
     projectAliases: currentProject?.aliases ?? [],
     authoritativeSessionIds: authoritativeSessionIds ?? undefined,

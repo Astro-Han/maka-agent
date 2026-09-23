@@ -19,7 +19,7 @@
 
 use super::{
     javascript_plugins::ready,
-    support::{client_probe::ClientFixture, peer::Peer},
+    support::{client_probe::ClientFixture, message_recovery::configure, peer::Peer},
 };
 use maka_plugins::{client::Bundle, kernel::Definition};
 use maka_runtime_host::{
@@ -41,6 +41,7 @@ async fn renamed_insights_uses_public_remote_capabilities_and_preserves_state_ac
 
 async fn scenario() {
     let fixture = ClientFixture::new("maka-insights-");
+    let model = configure(&fixture, "http://127.0.0.1:9/v1").await;
     let preferences = json!({"range":"30d","tab":"activity","selection":{"search":"🦀"}});
     let mut old_cursor = Value::Null;
     for reopened in [false, true] {
@@ -68,6 +69,12 @@ async fn scenario() {
         );
         let mut peer = Peer::new(host, "insights-client").await;
         ready(&mut peer).await;
+        if !reopened {
+            success(peer.rpc("session.create", json!({"sessionId":"inspector-session",
+                "workspace":{"kind":"host_path","path":fixture.workspace}, "sandboxMode":"danger-full-access",
+                "modelTarget":{"kind":"explicit","connectionId":model.connection_id,
+                    "connectionSlug":model.connection_slug,"model":model.model}})).await);
+        }
         let mut call = bind(&mut peer).await;
         let snapshot = invoke(&mut peer, &call, json!({"kind":"preferences"})).await;
         if reopened {
@@ -144,6 +151,32 @@ async fn scenario() {
         )
         .await;
         assert_eq!(summary["summary"]["models"]["calls"], 0);
+        let session_call = bind_session(&mut peer, Some("inspector-session")).await;
+        let session_page = invoke(&mut peer, &session_call, json!({"kind":"activity",
+            "operationId":uuid::Uuid::new_v4(), "read":{"kind":"start","filter":{"from":0,"to":2000000000000_f64}}})).await;
+        let scoped = invoke(
+            &mut peer,
+            &session_call,
+            json!({"kind":"summary",
+            "operationId":uuid::Uuid::new_v4(),"cursor":session_page["page"]["cursor"]}),
+        )
+        .await;
+        assert_eq!(scoped["summary"]["models"]["calls"], 0);
+        let mut crossing = session_call.clone();
+        crossing["input"] =
+            json!({"kind":"summary","operationId":uuid::Uuid::new_v4(),"cursor":old_cursor});
+        assert_eq!(
+            peer.rpc("plugin.remote", crossing).await["ok"],
+            false,
+            "Session-bound caller cannot read a profile summary cursor"
+        );
+        success(
+            peer.rpc(
+                "plugin.remote",
+                json!({"kind":"close_document","document":session_call["document"]}),
+            )
+            .await,
+        );
         if !reopened {
             success(
                 peer.rpc(
@@ -240,6 +273,9 @@ fn setup() -> Setup {
     }
 }
 async fn bind(peer: &mut Peer) -> Value {
+    bind_session(peer, None).await
+}
+async fn bind_session(peer: &mut Peer, session: Option<&str>) -> Value {
     let clients = success(
         peer.rpc("plugin.client.query", json!({"kind":"snapshot"}))
             .await,
@@ -250,7 +286,7 @@ async fn bind(peer: &mut Peer) -> Value {
         .iter()
         .find(|entry| entry["extensionId"] == ID)
         .unwrap();
-    let binding = json!({"method":"request","sessionId":null,"client":{
+    let binding = json!({"method":"request","sessionId":session,"client":{
         "entryId":entry["entryId"],"extensionId":entry["extensionId"],"activation":entry["activation"],
         "contentDigest":entry["contentDigest"],"clientDigest":entry["clientDigest"]}});
     let target = success(

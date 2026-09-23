@@ -28,10 +28,8 @@ import type { ContextDiagnosticsResult } from '@maka/runtime-host/protocol';
 import type {
   SessionInspectorService,
   SessionTracePage,
-  SessionUsageSummary,
 } from './service.js';
 import {
-  createRefreshCoalescer,
   createTraceRefreshCoalescer,
   TRACE_REFRESH_DEBOUNCE_MS,
 } from '@maka/ui/context-usage';
@@ -46,10 +44,7 @@ interface SessionTraceState {
    * answer it must not blank the causal record beside it.
    */
   context?: ContextDiagnosticsResult;
-  summary?: SessionUsageSummary;
   loading: boolean;
-  summaryLoading?: boolean;
-  summaryError?: boolean;
   loadingEarlier?: boolean;
   error?: string;
 }
@@ -89,7 +84,6 @@ export function useSessionTrace(
   hideEarlier: () => void;
 } {
   const traceRevisionRef = useRef(0);
-  const summaryRevisionRef = useRef(0);
   const contextRevisionRef = useRef(0);
   const desiredPageCountRef = useRef<{ sessionId: string; count: number } | undefined>(undefined);
   const traceWindowRef = useRef<
@@ -209,44 +203,6 @@ export function useSessionTrace(
     [copy.loadFailed, copy.locale, inspector],
   );
 
-  const readSummary = useCallback((targetSessionId: string) => {
-      const summaryRevision = ++summaryRevisionRef.current;
-      setState((current) =>
-        current.sessionId === targetSessionId
-          ? { ...current, summaryLoading: true, summaryError: undefined }
-          : { sessionId: targetSessionId, loading: false, summaryLoading: true },
-      );
-      void inspector.summary(targetSessionId).then(
-        (result) => {
-          if (summaryRevision !== summaryRevisionRef.current) return;
-          setState((current) =>
-            current.sessionId === targetSessionId
-              ? {
-                  ...current,
-                  ...(result.ok
-                    ? { summary: result.data, summaryError: undefined }
-                    : { summary: undefined, summaryError: true }),
-                  summaryLoading: false,
-                }
-              : current,
-          );
-        },
-        () => {
-          if (summaryRevision !== summaryRevisionRef.current) return;
-          setState((current) =>
-            current.sessionId === targetSessionId
-              ? {
-                  ...current,
-                  summary: undefined,
-                  summaryLoading: false,
-                  summaryError: true,
-                }
-              : current,
-          );
-        },
-      );
-    }, [inspector]);
-
   const readContext = useCallback((targetSessionId: string) => {
       const contextRevision = ++contextRevisionRef.current;
       // Enrichment, and read as such: the context snapshot has its own owner
@@ -272,15 +228,13 @@ export function useSessionTrace(
   const load = useCallback(
     (targetSessionId: string) => {
       readTraceWindow(targetSessionId);
-      readSummary(targetSessionId);
       readContext(targetSessionId);
     },
-    [readContext, readSummary, readTraceWindow],
+    [readContext, readTraceWindow],
   );
 
   useEffect(() => {
     traceRevisionRef.current += 1;
-    summaryRevisionRef.current += 1;
     contextRevisionRef.current += 1;
     if (!sessionId || !active) {
       if (!sessionId) {
@@ -302,29 +256,17 @@ export function useSessionTrace(
       schedule: (callback, delayMs) => setTimeout(callback, delayMs),
       cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     });
-    const summaryCoalescer = createRefreshCoalescer({
-      refresh: () => readSummary(sessionId),
-      delayMs: TRACE_REFRESH_DEBOUNCE_MS,
-      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
-      cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-    });
     const unsubscribe = inspector.subscribeSessionEvents(sessionId, (event) => {
       traceCoalescer.observe(event);
     });
-    const unsubscribeUsage = inspector.subscribeUsageChanges(sessionId, () =>
-      summaryCoalescer.request(),
-    );
     load(sessionId);
     return () => {
       traceRevisionRef.current += 1;
-      summaryRevisionRef.current += 1;
       contextRevisionRef.current += 1;
       traceCoalescer.cancel();
-      summaryCoalescer.cancel();
       unsubscribe();
-      unsubscribeUsage();
     };
-  }, [active, inspector, load, readContext, readSummary, readTraceWindow, sessionId]);
+  }, [active, inspector, load, readContext, readTraceWindow, sessionId]);
 
   const retry = useCallback(() => {
     if (sessionId) load(sessionId);

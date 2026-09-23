@@ -18,7 +18,7 @@
  */
 
 import type { SessionInspectorService } from '../../application/contracts/session-inspector/service.js';
-export type { SessionInspectorService, SessionTracePage, SessionUsageSummary } from '../../application/contracts/session-inspector/service.js';
+export type { SessionInspectorService, SessionTracePage } from '../../application/contracts/session-inspector/service.js';
 
 import type {
   MessageQueuePlacement,

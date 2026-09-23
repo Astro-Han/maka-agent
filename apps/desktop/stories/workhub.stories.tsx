@@ -93,14 +93,7 @@ function makeServices(failFirst: boolean, withHistory: boolean | 'usage', colore
     inspector: {
       context: async () => ({ ok: true, data: { status: 'available', completedAt: 1, modelId: session.model, providerId: 'openai', inputTokens: 1000, contextWindow: 100_000 } }),
       trace: async () => ({ ok: true, data: { trace: { schemaVersion: 1, sessionId, turns: [], coverage: { modelCalls: 'none', turnsMissingModelCalls: [], unreadableRecords: 0, oversizedRuns: 0, turnsWithFewerModelCallsThanSteps: [] } }, nextCursor: null } }),
-      summary: async () => ({ ok: true, data: {
-        range: { from: 1, to: 2 }, totalRequests: 1, totalCostUsd: 0.002, totalDurationMs: 3400,
-        totalTokens: { input: 1000, output: 120, cacheMiss: 400, cacheRead: 600, cacheWrite: 0, reasoning: 40, total: 1120 },
-        cacheHitRequests: 1, cacheCreateRequests: 0, errorRequests: 0,
-        provenance: { coverage: { attempts: 1, pricedAttempts: 1, unpricedAttempts: 0, usageReportedAttempts: 1, usagePartialAttempts: 0, usageMissingAttempts: 0 }, legacyRecords: 0, unreadableRecords: 0, pendingRepairs: 0 },
-      } }),
       subscribeSessionEvents: () => () => {},
-      subscribeUsageChanges: () => () => {},
     },
     retractQueueEntry: async () => {}, promoteQueueEntry: async () => {},
     updateQueueEntry: async () => {}, reorderQueueEntries: async () => {},

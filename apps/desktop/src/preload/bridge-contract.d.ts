@@ -141,8 +141,6 @@ import type {
   RendererRuntimeHostQueryOperation,
 } from './runtime-host-renderer-operations.js';
 import type { SessionTrace } from '@maka/core/session-trace';
-import type { UsageSummaryV2 } from '@maka/core/usage-stats/types';
-import type { UsageProvenance } from '@maka/core/usage-ledger-merge';
 import type { ContextDiagnosticsResult } from '@maka/runtime-host/protocol';
 import type { TestProxyInput } from '@maka/core/settings/network-settings';
 import type { ExternalSessionImportIpcResult } from './external-session-import-result.js';
@@ -754,9 +752,6 @@ export interface DesktopSessionTracePage {
   readonly nextCursor: string | null;
 }
 
-export interface DesktopSessionUsageSummary extends UsageSummaryV2 {
-  readonly provenance: UsageProvenance;
-}
 
 export interface DesktopHostHandoffPayload {
   readonly view: HostHandoffView;
@@ -1713,9 +1708,6 @@ export interface MakaBridge {
   inspector: {
     /** Read-only per-session causal trace (#1625). */
     trace(sessionId: string, cursor?: string): Promise<Result<DesktopSessionTracePage>>;
-    /** Complete Session-scoped LLM usage estimate, independent of loaded trace pages. */
-    summary(sessionId: string): Promise<Result<DesktopSessionUsageSummary>>;
-    subscribeUsageChanges(sessionId: string, handler: () => void): () => void;
     /** What the session's context is made of right now (#2323). */
     context(sessionId: string): Promise<Result<ContextDiagnosticsResult>>;
   };

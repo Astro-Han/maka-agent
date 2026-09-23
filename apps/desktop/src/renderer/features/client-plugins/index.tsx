@@ -73,7 +73,7 @@ export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
   </>;
 }
 
-export function ClientPluginSessionSlot<K extends 'session.composer.before' | 'session.header.actions' | 'turn.footer'>(props: {
+export function ClientPluginSessionSlot<K extends 'session.composer.before' | 'session.header.actions' | 'session.inspector.overview' | 'turn.footer'>(props: {
   readonly host: ClientHostRef;
   readonly name: K;
   readonly className?: string;

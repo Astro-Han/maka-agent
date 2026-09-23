@@ -18,6 +18,7 @@
  */
 
 import { useWorkbarServices } from '../services-context.js';
+import { ClientPluginSessionSlot } from '../../client-plugins/index.js';
 import { lazy, Suspense, useState, useEffect, useRef, type ReactNode } from 'react';
 import { Composer, useUiLocale, type ChatModelChoice } from '@maka/ui';
 import {
@@ -406,6 +407,7 @@ export function WorkbarSurface(props: {
   onActivityStateChange?: (panelId: string, active: boolean) => void;
   activeSideChatPanelIds?: ReadonlySet<string>;
   sourceSession?: SideChatSession;
+  inspectorHost?: { profileId: string; hostId: string };
   modelChoices?: readonly ChatModelChoice[];
   onStartWorkBoardTask?: (item: WorkBoardItem) => void;
   resolveWorkBoardStartTask?: (item: WorkBoardItem) => { ok: boolean; message?: string };
@@ -554,6 +556,9 @@ export function WorkbarSurface(props: {
             <Suspense fallback={<WorkbarPanelLoading label={copy.inspector} />}>
               <SessionInspectorPanel
                 inspector={inspector}
+                extensions={!props.hidden && active && props.inspectorHost ? <ClientPluginSessionSlot
+                  host={props.inspectorHost}
+                  name="session.inspector.overview" input={{ sessionId: props.sessionId!, locale }} /> : null}
                 copy={getDesktopConversationCopy(locale).inspector}
                 key={props.sessionId}
                 sessionId={props.sessionId!}

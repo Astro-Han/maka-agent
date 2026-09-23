@@ -37,7 +37,6 @@ function createBridgeRecorder(): {
     'browser.setActiveSession',
     'browser.setViewport',
     'browser.onState',
-    'inspector.subscribeUsageChanges',
   ]);
   // Adapters that reshape a bridge answer need one to reshape.
   const answers = new Map<string, unknown>([
@@ -216,10 +215,8 @@ describe('createDesktopWorkbarServices', () => {
     await services.artifacts.saveAs('s', 'a');
 
     await services.inspector.trace('s', 'cursor-1');
-    await services.inspector.summary('s');
     await services.inspector.context('s');
     services.inspector.subscribeSessionEvents('s', eventHandler)();
-    services.inspector.subscribeUsageChanges('s', eventHandler)();
 
     await services.attachments.pickFiles();
     await services.attachments.previewApproval('approval');
@@ -297,10 +294,8 @@ describe('createDesktopWorkbarServices', () => {
         'app.openArtifactPath',
         'app.saveArtifactAs',
         'inspector.trace',
-        'inspector.summary',
         'inspector.context',
         'sessions.subscribeEvents',
-        'inspector.subscribeUsageChanges',
         'attachments.pickFiles',
         'attachments.previewApproval',
         'sessions.list',

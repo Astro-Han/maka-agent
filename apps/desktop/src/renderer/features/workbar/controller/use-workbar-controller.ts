@@ -106,6 +106,7 @@ export interface UseWorkbarControllerInput {
   layoutSessionId: string | undefined;
   /** Independent persistent renderers must not overwrite each other’s panel topology. */
   activeSession: SideChatSession | undefined;
+  inspectorHost?: { profileId: string; hostId: string };
   projectId: string | null | undefined;
   projectAliases: readonly string[];
   authoritativeSessionIds: ReadonlySet<string> | undefined;
@@ -974,6 +975,7 @@ export function useWorkbarController(
       },
       onActivityStateChange: sideConversations.setActive,
       sourceSession: input.activeSession,
+      inspectorHost: input.inspectorHost,
       modelChoices: input.modelChoices,
       onStartWorkBoardTask: startWorkBoardTask,
       resolveWorkBoardStartTask: input.resolveWorkBoardTarget,

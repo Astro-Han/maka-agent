@@ -79,7 +79,7 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | Goal | 查询、arm、控制、续跑、终止、预算与恢复语义。 | **插件 + Host。** Goal 决定后续提交；Host 执行已准入的硬限制并记录用量。插件退休后不能继续提交。 |
 | Daily review／recap | daily-review 查询／修改、定时复盘、`session.recap.generate`。 | **插件 + Host。** 选择、总结及输出由插件负责，复用 Scheduler 和授权历史／模型服务；规范 Session 元数据的提交仍归 Host。 |
 | 外部 agent | setup start/query/cancel；具体执行适配、配置、鉴权、对话身份，以及附件／交互／resume／fork。 | **插件 + Host。** CLI／ACP 适配作为 Executor 插件，使用受管理进程／HTTP。已有 Executor 框架不等于已有具体 adapter。Host 负责授权、取消和外部事件落盘。 |
-| Usage／Pricing | 已实现 Agent 与辅助 SDK 的物理计量、冻结估价、公共 Rust／JS 作用域模型／工具混合活动分页，以及原生／插件共享的报价查询与 CAS 修改。一致快照汇总包含有界完整分组与缺失数据覆盖率；Insights 插件已提供设置报表、筛选、分页、视图持久化和报价编辑；Session Inspector 汇总接缝仍待接入。 | **插件 + Host。** 报表和可重建投影可归 Insights 领域；Host 不依赖插件存活来记录用量，并提供一致快照。缺失用量不能视为零。 |
+| Usage／Pricing | 已实现 Agent 与辅助 SDK 的物理计量、冻结估价、公共 Rust／JS 作用域模型／工具混合活动分页，以及原生／插件共享的报价查询与 CAS 修改。一致快照汇总包含有界完整分组与缺失数据覆盖率；Insights 插件已提供设置报表、筛选、分页、视图持久化和报价编辑；Session Inspector 已使用公共 Session 作用域 Client 插槽。 | **插件 + Host。** 报表和可重建投影可归 Insights 领域；Host 不依赖插件存活来记录用量，并提供一致快照。缺失用量不能视为零。 |
 | 后台健康 | BackgroundTaskHealth 的进程和端点检查。 | **插件 + Host。** 插件解释健康状态并提供工具；Host 提供授权资源观察和有界探测。保存 PID 不等于拥有进程。 |
 | Session 谱系 | 已实现公共 Rust／JS 历史复制和原始输入读取、原生分支／修订创建与放弃、继承历史独立裁剪、Desktop 规范输入编辑及完整持久草稿。已移除 regenerate，修改请求使用编辑重发。 | **Host。** 谱系及工作区只有一个事务权威；插件请求命令，不在私有存储中重做谱系。 |
 | Session 生命周期 | 已实现原生与公共插件删除／预览／回执接口、原子家族退休及队列取消、重启清理和共享 worktree 所有权。无引用规范材料回收及 shared 查询仍待完成。 | **Host。** 保留被引用历史及已接受回执；进程清理不确定时不得删除工作目录。shared 查询需要真实协作授权。 |
@@ -101,7 +101,7 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | Skills：工具发布 | Skill／SkillSearch 是普通 Contribution，不享有包名特权。每步绑定在工具上限内共同捕获 handler 和支持上下文，物理重试保持原快照。 |
 | WorkHub：精确执行命令 | 类型化命令携带稳定操作 ID、精确目标及预期 revision。纠正先冻结插件意图，再精确控制／提交 Host 工作，最后原子记录业务回执；已接受工作不依赖插件可用性继续结算。队列编辑保留原提交凭证。插件不获得 SQL 事务回调或无限制执行句柄。 |
 | WorkHub／Graph／Plan：可选择的 behavior | 已用开放的 `BehaviorId` 选择类型化 Contribution，Graph／Swarm 独立注册；非内置业务已通过 Host 验收。保留 Session 默认值和持久单 Turn 选择；请求的 behavior 不可用时明确失败。behavior 准备与输入准备是独立契约，不合并为 hook 总线。 |
-| Skills／Web／Recall／Insights：授权服务 | Rust／JS 公共历史 API 提供固定水位文本分页及归档 Session 元数据。已准入 Agent 可读受信任 profile，Remote／后台调用保留相应范围的历史授权。公共 Usage 读取提供作用域内的模型／工具物理调用和派发前拒绝，不暴露对话正文；固定快照汇总与有界分组已提供；Insights 已通过公共 Remote／Client API 消费这些能力；Session Inspector 汇总接缝仍待接入。领域目录／修改接口可作为类型化插件 Service，不必成为内核方法。 |
+| Skills／Web／Recall／Insights：授权服务 | Rust／JS 公共历史 API 提供固定水位文本分页及归档 Session 元数据。已准入 Agent 可读受信任 profile，Remote／后台调用保留相应范围的历史授权。公共 Usage 读取提供作用域内的模型／工具物理调用和派发前拒绝，不暴露对话正文；固定快照汇总与有界分组已提供；Insights 已通过公共 Remote／Client API 消费这些能力；Session Inspector 已使用公共 Session 作用域 Client 插槽。领域目录／修改接口可作为类型化插件 Service，不必成为内核方法。 |
 | Skills／WorkHub／默认行为：业务 UI 与 Prompt 上下文 | 发布的 Client 通过 Slot 和 Remote 拥有真实 Skills 选择器／管理页及 WorkHub 界面。原生适配验证原 Host 与 document；连接换代撤销旧 Remote 租约，不重放调用。Prompt Contribution 拥有业务指令。功能停用明确显示不可用，不阻塞普通聊天。 |
 | 其余 TS 扩展服务 | 新 SDK 尚缺等价的公开 LSP 路由、Commands、Skills／Goals 查询、shell 环境变量 Contribution、Settings 定义、授权流程及 LLM adapter 注册；问题／表单、源输入与附件复制已有公共契约；权限审批仍归 Host。能由插件服务实现的领域注册放在插件侧，敏感行为权威仍归 Host。`llm.generate` 不等于 adapter 注册。 |
 

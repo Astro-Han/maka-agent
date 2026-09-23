@@ -196,7 +196,12 @@ where
                 _ => "Read usage accounting",
             }
             .into(),
-            target: Target::Profile,
+            target: match (&caller.session_id, capability) {
+                (Some(session_id), Capability::ReadUsage) => Target::Session {
+                    session_id: session_id.clone(),
+                },
+                _ => Target::Profile,
+            },
             capabilities: [capability].into(),
         })
         .await?;

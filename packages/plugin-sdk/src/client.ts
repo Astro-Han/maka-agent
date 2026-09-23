@@ -84,6 +84,10 @@ export interface ClientSlots {
     readonly sessionId: string;
     readonly locale: 'en' | 'zh-CN' | 'zh-TW';
   };
+  'session.inspector.overview': {
+    readonly sessionId: string;
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+  };
   'turn.footer': {
     readonly sessionId: string;
     readonly turnId: string;

@@ -79,7 +79,6 @@ import type {
   DesktopProjectSnapshot,
   DesktopAppInfo,
   DesktopSessionTracePage,
-  DesktopSessionUsageSummary,
   AppIconImportResult,
   AppIconRemoveResult,
   AppIconSelectResult,
@@ -1171,17 +1170,6 @@ async function loadSessionTracePage(
   };
   if (!isSessionTrace(trace)) throw new Error('Invalid Session trace projection');
   return { trace, nextCursor: page.nextCursor };
-}
-
-async function loadSessionUsageSummary(
-  sessionId: string,
-): Promise<Result<DesktopSessionUsageSummary>> {
-  const session = await runtimeHostSessionRef(sessionId);
-  return invokeWhenReady(
-    'usage:summary',
-    session.scope,
-    { range: 'all', sessionId: session.sessionId },
-  ) as Promise<Result<DesktopSessionUsageSummary>>;
 }
 
 async function updateDailyReviewConfig(
@@ -3383,29 +3371,6 @@ const makaBridge = {
     /** Read-only per-session causal trace (#1625). Never writes runtime state. */
     trace(sessionId: string, cursor?: string): Promise<Result<DesktopSessionTracePage>> {
       return bridgeResult(() => loadSessionTracePage(sessionId, cursor), 'INSPECTOR_TRACE_FAILED');
-    },
-    summary(sessionId: string): Promise<Result<DesktopSessionUsageSummary>> {
-      return loadSessionUsageSummary(sessionId);
-    },
-    subscribeUsageChanges(sessionId: string, handler: () => void): () => void {
-      let disposed = false;
-      let unsubscribe = () => {};
-      void runtimeHostSessionRef(sessionId)
-        .then(({ scope, sessionId: rawSessionId }) => {
-          if (disposed) return;
-          unsubscribe = subscribeRuntimeHostEvent(
-            'usage:changed',
-            scope,
-            (event: { sessionId: string }) => {
-              if (event.sessionId === rawSessionId) handler();
-            },
-          );
-        })
-        .catch(() => undefined);
-      return () => {
-        disposed = true;
-        unsubscribe();
-      };
     },
     /**
      * What the session's context is made of right now (#2323).

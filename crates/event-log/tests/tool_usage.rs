@@ -179,6 +179,7 @@ async fn tool_accounting_preserves_dispatch_truth_and_snapshot_without_private_b
         Some(3.875),
         "refusals and unknown effects do not invent execution latency"
     );
+    assert_eq!(totals.duration_ms, 7.75);
     let find = |id: &str| {
         page.attempts
             .iter()

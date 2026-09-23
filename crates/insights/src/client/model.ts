@@ -55,9 +55,9 @@ export class RefreshRequired extends Error {
   }
 }
 
-export function api(context: ClientContext) {
+export function api(context: ClientContext, sessionId?: string) {
   // One JSON boundary, bound to this Client's exact Rust backend generation.
-  const invoke = context.remote.method<Json, Json>('request') as unknown as (
+  const invoke = context.remote.method<Json, Json>('request', sessionId) as unknown as (
     input: Request,
   ) => Promise<Response>;
   async function ask<K extends Response['kind']>(request: Request, expected: K) {

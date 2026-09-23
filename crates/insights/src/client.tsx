@@ -31,6 +31,7 @@ import { useReport } from './client/report.js';
 import { ActivityTable } from './client/activity.js';
 import { Totals } from './client/totals.js';
 import { Pricing } from './client/pricing.js';
+import { Inspector } from './client/inspector.js';
 import { style } from './client/style.js';
 
 function Insights({
@@ -291,6 +292,9 @@ function Insights({
 const plugin: ClientPlugin = {
   activate(context) {
     context.style(style);
+    context.slots.register('session.inspector.overview', 'usage', (props) => (
+      <Inspector {...props} context={context} />
+    ));
     context.slots.register(
       'settings.page',
       'usage',

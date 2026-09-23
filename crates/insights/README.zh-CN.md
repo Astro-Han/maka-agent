@@ -28,4 +28,6 @@
 - 报价修改按目录 revision 提交，仅影响此后准入的调用；冲突后必须重新读取。
 - 偏好使用插件作用域存储 CAS。停用撤下 UI 和 Remote 注册，不撤销 Host 已接受的工作或计量事实。
 
-原生插件不需要 V8。客户端使用公共 `settings.page` 插槽，包身份不构成授权捷径。
+原生插件不需要 V8。客户端使用公共 `settings.page` 与 `session.inspector.overview` 插槽，包身份不构成授权捷径。Inspector 读取限定于当前会话，随计量事件刷新，不随流式文本刷新。
+
+在仓库根目录运行 `node --test crates/insights/tests/client.test.mjs` 验证客户端生命周期。

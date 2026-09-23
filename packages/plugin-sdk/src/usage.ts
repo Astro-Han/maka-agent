@@ -136,6 +136,8 @@ export interface UsageSummary {
     error: number;
     aborted: number;
     unknown: number;
+    /** Sum of observed durations, excluding unknown outcomes; not wall-clock time. */
+    durationMs: number;
     input: UsageTokens;
     output: UsageTokens;
     cacheRead: UsageTokens;
@@ -149,6 +151,8 @@ export interface UsageSummary {
     error: number;
     unknown: number;
     rejected: number;
+    /** Known success/error durations only; not wall-clock time. */
+    durationMs: number;
     /** Only known success/error settlements contribute to latency. */
     meanLatencyMs: number | null;
   };
