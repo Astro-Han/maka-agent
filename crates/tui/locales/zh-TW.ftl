@@ -750,6 +750,7 @@ revision-resource-quote = 引用
 revision-resource-inline = 行內引用 · 正文中需保留完整標記
 
 attachments-title = 附件
+attachments-selected = 已選擇
 attachments-add = 新增檔案
 attachments-close = 關閉
 attachments-local-files = 本機檔案

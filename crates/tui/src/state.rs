@@ -388,8 +388,8 @@ mod tests {
             "copy":{"sourceSessionId":"a","targetSessionId":"revised","expectedSourceRevision":1,
                 "purpose":{"kind":"revision","turnId":"old-turn"}},
             "turn_id":"new-turn","inputs":[
-                {"original":{"messageId":"one","content":{"text":"original"}},"content":{"text":"edited"},"excluded":[]}
-            ],"stage":"draft","batch":null,"view":{"selected":0,"display":false,"positions":[{"input":0,"display":false,"cursor":{"cursor":0,"anchor":null,"upstream":false}}]}
+                {"original":{"messageId":"one","content":{"text":"original"}},"content":{"text":"edited"},"excluded":[],"files":[]}
+            ],"stage":"draft","batch":null,"mapped":null,"view":{"selected":0,"display":false,"positions":[{"input":0,"display":false,"cursor":{"cursor":0,"anchor":null,"upstream":false}}]}
         })).unwrap();
         saved.validate(ROOT).unwrap();
         app.revision.restore(saved);
@@ -422,7 +422,7 @@ mod tests {
         assert_eq!(written.revision, Some(request.clone()));
         assert!(written.result.is_ok());
         let bytes = read(&directory);
-        assert_eq!(bytes["version"], 11);
+        assert_eq!(bytes["version"], 12);
         assert_eq!(bytes["revision"]["copy"]["targetSessionId"], "revised");
         assert_eq!(bytes["revision"]["inputs"][0]["content"]["text"], "edited");
         let mut incomplete = bytes.clone();

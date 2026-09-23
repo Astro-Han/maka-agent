@@ -39,6 +39,13 @@ fn buttons(app: &App) -> Vec<Command> {
             Command::Resources
         });
     }
+    if matches!(
+        state.phase,
+        Phase::Editing | Phase::Uploading | Phase::Ready
+    ) && !state.confirm_discard
+    {
+        buttons.push(Command::Attachments);
+    }
     if state.problem.is_some() && !state.confirm_discard {
         buttons.push(Command::Details);
     }
@@ -250,10 +257,25 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 Phase::Retained => "revision-retained",
                 Phase::UnknownCopy | Phase::UnknownTurn | Phase::Failed => "revision-unknown",
                 Phase::Busy | Phase::Loading => "revision-wait",
+                Phase::Uploading => "attachments-uploading",
             }
         });
     let controls = buttons(app);
-    let labels: Vec<_> = controls.iter().map(|c| app.i18n.text(c.label())).collect();
+    let labels: Vec<_> = controls
+        .iter()
+        .map(|c| {
+            let count = app
+                .revision
+                .saved
+                .as_ref()
+                .map_or(0, |s| s.inputs[app.revision.selected].files.len());
+            if *c == Command::Attachments && count > 0 {
+                format!("{} · {count}", app.i18n.text("attachments-title"))
+            } else {
+                app.i18n.text(c.label())
+            }
+        })
+        .collect();
     let mut rows: Vec<Vec<(Command, String, u16, usize)>> = vec![vec![]];
     let mut used = 0;
     for (index, (command, label)) in controls.into_iter().zip(labels).enumerate() {

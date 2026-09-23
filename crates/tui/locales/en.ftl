@@ -750,6 +750,7 @@ revision-resource-quote = Quotation
 revision-resource-inline = Inline reference · keep its token intact in the text
 
 attachments-title = Attachments
+attachments-selected = Selected
 attachments-add = Attach files
 attachments-close = Close
 attachments-local-files = Local files

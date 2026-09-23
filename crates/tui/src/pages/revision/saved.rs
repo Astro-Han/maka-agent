@@ -83,6 +83,7 @@ impl View {
 pub(super) enum Stage {
     Draft,
     Copy,
+    Attachments,
     Batch,
     Abandon,
 }
@@ -97,9 +98,15 @@ pub struct Checkpoint {
     pub(super) inputs: Vec<Input>,
     pub(super) stage: Stage,
     pub(super) batch: Option<TurnBatchStartInput>,
+    pub(super) mapped: Option<TurnBatchStartInput>,
     pub(super) view: View,
 }
 impl Checkpoint {
+    pub(crate) fn upload_ids(&self) -> impl Iterator<Item = &str> {
+        self.inputs
+            .iter()
+            .flat_map(|input| input.files.iter().map(|file| file.id.as_str()))
+    }
     pub fn validate(&self, root: &str) -> Result<(), String> {
         let copy::Purpose::Revision { turn_id } = &self.copy.purpose else {
             return Err("Invalid revision purpose".into());
@@ -126,15 +133,52 @@ impl Checkpoint {
             "messages":self.inputs.iter().map(|input| &input.original).collect::<Vec<_>>(),
         }))
         .map_err(|e| e.to_string())?;
+        let mut uploads = std::collections::HashSet::new();
         for input in &self.inputs {
             input.validate()?;
+            if input.files.len() > 8 {
+                return Err("Too many revision attachments".into());
+            }
+            for file in &input.files {
+                file.validate(&self.copy.target_session_id)?;
+                if !uploads.insert(&file.id) {
+                    return Err("Duplicate revision upload".into());
+                }
+                if matches!(self.stage, Stage::Draft | Stage::Copy)
+                    && (file.manifest.is_some() || file.attachment.is_some())
+                {
+                    return Err("Revision uploaded before target creation".into());
+                }
+            }
         }
         self.view.validate(&self.inputs)?;
         if (self.stage == Stage::Batch && self.batch.is_none())
-            || (matches!(self.stage, Stage::Draft | Stage::Copy) && self.batch.is_some())
+            || (self.stage == Stage::Attachments && self.mapped.is_none())
+            || (self.mapped.is_some() && self.batch.is_some())
+            || (matches!(self.stage, Stage::Draft | Stage::Copy)
+                && (self.batch.is_some() || self.mapped.is_some()))
             || serde_json::to_vec(self).map_err(|e| e.to_string())?.len() > 2 * 1024 * 1024
         {
             return Err("Invalid revision checkpoint".into());
+        }
+        if let Some(mapped) = &self.mapped {
+            let decoded = maka_protocol::turn::validate_turn_batch_draft(
+                mapped.clone(),
+                &self
+                    .inputs
+                    .iter()
+                    .map(|i| i.files.len())
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|e| e.to_string())?;
+            if decoded != *mapped
+                || mapped.session_id != self.copy.target_session_id
+                || mapped.turn_id != self.turn_id
+                || mapped.messages.len() != self.inputs.len()
+            {
+                return Err("Invalid mapped revision".into());
+            }
+            super::resources::validate_mapped(&self.inputs, mapped, false)?;
         }
         if let Some(batch) = &self.batch {
             let decoded = maka_protocol::turn::decode_turn_batch_start_input(

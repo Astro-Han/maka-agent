@@ -166,11 +166,20 @@ pub(super) fn validate_frozen(
     inputs: &[Input],
     batch: &maka_protocol::turn::TurnBatchStartInput,
 ) -> Result<(), String> {
+    validate_mapped(inputs, batch, true)
+}
+
+pub(super) fn validate_mapped(
+    inputs: &[Input],
+    batch: &maka_protocol::turn::TurnBatchStartInput,
+    include_files: bool,
+) -> Result<(), String> {
     for (input, message) in inputs.iter().zip(&batch.messages) {
         let mut expected = input.message();
         let old = expected.content.attachments.as_deref().unwrap_or_default();
         let new = message.content.attachments.as_deref().unwrap_or_default();
-        if old.len() != new.len() {
+        let additions = if include_files { input.files.len() } else { 0 };
+        if old.len() + additions != new.len() {
             return Err("Changed frozen revision attachments".into());
         }
         for (old, new) in old.iter().zip(new) {
@@ -182,10 +191,20 @@ pub(super) fn validate_frozen(
                 return Err("Invalid frozen revision attachment".into());
             }
         }
+        if include_files {
+            for (file, attachment) in input.files.iter().zip(&new[old.len()..]) {
+                if file.attachment.as_ref() != Some(attachment) {
+                    return Err("Changed revision upload reference".into());
+                }
+            }
+        }
         expected.content.attachments = message.content.attachments.clone();
         expected
             .content
-            .validate_admission(!expected.input_selections.is_empty())
+            .validate_admission(
+                !expected.input_selections.is_empty()
+                    || (!include_files && !input.files.is_empty()),
+            )
             .map_err(|e| e.to_string())?;
         if expected != *message {
             return Err("Changed frozen revision input".into());

@@ -28,6 +28,16 @@ use serde_json::{Value, json};
 #[test]
 fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resubmission() {
     let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("new-first.txt"),
+        "first new attachment",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.path().join("new-second.txt"),
+        "second new attachment",
+    )
+    .unwrap();
     let mut host = super::super::candidate::CandidateFixture::new(directory.path().join("root"));
     host.child = Some(
         Command::new(env!("CARGO_BIN_EXE_maka"))
@@ -90,7 +100,10 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
         .join("tui-state")
         .join(&client.identity.root_id)
         .join("default/state.json");
-    let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
+    let mut tui = Pty::spawn_at(
+        &["--root", host.root.to_str().unwrap()],
+        Some(directory.path()),
+    );
     tui.wait_for("Revision source");
     tui.click_text("Revision source");
     tui.wait_for("Original reply.");
@@ -103,10 +116,20 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.wait_for("Input  1 / 2");
     tui.send("\x1b[200~中文 \x1b[201~".as_bytes());
     tui.wait_for("中文 🦀 @a.rs first");
+    tui.click_text("Attach files");
+    tui.wait_for("Local files");
+    tui.wait_for("new-first.txt");
+    tui.click_text("new-first.txt");
+    tui.wait_for("Attachments · 1");
     tui.send(b"\x1b[6~"); // PageDown selects the next original input.
     tui.wait_for("Input  2 / 2");
     tui.send(b"\x1b[200~edited \x1b[201~");
     tui.wait_for("edited second original");
+    tui.click_text("Attach files");
+    tui.wait_for("Local files");
+    tui.wait_for("new-second.txt");
+    tui.click_text("new-second.txt");
+    tui.wait_for("Attachments · 1");
     tui.click_text("Resources");
     tui.wait_for("note.txt");
     tui.click_text("Quotation");
@@ -127,8 +150,16 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.send(b"\x11");
     tui.finish();
     let saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
-    assert_eq!(saved["version"], 11);
+    assert_eq!(saved["version"], 12);
     assert_eq!(saved["revision"]["stage"], "draft");
+    assert!(saved["attachments"].as_object().unwrap().is_empty());
+    for input in saved["revision"]["inputs"].as_array().unwrap() {
+        assert_eq!(input["files"].as_array().unwrap().len(), 1);
+        assert!(
+            input["files"][0]["manifest"].is_null(),
+            "selection does not read/upload before explicit run"
+        );
+    }
     assert_eq!(
         saved["revision"]["inputs"][1]["excluded"],
         json!([{"kind":"quote","index":0},{"kind":"attachment","index":1}])
@@ -190,12 +221,27 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
             .as_ref()
             .unwrap()
             .len(),
-        1
+        2
     );
     assert_eq!(
         revised.messages[1].content.attachments.as_ref().unwrap()[0].name,
         "note.txt"
     );
+    assert_eq!(
+        revised.messages[0].content.attachments.as_ref().unwrap()[0].name,
+        "new-first.txt"
+    );
+    assert_eq!(
+        revised.messages[1].content.attachments.as_ref().unwrap()[1].name,
+        "new-second.txt"
+    );
+    for input in &revised.messages {
+        for attachment in input.content.attachments.iter().flatten() {
+            assert!(
+                matches!(&attachment.storage_ref, maka_protocol::turn::StorageRef::SessionFile {session_id,..} if *session_id == request.target_session_id)
+            );
+        }
+    }
     let unchanged = runtime
         .block_on(client.session_turn_sources(sources::Input {
             session_id: "revision-source".into(),

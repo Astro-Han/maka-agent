@@ -37,7 +37,10 @@ fn controls(app: &App) -> Vec<Command> {
     let dialog = app.attachments.dialog.as_ref().unwrap();
     if dialog.browse {
         let mut commands = vec![Command::Close];
-        if app.attachments.has(&dialog.session) {
+        if !app
+            .attachment_files(&dialog.session, dialog.input.as_deref())
+            .is_empty()
+        {
             commands.push(Command::Open);
         }
         commands
@@ -46,7 +49,10 @@ fn controls(app: &App) -> Vec<Command> {
         if app.attachment_enabled(&Command::Retry) {
             commands.push(Command::Retry);
         }
-        if app.attachments.has(&dialog.session) {
+        if !app
+            .attachment_files(&dialog.session, dialog.input.as_deref())
+            .is_empty()
+        {
             commands.push(Command::Remove);
         }
         commands
@@ -64,12 +70,17 @@ pub fn size(bytes: u64) -> String {
 impl App {
     pub fn attachment_input(&mut self, event: Event) -> (bool, Option<Action>) {
         let buttons = controls(self);
+        let attachment_count = {
+            let dialog = self.attachments.dialog.as_ref().unwrap();
+            self.attachment_files(&dialog.session, dialog.input.as_deref())
+                .len()
+        };
         let state = &mut self.attachments;
         let dialog = state.dialog.as_mut().unwrap();
         let count = if dialog.browse {
             dialog.entries.len()
         } else {
-            state.saved.get(&dialog.session).map_or(0, Vec::len)
+            attachment_count
         };
         let last = count.saturating_sub(1);
         let capacity = dialog.list.map_or(1, |a| {
@@ -192,10 +203,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     let desired = if dialog.browse {
         dialog.entries.len().clamp(1, 8) as u16 * 2 + 10
     } else {
-        app.attachments
-            .saved
-            .get(&dialog.session)
-            .map_or(1, |items| items.len().max(1)) as u16
+        app.attachment_files(&dialog.session, dialog.input.as_deref())
+            .len()
+            .max(1) as u16
             * 3
             + 8
     };
@@ -217,12 +227,24 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     );
     app.modal_area = Some(popup);
     let browse = app.attachments.dialog.as_ref().unwrap().browse;
+    let dialog = app.attachments.dialog.as_ref().unwrap();
+    let mut title = app.i18n.text(if browse {
+        "attachments-local-files"
+    } else {
+        "attachments-title"
+    });
+    if let Some((position, count)) = dialog
+        .input
+        .as_deref()
+        .and_then(|input| app.revision.file_position(&dialog.session, input))
+    {
+        title = format!(
+            "{title} · {} {position} / {count}",
+            app.i18n.text("revision-input")
+        );
+    }
     let block = Block::bordered()
-        .title(app.i18n.text(if browse {
-            "attachments-local-files"
-        } else {
-            "attachments-title"
-        }))
+        .title(title)
         .title_alignment(Alignment::Center)
         .border_type(if app.chrome.ascii {
             BorderType::Plain
@@ -235,6 +257,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     crate::view::clear_overlay(frame, popup);
     frame.render_widget(block, popup);
     let colors = app.theme.colors();
+    let dialog = app.attachments.dialog.as_ref().unwrap();
+    let items = app
+        .attachment_files(&dialog.session, dialog.input.as_deref())
+        .to_vec();
     let state = &mut app.attachments;
     let dialog = state.dialog.as_mut().unwrap();
     dialog.rendered = true;
@@ -253,11 +279,6 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     dialog.list = Some(list);
     let stride = if browse { 2 } else { 3 };
     let capacity = usize::from(list.height / stride).max(1);
-    let items = state
-        .saved
-        .get(&dialog.session)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
     let count = if browse {
         dialog.entries.len()
     } else {
@@ -321,8 +342,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 }
             } else if let Some(error) = state.errors.get(&item.id) {
                 (error.key(), None)
-            } else if state.queued.iter().any(|(_, id)| id == &item.id) {
+            } else if state.queued.iter().any(|(_, _, id)| id == &item.id) {
                 ("attachments-queued", None)
+            } else if dialog.input.is_some() && item.manifest.is_none() {
+                ("attachments-selected", None)
             } else {
                 ("attachments-paused", None)
             };

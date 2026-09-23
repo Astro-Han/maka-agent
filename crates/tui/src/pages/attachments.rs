@@ -59,6 +59,7 @@ pub struct Ticket {
     pub root: String,
     pub epoch: String,
     pub session: String,
+    pub input: Option<String>,
     pub id: String,
     generation: u64,
 }
@@ -151,7 +152,7 @@ struct Active {
 #[derive(Default)]
 pub struct State {
     pub saved: BTreeMap<String, Vec<Saved>>,
-    queued: VecDeque<(String, String)>,
+    queued: VecDeque<(String, Option<String>, String)>,
     errors: HashMap<String, Failure>,
     active: Option<Active>,
     pub dialog: Option<Dialog>,
@@ -160,6 +161,7 @@ pub struct State {
 }
 pub struct Dialog {
     session: String,
+    input: Option<String>,
     browse: bool,
     path: crate::editor::Editor,
     directory: PathBuf,
@@ -204,7 +206,7 @@ impl State {
         }
     }
     pub fn retire(&mut self, session: &str) {
-        self.queued.retain(|(owner, _)| owner != session);
+        self.queued.retain(|(owner, _, _)| owner != session);
         if let Some(active) = &self.active
             && active.ticket.session == session
         {
@@ -229,24 +231,20 @@ impl State {
             .as_ref()
             .is_some_and(|a| a.phase == Phase::Uploading)
     }
+    pub(crate) fn failed(&self, id: &str) -> bool {
+        self.errors.contains_key(id)
+    }
+    pub(crate) fn forget<'a>(&mut self, ids: impl Iterator<Item = &'a str>) {
+        for id in ids {
+            self.errors.remove(id);
+        }
+    }
     pub fn begin_frame(&mut self) {
         if let Some(dialog) = &mut self.dialog {
             dialog.rendered = false;
             dialog.list = None;
             dialog.path.invalidate_geometry();
         }
-    }
-    fn entry(&self, ticket: &Ticket) -> Option<&Saved> {
-        self.saved
-            .get(&ticket.session)?
-            .iter()
-            .find(|item| item.id == ticket.id)
-    }
-    fn entry_mut(&mut self, ticket: &Ticket) -> Option<&mut Saved> {
-        self.saved
-            .get_mut(&ticket.session)?
-            .iter_mut()
-            .find(|item| item.id == ticket.id)
     }
     fn status(&self, item: &Saved) -> (&'static str, Option<u64>) {
         if item.attachment.is_some() {
@@ -265,7 +263,7 @@ impl State {
         if let Some(error) = self.errors.get(&item.id) {
             return (error.key(), None);
         }
-        if self.queued.iter().any(|(_, id)| id == &item.id) {
+        if self.queued.iter().any(|(_, _, id)| id == &item.id) {
             ("attachments-queued", None)
         } else {
             ("attachments-paused", None)
@@ -273,6 +271,90 @@ impl State {
     }
 }
 impl App {
+    pub(crate) fn attachment_files(&self, session: &str, input: Option<&str>) -> &[Saved] {
+        if let Some(input) = input {
+            self.revision.files(session, input).unwrap_or(&[])
+        } else {
+            self.attachments
+                .saved
+                .get(session)
+                .map(Vec::as_slice)
+                .unwrap_or(&[])
+        }
+    }
+    fn attachment_files_mut(
+        &mut self,
+        session: &str,
+        input: Option<&str>,
+    ) -> Option<&mut Vec<Saved>> {
+        if let Some(input) = input {
+            self.revision.files_mut(session, input)
+        } else {
+            Some(self.attachments.saved.entry(session.into()).or_default())
+        }
+    }
+    fn attachment_entry(&self, ticket: &Ticket) -> Option<&Saved> {
+        self.attachment_files(&ticket.session, ticket.input.as_deref())
+            .iter()
+            .find(|f| f.id == ticket.id)
+    }
+    fn attachment_entry_mut(&mut self, ticket: &Ticket) -> Option<&mut Saved> {
+        self.attachment_files_mut(&ticket.session, ticket.input.as_deref())?
+            .iter_mut()
+            .find(|f| f.id == ticket.id)
+    }
+    fn attachment_uploadable(&self, session: &str, input: Option<&str>) -> bool {
+        if let Some(input) = input {
+            matches!(&self.connection, ConnectionState::Connected { root_id, .. }
+                if self.revision.uploadable(root_id, session, input))
+        } else {
+            self.attachment_editable(session)
+        }
+    }
+    pub(crate) fn queue_revision_files(&mut self, session: &str, files: Vec<(String, String)>) {
+        for (input, id) in files {
+            if !self
+                .attachments
+                .queued
+                .iter()
+                .any(|(_, _, queued)| *queued == id)
+                && self.attachments.active.as_ref().is_none_or(|active| {
+                    active.ticket.id != id || active.transfer.cancelled.load(Ordering::Relaxed)
+                })
+            {
+                self.attachments.errors.remove(&id);
+                self.attachments
+                    .queued
+                    .push_back((session.into(), Some(input), id));
+            }
+        }
+    }
+    pub(crate) fn open_revision_files(&mut self, session: String, input: String) {
+        self.open_attachment_dialog(session, Some(input));
+    }
+    fn open_attachment_dialog(&mut self, session: String, input: Option<String>) {
+        let browse = self.attachment_files(&session, input.as_deref()).is_empty();
+        self.attachments.generation += 1;
+        self.attachments.dialog = Some(Dialog {
+            session,
+            input,
+            browse,
+            path: crate::editor::Editor::bounded(4096, "attachments-path-long"),
+            directory: PathBuf::new(),
+            entries: vec![],
+            truncated: false,
+            requested: true,
+            generation: self.attachments.generation,
+            selected: 0,
+            top: 0,
+            focus: 1,
+            rendered: false,
+            list: None,
+            dragging: false,
+            problem: None,
+            details: false,
+        });
+    }
     fn attachment_identity(&self, ticket: &Ticket) -> bool {
         matches!(&self.connection, ConnectionState::Connected {root_id, epoch} if *root_id == ticket.root && *epoch == ticket.epoch)
     }
@@ -297,41 +379,48 @@ impl App {
         if !dialog.rendered {
             return false;
         }
-        let count = self
-            .attachments
-            .saved
-            .get(&dialog.session)
-            .map_or(0, Vec::len);
-        let editable = self.attachment_editable(&dialog.session);
+        let items = self.attachment_files(&dialog.session, dialog.input.as_deref());
+        let count = items.len();
+        let editable = if let Some(input) = &dialog.input {
+            self.revision.files_editable(&dialog.session, input)
+                && matches!(self.connection, ConnectionState::Connected { .. })
+        } else {
+            self.attachment_editable(&dialog.session)
+        };
+        let capacity = if let Some(input) = &dialog.input {
+            self.revision.file_capacity(&dialog.session, input)
+        } else {
+            LIMIT
+        };
         match command {
             Command::Open | Command::Close | Command::Details | Command::Select(_) => true,
-            Command::Browse => editable && count < LIMIT,
+            Command::Browse => editable && count < capacity,
             Command::Parent | Command::Path | Command::EnterPath | Command::Pick(_) => {
-                editable && count < LIMIT
+                editable && count < capacity
             }
             Command::Remove => {
                 dialog.selected < count
+                    && (dialog.input.is_none() || editable)
                     && !self
                         .sending
                         .get(&dialog.session)
                         .is_some_and(|sent| sent.delivery.blocks_send())
             }
             Command::Retry => {
-                editable
-                    && self
-                        .attachments
-                        .saved
-                        .get(&dialog.session)
-                        .and_then(|items| items.get(dialog.selected))
-                        .is_some_and(|item| {
-                            item.attachment.is_none()
-                                && self
-                                    .attachments
-                                    .active
-                                    .as_ref()
-                                    .is_none_or(|active| active.ticket.id != item.id)
-                                && !self.attachments.queued.iter().any(|(_, id)| id == &item.id)
-                        })
+                self.attachment_uploadable(&dialog.session, dialog.input.as_deref())
+                    && items.get(dialog.selected).is_some_and(|item| {
+                        item.attachment.is_none()
+                            && self
+                                .attachments
+                                .active
+                                .as_ref()
+                                .is_none_or(|active| active.ticket.id != item.id)
+                            && !self
+                                .attachments
+                                .queued
+                                .iter()
+                                .any(|(_, _, id)| id == &item.id)
+                    })
             }
         }
     }
@@ -345,25 +434,42 @@ impl App {
             let Route::Session(session) = self.navigation.current() else {
                 return None;
             };
-            self.attachments.generation += 1;
-            self.attachments.dialog = Some(Dialog {
-                browse: !self.attachments.has(&session),
-                session,
-                path: crate::editor::Editor::bounded(4096, "attachments-path-long"),
-                directory: PathBuf::new(),
-                entries: vec![],
-                truncated: false,
-                requested: true,
-                generation: self.attachments.generation,
-                selected: 0,
-                top: 0,
-                focus: 1,
-                rendered: false,
-                list: None,
-                dragging: false,
-                problem: None,
-                details: false,
-            });
+            self.open_attachment_dialog(session, None);
+            return None;
+        }
+        if matches!(command, Command::Retry | Command::Remove) {
+            let dialog = self.attachments.dialog.as_ref()?;
+            let (session, input, index) = (
+                dialog.session.clone(),
+                dialog.input.clone(),
+                dialog.selected,
+            );
+            let item = self
+                .attachment_files(&session, input.as_deref())
+                .get(index)?
+                .clone();
+            self.attachments.errors.remove(&item.id);
+            if command == Command::Retry {
+                self.attachments.queued.push_back((session, input, item.id));
+            } else {
+                let items = self.attachment_files_mut(&session, input.as_deref())?;
+                items.remove(index);
+                let selected = index.min(items.len().saturating_sub(1));
+                self.attachments.dialog.as_mut()?.selected = selected;
+                self.attachments.queued.retain(|(_, _, id)| *id != item.id);
+                if let Some(active) = self
+                    .attachments
+                    .active
+                    .as_ref()
+                    .filter(|a| a.ticket.id == item.id)
+                {
+                    active.transfer.cancelled.store(true, Ordering::Relaxed);
+                    if active.phase == Phase::Checkpoint {
+                        self.attachments.active = None;
+                    }
+                }
+            }
+            self.hits.clear();
             return None;
         }
         let dialog = self.attachments.dialog.as_mut()?;
@@ -409,38 +515,7 @@ impl App {
                 dialog.selected = index;
                 dialog.details = false;
             }
-            Command::Retry => {
-                let item = self
-                    .attachments
-                    .saved
-                    .get(&dialog.session)?
-                    .get(dialog.selected)?;
-                self.attachments.errors.remove(&item.id);
-                self.attachments
-                    .queued
-                    .push_back((dialog.session.clone(), item.id.clone()));
-            }
-            Command::Remove => {
-                let items = self.attachments.saved.get_mut(&dialog.session)?;
-                if dialog.selected >= items.len() {
-                    return None;
-                }
-                let item = items.remove(dialog.selected);
-                self.attachments.errors.remove(&item.id);
-                self.attachments.queued.retain(|(_, id)| id != &item.id);
-                if let Some(active) = self
-                    .attachments
-                    .active
-                    .as_ref()
-                    .filter(|a| a.ticket.id == item.id)
-                {
-                    active.transfer.cancelled.store(true, Ordering::Relaxed);
-                    if active.phase == Phase::Checkpoint {
-                        self.attachments.active = None;
-                    }
-                }
-                dialog.selected = dialog.selected.min(items.len().saturating_sub(1));
-            }
+            Command::Retry | Command::Remove => unreachable!(),
             Command::Close => {}
         }
         self.hits.clear();
@@ -463,6 +538,7 @@ impl App {
         let request = io::Browse {
             generation: dialog.generation,
             session: dialog.session.clone(),
+            input: dialog.input.clone(),
             path: dialog.directory.clone(),
         };
         self.attachments.browser_pending = Some(request.clone());
@@ -477,15 +553,51 @@ impl App {
             return;
         }
         self.attachments.browser_pending = None;
-        let editable = self.attachment_editable(&request.session);
-        let Some(dialog) = self.attachments.dialog.as_mut().filter(|d| {
+        let valid = self.attachments.dialog.as_ref().is_some_and(|d| {
             d.generation == request.generation
                 && d.session == request.session
+                && d.input == request.input
                 && d.browse
                 && !d.requested
-        }) else {
+        });
+        if !valid {
             return;
-        };
+        }
+        if let Ok(io::Listing::File(path)) = &result {
+            let editable = if let Some(input) = &request.input {
+                self.revision.files_editable(&request.session, input)
+            } else {
+                self.attachment_editable(&request.session)
+            };
+            let capacity = request.input.as_ref().map_or(LIMIT, |input| {
+                self.revision.file_capacity(&request.session, input)
+            });
+            if !editable {
+                return;
+            }
+            let Some(items) = self.attachment_files_mut(&request.session, request.input.as_deref())
+            else {
+                return;
+            };
+            if items.len() >= capacity {
+                return;
+            }
+            let id = uuid::Uuid::new_v4().to_string();
+            items.push(Saved {
+                id: id.clone(),
+                path: path.clone(),
+                manifest: None,
+                attachment: None,
+            });
+            if request.input.is_none() {
+                self.attachments
+                    .queued
+                    .push_back((request.session, None, id));
+            }
+            self.attachments.dialog = None;
+            return;
+        }
+        let dialog = self.attachments.dialog.as_mut().unwrap();
         match result {
             Ok(io::Listing::Directory {
                 path,
@@ -498,25 +610,6 @@ impl App {
                 dialog.path = crate::editor::Editor::bounded(4096, "attachments-path-long");
                 dialog.path.insert(&path.to_string_lossy());
             }
-            Ok(io::Listing::File(path)) if editable => {
-                let items = self
-                    .attachments
-                    .saved
-                    .entry(request.session.clone())
-                    .or_default();
-                if items.len() >= LIMIT {
-                    return;
-                }
-                let id = uuid::Uuid::new_v4().to_string();
-                items.push(Saved {
-                    id: id.clone(),
-                    path,
-                    manifest: None,
-                    attachment: None,
-                });
-                self.attachments.queued.push_back((request.session, id));
-                self.attachments.dialog = None;
-            }
             Ok(_) => {}
             Err(error) => dialog.problem = Some(error),
         }
@@ -528,17 +621,18 @@ impl App {
         let ConnectionState::Connected { root_id, epoch } = &self.connection else {
             return None;
         };
-        let (session, id) = self.attachments.queued.pop_front()?;
+        let (session, input, id) = self.attachments.queued.pop_front()?;
         self.attachments.generation += 1;
         let ticket = Ticket {
             root: root_id.clone(),
             epoch: epoch.clone(),
             session,
+            input,
             id,
             generation: self.attachments.generation,
         };
-        let saved = self.attachments.entry(&ticket)?.clone();
-        if !self.attachment_editable(&ticket.session) {
+        let saved = self.attachment_entry(&ticket)?.clone();
+        if !self.attachment_uploadable(&ticket.session, ticket.input.as_deref()) {
             return None;
         }
         let transfer = Arc::new(Transfer::default());
@@ -564,7 +658,7 @@ impl App {
             return None;
         }
         if !self.attachment_identity(&ticket)
-            || self.attachments.entry(&ticket).is_none()
+            || self.attachment_entry(&ticket).is_none()
             || self
                 .attachments
                 .active
@@ -579,11 +673,11 @@ impl App {
         }
         match result {
             Ok(Read::Recovered(reference)) => {
-                self.attachments.entry_mut(&ticket)?.attachment = Some(reference);
+                self.attachment_entry_mut(&ticket)?.attachment = Some(reference);
                 self.attachments.active = None;
             }
             Ok(Read::Prepared(prepared)) => {
-                self.attachments.entry_mut(&ticket)?.manifest = Some(prepared.manifest.clone());
+                self.attachment_entry_mut(&ticket)?.manifest = Some(prepared.manifest.clone());
                 let active = self.attachments.active.as_mut()?;
                 active.prepared = Some(prepared);
                 active.phase = Phase::Checkpoint;
@@ -610,7 +704,7 @@ impl App {
             return None;
         }
         if !self.attachment_identity(ticket)
-            || self.attachments.entry(ticket).is_none()
+            || self.attachment_entry(ticket).is_none()
             || self.closing
             || self
                 .attachments
@@ -655,13 +749,13 @@ impl App {
         self.attachments.active = None;
         if cancelled
             || !self.attachment_identity(&ticket)
-            || self.attachments.entry(&ticket).is_none()
+            || self.attachment_entry(&ticket).is_none()
         {
             return;
         }
         match result {
             Ok(reference) => {
-                self.attachments.entry_mut(&ticket).unwrap().attachment = Some(reference)
+                self.attachment_entry_mut(&ticket).unwrap().attachment = Some(reference)
             }
             Err(error) => {
                 self.attachments.errors.insert(ticket.id, error);

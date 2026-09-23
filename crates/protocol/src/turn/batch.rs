@@ -42,7 +42,26 @@ pub struct TurnBatchStartInput {
 }
 
 pub fn decode_turn_batch_start_input(value: &Value) -> Result<TurnBatchStartInput> {
-    let mut input: TurnBatchStartInput = decode(value)?;
+    validate_batch(decode(value)?, &[])
+}
+
+/// Preflight a client draft whose local attachments do not have Host references yet.
+/// This never authorizes admission: the complete request must pass the ordinary decoder.
+pub fn validate_turn_batch_draft(
+    input: TurnBatchStartInput,
+    pending_attachments: &[usize],
+) -> Result<TurnBatchStartInput> {
+    ensure(
+        pending_attachments.len() == input.messages.len(),
+        "Invalid pending attachment counts",
+    )?;
+    validate_batch(input, pending_attachments)
+}
+
+fn validate_batch(
+    mut input: TurnBatchStartInput,
+    pending: &[usize],
+) -> Result<TurnBatchStartInput> {
     entity(&input.session_id)?;
     entity(&input.turn_id)?;
     ensure(
@@ -55,10 +74,14 @@ pub fn decode_turn_batch_start_input(value: &Value) -> Result<TurnBatchStartInpu
     let mut references = 0;
     let mut allow_empty = false;
     let mut contents = Vec::with_capacity(input.messages.len());
-    for message in &mut input.messages {
+    let mut attachments = 0usize;
+    for (index, message) in input.messages.iter_mut().enumerate() {
+        let count = pending.get(index).copied().unwrap_or(0);
+        ensure(count <= 8, "Too many pending attachments")?;
+        attachments += count + message.content.attachments.iter().flatten().count();
         maka_runtime::input::validate_selections(&message.input_selections)
             .map_err(ProtocolError::invalid)?;
-        let selected = !message.input_selections.is_empty();
+        let selected = !message.input_selections.is_empty() || count > 0;
         message.content.validate_admission(selected)?;
         allow_empty |= selected;
         references += message
@@ -70,6 +93,7 @@ pub fn decode_turn_batch_start_input(value: &Value) -> Result<TurnBatchStartInpu
             message.content.clone(),
         ));
     }
+    ensure(attachments <= 8, "Too many attachments across Turn inputs")?;
     // aggregate() bounds its display references; reject before it can omit any.
     ensure(
         references <= 32,
@@ -138,5 +162,22 @@ mod tests {
             decode_turn_batch_start_input(&value).is_err(),
             "a batch does not multiply the per-Turn input budget"
         );
+    }
+    #[test]
+    fn pending_attachment_preflight_never_relaxes_wire_admission() {
+        let input: TurnBatchStartInput = serde_json::from_value(serde_json::json!({
+            "sessionId":"target", "turnId":"turn",
+            "messages":[{"content":{"text":""}},{"content":{"text":"second"}}]
+        }))
+        .unwrap();
+        assert!(decode_turn_batch_start_input(&serde_json::to_value(&input).unwrap()).is_err());
+        let checked = validate_turn_batch_draft(input.clone(), &[1, 0]).unwrap();
+        assert_eq!(checked, input);
+        for pending in [&[0, 1][..], &[1][..], &[8, 1][..], &[usize::MAX, 0][..]] {
+            assert!(validate_turn_batch_draft(input.clone(), pending).is_err());
+        }
+        let mut oversized = input;
+        oversized.messages[1].content.text = "x".repeat(48 * 1024 + 1);
+        assert!(validate_turn_batch_draft(oversized, &[1, 0]).is_err());
     }
 }

@@ -39,6 +39,7 @@ const MAX_ENTRIES: usize = 2048;
 pub struct Browse {
     pub generation: u64,
     pub session: String,
+    pub input: Option<String>,
     pub path: PathBuf,
 }
 pub struct Entry {
@@ -152,6 +153,7 @@ impl Saved {
             root: String::new(),
             epoch: String::new(),
             session: session.into(),
+            input: None,
             id: self.id.clone(),
             generation: 0,
         };

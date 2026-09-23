@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod attachments;
 mod draft;
 mod editing;
 mod request;
@@ -57,6 +58,7 @@ pub enum Command {
     Display,
     Details,
     Resources,
+    Attachments,
     Content,
     ToggleResource(resources::Resource),
 }
@@ -76,6 +78,7 @@ impl Command {
             Self::Details => "revision-details",
             Self::Resources | Self::ToggleResource(_) => "revision-resources",
             Self::Content => "revision-content",
+            Self::Attachments => "attachments-add",
         }
     }
 }
@@ -85,6 +88,7 @@ enum Phase {
     #[default]
     Loading,
     Editing,
+    Uploading,
     Busy,
     UnknownCopy,
     UnknownTurn,
@@ -113,6 +117,7 @@ pub struct State {
     editors: std::collections::VecDeque<((usize, bool), Editor)>,
     focus: usize,
     confirm_discard: bool,
+    uploading: bool,
 }
 impl State {
     pub fn begin_frame(&mut self) {
@@ -125,8 +130,10 @@ impl State {
         })
     }
     pub fn restore(&mut self, saved: Checkpoint) {
+        self.uploading = false;
         self.phase = match saved.stage {
             Stage::Draft => Phase::Editing,
+            Stage::Attachments => Phase::Ready,
             Stage::Copy | Stage::Abandon => Phase::UnknownCopy,
             Stage::Batch => Phase::UnknownTurn,
         };
@@ -149,11 +156,13 @@ impl State {
     pub fn disconnect(&mut self) {
         self.pending = None;
         self.requested = None;
+        self.uploading = false;
         self.problem = None;
         self.show_problem = false;
         self.confirm_discard = false;
         self.phase = match self.saved.as_ref().map(|saved| saved.stage) {
             Some(Stage::Draft) => Phase::Editing,
+            Some(Stage::Attachments) => Phase::Ready,
             Some(Stage::Batch) => Phase::UnknownTurn,
             Some(Stage::Copy | Stage::Abandon) => Phase::UnknownCopy,
             None => Phase::Failed,
@@ -207,7 +216,9 @@ impl App {
                     (self.tabs.contains(&s.copy.target_session_id) || self.tabs.entries.len() < crate::navigation::tabs::LIMIT)
                     && (self.drafts.contains_key(&s.copy.target_session_id) || self.drafts.len() < crate::navigation::tabs::LIMIT)
                 }),
-            Command::Select(index) => available && state.phase == Phase::Editing && !state.confirm_discard
+            Command::Attachments => available && !state.confirm_discard && state.saved.is_some()
+                && matches!(state.phase, Phase::Editing | Phase::Uploading | Phase::Ready),
+            Command::Select(index) => available && matches!(state.phase, Phase::Editing | Phase::Uploading | Phase::Ready) && !state.confirm_discard
                 && state.saved.as_ref().is_some_and(|s| *index < s.inputs.len()),
             Command::Resources | Command::Content => available && state.phase == Phase::Editing && !state.confirm_discard
                 && state.saved.as_ref().is_some_and(|s| !s.inputs[state.selected].resources().is_empty()),
@@ -223,8 +234,36 @@ impl App {
         if !self.revision_enabled(&command) {
             return None;
         }
+        if command == Command::Attachments {
+            let saved = self.revision.saved.as_ref()?;
+            self.open_revision_files(
+                saved.copy.target_session_id.clone(),
+                saved.inputs[self.revision.selected]
+                    .original
+                    .message_id
+                    .clone(),
+            );
+            return None;
+        }
+        if command == Command::Send
+            && self
+                .revision
+                .saved
+                .as_ref()
+                .is_some_and(|s| s.stage == Stage::Attachments)
+        {
+            self.resume_revision_uploads();
+            return None;
+        }
+        if command == Command::ConfirmDiscard {
+            if let Some(saved) = &self.revision.saved {
+                self.attachments.retire(&saved.copy.target_session_id);
+            }
+            self.revision.uploading = false;
+        }
         let state = &mut self.revision;
         match command {
+            Command::Attachments => unreachable!(),
             Command::Open(basis) => {
                 state.clear_editors();
                 state.requested = Some(Job::Load {
@@ -313,8 +352,13 @@ impl App {
                     };
                     if saved.inputs.iter().any(|input| {
                         input.original.turn_orchestration != preview.turn_orchestration
-                    }) || maka_protocol::turn::decode_turn_batch_start_input(
-                        &serde_json::to_value(preview).ok()?,
+                    }) || maka_protocol::turn::validate_turn_batch_draft(
+                        preview,
+                        &saved
+                            .inputs
+                            .iter()
+                            .map(|i| i.files.len())
+                            .collect::<Vec<_>>(),
                     )
                     .is_err()
                     {
@@ -332,7 +376,7 @@ impl App {
                     Stage::Copy => Job::Copy(saved.copy.clone()),
                     Stage::Batch => Job::Start(saved.batch.clone()?),
                     Stage::Abandon => Job::Abandon(saved.copy.target_session_id.clone()),
-                    Stage::Draft => return None,
+                    Stage::Draft | Stage::Attachments => return None,
                 });
                 state.error = None;
             }
@@ -349,7 +393,9 @@ impl App {
                 state.error = None;
             }
             Command::Visit => {
-                let target = state.saved.take()?.copy.target_session_id;
+                let saved = state.saved.take()?;
+                self.attachments.forget(saved.upload_ids());
+                let target = saved.copy.target_session_id;
                 state.clear_editors();
                 state.visible = false;
                 return self.apply(Action::Visit(Route::Session(target)));
@@ -454,6 +500,7 @@ impl App {
                     inputs: output.messages.into_iter().map(Input::new).collect(),
                     stage: Stage::Draft,
                     batch: None,
+                    mapped: None,
                     view: saved::View::default(),
                 };
                 if saved.validate(&saved.root).is_err() {
@@ -476,12 +523,25 @@ impl App {
                 }
                 match draft::batch(&saved.inputs, &output, &saved.turn_id) {
                     Ok(batch) => {
-                        saved.stage = Stage::Batch;
-                        saved.batch = Some(batch.clone());
+                        let has_files = saved.inputs.iter().any(|input| !input.files.is_empty());
+                        saved.stage = if has_files {
+                            Stage::Attachments
+                        } else {
+                            Stage::Batch
+                        };
+                        if has_files {
+                            saved.mapped = Some(batch.clone());
+                        } else {
+                            saved.batch = Some(batch.clone());
+                        }
                         state.phase = Phase::Ready;
                         state.error = None;
                         if matches!(request.job, Job::Copy(_)) {
-                            state.requested = Some(Job::Start(batch));
+                            if has_files {
+                                self.resume_revision_uploads();
+                            } else {
+                                state.requested = Some(Job::Start(batch));
+                            }
                         }
                     }
                     Err(_) => {
@@ -524,6 +584,9 @@ impl App {
                 state.error = Some("revision-retained");
             }
             Ok(Output::Abandoned) => {
+                if let Some(saved) = &state.saved {
+                    self.attachments.forget(saved.upload_ids());
+                }
                 state.saved = None;
                 state.clear_editors();
                 state.phase = Phase::Failed;

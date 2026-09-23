@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 pub struct Input {
     pub original: sources::Source,
     pub content: MessageContent,
+    pub files: Vec<crate::pages::attachments::Saved>,
     pub excluded: Vec<super::resources::Resource>,
 }
 
@@ -36,6 +37,7 @@ impl Input {
         Self {
             content: original.content.clone(),
             excluded: vec![],
+            files: vec![],
             original,
         }
     }
@@ -198,8 +200,9 @@ pub fn batch(
         turn_orchestration: orchestration,
         max_steps: None,
     };
-    turn::decode_turn_batch_start_input(
-        &serde_json::to_value(&request).map_err(|_| "revision-invalid")?,
+    turn::validate_turn_batch_draft(
+        request,
+        &inputs.iter().map(|i| i.files.len()).collect::<Vec<_>>(),
     )
     .map_err(|_| "revision-invalid".into())
 }

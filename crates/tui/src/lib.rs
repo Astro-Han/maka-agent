@@ -193,6 +193,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
     #[cfg(unix)]
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
+        app.advance_revision_uploads();
         if !app.closing
             && let Some(request) = app.attachment_browse_request()
         {

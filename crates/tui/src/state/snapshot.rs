@@ -60,7 +60,7 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 11,
+            version: 12,
             attachments: app.attachments.saved.clone(),
             root: root.into(),
             tabs: app.tabs.entries.iter().map(|tab| tab.id.clone()).collect(),
@@ -89,7 +89,7 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if self.version != 11
+        if self.version != 12
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
@@ -133,7 +133,7 @@ impl Snapshot {
                 return Err("Invalid attachment draft destination or count".into());
             }
             for item in items {
-                if !uploads.insert(&item.id) {
+                if !uploads.insert(item.id.as_str()) {
                     return Err("Duplicate attachment upload".into());
                 }
                 item.validate(session)?;
@@ -172,6 +172,9 @@ impl Snapshot {
         }
         if let Some(revision) = &self.revision {
             revision.validate(root)?;
+            if revision.upload_ids().any(|id| !uploads.insert(id)) {
+                return Err("Duplicate revision/composer upload".into());
+            }
         }
         if let Some(branch) = &self.branch {
             branch.validate(root)?;
@@ -353,7 +356,7 @@ mod tests {
         request.input().validate().unwrap();
         original.sending.get_mut("a").unwrap().request = request.clone();
         let saved = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
-        assert_eq!(saved["version"], 11);
+        assert_eq!(saved["version"], 12);
         let mut restored = app();
         serde_json::from_value::<Snapshot>(saved.clone())
             .unwrap()
