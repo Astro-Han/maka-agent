@@ -30,6 +30,8 @@ use serde_json::{Value, json};
 mod fixtures;
 #[path = "frames.rs"]
 mod frames;
+#[path = "materials.rs"]
+mod materials;
 #[path = "tamper.rs"]
 mod tamper;
 use frames::records;
@@ -287,5 +289,7 @@ async fn branch_export_keeps_archive_proofs_and_owned_bytes_without_parent_futur
         Err(BundleError::Store(StoreError::SessionBusy))
     ));
     end(&log, "busy").await;
+    materials::verify_nested_copy(&log).await;
+    tamper::verify_deleted_upload(&log).await;
     log.close().await.unwrap();
 }

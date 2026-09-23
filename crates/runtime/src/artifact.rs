@@ -20,6 +20,15 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Material committed atomically with a canonical fact, not a best-effort file reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactEvidence {
+    pub id: String,
+    pub bytes: u64,
+    pub digest: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {

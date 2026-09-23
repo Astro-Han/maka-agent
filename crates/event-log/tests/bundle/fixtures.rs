@@ -43,19 +43,33 @@ pub(super) async fn tool(
         .await
         .unwrap();
     let event = |fact| EventWrite::plain(RuntimeEvent::new(invocation.clone(), fact)).unwrap();
-    log.append(&event(Fact::ModelRequested {
-        step_id: step.into(),
-        model_id: "test".into(),
-        purpose: ModelPurpose::Main,
-        context: None,
-        source_scope: source.source_evidence.scope,
-        source_high_water: source.source_evidence.high_water,
-        source_digest: source.source_evidence.digest,
-        input_digest: "fixture".into(),
-        route_identity: format!("sha256:{}", "a".repeat(64)),
-        checkpoint_event_id: source.baseline.map(|baseline| baseline.event_id),
-        effective_source_digest: Some(source.effective_source_digest),
-    }))
+    log.append(
+        &event(Fact::ModelRequested {
+            step_id: step.into(),
+            model_id: "test".into(),
+            purpose: ModelPurpose::Main,
+            context: None,
+            source_scope: source.source_evidence.scope,
+            source_high_water: source.source_evidence.high_water,
+            source_digest: source.source_evidence.digest,
+            input_digest: "fixture".into(),
+            route_identity: format!("sha256:{}", "a".repeat(64)),
+            checkpoint_event_id: source.baseline.map(|baseline| baseline.event_id),
+            effective_source_digest: Some(source.effective_source_digest),
+        })
+        .with_quote(maka_runtime::pricing::Quote {
+            provider_id: "fixture".into(),
+            revision: 1,
+            pricing: Some(maka_runtime::pricing::Pricing {
+                model_key: "fixture:test".into(),
+                input_usd_per_million: 1.0,
+                output_usd_per_million: 2.0,
+                cache_read_usd_per_million: None,
+                cache_write_usd_per_million: None,
+            }),
+        })
+        .unwrap(),
+    )
     .await
     .unwrap();
     log.append(&event(Fact::ModelCompleted {

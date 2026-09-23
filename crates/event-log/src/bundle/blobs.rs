@@ -72,6 +72,7 @@ pub(super) async fn export<W: AsyncWrite + Unpin>(
         }
     }
     for session in &inventory.sessions {
+        required(db, &session.id).await?;
         let mut after = None::<String>;
         loop {
             let next: Option<(String, String, String, i64)> = sqlx::query_as(
@@ -117,6 +118,28 @@ pub(super) async fn export<W: AsyncWrite + Unpin>(
                 })
                 .await?;
         }
+    }
+    Ok(())
+}
+
+async fn required(db: &mut SqliteConnection, session: &str) -> Result<(), StoreError> {
+    // Copied evidence resolves through destination-owned material, never through
+    // a live lookup into an ancestor's artifact namespace.
+    let broken: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM session_history_events e
+         JOIN json_each(e.event_json,'$.fact.outcome.artifacts') proof
+         LEFT JOIN session_history_artifacts h ON h.session_id=e.owner_session_id
+           AND h.source_session_id=e.event_session AND h.source_artifact_id=json_extract(proof.value,'$.id')
+         LEFT JOIN artifacts a ON a.session_id=e.owner_session_id AND
+           a.id=CASE WHEN e.inherited=1 THEN h.artifact_id ELSE json_extract(proof.value,'$.id') END
+         WHERE e.owner_session_id=? AND e.kind='tool_settled' AND
+           (a.id IS NULL OR length(a.payload)!=json_extract(proof.value,'$.bytes')
+            OR a.content_sha256!=json_extract(proof.value,'$.digest')
+            OR json_extract(a.record_json,'$.source')!='tool_result_projection'
+            OR json_extract(a.record_json,'$.turnId')!=json_extract(e.event_json,'$.invocation.turn_id')))"
+    ).bind(session).fetch_one(db).await?;
+    if broken {
+        return Err(invalid("bundle lacks generated tool material"));
     }
     Ok(())
 }

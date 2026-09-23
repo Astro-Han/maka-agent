@@ -65,6 +65,23 @@ pub(super) fn records(bytes: &[u8], expected: &str) -> Vec<Value> {
 
 /// Rewrite selected canonical facts and recompute only the transport checksum.
 pub(super) fn rewrite_events(bytes: &[u8], mut change: impl FnMut(&mut Value) -> bool) -> Vec<u8> {
+    rewrite_records(bytes, |record| {
+        if record["kind"] != "event" {
+            return true;
+        }
+        let mut event: Value = serde_json::from_str(record["json"].as_str().unwrap()).unwrap();
+        let before = event.clone();
+        if !change(&mut event) {
+            return false;
+        }
+        if event != before {
+            record["json"] = Value::String(serde_json::to_string(&event).unwrap());
+        }
+        true
+    })
+}
+
+pub(super) fn rewrite_records(bytes: &[u8], mut change: impl FnMut(&mut Value) -> bool) -> Vec<u8> {
     use std::io::{Cursor, Read};
     let magic = b"MAKA-SESSION\0\x01";
     let mut cursor = Cursor::new(bytes);
@@ -77,19 +94,23 @@ pub(super) fn rewrite_events(bytes: &[u8], mut change: impl FnMut(&mut Value) ->
         let mut json = vec![0; u32::from_be_bytes(length) as usize];
         cursor.read_exact(&mut json).unwrap();
         let mut record: Value = serde_json::from_slice(&json).unwrap();
+        let payload_len = if record["kind"] == "blob" {
+            if record["resource"] == "artifact" {
+                record["metadata"]["sizeBytes"].as_u64().unwrap()
+            } else {
+                record["bytes"].as_u64().unwrap()
+            }
+        } else {
+            0
+        };
+        let start = cursor.position() as usize;
+        cursor.set_position(cursor.position() + payload_len);
         let end = record["kind"] == "end";
         if end {
             record["digest"] = Value::String(format!("sha256:{:x}", Sha256::digest(&output)));
             record["frames"] = Value::from(count);
-        } else if record["kind"] == "event" {
-            let mut event: Value = serde_json::from_str(record["json"].as_str().unwrap()).unwrap();
-            let before = event.clone();
-            if !change(&mut event) {
-                continue;
-            }
-            if event != before {
-                record["json"] = Value::String(serde_json::to_string(&event).unwrap());
-            }
+        } else if !change(&mut record) {
+            continue;
         }
         let json = serde_json::to_vec(&record).unwrap();
         output.extend((json.len() as u32).to_be_bytes());
@@ -98,15 +119,6 @@ pub(super) fn rewrite_events(bytes: &[u8], mut change: impl FnMut(&mut Value) ->
             return output;
         }
         count += 1;
-        if record["kind"] == "blob" {
-            let length = if record["resource"] == "artifact" {
-                record["metadata"]["sizeBytes"].as_u64().unwrap()
-            } else {
-                record["bytes"].as_u64().unwrap()
-            };
-            let start = cursor.position() as usize;
-            output.extend(&bytes[start..start + length as usize]);
-            cursor.set_position(cursor.position() + length);
-        }
+        output.extend(&bytes[start..start + payload_len as usize]);
     }
 }

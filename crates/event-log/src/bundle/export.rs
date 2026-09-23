@@ -50,6 +50,7 @@ impl EventLog {
             let result = async {
                 let inventory = super::inventory(&mut tx, &root).await?;
                 inventory.verify_confirmation(&expected)?;
+                require_idle(&mut tx, &inventory).await?;
                 let through = sequence_number(sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(sequence),0) FROM event_log")
                     .fetch_one(&mut *tx).await.map_err(StoreError::from)?)?;
                 let closure = Closure::capture(&mut tx, &inventory, through).await?;
@@ -72,6 +73,21 @@ impl EventLog {
             Ok(result)
         })).await?
     }
+}
+
+async fn require_idle(db: &mut SqliteConnection, inventory: &Inventory) -> Result<(), StoreError> {
+    for session in &inventory.sessions {
+        let busy: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM local_runtime_events o WHERE o.kind='invocation_opened' AND o.event_session=?1
+             AND NOT EXISTS(SELECT 1 FROM runtime_events t WHERE t.invocation_id=o.invocation_id AND t.kind='invocation_ended'))
+             OR EXISTS(SELECT 1 FROM message_admissions WHERE session_id=?1)
+             OR EXISTS(SELECT 1 FROM session_processes WHERE session_id=?1 AND cleaned=0)"
+        ).bind(&session.id).fetch_one(&mut *db).await?;
+        if busy {
+            return Err(StoreError::SessionBusy);
+        }
+    }
+    Ok(())
 }
 
 async fn catalog<W: AsyncWrite + Unpin>(
@@ -164,6 +180,10 @@ async fn accounting<W: AsyncWrite + Unpin>(
         .fetch_optional(&mut *db)
         .await?;
         if let Some((event_id, quote, usage, usd)) = row {
+            // A proof-only request need not include its later completion. Its
+            // future usage is not evidence belonging to this transfer.
+            let witness = super::accounting::witness(db, &event_id).await?;
+            let usage = usage.filter(|_| witness.is_some_and(|n| closure.events.contains(&n)));
             writer
                 .record(&Record::Accounting {
                     event_id,

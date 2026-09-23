@@ -35,6 +35,13 @@ CREATE UNIQUE INDEX event_blobs ON frames(json_extract(record_json, '$.resource'
     WHERE kind = 'blob' AND json_extract(record_json, '$.resource') IN ('tool_result', 'composition');
 CREATE UNIQUE INDEX artifact_blobs ON frames(json_extract(record_json, '$.metadata.sessionId'), json_extract(record_json, '$.metadata.id'))
     WHERE kind = 'blob' AND json_extract(record_json, '$.resource') = 'artifact';
+CREATE UNIQUE INDEX history_artifacts ON frames(json_extract(record_json, '$.session'), json_extract(record_json, '$.source_session'), json_extract(record_json, '$.source_artifact'))
+    WHERE kind = 'history_artifact';
+
+-- Derived during validation, never supplied by the transfer.
+CREATE TABLE referenced_mappings (
+    frame INTEGER PRIMARY KEY REFERENCES frames(number)
+);
 
 -- Keep binary payloads in bounded pieces; metadata never becomes file paths.
 CREATE TABLE chunks (

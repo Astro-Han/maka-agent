@@ -26,6 +26,8 @@ use maka_runtime::{
 use sqlx::SqliteConnection;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
+mod members;
+
 /// Event identities and exact copied memberships, not additional catalog Sessions.
 pub(super) struct Closure {
     pub events: BTreeSet<u64>,
@@ -55,15 +57,6 @@ impl Closure {
             bytes: 0,
         };
         for session in &inventory.sessions {
-            let busy: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM local_runtime_events o WHERE o.kind='invocation_opened' AND o.event_session=?1
-                 AND NOT EXISTS(SELECT 1 FROM runtime_events t WHERE t.invocation_id=o.invocation_id AND t.kind='invocation_ended'))
-                 OR EXISTS(SELECT 1 FROM message_admissions WHERE session_id=?1)
-                 OR EXISTS(SELECT 1 FROM session_processes WHERE session_id=?1 AND cleaned=0)"
-            ).bind(&session.id).fetch_one(&mut *db).await?;
-            if busy {
-                return Err(StoreError::SessionBusy);
-            }
             selected
                 .scope(
                     db,
@@ -80,6 +73,13 @@ impl Closure {
                 let sequence = sequence_number(sequence)?;
                 selected.add(sequence)?;
                 selected.revisions.insert((session.id.clone(), sequence));
+                let source: String = sqlx::query_scalar(
+                    "SELECT source_session_id FROM session_history_copies WHERE session_id=?",
+                )
+                .bind(&session.id)
+                .fetch_one(&mut *db)
+                .await?;
+                selected.member(db, &source, sequence).await?;
                 if selected.revisions.len() > MAX_EVENTS {
                     return Err(StoreError::PrefixTooLarge);
                 }
@@ -243,8 +243,8 @@ impl Closure {
             return Err(StoreError::MaterialCollected);
         }
         let filter = Selection::predicate("e", "?4");
-        let rows: Vec<(i64, bool, Option<i64>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT e.sequence,e.inherited,e.archive_sequence FROM session_history_events e
+        let rows: Vec<(i64, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT e.sequence,e.inherited FROM session_history_events e
              WHERE e.owner_session_id=?1 AND e.sequence>?2 AND e.sequence<=?3 AND {filter}
              ORDER BY e.sequence LIMIT ?5"
         )))
@@ -255,18 +255,11 @@ impl Closure {
         .bind((MAX_EVENTS + 1) as i64)
         .fetch_all(&mut *db)
         .await?;
-        for (sequence, inherited, archive) in rows {
+        for (sequence, inherited) in rows {
             let sequence = sequence_number(sequence)?;
             self.add(sequence)?;
             if inherited {
-                let archive = archive.map(sequence_number).transpose()?;
-                if let Some(archive) = archive {
-                    self.add(archive)?;
-                }
-                self.members.insert((session.clone(), sequence), archive);
-                if self.members.len() > MAX_EVENTS {
-                    return Err(StoreError::PrefixTooLarge);
-                }
+                self.member(db, session, sequence).await?;
             }
         }
         self.scopes.insert(key, through);

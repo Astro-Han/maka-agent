@@ -28,6 +28,8 @@ use maka_runtime::{
 };
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
 
+mod artifacts;
+mod catalog;
 mod copies;
 mod material;
 
@@ -62,7 +64,8 @@ async fn replay(
         .fetch_one(&mut *staged)
         .await?;
     let Record::Header {
-        source_high_water, ..
+        source_high_water,
+        inventory,
     } = serde_json::from_str(&header)?
     else {
         return Err(invalid("missing staged header"));
@@ -161,7 +164,10 @@ async fn replay(
         }
         after = sequence;
     }
-    material::check_bindings(staged, original).await
+    material::check_bindings(staged, original).await?;
+    catalog::validate(staged, original, &inventory, source_high_water).await?;
+    artifacts::validate(staged, original, &inventory).await?;
+    super::accounting::validate(staged, original).await
 }
 
 async fn request(

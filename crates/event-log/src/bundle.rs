@@ -26,6 +26,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Connection, SqliteConnection};
 use std::collections::HashSet;
 
+mod accounting;
 mod blobs;
 mod closure;
 mod export;

@@ -25,9 +25,9 @@ use crate::{
         format::{Copy, Record},
     },
 };
-use maka_runtime::session::{CopyPurpose, Lineage};
+use maka_runtime::session::{CopyPurpose, CopyState, Lineage};
 use sqlx::SqliteConnection;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 pub(super) struct Copies(VecDeque<Copy>);
 
@@ -51,6 +51,31 @@ impl Copies {
             shape(&copy, fence)?;
             copies.push(copy);
             after = number;
+        }
+        let indexes: BTreeMap<_, _> = copies
+            .iter()
+            .enumerate()
+            .map(|(index, copy)| (copy.request.target_session_id.as_str(), index))
+            .collect();
+        let mut children = vec![Vec::new(); copies.len()];
+        let mut ready = VecDeque::new();
+        for (index, copy) in copies.iter().enumerate() {
+            if let Some(parent) = indexes.get(copy.request.source_session_id.as_str()) {
+                if copies[*parent].observed_through > copy.observed_through {
+                    return Err(invalid("copy source did not exist at its observed fence"));
+                }
+                children[*parent].push(index);
+            } else {
+                ready.push_back(index);
+            }
+        }
+        let mut visited = 0;
+        while let Some(index) = ready.pop_front() {
+            visited += 1;
+            ready.extend(children[index].iter().copied());
+        }
+        if visited != copies.len() {
+            return Err(invalid("bundle copy ancestry contains a cycle"));
         }
         copies.sort_by_key(|copy| copy.observed_through);
         Ok(Self(copies.into()))
@@ -146,6 +171,7 @@ fn shape(copy: &Copy, fence: u64) -> Result<(), StoreError> {
         crate::sessions::validate_id(id)?;
     }
     if r.source_session_id == r.target_session_id
+        || copy.state == CopyState::Abandoned
         || r.expected_source_revision == 0
         || r.expected_source_revision > 9_007_199_254_740_991
         || copy.through > copy.observed_through

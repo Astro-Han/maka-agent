@@ -93,6 +93,91 @@ pub(super) async fn verify_original_proofs(
         json!({"kind":"event","sequence":events.last().unwrap().0+1,"json":serde_json::to_string(&imported).unwrap()}),
     );
     rejected(&mixed, "imported messages cannot admit an invocation").await;
+    imported["invocation"]["session_id"] = json!("unrelated-session");
+    imported["invocation"]["run_id"] = json!("unrelated-run");
+    let unrelated = append_record(
+        bytes,
+        json!({"kind":"event","sequence":events.last().unwrap().0+1,"json":serde_json::to_string(&imported).unwrap()}),
+    );
+    rejected(
+        &unrelated,
+        "bundle contains history outside its selected closure",
+    )
+    .await;
+    for (kind, field, value, expected) in [
+        (
+            "session",
+            "id",
+            json!("not-selected"),
+            "bundle catalog differs from its inventory",
+        ),
+        (
+            "session",
+            "parent",
+            json!("branch"),
+            "bundle catalog is not the selected rooted subtree",
+        ),
+        (
+            "accounting",
+            "event_id",
+            json!("not-a-request"),
+            "unbound bundle model quote",
+        ),
+        (
+            "accounting",
+            "valuation",
+            json!({"usage":{"input_tokens":1},"usd":0.0}),
+            "bundle valuation differs from its selected usage evidence",
+        ),
+    ] {
+        let mut changed = false;
+        let tampered = super::frames::rewrite_records(bytes, |record| {
+            if !changed && record["kind"] == kind {
+                record[field] = value.clone();
+                changed = true;
+            }
+            true
+        });
+        assert!(changed, "missing {kind} fixture");
+        rejected(&tampered, expected).await;
+    }
+    let omitted = super::frames::rewrite_records(bytes, |record| record["kind"] != "session");
+    rejected(&omitted, "bundle catalog differs from its inventory").await;
+    for (omit, expected) in [
+        (
+            "history_artifact",
+            "bundle copied reference lacks its retained Artifact",
+        ),
+        (
+            "artifact",
+            "bundle history mapping lacks its owned Artifact",
+        ),
+    ] {
+        let omitted = super::frames::rewrite_records(bytes, |record| {
+            !(record["kind"] == omit || (record["kind"] == "blob" && record["resource"] == omit))
+        });
+        rejected(&omitted, expected).await;
+    }
+    for (field, value, expected) in [
+        (
+            "sessionId",
+            "not-selected",
+            "bundle Artifact is outside its selected catalog",
+        ),
+        (
+            "name",
+            "wrong.txt",
+            "Attachment metadata does not match its canonical Artifact",
+        ),
+    ] {
+        let tampered = super::frames::rewrite_records(bytes, |record| {
+            if record["kind"] == "blob" && record["resource"] == "artifact" {
+                record["metadata"][field] = json!(value);
+            }
+            true
+        });
+        rejected(&tampered, expected).await;
+    }
     // Reject attacker-declared allocation before waiting for the absent body.
     let mut oversized = b"MAKA-SESSION\0\x01".to_vec();
     oversized.extend(u32::MAX.to_be_bytes());
@@ -100,6 +185,24 @@ pub(super) async fn verify_original_proofs(
         bundle::inspect(oversized.as_slice()).await,
         Err(BundleError::Store(StoreError::PrefixTooLarge))
     ));
+}
+
+pub(super) async fn verify_deleted_upload(log: &maka_event_log::EventLog) {
+    assert_eq!(
+        log.delete_user_artifact("source", "input").await.unwrap(),
+        maka_event_log::artifacts::ArtifactDeletion::Deleted
+    );
+    let inventory = log.preview_bundle("source").await.unwrap();
+    let (bytes, _) = log
+        .export_bundle("source", &inventory.subtree_digest, Vec::new())
+        .await
+        .unwrap();
+    let mut staged = StagedBundle::read(bytes.as_slice()).await.unwrap();
+    // The branch still owns its retained copy; the original reference now
+    // reports a missing upload without making the entire bundle invalid.
+    staged.validate_history().await.unwrap();
+    staged.validate_history().await.unwrap();
+    staged.close().await.unwrap();
 }
 
 async fn rejected(bytes: &[u8], expected: &str) {

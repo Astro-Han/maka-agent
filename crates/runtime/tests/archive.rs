@@ -154,6 +154,7 @@ fn execution_failure_and_projection_failure_do_not_reveal_raw_or_collapse_catego
             digest: content_digest(b"unavailable raw"),
         },
         model_projection: Projection::Failure,
+        artifacts: Vec::new(),
     };
     assert_eq!(
         encode_projection(&outcome_projection(&succeeded)).unwrap(),
