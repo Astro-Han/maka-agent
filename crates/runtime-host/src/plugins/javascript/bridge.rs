@@ -649,6 +649,10 @@ impl State {
                 let (commands, input) = self.execution(input)?;
                 encode(commands.restore_root(input.operation_id).await?)
             }
+            Request::AbandonRevision(input) => {
+                let (commands, input) = self.execution(input)?;
+                encode(commands.abandon_revision(input.operation_id).await?)
+            }
             Request::WorkspacePatch(input) => {
                 let (commands, input) = self.execution(input)?;
                 encode(commands.workspace_patch(input.operation_id).await?)

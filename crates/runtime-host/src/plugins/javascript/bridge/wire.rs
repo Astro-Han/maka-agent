@@ -177,6 +177,8 @@ pub(super) enum Request {
     CreateRoot(Execution<CreateRoot>),
     #[serde(rename = "execution.restoreRoot")]
     RestoreRoot(Execution<Operation>),
+    #[serde(rename = "execution.abandonRevision")]
+    AbandonRevision(Execution<Operation>),
     #[serde(rename = "execution.workspacePatch")]
     WorkspacePatch(Execution<Operation>),
     #[serde(rename = "execution.query")]

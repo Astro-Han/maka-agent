@@ -201,7 +201,7 @@ impl Host {
                     refresh = Some(Box::pin(async move {
                         let catalog_pending = host.session_catalog.publish_commits(&host.log, through).await?;
                         let mut subscriptions = subscriptions.lock().await;
-                        let (frames, subscription_pending) = subscriptions.poll(host).await?;
+                        let (frames, subscription_pending) = subscriptions.poll(host, outbound).await?;
                         // Delivery state and queue order have one owner. Open,
                         // close and resource frames cannot overtake this cut.
                         for frame in frames { outbound.enqueue(frame).await?; }

@@ -406,6 +406,14 @@ pub trait Access: Send + Sync {
     ) -> futures_util::future::BoxFuture<'_, Result<std::sync::Arc<dyn Commands>, CommandError>>;
 }
 
+/// Durable decision when abandoning an owned revision draft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RevisionDisposition {
+    Abandoned,
+    Retained,
+}
+
 /// An acquired execution capability retains its captured permission ceiling.
 pub trait Commands: Send + Sync + std::any::Any {
     /// Copy an immutable attachment between two Host-issued capabilities. Both
@@ -517,6 +525,12 @@ pub trait Commands: Send + Sync + std::any::Any {
         &self,
         operation_id: String,
     ) -> futures_util::future::BoxFuture<'_, Result<Option<ChildSession>, CommandError>>;
+    /// Abandon an unused revision created by this namespace. Accepted work
+    /// retains it; repeating an abandonment returns the durable decision.
+    fn abandon_revision(
+        &self,
+        operation_id: String,
+    ) -> futures_util::future::BoxFuture<'_, Result<RevisionDisposition, CommandError>>;
     /// Host-captured constraints suitable for persisting with a business intent.
     fn boundaries(&self) -> Result<Vec<SessionBoundary>, CommandError>;
     /// Export a settled child workspace once; exact retries return its immutable Artifact.

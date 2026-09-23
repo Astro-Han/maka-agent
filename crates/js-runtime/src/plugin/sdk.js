@@ -226,6 +226,7 @@
       createChild: (input) => call('createChild', input),
       createRoot: (input) => call('createRoot', input),
       restoreRoot: (operationId) => call('restoreRoot', { operationId }),
+      abandonRevision: (operationId) => call('abandonRevision', { operationId }),
       workspacePatch: (operationId) => call('workspacePatch', { operationId }),
       query: (operationId) => call('query', { operationId }),
       cancel: (operationId) => call('cancel', { operationId }),

@@ -127,7 +127,40 @@ impl Delivery {
         ))
     }
 
-    pub async fn poll(&mut self, host: &Host) -> Result<(Vec<Value>, bool), HostError> {
+    pub fn removed(&self) -> Result<Value, HostError> {
+        let frame = serde_json::to_value(AssistantObservationFrame::Closed {
+            host_epoch: self.epoch.clone(),
+            subscription_id: self.id.clone(),
+            sequence: self.sequence,
+            reason: SubscriptionClosedReason::SessionRemoved,
+        })?;
+        decode_assistant_observation_frame(&frame)?;
+        Ok(frame)
+    }
+
+    pub async fn poll(&mut self, host: &Host) -> Result<Option<(Vec<Value>, bool)>, HostError> {
+        let sequence = self.sequence;
+        match self.poll_existing(host).await {
+            Ok(batch) => Ok(Some(batch)),
+            Err(error) => {
+                // A draft can disappear after the version read, including while
+                // preparing transcript pages. Unsent frames consume no sequence.
+                if host
+                    .log
+                    .get_session::<SessionConfiguration>(&self.session_id)
+                    .await?
+                    .is_none()
+                {
+                    self.sequence = sequence;
+                    Ok(None)
+                } else {
+                    Err(error)
+                }
+            }
+        }
+    }
+
+    async fn poll_existing(&mut self, host: &Host) -> Result<(Vec<Value>, bool), HostError> {
         let continuing = self.pending.is_some();
         if self.pending.is_none() {
             let observation = host

@@ -215,7 +215,11 @@ impl Subscriptions {
     /// One bounded page per subscription leaves request/stop admission runnable
     /// between catch-up batches. A slow writer fails the connection, never skips
     /// a previously assigned sequence.
-    pub async fn poll(&mut self, host: &Host) -> Result<(Vec<Value>, bool), HostError> {
+    pub async fn poll(
+        &mut self,
+        host: &Host,
+        outbound: &super::outbound::Outbound,
+    ) -> Result<(Vec<Value>, bool), HostError> {
         let mut frames = Vec::new();
         let mut more = false;
         if self.owned.is_empty() {
@@ -227,19 +231,38 @@ impl Subscriptions {
             .map(|delivery| delivery.session_id().to_owned())
             .collect::<Vec<_>>();
         let versions = host.log.observation_versions(&sessions).await?;
-        for delivery in self.owned.values_mut().filter(|delivery| delivery.ready) {
-            let version = *versions
-                .get(delivery.session_id())
-                .ok_or("observed Session disappeared")?;
-            if delivery.version == Some(version) {
+        let mut removed = Vec::new();
+        for (id, delivery) in self.owned.iter_mut().filter(|(_, delivery)| delivery.ready) {
+            let version = versions.get(delivery.session_id()).copied();
+            if version.is_some() && delivery.version == version {
                 continue;
             }
-            let (mut next, pending) = delivery.poll(host).await?;
+            let batch = match version {
+                Some(_) => delivery.poll(host).await?,
+                None => None,
+            };
+            let Some((mut next, pending)) = batch else {
+                frames.push(delivery.removed()?);
+                removed.push(id.clone());
+                continue;
+            };
             // A paged fence or unfinished transcript always continues, even if
             // no new fact arrived since the previous page.
-            delivery.version = (!pending).then_some(version);
+            delivery.version = if pending { None } else { version };
             frames.append(&mut next);
             more |= pending;
+        }
+        if !removed.is_empty() {
+            let mut registry = self
+                .registry
+                .lock()
+                .map_err(|_| "subscription registry poisoned")?;
+            for id in removed {
+                self.owned.remove(&id);
+                registry.remove(&id);
+                self.pty.remove(&id);
+                outbound.retain_pty(&id, &[]);
+            }
         }
         Ok((frames, more))
     }

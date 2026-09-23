@@ -343,6 +343,88 @@ async fn scenario() {
             "patch":{"sandboxMode":"danger-full-access"}
         })).await;
         assert_eq!(ordinary["ok"], false, "{ordinary}");
+        // Draft removal closes only its own ready subscription, not another
+        // Session on the same connection. Reopening replays the tombstone.
+        let mut observer = Peer::new(host.clone(), "revision-observer").await;
+        let mut draft_subscription = Value::Null;
+        if !reopened {
+            let live = success(
+                observer
+                    .rpc(
+                        "subscription.open",
+                        json!({
+                            "sessionId":created["root"]["sessionId"], "transcript":{"kind":"none"}
+                        }),
+                    )
+                    .await,
+            );
+            success(
+                observer
+                    .rpc(
+                        "subscription.ready",
+                        json!({"subscriptionId":live["subscriptionId"]}),
+                    )
+                    .await,
+            );
+            draft_subscription = success(
+                observer
+                    .rpc(
+                        "subscription.open",
+                        json!({
+                            "sessionId":created["draft"], "transcript":{"kind":"none"}
+                        }),
+                    )
+                    .await,
+            );
+            success(
+                observer
+                    .rpc(
+                        "subscription.ready",
+                        json!({"subscriptionId":draft_subscription["subscriptionId"]}),
+                    )
+                    .await,
+            );
+        }
+        for _ in 0..2 {
+            let abandoned = remote(
+                &mut peer,
+                &client,
+                &document,
+                "abandon-revision",
+                json!({
+                    "grant":root_grant["id"], "operation":"unused-revision"
+                }),
+            )
+            .await;
+            assert_eq!(abandoned, "abandoned");
+        }
+        if !reopened {
+            loop {
+                let frame = observer.frame().await;
+                if frame["kind"] != "subscription.closed" {
+                    continue;
+                }
+                assert_eq!(
+                    frame["subscriptionId"],
+                    draft_subscription["subscriptionId"]
+                );
+                assert_eq!(frame["reason"], "session_removed");
+                assert_eq!(frame["sequence"], draft_subscription["nextSequence"]);
+                break;
+            }
+        }
+        let surviving = success(
+            observer
+                .rpc(
+                    "session.catalog.query",
+                    json!({
+                        "kind":"get", "sessionId":created["root"]["sessionId"]
+                    }),
+                )
+                .await,
+        );
+        assert_eq!(surviving["session"]["id"], created["root"]["sessionId"]);
+        observer.close().await;
         if reopened {
             assert_eq!(created, root_result);
         } else {

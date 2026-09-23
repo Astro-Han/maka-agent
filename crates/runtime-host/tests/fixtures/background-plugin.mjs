@@ -394,12 +394,62 @@ export default async function (ctx) {
           });
           if (sources[0]?.content.text !== 'Independent root work')
             throw new Error('public copy lost original input');
+          if (!(await ctx.storage.read('unused-revision'))) {
+            const draft = await history.history.copySession(commands, {
+              root: { ...request, operationId: 'unused-revision' },
+              source: {
+                ...copyInput.source,
+                expectedRevision: view.revision,
+                purpose: { kind: 'revision', turnId: receipt.invocation.turn_id },
+              },
+            });
+            if (draft.kind !== 'committed') throw new Error('revision draft did not commit');
+            const retained = await history.history.copySession(commands, {
+              root: { ...request, operationId: 'retained-revision' },
+              source: {
+                ...copyInput.source,
+                expectedRevision: view.revision,
+                purpose: { kind: 'revision', turnId: receipt.invocation.turn_id },
+              },
+            });
+            if (retained.kind !== 'committed') throw new Error('retained revision did not commit');
+            await commands.submit({
+              operationId: 'revision-work',
+              sessionId: retained.session.sessionId,
+              content: { text: 'Accepted revision work' },
+            });
+            while ((await commands.query('revision-work')).progress.state !== 'ended')
+              await ctx.sleep(10);
+            await ctx.storage.batch([
+              {
+                key: 'unused-revision',
+                expectedRevision: null,
+                data: { kind: 'present', value: draft.session.sessionId },
+              },
+            ]);
+          }
           return copied.session;
         },
       );
       const recoveredCopy = await commands.restoreRoot('history-copy');
       if (recoveredCopy?.sessionId !== copy.sessionId) throw new Error('copy recovery lost owner');
-      return JSON.parse(JSON.stringify({ root, receipt, copy }));
+      if ((await commands.abandonRevision('retained-revision')) !== 'retained')
+        throw new Error('accepted revision work was abandoned');
+      const draft = await ctx.storage.read('unused-revision');
+      if (draft?.data.kind !== 'present') throw new Error('revision identity was lost');
+      return JSON.parse(JSON.stringify({ root, receipt, copy, draft: draft.data.value }));
+    } finally {
+      await commands.close();
+    }
+  });
+  await ctx.remote.method('abandon-revision', async (input) => {
+    const intent = parseIntent(input);
+    const commands = await ctx.executions.restore(intent.grant);
+    try {
+      const result = await commands.abandonRevision(intent.operation);
+      if (result === 'abandoned' && (await commands.restoreRoot(intent.operation)))
+        throw new Error('abandoned revision was restored');
+      return result;
     } finally {
       await commands.close();
     }

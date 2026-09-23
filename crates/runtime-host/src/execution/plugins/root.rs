@@ -106,9 +106,32 @@ impl BoundCommands {
         if self.submission_stop.is_cancelled() {
             return Err(Error::Revoked);
         }
+        let Some(record) = self.owned_root(&host, &id, approval).await? else {
+            return Ok(None);
+        };
+        let current = &record.configuration;
+        self.grants.lock().unwrap().insert(
+            id.clone(),
+            Grant {
+                workspace_origin: current.workspace_origin,
+                boundary_revision: current.boundary_revision,
+                sandbox_mode: current.sandbox_mode,
+                approval_policy: current.approval_policy,
+                cwd: current.workspace.host_cwd.clone(),
+            },
+        );
+        Ok(Some(ChildSession { session_id: id }))
+    }
+
+    async fn owned_root(
+        &self,
+        host: &Executions,
+        id: &str,
+        approval: &RootGrant,
+    ) -> Result<Option<maka_event_log::sessions::SessionRecord<SessionConfiguration>>, Error> {
         let Some(record) = host
             .log
-            .get_session::<SessionConfiguration>(&id)
+            .get_session::<SessionConfiguration>(id)
             .await
             .map_err(storage)?
         else {
@@ -116,7 +139,7 @@ impl BoundCommands {
         };
         if host
             .log
-            .session_creator(&id)
+            .session_creator(id)
             .await
             .map_err(storage)?
             .as_ref()
@@ -166,17 +189,84 @@ impl BoundCommands {
                 return Err(Error::Denied);
             }
         }
-        self.grants.lock().unwrap().insert(
-            id.clone(),
-            Grant {
-                workspace_origin: current.workspace_origin,
-                boundary_revision: current.boundary_revision,
-                sandbox_mode: current.sandbox_mode,
-                approval_policy: current.approval_policy,
-                cwd: current.workspace.host_cwd.clone(),
-            },
-        );
-        Ok(Some(ChildSession { session_id: id }))
+        Ok(Some(record))
+    }
+
+    pub(super) async fn abandon_created_revision(
+        &self,
+        operation_id: String,
+    ) -> Result<maka_plugins::execution::RevisionDisposition, Error> {
+        use maka_plugins::execution::RevisionDisposition;
+        let id = self.root_id(&operation_id)?;
+        let approval = self.root_grant.as_ref().ok_or(Error::Denied)?;
+        let host = self.executions()?;
+        let lease = self.context.admit().map_err(|_| Error::Revoked)?;
+        self.authorize_origin(&host).await?;
+        let project = observe_workspace(&host, approval).await?;
+        let gate = host.interactions.own_admission().await;
+        self.authorize_origin(&host).await?;
+        recheck_project(&host, project).await?;
+        if !host.accepting() {
+            return Err(Error::Draining);
+        }
+        if self.submission_stop.is_cancelled() {
+            return Err(Error::Revoked);
+        }
+        // A removed draft retains its creator and receipt, but no live
+        // configuration. Never interpret an arbitrary missing ID as success.
+        if host
+            .log
+            .session_creator(&id)
+            .await
+            .map_err(storage)?
+            .as_ref()
+            != Some(&self.namespace)
+        {
+            return Err(Error::NotFound);
+        }
+        self.owned_root(&host, &id, approval).await?;
+        let receipt = host
+            .log
+            .session_copy_receipt(&id)
+            .await
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        if !matches!(
+            receipt.request.purpose,
+            maka_runtime::session::CopyPurpose::Revision { .. }
+        ) {
+            return Err(Error::Invalid(
+                "only a revision draft can be abandoned".into(),
+            ));
+        }
+        let worker = host.clone();
+        let grants = self.grants.clone();
+        let (send, receive) = tokio::sync::oneshot::channel();
+        host.workers.spawn(async move {
+            let result = worker.log.abandon_revision(&id).await.map_err(storage);
+            let result = match result {
+                Ok(maka_event_log::sessions::AbandonRevision::Abandoned) => {
+                    grants.lock().unwrap().remove(&id);
+                    if worker.catalog.publish_session(&id).await.is_err() {
+                        worker.begin_drain();
+                    }
+                    Ok(RevisionDisposition::Abandoned)
+                }
+                Ok(maka_event_log::sessions::AbandonRevision::Retained) => {
+                    Ok(RevisionDisposition::Retained)
+                }
+                Err(error) => Err(error),
+            };
+            if matches!(result, Err(Error::OutcomeUnknown(_))) {
+                worker.begin_drain();
+            }
+            drop(gate);
+            drop(lease);
+            let _ = send.send(result);
+        });
+        receive
+            .await
+            .map_err(|_| Error::OutcomeUnknown("revision abandonment owner disappeared".into()))?
     }
 
     pub(super) async fn authorize_origin(&self, host: &Executions) -> Result<(), Error> {

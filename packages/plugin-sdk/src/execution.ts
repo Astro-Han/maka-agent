@@ -235,6 +235,8 @@ export interface Executions {
    * Never creates or reconfigures it; null does not rule out a concurrent creation.
    */
   restoreRoot(operationId: string): Promise<{ sessionId: string } | null>;
+  /** Only unused owned revisions disappear. Accepted work and exact retries retain their facts. */
+  abandonRevision(operationId: string): Promise<'abandoned' | 'retained'>;
   /** Reads only an authorized Session, never the global catalog. */
   session(sessionId: string): Promise<SessionConfiguration>;
   /** Registered plugin tools/executors visible within this Session's ceiling, not a grant. */
