@@ -80,7 +80,7 @@ describe('edit-and-resend session revisions', () => {
     );
   });
 
-  it('hides a crash-orphaned draft version after restart', () => {
+  it('keeps an unsent version reachable after restart without replacing the sidebar head', () => {
     const root = summary('root', { lastMessageAt: 10 });
     const draft = summary('draft', {
       revisionRootSessionId: 'root',
@@ -90,7 +90,12 @@ describe('edit-and-resend session revisions', () => {
     });
 
     assert.deepEqual(collapseSessionRevisions([draft, root]).map((session) => session.id), ['root']);
-    assert.equal(deriveSessionRevisionNavigation([draft, root], 'root'), undefined);
+    assert.deepEqual(deriveSessionRevisionNavigation([draft, root], 'root'), {
+      current: 1, total: 2, nextSessionId: 'draft',
+    });
+    assert.deepEqual(deriveSessionRevisionNavigation([draft, root], 'draft'), {
+      current: 2, total: 2, previousSessionId: 'root',
+    });
   });
 
   it('keeps the selected old version in the same sidebar slot', () => {

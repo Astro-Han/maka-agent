@@ -22,7 +22,6 @@ import type { QuoteRef } from '@maka/core/events';
 import { boundReferenceText } from '@maka/core/session-reference';
 import {
   appendPending,
-  clearPending,
   removePending,
   selectPending,
   type PendingByKey,
@@ -61,9 +60,13 @@ export function useAppShellComposerQuotes(options: { draftKey: string }) {
     setPendingByKey((map) => removePending(map, ownerKey, index));
   }
 
-  function clearQuotes(): void {
+  function clearQuotes(submitted: readonly QuoteRef[] = pendingQuotes): void {
     const ownerKey = options.draftKey;
-    setPendingByKey((map) => clearPending(map, ownerKey));
+    setPendingByKey((map) => ({ ...map, [ownerKey]: selectPending(map, ownerKey).filter((quote) => !submitted.includes(quote)) }));
+  }
+
+  function hydrateQuotes(ownerKey: string, quotes: readonly QuoteRef[]): void {
+    setPendingByKey((map) => ({ ...map, [ownerKey]: [...quotes] }));
   }
 
   function clearAllQuotes(): void {
@@ -88,5 +91,6 @@ export function useAppShellComposerQuotes(options: { draftKey: string }) {
     clearQuotes,
     clearAllQuotes,
     restoreQuotes,
+    hydrateQuotes,
   };
 }

@@ -36,6 +36,7 @@
  */
 
 import { useEffect, useRef } from 'react';
+import type { InlineReference } from '@maka/core/events';
 import type { ComposerTextPort } from './chat-input-behavior.js';
 import {
   appendPromptContextDraft,
@@ -54,6 +55,8 @@ export interface ComposerDraftApi {
   clearDraft(key: string | undefined): void;
   /** Persist text under an explicit session key before the host switches it. */
   setDraft(key: string | undefined, value: string): void;
+  /** Accept a complete Host-loaded draft without saving it again or taking focus. */
+  hydrateDraft(key: string, value: string): void;
   /** Read one draft without changing which draft is active. */
   getDraft(key: string | undefined): string;
   /** Append text under an explicit session key without overwriting its draft. */
@@ -64,7 +67,8 @@ export interface ComposerDraftApi {
 
 export interface ComposerDraftPersistence {
   read(key: string | undefined): string | undefined;
-  write(key: string | undefined, value: string): void;
+  readWorkspaceFileReferences?(key: string | undefined): readonly Pick<InlineReference, 'value' | 'start'>[] | undefined;
+  write(key: string | undefined, value: string, workspaceFileReferences?: readonly Pick<InlineReference, 'value' | 'start'>[]): void;
 }
 
 export function useComposerDraft(input: {
@@ -75,6 +79,7 @@ export function useComposerDraft(input: {
   onDraftKeyChange(): void;
   /** Optional host persistence for drafts that must survive renderer replacement. */
   persistence?: ComposerDraftPersistence;
+  workspaceFileReferences?(): readonly Pick<InlineReference, 'value' | 'start'>[];
 }): ComposerDraftApi {
   const draftStoreRef = useRef<Map<string, string>>(new Map());
   const activeDraftKeyRef = useRef<string | undefined>(input.draftKey);
@@ -82,12 +87,12 @@ export function useComposerDraft(input: {
   function saveCurrentDraft(value?: string) {
     const nextValue = value ?? input.text.getValue();
     rememberComposerDraft(draftStoreRef.current, activeDraftKeyRef.current, nextValue);
-    input.persistence?.write(activeDraftKeyRef.current, nextValue);
+    input.persistence?.write(activeDraftKeyRef.current, nextValue, input.workspaceFileReferences?.());
   }
 
   function clearDraft(key: string | undefined) {
     rememberComposerDraft(draftStoreRef.current, key, '');
-    input.persistence?.write(key, '');
+    input.persistence?.write(key, '', []);
   }
 
   function setDraft(key: string | undefined, value: string) {
@@ -97,11 +102,15 @@ export function useComposerDraft(input: {
 
   function getDraft(key: string | undefined) {
     if (activeDraftKeyRef.current === key) return input.text.getValue();
+    const persisted = input.persistence?.read(key);
+    if (persisted !== undefined) return persisted;
     const remembered = readComposerDraft(draftStoreRef.current, key);
-    if (remembered) return remembered;
-    const persisted = input.persistence?.read(key) ?? '';
-    if (persisted) rememberComposerDraft(draftStoreRef.current, key, persisted);
-    return persisted;
+    return remembered;
+  }
+
+  function hydrateDraft(key: string, value: string) {
+    rememberComposerDraft(draftStoreRef.current, key, value);
+    if (activeDraftKeyRef.current === key) input.text.setValue(value);
   }
 
   function appendDraft(key: string | undefined, value: string) {
@@ -127,7 +136,7 @@ export function useComposerDraft(input: {
     activeDraftKeyRef.current = nextKey;
     input.onDraftKeyChange();
     const rememberedDraft = readComposerDraft(draftStoreRef.current, nextKey);
-    const nextDraft = rememberedDraft || input.persistence?.read(nextKey) || '';
+    const nextDraft = input.persistence?.read(nextKey) ?? rememberedDraft;
     if (!rememberedDraft && nextDraft) {
       rememberComposerDraft(draftStoreRef.current, nextKey, nextDraft);
     }
@@ -146,6 +155,7 @@ export function useComposerDraft(input: {
     saveCurrentDraft,
     clearDraft,
     setDraft,
+    hydrateDraft,
     getDraft,
     appendDraft,
     activeDraftKey,

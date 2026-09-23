@@ -435,6 +435,15 @@ export function useComposerAttachments(options: {
     updateDirectories((all) => ({ ...all, [key]: [...(all[key] ?? []), ...directories] }));
   }
 
+  function hydrateContext(ownerKey: string, hostId: string | undefined,
+    attachments: readonly PendingAttachment[], directories: readonly DirectoryReference[]): void {
+    const key = `${ownerKey}:${hostId ?? 'unresolved'}`;
+    setPendingState((current) => ({
+      attachments: { ...current.attachments, [ownerKey]: [...attachments] },
+      directories: { ...current.directories, [key]: [...directories] },
+    }));
+  }
+
   function removeAttachment(index: number): void {
     const ownerKey = options.draftKey;
     updateAttachments((map) => removePending(map, ownerKey, index));
@@ -501,6 +510,7 @@ export function useComposerAttachments(options: {
     attachFilePaths,
     restoreAttachments,
     restoreDirectories,
+    hydrateContext,
     removeAttachment,
     clearSubmittedContext,
     clearSubmittedAttachments,

@@ -33,7 +33,6 @@ import {
 } from '@maka/ui';
 import type { ComposerHandle } from '@maka/ui';
 import { useComposerMentionsContext } from './composer-mentions.js';
-import { composerDraftStorage } from './composer-draft-storage.js';
 import {
   readNewTaskReloadDraft,
   readNewTaskReloadIntent,
@@ -45,8 +44,7 @@ const newTaskDraftPersistence = {
   read(key: string | undefined): string | undefined {
     if (!key) return undefined;
     if (isNewTaskDraft(key)) return readNewTaskReloadDraft(key);
-    try { return composerDraftStorage(localStorage).read(key); }
-    catch { return undefined; }
+    return undefined;
   },
   write(key: string | undefined, value: string): void {
     if (!key) return;
@@ -54,7 +52,7 @@ const newTaskDraftPersistence = {
       if (!writeNewTaskReloadDraft(key, value)) {
         throw new Error('Copy this draft before closing the window; Desktop storage is unavailable.');
       }
-    } else composerDraftStorage(localStorage).write(key, value);
+    }
   },
 };
 
@@ -190,22 +188,26 @@ export function ChatComposerRegion({
   LiveContextUsageProbe,
   directoryComposerProps,
   directoryPickerEnabled,
+  draftPersistence: sessionDraftPersistence,
   ...composerRest
 }: ChatComposerRegionProps) {
   const toast = useToast();
   const draftStorageFailed = useRef(false);
   const draftPersistence = useMemo(() => ({
-    read: newTaskDraftPersistence.read,
-    write(key: string | undefined, value: string) {
+    read(key: string | undefined) { return key && !isNewTaskDraft(key)
+      ? sessionDraftPersistence?.read(key) : newTaskDraftPersistence.read(key); },
+    readWorkspaceFileReferences: sessionDraftPersistence?.readWorkspaceFileReferences,
+    write(key: string | undefined, value: string, references?: readonly Pick<import('@maka/core/events').InlineReference, 'value' | 'start'>[]) {
       try {
-        newTaskDraftPersistence.write(key, value);
+        if (key && !isNewTaskDraft(key)) sessionDraftPersistence?.write(key, value, references);
+        else newTaskDraftPersistence.write(key, value);
         draftStorageFailed.current = false;
       } catch (error) {
         if (!draftStorageFailed.current) toast.error('Draft could not be saved', String(error));
         draftStorageFailed.current = true;
       }
     },
-  }), [toast]);
+  }), [toast, sessionDraftPersistence]);
   const mentions = useComposerMentionsContext();
   const activeSandboxBoundary =
     activeInteraction?.type === 'sandbox_boundary_request' ? activeInteraction : undefined;

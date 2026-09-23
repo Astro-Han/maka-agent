@@ -41,6 +41,8 @@ import {
 import type { DesktopSessionSummaryInput } from '../../shared/desktop-session-projection.js';
 import type { DesktopTranscriptReplicaSnapshot } from '../desktop-transcript-replica.js';
 import { createAttachmentApprovalRegistry } from '../attachment-approval.js';
+import type { DesktopComposerDraft } from '../../shared/session-local-contract.js';
+import { SessionComposerDrafts } from '../../renderer/session-composer-drafts.js';
 
 const accepted: TurnMessageSubmitResult = {
   disposition: 'turn_started',
@@ -169,6 +171,122 @@ test('local IDs bind content, retries are idempotent, and admission stays bounde
     store.enqueue('authority-1', intent(`message-${index + 1}`));
   assert.throws(() => store.enqueue('authority-1', intent('overflow')), /storage is full/);
   assert.equal(store.list('authority-1').length, 256);
+});
+
+test('complete drafts survive restart and transfer once even after a lost reply and outbox retirement', async (t) => {
+  const db = await database(t);
+  const snapshot: DesktopComposerDraft = {
+    text: 'edited input',
+    attachments: [{ id: 'file-1', kind: 'file', name: 'note.txt', mimeType: 'text/plain', bytes: 14 }],
+    quotes: [{ text: 'original evidence' }],
+    inputSelections: { skills: ['review'] },
+    turnOrchestration: { mode: 'default', source: 'host_api' },
+    revision: { sourceSessionId: 'source', sourceTurnId: 'turn', copyId: 'copy', phase: 'ready' },
+  };
+  const saved = db.store.saveDraft('authority-1', 'session-1', 0, snapshot, [{ id: 'file-1', ...intent().staged[0]! }]);
+  db.reopen();
+  assert.deepEqual(db.store.draft('authority-1', 'session-1'), saved);
+  assert.deepEqual(db.store.list('authority-1'), [], 'recovery never sends a draft');
+  assert.equal(Buffer.from(db.store.draftAttachment('authority-1', 'session-1', 'file-1')!.content).toString(), 'original bytes');
+  const command = { ...intent().command, content: { text: snapshot.text, quotes: [...snapshot.quotes!] }, inputSelections: snapshot.inputSelections };
+  const submitted = db.store.submitDraft('authority-1', saved.version, command);
+  assert.equal(submitted.record?.state, 'saved');
+  assert.equal(db.store.draftAttachment('authority-1', 'session-1', 'file-1'), undefined);
+  assert.equal(Buffer.from(db.store.stagedAttachments('authority-1', 'message-1')[0]!.content).toString(), 'original bytes');
+  // The submit reply is lost, then its outbox record is observed and retired.
+  db.reopen();
+  const acceptedRecord = db.store.get('authority-1', 'message-1')!;
+  db.store.update({ ...acceptedRecord, state: 'accepted', intent: { ...acceptedRecord.intent, originHostEpoch: 'epoch' }, result: accepted });
+  db.store.retireObservedMessages('authority-1', {
+    sessionId: 'session-1', generation: 'generation', hostEpoch: 'epoch', durableThrough: 1,
+    durable: [{ sequence: 1, message: { type: 'user', id: 'message-1', turnId: 'turn-1', ts: 1, text: snapshot.text } }],
+    hasOlder: false, beginsAtTurnBoundary: true,
+  });
+  db.reopen();
+  assert.equal(db.store.get('authority-1', 'message-1'), undefined);
+  assert.deepEqual(db.store.submitDraft('authority-1', saved.version, command), { messageId: 'message-1', record: undefined });
+  assert.deepEqual(db.store.list('authority-1'), []);
+  assert.throws(() => db.store.submitDraft('authority-1', saved.version, { ...command, content: { text: 'different' } }), /different draft submission/);
+  assert.throws(() => db.store.saveDraft('authority-1', 'session-1', saved.version, snapshot), /draft changed/);
+  assert.throws(() => db.store.saveDraft('authority-1', 'session-1', saved.version, null), /draft changed/);
+  assert.throws(() => db.store.submitDraft('authority-1', saved.version, { ...command, messageId: 'different' }), /already submitted/);
+  const next = db.store.saveDraft('authority-1', 'session-1', saved.version + 1, { text: 'new work', attachments: [] });
+  assert.equal(next.snapshot?.text, 'new work');
+  db.store.purge('authority-1');
+  assert.deepEqual(db.store.draft('authority-1', 'session-1'), { authority: 'authority-1', version: 0, snapshot: null });
+});
+
+test('draft saves and submission roll back completely on attachment or outbox failure', async (t) => {
+  const { store } = await database(t);
+  const snapshot: DesktopComposerDraft = {
+    text: 'keep me', attachments: [{ id: 'file-1', kind: 'file', name: 'note.txt', mimeType: 'text/plain', bytes: 14 }],
+  };
+  const saved = store.saveDraft('authority-1', 'session-1', 0, snapshot, [{ id: 'file-1', ...intent().staged[0]! }]);
+  assert.throws(() => store.saveDraft('authority-1', 'session-1', saved.version, { ...snapshot, text: 'bad update' }, [
+    { id: 'file-1', ...intent().staged[0]!, base64: Buffer.from('modified bytes').toString('base64') },
+  ]), /different bytes/);
+  assert.deepEqual(store.draft('authority-1', 'session-1'), saved);
+  assert.equal(Buffer.from(store.draftAttachment('authority-1', 'session-1', 'file-1')!.content).toString(), 'original bytes');
+  for (let index = 0; index < 256; index += 1) store.enqueue('authority-1', intent(`full-${index}`));
+  assert.throws(() => store.submitDraft('authority-1', saved.version, intent().command), /storage is full/);
+  assert.deepEqual(store.draft('authority-1', 'session-1'), saved);
+  assert.ok(store.draftAttachment('authority-1', 'session-1', 'file-1'));
+  const cleared = store.saveDraft('authority-1', 'session-1', saved.version, { text: '', attachments: [] });
+  assert.equal(store.draftAttachment('authority-1', 'session-1', 'file-1'), undefined);
+  assert.throws(() => store.saveDraft('authority-1', 'session-1', saved.version, snapshot), /draft changed/);
+  assert.deepEqual(store.draft('authority-1', 'session-1'), cleared);
+});
+
+test('the editor recovers a lost submit reply without consuming newer typing or quoted context', async (t) => {
+  const db = await database(t);
+  let authority = 'authority';
+  const saving = deferred<void>();
+  const release = deferred<void>();
+  let blockSave = true;
+  const bridge = {
+    async readDraft(sessionId: string) { return db.store.draft(authority, sessionId); },
+    async readDraftFile() { throw new Error('Unexpected file read'); },
+    async saveDraft(sessionId: string, version: number, snapshot: DesktopComposerDraft | null, _uploads: unknown, expectedAuthority: string) {
+      if (blockSave) { blockSave = false; saving.resolve(); await release.promise; }
+      assert.equal(expectedAuthority, authority);
+      return db.store.saveDraft(authority, sessionId, version, snapshot);
+    },
+  };
+  const errors: unknown[] = [];
+  const drafts = new SessionComposerDrafts(bridge, (error) => errors.push(error));
+  const original = { text: 'original quotation' };
+  const newer = { text: 'a quotation added while sending' };
+  const newest = { text: 'another quotation before the lost reply' };
+  await drafts.load('session-1');
+  drafts.update('session-1', { text: 'first message', quotes: [original] });
+  const submission = drafts.submit('session-1', async ({ messageId, draftVersion }) => {
+    assert.deepEqual(db.store.draft('authority', 'session-1').snapshot?.quotes, [original], 'the click freezes input before awaiting autosave');
+    db.store.submitDraft('authority', draftVersion, {
+      sessionId: 'session-1', messageId, placement: 'current_turn', content: { text: 'first message', quotes: [original] },
+    });
+    drafts.update('session-1', { text: 'next message', quotes: [original, newer, newest] });
+    throw new Error('reply lost after committing');
+  });
+  await saving.promise;
+  drafts.update('session-1', { text: 'next message', quotes: [original, newer] });
+  release.resolve();
+  assert.equal(await submission, true);
+  await drafts.flushAll();
+  db.reopen();
+  const recovered = new SessionComposerDrafts(bridge, (error) => errors.push(error));
+  const snapshot = await recovered.load('session-1');
+  assert.equal(snapshot.text, 'next message');
+  assert.deepEqual(snapshot.quotes, [newer, newest]);
+  assert.equal(db.store.list('authority').length, 1);
+  assert.equal(errors.length, 1);
+  assert.deepEqual(await recovered.seed('session-1', { text: 'original Turn', attachments: [] }), snapshot,
+    'a retried revision creation cannot overwrite a saved or consumed editor');
+  authority = 'replacement-credential';
+  assert.deepEqual(await recovered.refresh('session-1'), { text: '', attachments: [] });
+  recovered.write('session-1', 'new authority work');
+  await recovered.flushAll();
+  assert.equal(db.store.draft('authority', 'session-1').snapshot?.text, 'next message');
+  assert.equal(db.store.draft(authority, 'session-1').snapshot?.text, 'new authority work');
 });
 
 test('a credential or profile incarnation change cannot read the old local history', async (t) => {

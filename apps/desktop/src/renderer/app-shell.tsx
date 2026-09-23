@@ -19,6 +19,7 @@
 
 import { WorkHubControlOverlay, WorkHubDock, WorkHubMainNavigation, WorkHubReturnButton } from './features/workhub';
 import { RuntimeHostAvailabilityNotice, useRuntimeHostAvailability } from './runtime-host-availability.js';
+import { SessionComposerDrafts, type DraftSubmissionIdentity } from './session-composer-drafts.js';
 import { ExecutorTaskPicker, type ExecutorTarget } from './executor-task-picker.js';
 import {
   useCallback,
@@ -161,7 +162,6 @@ import { createAppShellChatActions } from './app-shell-chat-actions';
 import { createAppShellTurnActions } from './app-shell-turn-actions';
 import {
   abandonTurnRevisionCopyAttempt,
-  completeTurnRevisionCopyAttempt,
   createAppShellRevisionActions,
   type TurnRevisionDraft,
 } from './app-shell-revision-actions';
@@ -380,8 +380,7 @@ function AppShellContent({
     directoryComposerProps,
     pickAttachments,
     attachFilePaths,
-    restoreAttachments,
-    restoreDirectories,
+    hydrateContext,
     removeAttachment,
     clearSubmittedContext,
     imageNoticeLifecycle,
@@ -400,7 +399,7 @@ function AppShellContent({
     addQuote,
     removeQuote,
     clearQuotes,
-    restoreQuotes,
+    hydrateQuotes,
   } = useAppShellComposerQuotes({ draftKey: attachmentDraftKey });
   const pendingComposerContextRef = useRef(false);
   useLayoutEffect(() => {
@@ -598,6 +597,38 @@ function AppShellContent({
   // `app:info` round-trip completes on mount.
   const persistedComposerDefaults = loadComposerDefaults();
   const composerRef = useRef<ComposerHandle>(null);
+  const [composerDrafts] = useState(() => new SessionComposerDrafts(window.maka.sessionLocal,
+    (error) => toastApi.error('Draft could not be saved', String(error))));
+  const [loadedDraftId, setLoadedDraftId] = useState<string>();
+  const [draftAuthorityRevision, setDraftAuthorityRevision] = useState(0);
+  const draftReady = !activeId || loadedDraftId === activeId;
+  const sessionDraftPersistence = useMemo(() => ({
+    read: (key: string | undefined) => key === activeId && !draftReady ? '' : composerDrafts.read(key),
+    readWorkspaceFileReferences: (key: string | undefined) => key === activeId && !draftReady
+      ? [] : key ? composerDrafts.snapshot(key)?.workspaceFileReferences : undefined,
+    write: (key: string | undefined, value: string, references?: readonly Pick<InlineReference, 'value' | 'start'>[]) => {
+      if (key !== activeId || draftReady) composerDrafts.write(key, value, references);
+    },
+  }), [composerDrafts, activeId, draftReady]);
+  const draftProfileEpochs = useRef(new Map<string, string>());
+  useEffect(() => window.maka.runtimeHostProfiles.subscribeChanges((event) => {
+    if (event.profileId !== activeCatalogSession?.profileId) return;
+    const previous = draftProfileEpochs.current.get(event.profileId);
+    draftProfileEpochs.current.set(event.profileId, event.epoch);
+    if (!event.removed && previous === event.epoch && loadedDraftId) return;
+    setLoadedDraftId(undefined);
+    setDraftAuthorityRevision((revision) => revision + 1);
+    const id = activeIdRef.current;
+    if (id) {
+      composerRef.current?.hydrateDraft(id, '');
+      hydrateContext(id, directoryHostId, [], []);
+      hydrateQuotes(id, []);
+    }
+  }), [activeCatalogSession?.profileId, directoryHostId, loadedDraftId]);
+  useEffect(() => window.maka.sessionLocal.onFlushDrafts(async () => {
+    try { await composerDrafts.flushAll(); }
+    catch (error) { toastApi.error('Draft could not be saved', String(error)); throw error; }
+  }), [composerDrafts, toastApi]);
   const openComposerModelPicker = useCallback(() => {
     composerRef.current?.openModelPicker();
   }, []);
@@ -609,17 +640,46 @@ function AppShellContent({
     setRevisionDraft(draft);
   }, []);
   useEffect(() => {
+    if (!activeId || newTaskSendPending || loadedDraftId === activeId) return;
+    let current = true;
+    const sessionId = activeId;
+    void (async () => {
+      const snapshot = await composerDrafts.refresh(sessionId);
+      const attachments = await composerDrafts.attachments(sessionId);
+      if (!current) return;
+      hydrateContext(sessionId, directoryHostId, attachments, snapshot.directoryReferences ?? []);
+      hydrateQuotes(sessionId, snapshot.quotes ?? []);
+      retractedWorkspaceReferencesRef.current[sessionId] = (snapshot.workspaceFileReferences ?? []).map((item) => ({ ...item, kind: 'workspace_file', label: item.value }));
+      composerRef.current?.hydrateDraft(sessionId, snapshot.text);
+      if (snapshot.revision) commitRevisionDraft({
+        sourceSessionId: snapshot.revision.sourceSessionId, sourceTurnId: snapshot.revision.sourceTurnId,
+        copyId: snapshot.revision.copyId, copyPhase: snapshot.revision.phase === 'abandoning' ? 'abandoning' : 'started',
+        draftSessionId: sessionId, previousComposerText: snapshot.text,
+        inputSelections: snapshot.inputSelections, turnOrchestration: snapshot.turnOrchestration,
+      });
+      else if (revisionDraftRef.current?.draftSessionId === sessionId) commitRevisionDraft(null);
+      setLoadedDraftId(sessionId);
+    })().catch((error) => { if (current) toastApi.error('Draft could not be restored', String(error)); });
+    return () => { current = false; };
+  }, [activeId, loadedDraftId, directoryHostId, composerDrafts, commitRevisionDraft, newTaskSendPending, draftAuthorityRevision]);
+  useLayoutEffect(() => {
+    if (!activeId || loadedDraftId !== activeId) return;
+    composerDrafts.stage(activeId, pendingAttachments, {
+      directoryReferences: directoryOptions.directoryReferences, quotes: pendingQuotes,
+    });
+  }, [activeId, loadedDraftId, pendingAttachments, directoryOptions.directoryReferences, pendingQuotes, composerDrafts]);
+  useEffect(() => {
     const draft = revisionDraftRef.current;
     if (!draft) return;
     return Conversation.observeRevisionDraftRetirement(sessionCatalogController, draft, () => {
       if (revisionDraftRef.current !== draft) return;
       if (draft.sourceSessionId !== draft.draftSessionId)
         composerRef.current?.clearDraft(draft.draftSessionId);
-      if (draft.copyPhase === 'reserved') completeTurnRevisionCopyAttempt(draft);
-      else void abandonTurnRevisionCopyAttempt(draft);
+      composerDrafts.forget(draft.draftSessionId);
+      void abandonTurnRevisionCopyAttempt(draft);
       commitRevisionDraft(null);
     });
-  }, [revisionDraft, sessionCatalogController, commitRevisionDraft]);
+  }, [revisionDraft, sessionCatalogController, commitRevisionDraft, composerDrafts]);
 
   const {
     resumePendingSessionId,
@@ -1298,8 +1358,8 @@ function AppShellContent({
   });
 
   const {
-    send,
-    enqueueMessage,
+    send: sendMessage,
+    enqueueMessage: enqueueSessionMessage,
     respondToSandboxBoundary,
     respondToUserQuestion,
     respondToUserForm,
@@ -1364,20 +1424,46 @@ function AppShellContent({
     captureSelection,
     composerRef,
     hasPendingContext: () => pendingComposerContextRef.current,
-    restoreContext: (session, content) => {
-      restoreAttachments(session.id, content.attachments ?? []);
-      restoreDirectories(session.id,
-        session.profileKind === 'local' ? session.runtimeHostId : undefined,
-        content.directoryReferences ?? []);
-      restoreQuotes(session.id, content.quotes ?? []);
-      retractedWorkspaceReferencesRef.current[session.id] = content.inlineReferences ?? [];
-    },
+    drafts: composerDrafts,
     openSessionInChat,
     refreshSessions,
     commitRevisionDraft,
     revisionDraftRef,
     toastApi,
   });
+
+  async function withComposerDraft(
+    sessionId: string,
+    pending: Parameters<typeof sendMessage>[1],
+    options: NonNullable<Parameters<typeof sendMessage>[2]>,
+    submit: (identity: DraftSubmissionIdentity) => Promise<boolean>,
+  ): Promise<boolean> {
+    if (loadedDraftId !== sessionId) return false;
+    try {
+      composerDrafts.write(sessionId, composerRef.current?.getDraft(sessionId) ?? '');
+      composerDrafts.stage(sessionId, pending ?? [], {
+        quotes: options.quotes, directoryReferences: options.directoryReferences,
+      });
+      return await composerDrafts.submit(sessionId, submit);
+    } catch (error) {
+      toastApi.error('Draft could not be submitted', String(error));
+      return false;
+    }
+  }
+
+  async function send(...[text, pending, options = {}]: Parameters<typeof sendMessage>): Promise<boolean> {
+    const sessionId = activeIdRef.current;
+    if (!sessionId) return sendMessage(text, pending, options);
+    return withComposerDraft(sessionId, pending, options,
+      (identity) => sendMessage(text, pending, { ...options, ...identity }));
+  }
+
+  async function enqueueMessage(...[sessionId, text, placement, pending, options = {}]: Parameters<typeof enqueueSessionMessage>): Promise<boolean> {
+    const revision = revisionDraftRef.current?.draftSessionId === sessionId ? revisionDraftRef.current : null;
+    const context = { ...options, ...(revision ? { inputSelections: revision.inputSelections, turnOrchestration: revision.turnOrchestration } : {}) };
+    return withComposerDraft(sessionId, pending, context,
+      (identity) => enqueueSessionMessage(sessionId, text, placement, pending, { ...context, ...identity }));
+  }
 
   async function taskSubmissionReadyAtSend(): Promise<boolean> {
     const sessionId = activeIdRef.current;
@@ -1435,7 +1521,7 @@ function AppShellContent({
         });
       if (!sent) return false;
       clearSubmittedContext(submittableAttachments);
-      clearQuotes();
+      clearQuotes(pendingQuotes);
       return true;
     } catch (error) {
       if (activeIdRef.current === sessionId) {
@@ -1471,7 +1557,14 @@ function AppShellContent({
     const followUpAtSubmit = slashCommand ? undefined : metadata?.followUpMode;
     if ((sessionId && followUpAtSubmit) || revisionSend) {
       const selectionIsCurrent = captureSelection();
+      const draftAtClick = sessionId ? composerDrafts.snapshot(sessionId) : undefined;
+      const textAtClick = sessionId ? composerRef.current?.getDraft(sessionId) : undefined;
       if (!(await taskSubmissionReadyAtSend()) || !selectionIsCurrent()) return false;
+      if (sessionId && (composerDrafts.snapshot(sessionId) !== draftAtClick ||
+        composerRef.current?.getDraft(sessionId) !== textAtClick)) {
+        toastApi.info(uiLocale === 'zh-CN' ? '草稿已更改，请再次发送' : 'Your draft changed; send again when ready');
+        return false;
+      }
     }
     if (sessionId && followUpAtSubmit) {
       const queued = await enqueueFollowUp(sessionId, text, followUpAtSubmit, {
@@ -1581,7 +1674,7 @@ function AppShellContent({
       });
       if (ok !== false) {
         clearSubmittedContext(pending);
-        if (quotes) clearQuotes();
+        if (quotes) clearQuotes(quotes);
         settleNewTaskImageNoticeOwner(sessionId);
       }
       return ok;
@@ -1630,7 +1723,7 @@ function AppShellContent({
       });
       if (ok !== false) {
         clearSubmittedContext(pending);
-        if (quotes) clearQuotes();
+        if (quotes) clearQuotes(quotes);
         settleNewTaskImageNoticeOwner(sessionId);
       }
       return ok;
@@ -1641,7 +1734,6 @@ function AppShellContent({
       : undefined;
     const quotes = pendingQuotes.length ? pendingQuotes : undefined;
     const ok = await send(text, pending, {
-      waitForHostAdmission: revisionSend,
       ...(expectedRevisionDraft ? {
         inputSelections: expectedRevisionDraft.inputSelections,
         turnOrchestration: expectedRevisionDraft.turnOrchestration,
@@ -1655,7 +1747,7 @@ function AppShellContent({
     });
     if (ok !== false) {
       clearSubmittedContext(pending);
-      if (quotes) clearQuotes();
+      if (quotes) clearQuotes(quotes);
       settleNewTaskImageNoticeOwner(sessionId);
       if (sessionId) delete retractedWorkspaceReferencesRef.current[sessionId];
     }
@@ -2001,7 +2093,7 @@ function AppShellContent({
   }
 
   const canStageComposerContext =
-    activeId !== undefined || taskEntry.selectors.target !== undefined;
+    draftReady && (activeId !== undefined || taskEntry.selectors.target !== undefined);
   const contextPickEnabled = canStageComposerContext;
 
   const activeMessageLoadError = activeId ? messageLoadErrorBySession[activeId] : undefined;
@@ -2321,18 +2413,18 @@ function AppShellContent({
                     ) : null}
                     {!sharedSessionActive && sessionsSelected && !usesPluginExecutor ? <PlanExecutionPanel planMode={planMode} /> : null}
                     {sessionsSelected && contextPickEnabled && !sharedSessionActive ? <Conversation.SessionReferencePicker
-                      key={activeId ?? currentNewTaskDraftKey} currentSessionId={activeId}
+                      key={`references:${activeId ?? currentNewTaskDraftKey}`} currentSessionId={activeId}
                       hostId={activeId ? activeCatalogSession?.runtimeHostId : taskEntry.selectors.target?.hostId}
                       locale={uiLocale} disabled={newTaskSendPending || activeMessageSubmitting}
                       onAttach={addQuote}
                     /> : null}
                     {sessionsSelected && !activeId && taskEntry.selectors.target ? <ExecutorTaskPicker
-                      key={currentNewTaskDraftKey} target={{ kind: 'new', host: taskEntry.selectors.target }} locale={uiLocale}
+                      key={`executor:${currentNewTaskDraftKey}`} target={{ kind: 'new', host: taskEntry.selectors.target }} locale={uiLocale}
                       value={newTaskExecutor} disabled={newTaskSendPending}
                       onChange={(value) => value ? setNewTaskExecutor(value) : clearNewTaskExecutor()}
                     /> : null}
                     {sessionsSelected && activeId && !sharedSessionActive && activeSession?.backend === 'plugin-executor' ? <ExecutorTaskPicker
-                      key={activeId} target={{ kind: 'session', sessionId: activeId }} locale={uiLocale}
+                      key={`executor:${activeId}`} target={{ kind: 'session', sessionId: activeId }} locale={uiLocale}
                       value={activeSession.executorId ? { kind: 'executor', executorId: activeSession.executorId, settings: activeSession.executorSettings } : undefined}
                       disabled={activeMessageSubmitting || turnActive}
                       onChange={async (value) => {
@@ -2356,6 +2448,8 @@ function AppShellContent({
                           <ChatComposerRegion
                   workspacePicker={workspacePicker}
                   composerRef={composerRef}
+                  draftPersistence={sessionDraftPersistence}
+                  disabled={!draftReady}
                   active={sessionsSelected}
                   onboardingComposerHidden={
                     onboardingComposerHidden
@@ -2441,7 +2535,7 @@ function AppShellContent({
                   noModelHint={!modelSettingsOwnsComposerHost && composerProfileName
                     ? shellCopy.configureModelsOnHost(composerProfileName)
                     : undefined}
-                  sendBlocked={taskSubmissionHardBlocked}
+                  sendBlocked={taskSubmissionHardBlocked || !draftReady}
                   sandboxMode={activeSandboxMode}
                   approval={(!activeId || activeSession?.approvalPolicy) && activeBoundarySurface.localInteractionAvailable
                     ? {

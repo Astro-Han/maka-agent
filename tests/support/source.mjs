@@ -45,6 +45,7 @@ export async function withSourceBundle(entry, verify) {
       platform: 'node',
       format: 'esm',
       target: 'node22',
+      jsx: 'automatic',
       metafile: true,
       legalComments: 'eof',
       plugins: [currentSourcePlugin(temporary)],

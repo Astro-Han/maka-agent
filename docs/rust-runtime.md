@@ -54,6 +54,12 @@ Host does not exit the app: retry, switch Host, copy diagnostics, or quit. Draft
 is stored by Desktop, never in a send queue; an offline send is rejected and retains
 the draft. Startup reports `mainInteractiveMs` and `hostReadyMs` separately.
 
+Session drafts persist text, attachments, references and revision intent in Desktop's
+authority-scoped SQLite store. Version navigation includes unsent revisions. Restoring
+a draft never sends it; submission atomically moves the selected version into the local
+outbox, retaining later edits. Closing flushes drafts before Host shutdown; an unconfirmed
+save keeps the window open unless the user explicitly discards it.
+
 Finite CLI commands accept `--timeout-ms` (1–600000): status/logs default to 15 seconds,
 other operations to 180 seconds. Desktop recovery has one 45-second budget and at most
 five attempts; quit has one 8-second budget including cleanup. Substeps use the remaining

@@ -36,6 +36,7 @@ import { resolveSystemUiLocale } from "@maka/core/ui-locale";
 import { resolveStorageRoot } from "@maka/storage/root-authority";
 import { createSettingsStore } from "@maka/storage/settings-store";
 import { createAppQuitCoordinator } from "./app-quit-coordinator.js";
+import { flushWindowDrafts } from './main-window.js';
 import { bootContext } from "./boot-context.js";
 import { showBrowserMessageBox, type BrowserMessageBoxTheme } from "./browser-message-box.js";
 import { resolveBuildInfo } from "./build-info.js";
@@ -255,7 +256,10 @@ let windowFailurePresented = false;
 export const quitCoordinator = createAppQuitCoordinator({
   // Until the Runtime Host boot wires its quit hooks there is nothing to
   // retire — a quit in that gap proceeds straight to cleanup.
-  prepareToQuit: (signal) => bootContext.prepareToQuit?.(signal) ?? Promise.resolve("ready" as const),
+  prepareToQuit: async (signal) => {
+    await flushWindowDrafts(mainWindowController.browserWindow());
+    return bootContext.prepareToQuit?.(signal) ?? 'ready' as const;
+  },
   cleanup: () => bootContext.cleanup?.() ?? Promise.resolve(),
   focusOrCreateWindow: (signal) => {
     if (mainWindowController.hasOpenWindows()) mainWindowController.focus();

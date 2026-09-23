@@ -23,8 +23,10 @@ import { it, type TestContext } from 'node:test';
 import type { MessageContent } from '@maka/core/events';
 import type { SessionSourceMessage } from '@maka/runtime-host/protocol';
 import { createAppShellRevisionActions, type TurnRevisionDraft } from '../../renderer/app-shell-revision-actions.js';
+import { SessionComposerDrafts } from '../../renderer/session-composer-drafts.js';
+import type { DesktopComposerDraftRecord } from '../../shared/session-local-contract.js';
 
-function harness(t: TestContext, sources: SessionSourceMessage[]) {
+async function harness(t: TestContext, sources: SessionSourceMessage[]) {
   const sourceId: string = crypto.randomUUID();
   const activeIdRef = { current: sourceId };
   const revisionDraftRef: { current: TurnRevisionDraft | null } = { current: null };
@@ -32,6 +34,19 @@ function harness(t: TestContext, sources: SessionSourceMessage[]) {
   const restored: Array<{ id: string; content: MessageContent }> = [];
   const abandoned: string[] = [];
   const errors: string[] = [];
+  const records = new Map<string, DesktopComposerDraftRecord>();
+  const persistence = new SessionComposerDrafts({
+    async readDraft(id) { return records.get(id) ?? { authority: 'test', version: 0, snapshot: null }; },
+    async readDraftFile() { throw new Error('Unexpected file read'); },
+    async saveDraft(id, version, snapshot) {
+      assert.equal(records.get(id)?.version ?? 0, version);
+      const record = { authority: 'test', version: version + 1, snapshot: structuredClone(snapshot) };
+      records.set(id, record);
+      return record;
+    },
+  }, (error) => { errors.push(String(error)); });
+  await persistence.load(sourceId);
+  persistence.write(sourceId, drafts.get(sourceId)!);
   let gate: Promise<void> = Promise.resolve();
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { maka: { sessions: {
@@ -49,7 +64,8 @@ function harness(t: TestContext, sources: SessionSourceMessage[]) {
     },
     async abandonSessionCopy(_source: string, id: string) { abandoned.push(id); },
   } } } });
-  t.after(() => {
+  t.after(async () => {
+    await persistence.flushAll();
     if (previous) Object.defineProperty(globalThis, 'window', previous);
     else Reflect.deleteProperty(globalThis, 'window');
   });
@@ -63,12 +79,24 @@ function harness(t: TestContext, sources: SessionSourceMessage[]) {
         appendText: (text) => { drafts.set(activeIdRef.current, (drafts.get(activeIdRef.current) ?? '') + text); },
         getDraft: (id) => drafts.get(id) ?? '',
         setDraft: (id, text) => { drafts.set(id, text); },
+        hydrateDraft: (id, text) => { drafts.set(id, text); },
         clearDraft: (id) => { drafts.delete(id); },
         focus() {}, openModelPicker() {},
       } },
       hasPendingContext: () => false,
-      restoreContext: (session, content) => { restored.push({ id: session.id, content }); },
-      openSessionInChat: (id) => { activeIdRef.current = id; },
+      drafts: persistence,
+      openSessionInChat: (id) => {
+        activeIdRef.current = id;
+        const snapshot = persistence.snapshot(id);
+        if (!snapshot) return;
+        drafts.set(id, snapshot.text);
+        restored.push({ id, content: { text: snapshot.text,
+          attachments: snapshot.attachments.flatMap((item) => item.kind === 'retained' ? [item.attachment] : []),
+          quotes: snapshot.quotes ? [...snapshot.quotes] : undefined,
+          directoryReferences: snapshot.directoryReferences ? [...snapshot.directoryReferences] : undefined,
+          inlineReferences: snapshot.workspaceFileReferences?.map((item) => ({ ...item, kind: 'workspace_file', label: item.value })),
+        } });
+      },
       refreshSessions: async () => [],
       commitRevisionDraft: (draft) => { revisionDraftRef.current = draft; },
       toastApi: { info() {}, error(_title, description) { errors.push(description ?? 'error'); } },
@@ -95,7 +123,7 @@ it('edits the complete original batch with target-owned context and keeps the so
       inlineReferences: [{ kind: 'workspace_file', value: '@file.ts', label: 'file.ts', start: 10 }] },
     inputSelections: { 'custom-plugin': ['second'] },
   }];
-  const h = harness(t, sources);
+  const h = await harness(t, sources);
   await h.actions().beginEditUserMessage('turn');
   assert.deepEqual(h.errors, []);
   const draft = h.revisionDraftRef.current;
@@ -129,7 +157,7 @@ it('edits the complete original batch with target-owned context and keeps the so
 });
 
 it('does not overwrite new typing or restore context after cancellation during creation', async (t) => {
-  const h = harness(t, [{ messageId: 'source', content: { text: 'original' } }]);
+  const h = await harness(t, [{ messageId: 'source', content: { text: 'original' } }]);
   let release = h.holdCreation();
   const preparation = h.actions().beginEditUserMessage('turn');
   h.drafts.set(h.sourceId, 'new typing during copy');

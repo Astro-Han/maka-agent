@@ -269,6 +269,7 @@ import {
 import { projectDesktopSharedSessionSummary } from '../shared/shared-session-catalog-projection.js';
 
 let activeRuntimeHost: DesktopTargetScope | undefined;
+const draftFlushHandlers = new Set<() => Promise<void>>();
 let activeRuntimeHostGeneration = 0;
 let newTaskCatalogGeneration = 0;
 type RuntimeHostScopeKey = string;
@@ -779,6 +780,20 @@ async function invokeSessionInput<T, I extends { readonly sessionId: string }>(
     { ...input, sessionId: session.sessionId },
     ...args,
   ) as Promise<T>;
+}
+
+function projectComposerDraft(
+  scope: DesktopTargetScope,
+  record: import('../shared/session-local-contract.js').DesktopComposerDraftRecord,
+): import('../shared/session-local-contract.js').DesktopComposerDraftRecord {
+  const snapshot = record.snapshot;
+  if (!snapshot) return record;
+  return { ...record, snapshot: { ...snapshot,
+    attachments: snapshot.attachments.map((item) => item.kind === 'retained'
+      ? { ...item, attachment: projectDesktopAttachmentRefs(scope, [item.attachment])[0]! } : item),
+    ...(snapshot.revision ? { revision: { ...snapshot.revision,
+      sourceSessionId: recordRuntimeHostSessionScope(scope, snapshot.revision.sourceSessionId) } } : {}),
+  } };
 }
 
 function projectSessionSummary(
@@ -1961,6 +1976,41 @@ const makaBridge = {
     },
   },
   sessionLocal: {
+    async flushDrafts() { await Promise.all([...draftFlushHandlers].map((handler) => handler())); },
+    onFlushDrafts(handler) {
+      draftFlushHandlers.add(handler);
+      return () => { draftFlushHandlers.delete(handler); };
+    },
+    async readDraft(sessionId) {
+      const session = await runtimeHostSessionRef(sessionId);
+      const record = await invokeWhenReady('session-local:draft', session.scope, session.sessionId) as import('../shared/session-local-contract.js').DesktopComposerDraftRecord;
+      return projectComposerDraft(session.scope, record);
+    },
+    async readDraftFile(sessionId, id, authority) {
+      const session = await runtimeHostSessionRef(sessionId);
+      return invokeWhenReady('session-local:draft-file', session.scope, session.sessionId, id, authority);
+    },
+    async saveDraft(sessionId, expectedVersion, snapshot, uploads, authority) {
+      const session = await runtimeHostSessionRef(sessionId);
+      let revision = snapshot?.revision;
+      if (revision) {
+        const source = await runtimeHostSessionRef(revision.sourceSessionId);
+        if (source.scope.hostId !== session.scope.hostId || source.scope.targetEpoch !== session.scope.targetEpoch)
+          throw new Error('Revision source belongs to another Host');
+        revision = { ...revision, sourceSessionId: source.sessionId };
+      }
+      const items = await encodeIngestItems(uploads.map((file) => file.item));
+      const record = await invokeWhenReady('session-local:save-draft', session.scope, session.sessionId, {
+        expectedVersion, authority,
+        snapshot: snapshot === null ? null : {
+          ...snapshot, ...(revision ? { revision } : {}),
+          attachments: snapshot.attachments.map((item) => item.kind === 'retained'
+            ? { ...item, attachment: hostAttachmentRefs(session, [item.attachment])[0]! } : item),
+        },
+        uploads: uploads.map((file, index) => ({ id: file.id, item: items[index]! })),
+      }) as import('../shared/session-local-contract.js').DesktopComposerDraftRecord;
+      return projectComposerDraft(session.scope, record);
+    },
     async listMessages(sessionId) {
       const session = await runtimeHostSessionRef(sessionId);
       const records = await invokeWhenReady('session-local:messages', session.scope, session.sessionId) as import('../shared/session-local-contract.js').DesktopLocalMessage[];
@@ -2070,7 +2120,7 @@ const makaBridge = {
       }
       let attachmentItems: Awaited<ReturnType<typeof encodeIngestItems>> | undefined;
       try {
-        attachmentItems = command.attachmentItems
+        attachmentItems = command.attachmentItems && options?.draftVersion === undefined
           ? await encodeIngestItems(command.attachmentItems)
           : undefined;
       } catch (error) {
@@ -2080,7 +2130,7 @@ const makaBridge = {
         throw error;
       }
       const result = (await invokeWhenReady(
-        options?.waitForHostAdmission ? 'sessions:submitMessage' : 'session-local:submit',
+        options?.waitForHostAdmission && options.draftVersion === undefined ? 'sessions:submitMessage' : 'session-local:submit',
         session.scope,
         session.sessionId,
         placement,
@@ -2089,6 +2139,7 @@ const makaBridge = {
           ...(command.retainedAttachments ? { retainedAttachments: hostAttachmentRefs(session, command.retainedAttachments) } : {}),
           ...(attachmentItems ? { attachmentItems } : {}),
         },
+        { draftVersion: options?.draftVersion, draftAuthority: options?.draftAuthority },
       )) as Awaited<ReturnType<MakaBridge['sessions']['submitMessage']>>;
       return result.ok
         ? { ...result, attachments: projectDesktopAttachmentRefs(session.scope, result.attachments) }

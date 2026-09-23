@@ -56,7 +56,7 @@ describe('busy-raced send settlement', () => {
         ...createActionsDeps(), activeIdRef: { current: 'revision' },
       });
       assert.equal(await actions.send('edited', undefined,
-        { inputSelections, waitForHostAdmission: true }), true);
+        { inputSelections }), true);
       assert.equal(submitted, true);
     } finally { restoreWindow(); }
   });

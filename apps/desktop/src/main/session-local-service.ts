@@ -57,6 +57,7 @@ import {
   type LocalOutboxRecord,
 } from './session-local-store.js';
 import type { DesktopTranscriptReplicaSnapshot } from './desktop-transcript-replica.js';
+import { composerDraftSaveSchema, composerDraftVersion } from '../shared/composer-draft.js';
 
 export interface DesktopSessionLocalTarget {
   readonly partition: string;
@@ -554,6 +555,59 @@ export function registerDesktopSessionLocalIpc(deps: {
   changed(scope: DesktopTargetScope, sessionId: string): void;
 }): void {
   const { ipcMain, service } = deps;
+  ipcMain.handle('session-local:draft', (_event, scope: unknown, sessionId: string) => {
+    const target = service.target(scope);
+    return service.store.draft(target.partition, requiredId(sessionId));
+  });
+  ipcMain.handle('session-local:draft-file', (_event, scope: unknown, sessionId: string, id: string, authority: unknown) => {
+    const target = service.target(scope);
+    if (authority !== target.partition) throw new Error('Draft belongs to a retired Host authority');
+    const file = service.store.draftAttachment(target.partition, requiredId(sessionId), requiredId(id));
+    if (!file) throw new Error('Draft attachment no longer exists');
+    return { name: file.name, mimeType: file.mimeType, base64: Buffer.from(file.content).toString('base64') };
+  });
+  ipcMain.handle('session-local:save-draft', async (event, scope: unknown, sessionId: string, value: unknown) => {
+    const target = service.target(scope);
+    requiredId(sessionId);
+    if (Buffer.byteLength(JSON.stringify(value) ?? '') > 2 * MAX_LOCAL_MESSAGE_BYTES)
+      throw new Error('Draft exceeds local storage limits');
+    const input = composerDraftSaveSchema.parse(value);
+    if (input.authority !== target.partition) throw new Error('Draft belongs to a retired Host authority');
+    if (input.snapshot?.directoryReferences?.some((ref) => ref.hostId !== target.scope.hostId))
+      throw new Error('Directory reference belongs to another Host');
+    for (const item of input.snapshot?.attachments ?? []) {
+      if (item.kind === 'retained' && (item.attachment.ref.kind !== 'session_file' || item.attachment.ref.sessionId !== sessionId))
+        throw new Error('Retained attachment belongs to another Session');
+    }
+    const uploads = input.uploads.filter((file) => !service.store.draftAttachment(target.partition, sessionId, file.id));
+    if (uploads.some((upload) => !input.snapshot?.attachments.some((item) => item.kind === 'file' && item.id === upload.id)))
+      throw new Error('Draft contains an unreferenced attachment upload');
+    const prepared = await prepareIngestItems({
+      senderId: event.sender.id, items: uploads.map((file) => file.item), approvals: deps.approvals,
+      stat, maxAttachments: MAX_ATTACHMENT_COUNT, maxTotalBytes: MAX_LOCAL_MESSAGE_BYTES,
+    });
+    const files = await resolveAttachmentRefs({
+      files: prepared.files, maxTotalBytes: MAX_LOCAL_MESSAGE_BYTES, resizeImage: deps.resizeImage,
+      snapshot: async ({ name, mimeType, content }) => ({ name, mimeType, base64: Buffer.from(content).toString('base64') }),
+    });
+    const staged = files.map((file, index) => ({ ...file, id: uploads[index]!.id }));
+    const current = service.target(scope);
+    if (current.partition !== target.partition) throw new Error('Host authority changed while saving the draft');
+    // File identity binds the approved byte snapshot, not its expiring approval
+    // or the Renderer MIME/size guess. Subsequent saves reuse that same snapshot.
+    const snapshot = input.snapshot === null ? null : {
+      ...input.snapshot,
+      attachments: input.snapshot.attachments.map((item) => {
+        if (item.kind === 'retained') return item;
+        const uploaded = staged.find((file) => file.id === item.id);
+        const stored = service.store.draftAttachment(target.partition, sessionId, item.id);
+        if (!uploaded && !stored) throw new Error('Draft attachment snapshot is missing');
+        return { ...item, name: (uploaded ?? stored)!.name, mimeType: (uploaded ?? stored)!.mimeType,
+          bytes: uploaded ? Buffer.byteLength(uploaded.base64, 'base64') : stored!.content.byteLength };
+      }),
+    };
+    return prepared.commit(() => service.store.saveDraft(target.partition, sessionId, input.expectedVersion, snapshot, staged));
+  });
   ipcMain.handle('session-local:catalog', () => service.catalog());
   ipcMain.handle('session-local:messages', (_event, scope: unknown, sessionId: string) =>
     service.listMessages(service.target(scope), requiredId(sessionId)),
@@ -640,8 +694,10 @@ export function registerDesktopSessionLocalIpc(deps: {
   });
   ipcMain.handle(
     'session-local:submit',
-    async (event, scope: unknown, sessionId: string, placement: unknown, value: unknown) => {
+    async (event, scope: unknown, sessionId: string, placement: unknown, value: unknown, options?: { draftVersion?: unknown; draftAuthority?: unknown }) => {
       const target = service.target(scope);
+      if (options?.draftVersion !== undefined && options.draftAuthority !== target.partition)
+        throw new Error('Draft belongs to a retired Host authority');
       if (!target.client || !target.submit) throw new Error('Host is not ready; keep the draft and send again after connecting');
       requiredId(sessionId);
       if (placement !== 'current_turn' && placement !== 'next_turn')
@@ -664,12 +720,13 @@ export function registerDesktopSessionLocalIpc(deps: {
         mimeType,
         base64: Buffer.from(content).toString('base64'),
       });
+      const draftVersion = options?.draftVersion === undefined ? undefined : composerDraftVersion.parse(options.draftVersion);
       let prepared: Awaited<ReturnType<typeof prepareIngestItems>>;
       let staged: Awaited<ReturnType<typeof resolveAttachmentRefs<Awaited<ReturnType<typeof snapshot>>>>>;
       try {
         prepared = await prepareIngestItems({
           senderId: event.sender.id,
-          items: command.attachmentItems ?? [],
+          items: draftVersion === undefined ? command.attachmentItems ?? [] : [],
           approvals: deps.approvals,
           stat,
           maxAttachments: MAX_ATTACHMENT_COUNT - retained.length,
@@ -700,10 +757,7 @@ export function registerDesktopSessionLocalIpc(deps: {
       try {
         // The approval can be consumed while the reads above were in flight, so
         // admission is part of the same conversion to the envelope.
-        prepared.commit(() =>
-          service.store.enqueue(target.partition, {
-            staged,
-            command: {
+        const message: Omit<TurnMessageSubmitInput, 'originHostEpoch'> = {
               sessionId,
               messageId,
               placement,
@@ -717,9 +771,10 @@ export function registerDesktopSessionLocalIpc(deps: {
               },
               ...(command.inputSelections ? { inputSelections: command.inputSelections } : {}),
               ...(command.turnOrchestration ? { turnOrchestration: command.turnOrchestration } : {}),
-            },
-          }),
-        );
+        };
+        prepared.commit(() => draftVersion === undefined
+          ? service.store.enqueue(target.partition, { staged, command: message })
+          : service.store.submitDraft(target.partition, draftVersion, message));
       } catch (error) {
         if (error instanceof AttachmentIngestBlockedError) {
           return { ok: false as const, reason: 'attachment_blocked' as const, code: error.code };

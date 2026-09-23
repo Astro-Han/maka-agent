@@ -18,6 +18,7 @@
  */
 
 import { MAIN_WINDOW_DROP_GUARD_SCRIPT } from './main-window-drop-guard.js';
+import { NativeHostBudget } from './native-runtime-host-operation.js';
 import { app, BrowserWindow, dialog, nativeTheme, screen, shell, type View, webFrameMain } from 'electron';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -46,6 +47,20 @@ import {
 type SettingsReader = {
   get(): Promise<AppSettings>;
 };
+
+/** Graceful exit flushes acknowledged editor work before retiring Main services. */
+export async function flushWindowDrafts(window: BrowserWindow | undefined): Promise<void> {
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed() || window.webContents.isCrashed()) return;
+  try {
+    await new NativeHostBudget(2_000).wait(
+      window.webContents.executeJavaScript('window.maka?.sessionLocal?.flushDrafts()'), 'saving composer drafts',
+    );
+  } catch (cause) {
+    // A draft failure cancels graceful quit; it is not a Host shutdown timeout
+    // for which the quit coordinator may safely leave the Host running.
+    throw new Error('Desktop could not save your drafts. Keep this window open or explicitly discard unsaved changes.', { cause });
+  }
+}
 
 export interface MainWindowController {
   createWindow(signal: AbortSignal): Promise<void>;
@@ -531,7 +546,27 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
     mainWindow.on('move', scheduleSave);
     mainWindow.on('maximize', handleWindowGeometryChange);
     mainWindow.on('unmaximize', scheduleSave);
-    mainWindow.on('close', () => {
+    let closePrepared = false;
+    let preparingClose = false;
+    mainWindow.on('close', (event) => {
+      if (!closePrepared && mainWindow && !mainWindow.webContents.isCrashed()) {
+        event.preventDefault();
+        if (preparingClose) return;
+        preparingClose = true;
+        const closing = mainWindow;
+        void flushWindowDrafts(closing).then(() => true, async (error) => {
+          if (closing.isDestroyed()) return false;
+          const result = await dialog.showMessageBox(closing, { type: 'warning',
+            message: 'Drafts could not be saved', detail: String(error),
+            buttons: ['Keep open', 'Close without saving'], defaultId: 0, cancelId: 0 });
+          return result.response === 1;
+        }).then((ready) => {
+          preparingClose = false;
+          if (ready && !closing.isDestroyed()) { closePrepared = true; closing.close(); }
+        }).catch((error) => { preparingClose = false; console.error('[window] draft flush failed:', error); });
+        return;
+      }
+      closePrepared = false;
       clearShowFallbackTimer();
       deps.onClose?.();
       if (saveTimer) clearTimeout(saveTimer);

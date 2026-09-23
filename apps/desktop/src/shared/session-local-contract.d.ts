@@ -24,6 +24,37 @@ import type {
   QuoteRef,
 } from '@maka/core/events';
 import type { DesktopTranscriptBatchPayload } from '../preload/transcript-contract.js';
+import type { InputSelections } from '@maka/runtime-host/protocol';
+import type { TurnOrchestration } from '@maka/core/orchestration';
+
+export type DesktopDraftAttachment =
+  | { readonly id: string; readonly kind: 'retained'; readonly attachment: AttachmentRef }
+  | { readonly id: string; readonly kind: 'file'; readonly name: string; readonly mimeType: string; readonly bytes: number };
+
+/** Unsubmitted editor state, not a Host message or a second outbox. */
+export interface DesktopComposerDraft {
+  readonly text: string;
+  readonly attachments: readonly DesktopDraftAttachment[];
+  readonly directoryReferences?: readonly DirectoryReference[];
+  readonly quotes?: readonly QuoteRef[];
+  readonly workspaceFileReferences?: readonly Pick<InlineReference, 'value' | 'start'>[];
+  readonly inputSelections?: InputSelections;
+  readonly turnOrchestration?: TurnOrchestration;
+  readonly revision?: {
+    readonly sourceSessionId: string;
+    readonly sourceTurnId: string;
+    readonly copyId: string;
+    readonly phase: 'preparing' | 'ready' | 'abandoning';
+  };
+}
+
+export interface DesktopComposerDraftRecord {
+  readonly authority: string;
+  readonly version: number;
+  readonly snapshot: DesktopComposerDraft | null;
+  /** Retained after the corresponding outbox message has been observed and retired. */
+  readonly submittedMessageId?: string;
+}
 
 export type DesktopLocalMessageState = 'saved' | 'sending' | 'accepted' | 'unknown' | 'failed';
 
@@ -50,6 +81,12 @@ export interface DesktopCachedTranscript {
 }
 
 export interface DesktopSessionLocalBridge {
+  flushDrafts(): Promise<void>;
+  onFlushDrafts(handler: () => Promise<void>): () => void;
+  readDraft(sessionId: string): Promise<DesktopComposerDraftRecord>;
+  readDraftFile(sessionId: string, id: string, authority: string): Promise<{ name: string; mimeType: string; base64: string }>;
+  saveDraft(sessionId: string, expectedVersion: number, snapshot: DesktopComposerDraft | null,
+    uploads: readonly { id: string; item: import('../preload/attachment-ingest-payload.js').IngestInput }[], authority: string): Promise<DesktopComposerDraftRecord>;
   listMessages(sessionId: string): Promise<readonly DesktopLocalMessage[]>;
   /** Only an intent that has never been dispatched can be cancelled locally. */
   cancelMessage(sessionId: string, messageId: string): Promise<void>;

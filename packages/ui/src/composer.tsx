@@ -218,6 +218,7 @@ export interface ComposerHandle {
   clearDraft(draftKey: string): void;
   /** Write a specific session draft before navigation changes the active key. */
   setDraft(draftKey: string, text: string): void;
+  hydrateDraft(draftKey: string, text: string): void;
   /** Read a specific draft without changing the active input. */
   getDraft(draftKey: string): string;
   /** Append to a specific session draft without replacing newer text. */
@@ -706,81 +707,38 @@ export const Composer = forwardRef<
       document.execCommand('insertText', false, needsSpace ? ' /' : '/');
     });
   }
-  /**
-   * Redraw the chips a controlled write flattened.
-   *
-   * `ChatComposerInput` rebuilds the editor from the string on every external
-   * value change (`editable.textContent = controlledValue`), which is correct
-   * for text and lossy for tokens: the chip spans go, and the draft comes back
-   * as the `/skill:<id>` text they serialize to. Upstream declares a
-   * `deserialize` hook for exactly this and never calls it (facebook/astryx
-   * #4655), so until it does, we re-insert the chips ourselves.
-   *
-   * Nothing is recovered here that was not already in the string — the draft
-   * stays the single source of truth, and this only restores its rendering.
-   * That is what keeps it deletable in one piece: when upstream deserializes,
-   * this function and its one call site go, and no state goes with them.
-   *
-   * Three preconditions, all cheap, all necessary:
-   *
-   * - Only for an external write. `redrawPendingRef` is set by `textPort.setValue`
-   *   — the sole funnel for draft swap, history recall and the imperative handle
-   *   — and cleared by `applyText`, so a user who has taken the draft back never
-   *   watches a half-typed `/skill:` seize into a chip under the caret.
-   * - Only on the DOM shape that write produces: exactly one text node equal to
-   *   the draft. Anything else means upstream skipped the rewrite (the chips are
-   *   still there) or the editor is in a shape whose offsets we cannot trust.
-   * - Never mid-composition. The rewrite already broke the IME's composition;
-   *   moving the selection on top of that makes it worse.
-   *
-   * A pending redraw survives a failed attempt, and that is the whole reason it
-   * is a flag rather than a call at the write. The two inputs do not arrive
-   * together: switching sessions swaps the draft on the spot while the Skill
-   * catalog for the newly active session lands a render or two later, still
-   * holding the previous session's Skills. Clearing on the first attempt would
-   * read that stale catalog as proof the token is unresolvable and give up for
-   * good. Retrying costs one regex over a short draft on renders where a write
-   * is outstanding, and every other precondition — mid-composition, an
-   * unexpected DOM — gets the same second chance for free.
-   *
-   * Back to front, because `Range.deleteContents` inside a text node leaves the
-   * original node holding the text before the range: earlier offsets stay valid,
-   * later ones would not. The token's own matched text becomes the chip value,
-   * not a value rebuilt from the catalog id, so a differently-cased token comes
-   * back spelled the way the draft spells it.
-   *
-   * `insertToken` anchors each chip with a U+00A0, so we take the following
-   * space into the replaced range to keep one separator rather than two. The
-   * draft therefore serializes with U+00A0 where it had a space, and with one
-   * extra U+00A0 when a token ends the draft. That is the same text a chip
-   * picked from the `/` menu produces, `composerWireText` normalizes it on send,
-   * and upstream's sync effect is keyed on the controlled value rather than on
-   * the serialization, so the difference cannot loop back as a rewrite.
-   *
-   * A token whose id is not in the live catalog stays text: no chip should claim
-   * a Skill that will not resolve.
-   */
-  function redrawSkillTokens(): boolean {
+  /** Restore Skill tokens and explicitly saved workspace-file references after a
+   * controlled text write. Astryx currently flattens both into plain text.
+   * Only exact saved positions are restored; arbitrary @ text is not a file. */
+  const redrawingDraftRef = useRef(false);
+  function redrawDraftTokens(): boolean {
     if (compositionActiveRef.current) return false;
     const skills = props.mentionSkills;
-    if (!skills?.length) return false;
     const draft = textRef.current;
-    if (!draft.includes('/skill:')) return false;
     const editable = editableNode();
     const node = editable?.firstChild;
     if (!editable || editable.childNodes.length !== 1) return false;
-    if (!(node instanceof Text) || node.data !== draft) return false;
-    const byId = new Map(skills.map((skill) => [skill.id.toLowerCase(), skill]));
-    const matches = [...draft.matchAll(new RegExp(SKILL_INVOCATION_TOKEN_SOURCE, 'g'))];
+    if (node?.nodeType !== Node.TEXT_NODE || node.textContent !== draft) return false;
+    const byId = new Map((skills ?? []).map((skill) => [skill.id.toLowerCase(), skill]));
+    const tokens = [...draft.matchAll(new RegExp(SKILL_INVOCATION_TOKEN_SOURCE, 'g'))].flatMap((match) => {
+      const skill = byId.get(match[1].toLowerCase());
+      return skill ? [{ start: match.index, kind: 'skill' as const, value: match[0], label: skill.name }] : [];
+    });
+    const files = (props.draftPersistence?.readWorkspaceFileReferences?.(props.draftKey) ?? [])
+      .filter((item) => draft.slice(item.start, item.start + item.value.length) === item.value)
+      .map((item) => ({ ...item, kind: 'workspace_file' as const, label: item.value.slice(1) }));
+    const matches = [...tokens, ...files].sort((a, b) => b.start - a.start);
     const selection = document.getSelection();
     if (!selection) return false;
+    const previousFocus = document.activeElement;
     let redrew = false;
-    for (let i = matches.length - 1; i >= 0; i--) {
-      const match = matches[i];
-      const skill = byId.get(match[1].toLowerCase());
-      if (!skill) continue;
-      const start = match.index;
-      let end = start + match[0].length;
+    let boundary = draft.length;
+    redrawingDraftRef.current = true;
+    try { for (const match of matches) {
+      const start = match.start;
+      let end = start + match.value.length;
+      if (end > boundary) continue;
+      boundary = start;
       const next = draft[end];
       if (next === ' ' || next === '\u00A0') end += 1;
       const range = document.createRange();
@@ -789,10 +747,18 @@ export const Composer = forwardRef<
       selection.removeAllRanges();
       selection.addRange(range);
       inputHandleRef.current?.insertToken(
-        inlineReferenceToken({ kind: 'skill', value: match[0], label: skill.name }),
+        inlineReferenceToken(match),
       );
       redrew = true;
+    } } finally {
+      redrawingDraftRef.current = false;
+      if (previousFocus !== editable) {
+        if (previousFocus instanceof HTMLElement && previousFocus !== document.body && previousFocus.isConnected)
+          previousFocus.focus({ preventScroll: true });
+        else editable.blur();
+      }
     }
+    if (redrew) saveCurrentDraft(textRef.current);
     return redrew;
   }
   /**
@@ -821,7 +787,7 @@ export const Composer = forwardRef<
     if (redrawPendingRef.current) {
       const heldCaret = caretPendingRef.current;
       caretPendingRef.current = false;
-      const redrew = redrawSkillTokens();
+      const redrew = redrawDraftTokens();
       caretPendingRef.current = redrew ? false : heldCaret;
       if (redrew) {
         redrawPendingRef.current = false;
@@ -838,6 +804,7 @@ export const Composer = forwardRef<
     saveCurrentDraft,
     clearDraft,
     setDraft,
+    hydrateDraft,
     getDraft,
     appendDraft,
     activeDraftKey,
@@ -846,6 +813,7 @@ export const Composer = forwardRef<
     draftKey: props.draftKey,
     onDraftKeyChange: resetPromptHistoryNavigation,
     persistence: props.draftPersistence,
+    workspaceFileReferences: () => { const node = editableNode(); return node ? workspaceFileReferencePositions(node) : []; },
   });
   const { resetNavigation, rememberSentEntry, handleArrowKey } = useComposerHistory({
     text: textPort,
@@ -1275,6 +1243,7 @@ export const Composer = forwardRef<
         focusInput();
         textPort.setValue(nextText);
       },
+      hydrateDraft,
       getDraft(draftKey: string) {
         return getDraft(draftKey);
       },
@@ -1341,7 +1310,7 @@ export const Composer = forwardRef<
     // The owner may have changed while onSend awaited (new-session creation,
     // revision branch, or user navigation). Never erase a foreign draft.
     if (activeDraftKey() !== submittedDraftKey) {
-      clearDraft(submittedDraftKey);
+      if (composerWireText(getDraft(submittedDraftKey)) === text) clearDraft(submittedDraftKey);
       return;
     }
     // The user can begin the next message while the send IPC is still
@@ -1439,7 +1408,7 @@ export const Composer = forwardRef<
   function onInputChange(next: string) {
     applyText(next);
     resetPromptHistoryNavigation();
-    saveCurrentDraft(next);
+    if (!redrawingDraftRef.current) saveCurrentDraft(next);
   }
 
   function canAcceptDroppedFiles(): boolean {

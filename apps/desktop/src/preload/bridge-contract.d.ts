@@ -1174,8 +1174,8 @@ export interface MakaBridge {
           Pick<import('@maka/core/events').InlineReference, 'value' | 'start'>
         >;
       },
-      /** Revision transactions require Host admission before committing/clearing their draft. */
-      options?: { waitForHostAdmission?: boolean },
+      /** Consume this exact local draft in the same transaction as outbox admission. */
+      options?: { draftVersion?: number; draftAuthority?: string; waitForHostAdmission?: boolean },
     ): Promise<
       | {
           ok: true;

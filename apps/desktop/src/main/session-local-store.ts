@@ -27,10 +27,11 @@ import type {
   TurnMessageSubmitResult,
 } from '@maka/runtime-host/protocol';
 import type { DesktopSessionSummaryInput } from '../shared/desktop-session-projection.js';
-import type { DesktopLocalMessageState } from '../shared/session-local-contract.js';
+import type { DesktopComposerDraft, DesktopComposerDraftRecord, DesktopLocalMessageState } from '../shared/session-local-contract.js';
 import type { DesktopTranscriptReplicaSnapshot } from './desktop-transcript-replica.js';
 
 const MAX_OUTBOX_BYTES = 256 * 1024 * 1024;
+const MAX_DRAFT_BYTES = 256 * 1024 * 1024;
 export const MAX_LOCAL_MESSAGE_BYTES = 64 * 1024 * 1024;
 const MAX_CACHE_BYTES = 64 * 1024 * 1024;
 const MAX_CACHE_SESSION_BYTES = 2 * 1024 * 1024;
@@ -40,6 +41,10 @@ export interface LocalStagedAttachment {
   readonly name: string;
   readonly mimeType: string;
   readonly base64: string;
+}
+
+export interface LocalDraftAttachment extends LocalStagedAttachment {
+  readonly id: string;
 }
 
 export interface LocalMessageIntent {
@@ -81,6 +86,16 @@ export class DesktopSessionLocalStore {
       PRAGMA synchronous = FULL;
       PRAGMA foreign_keys = ON;
       PRAGMA busy_timeout = 5000;
+    `);
+    this.#migrate();
+    // A crash may have happened anywhere after persisting dispatch intent.
+    // Recovery probes the original epoch instead of assuming the send failed.
+    this.#db.exec("UPDATE outbox SET state = 'unknown' WHERE state = 'sending'");
+    this.#db.prepare('DELETE FROM transcripts WHERE updated_at < ?').run(now() - CACHE_TTL_MS);
+  }
+
+  #migrate(): void {
+    const migrations = [String.raw`
       CREATE TABLE IF NOT EXISTS outbox (
         partition TEXT NOT NULL, session_id TEXT NOT NULL, message_id TEXT NOT NULL,
         created_at INTEGER NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL,
@@ -104,11 +119,27 @@ export class DesktopSessionLocalStore {
         PRIMARY KEY (partition, session_id)
       );
       CREATE TABLE IF NOT EXISTS authorities (profile_id TEXT PRIMARY KEY, partition TEXT NOT NULL);
-    `);
-    // A crash may have happened anywhere after persisting dispatch intent.
-    // Recovery probes the original epoch instead of assuming the send failed.
-    this.#db.exec("UPDATE outbox SET state = 'unknown' WHERE state = 'sending'");
-    this.#db.prepare('DELETE FROM transcripts WHERE updated_at < ?').run(now() - CACHE_TTL_MS);
+      CREATE TABLE IF NOT EXISTS composer_drafts (
+        partition TEXT NOT NULL, session_id TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK (version > 0), snapshot TEXT,
+        submitted_message_id TEXT, submission_fingerprint TEXT,
+        PRIMARY KEY (partition, session_id)
+      );
+      CREATE TABLE IF NOT EXISTS composer_draft_attachments (
+        partition TEXT NOT NULL, session_id TEXT NOT NULL, attachment_id TEXT NOT NULL,
+        name TEXT NOT NULL, mime_type TEXT NOT NULL, content BLOB NOT NULL,
+        PRIMARY KEY (partition, session_id, attachment_id),
+        FOREIGN KEY (partition, session_id) REFERENCES composer_drafts(partition, session_id) ON DELETE CASCADE
+      );
+    `];
+    this.#transaction(() => {
+      const version = Number(this.#db.prepare('PRAGMA user_version').get()!.user_version);
+      if (version > migrations.length) throw new Error('Desktop database was created by a newer version');
+      for (let index = version; index < migrations.length; index += 1) {
+        this.#db.exec(migrations[index]!);
+        this.#db.exec(`PRAGMA user_version = ${index + 1}`);
+      }
+    });
   }
 
   close(): void {
@@ -128,11 +159,127 @@ export class DesktopSessionLocalStore {
       .run(profileId, partition);
   }
 
+  draft(partition: string, sessionId: string): DesktopComposerDraftRecord {
+    const row = this.#db.prepare(
+      'SELECT version, snapshot, submitted_message_id FROM composer_drafts WHERE partition = ? AND session_id = ?',
+    ).get(partition, sessionId);
+    return row ? {
+      authority: partition,
+      version: Number(row.version),
+      snapshot: row.snapshot === null ? null : JSON.parse(String(row.snapshot)) as DesktopComposerDraft,
+      ...(row.submitted_message_id ? { submittedMessageId: String(row.submitted_message_id) } : {}),
+    } : { authority: partition, version: 0, snapshot: null };
+  }
+
+  /** CAS covers the complete editor state, including attachment membership. */
+  saveDraft(
+    partition: string, sessionId: string, expectedVersion: number,
+    snapshot: DesktopComposerDraft | null, files: readonly LocalDraftAttachment[] = [],
+  ): DesktopComposerDraftRecord {
+    return this.#transaction(() => {
+      const previous = this.draft(partition, sessionId);
+      const payload = snapshot === null ? null : JSON.stringify(snapshot);
+      if (previous.version !== expectedVersion) {
+        // A lost save acknowledgement is not a new edit. A consumed version can
+        // never match this branch, even if an old autosave tries to clear it.
+        if (previous.version === expectedVersion + 1 && !previous.submittedMessageId &&
+            JSON.stringify(previous.snapshot) === JSON.stringify(snapshot) && files.length === 0)
+          return previous;
+        throw new Error('Composer draft changed; reload it before saving');
+      }
+      const attachments = snapshot?.attachments.filter((item) => item.kind === 'file') ?? [];
+      if (new Set(snapshot?.attachments.map((item) => item.id)).size !== (snapshot?.attachments.length ?? 0))
+        throw new Error('Duplicate draft attachment identity');
+      if (new Set(files.map((item) => item.id)).size !== files.length ||
+          files.some((file) => !attachments.some((item) => item.id === file.id)))
+        throw new Error('Draft contains an unreferenced attachment upload');
+      this.#db.prepare(`INSERT INTO composer_drafts VALUES (?, ?, ?, ?, NULL, NULL)
+        ON CONFLICT(partition, session_id) DO UPDATE SET version = excluded.version,
+          snapshot = excluded.snapshot, submitted_message_id = NULL, submission_fingerprint = NULL`)
+        .run(partition, sessionId, expectedVersion + 1, payload);
+      const insert = this.#db.prepare('INSERT INTO composer_draft_attachments VALUES (?, ?, ?, ?, ?, ?)');
+      for (const attachment of attachments) {
+        const stored = this.draftAttachment(partition, sessionId, attachment.id);
+        const upload = files.find((item) => item.id === attachment.id);
+        const content = upload ? Buffer.from(upload.base64, 'base64') : stored?.content;
+        if (!content || content.byteLength !== attachment.bytes ||
+            attachment.name !== (upload?.name ?? stored?.name) ||
+            attachment.mimeType !== (upload?.mimeType ?? stored?.mimeType))
+          throw new Error('Draft attachment snapshot is missing or changed');
+        if (stored) {
+          if (stored.name !== attachment.name || stored.mimeType !== attachment.mimeType ||
+              !Buffer.from(stored.content).equals(content))
+            throw new Error('Draft attachment identity is already bound to different bytes');
+        } else insert.run(partition, sessionId, attachment.id, attachment.name, attachment.mimeType, content);
+      }
+      for (const row of this.#db.prepare(
+        'SELECT attachment_id FROM composer_draft_attachments WHERE partition = ? AND session_id = ?',
+      ).all(partition, sessionId)) {
+        if (!attachments.some((item) => item.id === row.attachment_id))
+          this.#db.prepare('DELETE FROM composer_draft_attachments WHERE partition = ? AND session_id = ? AND attachment_id = ?')
+            .run(partition, sessionId, row.attachment_id!);
+      }
+      const metadataBytes = Number(this.#db.prepare(
+        'SELECT COALESCE(SUM(length(CAST(snapshot AS BLOB))), 0) AS bytes FROM composer_drafts',
+      ).get()!.bytes);
+      const fileBytes = Number(this.#db.prepare(
+        'SELECT COALESCE(SUM(length(content)), 0) AS bytes FROM composer_draft_attachments',
+      ).get()!.bytes);
+      if (Buffer.byteLength(payload ?? '') + attachments.reduce((sum, item) => sum + item.bytes, 0) > MAX_LOCAL_MESSAGE_BYTES ||
+          metadataBytes + fileBytes > MAX_DRAFT_BYTES)
+        throw new Error('Local draft storage is full; no drafts were discarded');
+      return this.draft(partition, sessionId);
+    });
+  }
+
+  draftAttachment(partition: string, sessionId: string, id: string):
+    { name: string; mimeType: string; content: Uint8Array } | undefined {
+    const row = this.#db.prepare(
+      'SELECT name, mime_type, content FROM composer_draft_attachments WHERE partition = ? AND session_id = ? AND attachment_id = ?',
+    ).get(partition, sessionId, id);
+    return row ? { name: String(row.name), mimeType: String(row.mime_type), content: row.content as Uint8Array } : undefined;
+  }
+
+  /** Transfer ownership once. The fence outlives outbox retirement and ACK loss. */
+  submitDraft(
+    partition: string, expectedVersion: number,
+    command: LocalMessageIntent['command'],
+  ): { messageId: string; record?: LocalOutboxRecord } {
+    return this.#transaction(() => {
+      const previous = this.draft(partition, command.sessionId);
+      const fingerprint = createHash('sha256').update(JSON.stringify(command)).digest('hex');
+      if (previous.version === expectedVersion + 1 && previous.submittedMessageId === command.messageId) {
+        const row = this.#db.prepare(
+          'SELECT submission_fingerprint FROM composer_drafts WHERE partition = ? AND session_id = ?',
+        ).get(partition, command.sessionId)!;
+        if (row.submission_fingerprint !== fingerprint)
+          throw new Error('Message identity is already bound to a different draft submission');
+        return { messageId: command.messageId, record: this.get(partition, command.messageId) };
+      }
+      if (previous.version !== expectedVersion || !previous.snapshot)
+        throw new Error('Composer draft changed or was already submitted');
+      const staged = previous.snapshot.attachments.flatMap((attachment) => {
+        if (attachment.kind !== 'file') return [];
+        const file = this.draftAttachment(partition, command.sessionId, attachment.id);
+        if (!file) throw new Error('Draft attachment snapshot is missing');
+        return [{ name: file.name, mimeType: file.mimeType, base64: Buffer.from(file.content).toString('base64') }];
+      });
+      const record = this.#enqueue(partition, { command, staged });
+      this.#db.prepare(`UPDATE composer_drafts SET version = version + 1, snapshot = NULL,
+        submitted_message_id = ?, submission_fingerprint = ? WHERE partition = ? AND session_id = ?`)
+        .run(command.messageId, fingerprint, partition, command.sessionId);
+      this.#db.prepare('DELETE FROM composer_draft_attachments WHERE partition = ? AND session_id = ?')
+        .run(partition, command.sessionId);
+      return { messageId: command.messageId, record };
+    });
+  }
+
   enqueue(partition: string, intent: LocalMessageIntent): LocalOutboxRecord {
-    const digest = createHash('sha256').update(JSON.stringify(intent.command));
-    for (const staged of intent.staged)
-      digest.update(JSON.stringify([staged.name, staged.mimeType, staged.base64]));
-    const fingerprint = digest.digest('hex');
+    return this.#transaction(() => this.#enqueue(partition, intent));
+  }
+
+  #enqueue(partition: string, intent: LocalMessageIntent): LocalOutboxRecord {
+    const fingerprint = intentFingerprint(intent);
     const previous = this.get(partition, intent.command.messageId);
     if (previous) {
       // Only an identical caller retry can claim a durable local receipt.
@@ -174,8 +321,7 @@ export class DesktopSessionLocalStore {
         'Local message storage is full; keep the draft and resolve pending messages first',
       );
     }
-    this.#transaction(() => {
-      this.#db
+    this.#db
         .prepare('INSERT INTO outbox VALUES (?, ?, ?, ?, ?, ?)')
         .run(
           partition,
@@ -185,8 +331,8 @@ export class DesktopSessionLocalStore {
           record.state,
           payload,
         );
-      const insert = this.#db.prepare('INSERT INTO outbox_attachments VALUES (?, ?, ?, ?, ?, ?)');
-      staged.forEach((item, ordinal) =>
+    const insert = this.#db.prepare('INSERT INTO outbox_attachments VALUES (?, ?, ?, ?, ?, ?)');
+    staged.forEach((item, ordinal) =>
         insert.run(
           partition,
           record.messageId,
@@ -195,8 +341,7 @@ export class DesktopSessionLocalStore {
           item.mimeType,
           Buffer.from(item.base64, 'base64'),
         ),
-      );
-    });
+    );
     this.#revision += 1;
     return record;
   }
@@ -321,7 +466,7 @@ export class DesktopSessionLocalStore {
       for (const summary of summaries) this.saveSession(partition, summary);
       for (const previous of this.sessions(partition)) {
         if (!seen.has(previous.id) && !this.creation(partition, previous.id))
-          this.removeSession(partition, previous.id);
+          this.#removeSession(partition, previous.id);
       }
     });
   }
@@ -397,16 +542,18 @@ export class DesktopSessionLocalStore {
   }
 
   removeSession(partition: string, sessionId: string): void {
-    for (const table of ['outbox', 'sessions', 'transcripts'])
-      this.#db
-        .prepare(`DELETE FROM ${table} WHERE partition = ? AND session_id = ?`)
-        .run(partition, sessionId);
+    this.#transaction(() => this.#removeSession(partition, sessionId));
+  }
+
+  #removeSession(partition: string, sessionId: string): void {
+    for (const table of ['outbox', 'sessions', 'transcripts', 'composer_drafts'])
+      this.#db.prepare(`DELETE FROM ${table} WHERE partition = ? AND session_id = ?`).run(partition, sessionId);
     this.#revision += 1;
   }
 
   purge(partition: string): void {
     this.#transaction(() => {
-      for (const table of ['outbox', 'sessions', 'transcripts'])
+      for (const table of ['outbox', 'sessions', 'transcripts', 'composer_drafts'])
         this.#db.prepare(`DELETE FROM ${table} WHERE partition = ?`).run(partition);
     });
     this.#revision += 1;
@@ -423,4 +570,11 @@ export class DesktopSessionLocalStore {
       throw error;
     }
   }
+}
+
+function intentFingerprint(intent: LocalMessageIntent): string {
+  const digest = createHash('sha256').update(JSON.stringify(intent.command));
+  for (const staged of intent.staged)
+    digest.update(JSON.stringify([staged.name, staged.mimeType, staged.base64]));
+  return digest.digest('hex');
 }

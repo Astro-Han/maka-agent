@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { sessionRevisionFamilyId, visibleSessionRevisionMembers } from '@maka/core/session-revisions';
+import { sessionRevisionFamilyId } from '@maka/core/session-revisions';
 
 import { type SessionSummary } from '@maka/core/session';
 
@@ -37,8 +37,9 @@ export function deriveSessionRevisionNavigation(
   const active = sessions.find((session) => session.id === activeId);
   if (!active) return undefined;
   const root = sessionRevisionFamilyId(active);
-  const rawFamily = sessions.filter((session) => sessionRevisionFamilyId(session) === root);
-  const family = visibleSessionRevisionMembers(rawFamily, activeId);
+  // Unsent versions own durable editors too. They must remain reachable after
+  // restart even when the conversation row initially selects a sent version.
+  const family = sessions.filter((session) => sessionRevisionFamilyId(session) === root);
   if (family.length <= 1) return undefined;
   const ordered = [...family].sort((left, right) => {
     const indexDelta = (left.revisionIndex ?? 1) - (right.revisionIndex ?? 1);

@@ -97,14 +97,16 @@ type ToastApi = {
 
 type DirectoryReferences = NonNullable<TransientUserMessageProjection['directoryReferences']>;
 type MessageContextOptions = {
+  messageId?: string;
+  draftVersion?: number;
+  draftAuthority?: string;
+  inputSelections?: import('@maka/runtime-host/protocol').InputSelections;
+  turnOrchestration?: TurnOrchestration;
   directoryReferences?: DirectoryReferences;
   quotes?: readonly QuoteRef[];
   workspaceFileReferences?: readonly WorkspaceFileReferencePosition[];
 };
 type SendOptions = MessageContextOptions & {
-  waitForHostAdmission?: boolean;
-  inputSelections?: import('@maka/runtime-host/protocol').InputSelections;
-  turnOrchestration?: TurnOrchestration;
   displayText?: string;
   onSessionResolved?: (sessionId: string, newTaskDraftKey?: string) => void;
 };
@@ -259,7 +261,8 @@ export function createAppShellChatActions(deps: {
     displayText?: string;
     quotes?: readonly QuoteRef[];
     pendingSteering?: boolean;
-    waitForHostAdmission?: boolean;
+    draftVersion?: number;
+    draftAuthority?: string;
     /** Whether this Session's surface is on screen to receive Skill feedback. */
     isSurfaceVisible?: () => boolean;
   }): Promise<SubmittedMessage> {
@@ -269,7 +272,7 @@ export function createAppShellChatActions(deps: {
     const result = await window.maka.sessions.submitMessage(sessionId, placement, {
       ...input.command,
       messageId,
-    }, { waitForHostAdmission: input.waitForHostAdmission });
+    }, { draftVersion: input.draftVersion, draftAuthority: input.draftAuthority });
     const surfaceVisible = input.isSurfaceVisible?.() ?? true;
     if (!result.ok) {
       if (result.reason === 'outcome_unknown') {
@@ -324,7 +327,7 @@ export function createAppShellChatActions(deps: {
       return false;
     }
     let optimisticSessionId: string | undefined;
-    const messageId = crypto.randomUUID();
+    const messageId = options.messageId ?? crypto.randomUUID();
     // #1433: the composer creates the session BEFORE it sends, so a first
     // send that never lands has to take the session with it. Set the moment
     // creation succeeds, cleared the moment the send does — while it holds a
@@ -378,7 +381,8 @@ export function createAppShellChatActions(deps: {
           ...(options.displayText ? { displayText: options.displayText } : {}),
           ...copiedArray('quotes', quotes),
           pendingSteering: false,
-          waitForHostAdmission: options.waitForHostAdmission,
+          draftVersion: options.draftVersion,
+          draftAuthority: options.draftAuthority,
           isSurfaceVisible: () => activeIdRef.current === sessionId,
         });
       }
@@ -517,7 +521,7 @@ export function createAppShellChatActions(deps: {
     pending?: readonly PendingAttachment[],
     options: MessageContextOptions = {},
   ): Promise<boolean> {
-    const messageId = crypto.randomUUID();
+    const messageId = options.messageId ?? crypto.randomUUID();
     const steeringTurnId = placement === 'current_turn' ? deps.getRunningTurnId?.(sessionId) : undefined;
     const directoryReferences = options.directoryReferences;
     const quotes = options.quotes ?? [];
@@ -538,8 +542,12 @@ export function createAppShellChatActions(deps: {
         messageId,
         placement,
         pendingSteering: placement === 'current_turn',
+        draftVersion: options.draftVersion,
+        draftAuthority: options.draftAuthority,
         command: {
           text,
+          ...(options.inputSelections ? { inputSelections: options.inputSelections } : {}),
+          ...(options.turnOrchestration ? { turnOrchestration: options.turnOrchestration } : {}),
           ...copiedArray('attachmentItems', attachmentItems),
           ...copiedArray('retainedAttachments', retainedAttachments),
           ...copiedArray('directoryReferences', directoryReferences),
