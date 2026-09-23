@@ -22,7 +22,13 @@ use crate::{EventLog, StoreError, sequence_number};
 use sqlx::{Connection, SqliteConnection};
 
 /// Logical Turn cuts are resolved against canonical facts, not presentation rows.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "turn_id",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum HistoryCut {
     Empty,
     BeforeTurn(String),
@@ -119,7 +125,7 @@ impl EventLog {
     }
 }
 
-async fn resolve_cut(
+pub(crate) async fn resolve_cut(
     connection: &mut SqliteConnection,
     session: &str,
     cut: &HistoryCut,
@@ -130,13 +136,13 @@ async fn resolve_cut(
         HistoryCut::End => observed,
         HistoryCut::BeforeTurn(turn) | HistoryCut::ThroughTurn(turn) => {
             let (first, last): (Option<i64>, Option<i64>) = sqlx::query_as(
-                "SELECT MIN(sequence),MAX(sequence) FROM runtime_events
-                 WHERE json_extract(event_json,'$.invocation.session_id') = ?1
+                "SELECT MIN(sequence),MAX(sequence) FROM session_history_events
+                 WHERE owner_session_id = ?1
                    AND json_extract(event_json,'$.invocation.turn_id') = ?2
                    AND sequence <= ?3
-                   AND EXISTS(SELECT 1 FROM runtime_events opening
+                   AND EXISTS(SELECT 1 FROM session_history_events opening
                        WHERE opening.kind = 'invocation_opened'
-                         AND json_extract(opening.event_json,'$.invocation.session_id') = ?1
+                         AND opening.owner_session_id = ?1
                          AND json_extract(opening.event_json,'$.invocation.turn_id') = ?2
                          AND json_extract(opening.event_json,'$.fact.input.kind') IN ('message','continuation','handoff')
                          AND opening.sequence <= ?3)",
@@ -157,8 +163,8 @@ async fn resolve_cut(
         }
     };
     let crossing: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events
-         WHERE json_extract(event_json,'$.invocation.session_id') = ?1 AND sequence <= ?2
+        "SELECT EXISTS(SELECT 1 FROM session_history_events
+         WHERE owner_session_id = ?1 AND sequence <= ?2
          GROUP BY json_extract(event_json,'$.invocation.turn_id')
          HAVING MIN(sequence) <= ?3 AND MAX(sequence) > ?3)",
     )

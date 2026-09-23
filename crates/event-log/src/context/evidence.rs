@@ -50,22 +50,28 @@ pub(super) async fn selected(
     digest.update((encoded.len() as u64).to_be_bytes());
     digest.update(encoded);
     digest.update(through.to_be_bytes());
-    let filter = Selection::predicate("runtime_events", "?4");
+    let filter = Selection::predicate("e", "?4");
+    let columns = "e.sequence, length(CAST(e.event_json AS BLOB)),
+        CASE WHEN length(CAST(e.event_json AS BLOB)) <= 65536 THEN CAST(e.event_json AS BLOB) END";
     let mut after = 0i64;
     loop {
         let mut oversized = None;
         {
-            let mut rows = sqlx::query_as::<_, (i64, i64, Option<Vec<u8>>)>(sqlx::AssertSqlSafe(format!(
-            "SELECT sequence, length(CAST(event_json AS BLOB)),
-             CASE WHEN length(CAST(event_json AS BLOB)) <= 65536 THEN CAST(event_json AS BLOB) END FROM runtime_events
-             WHERE sequence > ? AND sequence <= ?
-             AND json_extract(event_json, '$.invocation.session_id') = ?3 AND {filter} ORDER BY sequence"
-        )))
-        .bind(after)
-        .bind(through as i64)
-        .bind(session)
-        .bind(&selection.lineage)
-        .fetch(&mut *connection);
+            let mut rows =
+                sqlx::query_as::<_, (i64, i64, Option<Vec<u8>>)>(sqlx::AssertSqlSafe(format!(
+                    "SELECT {columns} FROM runtime_events e
+             WHERE e.sequence > ?1 AND e.sequence <= ?2
+             AND json_extract(e.event_json,'$.invocation.session_id') = ?3 AND {filter}
+             UNION ALL SELECT {columns} FROM session_history_members h
+             JOIN runtime_events e ON e.sequence = h.sequence
+             WHERE h.session_id = ?3 AND h.sequence > ?1 AND h.sequence <= ?2 AND {filter}
+             ORDER BY sequence"
+                )))
+                .bind(after)
+                .bind(through as i64)
+                .bind(session)
+                .bind(&selection.lineage)
+                .fetch(&mut *connection);
             while let Some((sequence, bytes, payload)) = rows.try_next().await? {
                 let bytes = sequence_number(bytes)?;
                 digest.update(sequence_number(sequence)?.to_be_bytes());
@@ -109,14 +115,7 @@ pub(super) async fn high_water(
     session: &str,
     before: i64,
 ) -> Result<u64, StoreError> {
-    sequence_number(
-        sqlx::query_scalar(
-            "SELECT COALESCE(MAX(sequence), 0) FROM runtime_events WHERE sequence < ?
-         AND json_extract(event_json, '$.invocation.session_id') = ?",
-        )
-        .bind(before)
-        .bind(session)
-        .fetch_one(connection)
-        .await?,
-    )
+    Selection::session(session)
+        .high_water(connection, sequence_number(before.saturating_sub(1))?)
+        .await
 }

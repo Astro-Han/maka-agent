@@ -121,6 +121,27 @@ async fn repeated_checkpoints_cross_old_history_limits_with_bounded_tail_and_exa
         copied.context.source_evidence.digest,
         source.source_evidence.digest
     );
+    assert!(matches!(
+        log.copy_session(
+            maka_event_log::sessions::SessionCopy {
+                source_session_id: "session".into(),
+                target_session_id: "copied-session".into(),
+                expected_source_revision: revision,
+                cut: HistoryCut::End,
+            },
+            &json!({}),
+            2
+        )
+        .await
+        .unwrap(),
+        maka_event_log::sessions::SessionCopyResult::Committed(_)
+    ));
+    let inherited = log
+        .read_model_context("copied-session", None, 100, 8192)
+        .await
+        .unwrap();
+    assert_eq!(inherited.baseline.unwrap().event_id, last[0].event().id);
+    assert!(inherited.tail.len() < 10);
     assert!(
         matches!(
             log.capture_session_history(

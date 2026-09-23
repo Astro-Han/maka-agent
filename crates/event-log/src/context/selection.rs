@@ -157,6 +157,16 @@ impl Selection {
         )
     }
 
+    /// Adopted archives are immutable ownership, not events on the new Run's
+    /// timeline. Only native targets apply the current time and lineage fences.
+    pub fn archive_predicate(target: &str, archive: &str, before: &str, lineage: &str) -> String {
+        let filter = Self::predicate(archive, lineage);
+        format!(
+            "(({target}.inherited = 1 AND {archive}.sequence = {target}.archive_sequence)
+            OR ({target}.inherited = 0 AND {archive}.sequence < {before} AND {filter}))"
+        )
+    }
+
     pub async fn high_water(
         &self,
         connection: &mut SqliteConnection,
@@ -169,8 +179,12 @@ impl Selection {
             .ok_or_else(|| super::invalid("context requires a Session"))?;
         sequence_number(
             sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "SELECT COALESCE(MAX(e.sequence),0) FROM runtime_events e WHERE e.sequence <= ?1
-             AND json_extract(e.event_json,'$.invocation.session_id')=?2 AND {filter}"
+                "SELECT MAX(
+                    (SELECT COALESCE(MAX(e.sequence),0) FROM runtime_events e WHERE e.sequence <= ?1
+                     AND json_extract(e.event_json,'$.invocation.session_id')=?2 AND {filter}),
+                    (SELECT COALESCE(MAX(h.sequence),0) FROM session_history_members h
+                     JOIN runtime_events e ON e.sequence=h.sequence
+                     WHERE h.session_id=?2 AND h.sequence <= ?1 AND {filter}))"
             )))
             .bind(through as i64)
             .bind(session)

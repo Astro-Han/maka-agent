@@ -88,6 +88,22 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
     else {
         panic!("unchanged source");
     };
+    use maka_event_log::sessions::{SessionCopy, SessionCopyResult};
+    assert!(matches!(
+        log.copy_session(
+            SessionCopy {
+                source_session_id: "session".into(),
+                target_session_id: "unpruned-copy".into(),
+                expected_source_revision: initial_revision,
+                cut: HistoryCut::ThroughTurn("old".into()),
+            },
+            &json!({}),
+            2
+        )
+        .await
+        .unwrap(),
+        SessionCopyResult::Committed(_)
+    ));
     open(&log, "writer", false).await;
     let source = log
         .read_model_context("session", Some("writer"), 100, 64 * 1024)
@@ -218,6 +234,106 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
         .unwrap()
         .unwrap()
         .revision;
+    assert!(matches!(
+        log.copy_session(
+            SessionCopy {
+                source_session_id: "session".into(),
+                target_session_id: "archived-copy".into(),
+                expected_source_revision: final_revision,
+                cut: HistoryCut::ThroughTurn("old".into()),
+            },
+            &json!({}),
+            3
+        )
+        .await
+        .unwrap(),
+        SessionCopyResult::Committed(_)
+    ));
+    let adopted = log
+        .read_model_context("archived-copy", None, 100, 64 * 1024)
+        .await
+        .unwrap();
+    assert!(
+        adopted
+            .tail
+            .iter()
+            .any(|e| matches!(e, ContextEvent::Archived(a) if a.event_id == target.event().id))
+    );
+    assert_eq!(
+        log.read_frozen_model_context(&adopted.source_evidence, 100, 64 * 1024)
+            .await
+            .unwrap()
+            .effective_source_digest,
+        adopted.effective_source_digest
+    );
+    assert!(
+        matches!(
+            log.read_model_context("unpruned-copy", None, 100, 8192)
+                .await,
+            Err(StoreError::PrefixTooLarge)
+        ),
+        "later source pruning cannot replace history already owned by a copy"
+    );
+    let copy_invocation = Invocation {
+        session_id: "archived-copy".into(),
+        turn_id: "copy-turn".into(),
+        run_id: "copy-run".into(),
+        invocation_id: "copy-inv".into(),
+    };
+    for fact in [
+        Fact::InvocationOpened {
+            configuration: None,
+            input: InvocationInput::Message {
+                content: "continue".into(),
+                source_messages: Vec::new(),
+                request_fingerprint: None,
+            },
+        },
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Completed,
+        },
+    ] {
+        log.append(&EventWrite::plain(RuntimeEvent::new(copy_invocation.clone(), fact)).unwrap())
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        log.context_before_run(&copy_invocation, 100, 64 * 1024)
+            .await
+            .unwrap()
+            .effective_source_digest,
+        adopted.effective_source_digest
+    );
+    let lineage = log
+        .scoped_prefix(
+            LogScope::Lineage {
+                session_id: "archived-copy".into(),
+                run_id: "copy-run".into(),
+            },
+            100,
+            65536,
+        )
+        .await
+        .unwrap();
+    let lineage = log
+        .read_frozen_model_context(
+            &maka_event_log::context::SourceEvidence {
+                scope: lineage.scope,
+                high_water: lineage.high_water,
+                digest: lineage.digest,
+            },
+            100,
+            64 * 1024,
+        )
+        .await
+        .unwrap();
+    assert!(
+        lineage
+            .tail
+            .iter()
+            .any(|e| matches!(e, ContextEvent::Archived(a) if a.event_id == target.event().id)),
+        "adopted archive writer need not belong to the new Run's lineage"
+    );
     assert!(matches!(log.capture_session_history(
         "session", initial_revision, HistoryCut::End, 100, 8192,
     ).await.unwrap(), HistoryCapture::SourceRevisionConflict { expected, actual }

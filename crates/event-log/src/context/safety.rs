@@ -51,7 +51,7 @@ pub(crate) async fn require_safe(
 
 /// Historical observations cannot borrow a later settlement or inherit later work.
 /// NOT MATERIALIZED keeps the cut in the indexed queries rather than copying the ledger.
-pub(super) async fn require_safe_through(
+pub(crate) async fn require_safe_through(
     connection: &mut SqliteConnection,
     session: &str,
     current: Option<&str>,
@@ -129,8 +129,8 @@ pub(super) async fn closed_boundary(
     through: u64,
 ) -> Result<(), StoreError> {
     let closed: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE sequence = ? AND kind = 'invocation_ended'
-         AND json_extract(event_json, '$.invocation.session_id') = ?)",
+        "SELECT EXISTS(SELECT 1 FROM session_history_events WHERE sequence = ? AND kind = 'invocation_ended'
+         AND owner_session_id = ?)",
     ).bind(i64::try_from(through).map_err(|_| invalid("coverage overflow"))?).bind(session).fetch_one(connection).await?;
     if !closed {
         return Err(invalid("coverage must end at a closed Session boundary"));

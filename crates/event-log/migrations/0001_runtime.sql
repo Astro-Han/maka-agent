@@ -199,7 +199,48 @@ CREATE TABLE "tool_result_payloads" (
 CREATE VIEW runtime_events AS
     SELECT * FROM event_log WHERE invocation_id IS NOT NULL;
 
+-- Copies retain original facts, never execution authority. Flatten membership
+-- at creation so descendants do not query mutable parent Session metadata.
+CREATE TABLE session_history_copies (
+    session_id TEXT PRIMARY KEY REFERENCES session_control(id),
+    source_session_id TEXT NOT NULL,
+    source_revision INTEGER NOT NULL CHECK(source_revision > 0),
+    through_sequence INTEGER NOT NULL CHECK(through_sequence >= 0),
+    observed_through INTEGER NOT NULL CHECK(observed_through >= through_sequence),
+    request_json TEXT NOT NULL,
+    CHECK(session_id != source_session_id)
+);
+
+CREATE TABLE session_history_members (
+    session_id TEXT NOT NULL REFERENCES session_history_copies(session_id),
+    sequence INTEGER NOT NULL REFERENCES event_log(sequence),
+    archives_before INTEGER NOT NULL CHECK(archives_before > 0),
+    archive_sequence INTEGER REFERENCES event_log(sequence),
+    PRIMARY KEY(session_id, sequence)
+);
+
+CREATE VIEW session_history_events AS
+    SELECT json_extract(event_json, '$.invocation.session_id') AS owner_session_id,
+           0 AS inherited, NULL AS archive_sequence,
+           9223372036854775807 AS archives_before, e.* FROM runtime_events e
+    UNION ALL
+    SELECT h.session_id, 1, h.archive_sequence, h.archives_before, e.*
+    FROM session_history_members h JOIN runtime_events e ON e.sequence = h.sequence;
+
+CREATE TABLE session_history_artifacts (
+    session_id TEXT NOT NULL REFERENCES session_history_copies(session_id),
+    source_session_id TEXT NOT NULL,
+    source_artifact_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    PRIMARY KEY(session_id, source_session_id, source_artifact_id),
+    FOREIGN KEY(session_id, artifact_id) REFERENCES artifacts(session_id, id)
+);
+
 CREATE INDEX invocation_sequence ON event_log(invocation_id, sequence);
+
+CREATE UNIQUE INDEX archived_tool_result ON event_log(
+    CAST(json_extract(event_json, '$.fact.placeholder.identity.runtime_event_id') AS TEXT)
+) WHERE kind = 'tool_result_archived';
 
 CREATE INDEX session_event_sequence ON event_log(
     json_extract(event_json, '$.invocation.session_id'), sequence

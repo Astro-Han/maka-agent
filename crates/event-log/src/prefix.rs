@@ -50,13 +50,14 @@ impl EventLog {
         let mut transaction = connection.begin().await?;
         let selection = Selection::resolve(&mut transaction, &scope).await?;
         let lineage = Selection::predicate("runtime_events", "?2");
+        let source = if selection.session.is_some() { "session_history_events" } else { "runtime_events" };
         let session_filter = if selection.session.is_some() {
-            "json_extract(event_json,'$.invocation.session_id')=?1"
+            "owner_session_id=?1"
         } else { "?1 IS NULL" };
         let filter = format!("{session_filter} AND {lineage}");
         // Only internal SQL clauses are formatted; all identities remain bound.
         let budget = sqlx::query_as::<_, (i64, i64, i64)>(sqlx::AssertSqlSafe(format!(
-            "SELECT COALESCE(MAX(sequence), 0), COUNT(*), COALESCE(SUM(length(CAST(event_json AS BLOB))), 0) FROM runtime_events WHERE {filter}"
+            "SELECT COALESCE(MAX(sequence), 0), COUNT(*), COALESCE(SUM(length(CAST(event_json AS BLOB))), 0) FROM {source} runtime_events WHERE {filter}"
         ))).bind(&selection.session).bind(&selection.lineage);
         let (high_water, count, bytes) = budget.fetch_one(&mut *transaction).await?;
         if sequence_number(count)? > max_events as u64 || sequence_number(bytes)? > max_bytes as u64
@@ -72,7 +73,7 @@ impl EventLog {
         let mut events = Vec::new();
         {
             let statement = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "SELECT sequence, event_json, (SELECT length(payload) FROM tool_result_payloads WHERE event_id = runtime_events.event_id) FROM runtime_events WHERE {filter} ORDER BY sequence"
+                "SELECT sequence, event_json, (SELECT length(payload) FROM tool_result_payloads WHERE event_id = runtime_events.event_id) FROM {source} runtime_events WHERE {filter} ORDER BY sequence"
             ))).bind(&selection.session).bind(&selection.lineage);
             let mut rows = statement.fetch(&mut *transaction);
             while let Some(row) = rows.try_next().await? {

@@ -44,24 +44,31 @@ pub(crate) async fn digest_selected(
     if broken {
         return Err(ArchiveError::Corrupt.into());
     }
-    let archive_filter = Selection::predicate("a", "?5");
+    let archive_filter = Selection::archive_predicate("t", "a", "?1", "?5");
     let mut hash = Sha256::new();
     hash.update(b"maka.effective-context.v1\0");
     hash.update(source.digest.as_bytes());
     let mut after = 0_i64;
     loop {
-        let next: Option<(i64,String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT t.sequence,t.event_id FROM runtime_events a JOIN runtime_events t
-             ON t.event_id=json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id')
-             WHERE a.kind='tool_result_archived' AND a.sequence < ? AND json_extract(a.event_json,'$.invocation.session_id')=?
-               AND t.sequence > ? AND t.sequence <= ? AND {archive_filter} AND {target_filter} ORDER BY t.sequence LIMIT 1"
+        let next: Option<(i64,String,String,i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT t.sequence,t.event_id,json_extract(t.event_json,'$.invocation.session_id'),
+             CASE WHEN t.inherited = 1 THEN t.archives_before ELSE ?1 END
+             FROM runtime_events a JOIN session_history_events t
+             ON t.event_id=CAST(json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id') AS TEXT)
+             WHERE a.kind='tool_result_archived' AND t.owner_session_id=?2
+               AND t.sequence > ?3 AND t.sequence <= ?4 AND {archive_filter} AND {target_filter} ORDER BY t.sequence LIMIT 1"
         ))).bind(before as i64).bind(session).bind(after).bind(source.high_water as i64).bind(&selection.lineage).fetch_optional(&mut *connection).await?;
-        let Some((sequence, id)) = next else {
+        let Some((sequence, id, source_session, archive_before)) = next else {
             break;
         };
-        let (_, placeholder) = accepted::find(connection, session, &id, before)
-            .await?
-            .ok_or(ArchiveError::Corrupt)?;
+        let (_, placeholder) = accepted::find(
+            connection,
+            &source_session,
+            &id,
+            crate::sequence_number(archive_before)?,
+        )
+        .await?
+        .ok_or(ArchiveError::Corrupt)?;
         let replacement = placeholder
             .to_model_projection()
             .map_err(|_| ArchiveError::Corrupt)?;

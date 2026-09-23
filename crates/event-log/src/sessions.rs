@@ -20,6 +20,8 @@
 //! Durable session control metadata. Execution history remains in runtime_events.
 
 mod activity;
+mod copy;
+pub use copy::{SessionCopy, SessionCopyResult};
 mod execution;
 mod metadata;
 mod origin;

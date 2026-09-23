@@ -18,6 +18,7 @@
  */
 
 mod copy;
+pub(crate) mod history;
 mod read;
 mod records;
 use crate::{EventLog, StoreError};
@@ -98,7 +99,10 @@ impl EventLog {
                     else {
                         return Ok(ArtifactDeletion::NotFound);
                     };
-                    if !artifact.source.user_deletable() {
+                    let retained: bool = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM session_history_artifacts WHERE session_id = ? AND artifact_id = ?)",
+                    ).bind(&session_id).bind(&artifact_id).fetch_one(&mut *tx).await?;
+                    if !artifact.source.user_deletable() || retained {
                         return Ok(ArtifactDeletion::Protected);
                     }
                     sqlx::query("DELETE FROM artifacts WHERE session_id = ? AND id = ?")

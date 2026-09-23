@@ -230,15 +230,31 @@ pub(crate) async fn latest_record(
     through: u64,
 ) -> Result<Option<StoredEvent>, StoreError> {
     let filter = Selection::predicate("c", "?3");
-    let row: Option<(i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT c.sequence,c.event_json FROM runtime_events c WHERE c.kind='context_checkpoint_recorded' AND c.sequence <= ?1
-         AND json_extract(c.event_json,'$.invocation.session_id')=?2 AND {filter}
+    let eligible = format!(
+        "c.kind='context_checkpoint_recorded' AND c.sequence <= ?1 AND {filter}
          AND NOT EXISTS(SELECT 1 FROM runtime_events r WHERE r.invocation_id=c.invocation_id
            AND r.kind='model_requested' AND r.operation_id=json_extract(c.event_json,'$.fact.checkpoint.summary_step_id')
            AND json_extract(r.event_json,'$.fact.source_scope.kind')='lineage'
-           AND (?3 IS NULL OR c.invocation_id NOT IN (SELECT value FROM json_each(?3,'$.runs'))))
-         ORDER BY c.sequence DESC LIMIT 1"
-    ))).bind(through as i64).bind(&selection.session).bind(&selection.lineage).fetch_optional(&mut *connection).await?;
+           AND (?3 IS NULL OR c.invocation_id NOT IN (SELECT value FROM json_each(?3,'$.runs'))))"
+    );
+    // Limit each indexed branch before combining: a wide UNION view would sort
+    // every old body even when the newest native checkpoint is already known.
+    let row: Option<(i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT * FROM (
+           SELECT c.sequence,c.event_json FROM runtime_events c
+           WHERE json_extract(c.event_json,'$.invocation.session_id')=?2 AND {eligible}
+           ORDER BY c.sequence DESC LIMIT 1)
+         UNION ALL SELECT * FROM (
+           SELECT c.sequence,c.event_json FROM session_history_members h
+           JOIN runtime_events c ON c.sequence=h.sequence
+           WHERE h.session_id=?2 AND {eligible} ORDER BY h.sequence DESC LIMIT 1)
+         ORDER BY sequence DESC LIMIT 1"
+    )))
+    .bind(through as i64)
+    .bind(&selection.session)
+    .bind(&selection.lineage)
+    .fetch_optional(&mut *connection)
+    .await?;
     let Some((sequence, json)) = row else {
         return Ok(None);
     };

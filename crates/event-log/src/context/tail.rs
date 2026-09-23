@@ -36,11 +36,11 @@ pub(super) async fn read(
         .as_deref()
         .ok_or_else(|| invalid("context requires a Session"))?;
     let filter = Selection::predicate("t", "?5");
-    let archive_filter = Selection::predicate("a", "?5");
+    let archive_filter = Selection::archive_predicate("t", "a", "?4", "?5");
     macro_rules! selected { ($prefix:literal, $suffix:literal) => { concat!($prefix,
-        " FROM runtime_events t LEFT JOIN runtime_events a ON a.kind='tool_result_archived'
-           AND json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id')=t.event_id AND a.sequence < ?4 AND {archive_filter}
-         WHERE t.sequence > ?1 AND t.sequence <= ?2 AND json_extract(t.event_json,'$.invocation.session_id')=?3
+        " FROM session_history_events t LEFT JOIN runtime_events a ON a.kind='tool_result_archived'
+           AND CAST(json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id') AS TEXT)=t.event_id AND {archive_filter}
+         WHERE t.sequence > ?1 AND t.sequence <= ?2 AND t.owner_session_id=?3
            AND {filter} AND t.kind NOT IN ('model_observed','context_checkpoint_recorded','tool_result_archived')
            AND NOT EXISTS(SELECT 1 FROM runtime_events o WHERE o.invocation_id=t.invocation_id
              AND o.kind='invocation_opened' AND json_extract(o.event_json,'$.fact.input.kind')='context_compact')
@@ -55,7 +55,9 @@ pub(super) async fn read(
     }
     // Archived base bodies are NULL here, never retained with the returned tail.
     let rows = sqlx::query(sqlx::AssertSqlSafe(format!(selected!(
-        "SELECT t.sequence,t.event_id,CASE WHEN a.sequence IS NULL THEN t.event_json END AS canonical,
+        "SELECT t.sequence,t.event_id,json_extract(t.event_json,'$.invocation.session_id') AS source_session,
+         CASE WHEN t.inherited = 1 THEN t.archives_before ELSE ?4 END AS archives_before,
+         CASE WHEN a.sequence IS NULL THEN t.event_json END AS canonical,
          (SELECT length(payload) FROM tool_result_payloads WHERE event_id=t.event_id) AS raw_bytes", " ORDER BY t.sequence"
     ), filter=filter, archive_filter=archive_filter))).bind(after as i64).bind(through as i64).bind(session).bind(before as i64).bind(&selection.lineage).fetch_all(&mut *connection).await?;
     let mut used = bytes as usize;
@@ -69,10 +71,14 @@ pub(super) async fn read(
                 event,
             })));
         } else {
-            let archived =
-                crate::archive::archived(connection, session, row.try_get("event_id")?, before)
-                    .await?
-                    .ok_or_else(|| invalid("missing accepted archive replacement"))?;
+            let archived = crate::archive::archived(
+                connection,
+                row.try_get("source_session")?,
+                row.try_get("event_id")?,
+                sequence_number(row.try_get("archives_before")?)?,
+            )
+            .await?
+            .ok_or_else(|| invalid("missing accepted archive replacement"))?;
             let bytes = serde_json::to_vec(&(
                 &archived.event_id,
                 &archived.invocation,

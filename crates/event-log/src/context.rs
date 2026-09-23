@@ -20,7 +20,7 @@
 mod boundary;
 mod evidence;
 pub(crate) mod frozen;
-mod history;
+pub(crate) mod history;
 pub use history::{FrozenSessionHistory, HistoryCapture, HistoryCut};
 mod latest_main;
 mod lineage;
