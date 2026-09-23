@@ -55,6 +55,7 @@
 | **Session 待办：**`maka.todo` 拥有 `todo_read`／`todo_write`、类型化文档和输入框实时 Client。 | 公共命名空间存储提供修订检查；Remote 按调用者 Session 分页推送完整快照。停用／重启保留数据，不保留 Todo 专用 Host 服务或 Desktop IPC。 |
 | **Graph／Swarm：**已经是内置插件，behavior 按开放的类型化身份选择。Graph 使用公共授权 Session／执行命令、作用域数据和只读偏好，不接收 Host 私有句柄。 | 保持已有编排与唤醒行为；语义相同时复用窄命令，类型化领域 repository 可以保留。 |
 | **Scheduler：**插件拥有计划、冻结触发、漏触发／重试策略和通知撤销；激活只接收公共存储、授权、执行与通知能力，不使用调度专用 Host 服务。 | Host 解析授权并准入执行／原生投递。暂停撤销尚未准入的通知，包括 provider 的迟到接受；已接受执行仍归 Host。恢复复用精确 Fire 身份，不重放结果不确定的通知。现有 Desktop 操作保留为插件的薄适配。 |
+| **Jev：**`maka.jev` 静态内置插件提供 `maka.jev.evaluate`，原生／JSON 插件通过已准入作用域调用；Desktop 设置页支持完整 URL、模型、超时、API key 和自定义请求头。 | Host 负责 HTTP 授权、凭据命名空间和资源结算；插件负责 System One 协议、概率结果校验和端点凭据隔离。返回的 token 用量是供应商元数据，尚未接入 Host 模型用量账本。 |
 | **Web：**`maka.web` 拥有无浏览器 WebFetch、Tavily 搜索、来源选择、凭据验证与设置 Client；原生搜索通过公共 provider-tool 契约在每个模型步骤绑定。 | Host 负责授权 HTTP、代理、资源结算与命名空间凭据；Rust／JS 共用绑定，供应商结果和引用保留为规范事实。旧 Web RPC、全局设置和 Tavily 专用凭据槽已删除。 |
 | **Recall：**`maka.recall` 拥有 Unicode 字面词匹配、BM25 排序、Session 多样性及 RecallMore 片段扩展。 | 公共 Rust／JS 历史 API 提供固定水位 UTF-8 分页和归档元数据；Host 拥有访问检查及 SQLx 文本投影，不提供 Recall 专用服务，不需要 V8。隐私模式撤下工具，来源缺失和片段截断明确报告。 |
 | **Code Mode：**模式选择、嵌套派发及历史投影跨越多个 crate。 | 首批领域迁移后，在有实际 Contribution 边界收益时迁移面向用户的工具和模式策略；V8 所有权、嵌套调用权限、派发／结算及规范历史保留 runtime。不为搬迁 `exec` 发明万能执行 hook。 |

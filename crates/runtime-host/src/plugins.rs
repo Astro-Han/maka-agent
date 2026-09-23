@@ -27,6 +27,7 @@ pub(crate) mod host;
 mod http;
 pub(crate) mod insights;
 pub(crate) mod javascript;
+pub(crate) mod jev;
 pub(crate) mod models;
 mod owner;
 mod pricing;

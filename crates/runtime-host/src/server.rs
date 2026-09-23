@@ -267,6 +267,7 @@ impl Host {
             );
         }
         crate::plugins::skills::install(&mut setup)?;
+        crate::plugins::jev::install(&mut setup)?;
         crate::plugins::web::install(&mut setup)?;
         crate::plugins::insights::install(&mut setup)?;
         crate::plugins::session_import::install(&mut setup)?;
