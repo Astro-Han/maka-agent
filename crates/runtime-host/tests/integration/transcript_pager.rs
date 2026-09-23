@@ -27,6 +27,7 @@ use maka_runtime::event::{
 use maka_runtime_host::transcript::Transcript;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+mod search;
 
 async fn fixture() -> (tempfile::TempDir, EventLog, u64) {
     let dir = tempfile::tempdir().unwrap();

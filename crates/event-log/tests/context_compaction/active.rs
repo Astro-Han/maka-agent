@@ -48,6 +48,7 @@ fn request(id: &str, step: &str, purpose: ModelPurpose, source: &ModelContextSou
             context: Some(ModelRequestContext {
                 provider_id: "openai".into(),
                 context_window: Some(10_000),
+                model_context_window: None,
                 declared_window: Some(9000),
             }),
             source_scope: source.source_evidence.scope.clone(),

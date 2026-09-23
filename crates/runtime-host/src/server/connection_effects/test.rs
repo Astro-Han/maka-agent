@@ -171,7 +171,7 @@ fn provider(
         base_url: route.base_url,
         auth: maka_model::ProviderAuth::ApiKey(credential.to_owned()),
         headers: headers(prepared)?,
-        network: maka_network::Policy::from_settings(
+        network: maka_network::Policy::from_host_settings(
             &prepared.network_configuration().proxy,
             prepared.network_configuration().password.as_deref(),
         )

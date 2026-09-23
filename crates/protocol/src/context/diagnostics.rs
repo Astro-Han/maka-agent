@@ -21,6 +21,14 @@ use crate::{ProtocolError, Result, codec, turn};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub const DIAGNOSTICS_ERRORS: &[crate::OperationErrorCode] = &[
+    crate::OperationErrorCode::HostNotReady,
+    crate::OperationErrorCode::HostDraining,
+    crate::OperationErrorCode::OperationUnavailable,
+    crate::OperationErrorCode::NotFound,
+    crate::OperationErrorCode::InternalFailure,
+];
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContextDiagnosticsInput {
@@ -44,8 +52,14 @@ pub enum ContextDiagnosticsResult {
         completed_at: u64,
         #[serde(skip_serializing_if = "Option::is_none")]
         input_tokens: Option<u64>,
+        /// Current occupancy derived from the existing Main usage and any
+        /// subsequent additions. Absent when that baseline is no longer usable.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        current: Option<ContextUsage>,
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_read_input_tokens: Option<u64>,
+        /// Full model capacity frozen with the request, not an input budget or
+        /// a user-defined compaction threshold. Absent if that fact is unknown.
         #[serde(skip_serializing_if = "Option::is_none")]
         context_window: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,6 +67,14 @@ pub enum ContextDiagnosticsResult {
         #[serde(skip_serializing_if = "Option::is_none")]
         compaction: Option<ContextDiagnosticsCompaction>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextUsage {
+    pub connection_id: String,
+    pub tokens: u64,
+    pub approximate: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,12 +161,16 @@ pub fn decode_context_diagnostics_result(value: &Value) -> Result<ContextDiagnos
     let result: ContextDiagnosticsResult = turn::decode(value)?;
     if let ContextDiagnosticsResult::Available {
         context_window,
+        current,
         composition,
         ..
     } = &result
     {
         codec::string(&value["providerId"], "providerId", 512)?;
         codec::string(&value["modelId"], "modelId", 512)?;
+        if let Some(current) = current {
+            turn::entity(&current.connection_id)?;
+        }
         if *context_window == Some(0) {
             return Err(ProtocolError::invalid("Invalid contextWindow"));
         }

@@ -17,10 +17,12 @@
  * under the License.
  */
 
-//! Epoch 141 subscription inputs and assistant observation boundary.
-//! Outbound snapshots additionally support the host's empty interaction state
-//! and transcript-none policy; they do not claim full snapshot decoding support.
+//! Session subscriptions, observation snapshots and shared operation contracts.
 //! JSON callers must use the decode functions for semantic validation.
+mod operations;
+pub use operations::{decode_input, decode_output, errors};
+mod observation;
+pub use observation::*;
 mod resource;
 mod snapshot;
 pub use resource::*;

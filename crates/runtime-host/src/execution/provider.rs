@@ -94,8 +94,9 @@ pub(super) async fn observe_binding(
         .network_configuration()
         .await
         .map_err(crate::server::configuration::failure)?;
-    let network = maka_network::Policy::from_settings(&network.proxy, network.password.as_deref())
-        .map_err(|error| unavailable(error.to_string()))?;
+    let network =
+        maka_network::Policy::from_host_settings(&network.proxy, network.password.as_deref())
+            .map_err(|error| unavailable(error.to_string()))?;
     let catalog = config.catalog().await.map_err(|error| OperationError {
         code: if matches!(error, maka_config::ConfigError::CommitUnknown) {
             OperationErrorCode::CommitOutcomeUnknown

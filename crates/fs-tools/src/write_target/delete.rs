@@ -138,7 +138,7 @@ mod tests {
             },
         )
         .unwrap();
-        Target::capture(&authority, Path::new("file"), false).unwrap()
+        Target::capture(&authority, Path::new("file"), super::ReadMode::None).unwrap()
     }
 
     #[test]
@@ -243,7 +243,8 @@ mod tests {
         fs::write(parent.join("file"), "approved").unwrap();
         assert!(target.require_missing().is_err());
         let authority = Authority::new(&root, ReadScope::Unrestricted).unwrap();
-        let target = Target::capture(&authority, Path::new("parent/file"), false).unwrap();
+        let target =
+            Target::capture(&authority, Path::new("parent/file"), super::ReadMode::None).unwrap();
         assert!(target.require_existing().is_ok());
         assert!(target.require_missing().is_err());
         let result = target.delete_impl(

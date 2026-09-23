@@ -79,7 +79,7 @@ impl Executions {
             .await
             .map_err(internal)?;
         let network_route =
-            maka_network::Policy::from_settings(&network.proxy, network.password.as_deref())
+            maka_network::Policy::from_host_settings(&network.proxy, network.password.as_deref())
                 .map_err(internal)?;
         Ok(tools::NativeTools {
             workspace_origin,

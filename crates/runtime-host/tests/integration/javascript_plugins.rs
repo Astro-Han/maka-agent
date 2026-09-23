@@ -118,7 +118,7 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
         std::fs::write(fixture.workspace.join("unshared.txt"), "not granted").unwrap();
         let service = package(&fixture.workspace, "example.service", "shared", SERVICE, false);
         let source = CONSUMER.replace("'__PROTOCOL_EXECUTABLE__'", &serde_json::to_string(&std::env::current_exe().unwrap()).unwrap())
-            .replace("__MANAGED_SANDBOX__", if cfg!(target_os = "macos") { "supported" } else { "unsupported" })
+            .replace("__MANAGED_SANDBOX__", if cfg!(any(target_os = "macos", target_os = "linux")) { "supported" } else { "unsupported" })
             .replace("'example.echo'", "'example.native'");
         let consumer = package(&fixture.workspace, "example.consumer", "dedicated", &source, true);
         let (provider, mut requests) = Provider::controlled_with_usage(3, 5).await;

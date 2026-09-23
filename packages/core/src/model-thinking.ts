@@ -57,18 +57,12 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
 ];
 
 /**
- * The levels a generic-relay declaration may hold — the vocabulary the
- * settings surfaces offer and the one the data layer admits. `off` is the
- * sole exclusion: it is not an intensity tier but a *disable* wire
- * (`reasoning_effort: 'none'`), and no generic relay is presumed to honor
- * that encoding; built-in providers that support it get `off` from their own
- * metadata instead. `minimal` and every effort tier above are pure
- * intensity values — the user declaring them is the authority on what the
- * relay accepts.
+ * Explicit per-model relay declarations are the authority on supported wire
+ * options. Declaring `off` opts into reasoning_effort: 'none'; it is never
+ * inferred for an unknown relay. Other levels likewise require a declaration
+ * or provider metadata rather than being assumed supported.
  */
-export const DECLARABLE_RELAY_THINKING_LEVELS: readonly ThinkingLevel[] = THINKING_LEVELS.filter(
-  (level) => level !== 'off',
-);
+export const DECLARABLE_RELAY_THINKING_LEVELS: readonly ThinkingLevel[] = THINKING_LEVELS;
 
 export function isThinkingLevel(value: unknown): value is ThinkingLevel {
   return typeof value === 'string' && (THINKING_LEVELS as readonly string[]).includes(value);
@@ -178,12 +172,7 @@ function normalizeModelOverride(entry: unknown): ModelOverride | undefined {
     declared.adapter = entry.adapter;
   }
   if (Array.isArray(entry.thinkingLevels)) {
-    // Declared levels are filtered to the declarable vocabulary, not merely
-    // the level vocabulary: `off` is a disable-wire encoding no generic
-    // relay is presumed to speak, and a declaration table has no business
-    // carrying it. The codec rejects it in persisted documents for the same
-    // reason; normalize silently drops it because it also sanitizes input
-    // that never passed a validator (settings drafts, hand-edited tables).
+    // Preserve explicitly declared disable support; unknown values still drop.
     const declaredSet = new Set(
       entry.thinkingLevels.filter(
         (level): level is ThinkingLevel =>

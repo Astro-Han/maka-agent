@@ -61,6 +61,20 @@ pub struct ModelInfo {
         deserialize_with = "present"
     )]
     pub max_output_tokens: Option<u64>,
+    /// Account-advertised choices, not a guess based on a model name.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub thinking_levels: Option<Vec<crate::execution::ThinkingLevel>>,
+    /// Whether the provider accepts a request for a visible reasoning summary.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub supports_reasoning_summary: Option<bool>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -150,6 +164,13 @@ impl ModelInfo {
 
     pub fn validate(&self) -> Result<(), String> {
         validation::text(&self.id, 512, true)?;
+        if let Some(levels) = &self.thinking_levels {
+            for (index, level) in levels.iter().enumerate() {
+                if levels[..index].contains(level) {
+                    return Err("duplicate model thinking level".into());
+                }
+            }
+        }
         for (value, max) in [
             (self.display_name.as_deref(), 512),
             (self.description.as_deref(), 2048),

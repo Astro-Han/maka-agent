@@ -225,6 +225,7 @@ operations! {
     SessionSharedQuery => ("session.shared.query", Query, Ready),
     SubscriptionReady => ("subscription.ready", Control, Ready),
     SessionTranscriptPage => ("session.transcript.page", Query, Ready),
+    SessionTranscriptSearch => ("session.transcript.search", Query, Ready),
     SessionTurnLandmarksQuery => ("session.turn_landmarks.query", Query, Ready),
     SessionTurnsQuery => ("session.turns.query", Query, Ready),
     SessionWorkspaceRelocate => ("session.workspace.relocate", Command, Ready),

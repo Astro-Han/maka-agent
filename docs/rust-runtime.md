@@ -22,7 +22,7 @@
 [简体中文](./rust-runtime.zh-CN.md)
 
 The Rust workspace replaces Maka's runtime and host while preserving the
-TypeScript client protocol and interactions. Both use protocol epoch 165. The rewrite is incomplete;
+TypeScript client protocol and interactions. Both use protocol epoch 179. The rewrite is incomplete;
 unsupported operations return explicit errors.
 
 ## Build and run
@@ -48,6 +48,190 @@ maka host serve --root /absolute/path/to/new-root
 maka host status --root /absolute/path/to/new-root
 maka host retire --root /absolute/path/to/new-root
 ```
+
+The native `maka` executable opens its TUI when no subcommand is supplied;
+`maka tui` is the explicit equivalent. Use `maka --root /absolute/path/to/root`
+or `maka tui --root /absolute/path/to/root` to connect to an existing native Host.
+The default root is the account's native `runtime-host-rust` installation root,
+not Desktop's `userData` root. Startup does not create, migrate or stop a Host.
+This initial TUI slice provides keyboard/mouse navigation, a command palette,
+appearance switching, live Host status and a paginated session catalog. Open a
+session by mouse or keyboard to inspect its identity, workspace, model and latest
+preview. Catalog notifications refresh views; revision changes restart pagination
+instead of mixing snapshots. Session pages have independent in-memory drafts with
+grapheme-aware editing, soft wrapping, mouse selection and undo/redo. Enter inserts
+a newline, Ctrl+A selects all, Ctrl+Z/Ctrl+Y undo/redo, and Tab leaves the editor.
+Bracketed paste is a single undoable edit; terminal controls are rejected. Drafts
+are limited to 256 KiB each and 32 per running client, with bounded undo history;
+they survive navigation, reconnects and restarts. Drafts, preferences, reading
+bookmarks and navigation history are saved per Root/client profile. Use `--profile
+NAME` for independent clients; one writer owns each profile. Unconfirmed sends
+retain their original identity and are never automatically resent. Undo history
+and transcript text selections are not restored across processes.
+Use Ctrl+P in a session or with a selected catalog row to rename, archive or
+restore it. The centered dialog supports keyboard and mouse; archiving defaults
+to Cancel and retains history and drafts. Archived sessions remain accessible
+from the workspace. Renames use the Host's revision check; conflicts and unknown
+outcomes are never retried automatically. Acknowledgements update only their
+original session without navigating away. Background catalog refreshes retain
+row positions instead of inserting loading notices above existing content.
+
+Settings → Model connections shows a paged overview of enabled models and the Host
+default; it also follows configuration changes from other clients. This nested
+page supports Back/Forward and reopening without adding a sidebar item.
+Use its ⊕ button or Ctrl+P → Add model connection for API-key setup for OpenAI-compatible,
+OpenAI and Anthropic providers. Verify discovers models without saving; select
+models and explicitly save the connection and key together. Keys stay masked and
+are not saved in TUI state. If the Host has no default model, its first selected
+model becomes default.
+
+Select a connection and press Enter or click ✎ to rename it. Ctrl+P also offers
+enable, disable and remove; these confirmations default to Cancel. Renaming and
+toggling preserve the endpoint, enabled model IDs, overrides and credentials.
+Disabling clears a default that uses this connection; enabling does not restore it.
+Removal permanently deletes the connection and its saved credentials, but keeps
+chat history. All changes use the Host's connection revision check; unknown
+outcomes require a fresh read, never an automatic retry.
+Use the connection page's ☆ button or Ctrl+P → Default model to choose the Host
+default. Select a model, then confirm; to clear it, select No default model and
+confirm Clear default. Only new sessions requesting the default are affected;
+existing sessions and drafts stay unchanged. Configuration changes withdraw the
+selection, and the Host checks the catalog revision before saving.
+Ctrl+P → Change service address edits non-OAuth connections. Review the full
+destination before confirming; saved credentials will be used there. Changing
+the address clears discovered models, model overrides and test results, but keeps
+enabled models and request overrides. The confirmation defaults to Cancel.
+For API-key connections, Ctrl+P → API key shows whether a key is configured and
+lets you replace it without revealing the saved key. The new value stays masked,
+is not saved in TUI state, and is discarded from the form on submission or disconnect.
+Saving is revision-checked; it does not test the key. Clear API key defaults to
+Cancel and removes only the Host's saved key, not the key at the provider.
+Ctrl+P → Fetch models queries the connection's currently configured service with
+saved credentials and saves the inventory after confirmation. Existing enabled
+selections are preserved; first discovery on an empty connection may enable its
+first model, without setting a Host default. The Host rechecks effect-relevant
+configuration before committing; this operation has no client revision precondition.
+Failures stay in the dialog, and uncertain outcomes are never automatically retried.
+Model-settings editors and OAuth UI are still pending.
+
+For an unarchived AI SDK session, click the model name on the composer's lower
+border or use Ctrl+P → Change model. Choose an enabled chat model from the Host's
+catalog, then confirm. This uses the selected model's default thinking settings;
+the Host default, other sessions, sandbox and draft stay unchanged. Concurrent
+changes are revision-checked and uncertain writes are not retried automatically.
+
+For an unarchived session, Ctrl+P also offers Change workspace. Enter an existing
+absolute directory on the Host; this changes future execution's working directory,
+not file locations. A project-backed session switched to a fixed directory no longer
+follows the project's location. The Host rejects busy or non-relocatable sessions;
+conflicts and unknown outcomes are not retried automatically.
+Ctrl+P → Change project binds an existing session to a registered project, with
+its directory resolved by the Host. Nothing is preselected; select a row and use
+Enter or Use project to confirm. Archived or unavailable projects cannot be applied.
+This changes only the selected session, preserves its draft and uses its revision
+check; it does not merge projects or move files.
+
+Projects (sidebar or Ctrl+P) lists the Host's registered projects. Select a row
+with the mouse or arrow keys, then use Enter or + to create a session bound to
+that project. The Host resolves its current directory; archived or unavailable
+projects cannot be used. Project changes refresh the list without rebinding a
+selection to a different row. ⓘ or Ctrl+P → Project locations shows registered
+Host directories, including the preferred directory and worktree markers. Long
+paths wrap; arrows or the mouse wheel scroll, PageUp/PageDown change catalog pages.
+The read-only view refreshes after project changes. Use ⊕ or Ctrl+P → Register project with an existing
+absolute Host directory, or choose Browse to navigate the directories published
+by that Host. Enter opens a directory; Register here (or Ctrl+Enter) registers the
+current one. Backspace goes up, PageUp/PageDown change pages, and Esc returns to
+the path editor without losing its draft. Ctrl+P also offers project rename,
+archive and restore.
+Archiving keeps existing sessions and files but prevents new project sessions;
+confirmation defaults to Cancel. Project mutations follow the Host's serialized
+commits, without session-style revision checks. Unknown outcomes
+are not retried automatically. Ctrl+P → Relink project accepts a replacement
+absolute Host directory, then asks for confirmation (Cancel is selected by
+default). Relinking replaces the project's locations and updates its sessions;
+if the destination belongs to another registered project, the Host merges it
+into this one. Files are not moved. Edit path returns to the input; an unknown
+outcome blocks editing and resubmission until the dialog is closed and state is
+checked. Relinking is not a promise to move already-running execution.
+
+The Inbox lists sessions with unresolved approvals, questions or forms, including
+sessions not opened in this client. Its filled diamond indicates pending work;
+background updates never open a dialog or move focus. Open a session to review
+its current requests, then use Alt+Left to return. Session fullscreen exposes an
+Inbox icon while attention is needed. The native Host supports `pending_start`
+and `pending_continue` on `session.catalog.query`; the legacy TypeScript Host
+returns `operation_unavailable` for these new query kinds.
+Use + (or Ctrl+N in the workspace) to create a session in the process's current
+directory with the Host's default model. Ctrl+S or the send icon submits the draft;
+Enter still inserts a newline. Acknowledgements clear only an unchanged sent draft.
+Unknown outcomes retain the draft and replace the send icon with a delivery check
+(Ctrl+R), which queries the original message ID without resending. A confirmed
+receipt clears only the unchanged draft; confirmed cancellation keeps it for an
+explicit new send. An absent receipt is not proof of non-delivery: sending stays
+disabled, editing remains available, and delivery can be checked again after
+reconnecting to the same Root.
+Session pages now consume snapshot/ready subscriptions, reconstruct byte fragments
+with digest checks, and reconcile UTF-16 live streams with durable messages.
+Reopening reloads Host history. Use the earlier-messages icon for older pages,
+the mouse wheel over the transcript, or PageUp/PageDown outside the composer.
+Assistant text now has basic Markdown styling (headings, emphasis, lists, code and
+visible link destinations). Message triangles fold/expand content; thinking and
+tool records start compact. Outside the editor, Space toggles the top message and
+End returns to the latest output; a down-arrow control appears when not following.
+Message/source-position anchors preserve reading across new output, older-page
+loads and width changes. Completed messages keep their layouts while live text
+updates; manual folds survive live-to-durable replacement. Folds and anchors are
+currently local to the open page, not saved across route changes or restarts.
+Tables preserve cell styling, allocate widths by content, wrap cells and honor
+left/right/center alignment; very narrow screens switch to labeled fields.
+Live Markdown caches closed top-level blocks and reparses the open tail. Documents
+containing square brackets still use full parsing so later reference definitions
+cannot invalidate cached links; large open blocks also still require full reflow.
+Code syntax highlighting, selection/copy, search and semantic tool cards remain incomplete.
+Pending interactions expose a compact ! action (Ctrl+A outside the editor).
+The review dialog shows the original Host request and identity, supports mouse
+and keyboard scrolling/choices, and defaults to Later, which leaves it pending.
+Permission requests can be denied or granted once, for the turn, or for the session;
+producer requests without a tool identity cannot receive a once-only grant.
+Client-capability approval explicitly grants the displayed provider/contract/scope
+for the session. Unknown outcomes only permit querying the original request;
+disappearing requests lose their approval buttons, and replies are bound to the
+original session, interaction, turn, run and request.
+Questionnaires have compact question tabs, radio choices with descriptions,
+grapheme-aware custom input (2,048 UTF-8 bytes per answer), and explicit skipping.
+Every question must be answered or explicitly skipped before Ctrl+S / Submit is
+enabled; Enter in custom input inserts a newline. Unsent answers survive Later
+and returning to the same pending request in this process, but are not persisted
+across restarts or retained if replaced by another review. The dialog sizes to
+its content and scrolls longer questions. Forms still require another client;
+structured form editors, a global pending inbox and richer tool cards remain pending.
+Current limits are 16 MiB per assembled message, 32 MiB per batch and retained
+history, 2,048 retained messages, and 131,072 layout rows / 64 MiB of estimated
+layout storage; capacity failures are explicit.
+The shell prioritizes content: Ctrl+B toggles an expanded navigation sidebar and
+compact icon rail; narrow terminals start with the rail. F11 toggles session focus
+mode, and the info icon reveals session metadata. The composer grows with its
+content up to a bounded height. F5 and the command palette refresh the current
+page; catalog notifications continue to update it automatically. Hover an icon for
+its tooltip, or focus it with the keyboard for a status-line description. Settings
+offer ASCII icons and reduced motion; sidebar transitions stop rendering when idle.
+Use Ctrl+P for commands and Ctrl+Q to leave the UI without stopping the Host.
+Piped stdin/stdout are rejected without entering terminal modes; explicit Host,
+Code Mode, inspect and sandbox subcommands retain their existing behavior.
+This does not replace a separately installed legacy TypeScript CLI on your PATH.
+
+TUI language selection uses `maka --locale zh-CN` (or `maka tui --locale zh-CN`),
+then `MAKA_LOCALE`, the saved profile preference, then automatic system detection. Supported values are `auto`,
+`zh-CN`, `zh-TW` and `en`; `zh` aliases `zh-CN`. Explicit `auto` ignores
+`MAKA_LOCALE`. Automatic detection honors the first nonempty `LC_ALL`,
+`LC_MESSAGES`, or `LANG`, then the native system locale; unsupported languages
+fall back to English. Invalid explicit preferences fail clearly.
+Settings lets you cycle languages using mouse or Tab/Enter without reconnecting
+or resetting navigation. Language and palette changes are saved to the client
+profile. Host diagnostics and business data retain their original language.
+Core TUI text lives in `crates/tui/locales/*.ftl`; missing/invalid translations
+fall back to English with deduplicated diagnostics shown in Settings.
 
 Desktop opens its navigation and draft editor before Host readiness. An unavailable
 Host does not exit the app: retry, switch Host, copy diagnostics, or quit. Draft text
@@ -296,6 +480,20 @@ user/project content paths stay separate from private journals.
   contract. Summary replay preserves item identity and Unicode-safe part boundaries without
   storing a second copy of its text; malformed metadata is not replayed.
 - Request-scoped proxy policy applies to HTTP and Responses WebSocket transport.
+  An enabled manual Host proxy takes precedence; otherwise the Host captures
+  `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (uppercase before lowercase).
+  A scheme-specific proxy wins over `ALL_PROXY`; `NO_PROXY` supports domains and
+  subdomains, IPv4/IPv6 addresses and CIDRs, and `*`. To force direct routing without
+  a manual proxy, clear the proxy variables or set `NO_PROXY=*` before starting the
+  Host. Restart an already-running Host with the new environment; a supervised
+  service gets its environment from its service manager, not a later TUI shell.
+  OAuth, model discovery and authorized tool networking share this policy;
+  sandbox CONNECT uses the HTTPS route regardless of destination port and still
+  checks destination permissions before connecting. Proxy failures never trigger
+  direct fallback. HTTP, HTTPS, SOCKS5 (local DNS) and SOCKS5H (proxy DNS) URLs are
+  supported; invalid proxy values are rejected without echoing credentials.
+  Environment credentials are not persisted. In CGI environments,
+  `HTTP_PROXY`/`http_proxy` are ignored.
   Failed WS handshakes retry five times with exponential backoff, then use HTTP
   through the same policy. Separately, main requests allow up to ten attempts for
   identified transient provider or native network failures, using frozen inputs and cancellable backoff.

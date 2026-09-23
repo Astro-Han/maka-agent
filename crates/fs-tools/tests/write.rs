@@ -60,7 +60,7 @@ async fn write_contract_authority_bounds_and_inode() {
         .unwrap();
     assert_eq!(
         result,
-        json!({"kind":"file_write","path":root.join("text"),"bytes":3})
+        json!({"kind":"file_write","path":root.join("text"),"bytes":3,"previousContent":"old content"})
     );
     assert_eq!(fs::read(root.join("hard")).unwrap(), "零".as_bytes());
     let after = File::from_std(fs::File::open(root.join("text")).unwrap())
@@ -70,7 +70,7 @@ async fn write_contract_authority_bounds_and_inode() {
         (before.dev(), before.ino(), before.permissions()),
         (after.dev(), after.ino(), after.permissions())
     );
-    executor
+    let created = executor
         .invoke(
             "Write".into(),
             json!({"path":"new","content":""}),
@@ -79,6 +79,20 @@ async fn write_contract_authority_bounds_and_inode() {
         .await
         .unwrap();
     assert_eq!(fs::read(root.join("new")).unwrap(), b"");
+    assert_eq!(created["previousContent"], "");
+    for previous in [vec![0xff, 0x00], vec![b'x'; 8193]] {
+        fs::write(root.join("new"), previous).unwrap();
+        let result = executor
+            .invoke(
+                "Write".into(),
+                json!({"path":"new", "content":"replacement"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(result.get("previousContent").is_none());
+        assert_eq!(fs::read(root.join("new")).unwrap(), b"replacement");
+    }
     fs::create_dir(root.join("dir")).unwrap();
     #[cfg(unix)]
     {

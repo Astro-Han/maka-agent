@@ -32,6 +32,16 @@ publish = false
 maka-insights = { path = "crates/insights" }
 maka-providers = { path = "crates/providers" }
 maka-responses = { path = "crates/responses" }
+fluent-bundle = "0.16.0"
+unic-langid = "0.9.6"
+sys-locale = "0.3.2"
+unicode-width = "0.2.2"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+unicode-segmentation = "1.13.3"
+maka-client = { path = "crates/client" }
+maka-tui = { path = "crates/tui" }
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
+crossterm = { version = "0.29.0", features = ["event-stream"] }
 maka-sandbox = { path = "crates/sandbox" }
 maka-web = { path = "crates/web" }
 maka-assistant = { path = "crates/assistant" }

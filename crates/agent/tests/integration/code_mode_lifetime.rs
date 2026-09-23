@@ -41,7 +41,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-fn input(base: &str, suffix: &str, effect: Arc<SlowEffect>) -> RunInput {
+fn input(base: &str, suffix: &str, effect: Arc<dyn maka_runtime::tools::ToolExecutor>) -> RunInput {
     RunInput {
         provider_id: "fixture".into(),
         main_output_limit: None,
@@ -250,4 +250,140 @@ async fn dropping_caller_keeps_unawaited_child_session_and_cell_owned_until_drai
     })
     .await
     .expect("cancelled unawaited Code Mode work must drain within the test bound");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn yielded_cell_can_receive_an_answer_and_be_observed_by_the_next_model_step() {
+    for continuation in [false, true] {
+        tokio::time::timeout(Duration::from_secs(15), verify_yielded(continuation))
+            .await
+            .expect("yielded cells must continue without cancelling the pending answer");
+    }
+}
+
+async fn verify_yielded(continuation: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let log = Arc::new(
+        EventLog::open(&directory.path().join("events.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let effect = Arc::new(fixture::AnswerEffect::default());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let provider_effect = effect.clone();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        http::read_request(&mut socket).await;
+        fixture::tool(
+            &mut socket,
+            "exec",
+            json!({"code":"return await tools.slow({value:42});","yield_time_ms":0}),
+        )
+        .await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let request = http::read_request(&mut socket).await;
+        let running: serde_json::Value = serde_json::from_str(
+            request["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(running["state"], "running");
+        provider_effect.entered.notified().await;
+        provider_effect.release.notify_one();
+        fixture::tool(
+            &mut socket,
+            "wait",
+            json!({"cell_id":running["cell_id"],"yield_time_ms":1000}),
+        )
+        .await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let request = http::read_request(&mut socket).await;
+        let completed: serde_json::Value = serde_json::from_str(
+            request["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(completed["state"], "completed");
+        assert_eq!(completed["result"]["value"], json!({"value":42}));
+        respond(&mut socket, false).await;
+    });
+    let engine = Engine::new(
+        log.clone(),
+        ModelExecutor::new(1, Duration::from_secs(5)).unwrap(),
+        CodeExecutor::new(1, CellLimits::default()).unwrap(),
+    );
+    let mut request = input(&base, "yielded", effect.clone());
+    if let maka_agent::RunWork::Message { max_steps, .. } = &mut request.work {
+        *max_steps = 3;
+    }
+    if continuation {
+        use maka_runtime::event::{EventWrite, InvocationInput, RuntimeEvent};
+        request.configuration.workspace_identity = Some(
+            maka_runtime::execution::WorkspaceIdentity::from_marker_id(
+                "ef751105-55b5-4d65-a364-646281586a17",
+            )
+            .unwrap(),
+        );
+        request.request_fingerprint =
+            Some(maka_runtime::artifact::content_digest(b"resume-yielded"));
+        let source = Invocation {
+            session_id: "session".into(),
+            turn_id: "source".into(),
+            run_id: "source".into(),
+            invocation_id: "source".into(),
+        };
+        for fact in [
+            Fact::InvocationOpened {
+                configuration: Some(Box::new(request.configuration.clone())),
+                input: InvocationInput::Message {
+                    content: "original question".into(),
+                    request_fingerprint: None,
+                    source_messages: Vec::new(),
+                },
+            },
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::Cancelled {
+                    source: "user".into(),
+                },
+            },
+        ] {
+            log.append(&EventWrite::plain(RuntimeEvent::new(source.clone(), fact)).unwrap())
+                .await
+                .unwrap();
+        }
+        let prefix = log
+            .run_prefix("session", "source", None, 100, 128 * 1024)
+            .await
+            .unwrap()
+            .unwrap();
+        let maka_agent::RunWork::Message {
+            tools, max_steps, ..
+        } = request.work
+        else {
+            unreachable!()
+        };
+        request.work = maka_agent::RunWork::Continuation {
+            source: maka_runtime::continuation::RunBoundary {
+                invocation: source,
+                high_water: prefix.high_water,
+                digest: prefix.digest,
+            },
+            tools,
+            max_steps,
+        };
+    }
+    engine.run(request, CancellationToken::new()).await.unwrap();
+    server.await.unwrap();
+    engine.drain().await;
+    assert_eq!(effect.count.load(Ordering::SeqCst), 1);
+    let projection = log
+        .prefix(100, 128 * 1024)
+        .await
+        .unwrap()
+        .project_invocation("invocation-yielded");
+    assert_eq!(projection.terminal, Some(TerminalStatus::Completed));
+    assert!(projection.uncertain_operations.is_empty());
 }

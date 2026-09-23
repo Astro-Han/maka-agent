@@ -30,6 +30,8 @@ mod request;
 pub(crate) mod safety;
 pub(crate) mod selection;
 mod tail;
+mod usage;
+pub use usage::ContextUsage;
 mod validate;
 
 use crate::StoreError;

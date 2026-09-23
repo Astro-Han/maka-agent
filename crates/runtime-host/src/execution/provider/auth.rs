@@ -100,8 +100,9 @@ pub(super) async fn observe(
         .map_err(crate::server::configuration::failure)?
         .ok_or_else(|| unavailable("OAuth credential connection is no longer available"))?;
     let settings = snapshot.network_configuration();
-    let policy = maka_network::Policy::from_settings(&settings.proxy, settings.password.as_deref())
-        .map_err(|error| unavailable(error.to_string()))?;
+    let policy =
+        maka_network::Policy::from_host_settings(&settings.proxy, settings.password.as_deref())
+            .map_err(|error| unavailable(error.to_string()))?;
     let client =
         maka_model::oauth::Client::new(&policy).map_err(|error| unavailable(error.to_string()))?;
     Ok(Arc::new(Binding {

@@ -20,9 +20,9 @@
 use super::super::{ensure, entity};
 use super::{count, encoded};
 use crate::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GoalStatus {
     Active,
@@ -36,8 +36,8 @@ pub enum GoalStatus {
     MaxIterations,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GoalProjection {
     pub goal_id: String,
     pub revision: u64,

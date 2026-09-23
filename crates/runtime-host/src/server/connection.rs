@@ -314,7 +314,7 @@ impl Host {
                     code: request.operation.unavailable_error(),
                     message: format!("{} is not implemented by this Rust Host", request.operation),
                 })
-            } else if subscriptions::errors(request.operation).is_some() {
+            } else if maka_protocol::subscription::errors(request.operation).is_some() {
                 if request.operation == Operation::SubscriptionOpen && !observing {
                     // Old invalidations cannot affect a newly bootstrapped view.
                     shell_changes = self.log.subscribe_shell_changes();

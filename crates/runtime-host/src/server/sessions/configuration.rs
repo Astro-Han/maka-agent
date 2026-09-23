@@ -238,16 +238,3 @@ async fn merge(
     }
     Ok(next)
 }
-
-pub(crate) const ERRORS: &[Code] = &[
-    Code::HostNotReady,
-    Code::HostDraining,
-    Code::OperationUnavailable,
-    Code::InvalidRequest,
-    Code::PersistenceFailed,
-    Code::InternalFailure,
-    Code::NotFound,
-    Code::CommitOutcomeUnknown,
-    Code::SessionBusy,
-    Code::OperationConflict,
-];

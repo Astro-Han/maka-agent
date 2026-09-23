@@ -118,7 +118,7 @@ mod tests {
         )
         .unwrap();
         fs::write(&path, "original").unwrap();
-        let target = Target::capture(&authority, Path::new("file"), false).unwrap();
+        let target = Target::capture(&authority, Path::new("file"), super::ReadMode::None).unwrap();
         let cancelled = CancellationToken::new();
         cancelled.cancel();
         let started = AtomicBool::new(false);
@@ -129,7 +129,7 @@ mod tests {
         assert!(!started.load(Ordering::SeqCst));
         assert_eq!(fs::read(&path).unwrap(), b"original");
 
-        let target = Target::capture(&authority, Path::new("file"), false).unwrap();
+        let target = Target::capture(&authority, Path::new("file"), super::ReadMode::None).unwrap();
         fs::rename(&path, root.join("before")).unwrap();
         fs::write(&path, "replacement").unwrap();
         assert!(matches!(
@@ -139,7 +139,7 @@ mod tests {
         assert!(!started.load(Ordering::SeqCst));
         assert_eq!(fs::read(&path).unwrap(), b"replacement");
 
-        let target = Target::capture(&authority, Path::new("file"), false).unwrap();
+        let target = Target::capture(&authority, Path::new("file"), super::ReadMode::None).unwrap();
         let result = target.delete_impl(&CancellationToken::new(), &started, || {
             fs::rename(&path, root.join("moved")).unwrap();
             fs::write(&path, "sentinel").unwrap();
@@ -153,7 +153,7 @@ mod tests {
         assert!(!root.join("moved").exists());
 
         let mut reader = fs::File::open(&path).unwrap();
-        Target::capture(&authority, Path::new("file"), false)
+        Target::capture(&authority, Path::new("file"), super::ReadMode::None)
             .unwrap()
             .delete(&CancellationToken::new(), &AtomicBool::new(false))
             .unwrap();

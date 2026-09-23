@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::invalid;
+use super::{invalid, selection::Selection};
 use crate::StoreError;
 use maka_runtime::event::RuntimeEvent;
 use sqlx::SqliteConnection;
@@ -144,7 +144,7 @@ pub(crate) async fn active_boundary(
     invocation: &str,
     through: u64,
 ) -> Result<(), StoreError> {
-    execution_boundary(connection, invocation, through, false).await
+    execution_boundary(connection, invocation, through, Boundary::Active).await
 }
 
 pub(crate) async fn settled_boundary(
@@ -152,19 +152,78 @@ pub(crate) async fn settled_boundary(
     invocation: &str,
     through: u64,
 ) -> Result<(), StoreError> {
-    execution_boundary(connection, invocation, through, true).await
+    execution_boundary(connection, invocation, through, Boundary::Settled).await
+}
+
+/// Main-model control may observe independent cells without summarizing away
+/// their unresolved effects. Direct calls and unfinished model steps still block.
+pub(crate) async fn model_boundary(
+    connection: &mut SqliteConnection,
+    invocation: &str,
+    through: u64,
+) -> Result<(), StoreError> {
+    execution_boundary(connection, invocation, through, Boundary::Model).await
+}
+
+enum Boundary {
+    Active,
+    Settled,
+    Model,
+}
+
+// Parameters 1/2/4 are invocation, upper cut, and whether independent work is allowed.
+const INDEPENDENT_CELLS: &str = "WITH RECURSIVE independent(operation_id) AS (
+  SELECT operation_id FROM runtime_events WHERE ?4 AND invocation_id=?1 AND sequence<=?2
+    AND kind='tool_dispatched' AND json_extract(event_json,'$.fact.call.origin.kind')='code_cell'
+  UNION ALL
+  SELECT child.operation_id FROM runtime_events child JOIN independent parent
+    ON json_extract(child.event_json,'$.fact.call.origin.parent_operation_id')=parent.operation_id
+    WHERE child.invocation_id=?1 AND child.sequence<=?2
+      AND child.kind IN ('tool_dispatched','tool_rejected')
+)";
+
+/// The prompt's immutable cut may lag only asynchronous cell events, not a new
+/// model step, direct tool result, checkpoint, or other selected history.
+pub(super) async fn model_source_unchanged(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    invocation: &str,
+    through: u64,
+) -> Result<(), StoreError> {
+    let filter = Selection::predicate("e", "?6");
+    let changed: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "{INDEPENDENT_CELLS}
+         SELECT EXISTS(SELECT 1 FROM runtime_events e WHERE e.sequence > ?3
+           AND json_extract(e.event_json,'$.invocation.session_id')=?5 AND {filter}
+           AND NOT (e.invocation_id=?1 AND e.kind IN ('tool_dispatched','tool_settled','tool_rejected')
+             AND e.operation_id IN (SELECT operation_id FROM independent)))"
+    )))
+    .bind(invocation)
+    .bind(i64::MAX)
+    .bind(through as i64)
+    .bind(true)
+    .bind(&selection.session)
+    .bind(&selection.lineage)
+    .fetch_one(connection)
+    .await?;
+    if changed {
+        return Err(invalid("model request source changed"));
+    }
+    Ok(())
 }
 
 async fn execution_boundary(
     connection: &mut SqliteConnection,
     invocation: &str,
     through: u64,
-    allow_summary_partial: bool,
+    boundary: Boundary,
 ) -> Result<(), StoreError> {
-    let pending: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events e WHERE e.invocation_id = ?1 AND e.sequence <= ?2 AND (
+    let pending: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "{INDEPENDENT_CELLS}
+        SELECT EXISTS(SELECT 1 FROM runtime_events e WHERE e.invocation_id = ?1 AND e.sequence <= ?2 AND (
           (e.kind = 'tool_dispatched' AND NOT EXISTS(SELECT 1 FROM runtime_events t
-             WHERE t.invocation_id = e.invocation_id AND t.operation_id = e.operation_id AND t.kind = 'tool_settled' AND t.sequence <= ?2))
+             WHERE t.invocation_id = e.invocation_id AND t.operation_id = e.operation_id AND t.kind = 'tool_settled' AND t.sequence <= ?2)
+             AND e.operation_id NOT IN (SELECT operation_id FROM independent))
           OR (e.kind = 'model_requested' AND NOT EXISTS(SELECT 1 FROM runtime_events t
              WHERE t.invocation_id = e.invocation_id AND t.operation_id = e.operation_id AND t.kind IN ('model_completed','model_interrupted') AND t.sequence <= ?2))
           OR (e.kind = 'model_completed' AND EXISTS(SELECT 1 FROM json_each(e.event_json, '$.fact.output.parts') p
@@ -181,7 +240,7 @@ async fn execution_boundary(
                    OR (json_extract(barrier.event_json, '$.fact.event.kind')='tool_call'
                      AND json_extract(barrier.event_json, '$.fact.event.data.provider_executed')=1)
                    OR (json_extract(barrier.event_json, '$.fact.event.data.provider_options') IS NOT NULL
-                     AND json_extract(barrier.event_json, '$.fact.event.data.provider_options') != '{}'))))
+                     AND json_extract(barrier.event_json, '$.fact.event.data.provider_options') != '{{}}'))))
              AND NOT (?3 AND EXISTS(SELECT 1 FROM runtime_events r WHERE r.invocation_id=e.invocation_id AND r.operation_id=e.operation_id
                AND r.kind='model_requested' AND json_extract(r.event_json,'$.fact.purpose')='summary')
                AND NOT EXISTS(SELECT 1 FROM runtime_events o WHERE o.invocation_id=e.invocation_id
@@ -196,7 +255,8 @@ async fn execution_boundary(
                WHERE json_extract(result.value, '$.kind') = 'tool_result'
                  AND json_extract(result.value, '$.id') = json_extract(p.value, '$.call.id')
                  AND json_extract(result.value, '$.name') = json_extract(p.value, '$.call.name'))))))",
-    ).bind(invocation).bind(through as i64).bind(allow_summary_partial).fetch_one(connection).await?;
+    ))).bind(invocation).bind(through as i64).bind(matches!(boundary,Boundary::Settled))
+        .bind(matches!(boundary,Boundary::Model)).fetch_one(connection).await?;
     if pending {
         return Err(invalid(
             "active source contains unresolved model or tool work",

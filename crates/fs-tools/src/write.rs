@@ -199,7 +199,11 @@ fn run(
     let mut target = crate::write_target::Target::capture(
         authority,
         Path::new(input.path()),
-        input.needs_read(),
+        if input.needs_read() {
+            crate::write_target::ReadMode::Required
+        } else {
+            crate::write_target::ReadMode::Preview
+        },
     )?;
     #[cfg(test)]
     if let Some(hook) = coordinator.after_capture.lock().unwrap().take() {

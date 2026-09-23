@@ -136,9 +136,9 @@ const PROJECTION_FIELDS = [
 export type SessionCatalogRevision = `sha256:${string}`;
 
 export type SessionCatalogQueryInput =
-  | { readonly kind: 'list_start' }
+  | { readonly kind: 'list_start' | 'pending_start' }
   | {
-      readonly kind: 'list_continue';
+      readonly kind: 'list_continue' | 'pending_continue';
       readonly revision: SessionCatalogRevision;
       readonly cursor: string;
     }
@@ -488,18 +488,18 @@ export function decodeExecutionBoundarySummary(value: unknown): ExecutionBoundar
 
 export function decodeSessionCatalogQueryInput(value: unknown): SessionCatalogQueryInput {
   const input = requireRecord(value, 'Session catalog query input');
-  if (input.kind === 'list_start') {
+  if (input.kind === 'list_start' || input.kind === 'pending_start') {
     requireExactRecord(input, 'Session catalog list start input', ['kind']);
-    return { kind: 'list_start' };
+    return { kind: input.kind };
   }
-  if (input.kind === 'list_continue') {
+  if (input.kind === 'list_continue' || input.kind === 'pending_continue') {
     const exact = requireExactRecord(input, 'Session catalog list continuation input', [
       'kind',
       'revision',
       'cursor',
     ]);
     return {
-      kind: 'list_continue',
+      kind: input.kind,
       revision: catalogRevision(exact.revision),
       cursor: requireUtf8String(
         exact.cursor,

@@ -56,6 +56,13 @@ function diagnostics(value, model, window, inputTokens) {
   assert.equal(value.modelId, model);
   assert.equal(value.contextWindow, window);
   assert.equal(value.inputTokens, inputTokens);
+  assert.equal(
+    value.current.tokens,
+    inputTokens + 1,
+    'reuse the latest input + output, not cumulative usage',
+  );
+  assert.equal(value.current.approximate, true);
+  assert.equal(typeof value.current.connectionId, 'string');
 }
 export async function verifyModelOverrides(connection, workspace, reopened, openClient) {
   const request = (operation, input) => connection.request(operation, input, 5000);
@@ -119,22 +126,47 @@ export async function verifyModelOverrides(connection, workspace, reopened, open
     ];
     for (const input of inputs) await request('session.create', input);
     const turns = [];
-    // Usage exceeds the displayed inputLimit. No contextWindow was declared for
+    // Usage exceeds inputLimit. No contextWindow was declared for
     // this model, so the second real request must remain Main, not a summary.
     for (let i = 1; i <= 2; i++) {
       const marker = 'FACTS_INPUT_ONLY_' + i;
-      fixture.expect({
+      const stream = fixture.expect({
         path: '/v1/chat/completions',
         model: inputOnlyId,
         parallel: true,
         marker,
         answer: 'input-only main ' + i,
         tokens: 100,
+        streamHold: i === 2,
       });
-      turns.push(await start(turnInput('facts-input-only', 'input-only-' + i, marker)));
+      const input = turnInput('facts-input-only', 'input-only-' + i, marker);
+      if (i === 2) {
+        await request('turn.start', input);
+        await stream.wait();
+        const beforeStream = 101 + Math.ceil((12 + marker.length) / 4);
+        const deadline = Date.now() + 5000;
+        let live;
+        do {
+          live = await queryDiagnostics('facts-input-only');
+          if (live.current?.tokens > beforeStream) break;
+          await delay(10);
+        } while (Date.now() < deadline);
+        assert(
+          live.current?.tokens > beforeStream,
+          'pending assistant output is included before provider usage arrives',
+        );
+        assert.equal(live.current.approximate, true);
+        stream.release();
+        turns.push({
+          input,
+          terminal: await terminal(request, fixture, input.sessionId, input.turnId),
+        });
+      } else {
+        turns.push(await start(input));
+      }
     }
     const inputOnlyDiagnostics = await queryDiagnostics('facts-input-only');
-    diagnostics(inputOnlyDiagnostics, inputOnlyId, 20, 100);
+    diagnostics(inputOnlyDiagnostics, inputOnlyId, undefined, 100);
 
     await writeFile(join(workspace, 'facts-evidence.txt'), evidence);
     const gate = fixture.expect({
@@ -146,13 +178,14 @@ export async function verifyModelOverrides(connection, workspace, reopened, open
       read: true,
       hold: true,
     });
-    fixture.expect({
+    const toolGate = fixture.expect({
       path: '/v1/chat/completions',
       model: modelId,
       outputLimit: 12345,
       parallel: false,
       marker: 'FACTS_FROZEN',
       toolResult: true,
+      hold: true,
       answer: 'facts frozen complete',
     });
     const frozenInput = turnInput('facts-frozen', 'frozen', 'FACTS_FROZEN', 2);
@@ -168,6 +201,14 @@ export async function verifyModelOverrides(connection, workspace, reopened, open
     await updateDeclaration(request, rows[0], nextPin);
     const during = await catalog(request);
     gate.release();
+    await toolGate.wait();
+    const withResult = await queryDiagnostics('facts-frozen');
+    assert(
+      withResult.current.tokens > 43,
+      'new model-facing Read result increases current occupancy',
+    );
+    assert.equal(withResult.current.approximate, true);
+    toolGate.release();
     turns.push({
       input: frozenInput,
       terminal: await terminal(request, fixture, frozenInput.sessionId, frozenInput.turnId),

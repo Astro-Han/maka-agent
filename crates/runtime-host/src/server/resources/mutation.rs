@@ -56,7 +56,8 @@ pub(super) async fn start(host: &Host, input: ResourceStartInput) -> Result<Outc
     let state_root = host.root.canonical_path().to_owned();
     let source = input.command.clone();
     let network = host.configuration.network_configuration().await?;
-    let route = maka_network::Policy::from_settings(&network.proxy, network.password.as_deref())?;
+    let route =
+        maka_network::Policy::from_host_settings(&network.proxy, network.password.as_deref())?;
     let (command, source, pty, sandbox) = match tokio::task::spawn_blocking(move || {
         let (sandbox, _) = crate::execution::permissions::resolve(
             mode,

@@ -271,6 +271,7 @@ fn path_free(request: &Request) -> bool {
         | Operation::SubscriptionClose
         | Operation::SubscriptionPtyInterestSet
         | Operation::SessionTranscriptPage
+        | Operation::SessionTranscriptSearch
         | Operation::SubscriptionReady => true,
         _ => false,
     }

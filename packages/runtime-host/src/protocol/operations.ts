@@ -64,6 +64,7 @@ import { SCHEDULED_TASK_OPERATION_SPECS } from './scheduled-task.js';
 import { SESSION_CATALOG_OPERATION_SPECS } from './session-catalog.js';
 import { SESSION_CONTINUITY_OPERATION_SPECS } from './session-continuity.js';
 import { SESSION_TRANSCRIPT_OPERATION_SPECS } from './session-transcript.js';
+import { SESSION_TRANSCRIPT_SEARCH_OPERATION_SPECS } from './session-transcript-search.js';
 import { SESSION_TURNS_OPERATION_SPECS } from './session-turns.js';
 import { SESSION_TODO_OPERATION_SPECS } from './session-todo.js';
 import { SESSION_COLLABORATION_OPERATION_SPECS } from './session-collaboration.js';
@@ -168,6 +169,7 @@ export * from './access-authority.js';
 export * from './configuration.js';
 export * from './daily-review.js';
 export * from './context.js';
+export * from './session-transcript-search.js';
 export * from './agent-graph.js';
 export * from './execution-inspect.js';
 export * from './client-capability.js';
@@ -226,6 +228,7 @@ export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
   INTERACTION_OPERATION_SPECS,
   SESSION_CONTINUITY_OPERATION_SPECS,
   SESSION_TRANSCRIPT_OPERATION_SPECS,
+  SESSION_TRANSCRIPT_SEARCH_OPERATION_SPECS,
   SESSION_TURNS_OPERATION_SPECS,
   SESSION_CATALOG_OPERATION_SPECS,
   SESSION_EFFECT_OPERATION_SPECS,
@@ -356,6 +359,7 @@ export const REMOTE_OWNER_OPERATION_GRANTS = Object.freeze([
   'session.revision.abandon',
   'session.revision.create',
   'session.transcript.page',
+  'session.transcript.search',
   'session.turn_landmarks.query',
   'session.turns.query',
   'session.workspace.relocate',

@@ -51,6 +51,7 @@ async fn original_client_declarations_freeze_each_invocation_and_reopen_without_
                     stored.event.invocation.turn_id.as_str(),
                     context.context_window,
                     context.declared_window,
+                    context.model_context_window,
                 ));
             }
         }
@@ -58,11 +59,11 @@ async fn original_client_declarations_freeze_each_invocation_and_reopen_without_
         assert_eq!(
             &requests[..5],
             &[
-                ("input-only-1", Some(20), None),
-                ("input-only-2", Some(20), None),
-                ("frozen", Some(64000), Some(64000)),
-                ("frozen", Some(64000), Some(64000)),
-                ("next", Some(96000), Some(96000)),
+                ("input-only-1", Some(20), None, None),
+                ("input-only-2", Some(20), None, None),
+                ("frozen", Some(32000), Some(64000), Some(64000)),
+                ("frozen", Some(32000), Some(64000), Some(64000)),
+                ("next", Some(32000), Some(96000), Some(96000)),
             ]
         );
         assert_eq!(

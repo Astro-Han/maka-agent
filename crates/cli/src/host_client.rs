@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use maka_event_log::root::{self, RootNamespaces};
+use maka_client::local::{Discovery, Stream, open_stream, read_discovery};
 use maka_protocol::{
     COMPATIBILITY_EPOCH, COMPOSITION_ID, Operation, Outcome, Request,
     handshake::{ClientHello, HostHandshake, Lifecycle, decode_host_handshake},
@@ -28,31 +28,12 @@ use maka_transport::ndjson::{NdjsonReader, NdjsonWriter};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    io::Read,
     num::{NonZeroU16, NonZeroU32},
-    path::{Path, PathBuf},
+    path::Path,
     time::Duration,
 };
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio_util::sync::CancellationToken;
-
-#[cfg(unix)]
-pub(super) type Stream = tokio::net::UnixStream;
-#[cfg(windows)]
-pub(super) type Stream = tokio::net::windows::named_pipe::NamedPipeClient;
-
-/// Discovery is only a hint. The live handshake must confirm both root and epoch.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Discovery {
-    root_id: String,
-    generation: Option<String>,
-    host_epoch: String,
-    endpoint: PathBuf,
-    pid: NonZeroU32,
-    #[serde(default)]
-    websocket_endpoints: Vec<String>,
-}
 
 #[derive(serde::Serialize)]
 pub(super) struct LiveHost {
@@ -247,77 +228,4 @@ impl HostClient {
         })
         .await?
     }
-}
-
-async fn open_stream(endpoint: &Path) -> Result<Stream, HostError> {
-    #[cfg(unix)]
-    return Ok(Stream::connect(endpoint).await?);
-    #[cfg(windows)]
-    {
-        use tokio::net::windows::named_pipe::ClientOptions;
-        loop {
-            match ClientOptions::new().open(endpoint) {
-                Ok(stream) => return Ok(stream),
-                // An existing pipe instance may be between accepts.
-                Err(error) if error.raw_os_error() == Some(231) => {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                Err(error) => return Err(error.into()),
-            }
-        }
-    }
-}
-
-fn read_discovery(path: &Path) -> Result<Discovery, HostError> {
-    let root = root::resolve(path)?;
-    let path = RootNamespaces::for_current_account()?
-        .control
-        .join(root.root_id())
-        .join("registration.json");
-    let before = path.symlink_metadata()?;
-    if !before.is_file() || before.len() > 16 * 1024 {
-        return Err("Invalid Host discovery record".into());
-    }
-    #[cfg(unix)]
-    let file = {
-        use std::os::unix::fs::OpenOptionsExt;
-        std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(&path)?
-    };
-    #[cfg(windows)]
-    let file = maka_event_log::root::windows::open_nofollow(&path, false)?;
-    if !file.metadata()?.is_file() {
-        return Err("Host discovery is not a regular file".into());
-    }
-    let mut bytes = Vec::new();
-    file.take(16 * 1024 + 1).read_to_end(&mut bytes)?;
-    let after = path.symlink_metadata()?;
-    if !after.is_file()
-        || bytes.len() > 16 * 1024
-        || before.len() != bytes.len() as u64
-        || before.len() != after.len()
-        || before.modified()? != after.modified()?
-    {
-        return Err("Host discovery changed while reading".into());
-    }
-    let discovery: Discovery = serde_json::from_slice(&bytes)?;
-    if discovery.root_id != root.root_id()
-        || discovery.host_epoch.is_empty()
-        || discovery.host_epoch.len() > 128
-        || !discovery.endpoint.is_absolute()
-    {
-        return Err("Host discovery does not match the native root".into());
-    }
-    #[cfg(windows)]
-    if !discovery
-        .endpoint
-        .to_str()
-        .and_then(|path| path.strip_prefix(r"\\.\pipe\"))
-        .is_some_and(|name| !name.is_empty() && !name.contains(['\\', '/', '\0']))
-    {
-        return Err("Host discovery is not a local named pipe".into());
-    }
-    Ok(discovery)
 }

@@ -42,7 +42,9 @@ pub(crate) async fn connect(policy: &Policy, destination: &Destination) -> io::R
 
 async fn connect_inner(policy: &Policy, destination: &Destination) -> io::Result<Tunnel> {
     let target = (destination.host(), destination.port());
-    let Some(proxy) = policy.proxy_for(destination.host()) else {
+    // CONNECT carries no URL scheme. Like HTTPS transport, it uses HTTPS_PROXY
+    // (then ALL_PROXY), including tunnels to nonstandard destination ports.
+    let Some(proxy) = policy.proxy_for("https", destination.host()) else {
         return Ok(Box::new(TcpStream::connect(target).await?));
     };
     let host = proxy
@@ -54,7 +56,17 @@ async fn connect_inner(policy: &Policy, destination: &Destination) -> io::Result
         .ok_or_else(|| io::Error::other("proxy port missing"))?;
     let user = decode(proxy.username())?;
     let password = decode(proxy.password().unwrap_or_default())?;
-    if proxy.scheme() == "socks5h" {
+    if matches!(proxy.scheme(), "socks5" | "socks5h") {
+        let target = if proxy.scheme() == "socks5" {
+            tokio_socks::TargetAddr::Ip(
+                tokio::net::lookup_host(target)
+                    .await?
+                    .next()
+                    .ok_or_else(|| io::Error::other("SOCKS destination resolution failed"))?,
+            )
+        } else {
+            tokio_socks::IntoTargetAddr::into_target_addr(target).map_err(io::Error::other)?
+        };
         let stream = if user.is_empty() {
             tokio_socks::tcp::Socks5Stream::connect((host, port), target).await
         } else {

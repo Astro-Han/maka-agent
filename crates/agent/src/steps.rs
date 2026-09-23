@@ -53,9 +53,8 @@ pub(super) async fn run(
             compaction = pause.execution.compaction;
         }
         for step in 0..max_steps {
-            if cancellation.is_cancelled() {
-                return Err(RunError::Cancelled);
-            }
+            crate::interactions::wait_until_clear(&inner.log, &input.invocation, cancellation)
+                .await?;
             inner.log.commit_pending_steering(&input.invocation).await?;
             if let Some(pause) = handoff
                 .boundary(cancellation, |intent| async {
@@ -132,7 +131,10 @@ pub(super) async fn run(
                     8 * 1024 * 1024,
                 )
                 .await?;
-            if compaction == CompactionBudget::Available && auto_context::due(input, &source) {
+            if tools.code_idle()
+                && compaction == CompactionBudget::Available
+                && auto_context::due(input, &source)
+            {
                 compaction = CompactionBudget::Failed;
                 if auto_context::attempt(
                     inner,
@@ -200,6 +202,7 @@ pub(super) async fn run(
                         observed_output: false,
                     }),
                 ) if compaction == CompactionBudget::Available
+                    && tools.code_idle()
                     && step + 1 < max_steps
                     && !cancellation.is_cancelled() =>
                 {
@@ -247,9 +250,18 @@ pub(super) async fn run(
                     Err(error) => return Err(error.into()),
                 }
             }
-            // Bound settled tool output before Responses confirmation or compaction.
-            // Independent cells may still run; their pending effects remain canonical.
-            prune::run(inner, input, cancellation).await?;
+            // An exec/wait observation can settle while its cell is still
+            // asking the user. Pause before advancing or consuming the final
+            // step budget. First settle/reject the entire model tool batch:
+            // cancellation must still journal every remaining provider call.
+            crate::interactions::wait_until_clear(&inner.log, &input.invocation, cancellation)
+                .await?;
+            // Pruning/compaction require a settled boundary. A yielded cell is
+            // still live work, not a corrupt boundary or a reason to cancel it.
+            // Defer maintenance until it settles; the model can still call wait.
+            if tools.code_idle() {
+                prune::run(inner, input, cancellation).await?;
+            }
             if step_tools.finished() {
                 return Ok(maka_runtime::event::InvocationOutcome::Completed);
             }

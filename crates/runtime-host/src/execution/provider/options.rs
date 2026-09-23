@@ -96,12 +96,28 @@ pub(super) fn resolve(
         }
         return Ok(json!({}));
     }
-    Ok(openai(
+    // Account inventories can differ from build-time facts. With advertised
+    // levels, leave an unselected effort to the provider's own default.
+    let default_medium =
+        stored.is_none_or(|model| model.thinking_levels.is_none()) && default_medium(facts, model);
+    // Codex accepts visible summaries independently of this build's model list.
+    // An explicit account capability can opt out; it never gates rendering.
+    let summary = stored
+        .and_then(|model| model.supports_reasoning_summary)
+        .unwrap_or(row.provider_type == "openai-codex" || default_medium);
+    let mut options = openai(
         wire,
         thinking_level,
-        default_medium(facts, model),
+        default_medium,
+        summary,
         parallel.unwrap_or(true),
-    ))
+    );
+    if row.provider_type == "openai-codex" && (summary || thinking_level.is_some()) {
+        // The transport SDK also recognizes model names. Pass the provider
+        // contract explicitly so new account slugs do not lose these options.
+        options["openai"]["forceReasoning"] = json!(true);
+    }
+    Ok(options)
 }
 
 fn default_medium(facts: &ProviderFacts, model: &str) -> bool {
@@ -115,7 +131,13 @@ fn default_medium(facts: &ProviderFacts, model: &str) -> bool {
     })
 }
 
-fn openai(wire: Wire, level: Option<ThinkingLevel>, default_medium: bool, parallel: bool) -> Value {
+fn openai(
+    wire: Wire,
+    level: Option<ThinkingLevel>,
+    default_medium: bool,
+    summary: bool,
+    parallel: bool,
+) -> Value {
     let level = level.or(default_medium.then_some(ThinkingLevel::Medium));
     let mut options = json!({"store": false, "parallelToolCalls": parallel});
     if let Some(level) = level {
@@ -124,7 +146,7 @@ fn openai(wire: Wire, level: Option<ThinkingLevel>, default_medium: bool, parall
             level => json!(level),
         };
     }
-    if wire == Wire::OpenaiResponses && default_medium && level != Some(ThinkingLevel::Off) {
+    if wire == Wire::OpenaiResponses && summary && level != Some(ThinkingLevel::Off) {
         options["reasoningSummary"] = json!("auto");
     }
     json!({"openai": options})
@@ -300,20 +322,79 @@ mod tests {
                 .any(|effort| effort == "medium")
         );
         assert_eq!(
-            openai(Wire::OpenaiResponses, None, true, true),
+            openai(Wire::OpenaiResponses, None, true, true, true),
             json!({"openai":{"store":false,"parallelToolCalls":true,"reasoningEffort":"medium","reasoningSummary":"auto"}}),
         );
         assert_eq!(
-            openai(Wire::OpenaiResponses, Some(ThinkingLevel::Off), true, false),
+            openai(
+                Wire::OpenaiResponses,
+                Some(ThinkingLevel::Off),
+                true,
+                true,
+                false
+            ),
             json!({"openai":{"store":false,"parallelToolCalls":false,"reasoningEffort":"none"}}),
         );
         assert_eq!(
-            openai(Wire::OpenaiChat, Some(ThinkingLevel::High), true, false),
+            openai(
+                Wire::OpenaiChat,
+                Some(ThinkingLevel::High),
+                true,
+                true,
+                false
+            ),
             json!({"openai":{"store":false,"parallelToolCalls":false,"reasoningEffort":"high"}}),
         );
         assert_eq!(
-            openai(Wire::OpenaiResponses, None, false, true),
+            openai(Wire::OpenaiResponses, None, false, false, true),
             json!({"openai":{"store":false,"parallelToolCalls":true}}),
+        );
+        assert_eq!(
+            openai(Wire::OpenaiResponses, None, false, true, true),
+            json!({"openai":{"store":false,"parallelToolCalls":true,"reasoningSummary":"auto"}}),
+            "requesting a summary must not require a known model or force an effort"
+        );
+        let facts = maka_config::model_catalog::provider_facts("openai-codex").unwrap();
+        for summary in [None, Some(true), Some(false)] {
+            let mut row: ConnectionCatalogEntry = serde_json::from_value(json!({
+                "connectionId":"test", "revision":1, "slug":"test", "name":"Test",
+                "providerType":"openai-codex", "enabled":true,
+                "enabledModelIds":["future-codex"], "models":[{"id":"future-codex"}]
+            }))
+            .unwrap();
+            row.models[0].supports_reasoning_summary = summary;
+            let route = crate::provider_route::resolve(&row, facts, "future-codex").unwrap();
+            let value = resolve(&row, facts, "future-codex", None, &route).unwrap();
+            assert_eq!(
+                value["openai"].get("reasoningSummary").is_some(),
+                summary != Some(false)
+            );
+            assert_eq!(
+                value["openai"]["forceReasoning"].as_bool(),
+                (summary != Some(false)).then_some(true)
+            );
+            assert!(value["openai"].get("reasoningEffort").is_none());
+            let off = resolve(
+                &row,
+                facts,
+                "future-codex",
+                Some(ThinkingLevel::Off),
+                &route,
+            )
+            .unwrap();
+            assert!(off["openai"].get("reasoningSummary").is_none());
+        }
+        let row: ConnectionCatalogEntry = serde_json::from_value(json!({
+            "connectionId":"test", "revision":1, "slug":"test", "name":"Test",
+            "providerType":"openai-codex", "enabled":true, "enabledModelIds":["gpt-5.6-luna"],
+            "models":[{"id":"gpt-5.6-luna","thinkingLevels":["high"]}]
+        }))
+        .unwrap();
+        let route = crate::provider_route::resolve(&row, facts, "gpt-5.6-luna").unwrap();
+        let value = resolve(&row, facts, "gpt-5.6-luna", None, &route).unwrap();
+        assert!(
+            value["openai"].get("reasoningEffort").is_none(),
+            "do not force a static default absent from the account inventory"
         );
     }
 }

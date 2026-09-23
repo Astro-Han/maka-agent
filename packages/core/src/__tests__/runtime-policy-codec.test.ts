@@ -422,11 +422,18 @@ test('relay model profiles round-trip canonical entries and drafts, strictly', (
   assert.equal(JSON.stringify(hostileTable).includes('"__proto__"'), true);
 
   // Strictness: writers emit normalized tables, so anything else is corrupt.
+  assert.deepEqual(
+    decodeModelOverridesTable({
+      m: { thinkingLevels: ['off', 'high', 'max'] },
+    }),
+    {
+      m: { thinkingLevels: ['off', 'high', 'max'] },
+    },
+  );
   for (const bad of [
     'nope',
     [],
     { m: { thinkingLevels: ['turbo'] } }, // unknown level
-    { m: { thinkingLevels: ['off'] } }, // disable wire, not a declarable tier
     { m: { thinkingLevels: ['low', 'low'] } }, // duplicate
     { m: { thinkingLevels: [] } }, // empty level list
     { m: { vision: 'yes' } },

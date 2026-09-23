@@ -87,7 +87,13 @@ async function terminal(request, sessionId, turnId, model) {
 function diagnostics(value, inputTokens, cacheReadInputTokens, since) {
   assert.equal(typeof value.completedAt, 'number');
   assert(value.completedAt >= since && value.completedAt <= Date.now());
-  assert.deepEqual(value, {
+  const { current, ...completed } = value;
+  if (current !== undefined) {
+    assert.equal(typeof current.connectionId, 'string');
+    assert(current.tokens >= inputTokens);
+    assert.equal(current.approximate, true);
+  }
+  assert.deepEqual(completed, {
     status: 'available',
     providerId: 'openai',
     modelId: 'fixture-model',
@@ -212,9 +218,17 @@ export async function verifyAutoContext(connection, workspace, reopened) {
       ordinaryRoot(live.frames);
       model.releaseSummary();
       await model.waitFor('main');
+      const afterCompaction = await query();
+      const { current: _beforeCurrent, ...beforeMain } = firstDiagnostics;
+      const { current: afterCurrent, ...afterMain } = afterCompaction;
+      assert.equal(
+        afterCurrent,
+        undefined,
+        'compaction invalidates old current usage until the next Main settles',
+      );
       assert.deepEqual(
-        await query(),
-        firstDiagnostics,
+        afterMain,
+        beforeMain,
         'completed summary cannot replace completed main diagnostics',
       );
       const afterSummary = (

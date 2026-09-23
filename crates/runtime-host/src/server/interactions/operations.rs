@@ -20,62 +20,12 @@
 use super::{Interactions, failure};
 use crate::server::{Host, HostError};
 use maka_protocol::{
-    Operation, OperationError, OperationErrorCode as Code, Outcome, ProtocolError,
+    Operation, OperationError, OperationErrorCode as Code, Outcome,
     interaction::{self, InteractionAnswerInput, InteractionSnapshot},
 };
 use serde_json::Value;
 
-pub(crate) fn supports(operation: Operation) -> bool {
-    matches!(
-        operation,
-        Operation::InteractionQuery | Operation::InteractionAnswer
-    )
-}
-pub(crate) fn errors(operation: Operation) -> Option<&'static [Code]> {
-    const QUERY: &[Code] = &[
-        Code::HostNotReady,
-        Code::HostDraining,
-        Code::OperationUnavailable,
-        Code::InvalidRequest,
-        Code::NotFound,
-        Code::InternalFailure,
-    ];
-    const ANSWER: &[Code] = &[
-        Code::HostNotReady,
-        Code::HostDraining,
-        Code::OperationUnavailable,
-        Code::InvalidRequest,
-        Code::NotFound,
-        Code::OperationConflict,
-        Code::AlreadyResolved,
-        Code::InternalFailure,
-    ];
-    match operation {
-        Operation::InteractionQuery => Some(QUERY),
-        Operation::InteractionAnswer => Some(ANSWER),
-        _ => None,
-    }
-}
-pub(crate) fn decode_input(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    let result = match operation {
-        Operation::InteractionQuery => {
-            serde_json::to_value(interaction::decode_query_input(value)?)
-        }
-        Operation::InteractionAnswer => {
-            serde_json::to_value(interaction::decode_answer_input(value)?)
-        }
-        _ => return Err(ProtocolError::invalid("Unknown Interaction operation")),
-    };
-    result.map_err(|error| ProtocolError::invalid(error.to_string()))
-}
-pub(crate) fn decode_output(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    let snapshot = match operation {
-        Operation::InteractionQuery => interaction::decode_snapshot(value)?,
-        Operation::InteractionAnswer => interaction::decode_answered_snapshot(value)?,
-        _ => return Err(ProtocolError::invalid("Unknown Interaction operation")),
-    };
-    serde_json::to_value(snapshot).map_err(|error| ProtocolError::invalid(error.to_string()))
-}
+pub(crate) use maka_protocol::interaction::{decode_input, decode_output, errors, supports};
 pub(crate) async fn execute(
     host: &Host,
     operation: Operation,

@@ -124,6 +124,7 @@ impl Operation {
                 | Self::SessionRevisionAbandon
                 | Self::SessionRevisionCreate
                 | Self::SessionTranscriptPage
+                | Self::SessionTranscriptSearch
                 | Self::SubscriptionReady
                 | Self::SessionTurnLandmarksQuery
                 | Self::SessionTurnsQuery

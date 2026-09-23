@@ -31,18 +31,19 @@ import {
 } from '../model-thinking.js';
 import { isRelayProviderType } from '../llm-connections.js';
 
-test('declarable relay levels are every intensity tier but off', () => {
-  // `off` is a disable-wire encoding (reasoning_effort 'none'), not an
-  // intensity tier — a hybrid UI/data contract keeps it out of declarations.
+test('relay disable support is explicit per model, never inferred', () => {
   assert.deepEqual(normalizeModelOverrides({ m: { thinkingLevels: ['off', 'low'] } }), {
-    m: { thinkingLevels: ['low'] },
+    m: { thinkingLevels: ['off', 'low'] },
   });
-  assert.deepEqual(normalizeModelOverrides({ m: { thinkingLevels: ['off'] } }), { m: {} });
+  assert.deepEqual(normalizeModelOverrides({ m: { thinkingLevels: ['off'] } }), {
+    m: { thinkingLevels: ['off'] },
+  });
   const declaredOff = {
     providerType: 'openai-compatible',
     modelOverrides: { m: { thinkingLevels: ['off', 'low'] } },
   } as const;
-  assert.deepEqual([...thinkingVariantsForConnection(declaredOff, 'm')], ['low']);
+  assert.deepEqual([...thinkingVariantsForConnection(declaredOff, 'm')], ['off', 'low']);
+  assert.deepEqual([...thinkingVariantsForConnection(declaredOff, 'unknown')], []);
 });
 
 test('relay profiles preserve the fast service tier declaration', () => {
@@ -78,19 +79,10 @@ test('modelOverride returns undefined without a usable declaration', () => {
       junk: 'nope',
       badLevels: { thinkingLevels: 'low' },
       unknownLevels: { thinkingLevels: ['turbo'] },
-      offOnly: { thinkingLevels: ['off'] },
       badVision: { vision: 'yes' },
     },
   } as unknown as ConnectionThinkingContext;
-  for (const modelId of [
-    'missing',
-    'empty',
-    'junk',
-    'badLevels',
-    'unknownLevels',
-    'offOnly',
-    'badVision',
-  ]) {
+  for (const modelId of ['missing', 'empty', 'junk', 'badLevels', 'unknownLevels', 'badVision']) {
     assert.deepEqual(
       modelOverride(connection, modelId),
       ['missing', 'junk'].includes(modelId) ? undefined : {},
@@ -198,8 +190,7 @@ test('resolveThinkingLevel discards levels the model does not offer', () => {
     modelOverrides: { m: { thinkingLevels: ['off', 'low'] } },
   } as const;
   assert.equal(resolveThinkingLevel(relay, 'm', 'low'), 'low');
-  // `off` is not declarable for relays: a stray entry degrades to absent.
-  assert.equal(resolveThinkingLevel(relay, 'm', 'off'), undefined);
+  assert.equal(resolveThinkingLevel(relay, 'm', 'off'), 'off');
   assert.equal(resolveThinkingLevel(relay, 'm', 'max'), undefined);
   assert.equal(resolveThinkingLevel(relay, 'm', undefined), undefined);
   assert.equal(resolveThinkingLevel({ providerType: 'openai' }, 'gpt-5.5', 'xhigh'), 'xhigh');

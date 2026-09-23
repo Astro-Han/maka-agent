@@ -194,13 +194,16 @@ pub(super) fn resolve(
     if let Some(threshold) = profile.and_then(|p| p.compaction_threshold) {
         result.compaction_threshold = Some(threshold);
     }
+    if let Some(levels) = &model.thinking_levels {
+        result.thinking_levels = levels.clone();
+    }
     result.supports_vision = capabilities
         .vision
         .or(fallback.vision)
         .unwrap_or(result.supports_vision);
     if let Some(declared) = profile.and_then(|p| p.thinking_levels.as_ref()) {
         use ThinkingLevel::*;
-        let levels: Vec<_> = [Minimal, Low, Medium, High, Xhigh, Max]
+        let levels: Vec<_> = [Off, Minimal, Low, Medium, High, Xhigh, Max]
             .into_iter()
             .filter(|level| declared.contains(level))
             .collect();

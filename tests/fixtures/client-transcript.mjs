@@ -112,6 +112,22 @@ export async function finishTranscriptObservers(connection, sessionId, none, liv
     false,
     'transcript:none observers receive no transcript advancement',
   );
+  await assert.rejects(
+    connection.request(
+      'session.transcript.search',
+      {
+        subscriptionId: none.subscription.subscriptionId,
+        throughSequence: null,
+        query: 'text',
+        includeInternal: false,
+        cursor: null,
+        maxMatches: 8,
+      },
+      3000,
+    ),
+    (error) => error.code === 'operation_unavailable',
+    'search cannot upgrade transcript:none',
+  );
   await live.close();
 }
 
@@ -131,6 +147,41 @@ export async function completedTail(connection, sessionId, frames, startedAt) {
     assert.equal(rows[4].status, 'completed');
     for (const row of rows) assert(row.ts >= startedAt && row.ts <= Date.now());
     const initial = bootstrap(subscription).durable;
+    const searchInput = {
+      subscriptionId: subscription.subscriptionId,
+      throughSequence: initial.throughSequence,
+      query: 'completed😀',
+      includeInternal: false,
+      cursor: null,
+      maxMatches: 8,
+    };
+    const found = await connection.request('session.transcript.search', searchInput, 3000);
+    assert.equal(found.sessionId, sessionId);
+    assert.equal(found.matches.length, 1, 'search reaches messages outside a two-byte tail');
+    assert(found.matches[0].preview.includes('completed😀'));
+    assert.equal(found.nextCursor, null);
+    const hidden = await connection.request(
+      'session.transcript.search',
+      { ...searchInput, query: 'first question' },
+      3000,
+    );
+    assert.deepEqual(
+      hidden.matches,
+      [],
+      'search uses user-facing displayText, not hidden raw input',
+    );
+    const searchPage = await subscription.loadTranscriptPage({
+      ...pageInput(subscription),
+      direction: 'newer',
+      anchorSequence: found.matches[0].sequence - 1,
+      maxBytes: 192 * 1024,
+    });
+    const searchRows = await subscription.decodeTranscriptPage(searchPage, decodeStoredMessage);
+    assert.equal(
+      searchRows.messages[0].identity,
+      found.matches[0].sequence,
+      'existing pager locates a search result',
+    );
     assert(initial.nextCursor, 'two-byte bootstrap must require fragmented continuation');
     assert(
       initial.fragments.every((fragment) => /^sha256:[a-f0-9]{64}$/.test(fragment.payloadDigest)),
@@ -166,6 +217,22 @@ export async function activeTail(connection, observer, connectSibling) {
   bootstrap(subscription);
   const sibling = await connectSibling();
   try {
+    await assert.rejects(
+      sibling.request(
+        'session.transcript.search',
+        {
+          subscriptionId: subscription.subscriptionId,
+          throughSequence: bootstrap(subscription).durable.throughSequence,
+          query: 'text',
+          includeInternal: false,
+          cursor: null,
+          maxMatches: 8,
+        },
+        3000,
+      ),
+      (error) => error.code === 'not_found',
+      'search cannot borrow another connection subscription',
+    );
     await assert.rejects(
       sibling.request('subscription.ready', { subscriptionId: subscription.subscriptionId }, 3000),
       (error) => error.code === 'not_found',

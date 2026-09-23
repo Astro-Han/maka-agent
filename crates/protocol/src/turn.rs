@@ -26,6 +26,15 @@ pub use content::*;
 pub use resume::*;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
+
+pub const STOP_ERRORS: &[crate::OperationErrorCode] = &[
+    crate::OperationErrorCode::HostNotReady,
+    crate::OperationErrorCode::HostDraining,
+    crate::OperationErrorCode::OperationUnavailable,
+    crate::OperationErrorCode::NotFound,
+    crate::OperationErrorCode::OperationConflict,
+    crate::OperationErrorCode::InternalFailure,
+];
 pub use types::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

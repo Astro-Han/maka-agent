@@ -60,26 +60,3 @@ pub(super) async fn read_marker(log: &EventLog, value: &Value) -> Result<Session
     assert_read_marker_output_for_input(&input, &output).map_err(invalid)?;
     Ok(output)
 }
-
-pub(crate) const METADATA_ERRORS: &[Code] = &[
-    Code::HostNotReady,
-    Code::HostDraining,
-    Code::OperationUnavailable,
-    Code::NotFound,
-    Code::InvalidRequest,
-    Code::PersistenceFailed,
-    Code::CommitOutcomeUnknown,
-    Code::InternalFailure,
-];
-
-pub(crate) const READ_MARKER_ERRORS: &[Code] = &[
-    Code::HostNotReady,
-    Code::HostDraining,
-    Code::OperationUnavailable,
-    Code::NotFound,
-    Code::InvalidRequest,
-    Code::OperationConflict,
-    Code::PersistenceFailed,
-    Code::CommitOutcomeUnknown,
-    Code::InternalFailure,
-];

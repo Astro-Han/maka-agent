@@ -48,22 +48,3 @@ pub async fn fail_closure(database: &mut sqlx::SqliteConnection) {
     .await
     .unwrap();
 }
-
-pub fn reject_model(provider: &std::net::TcpListener) -> tokio::task::JoinHandle<()> {
-    let provider = tokio::net::TcpListener::from_std(provider.try_clone().unwrap()).unwrap();
-    tokio::spawn(async move {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let (mut stream, _) = provider.accept().await.unwrap();
-        let mut bytes = [0; 8192];
-        assert!(stream.read(&mut bytes).await.unwrap() > 0);
-        // A non-retryable provider refusal reaches normal failed finalization;
-        // all execution commits before the interaction closure remain valid.
-        stream
-            .write_all(
-                b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            )
-            .await
-            .unwrap();
-        stream.shutdown().await.unwrap();
-    })
-}

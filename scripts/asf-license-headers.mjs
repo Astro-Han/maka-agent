@@ -112,6 +112,7 @@ const coveredExtensions = new Map([
   ['.astro', 'astro'],
   ['.cjs', 'block'],
   ['.css', 'block'],
+  ['.ftl', 'hash'],
   ['.html', 'html'],
   ['.js', 'block'],
   ['.jsonc', 'slash'],

@@ -203,13 +203,25 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
         Fact::ModelCompleted {
             step_id: "writer-main".into(),
             output: serde_json::from_value(
-                json!({"parts":[],"finish_reason":"stop","usage":{"input_tokens":10}}),
+                json!({"parts":[],"finish_reason":"stop","usage":{"input_tokens":10,"output_tokens":0}}),
             )
             .unwrap(),
         },
     ))
     .await
     .unwrap();
+    let observed = log.subscribe_commits();
+    assert_eq!(
+        log.context_usage("session").await.unwrap().1,
+        Some(maka_event_log::context::ContextUsage {
+            tokens: 10,
+            approximate: false
+        })
+    );
+    assert!(
+        !observed.has_changed().unwrap(),
+        "usage queries must not write execution facts"
+    );
     let write = archive("writer", &target);
     let Fact::ToolResultArchived { placeholder } = &write.event().fact else {
         panic!()
@@ -246,6 +258,11 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
         .execute_batch("DROP TRIGGER reject_archive")
         .unwrap();
     log.append(&write).await.unwrap();
+    assert_eq!(
+        log.context_usage("session").await.unwrap().1,
+        None,
+        "archiving invalidates the old provider baseline without inventing a subtraction"
+    );
     assert!(
         matches!(log.latest_main_context("session").await.unwrap(),LatestMainContext::Selected(selected) if !selected.projection_current)
     );

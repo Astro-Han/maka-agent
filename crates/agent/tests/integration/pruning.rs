@@ -166,6 +166,7 @@ async fn settled_results_are_pruned_before_context_limits_and_survive_failed_sum
         input.context = Some(ModelRequestContext {
             provider_id: "openai".into(),
             context_window: Some(220),
+            model_context_window: None,
             declared_window: spent.then_some(220),
         });
         input.work = RunWork::Message {

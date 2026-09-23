@@ -36,6 +36,7 @@ fn context(window: Option<u64>) -> Option<ModelRequestContext> {
     Some(ModelRequestContext {
         provider_id: "openai".into(),
         context_window: Some(170),
+        model_context_window: None,
         declared_window: window,
     })
 }

@@ -21,8 +21,10 @@
 //! Decode at the JSON boundary; the owned types do not replace wire validation.
 
 mod decode;
+mod operations;
 mod output;
 pub use decode::{decode_mutation, decode_query};
+pub use operations::{MUTATION_ERRORS, QUERY_ERRORS, decode_input, decode_output, supports};
 pub use output::{assert_query_output, decode_mutation_result, decode_query_result};
 use serde::Serialize;
 

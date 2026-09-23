@@ -124,8 +124,14 @@ impl Mutation {
     ) -> Result<(String, Value), ToolError> {
         match self {
             Self::Write(input) => {
-                let result =
+                let mut result =
                     json!({"kind":"file_write","path":output_path,"bytes":input.content.len()});
+                // Capture under the mutation lock, through the same held file
+                // that will be written. A preview must not require read access
+                // or turn a large/binary overwrite into a failed operation.
+                if let Some(before) = write_preview(file, &input.content)? {
+                    result["previousContent"] = before.into();
+                }
                 Ok((input.content, result))
             }
             Self::Edit(input) => {
@@ -150,6 +156,41 @@ impl Mutation {
     }
 }
 
+fn write_preview(
+    file: Option<&mut cap_std::fs::File>,
+    after: &str,
+) -> Result<Option<String>, ToolError> {
+    use std::io::{Read, Seek, SeekFrom};
+    const LIMIT: usize = 8 * 1024;
+    if after.len() > LIMIT || after.contains('\0') {
+        return Ok(None);
+    }
+    let Some(file) = file else {
+        return Ok(Some(String::new()));
+    };
+    let available = LIMIT - after.len();
+    if file
+        .metadata()
+        .ok()
+        .is_none_or(|metadata| metadata.len() > available as u64)
+    {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    let read = (&mut *file)
+        .take(available as u64 + 1)
+        .read_to_end(&mut bytes);
+    // Even a failed read may advance the offset; restore it before any write.
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| failed(error.to_string()))?;
+    if read.is_err() || bytes.len() > available {
+        return Ok(None);
+    }
+    Ok(String::from_utf8(bytes)
+        .ok()
+        .filter(|text| !text.contains('\0')))
+}
+
 fn read_source(file: Option<&mut cap_std::fs::File>) -> Result<String, ToolError> {
     use std::io::{Read, Seek, SeekFrom};
     let file = file.ok_or_else(|| failed("mutation requires an existing file"))?;
@@ -168,4 +209,26 @@ fn read_source(file: Option<&mut cap_std::fs::File>) -> Result<String, ToolError
     file.seek(SeekFrom::Start(0))
         .map_err(|e| failed(e.to_string()))?;
     Ok(source)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn unavailable_preview_does_not_break_write_only_targets_or_advance_the_write_offset() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("write-only");
+        std::fs::write(&path, "old").unwrap();
+        let mut file = cap_std::fs::File::from_std(
+            std::fs::OpenOptions::new().write(true).open(&path).unwrap(),
+        );
+        let (content, result) = Mutation::complete_write("write-only".into(), "new".into())
+            .prepare(Some(&mut file), "write-only")
+            .unwrap();
+        assert!(result.get("previousContent").is_none());
+        file.write_all(content.as_bytes()).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+    }
 }

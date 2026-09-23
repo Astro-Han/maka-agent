@@ -190,13 +190,13 @@ fn model_override_sanitization_matches_source_and_empty_overlay_is_omitted() {
     let result = decode_catalog_query_result(&page).unwrap();
     assert_eq!(
         result["items"][3]["modelOverride"],
-        json!({"thinkingLevels":["low","high"],"serviceTier":"fast"})
+        json!({"thinkingLevels":["off","low","high"],"serviceTier":"fast"})
     );
     assert!(result["items"][0].get("requestBodyOverlay").is_none());
     page["items"][3]["modelOverride"] = json!({"thinkingLevels":["off"]});
     assert_eq!(
         decode_catalog_query_result(&page).unwrap()["items"][3]["modelOverride"],
-        json!({})
+        json!({"thinkingLevels":["off"]})
     );
     page["items"][3]["modelOverride"] = json!({});
     assert_eq!(

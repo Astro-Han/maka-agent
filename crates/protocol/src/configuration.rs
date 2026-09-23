@@ -22,6 +22,25 @@ use maka_runtime::configuration::validation as v;
 pub use maka_runtime::configuration::*;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+
+pub const QUERY_ERRORS: &[crate::OperationErrorCode] = &[
+    crate::OperationErrorCode::HostNotReady,
+    crate::OperationErrorCode::HostDraining,
+    crate::OperationErrorCode::OperationUnavailable,
+    crate::OperationErrorCode::InvalidRequest,
+    crate::OperationErrorCode::InternalFailure,
+    crate::OperationErrorCode::PersistenceFailed,
+];
+pub const MUTATION_ERRORS: &[crate::OperationErrorCode] = &[
+    crate::OperationErrorCode::HostNotReady,
+    crate::OperationErrorCode::HostDraining,
+    crate::OperationErrorCode::OperationUnavailable,
+    crate::OperationErrorCode::InvalidRequest,
+    crate::OperationErrorCode::InternalFailure,
+    crate::OperationErrorCode::PersistenceFailed,
+    crate::OperationErrorCode::CommitOutcomeUnknown,
+];
+
 fn decode<T: DeserializeOwned>(value: &Value) -> Result<T> {
     serde_json::from_value(value.clone())
         .map_err(|_| ProtocolError::invalid("Invalid configuration payload"))

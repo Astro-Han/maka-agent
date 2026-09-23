@@ -26,10 +26,19 @@ use std::{
     time::Duration,
 };
 
+mod environment;
+use environment::Environment;
+
 /// Secret-bearing immutable routing snapshot. No Debug or serialization:
 /// configuration/vault own persistence, not transport or conversation logs.
 #[derive(Clone, Default, PartialEq, Eq, Hash)]
-pub struct Policy(Option<Arc<ProxyRoute>>);
+pub struct Policy(Option<Arc<Route>>);
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum Route {
+    Manual(ProxyRoute),
+    Environment(Environment),
+}
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct ProxyRoute {
@@ -38,11 +47,25 @@ struct ProxyRoute {
 }
 
 impl Policy {
-    pub(crate) fn proxy_for(&self, host: &str) -> Option<&Url> {
-        self.0
-            .as_ref()
-            .filter(|route| !bypasses(host, &route.bypass))
-            .map(|route| &route.url)
+    pub(crate) fn proxy_for(&self, scheme: &str, host: &str) -> Option<&Url> {
+        match self.0.as_deref()? {
+            Route::Manual(route) => (!bypasses(host, &route.bypass)).then_some(&route.url),
+            Route::Environment(route) => route.proxy_for(scheme, host),
+        }
+    }
+
+    /// Host routing: an enabled manual proxy wins; otherwise capture the Host's
+    /// environment. Credentials stay in this immutable, non-serializable value.
+    pub fn from_host_settings(
+        settings: &NetworkProxy,
+        password: Option<&str>,
+    ) -> Result<Self, Error> {
+        if settings.enabled {
+            Self::from_settings(settings, password)
+        } else {
+            let route = Environment::capture(|name| std::env::var(name))?;
+            Ok(Self(Some(Arc::new(Route::Environment(route)))))
+        }
     }
     pub fn from_settings(settings: &NetworkProxy, password: Option<&str>) -> Result<Self, Error> {
         if !settings.enabled {
@@ -82,7 +105,7 @@ impl Policy {
             url.set_password(Some(password))
                 .map_err(|_| Error::InvalidProxy)?;
         }
-        Ok(Self(Some(Arc::new(ProxyRoute {
+        Ok(Self(Some(Arc::new(Route::Manual(ProxyRoute {
             url,
             bypass: settings
                 .bypass_list
@@ -90,10 +113,10 @@ impl Policy {
                 .chain(&settings.auto_bypass_domains)
                 .cloned()
                 .collect(),
-        }))))
+        })))))
     }
 
-    /// Explicit routing, independent of ALL_PROXY/HTTP_PROXY/NO_PROXY. Redirects
+    /// Captured routing, independent of subsequent environment changes. Redirects
     /// retain authority only within the same origin and therefore the same route.
     pub fn client_builder(&self) -> ClientBuilder {
         let mut builder = reqwest::Client::builder()
@@ -113,10 +136,12 @@ impl Policy {
                     attempt.follow()
                 }
             }));
-        if let Some(route) = self.0.clone() {
+        if self.0.is_some() {
+            let policy = self.clone();
             builder = builder.proxy(Proxy::custom(move |url| {
-                (!bypasses(url.host_str().unwrap_or_default(), &route.bypass))
-                    .then(|| route.url.clone())
+                policy
+                    .proxy_for(url.scheme(), url.host_str().unwrap_or_default())
+                    .cloned()
             }));
         }
         builder

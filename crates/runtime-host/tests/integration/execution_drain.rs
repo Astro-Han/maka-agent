@@ -106,9 +106,6 @@ async fn foreground_background_and_closure_commit_failures_drain_host() {
         };
         sqlx::raw_sql(trigger).execute(&mut database).await.unwrap();
         database.close().await.unwrap();
-        let provider_response =
-            (failed_kind == "interaction_closure").then(|| support::reject_model(&provider));
-
         let socket_path = directory.path().join("h.sock");
         let server = tokio::spawn(
             LocalListener::bind(&socket_path)
@@ -145,6 +142,43 @@ async fn foreground_background_and_closure_commit_failures_drain_host() {
         tokio::time::timeout(Duration::from_secs(5), entered.cancelled())
             .await
             .unwrap();
+        if failed_kind == "interaction_closure" {
+            // A pending approval now correctly pauses before the first model
+            // request. Explicit stop reaches finalization without answering it
+            // or letting the model run merely to provoke the closure fault.
+            live_writer
+                .write(&request(
+                    "turn.query",
+                    json!({
+                        "sessionId":"session", "turnId":"turn"
+                    }),
+                ))
+                .await
+                .unwrap();
+            let turn = response(&mut live_reader).await;
+            assert_eq!(turn["result"]["status"], "waiting_for_user", "{turn}");
+            assert_eq!(
+                provider.accept().unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+            live_writer
+                .write(&request(
+                    "turn.stop",
+                    json!({
+                        "sessionId":"session", "turnId":"turn", "runId":turn["result"]["runId"]
+                    }),
+                ))
+                .await
+                .unwrap();
+            let stopped = response(&mut live_reader).await;
+            assert_eq!(stopped["error"]["code"], "internal_failure", "{stopped}");
+            assert!(
+                stopped["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("injected ordinary closure failure")
+            );
+        }
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 live_writer
@@ -210,16 +244,10 @@ async fn foreground_background_and_closure_commit_failures_drain_host() {
         if failed_kind == "invocation_opened" {
             assert!(before.is_empty());
         } else if failed_kind == "interaction_closure" {
-            provider_response.unwrap().await.unwrap();
-            assert_eq!(before.len(), 3);
+            assert_eq!(before.len(), 1);
             assert!(matches!(
                 before[0].event.fact,
                 Fact::InvocationOpened { .. }
-            ));
-            assert!(matches!(before[1].event.fact, Fact::ModelRequested { .. }));
-            assert!(matches!(
-                before[2].event.fact,
-                Fact::ModelInterrupted { .. }
             ));
             let pending = log.interaction("approval").await.unwrap().unwrap();
             assert!(pending.outcome.is_none());

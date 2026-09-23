@@ -34,6 +34,7 @@ pub(super) fn responses(
         Wire::OpenaiResponses,
         level,
         super::default_medium(facts, model),
+        super::default_medium(facts, model),
         parallel,
     );
     options["openai"]["forceReasoning"] = Value::Bool(true);

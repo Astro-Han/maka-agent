@@ -32,14 +32,14 @@ pub(super) fn ensure(valid: bool, message: &str) -> Result<()> {
         Err(ProtocolError::invalid(message))
     }
 }
-fn nullable_count(v: &Value) -> Result<Option<u64>> {
+pub(super) fn nullable_count(v: &Value) -> Result<Option<u64>> {
     if v.is_null() {
         Ok(None)
     } else {
         count(v, "transcript count").map(Some)
     }
 }
-fn cursor(v: &Value) -> Result<Option<String>> {
+pub(super) fn cursor(v: &Value) -> Result<Option<String>> {
     if v.is_null() {
         return Ok(None);
     }

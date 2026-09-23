@@ -77,6 +77,7 @@ pub struct SessionRecord<T> {
 #[derive(Clone, Debug)]
 pub enum CatalogScope {
     Profile,
+    PendingInteractions,
     Session(String),
     Workspace(String),
 }
@@ -247,13 +248,14 @@ impl EventLog {
             }
         }
         let active_only = !include_archived;
+        let pending_only = matches!(scope, Some(CatalogScope::PendingInteractions));
         let (session, cwd) = match scope {
             Some(CatalogScope::Session(id)) => {
                 validate_id(&id)?;
                 (Some(id), None)
             }
             Some(CatalogScope::Workspace(cwd)) => (None, Some(cwd)),
-            Some(CatalogScope::Profile) | None => (None, None),
+            Some(CatalogScope::Profile | CatalogScope::PendingInteractions) | None => (None, None),
         };
         let expected_revision = expected_revision.map(str::to_owned);
         let cursor = cursor.map(str::to_owned);
@@ -268,7 +270,11 @@ impl EventLog {
                     .await?;
                     let revision = format!(
                         "sha256:{:x}",
-                        Sha256::digest(format!("session-catalog:{counter}"))
+                        Sha256::digest(if pending_only {
+                            format!("session-pending:{counter}")
+                        } else {
+                            format!("session-catalog:{counter}")
+                        })
                     );
                     if let Some(expected) = expected_revision
                         && expected != revision
@@ -284,6 +290,11 @@ impl EventLog {
                          AND (? = 0 OR archived = 0)
                          AND (? IS NULL OR id = ?)
                          AND (? IS NULL OR json_extract(configuration, '$.workspace.hostCwd') = ?)
+                         AND (? = 0 OR EXISTS (
+                             SELECT 1 FROM interaction_requests request
+                             WHERE request.session_id = session_control.id AND NOT EXISTS (
+                                 SELECT 1 FROM interaction_outcomes outcome
+                                 WHERE outcome.request_id = request.request_id)))
                          ORDER BY id LIMIT ?",
                     )
                     .bind(cursor.as_deref().unwrap_or(""))
@@ -292,6 +303,7 @@ impl EventLog {
                     .bind(&session)
                     .bind(&cwd)
                     .bind(&cwd)
+                    .bind(pending_only)
                     .bind((limit + 1) as i64)
                     .fetch_all(&mut *tx)
                     .await?;

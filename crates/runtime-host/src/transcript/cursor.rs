@@ -38,6 +38,15 @@ struct Claims {
     through: Option<u64>,
     position: Position,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchClaims {
+    binding: String,
+    through: Option<u64>,
+    query_digest: String,
+    include_internal: bool,
+    after: u64,
+}
 pub(super) struct Signer {
     key: [u8; 32],
     binding: String,
@@ -57,13 +66,16 @@ impl Signer {
         }
     }
     pub fn encode(&self, input: &SessionTranscriptPageInput, position: Position) -> Result<String> {
-        let bytes = serde_json::to_vec(&Claims {
+        self.seal(&Claims {
             version: 1,
             binding: self.binding.clone(),
             direction: input.direction,
             through: input.through_sequence,
             position,
-        })?;
+        })
+    }
+    fn seal(&self, claims: &impl Serialize) -> Result<String> {
+        let bytes = serde_json::to_vec(claims)?;
         let mut mac = Hmac::<Sha256>::new_from_slice(&self.key).expect("HMAC accepts 32-byte key");
         mac.update(&bytes);
         let token = format!(
@@ -77,6 +89,41 @@ impl Signer {
         Ok(token)
     }
     pub fn decode(&self, input: &SessionTranscriptPageInput, token: &str) -> Result<Position> {
+        let claims: Claims = self.open(token)?;
+        if claims.version != 1
+            || claims.binding != self.binding
+            || claims.direction != input.direction
+            || claims.through != input.through_sequence
+        {
+            return Err(TranscriptError::InvalidRequest(
+                "invalid or mismatched cursor",
+            ));
+        }
+        Ok(claims.position)
+    }
+    pub fn encode_search(&self, input: &TranscriptSearchInput, after: u64) -> Result<String> {
+        self.seal(&SearchClaims {
+            binding: self.binding.clone(),
+            through: input.through_sequence,
+            query_digest: format!("{:x}", Sha256::digest(input.query.as_bytes())),
+            include_internal: input.include_internal,
+            after,
+        })
+    }
+    pub fn decode_search(&self, input: &TranscriptSearchInput, token: &str) -> Result<u64> {
+        let claims: SearchClaims = self.open(token)?;
+        if claims.binding != self.binding
+            || claims.through != input.through_sequence
+            || claims.query_digest != format!("{:x}", Sha256::digest(input.query.as_bytes()))
+            || claims.include_internal != input.include_internal
+        {
+            return Err(TranscriptError::InvalidRequest(
+                "invalid or mismatched search cursor",
+            ));
+        }
+        Ok(claims.after)
+    }
+    fn open<T: serde::de::DeserializeOwned>(&self, token: &str) -> Result<T> {
         let invalid = || TranscriptError::InvalidRequest("invalid or mismatched cursor");
         if token.len() > SESSION_TRANSCRIPT_CURSOR_MAX_BYTES {
             return Err(invalid());
@@ -87,14 +134,6 @@ impl Signer {
         let mut mac = Hmac::<Sha256>::new_from_slice(&self.key).expect("HMAC accepts 32-byte key");
         mac.update(&bytes);
         mac.verify_slice(&signature).map_err(|_| invalid())?;
-        let claims: Claims = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-        if claims.version != 1
-            || claims.binding != self.binding
-            || claims.direction != input.direction
-            || claims.through != input.through_sequence
-        {
-            return Err(invalid());
-        }
-        Ok(claims.position)
+        serde_json::from_slice(&bytes).map_err(|_| invalid())
     }
 }

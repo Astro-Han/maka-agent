@@ -128,4 +128,62 @@ impl Transcript {
         }
         page::read(self, log, input).await
     }
+
+    pub async fn search(
+        &self,
+        log: &EventLog,
+        input: &TranscriptSearchInput,
+    ) -> Result<TranscriptSearchResult> {
+        decode_transcript_search_input(&serde_json::to_value(input)?)
+            .map_err(|_| TranscriptError::InvalidRequest("invalid search input"))?;
+        if input.subscription_id != self.subscription_id
+            || input.through_sequence > self.announced_watermark
+        {
+            return Err(TranscriptError::InvalidRequest(
+                "invalid subscription or unannounced watermark",
+            ));
+        }
+        let after = input
+            .cursor
+            .as_ref()
+            .map(|cursor| self.cursor.decode_search(input, cursor))
+            .transpose()?
+            .unwrap_or(0);
+        let Some(through) = input.through_sequence else {
+            if input.cursor.is_some() {
+                return Err(TranscriptError::InvalidRequest("empty history cursor"));
+            }
+            return Ok(TranscriptSearchResult {
+                session_id: self.session_id.clone(),
+                through_sequence: None,
+                matches: vec![],
+                next_cursor: None,
+            });
+        };
+        let batch = log
+            .search_transcript(
+                &self.session_id,
+                maka_event_log::transcript::search::TranscriptSearch {
+                    through,
+                    after,
+                    query: input.query.clone(),
+                    include_internal: input.include_internal,
+                    max_matches: input.max_matches,
+                },
+            )
+            .await?;
+        Ok(TranscriptSearchResult {
+            session_id: self.session_id.clone(),
+            through_sequence: Some(through),
+            matches: batch
+                .matches
+                .into_iter()
+                .map(|(sequence, preview)| TranscriptSearchMatch { sequence, preview })
+                .collect(),
+            next_cursor: batch
+                .next_after
+                .map(|after| self.cursor.encode_search(input, after))
+                .transpose()?,
+        })
+    }
 }

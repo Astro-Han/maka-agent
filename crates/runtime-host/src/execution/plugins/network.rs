@@ -95,7 +95,7 @@ impl Executions {
             .network_configuration()
             .await
             .map_err(|error| Error::Host(error.to_string()))?;
-        maka_network::Policy::from_settings(&network.proxy, network.password.as_deref())
+        maka_network::Policy::from_host_settings(&network.proxy, network.password.as_deref())
             .map_err(|error| Error::Host(error.to_string()))
     }
 }

@@ -28,31 +28,7 @@ mod mutations;
 pub(crate) mod projection;
 mod update;
 
-pub(super) fn supports(operation: Operation) -> bool {
-    matches!(
-        operation,
-        Operation::TurnMessageSubmit
-            | Operation::TurnInterrupt
-            | Operation::TurnMessageQuery
-            | Operation::TurnMessageExecutionQuery
-            | Operation::QueueRetract
-            | Operation::QueueEntryRetract
-            | Operation::QueueEntryPromote
-            | Operation::QueueEntryUpdate
-            | Operation::QueueEntriesReorder
-    )
-}
-pub(super) const ERRORS: &[Code] = &[
-    Code::HostNotReady,
-    Code::HostDraining,
-    Code::OperationUnavailable,
-    Code::NotFound,
-    Code::SessionArchived,
-    Code::SessionBusy,
-    Code::OperationConflict,
-    Code::OutcomeUnknown,
-    Code::InternalFailure,
-];
+pub(super) use maka_protocol::message::{ERRORS, supports};
 pub(super) async fn execute(
     host: &Host,
     connection_id: uuid::Uuid,

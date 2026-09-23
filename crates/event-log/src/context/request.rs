@@ -63,7 +63,13 @@ pub(super) async fn validate(
     let selection = Selection::for_opening(connection, &opening).await?;
     let session = &event.invocation.session_id;
     safety::require_safe(connection, session, Some(&event.invocation.invocation_id)).await?;
-    safety::active_boundary(connection, &event.invocation.invocation_id, i64::MAX as u64).await?;
+    if resolved == ModelPurpose::Main {
+        safety::model_boundary(connection, &event.invocation.invocation_id, i64::MAX as u64)
+            .await?;
+    } else {
+        safety::active_boundary(connection, &event.invocation.invocation_id, i64::MAX as u64)
+            .await?;
+    }
     let high = if resolved == ModelPurpose::Summary {
         let mode = match input {
             InvocationInput::ContextCompact { .. } => CheckpointMode::Standalone,
@@ -91,7 +97,14 @@ pub(super) async fn validate(
         )
         .await?
     } else {
-        selection.high_water(connection, i64::MAX as u64).await?
+        safety::model_source_unchanged(
+            connection,
+            &selection,
+            &event.invocation.invocation_id,
+            *source_high_water,
+        )
+        .await?;
+        *source_high_water
     };
     if source_scope != &selection.scope
         || high != *source_high_water

@@ -59,108 +59,7 @@ impl Output {
     }
 }
 
-pub(super) fn supports(operation: Operation) -> bool {
-    matches!(
-        operation,
-        Operation::SessionCreate
-            | Operation::SessionBranchCreate
-            | Operation::SessionRevisionCreate
-            | Operation::SessionRevisionAbandon
-            | Operation::SessionCopyQuery
-            | Operation::SessionSourcesQuery
-            | Operation::SessionCatalogQuery
-            | Operation::SessionLifecycleSet
-            | Operation::SessionMetadataUpdate
-            | Operation::SessionReadMarkerSet
-            | Operation::SessionConfigurationUpdate
-            | Operation::SessionWorkspaceRelocate
-            | Operation::SessionRemove
-            | Operation::SessionRemovePreview
-            | Operation::SessionRemoveQuery
-    )
-}
-
-pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    match operation {
-        Operation::SessionRemove => {
-            decode_session_remove_input(value)?;
-        }
-        Operation::SessionRemovePreview => {
-            decode_session_remove_preview_input(value)?;
-        }
-        Operation::SessionRemoveQuery => {
-            decode_session_remove_query_input(value)?;
-        }
-        Operation::SessionSourcesQuery => {
-            maka_protocol::session::sources::decode_input(value)?;
-        }
-        Operation::SessionBranchCreate | Operation::SessionRevisionCreate => {
-            maka_protocol::session::copy::decode_input(operation, value)?;
-        }
-        Operation::SessionRevisionAbandon => {
-            maka_protocol::session::copy::decode_abandon_input(value)?;
-        }
-        Operation::SessionCopyQuery => {
-            maka_protocol::session::copy::decode_query_input(value)?;
-        }
-        Operation::SessionCreate => {
-            decode_session_create_input(value)?;
-        }
-        Operation::SessionCatalogQuery => {
-            decode_session_catalog_query_input(value)?;
-        }
-        Operation::SessionLifecycleSet => {
-            decode_session_lifecycle_set_input(value)?;
-        }
-        Operation::SessionMetadataUpdate => {
-            decode_session_metadata_update_input(value)?;
-        }
-        Operation::SessionConfigurationUpdate => {
-            decode_session_configuration_update_input(value)?;
-        }
-        Operation::SessionWorkspaceRelocate => {
-            decode_session_workspace_relocate_input(value)?;
-        }
-        Operation::SessionReadMarkerSet => {
-            decode_session_read_marker_set_input(value)?;
-        }
-        _ => return Err(ProtocolError::invalid("Unknown Session operation")),
-    }
-    Ok(value.clone())
-}
-
-pub(super) fn decode_output(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    if operation == Operation::SessionRemove {
-        decode_session_remove_result(value)?;
-    } else if operation == Operation::SessionRemovePreview {
-        decode_session_remove_preview_result(value)?;
-    } else if operation == Operation::SessionRemoveQuery {
-        decode_session_remove_query_result(value)?;
-    } else if matches!(
-        operation,
-        Operation::SessionBranchCreate | Operation::SessionRevisionCreate
-    ) {
-        maka_protocol::session::copy::decode_result(value)?;
-    } else if operation == Operation::SessionSourcesQuery {
-        maka_protocol::session::sources::decode_output(value)?;
-    } else if operation == Operation::SessionCopyQuery {
-        maka_protocol::session::copy::decode_query_result(value)?;
-    } else if operation == Operation::SessionRevisionAbandon {
-        maka_protocol::session::copy::decode_abandon_result(value)?;
-    } else if operation == Operation::SessionCatalogQuery {
-        decode_session_catalog_query_result(value)?;
-    } else if matches!(
-        operation,
-        Operation::SessionMetadataUpdate
-            | Operation::SessionConfigurationUpdate
-            | Operation::SessionWorkspaceRelocate
-    ) {
-        decode_session_update_result(value)?;
-    } else {
-        decode_session_catalog_projection(value)?;
-    }
-    Ok(value.clone())
-}
+pub(super) use maka_protocol::session::{decode_input, decode_output, supports};
 
 pub(super) async fn execute(
     host: &super::Host,
@@ -338,15 +237,29 @@ async fn query(
         });
     }
     let (revision, cursor) = match &input {
-        SessionCatalogQueryInput::ListContinue { revision, cursor } => {
+        SessionCatalogQueryInput::ListContinue { revision, cursor }
+        | SessionCatalogQueryInput::PendingContinue { revision, cursor } => {
             (Some(revision.as_str()), Some(cursor.as_str()))
         }
         _ => (None, None),
     };
-    let mut page = match log
-        .list_sessions::<SessionConfiguration>(revision, cursor, 32)
+    let pending = matches!(
+        input,
+        SessionCatalogQueryInput::PendingStart | SessionCatalogQueryInput::PendingContinue { .. }
+    );
+    let result = if pending {
+        log.scoped_sessions::<SessionConfiguration>(
+            maka_event_log::sessions::CatalogScope::PendingInteractions,
+            revision,
+            cursor,
+            true,
+        )
         .await
-    {
+    } else {
+        log.list_sessions::<SessionConfiguration>(revision, cursor, 32)
+            .await
+    };
+    let mut page = match result {
         Ok(page) => page,
         Err(StoreError::RevisionConflict { expected, actual }) => {
             return Ok(SessionCatalogQueryResult::RevisionChanged {
@@ -410,33 +323,3 @@ pub(super) fn stored(error: StoreError) -> OperationError {
     };
     failure(code, &error.to_string())
 }
-
-pub(super) const QUERY_ERRORS: &[OperationErrorCode] = &[
-    OperationErrorCode::HostNotReady,
-    OperationErrorCode::HostDraining,
-    OperationErrorCode::OperationUnavailable,
-    OperationErrorCode::InvalidRequest,
-    OperationErrorCode::PersistenceFailed,
-    OperationErrorCode::InternalFailure,
-];
-pub(super) const CREATE_ERRORS: &[OperationErrorCode] = &[
-    OperationErrorCode::HostNotReady,
-    OperationErrorCode::HostDraining,
-    OperationErrorCode::OperationUnavailable,
-    OperationErrorCode::InvalidRequest,
-    OperationErrorCode::OperationConflict,
-    OperationErrorCode::PersistenceFailed,
-    OperationErrorCode::CommitOutcomeUnknown,
-    OperationErrorCode::InternalFailure,
-];
-pub(super) const LIFECYCLE_ERRORS: &[OperationErrorCode] = &[
-    OperationErrorCode::HostNotReady,
-    OperationErrorCode::HostDraining,
-    OperationErrorCode::OperationUnavailable,
-    OperationErrorCode::NotFound,
-    OperationErrorCode::SessionBusy,
-    OperationErrorCode::OperationConflict,
-    OperationErrorCode::PersistenceFailed,
-    OperationErrorCode::CommitOutcomeUnknown,
-    OperationErrorCode::InternalFailure,
-];

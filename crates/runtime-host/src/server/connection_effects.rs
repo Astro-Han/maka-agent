@@ -139,8 +139,9 @@ fn bind_oauth(
         message: "Provider OAuth refresh is not installed".into(),
     })?;
     let settings = snapshot.network_configuration();
-    let policy = maka_network::Policy::from_settings(&settings.proxy, settings.password.as_deref())
-        .map_err(oauth_failure)?;
+    let policy =
+        maka_network::Policy::from_host_settings(&settings.proxy, settings.password.as_deref())
+            .map_err(oauth_failure)?;
     let client = maka_model::oauth::Client::new(&policy).map_err(oauth_failure)?;
     let credential = host
         .executions
@@ -160,7 +161,7 @@ fn oauth_failure(error: impl std::fmt::Display) -> OperationError {
 pub(super) fn client(
     configuration: &maka_config::network::NetworkConfiguration,
 ) -> Result<ConnectionClient, OperationError> {
-    let policy = maka_network::Policy::from_settings(
+    let policy = maka_network::Policy::from_host_settings(
         &configuration.proxy,
         configuration.password.as_deref(),
     )

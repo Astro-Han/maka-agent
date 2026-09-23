@@ -20,35 +20,27 @@
 use super::support::client_probe::ClientFixture;
 use maka_runtime::event::Fact;
 use sha2::{Digest, Sha256};
+mod workflow;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unchanged_client_writes_edits_reads_and_reopens_without_repeating_mutation() {
+async fn native_client_writes_edits_reads_and_reopens_without_repeating_mutation() {
     let fixture = ClientFixture::new("maka-write-");
-    let workspace = &fixture.workspace;
     let mut original = None;
+    let mut original_rows = None;
+    let mut live = Vec::new();
     for reopened in [false, true] {
-        fixture
-            .run(
-                "--write-workspace",
-                reopened,
-                if reopened {
-                    "original-client-write-reopened"
-                } else {
-                    "original-client-write"
-                },
-            )
-            .await;
+        let (rows, events) = workflow::run(&fixture, reopened).await;
+        if let Some(expected) = &original_rows {
+            assert_eq!(&rows, expected, "reopen must preserve every transcript row");
+        } else {
+            original_rows = Some(rows.clone());
+            live = events;
+        }
         let log = fixture.log().await;
         let prefix = log.prefix(100, 1024 * 1024).await.unwrap();
-        let rows: Vec<serde_json::Value> =
-            serde_json::from_slice(&std::fs::read(workspace.join("write-rows.json")).unwrap())
-                .unwrap();
         let mut dispatched = 0;
         let mut settled = 0;
         let mut rejected = 0;
-        let live: Vec<serde_json::Value> =
-            serde_json::from_slice(&std::fs::read(workspace.join("write-live.json")).unwrap())
-                .unwrap();
         for stored in &prefix.events {
             match &stored.event.fact {
                 Fact::ToolSettled { .. } => settled += 1,

@@ -86,16 +86,3 @@ pub(super) async fn query(
         },
     )
 }
-
-pub(in crate::server) const ERRORS: &[Code] = &[
-    Code::HostNotReady,
-    Code::HostDraining,
-    Code::OperationUnavailable,
-    Code::InvalidRequest,
-    Code::NotFound,
-    Code::SessionBusy,
-    Code::OperationConflict,
-    Code::PersistenceFailed,
-    Code::CommitOutcomeUnknown,
-    Code::InternalFailure,
-];

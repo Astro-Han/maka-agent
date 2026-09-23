@@ -50,7 +50,7 @@ fn connection_input_canonicalizes_endpoint_and_preserves_three_state_updates() {
         Patch::Clear
     ));
     input["changes"]["modelOverrides"] = json!({"m":{
-        "thinkingLevels":["minimal","max"],"serviceTier":"fast"
+        "thinkingLevels":["off","minimal","max"],"serviceTier":"fast"
     }});
     let Patch::Set(profiles) = decode_update_connection_input(&input)
         .unwrap()
@@ -62,7 +62,11 @@ fn connection_input_canonicalizes_endpoint_and_preserves_three_state_updates() {
     use maka_runtime::{configuration::RelayServiceTier, execution::ThinkingLevel};
     assert_eq!(
         profiles["m"].thinking_levels,
-        Some(vec![ThinkingLevel::Minimal, ThinkingLevel::Max])
+        Some(vec![
+            ThinkingLevel::Off,
+            ThinkingLevel::Minimal,
+            ThinkingLevel::Max
+        ])
     );
     assert_eq!(profiles["m"].service_tier, Some(RelayServiceTier::Fast));
     assert_eq!(
@@ -87,10 +91,6 @@ fn connection_input_rejects_unknown_fields_and_semantic_boundaries() {
         (
             "modelOverrides",
             json!({"absent":{"capabilities":{"vision":true}}}),
-        ),
-        (
-            "modelOverrides",
-            json!({"fixture-model":{"thinkingLevels":["off"]}}),
         ),
         (
             "modelOverrides",

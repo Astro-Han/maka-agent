@@ -23,12 +23,14 @@
 mod configuration;
 pub mod copy;
 mod mutation;
+mod operations;
 pub mod sources;
 mod types;
 mod validation;
 use crate::{ProtocolError, Result};
 pub use configuration::*;
 pub use mutation::*;
+pub use operations::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 pub use types::*;
@@ -90,6 +92,8 @@ pub enum SessionCreateTarget {
 pub enum SessionCatalogQueryInput {
     ListStart,
     ListContinue { revision: String, cursor: String },
+    PendingStart,
+    PendingContinue { revision: String, cursor: String },
     Get { session_id: String },
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

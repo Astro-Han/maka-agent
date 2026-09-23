@@ -18,6 +18,7 @@
  */
 
 pub mod form;
+pub use maka_runtime::capability::HostFrame;
 mod manifest;
 pub use form::{decode_form_input, decode_form_result};
 mod frame;

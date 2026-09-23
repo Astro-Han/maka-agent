@@ -210,6 +210,7 @@ describe('ASF header classification', () => {
       'apps/desktop/src/renderer/app-shell.tsx',
       'scripts/asf-source-release.mjs',
       'apps/desktop/build/installer.nsh',
+      'crates/tui/locales/zh-CN.ftl',
       'experiments/windows-sandbox/launcher/src/main.rs',
       'packages/eval/harbor/egress-proxy/Dockerfile',
       'packages/eval/harbor/egress-proxy/network-policy',
@@ -219,6 +220,7 @@ describe('ASF header classification', () => {
     ]) {
       assert.equal(classifyPath(path).status, 'covered', path);
     }
+    assert.equal(commentStyleFor('crates/tui/locales/zh-CN.ftl'), 'hash');
   });
 
   test('excludes the reviewed categories', () => {

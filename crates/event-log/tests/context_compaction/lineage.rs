@@ -29,6 +29,9 @@ use maka_runtime::{
 #[path = "../continuation/fixtures.rs"]
 mod continuation;
 
+#[path = "lineage/cells.rs"]
+mod cells;
+
 fn lineage_request(step: &str, purpose: ModelPurpose, source: &ModelContextSource) -> EventWrite {
     let mut write = request("child", step, purpose, source).event().clone();
     if let Fact::ModelRequested {

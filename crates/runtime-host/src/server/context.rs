@@ -62,13 +62,7 @@ pub(super) fn decode_output(operation: Operation, value: &Value) -> Result<Value
 pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
     match operation {
         Operation::ContextCompact => turns::errors(Operation::TurnStart),
-        Operation::ContextDiagnosticsQuery => Some(&[
-            Code::HostNotReady,
-            Code::HostDraining,
-            Code::OperationUnavailable,
-            Code::NotFound,
-            Code::InternalFailure,
-        ]),
+        Operation::ContextDiagnosticsQuery => Some(wire::DIAGNOSTICS_ERRORS),
         _ => None,
     }
 }
@@ -119,12 +113,8 @@ async fn diagnostics(
             message: "Session does not exist".into(),
         });
     }
-    let selected = match host
-        .log
-        .latest_main_context(session)
-        .await
-        .map_err(internal)?
-    {
+    let (selected, usage) = host.log.context_usage(session).await.map_err(internal)?;
+    let selected = match selected {
         LatestMainContext::NoCompletedRequest => {
             return Ok(unavailable(Reason::NoCompletedRequest));
         }
@@ -148,8 +138,15 @@ async fn diagnostics(
         model_id: selected.model_id,
         completed_at,
         input_tokens: selected.usage.input_tokens,
+        current: usage
+            .zip(selected.connection_id)
+            .map(|(usage, connection_id)| wire::ContextUsage {
+                connection_id,
+                tokens: usage.tokens,
+                approximate: usage.approximate,
+            }),
         cache_read_input_tokens: selected.usage.cache_read_tokens,
-        context_window: context.context_window,
+        context_window: context.model_context_window,
         composition: None,
         compaction: None,
     })

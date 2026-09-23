@@ -21,7 +21,9 @@ use crate::{ProtocolError, Result, codec};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod operations;
 mod status;
+pub use operations::Operations;
 pub use status::{Diagnostics, Platform, Residency, Status, decode_diagnostics, decode_status};
 
 /// Maintenance targets a process lifetime, not merely a State Root or a PID.

@@ -68,6 +68,38 @@ fn diagnostics_shapes_and_bounds_agree_with_original_source() {
     let available =
         json!({"status":"available","providerId":"openai","modelId":"model","completedAt":1.0});
     add("output", available.clone(), true);
+    for (current, valid) in [
+        (
+            json!({"connectionId":"connection","tokens":123,"approximate":true}),
+            true,
+        ),
+        (
+            json!({"connectionId":"connection","tokens":0,"approximate":false}),
+            true,
+        ),
+        (
+            json!({"connectionId":"connection","tokens":-1,"approximate":true}),
+            false,
+        ),
+        (
+            json!({"connectionId":"connection","tokens":9007199254740992u64,"approximate":true}),
+            false,
+        ),
+        (
+            json!({"connectionId":"bad.id","tokens":1,"approximate":true}),
+            false,
+        ),
+        (
+            json!({"connectionId":"connection","tokens":1,"approximate":"yes"}),
+            false,
+        ),
+        (json!({"connectionId":"connection","tokens":1}), false),
+        (Value::Null, false),
+    ] {
+        let mut value = available.clone();
+        value["current"] = current;
+        add("output", value, valid);
+    }
     for field in ["providerId", "modelId", "completedAt"] {
         let mut missing = available.clone();
         missing.as_object_mut().unwrap().remove(field);

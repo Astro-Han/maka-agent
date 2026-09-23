@@ -25,7 +25,9 @@ pub use maka_runtime::interaction::*;
 use serde::{Serialize, ser::SerializeStruct};
 use serde_json::{Value, json};
 use std::collections::HashSet;
+mod operations;
 mod question;
+pub use operations::{decode_input, decode_output, errors, supports};
 pub use question::project_question_request;
 
 pub const INTERACTION_MAX_PENDING_PER_SESSION: usize = 16;

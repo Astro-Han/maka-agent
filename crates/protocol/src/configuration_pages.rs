@@ -233,7 +233,7 @@ fn model_override(value: &Value) -> Result<Value> {
     record(value, "model override")?;
     let mut result = json!({});
     if let Some(levels) = value["thinkingLevels"].as_array() {
-        let levels: Vec<_> = ["minimal", "low", "medium", "high", "xhigh", "max"]
+        let levels: Vec<_> = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
             .into_iter()
             .filter(|level| levels.iter().any(|v| v.as_str() == Some(level)))
             .collect();

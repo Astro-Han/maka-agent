@@ -36,6 +36,12 @@ mod delete;
 mod windows;
 
 type Identity = (u64, u64);
+#[derive(Clone, Copy)]
+pub(crate) enum ReadMode {
+    None,
+    Required,
+    Preview,
+}
 fn identity(metadata: &Metadata) -> Identity {
     (metadata.dev(), metadata.ino())
 }
@@ -64,7 +70,7 @@ impl Target {
     pub(crate) fn capture(
         authority: &Authority,
         path: &Path,
-        read: bool,
+        read: ReadMode,
     ) -> Result<Self, ToolError> {
         let mut error = failed("path is outside the admitted Write roots");
         for route in authority.routes(path)? {
@@ -83,7 +89,7 @@ impl Target {
     fn capture_route(
         root: Dir,
         relative: &Path,
-        read: bool,
+        read: ReadMode,
         managed: bool,
     ) -> Result<Self, ToolError> {
         if relative
@@ -104,7 +110,19 @@ impl Target {
                     return Err(failed("Write supports only regular files, not symlinks"));
                 }
                 let file = parent
-                    .open_with(&name, file_options(false).read(read))
+                    .open_with(
+                        &name,
+                        file_options(false).read(!matches!(read, ReadMode::None)),
+                    )
+                    .or_else(|error| {
+                        if matches!(read, ReadMode::Preview)
+                            && error.kind() == io::ErrorKind::PermissionDenied
+                        {
+                            parent.open_with(&name, &file_options(false))
+                        } else {
+                            Err(error)
+                        }
+                    })
                     .map_err(io_error)?;
                 let opened = file.metadata().map_err(io_error)?;
                 if !opened.is_file() || identity(&opened) != identity(&metadata) {
@@ -260,7 +278,7 @@ mod tests {
             )),
         )
         .unwrap();
-        let target = Target::capture(&authority, Path::new("file"), false).unwrap();
+        let target = Target::capture(&authority, Path::new("file"), ReadMode::None).unwrap();
         fs::hard_link(root.join("file"), root.join("alias")).unwrap();
         let started = AtomicBool::new(false);
         assert!(matches!(
@@ -286,7 +304,8 @@ mod tests {
                 },
             )
             .unwrap();
-            let mut target = Target::capture(&authority, Path::new("parent/file"), false).unwrap();
+            let mut target =
+                Target::capture(&authority, Path::new("parent/file"), ReadMode::None).unwrap();
             let replace_root = root.clone();
             let replace = move || {
                 fs::rename(replace_root.join("parent"), replace_root.join("detached")).unwrap();
@@ -322,7 +341,7 @@ mod tests {
             },
         )
         .unwrap();
-        let mut target = Target::capture(&authority, Path::new("file"), false).unwrap();
+        let mut target = Target::capture(&authority, Path::new("file"), ReadMode::None).unwrap();
         let token = CancellationToken::new();
         let cancellation = token.clone();
         target.after_write = Some(Box::new(move || {
@@ -333,7 +352,7 @@ mod tests {
             .apply(b"changed", &token, &AtomicBool::new(false))
             .unwrap();
         assert_eq!(fs::read(root.join("file")).unwrap(), b"changed");
-        let mut target = Target::capture(&authority, Path::new("file"), false).unwrap();
+        let mut target = Target::capture(&authority, Path::new("file"), ReadMode::None).unwrap();
         target.after_write = Some(Box::new(|| Err(io::Error::from_raw_os_error(libc::ENOSPC))));
         assert!(matches!(
             target.apply(b"xx", &CancellationToken::new(), &AtomicBool::new(false)),

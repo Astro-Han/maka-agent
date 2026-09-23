@@ -266,6 +266,50 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
             .contains("path required")
     );
     assert_eq!(values[11]["status"], "completed");
+    // Search scans only bounded disposable-index batches, including large
+    // nested results; normal orchestration stays hidden and errors searchable.
+    for (query, include_internal, expected) in [
+        ("xxxx", false, 3),
+        ("toolCalls", false, 0),
+        ("toolCalls", true, 1),
+        ("path required", false, 1),
+    ] {
+        let mut after = 0;
+        let mut sequences = Vec::new();
+        let mut batches = 0;
+        loop {
+            let result = log
+                .search_transcript(
+                    "session",
+                    maka_event_log::transcript::search::TranscriptSearch {
+                        through: maka_presentation::watermark(through).unwrap(),
+                        after,
+                        query: query.into(),
+                        include_internal,
+                        max_matches: 64,
+                    },
+                )
+                .await
+                .unwrap();
+            batches += 1;
+            for (sequence, preview) in result.matches {
+                assert!(preview.len() <= 384 && preview.contains(query));
+                assert!(sequences.last().is_none_or(|last| sequence > *last));
+                sequences.push(sequence);
+            }
+            let Some(next) = result.next_after else {
+                break;
+            };
+            assert!(next > after && batches < 8);
+            after = next;
+        }
+        assert_eq!(sequences.len(), expected, "{query}");
+        assert!(batches >= 2, "18 MiB of siblings must not fit in one scan");
+    }
+    assert!(
+        !notices.has_changed().unwrap(),
+        "search emits no execution commits"
+    );
     let canonical = log.prefix(128, 32 * 1024 * 1024).await.unwrap().digest;
     db.execute("DELETE FROM transcript_progress", []).unwrap();
     log.close().await.unwrap();

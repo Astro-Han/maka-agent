@@ -37,46 +37,9 @@ pub(crate) use usage::Usage;
 
 type Result<T> = std::result::Result<T, OperationError>;
 
-pub(super) fn supports(operation: Operation) -> bool {
-    matches!(
-        operation,
-        Operation::ProjectCatalogQuery | Operation::ProjectCatalogMutate
-    )
-}
-
-pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    match operation {
-        Operation::ProjectCatalogQuery => {
-            decode_query(value)?;
-        }
-        Operation::ProjectCatalogMutate => {
-            decode_mutation(value)?;
-        }
-        _ => {
-            return Err(maka_protocol::ProtocolError::invalid(
-                "unknown Project operation",
-            ));
-        }
-    }
-    Ok(value.clone())
-}
-
-pub(super) fn decode_output(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    match operation {
-        Operation::ProjectCatalogQuery => {
-            decode_query_result(value)?;
-        }
-        Operation::ProjectCatalogMutate => {
-            decode_mutation_result(value)?;
-        }
-        _ => {
-            return Err(maka_protocol::ProtocolError::invalid(
-                "unknown Project operation",
-            ));
-        }
-    }
-    Ok(value.clone())
-}
+pub(super) use maka_protocol::project::{
+    MUTATION_ERRORS, QUERY_ERRORS, decode_input, decode_output, supports,
+};
 
 pub(super) async fn execute(
     host: &Host,
@@ -269,23 +232,3 @@ fn invalid(error: impl std::fmt::Display) -> OperationError {
 fn internal(error: impl std::fmt::Display) -> OperationError {
     failure(Code::InternalFailure, error)
 }
-
-pub(super) const QUERY_ERRORS: &[Code] = &[
-    Code::HostNotReady,
-    Code::HostDraining,
-    Code::OperationUnavailable,
-    Code::InvalidRequest,
-    Code::PersistenceFailed,
-    Code::InternalFailure,
-];
-pub(super) const MUTATION_ERRORS: &[Code] = &[
-    Code::HostNotReady,
-    Code::HostDraining,
-    Code::OperationUnavailable,
-    Code::InvalidRequest,
-    Code::NotFound,
-    Code::OperationConflict,
-    Code::PersistenceFailed,
-    Code::CommitOutcomeUnknown,
-    Code::InternalFailure,
-];

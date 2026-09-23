@@ -23,6 +23,7 @@ mod policy;
 use maka_config::{ConfigError, ConfigurationStore};
 use maka_protocol::OperationErrorCode;
 use maka_protocol::configuration as wire;
+pub(super) use maka_protocol::configuration::{MUTATION_ERRORS, QUERY_ERRORS};
 use maka_protocol::request_headers;
 use maka_protocol::{Operation, OperationError, ProtocolError, Result};
 use maka_runtime::configuration::headers::{
@@ -389,21 +390,3 @@ pub(crate) fn failure(error: ConfigError) -> OperationError {
         message: error.to_string().chars().take(1024).collect(),
     }
 }
-
-pub(super) const QUERY_ERRORS: &[OperationErrorCode] = &[
-    OperationErrorCode::HostNotReady,
-    OperationErrorCode::HostDraining,
-    OperationErrorCode::OperationUnavailable,
-    OperationErrorCode::InvalidRequest,
-    OperationErrorCode::InternalFailure,
-    OperationErrorCode::PersistenceFailed,
-];
-pub(super) const MUTATION_ERRORS: &[OperationErrorCode] = &[
-    OperationErrorCode::HostNotReady,
-    OperationErrorCode::HostDraining,
-    OperationErrorCode::OperationUnavailable,
-    OperationErrorCode::InvalidRequest,
-    OperationErrorCode::InternalFailure,
-    OperationErrorCode::PersistenceFailed,
-    OperationErrorCode::CommitOutcomeUnknown,
-];

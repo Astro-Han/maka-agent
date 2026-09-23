@@ -17,8 +17,9 @@
  * under the License.
  */
 
-//! Outbound schema-5 observation slice, including ClientCapability interactions.
-//! This is deliberately not a full snapshot decoder.
+//! Schema-5 session observation, including ClientCapability interactions.
+mod decode;
+pub use decode::*;
 mod goal;
 mod queue;
 use super::{

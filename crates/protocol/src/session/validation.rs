@@ -46,7 +46,7 @@ fn validate(value: &mut Value, field: &str) -> Result<()> {
         Value::Object(map) => {
             if matches!(
                 map.get("kind").and_then(Value::as_str),
-                Some("list_start" | "default")
+                Some("list_start" | "pending_start" | "default")
             ) {
                 codec::exact(map, &["kind"])?;
             }

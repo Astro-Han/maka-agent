@@ -82,6 +82,12 @@ export type ContextDiagnosticsResult =
       readonly modelId: string;
       readonly completedAt: number;
       readonly inputTokens?: number;
+      /** Latest Main usage plus additions, never cumulative billing. */
+      readonly current?: {
+        readonly connectionId: string;
+        readonly tokens: number;
+        readonly approximate: boolean;
+      };
       /** Provider-reported cache read for the same request, when it counted one. */
       readonly cacheReadInputTokens?: number;
       readonly contextWindow?: number;
@@ -170,6 +176,7 @@ function decodeContextDiagnosticsResult(value: unknown): ContextDiagnosticsResul
       'modelId',
       'completedAt',
       'inputTokens',
+      'current',
       'cacheReadInputTokens',
       'contextWindow',
       'composition',
@@ -196,7 +203,14 @@ function decodeContextDiagnosticsResult(value: unknown): ContextDiagnosticsResul
     record,
     'Available context diagnostics',
     ['status', 'providerId', 'modelId', 'completedAt'],
-    ['inputTokens', 'cacheReadInputTokens', 'contextWindow', 'composition', 'compaction'],
+    [
+      'inputTokens',
+      'current',
+      'cacheReadInputTokens',
+      'contextWindow',
+      'composition',
+      'compaction',
+    ],
   );
   return {
     status: 'available',
@@ -206,6 +220,7 @@ function decodeContextDiagnosticsResult(value: unknown): ContextDiagnosticsResul
     ...(available.inputTokens === undefined
       ? {}
       : { inputTokens: requireCount(available.inputTokens, 'inputTokens') }),
+    ...(available.current === undefined ? {} : { current: decodeCurrentUsage(available.current) }),
     ...(available.cacheReadInputTokens === undefined
       ? {}
       : {
@@ -223,6 +238,21 @@ function decodeContextDiagnosticsResult(value: unknown): ContextDiagnosticsResul
     ...(available.compaction === undefined
       ? {}
       : { compaction: decodeContextDiagnosticsCompaction(available.compaction) }),
+  };
+}
+
+function decodeCurrentUsage(value: unknown) {
+  const current = requireExactRecord(value, 'Current context usage', [
+    'connectionId',
+    'tokens',
+    'approximate',
+  ]);
+  if (typeof current.approximate !== 'boolean')
+    throw invalidProtocolFrame('Invalid context usage accuracy');
+  return {
+    connectionId: requireEntityId(current.connectionId, 'connectionId'),
+    tokens: requireCount(current.tokens, 'tokens'),
+    approximate: current.approximate,
   };
 }
 

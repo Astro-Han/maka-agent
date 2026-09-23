@@ -238,7 +238,11 @@ fn apply_one(
     let mut target = Target::capture(
         authority,
         path,
-        matches!(operation, PatchOperation::Update { .. }),
+        if matches!(operation, PatchOperation::Update { .. }) {
+            crate::write_target::ReadMode::Required
+        } else {
+            crate::write_target::ReadMode::None
+        },
     )?;
     let _guard = coordinator
         .mutation

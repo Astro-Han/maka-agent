@@ -153,10 +153,10 @@ pub fn profiles(
         }
         if let Some(levels) = &p.thinking_levels
             && (levels.is_empty()
-                || levels.iter().enumerate().any(|(index, level)| {
-                    *level == crate::execution::ThinkingLevel::Off
-                        || levels[..index].contains(level)
-                }))
+                || levels
+                    .iter()
+                    .enumerate()
+                    .any(|(index, level)| levels[..index].contains(level)))
         {
             return Err("invalid relay thinking levels".into());
         }

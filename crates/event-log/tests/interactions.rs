@@ -289,6 +289,97 @@ fn decision(value: Decision, time: u64) -> InteractionOutcome {
 }
 
 #[tokio::test]
+async fn pending_session_pages_use_canonical_outcomes_and_isolate_continuation_scope() {
+    use maka_event_log::{StoreError, sessions::CatalogScope};
+    use serde_json::{Value, json};
+    let directory = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&directory.path().join("pending.sqlite"))
+        .await
+        .unwrap();
+    for index in 0..35 {
+        let id = format!("session-{index:02}");
+        log.create_session(&id, &id, &json!({}), 1).await.unwrap();
+        if index < 34 {
+            let mut pending = request(&format!("request-{index}"));
+            pending.session_id = id;
+            log.establish_interaction(&pending).await.unwrap();
+        }
+    }
+    let mut second_request = request("second-request");
+    second_request.session_id = "session-33".into();
+    log.establish_interaction(&second_request).await.unwrap();
+    let page = log
+        .scoped_sessions::<Value>(CatalogScope::PendingInteractions, None, None, true)
+        .await
+        .unwrap();
+    assert_eq!(page.sessions.len(), 32);
+    assert!(
+        page.sessions
+            .iter()
+            .all(|row| row.pending_interaction_since == Some(10))
+    );
+    let cursor = page.next_cursor.as_deref();
+    let tail = log
+        .scoped_sessions::<Value>(
+            CatalogScope::PendingInteractions,
+            Some(&page.revision),
+            cursor,
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tail.sessions
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["session-32", "session-33"]
+    );
+    assert!(tail.next_cursor.is_none());
+    assert!(matches!(
+        log.list_sessions::<Value>(Some(&page.revision), cursor, 32)
+            .await,
+        Err(StoreError::RevisionConflict { .. })
+    ));
+    log.commit_interaction_outcome("request-0", decision(Decision::Deny, 20))
+        .await
+        .unwrap();
+    assert!(matches!(
+        log.scoped_sessions::<Value>(
+            CatalogScope::PendingInteractions,
+            Some(&page.revision),
+            cursor,
+            true
+        )
+        .await,
+        Err(StoreError::RevisionConflict { .. })
+    ));
+    log.commit_interaction_outcome("request-33", decision(Decision::Deny, 20))
+        .await
+        .unwrap();
+    assert!(
+        log.get_session::<Value>("session-33")
+            .await
+            .unwrap()
+            .unwrap()
+            .pending_interaction_since
+            .is_some()
+    );
+    log.commit_interaction_outcome("second-request", decision(Decision::Deny, 20))
+        .await
+        .unwrap();
+    let fresh = log
+        .scoped_sessions::<Value>(CatalogScope::PendingInteractions, None, None, true)
+        .await
+        .unwrap();
+    assert_eq!(fresh.sessions.len(), 32);
+    assert!(fresh.next_cursor.is_none());
+    assert_eq!(fresh.sessions.first().unwrap().id, "session-01");
+    assert_eq!(fresh.sessions.last().unwrap().id, "session-32");
+    log.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn first_outcome_and_atomic_grant_survive_conflicts_faults_and_reopen() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("runtime.sqlite");

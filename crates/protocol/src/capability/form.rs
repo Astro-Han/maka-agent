@@ -19,7 +19,10 @@
 
 use crate::display::project;
 use crate::{ProtocolError, Result};
-use maka_runtime::capability::*;
+pub use maka_runtime::capability::{
+    FormField, FormFieldSpec, FormFormat, FormInput, FormOption, FormRequester, FormResult,
+    FormValue,
+};
 use serde_json::Value;
 fn invalid() -> ProtocolError {
     ProtocolError::invalid("Invalid Client Capability form")

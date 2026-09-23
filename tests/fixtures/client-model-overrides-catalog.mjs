@@ -40,6 +40,7 @@ export function fullPin(patch = {}) {
     description: 'Configured description',
     apiProtocol: 'openai-chat',
     contextWindow: 64000,
+    inputLimit: 32000,
     compactionThreshold: 64000,
     maxOutputTokens: 12345,
     knowledgeCutoff: '2025-01',

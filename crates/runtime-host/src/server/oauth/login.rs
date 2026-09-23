@@ -114,8 +114,9 @@ async fn authorize(
     registration: Arc<Registration>,
 ) -> Result<maka_model::oauth::Tokens, Failure> {
     let network = ticket.network_configuration();
-    let policy = maka_network::Policy::from_settings(&network.proxy, network.password.as_deref())
-        .map_err(|_| Failure::AuthorizationFailed)?;
+    let policy =
+        maka_network::Policy::from_host_settings(&network.proxy, network.password.as_deref())
+            .map_err(|_| Failure::AuthorizationFailed)?;
     let client = Client::new(&policy).map_err(|_| Failure::InternalFailure)?;
     let authorization = client
         .start(attempt.connection.provider_type, &attempt.cancellation)

@@ -20,6 +20,8 @@
 //! Message admission and queue wire contracts, epoch 141.
 //! These codecs do not register handlers or own admission state.
 mod input;
+mod operations;
+pub use operations::{ERRORS, supports};
 mod output;
 mod queue;
 

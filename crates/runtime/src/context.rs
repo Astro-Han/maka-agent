@@ -38,8 +38,13 @@ pub enum ModelPurpose {
 #[serde(deny_unknown_fields)]
 pub struct ModelRequestContext {
     pub provider_id: String,
+    /// Historical field: effective input budget, not the model's total capacity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
+    /// Full selected-model capacity. Unknown legacy values must not be inferred
+    /// from context_window, which may be an independent input-only limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_context_window: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declared_window: Option<u64>,
 }
@@ -49,10 +54,14 @@ impl ModelRequestContext {
         if self.provider_id.is_empty() || self.provider_id.encode_utf16().count() > 512 {
             return Err("invalid model request provider identity");
         }
-        if [self.context_window, self.declared_window]
-            .into_iter()
-            .flatten()
-            .any(|value| value == 0 || value > 9_007_199_254_740_991)
+        if [
+            self.context_window,
+            self.model_context_window,
+            self.declared_window,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value == 0 || value > 9_007_199_254_740_991)
         {
             return Err("invalid model request context window");
         }
@@ -240,9 +249,18 @@ mod tests {
 
     #[test]
     fn request_context_keeps_unknown_windows_and_checks_utf16_and_safe_integers() {
+        let legacy: ModelRequestContext = serde_json::from_value(serde_json::json!({
+            "provider_id":"openai", "context_window":4000
+        }))
+        .unwrap();
+        assert_eq!(
+            legacy.model_context_window, None,
+            "an old input budget is not a model window"
+        );
         let mut context = ModelRequestContext {
             provider_id: "😀".repeat(256),
             context_window: None,
+            model_context_window: None,
             declared_window: None,
         };
         assert!(context.validate().is_ok());
@@ -264,6 +282,16 @@ mod tests {
             context.declared_window = Some(invalid);
             assert!(context.validate().is_err());
         }
+        context.declared_window = None;
+        context.model_context_window = Some(0);
+        assert!(context.validate().is_err());
+        context.model_context_window = Some(128000);
+        assert!(context.validate().is_ok());
+        let encoded = serde_json::to_value(&context).unwrap();
+        assert_eq!(
+            serde_json::from_value::<ModelRequestContext>(encoded).unwrap(),
+            context
+        );
     }
 
     #[test]

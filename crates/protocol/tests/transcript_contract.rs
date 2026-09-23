@@ -20,6 +20,8 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use maka_protocol::transcript::*;
 use serde_json::{Value, json};
+#[path = "transcript_contract/search.rs"]
+mod search;
 
 fn page() -> Value {
     json!({"kind":"page","sessionId":"session_1","direction":"older",

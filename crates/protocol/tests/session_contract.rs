@@ -220,6 +220,15 @@ fn projection_requires_every_authoritative_field_and_preserves_nullable_connecti
 #[test]
 fn query_checks_revision_cursor_page_bounds_and_required_nullables() {
     let revision = format!("sha256:{}", "a".repeat(64));
+    for value in [
+        json!({"kind":"pending_start"}),
+        json!({"kind":"pending_continue","revision":revision,"cursor":"cursor"}),
+    ] {
+        assert_eq!(
+            serde_json::to_value(decode_session_catalog_query_input(&value).unwrap()).unwrap(),
+            value
+        );
+    }
     assert!(
         decode_session_catalog_query_input(
             &json!({"kind":"list_continue","revision":revision,"cursor":"cursor"})
@@ -228,6 +237,8 @@ fn query_checks_revision_cursor_page_bounds_and_required_nullables() {
     );
     for value in [
         json!({"kind":"list_start","cursor":"x"}),
+        json!({"kind":"pending_start","cursor":"x"}),
+        json!({"kind":"pending_continue","revision":revision}),
         json!({"kind":"get","sessionId":"bad.id"}),
         json!({"kind":"list_continue","revision":"sha256:ABC","cursor":"c"}),
         json!({"kind":"list_continue","revision":revision,"cursor":"é".repeat(257)}),

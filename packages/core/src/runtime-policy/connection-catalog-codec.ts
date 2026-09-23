@@ -313,9 +313,6 @@ export function decodeModelOverridesTable(value: unknown): Readonly<Record<strin
           !isThinkingLevel(level) ||
           !(DECLARABLE_RELAY_THINKING_LEVELS as readonly ThinkingLevel[]).includes(level)
         ) {
-          // Not just "unknown": 'off' is a disable-wire encoding, not an
-          // intensity tier, and no declaration may carry it (normalize drops
-          // it at write; a persisted table containing it is foreign/corrupt).
           throw domainError(`declared thinking level for ${modelId} is not declarable`);
         }
       }

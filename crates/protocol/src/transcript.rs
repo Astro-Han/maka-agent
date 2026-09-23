@@ -20,8 +20,10 @@
 //! Transcript wire validation; contains no history or projection state.
 mod codec;
 mod fragment;
+mod search;
 mod types;
 pub use codec::*;
+pub use search::*;
 pub use types::*;
 
 pub const SESSION_TRANSCRIPT_BOOTSTRAP_MAX_BYTES: u64 = 16 * 1024;

@@ -25,6 +25,7 @@ pub use executor::ExecutorInput;
 mod handoff;
 pub use handoff::{HandoffGate, HandoffReservation, HeldHandoff, PendingSeal};
 mod history;
+mod interactions;
 mod model_attempt;
 pub mod pricing;
 mod request_composition;

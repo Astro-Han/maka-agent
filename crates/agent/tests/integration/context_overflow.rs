@@ -182,6 +182,7 @@ async fn proactive_failure_spends_the_same_budget_as_overflow_recovery() {
         provider_id: "openai".into(),
         context_window: Some(170),
         declared_window: None,
+        model_context_window: None,
     });
     worker.run(old, CancellationToken::new()).await.unwrap();
     let mut next = fixture::input(&base, "latched", false);
@@ -189,6 +190,7 @@ async fn proactive_failure_spends_the_same_budget_as_overflow_recovery() {
         provider_id: "openai".into(),
         context_window: Some(170),
         declared_window: Some(170),
+        model_context_window: None,
     });
     if let RunWork::Message { max_steps, .. } = &mut next.work {
         *max_steps = 3;

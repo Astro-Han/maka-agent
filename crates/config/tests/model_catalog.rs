@@ -160,3 +160,33 @@ fn source_catalog_differential() {
         }
     }
 }
+
+#[test]
+fn account_thinking_choices_precede_static_facts_and_remain_overridable() {
+    use maka_runtime::execution::ThinkingLevel::{High, Low};
+    for model in ["future-codex", "gpt-5.6-luna"] {
+        let mut wire = json!({
+            "connectionId":"test", "revision":1, "slug":"test", "name":"Test",
+            "providerType":"openai-codex", "enabled":true, "enabledModelIds":[model],
+            "modelSource":"fetched", "models":[{"id":model,"thinkingLevels":["low","high"]}]
+        });
+        let row: ConnectionCatalogEntry = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(
+            resolve(&row, Some(model)).unwrap()[0].thinking_levels,
+            [Low, High]
+        );
+        wire["models"][0]["thinkingLevels"] = json!([]);
+        let row: ConnectionCatalogEntry = serde_json::from_value(wire.clone()).unwrap();
+        assert!(
+            resolve(&row, Some(model)).unwrap()[0]
+                .thinking_levels
+                .is_empty()
+        );
+        wire["modelOverrides"] = json!({model:{"thinkingLevels":["high"]}});
+        let row: ConnectionCatalogEntry = serde_json::from_value(wire).unwrap();
+        assert_eq!(
+            resolve(&row, Some(model)).unwrap()[0].thinking_levels,
+            [High]
+        );
+    }
+}

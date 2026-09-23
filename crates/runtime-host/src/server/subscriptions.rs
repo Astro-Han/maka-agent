@@ -171,9 +171,11 @@ impl Subscriptions {
                 }
                 Ok(Outcome::success(serde_json::to_value(input)?))
             }
-            Operation::SessionTranscriptPage => {
-                let input = decode_session_transcript_page_input(&input)?;
-                let Some(delivery) = self.owned.get(&input.subscription_id) else {
+            Operation::SessionTranscriptPage | Operation::SessionTranscriptSearch => {
+                let id = input["subscriptionId"]
+                    .as_str()
+                    .ok_or("missing subscription identity")?;
+                let Some(delivery) = self.owned.get(id) else {
                     return Ok(failure(
                         Code::NotFound,
                         "Session subscription was not found",
@@ -191,9 +193,24 @@ impl Subscriptions {
                         "Transcript exceeds available presentation capacity",
                     ));
                 }
-                let result = access.state.page(&host.log, &input).await;
+                let result = if operation == Operation::SessionTranscriptSearch {
+                    access
+                        .state
+                        .search(
+                            &host.log,
+                            &maka_protocol::transcript::decode_transcript_search_input(&input)?,
+                        )
+                        .await
+                        .and_then(|result| serde_json::to_value(result).map_err(Into::into))
+                } else {
+                    access
+                        .state
+                        .page(&host.log, &decode_session_transcript_page_input(&input)?)
+                        .await
+                        .and_then(|result| serde_json::to_value(result).map_err(Into::into))
+                };
                 match result {
-                    Ok(page) => Ok(Outcome::success(serde_json::to_value(page)?)),
+                    Ok(page) => Ok(Outcome::success(page)),
                     Err(error) => Ok(Outcome::failure(transcript::operation_error(error))),
                 }
             }
@@ -282,61 +299,4 @@ fn failure(code: Code, message: &str) -> Outcome {
         code,
         message: message.into(),
     })
-}
-
-pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    match operation {
-        Operation::SubscriptionOpen => {
-            decode_subscription_open_input(value)?;
-        }
-        Operation::SubscriptionClose => {
-            decode_subscription_close_input(value)?;
-        }
-        Operation::SubscriptionPtyInterestSet => {
-            decode_pty_interest_input(value)?;
-        }
-        Operation::SessionTranscriptPage => {
-            decode_session_transcript_page_input(value)?;
-        }
-        Operation::SubscriptionReady => {
-            decode_subscription_close_input(value)?;
-        }
-        _ => unreachable!("subscription operation decoder"),
-    }
-    Ok(value.clone())
-}
-
-pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
-    match operation {
-        Operation::SessionTranscriptPage => Some(&[
-            Code::HostNotReady,
-            Code::HostDraining,
-            Code::OperationUnavailable,
-            Code::InvalidRequest,
-            Code::NotFound,
-            Code::OperationConflict,
-            Code::PersistenceFailed,
-            Code::InternalFailure,
-        ]),
-        Operation::SubscriptionOpen => Some(&[
-            Code::TranscriptPreparing,
-            Code::HostNotReady,
-            Code::HostDraining,
-            Code::OperationUnavailable,
-            Code::NotFound,
-            Code::OperationConflict,
-            Code::PersistenceFailed,
-            Code::InternalFailure,
-        ]),
-        Operation::SubscriptionClose
-        | Operation::SubscriptionReady
-        | Operation::SubscriptionPtyInterestSet => Some(&[
-            Code::HostNotReady,
-            Code::HostDraining,
-            Code::OperationUnavailable,
-            Code::NotFound,
-            Code::InternalFailure,
-        ]),
-        _ => None,
-    }
 }

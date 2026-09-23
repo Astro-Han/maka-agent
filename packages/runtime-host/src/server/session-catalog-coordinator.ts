@@ -401,6 +401,9 @@ export class HostSessionCatalogCoordinator {
     input: SessionCatalogQueryInput,
   ): Promise<OperationOutcome<'session.catalog.query'>> {
     try {
+      if (input.kind === 'pending_start' || input.kind === 'pending_continue') {
+        return queryFailure('operation_unavailable', 'Pending catalog requires the native Host');
+      }
       if (input.kind === 'get') {
         const record = await this.#readCatalogRecordIfPresent(input.sessionId);
         return successQuery({
@@ -409,7 +412,7 @@ export class HostSessionCatalogCoordinator {
         });
       }
 
-      const cursor = input.kind === 'list_start' ? undefined : decodeCursor(input.cursor);
+      const cursor = input.kind === 'list_continue' ? decodeCursor(input.cursor) : undefined;
       if (input.kind === 'list_continue' && cursor === undefined) {
         return queryFailure('invalid_request', 'Session cursor is invalid');
       }

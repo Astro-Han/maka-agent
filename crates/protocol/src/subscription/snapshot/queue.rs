@@ -17,9 +17,7 @@
  * under the License.
  */
 
-//! Outbound live queue rows reuse the currently supported message content.
-//! Host-owned `session_context` attachment references are not represented by
-//! that content type yet; this is not a decoder for arbitrary existing queues.
+//! Queue rows use client-authored message content, matching message admission.
 use super::super::{ensure, entity, id};
 use super::{count, encoded};
 use crate::{Result, turn::MessageContent};
@@ -124,7 +122,7 @@ impl SessionMessageQueueProjection {
                 entries.insert(&message.entry_id) && messages.insert(&message.message_id),
                 "Duplicate queue identity",
             )?;
-            message.content.clone().validate(false)?;
+            message.content.clone().validate_admission(false)?;
         }
         encoded(self, 52 * 1024)
     }

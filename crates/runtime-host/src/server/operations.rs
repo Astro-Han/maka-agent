@@ -19,9 +19,10 @@
 
 use super::{
     access, artifacts, bootstrap, capabilities, configuration, context, interactions, sessions,
-    subscriptions, turns,
+    turns,
 };
 use maka_protocol::OperationErrorCode;
+use maka_protocol::subscription as subscriptions;
 use maka_protocol::{Operation, OperationRegistry, Result};
 use serde_json::Value;
 
@@ -145,9 +146,8 @@ impl OperationRegistry for Operations {
             maka_protocol::message::decode_output(operation, value)?;
             return Ok(value.clone());
         }
-        if operation == Operation::SubscriptionPtyInterestSet {
-            maka_protocol::subscription::decode_subscription_close_result(value)?;
-            return Ok(value.clone());
+        if subscriptions::errors(operation).is_some() {
+            return subscriptions::decode_output(operation, value);
         }
         if maka_protocol::resource::is_controller(operation) {
             maka_protocol::resource::validate_controller_output(operation, value)?;
@@ -272,26 +272,9 @@ impl OperationRegistry for Operations {
                 configuration::MUTATION_ERRORS
             })
         } else {
-            match operation {
-                Operation::SessionCreate => Some(sessions::CREATE_ERRORS),
-                Operation::SessionBranchCreate
-                | Operation::SessionRevisionCreate
-                | Operation::SessionRevisionAbandon => Some(sessions::copy::ERRORS),
-                Operation::SessionCopyQuery => Some(sessions::copy::ERRORS),
-                Operation::SessionSourcesQuery => Some(maka_protocol::session::sources::ERRORS),
-                Operation::SessionCatalogQuery => Some(sessions::QUERY_ERRORS),
-                Operation::SessionLifecycleSet => Some(sessions::LIFECYCLE_ERRORS),
-                Operation::SessionRemove
-                | Operation::SessionRemovePreview
-                | Operation::SessionRemoveQuery => Some(sessions::removal::ERRORS),
-                Operation::SessionMetadataUpdate => Some(sessions::mutation::METADATA_ERRORS),
-                Operation::SessionReadMarkerSet => Some(sessions::mutation::READ_MARKER_ERRORS),
-                Operation::SessionConfigurationUpdate | Operation::SessionWorkspaceRelocate => {
-                    Some(sessions::configuration::ERRORS)
-                }
-                _ => turns::errors(operation)
-                    .or_else(|| bootstrap::Operations.error_codes(operation)),
-            }
+            maka_protocol::session::errors(operation)
+                .or_else(|| turns::errors(operation))
+                .or_else(|| bootstrap::Operations.error_codes(operation))
         }
     }
 }

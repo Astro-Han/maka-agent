@@ -90,14 +90,7 @@ pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
             Code::NotFound,
             Code::InternalFailure,
         ]),
-        Operation::TurnStop => Some(&[
-            Code::HostNotReady,
-            Code::HostDraining,
-            Code::OperationUnavailable,
-            Code::NotFound,
-            Code::OperationConflict,
-            Code::InternalFailure,
-        ]),
+        Operation::TurnStop => Some(turn::STOP_ERRORS),
         _ => None,
     }
 }
