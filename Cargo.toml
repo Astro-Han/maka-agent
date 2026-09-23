@@ -18,7 +18,7 @@
 [workspace]
 default-members = ["crates/cli"]
 exclude = ["native/gitoxide-helper", "native/runtime-host-peer", "native/runtime-host-windows-task-launcher", "experiments/windows-sandbox/launcher"]
-members = ["crates/jev", "crates/session-import", "crates/insights", "crates/sandbox", "crates/web", "crates/workhub", "crates/assistant", "crates/scheduler", "crates/graph", "crates/plugins", "crates/skills", "crates/apply-patch", "crates/cli", "crates/runtime", "crates/event-log", "crates/js-runtime", "crates/runtime-host", "crates/protocol", "crates/model", "crates/responses", "crates/providers", "crates/transport", "crates/agent", "crates/config", "crates/presentation", "crates/tools", "crates/tool-catalog", "crates/fs-tools", "crates/process", "crates/client-capability", "crates/network"]
+members = ["crates/session-recap", "crates/jev", "crates/session-import", "crates/insights", "crates/sandbox", "crates/web", "crates/workhub", "crates/assistant", "crates/scheduler", "crates/graph", "crates/plugins", "crates/skills", "crates/apply-patch", "crates/cli", "crates/runtime", "crates/event-log", "crates/js-runtime", "crates/runtime-host", "crates/protocol", "crates/model", "crates/responses", "crates/providers", "crates/transport", "crates/agent", "crates/config", "crates/presentation", "crates/tools", "crates/tool-catalog", "crates/fs-tools", "crates/process", "crates/client-capability", "crates/network"]
 resolver = "3"
 
 [workspace.package]
@@ -44,6 +44,7 @@ maka-tui = { path = "crates/tui" }
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 maka-sandbox = { path = "crates/sandbox" }
+maka-session-recap = { path = "crates/session-recap" }
 maka-jev = { path = "crates/jev" }
 maka-web = { path = "crates/web" }
 maka-assistant = { path = "crates/assistant" }

@@ -78,7 +78,8 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | --- | --- | --- |
 | Plan | 状态与持久回执层完成：修订／放弃、版本与重规划来源检查、冻结提交、进度／中断／恢复／取消、精确重试及固定水位历史分页。工具、Behavior、Remote／Desktop 和实际执行观察尚未接入，非 Agent collaboration mode 仍拒绝准入。 | **插件 + Host。** 插件通过公共存储拥有流程与记录；审批计划不授予沙箱权限，Host 保留授权和 Turn 准入。没有 Host 回执只表示待准入，不能标记正在执行。 |
 | Goal | 查询、arm、控制、续跑、终止、预算与恢复语义。 | **插件 + Host。** Goal 决定后续提交；Host 执行已准入的硬限制并记录用量。插件退休后不能继续提交。 |
-| Daily review／recap | daily-review 查询／修改、定时复盘、`session.recap.generate`。 | **插件 + Host。** 选择、总结及输出由插件负责，复用 Scheduler 和授权历史／模型服务；规范 Session 元数据的提交仍归 Host。 |
+| Session recap | `maka.session-recap` 已提供手动生成、操作 ID 幂等、持久回执及 Desktop Session Inspector 展示；使用授权历史与本会话模型，未知结果不自动重试。 | **插件。** 回顾是插件派生数据，不改写规范历史／Session 元数据；输入为有界文本历史，尚无 TS 结构化工具结果投影。自动 idle 触发与旧协议路由未接入。 |
+| Daily review | daily-review 查询／修改与定时复盘待实现。 | **插件 + Host。** 复用 Scheduler、授权历史与模型服务。 |
 | 外部 agent | setup start/query/cancel；具体执行适配、配置、鉴权、对话身份，以及附件／交互／resume／fork。 | **插件 + Host。** CLI／ACP 适配作为 Executor 插件，使用受管理进程／HTTP。已有 Executor 框架不等于已有具体 adapter。Host 负责授权、取消和外部事件落盘。 |
 | Usage／Pricing | 已实现 Agent 与辅助 SDK 的物理计量、冻结估价、公共 Rust／JS 作用域模型／工具混合活动分页，以及原生／插件共享的报价查询与 CAS 修改。一致快照汇总包含有界完整分组与缺失数据覆盖率；Insights 插件已提供设置报表、筛选、分页、视图持久化和报价编辑；Session Inspector 已使用公共 Session 作用域 Client 插槽。 | **插件 + Host。** 报表和可重建投影可归 Insights 领域；Host 不依赖插件存活来记录用量，并提供一致快照。缺失用量不能视为零。 |
 | 后台健康 | BackgroundTaskHealth 的进程和端点检查。 | **插件 + Host。** 插件解释健康状态并提供工具；Host 提供授权资源观察和有界探测。保存 PID 不等于拥有进程。 |

@@ -33,6 +33,7 @@ for (const [name, entryPoint] of [
   ['agent-graph', 'crates/graph/src/client.tsx'],
   ['skills', 'crates/skills/src/client.tsx'],
   ['jev', 'crates/jev/src/client.tsx'],
+  ['session-recap', 'crates/session-recap/src/client.tsx'],
   ['web', 'crates/web/src/client.tsx'],
   ['insights', 'crates/insights/src/client.tsx'],
   ['session-import', 'crates/session-import/src/client.tsx'],
