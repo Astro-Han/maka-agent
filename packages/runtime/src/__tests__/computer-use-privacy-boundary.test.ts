@@ -297,15 +297,10 @@ test('Computer Use persists which element a call targeted', async () => {
   };
 
   // This object is the dialect, not an example of it. `computerActionLabel` in
-  // `packages/ui/src/tool-activity/computer-action-label.ts` and
-  // `computerCallSummary` in `packages/cli/src/pi-transcript-tools.ts` read
-  // these exact key names off the persisted args, and they are the only things
-  // that turn a Computer Use row into a sentence. Respell them at the seam —
-  // `window_id` to `windowId`, `element_id` to `elementId` — and both renderers
-  // silently fall back to "点击该元素" on every row, which is the defect this
-  // projection exists to prevent. Neither renderer's own suite can see it: both
-  // build their fixtures by calling a projection, so respelling the seam leaves
-  // them green. Change this assertion and those two files in one commit.
+  // `packages/ui/src/tool-activity/computer-action-label.ts` reads these exact
+  // keys off persisted args. Respelling `window_id` to `windowId` or `element_id`
+  // to `elementId` makes the renderer silently fall back to "点击该元素". Its own
+  // fixtures use this projection, so this assertion protects the shared seam.
   assert.deepEqual(await persisted('e7'), {
     action: 'click_element',
     app: 'Calculator',

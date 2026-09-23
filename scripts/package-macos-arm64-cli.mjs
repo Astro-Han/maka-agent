@@ -945,7 +945,7 @@ export async function packageMacosArm64Cli({
       writeFile(
         join(archiveRoot, 'README.txt'),
         [
-          `Maka CLI/TUI ${version} for Apple Silicon macOS`,
+          `Maka CLI ${version} for Apple Silicon macOS`,
           '',
           "Add this directory's bin folder to PATH, then run:",
           '  maka --help',

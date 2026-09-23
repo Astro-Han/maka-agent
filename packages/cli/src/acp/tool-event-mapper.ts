@@ -34,7 +34,7 @@ import type { StoredMessage } from '@maka/core/session';
 import { projectToolArgsPreview } from '@maka/core/tool-quiet-preview';
 import { toolResultActivityStatus } from '@maka/core/tool-result-status';
 import { BoundedChunkBuffer } from '../bounded-chunk-buffer.js';
-import { formatToolResultContent } from '../pi-transcript-format.js';
+import { formatToolResultContent } from './tool-result-format.js';
 
 // Presentation limits, not Host execution/admission limits. The per-tool values
 // match the existing TUI buffers; the aggregate also bounds concurrent tools.

@@ -115,29 +115,24 @@ The app distinguishes configured, send-ready, and experimental connection states
 For the public npm package, see the [CLI installation and usage guide](./packages/cli/README.md).
 The commands below run the development CLI from a source checkout.
 
-Build the workspaces first:
+Build the native CLI:
 
 ```sh
-npm run build
+cargo build -p maka-cli
 ```
 
-Then start the TUI or run one Turn:
+Then start the Rust TUI or inspect the native commands:
 
 ```sh
 npm run cli:dev
-npm run cli:dev -- run "Summarize this repository and identify its most important risk"
-npm run cli:dev -- run --graph "Implement two independent slices, integrate them, then review the result"
 npm run cli:dev -- --help
 ```
 
-The TUI also accepts `/graph on`, `/graph off`, and `/graph <task>`. Non-interactive
-`--graph` runs wait for the durable Graph to finish before printing the final
-supervisor output. Graph implementation operators use isolated Git worktrees, so
-the source project must be a clean Git worktree.
-
-The repository CLI uses the same `Maka Dev` profile as a development Desktop build. The
-released `maka` binary continues to use the `Maka` profile; the two profiles are not copied or
-synchronized automatically. Evaluation specs and adapters live in [`packages/eval`](./packages/eval).
+The native `maka` executable opens the TUI by default in an interactive terminal;
+`maka tui` is the explicit entry. It uses its own native Host state root, not the
+Desktop development profile. This branch no longer contains the TypeScript TUI.
+The npm CLI retains automation and Host management commands. Evaluation specs and
+adapters live in [`packages/eval`](./packages/eval).
 
 ## Architecture
 
@@ -161,7 +156,7 @@ Start with [ARCHITECTURE.md](./ARCHITECTURE.md). It provides the system map, cod
 
 ```text
 apps/desktop/          Electron main / preload / React renderer
-crates/                Rust runtime and Host (root Cargo workspace)
+crates/                Rust TUI, CLI, runtime and Host (root Cargo workspace)
 
 packages/core/         Pure contracts for Sessions, Events, Permissions, and Connections
 packages/storage/      SQLite operational state, configuration, and payload stores
@@ -170,7 +165,7 @@ packages/runtime/      AgentRun, model adapters, tools, context, and recovery
 packages/runtime-host/ Single-owner Runtime Host lifecycle, protocol, and client bootstrap
 packages/eval/         Experiment cells, attempts, results, and executor/subject adapters
 packages/computer-use/ Computer-use backend selection, host lifecycle, and protocol adapters
-packages/cli/          TUI and non-interactive CLI
+packages/cli/          npm automation CLI, ACP and Host management
 packages/ui/           Shared conversation, Markdown, Artifact, and UI primitives
 native/                Rust: the direct-peer addon for Runtime Host and the gitoxide helper
 website/               Astro source for maka.apache.org

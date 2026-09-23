@@ -36,7 +36,7 @@ export const SCOPE = [
 ];
 
 export const RULES = {
-  // This install-free subset complements check-tui-copy's TUI-only AST rule.
+  // Keep these source checks install-free.
   'locale-literal-compare':
     /\blocale(?:\.[A-Za-z]+)?\s*(?:===|!==)\s*['"](?:zh(?:-CN|-TW)?|en)['"]|\blocale\.startsWith\(['"]zh['"]\)/gu,
   'silent-locale-default': /(?<!\b(?:let|const|var)\s+)\blocale\??:\s*UiLocale\s*=\s*['"]/gu,

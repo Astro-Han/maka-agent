@@ -59,7 +59,7 @@ npm --workspace @maka/core run test:dist
 
 ```sh
 npm run dev          # 带 HMR 的桌面应用
-npm run cli:dev      # TUI；`npm run cli:dev -- run "…"` 非交互地跑一个 Turn
+npm run cli:dev      # Rust TUI；`npm run cli:dev -- --help` 查看原生命令
 npm test             # 全部 workspace，或：npm --workspace @maka/core run test:dist
 ```
 

@@ -35,7 +35,7 @@ import {
 import { createRequire } from 'node:module';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { promisify, stripVTControlCharacters } from 'node:util';
+import { promisify } from 'node:util';
 import {
   assertMacosArm64CliHost,
   assertNoDanglingSymlinks,
@@ -52,7 +52,6 @@ import { resolveProductReleaseIdentity } from './product-release-identity.mjs';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tuiReadyPattern = /Maka\s*·\s*Auto\s*·/u;
 
 async function runCommand(command, args, options = {}) {
   return execFileAsync(command, args, {
@@ -93,23 +92,6 @@ async function assertMissing(path) {
   throw new Error(`CLI artifact contains forbidden path: ${path}`);
 }
 
-export function isTuiReadyOutput(output) {
-  return tuiReadyPattern.test(stripVTControlCharacters(output));
-}
-
-export function assertExpectedTuiExit({ ready, stopRequested, exitCode, signal, output }) {
-  if (!ready) {
-    throw new Error(
-      `TUI exited before rendering in a PTY (exit ${exitCode}, signal ${signal}). Output: ${output.slice(-1000)}`,
-    );
-  }
-  if (!stopRequested || (exitCode !== 0 && exitCode !== 130)) {
-    throw new Error(
-      `TUI crashed after startup (exit ${exitCode}, signal ${signal}). Output: ${output.slice(-1000)}`,
-    );
-  }
-}
-
 export function assertSafeCliArchiveEntries(entries, archiveRootName) {
   if (entries.length === 0) throw new Error('CLI archive is empty.');
   for (const entry of entries) {
@@ -124,55 +106,6 @@ export function assertSafeCliArchiveEntries(entries, archiveRootName) {
       throw new Error(`Unsafe CLI archive entry: ${entry}`);
     }
   }
-}
-
-async function smokeTuiInPty(archiveRoot, environment) {
-  const cliManifestPath = join(
-    archiveRoot,
-    'libexec',
-    'node_modules',
-    'maka-agent',
-    'package.json',
-  );
-  const requireFromCli = createRequire(cliManifestPath);
-  const pty = requireFromCli('node-pty');
-  const executable = join(archiveRoot, 'bin', 'maka');
-  await new Promise((resolvePromise, reject) => {
-    let output = '';
-    let ready = false;
-    let stopRequested = false;
-    let closeTimer;
-    const child = pty.spawn(executable, [], {
-      cols: 100,
-      rows: 30,
-      cwd: archiveRoot,
-      env: { ...environment, TERM: 'xterm-256color' },
-    });
-    const timeout = setTimeout(() => {
-      child.kill();
-      reject(new Error(`TUI did not start in a PTY. Output: ${output.slice(-1000)}`));
-    }, 10_000);
-
-    child.onData((data) => {
-      output += data;
-      if (!ready && isTuiReadyOutput(output)) {
-        ready = true;
-        stopRequested = true;
-        child.write('\u0003');
-        closeTimer = setTimeout(() => child.write('\u0003'), 250);
-      }
-    });
-    child.onExit(({ exitCode, signal }) => {
-      clearTimeout(timeout);
-      clearTimeout(closeTimer);
-      try {
-        assertExpectedTuiExit({ ready, stopRequested, exitCode, signal, output });
-        resolvePromise();
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
 }
 
 function parseLinkedLibraries(output) {
@@ -523,7 +456,6 @@ export async function verifyMacosArm64Cli(
     platform = process.platform,
     arch = process.arch,
     run = runCommand,
-    smokeTui = smokeTuiInPty,
     requireReleaseSigning = process.env.MAKA_CLI_REQUIRE_RELEASE_SIGNING === '1',
   } = {},
 ) {
@@ -734,7 +666,6 @@ export async function verifyMacosArm64Cli(
       throw new Error('Packaged eval command did not load its public CLI contract.');
     }
     await smokePackagedEval(archiveRoot, identity.sourceCommit, environment, run);
-    await smokeTui(archiveRoot, environment);
 
     return {
       archivePath: resolvedArchivePath,

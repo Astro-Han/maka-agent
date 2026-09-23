@@ -133,8 +133,6 @@ const EMBEDDED_COMPONENT_LICENSES = new Map([
 ]);
 const MIT_COPYRIGHT_OVERRIDES = new Map([
   // The published tarball omits the monorepo-root LICENSE.
-  ['@earendil-works/pi-tui@0.84.4', 'Copyright (c) 2025 Mario Zechner'],
-  ['@earendil-works/pi-tui@0.85.1', 'Copyright (c) 2025 Mario Zechner'],
   // The published tarball omits the repository LICENSE; sibling @astryxdesign
   // packages ship it verbatim with this notice.
   ['@astryxdesign/core@0.1.9', 'Copyright (c) 2026 Meta Platforms, Inc.'],

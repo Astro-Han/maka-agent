@@ -31,16 +31,8 @@ import {
   type RuntimeHostCliCommand,
 } from './runtime-host-cli.js';
 import { sessionBundleHelpText } from './runtime-host-help.js';
-import { resolveCliUiLocale } from './cli-ui-locale.js';
 
 export type MakaCliCommand =
-  | {
-      kind: 'tui';
-      resumeSessionId?: string;
-      resumeCwd?: string;
-      hostProfileId?: string;
-      projectId?: string;
-    }
   | { kind: 'run'; args: string[] }
   | { kind: 'activate'; args: string[] }
   | { kind: 'session-export'; args: string[] }
@@ -69,7 +61,7 @@ export function parseMakaCliArgs(
   version: string,
   cliCommand = RELEASE_MAKA_CLI_LAUNCH_OPTIONS.cliCommand,
 ): MakaCliCommand {
-  if (argv.length === 0) return { kind: 'tui' };
+  if (argv.length === 0) return { kind: 'help', text: helpText(cliCommand) };
   const [first] = argv;
   if (first === '--help' || first === '-h') return { kind: 'help', text: helpText(cliCommand) };
   if (first === '--version' || first === '-v') return { kind: 'version', text: version };
@@ -83,7 +75,6 @@ export function parseMakaCliArgs(
           showHelp: false,
         };
   }
-  if (first?.startsWith('--')) return parseTuiArgs(argv);
   if (first === 'run' || first === '-p') return { kind: 'run', args: argv.slice(1) };
   if (first === 'activate') return { kind: 'activate', args: argv.slice(1) };
   if (first === 'session-export' || first === 'session-import') {
@@ -135,14 +126,13 @@ export function handleMakaCliProcessExit(
 
 function helpText(cliCommand: string): string {
   return [
-    `Usage: ${cliCommand}`,
+    `Usage: ${cliCommand} <command>`,
     '',
-    'Launches the Maka terminal UI in the current working directory.',
+    'Session automation and Runtime Host management.',
     '',
     'Commands:',
     ...(
       [
-        ['', 'Start the TUI'],
         ['--acp', 'Serve ACP v1 over stdio (sessions, prompts, streaming, cancellation)'],
         ['run ...', 'Run one non-interactive model turn'],
         ['-p ...', `Alias for ${cliCommand} run`],
@@ -165,10 +155,6 @@ function helpText(cliCommand: string): string {
     'Options:',
     '  -h, --help        Show help',
     '  -v, --version     Show version',
-    '  --resume <session-id>  Reopen a previous session in the TUI',
-    '  --resume <id> --cwd <path>  Reopen a session after its directory moved',
-    '  --host <profile-id>     Connect the TUI to a saved Runtime Host profile',
-    '  --project <project-id>  Select an existing Project on a remote Host',
     '',
     `Run \`${cliCommand} <command> --help\` for a command's own options.`,
   ].join('\n');
@@ -772,85 +758,7 @@ export async function runMakaCli(
           : `${command.message}\n\n${helpText(options.cliCommand)}\n`,
       );
       return command.exitCode;
-    case 'tui': {
-      const locale = resolveCliUiLocale(process.env);
-      if (!locale.ok) {
-        process.stderr.write(`${locale.message}\n`);
-        return 2;
-      }
-      const { runRuntimeHostTui } = await import('./runtime-host-tui-command.js');
-      return runRuntimeHostTui({
-        cliCommand: options.cliCommand,
-        clientDataRoot: dataRoots.clientDataRoot,
-        workspaceRoot: dataRoots.workspaceRoot,
-        locale: locale.locale,
-        cwd: process.cwd(),
-        onProcessExit: handleMakaCliProcessExit,
-        ...(command.resumeSessionId ? { resumeSessionId: command.resumeSessionId } : {}),
-        ...(command.resumeCwd ? { resumeCwd: command.resumeCwd } : {}),
-        ...(command.hostProfileId ? { hostProfileId: command.hostProfileId } : {}),
-        ...(command.projectId ? { projectId: command.projectId } : {}),
-      });
-    }
   }
-}
-
-function parseTuiArgs(argv: string[]): MakaCliCommand {
-  const values = new Map<string, string>();
-  const supported = new Set(['--resume', '--cwd', '--host', '--project']);
-  for (let index = 0; index < argv.length; index += 1) {
-    const option = argv[index];
-    if (!option || !supported.has(option)) {
-      return {
-        kind: 'error',
-        message: `Unexpected argument: ${option ?? ''}`,
-        exitCode: 2,
-      };
-    }
-    if (values.has(option)) {
-      return {
-        kind: 'error',
-        message: `Option repeated: ${option}`,
-        exitCode: 2,
-      };
-    }
-    const value = argv[index + 1];
-    if (!value || value.startsWith('-')) {
-      const expected =
-        option === '--resume' ? 'a session id' : option === '--cwd' ? 'a directory' : 'a value';
-      return {
-        kind: 'error',
-        message: `${option} requires ${expected}`,
-        exitCode: 2,
-      };
-    }
-    values.set(option, value);
-    index += 1;
-  }
-  if (values.has('--cwd') && !values.has('--resume')) {
-    return { kind: 'error', message: '--cwd requires --resume', exitCode: 2 };
-  }
-  if (values.has('--project') && values.has('--resume')) {
-    return {
-      kind: 'error',
-      message: '--project cannot be used with --resume',
-      exitCode: 2,
-    };
-  }
-  if (values.has('--cwd') && values.has('--host') && values.get('--host') !== 'local') {
-    return {
-      kind: 'error',
-      message: '--cwd cannot be used with a remote Runtime Host',
-      exitCode: 2,
-    };
-  }
-  return {
-    kind: 'tui',
-    ...(values.has('--resume') ? { resumeSessionId: values.get('--resume') } : {}),
-    ...(values.has('--cwd') ? { resumeCwd: values.get('--cwd') } : {}),
-    ...(values.has('--host') ? { hostProfileId: values.get('--host') } : {}),
-    ...(values.has('--project') ? { projectId: values.get('--project') } : {}),
-  };
 }
 
 async function readPackageVersion(): Promise<string> {

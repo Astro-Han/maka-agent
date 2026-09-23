@@ -59,7 +59,7 @@ npm --workspace @maka/core run test:dist
 
 ```sh
 npm run dev          # desktop app with HMR
-npm run cli:dev      # TUI; `npm run cli:dev -- run "…"` runs one non-interactive turn
+npm run cli:dev      # Rust TUI; `npm run cli:dev -- --help` lists native commands
 npm test             # all workspaces, or: npm --workspace @maka/core run test:dist
 ```
 

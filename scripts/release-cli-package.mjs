@@ -691,7 +691,7 @@ function writeReleaseManifest(cli, publishable) {
     },
     homepage: 'https://github.com/apache/maka#readme',
     bugs: { url: 'https://github.com/apache/maka/issues' },
-    keywords: ['apache', 'ai', 'agent', 'cli', 'tui', 'local-first'],
+    keywords: ['apache', 'ai', 'agent', 'cli', 'local-first'],
     publishConfig: publishable
       ? {
           access: 'public',

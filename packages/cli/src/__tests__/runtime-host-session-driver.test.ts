@@ -55,8 +55,10 @@ import type {
   MakaAttachedSessionTurn,
   MakaSideConversationParentStatus,
 } from '../session-driver.js';
-import { WAIT_BUDGET_MS } from './tui-terminal-mock.js';
 import { waitFor as pollFor } from '@maka/core/test-only/async-primitives';
+
+const WAIT_BUDGET_MS =
+  Number(process.env.MAKA_TEST_WAIT_BUDGET_MS ?? '') || (process.env.CI ? 5_000 : 250);
 
 describe('Runtime Host Maka Session driver', () => {
   test('maps authoritative Catalog activity into Session summaries', () => {

@@ -88,19 +88,6 @@ painted on resume without another write. It fails against the unpatched bundle.
 Delete when upstream routes selection changes through its paused-render
 contract and both bundle regressions pass without the patch.
 
-## `@earendil-works/pi-tui@0.85.1`
-
-
-Editor undo snapshots deep-clone all stored paste strings for each typed word,
-so a 1 MiB paste followed by 60 words retains roughly 60 MiB of duplicate text.
-The editor now copies its mutable state, lines array, and paste Map while
-sharing immutable strings. All undo steps, paste renumbering, and submission
-cleanup are preserved; the generic undo stack used by Input stays unchanged.
-Snapshot creation and storage are private, with no published clone policy
-that product code can configure.
-
-Delete the patch when upstream shares immutable paste strings across undo snapshots.
-
 ## `zod@4.6.5`
 
 Recursive schemas retain their last parse context and bucket in schema closures,

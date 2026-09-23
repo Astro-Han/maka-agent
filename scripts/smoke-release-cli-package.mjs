@@ -181,31 +181,12 @@ async function validateInstalledProduct(root) {
   await smokeNativeFileLock(packageRoot, root);
   await smokeRuntimeHostPeerProtocol({ packageRoot, cliEntrypoint, root });
 
-  // These flows own separate roots and each proves the packaged Host's idle
-  // retirement. Start both before awaiting so the same grace window is
-  // observed once in wall-clock time rather than twice in series.
-  logStep('checking the interactive TUI setup path');
-  const interactiveTui = smokeInteractiveTui({
-    packageRoot,
-    cliEntrypoint,
-    ptySpawn,
-    root: join(root, 'first-run'),
-  });
-
   logStep('checking a filesystem-backed controlled model turn');
-  const controlledRun = smokeControlledRun({
+  await smokeControlledRun({
     packageRoot,
     cliEntrypoint,
     root: join(root, 'controlled-run'),
   });
-  const smokeResults = await Promise.allSettled([interactiveTui, controlledRun]);
-  const smokeFailures = smokeResults.flatMap((result) =>
-    result.status === 'rejected' ? [result.reason] : [],
-  );
-  if (smokeFailures.length === 1) throw smokeFailures[0];
-  if (smokeFailures.length > 1) {
-    throw new AggregateError(smokeFailures, 'Installed CLI product flows both failed');
-  }
 
   logStep('checking npx invocation lifetime and durable schedule recovery after cache removal');
   await smokeNpxScheduleRecovery({
@@ -731,39 +712,6 @@ async function smokeNativeFileLock(packageRoot, root) {
   } finally {
     closeSync(handle);
   }
-}
-
-async function smokeInteractiveTui({ packageRoot, cliEntrypoint, ptySpawn, root }) {
-  mkdirSync(root, { recursive: true });
-  const home = join(root, 'home');
-  const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { recursive: true });
-  const environment = isolatedEnvironment(home);
-  const dataRoots = await resolveInstalledDataRoots(packageRoot, environment, home);
-  await withCleanup(
-    async () => {
-      const result = await runPtyScenario({
-        ptySpawn,
-        command: process.execPath,
-        args: [cliEntrypoint],
-        cwd: workspace,
-        environment,
-        marker: 'Set Up Provider',
-        onOutput: (terminal, output) => {
-          if (!output.includes('/setup')) return false;
-          terminal.write('/setup\r');
-          return true;
-        },
-        onMarker: (terminal) => {
-          terminal.write('\x03');
-          setTimeout(() => terminal.write('\x04'), 250);
-        },
-        timeoutMs: PROCESS_TIMEOUT_MS,
-      });
-      if (result.exitCode !== 0) throw new Error(`Interactive TUI exited with ${result.exitCode}`);
-    },
-    (completed) => settleRuntimeHost(packageRoot, dataRoots.workspaceRoot, completed),
-  );
 }
 
 async function smokeRuntimeHostService({ packageRoot, cliEntrypoint, ptySpawn, root }) {

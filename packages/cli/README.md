@@ -40,13 +40,11 @@ includes the canonical work-in-progress disclaimer below directly from the relea
 ## Requirements
 
 - Node.js 22.19.0 or newer;
-- a terminal with interactive input for the TUI;
-- a configured model connection for agent turns; first-run setup currently supports API-key
-  providers.
+- a configured model connection for agent turns.
 
 The release gate validates the following installed-package matrix:
 
-| Platform | Architecture | Node.js | TUI, CLI, Runtime Host | Real Harbor/Pier Eval |
+| Platform | Architecture | Node.js | CLI, Runtime Host | Real Harbor/Pier Eval |
 | --- | --- | --- | --- | --- |
 | Linux | x64 | 22.19 | Validated | Preflight only |
 | Linux | x64 | 24 | Validated | Validated |
@@ -88,16 +86,15 @@ with persistent configuration, see the
 
 ## First run
 
-Start Maka from the project directory the agent should work in:
+Inspect the available automation and Host management commands:
 
 ```sh
 cd path/to/project
-maka
+maka --help
 ```
 
-If no model connection exists, Maka opens the provider setup flow. Select a provider, enter its API
-key, choose the enabled models, and save. Run `/setup` later to add or update a provider and `/model`
-to switch models.
+The terminal UI is implemented in Rust under `crates/tui`; it is no longer part
+of this npm package. From a source checkout, run `npm run cli:dev` to launch it.
 
 API keys and workspace state stay in the local `Maka` profile. The current credential vault is a
 local plaintext file protected by the operating-system account boundary; on POSIX systems Maka
@@ -256,7 +253,7 @@ maka --version
 
 - If `maka` is not found after a global install, ensure npm's global executable directory is on
   `PATH`.
-- If no model is available, start the TUI and run `/setup`.
+- If no model is available, configure a model connection for the selected Host.
 - If Eval refuses to start, follow the reported environment-variable name and expected framework
   version; it does not install or silently substitute missing prerequisites.
 - When reporting a problem, include the three versions above, the operating system and

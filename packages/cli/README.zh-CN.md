@@ -38,12 +38,11 @@ release commit 中的 [DISCLAIMER-WIP](https://github.com/apache/maka/blob/main/
 ## 环境要求
 
 - Node.js 22.19.0 或更高版本；
-- 使用 TUI 时需要支持交互输入的终端；
-- 执行 Agent Turn 时需要已经配置的模型连接；首次设置目前支持使用 API Key 的供应商。
+- 执行 Agent Turn 时需要已经配置的模型连接。
 
 发布门禁会验证以下安装态矩阵：
 
-| 平台 | 架构 | Node.js | TUI、CLI、Runtime Host | 真实 Harbor/Pier Eval |
+| 平台 | 架构 | Node.js | CLI、Runtime Host | 真实 Harbor/Pier Eval |
 | --- | --- | --- | --- | --- |
 | Linux | x64 | 22.19 | 已验证 | 仅验证 preflight |
 | Linux | x64 | 24 | 已验证 | 已验证 |
@@ -81,15 +80,15 @@ npm 上有两条 dist-tag，且二者不可互换：
 
 ## 第一次运行
 
-进入希望 Agent 工作的项目目录，然后启动 Maka：
+查看可用的自动化与 Host 管理命令：
 
 ```sh
 cd path/to/project
-maka
+maka --help
 ```
 
-如果还没有模型连接，Maka 会自动打开供应商设置流程。选择供应商、输入 API Key、选择要
-启用的模型并保存。之后可以运行 `/setup` 添加或更新供应商，使用 `/model` 切换模型。
+终端 UI 已由 `crates/tui` 中的 Rust 实现提供，不再包含在这个 npm 包中。
+在源码 checkout 中运行 `npm run cli:dev` 即可启动。
 
 API Key 和工作空间状态保存在本机的 `Maka` profile 中。当前 credential vault 是受操作系统
 账号边界保护的本地明文文件；在 POSIX 系统上，Maka 会强制使用仅 owner 可访问的目录和文件
@@ -234,7 +233,7 @@ maka --version
 ```
 
 - 全局安装后找不到 `maka` 时，确认 npm 的全局可执行目录已经加入 `PATH`；
-- 没有可用模型时，启动 TUI 并运行 `/setup`；
+- 没有可用模型时，为所选 Host 配置模型连接；
 - Eval 拒绝启动时，根据错误中给出的环境变量名和预期 framework 版本修复环境；Eval 不会
   自动安装或静默替换缺失的前置条件；
 - 报告问题时，请提供以上三个版本、操作系统和架构、执行的命令，以及移除凭证后的完整

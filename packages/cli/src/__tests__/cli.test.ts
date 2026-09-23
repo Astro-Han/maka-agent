@@ -46,7 +46,8 @@ describe('Maka CLI args', () => {
     const help = parseMakaCliArgs(['--help'], '0.1.0');
     assert.equal(help.kind, 'help');
     if (help.kind !== 'help') return;
-    assert.match(help.text, /^ {2}maka {2,}Start the TUI$/m);
+    assert.deepEqual(parseMakaCliArgs([], '0.1.0'), help);
+    assert.doesNotMatch(help.text, /TUI|--resume/);
     assert.doesNotMatch(help.text, /maka-agent/);
     assert.match(help.text, /^ {2}maka run /m);
     assert.match(help.text, /^ {2}maka activate /m);
@@ -84,26 +85,21 @@ describe('Maka CLI args', () => {
     });
   });
 
-  test('selects a Runtime Host and Project for TUI startup', () => {
+  test('rejects removed interactive startup flags', () => {
     assert.deepEqual(parseMakaCliArgs(['--host', 'office', '--project', 'project-1'], '0.1.0'), {
-      kind: 'tui',
-      hostProfileId: 'office',
-      projectId: 'project-1',
+      kind: 'error',
+      message: 'Unexpected argument: --host',
+      exitCode: 2,
     });
   });
 
-  test('parses the ACP stdio command before TUI flags', () => {
+  test('parses the ACP stdio command', () => {
     assert.deepEqual(parseMakaCliArgs(['--acp'], '0.1.0'), { kind: 'acp' });
     assert.deepEqual(parseMakaCliArgs(['--acp', 'extra'], '0.1.0'), {
       kind: 'error',
       message: 'maka --acp does not accept arguments',
       exitCode: 2,
       showHelp: false,
-    });
-    assert.deepEqual(parseMakaCliArgs(['--host', 'office', '--project', 'project-1'], '0.1.0'), {
-      kind: 'tui',
-      hostProfileId: 'office',
-      projectId: 'project-1',
     });
   });
 
@@ -120,7 +116,7 @@ describe('Maka CLI args', () => {
     const help = parseMakaCliArgs(['--help'], '0.1.0', 'npm run cli:dev --');
     assert.equal(help.kind, 'help');
     if (help.kind === 'help') {
-      assert.match(help.text, /^Usage: npm run cli:dev --$/m);
+      assert.match(help.text, /^Usage: npm run cli:dev -- <command>$/m);
       assert.match(help.text, /^ {2}npm run cli:dev -- runtime-host \.\.\. /m);
       assert.doesNotMatch(help.text, /^ {2}maka runtime-host /m);
       assert.doesNotMatch(help.text, /maka-agent/);

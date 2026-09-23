@@ -115,28 +115,22 @@ Maka 不内置共享模型账号。第一次打开时：
 公共 npm 包的安装和使用方式请查看 [CLI 中文指南](./packages/cli/README.zh-CN.md)。下面的命令
 用于从源码 checkout 运行开发版 CLI。
 
-先构建 workspace：
+先构建原生 CLI：
 
 ```sh
-npm run build
+cargo build -p maka-cli
 ```
 
-然后可以启动 TUI 或执行单次 Turn：
+然后启动 Rust TUI 或查看原生命令：
 
 ```sh
 npm run cli:dev
-npm run cli:dev -- run "总结当前仓库并指出最重要的风险"
-npm run cli:dev -- run --graph "并行实现两个切片，完成集成，然后独立审查"
 npm run cli:dev -- --help
 ```
 
-TUI 同时支持 `/graph on`、`/graph off` 和 `/graph <任务>`。非交互
-`--graph` 会等待持久化 Graph 真正结束，再输出 supervisor 的最终结果。
-Graph 的 implementation operator 使用隔离的 Git worktree，因此源项目必须是干净的
-Git worktree。
-
-仓库 CLI 使用与开发版 Desktop 构建相同的 `Maka Dev` profile；发布版 `maka` 二进制仍使用
-`Maka` profile，二者不会自动复制或同步。评测 spec 和 adapter 位于 [`packages/eval`](./packages/eval)。
+原生 `maka` 在交互终端默认进入 TUI，也可以显式执行 `maka tui`。
+它使用独立的原生 Host 状态目录，不复用 Desktop 开发 profile。本分支已移除 TypeScript TUI；
+npm CLI 保留自动化、ACP 与 Host 管理命令。评测 spec 和 adapter 位于 [`packages/eval`](./packages/eval)。
 
 ## 架构
 
@@ -160,6 +154,7 @@ Experiment → Cells → Attempts → Results
 
 ```text
 apps/desktop/          Electron main / preload / React renderer
+crates/                Rust TUI、CLI、运行时与 Host（根 Cargo workspace）
 
 packages/core/         Session、Event、Permission、Connection 等纯 contracts
 packages/storage/      SQLite 运行状态、配置与 payload stores
@@ -168,7 +163,7 @@ packages/runtime/      AgentRun、模型适配、工具、上下文和恢复
 packages/runtime-host/ 单一所有者的 Runtime Host 生命周期、协议和客户端启动
 packages/eval/         Experiment cell、attempt、result 与 executor/subject adapter
 packages/computer-use/ Computer Use 后端选择、Host 生命周期和协议适配
-packages/cli/          TUI 和非交互 CLI
+packages/cli/          npm 自动化 CLI、ACP 与 Host 管理
 packages/ui/           共享对话、Markdown、Artifact 与 UI primitives
 native/                Rust：Runtime Host 的 direct-peer addon 与 gitoxide helper
 website/               maka.apache.org 的 Astro 源码

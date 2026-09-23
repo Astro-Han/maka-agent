@@ -63,7 +63,7 @@ import {
   standaloneInstallRootManifest,
 } from './package-macos-arm64-cli.mjs';
 import { resolveWorkspaceReleaseFiles } from './release-cli-file-policy.mjs';
-import { isTuiReadyOutput, verifyQuarantinedExecution } from './verify-macos-arm64-cli.mjs';
+import { verifyQuarantinedExecution } from './verify-macos-arm64-cli.mjs';
 import { makePtyProbe } from './verify-packaged-app.mjs';
 import { ensureProductTag } from './product-release-tag.mjs';
 
@@ -634,15 +634,6 @@ test('product tag creation is exact and idempotent but rejects a conflicting com
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
-
-test('standalone verification recognizes the current TUI status line through ANSI output', () => {
-  assert.equal(
-    isTuiReadyOutput(
-      '\u001b[1mMaka\u001b[22m\u001b[2m · \u001b[22m\u001b[2mAuto\u001b[22m\u001b[2m · model · provider\u001b[0m',
-    ),
-    true,
-  );
 });
 
 test('standalone verification assesses the downloaded quarantine state', async () => {

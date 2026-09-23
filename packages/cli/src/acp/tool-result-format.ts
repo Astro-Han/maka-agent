@@ -17,34 +17,10 @@
  * under the License.
  */
 
-import {
-  truncateToWidth,
-  visibleWidth,
-  wrapTextWithAnsi,
-  type MarkdownTheme,
-} from '@earendil-works/pi-tui';
 import type { ToolResultContent } from '@maka/core/events';
 import { projectAgentSwarmResult } from '@maka/core/agent-swarm';
 import { ptyHumanTerminalText } from '@maka/core/pty-output-view';
 import { type ShellOutput } from '@maka/core/shell-run';
-import { ansi } from './tui-ansi.js';
-
-export function renderIndented(text: string, width: number, indent: number): string[] {
-  const prefix = ' '.repeat(indent);
-  const contentWidth = Math.max(1, width - indent);
-  const out: string[] = [];
-  for (const rawLine of text.split('\n')) {
-    const wrapped = wrapTextWithAnsi(rawLine, contentWidth);
-    for (const line of wrapped.length > 0 ? wrapped : ['']) {
-      out.push(prefix + line);
-    }
-  }
-  return out;
-}
-
-export function fitLine(line: string, width: number): string {
-  return visibleWidth(line) > width ? truncateToWidth(line, width, '…') : line;
-}
 
 export function formatToolResultContent(content: ToolResultContent): string {
   switch (content.kind) {
@@ -144,7 +120,7 @@ function formatShellOutput(output: ShellOutput): string {
     .join('\n\n');
 }
 
-export function formatUnknown(value: unknown): string {
+function formatUnknown(value: unknown): string {
   if (typeof value === 'string') return value;
   try {
     return JSON.stringify(value, null, 2);
@@ -153,44 +129,7 @@ export function formatUnknown(value: unknown): string {
   }
 }
 
-export function formatUnknownInline(value: unknown): string {
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-/** Fold line breaks into spaces so a summary can never split a one-line slot. */
-export function formatTokenCount(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
-  return String(tokens);
-}
-
-export function collapseToSingleLine(text: string): string {
-  return text.replace(/\s*\n\s*/g, ' ');
-}
-
-export function limitText(text: string, maxChars: number): string {
+function limitText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars)}\n... ${text.length - maxChars} chars truncated`;
 }
-
-export const markdownTheme: MarkdownTheme = {
-  heading: ansi.accent,
-  link: ansi.underline,
-  linkUrl: ansi.dim,
-  code: ansi.yellow,
-  codeBlock: (text) => text,
-  codeBlockBorder: ansi.dim,
-  quote: ansi.dim,
-  quoteBorder: ansi.dim,
-  hr: ansi.dim,
-  listBullet: ansi.accent,
-  bold: ansi.bold,
-  italic: ansi.italic,
-  strikethrough: ansi.strikethrough,
-  underline: ansi.underline,
-};

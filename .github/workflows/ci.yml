@@ -227,12 +227,6 @@ jobs:
         if: steps.plan.outputs.code == 'true' || steps.plan.outputs.astryx_surface == 'true' || steps.plan.outputs.asf_source == 'true' || steps.plan.outputs.cli_package == 'true' || steps.plan.outputs.release_contract == 'true'
         run: npm ci
 
-      - name: Check localized TUI copy boundaries
-        if: steps.plan.outputs.code == 'true'
-        run: |
-          npm run check:tui-copy
-          node --test scripts/check-tui-copy.test.mjs
-
       - name: Test staged Biome hook
         if: steps.plan.outputs.code == 'true'
         run: node --test scripts/biome-staged-check.test.mjs
