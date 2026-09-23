@@ -271,14 +271,14 @@ impl maka_plugins::session::catalog::Queries for Effects {
 }
 
 impl maka_plugins::session::history::History for Effects {
-    fn source(
+    fn sources(
         &self,
         call: Authority,
-        input: maka_plugins::session::history::SourceRead,
+        input: maka_plugins::session::history::SourcesRead,
     ) -> BoxFuture<
         '_,
         Result<
-            Option<maka_plugins::session::history::EditableMessage>,
+            Vec<maka_plugins::session::history::EditableMessage>,
             maka_plugins::execution::CommandError,
         >,
     > {
@@ -291,7 +291,7 @@ impl maka_plugins::session::history::History for Effects {
                 .owner
                 .admit()
                 .map_err(|_| maka_plugins::execution::CommandError::Revoked)?;
-            host.plugin_history_source(call, input).await
+            host.plugin_history_sources(call, input).await
         })
     }
 

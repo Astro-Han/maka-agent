@@ -75,16 +75,14 @@ export default async function (ctx) {
           for (const chunk of page.chunks) {
             if (chunk.role !== 'user' || chunk.offset !== 0 || chunk.text !== 'Run authorized work')
               continue;
-            const locator = {
-              sessionId: input.sessionId,
-              turnId: chunk.turnId,
-              messageId: chunk.messageId,
-            };
-            const source = await call.history.source(locator);
+            const locator = { sessionId: input.sessionId, turnId: chunk.turnId };
+            const sources = await call.history.sources(locator);
+            const source = sources[0];
+            if (sources.length !== 1) throw new Error('source messages were aggregated or lost');
             if (source?.messageId !== chunk.messageId || source.turnId !== chunk.turnId)
               throw new Error('original input lost its canonical identity');
             original = source.content.text;
-            if (await call.history.source({ ...locator, turnId: 'not-this-turn' }))
+            if ((await call.history.sources({ ...locator, turnId: 'not-this-turn' })).length)
               throw new Error('source lookup ignored its Turn');
           }
           if (!page.next) break;
@@ -141,10 +139,9 @@ export default async function (ctx) {
         if (error.code !== 'revoked') throw error;
       }
       try {
-        await call.history.source({
+        await call.history.sources({
           sessionId: 'background-session',
           turnId: 'unknown',
-          messageId: 'unknown',
         });
         throw new Error('metadata-only consent became source input authority');
       } catch (error) {

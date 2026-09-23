@@ -269,9 +269,9 @@ impl State {
                 let call = self.calls.get(&input.authority)?;
                 encode(self.history.read(call, input.input).await?)
             }
-            Request::HistorySource(input) => {
+            Request::HistorySources(input) => {
                 let call = self.calls.get(&input.authority)?;
-                encode(self.history.source(call, input.input).await?)
+                encode(self.history.sources(call, input.input).await?)
             }
             Request::HistoryCopy(input) => {
                 let call = self.calls.get(&input.authority)?;

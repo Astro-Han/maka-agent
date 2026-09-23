@@ -105,16 +105,16 @@ impl Executions {
         Ok(result)
     }
 
-    pub(crate) async fn plugin_history_source(
+    pub(crate) async fn plugin_history_sources(
         &self,
         call: Scope,
-        input: maka_plugins::session::history::SourceRead,
-    ) -> Result<Option<maka_plugins::session::history::EditableMessage>, Error> {
+        input: maka_plugins::session::history::SourcesRead,
+    ) -> Result<Vec<maka_plugins::session::history::EditableMessage>, Error> {
         input.validate()?;
         self.check_history_target(&call, &input.session_id).await?;
         let result = self
             .log
-            .editable_message(&input.session_id, &input.turn_id, &input.message_id)
+            .editable_turn(&input.session_id, &input.turn_id)
             .await
             .map_err(storage)?;
         self.check_history_target(&call, &input.session_id).await?;

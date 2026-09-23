@@ -285,6 +285,10 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
             .unwrap();
         assert_eq!(editable.content.text, "first before preparation");
         assert_eq!(
+            log.editable_turn(session, "first").await.unwrap(),
+            vec![editable.clone()]
+        );
+        assert_eq!(
             editable.content.attachments.as_ref().unwrap()[0].storage_ref,
             StorageRef::SessionFile {
                 session_id: session.into(),
@@ -686,6 +690,10 @@ async fn revisions_own_excluded_inputs_and_allocate_one_durable_family() {
             .unwrap()
             .unwrap();
         assert_eq!(input.content.text, "first before preparation");
+        assert_eq!(
+            log.editable_turn(target, "first").await.unwrap(),
+            vec![input.clone()]
+        );
         let StorageRef::SessionFile {
             session_id,
             relative_path,

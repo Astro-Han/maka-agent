@@ -233,7 +233,12 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
         "client-source"
     );
 
-    let batch = vec![source("batch-left", "left"), source("batch-right", "right")];
+    let mut batch = vec![
+        source("batch-z-left", "left"),
+        source("batch-a-right", "right"),
+    ];
+    batch[0].unprepared_content.text = "first original".into();
+    batch[1].unprepared_content.text = "second original".into();
     let combined = opening("a", "successor", batch.clone());
     let mut mismatch = combined.clone();
     if let Fact::InvocationOpened {
@@ -255,6 +260,23 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     let rows = support::transcript(&log, "a").await;
     let row = rows.iter().find(|row| row["id"] == combined.id).unwrap();
     assert_eq!(row["text"], "left\n\nright");
+    let editable = log.editable_turn("a", "successor").await.unwrap();
+    assert_eq!(
+        editable
+            .iter()
+            .map(|source| (source.message_id.as_str(), source.content.text.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("batch-z-left", "first original"),
+            ("batch-a-right", "second original")
+        ]
+    );
+    assert!(
+        log.editable_turn("b", "successor")
+            .await
+            .unwrap()
+            .is_empty()
+    );
     for source in &batch {
         let proof = log
             .root_message("a", &source.message.message_id)
@@ -286,7 +308,7 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
             outcome: InvocationOutcome::Completed,
         },
     );
-    collision.id = "batch-right".into();
+    collision.id = "batch-a-right".into();
     assert!(
         log.append(&EventWrite::plain(collision).unwrap())
             .await
@@ -304,6 +326,7 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
         canonical
     );
     assert_eq!(support::transcript(&log, "a").await, rows);
+    assert_eq!(log.editable_turn("a", "successor").await.unwrap(), editable);
     assert!(
         matches!(log.message_execution("a", "client-source").await.unwrap(), MessageExecution::Owned(owner) if owner.invocation == event.invocation),
         "a later independent root cannot acquire an earlier Message"

@@ -392,6 +392,10 @@ CREATE TABLE message_sources (
 
 CREATE INDEX message_source_identity ON message_sources(message_id, event_id);
 
+CREATE INDEX message_openings_by_turn ON event_log(
+    CAST(json_extract(event_json, '$.invocation.turn_id') AS TEXT), sequence
+) WHERE kind = 'invocation_opened' AND json_extract(event_json, '$.fact.input.kind') = 'message';
+
 CREATE VIEW session_message_sources AS
     SELECT session_id AS owner_session_id, session_id AS source_session_id, message_id, event_id
     FROM message_sources
