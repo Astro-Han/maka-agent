@@ -73,6 +73,7 @@ pub(super) async fn verify(
             },
         )
         .unwrap();
+    verify_intent(host, fiber, commands.as_ref(), workspace, request, reopened).await;
     let operation_id = "import-current-ceilings".to_owned();
     let receipt = if !reopened {
         let receipt = commands
@@ -142,6 +143,163 @@ pub(super) async fn verify(
             .await
             .unwrap();
         assert_eq!(abandoned.progress.state, ImportState::Abandoned);
+    }
+}
+
+async fn verify_intent(
+    host: &Arc<Host>,
+    fiber: &Fiber,
+    commands: &dyn maka_plugins::execution::Commands,
+    workspace: &Path,
+    root: &CreateRoot,
+    reopened: bool,
+) {
+    use maka_session_import::{Fingerprint, Transcript, intent, source};
+    use sha2::{Digest, Sha256};
+    let storage = host.plugin_storage(fiber.context()).unwrap();
+    let repository = intent::Repository::new(storage.clone());
+    let id = uuid::Uuid::from_u128(2);
+    let source = source::Source {
+        id: uuid::Uuid::from_u128(1),
+        name: "Foreign conversations".into(),
+        location: source::Location::Codex {
+            root: workspace.to_str().unwrap().into(),
+        },
+    };
+    let mut settings = root.settings.clone();
+    // This import already fits the tighter policy applied during the restart.
+    settings.bound_tools = Some(["Read".into()].into());
+    settings.instructions = Some("new required instruction".into());
+    let request = intent::Request {
+        operation_id: id,
+        selection: source::Selection {
+            source_id: source.id,
+            source_revision: 1,
+            session_id: "foreign".into(),
+            path: "sessions/rollout-foreign.jsonl".into(),
+        },
+        workspace: maka_runtime::execution::WorkspaceTarget::HostPath {
+            path: workspace.to_str().unwrap().into(),
+        },
+        settings,
+    };
+    if !reopened {
+        source::save(
+            storage.as_ref(),
+            None,
+            source::Configuration {
+                sources: vec![source.clone()],
+            },
+        )
+        .await
+        .unwrap();
+        let snapshot = source::read(storage.as_ref()).await.unwrap();
+        assert_eq!(
+            snapshot.configuration.sources,
+            std::slice::from_ref(&source)
+        );
+        // Host retention also includes canonical event/source envelopes.
+        let text = "x".repeat(maka_runtime::import::MAX_IMPORT_BYTES as usize - 16 * 1024);
+        let transcript = Transcript {
+            source: Source {
+                adapter: "codex".into(),
+                session_id: "foreign".into(),
+            },
+            cwd: Some("/source/observation".into()),
+            title: "Large imported conversation".into(),
+            fingerprint: Fingerprint {
+                bytes: text.len() as u64,
+                sha256: format!("{:x}", Sha256::digest(text.as_bytes())),
+                incomplete_tail: false,
+            },
+            records: vec![Record {
+                source_message_id: "message".into(),
+                source_turn_id: "turn".into(),
+                timestamp: None,
+                content: Content::User { text },
+            }],
+        };
+        let prepared = repository
+            .prepare(request.clone(), source.clone(), transcript)
+            .await
+            .unwrap();
+        let transcript = repository.transcript(&prepared).await.unwrap();
+        let receipt = commands
+            .import_session(Command::Begin {
+                root: Box::new(CreateRoot {
+                    managed: false,
+                    operation_id: id.to_string(),
+                    name: transcript.title,
+                    settings: request.settings.clone(),
+                }),
+                source: transcript.source,
+            })
+            .await
+            .unwrap();
+        assert_eq!(receipt.progress.state, ImportState::Collecting);
+        // The caller loses the append receipt and restarts without publishing.
+        commands
+            .import_session(Command::Append {
+                operation_id: id.to_string(),
+                position: 0,
+                records: transcript.records,
+            })
+            .await
+            .unwrap();
+        // Removing a source must not remove already prepared content or change its input.
+        source::save(
+            storage.as_ref(),
+            snapshot.revision,
+            source::Configuration::default(),
+        )
+        .await
+        .unwrap();
+    } else {
+        assert!(
+            source::read(storage.as_ref())
+                .await
+                .unwrap()
+                .configuration
+                .sources
+                .is_empty()
+        );
+        let saved = repository.get(id).await.unwrap().unwrap();
+        assert_eq!(saved.intent().request, request);
+        let transcript = repository.transcript(&saved).await.unwrap();
+        assert!(
+            matches!(&transcript.records[0].content, Content::User { text } if text.len() == maka_runtime::import::MAX_IMPORT_BYTES as usize - 16 * 1024)
+        );
+        let progress = commands
+            .import_session(Command::Inspect {
+                operation_id: id.to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(progress.progress.records, 1);
+        let stale = repository.get(id).await.unwrap().unwrap();
+        let receipt = commands
+            .import_session(Command::Publish {
+                operation_id: id.to_string(),
+                records: 1,
+            })
+            .await
+            .unwrap();
+        repository.complete(saved, receipt.clone()).await.unwrap();
+        let settled = repository.complete(stale, receipt).await.unwrap();
+        assert_eq!(
+            settled.intent().receipt.as_ref().unwrap().progress.state,
+            ImportState::Published
+        );
+        assert!(matches!(
+            storage
+                .read(format!("payloads/{id}/0000"))
+                .await
+                .unwrap()
+                .unwrap()
+                .data,
+            maka_plugins::storage::Data::Deleted
+        ));
+        assert!(repository.transcript(&settled).await.is_err());
     }
 }
 
