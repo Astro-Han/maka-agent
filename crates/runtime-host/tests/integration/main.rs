@@ -47,6 +47,7 @@ mod connection_multiplex;
 mod context_compaction;
 mod execution_boundary;
 mod execution_drain;
+mod goal_plugin;
 mod graph_plugin;
 mod handoff;
 mod host_drain;
