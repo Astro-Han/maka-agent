@@ -38,11 +38,12 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
         editor.preferred_height(width, (area.height / 3).clamp(1, 8))
     });
     let attachment_rows = u16::from(app.attachments.has(id));
+    let directory_rows = u16::from(app.has_directories(id));
     let parts = Layout::vertical([
         Constraint::Min(1),
         Constraint::Length(super::queue::height(app, area.height)),
         Constraint::Length(1),
-        Constraint::Length(editor_height + 2 + attachment_rows),
+        Constraint::Length(editor_height + 2 + attachment_rows + directory_rows),
     ])
     .split(area);
     if app.chrome.details {
@@ -210,6 +211,16 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
     }
     if attachment_rows > 0 && input.height > 1 {
         crate::pages::attachments::chips(
+            frame,
+            app,
+            Rect::new(input.x, input.y, input.width, 1),
+            id,
+        );
+        input.y += 1;
+        input.height -= 1;
+    }
+    if directory_rows > 0 && input.height > 1 {
+        crate::pages::references::chips(
             frame,
             app,
             Rect::new(input.x, input.y, input.width, 1),

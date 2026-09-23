@@ -42,6 +42,7 @@ mod projects;
 mod queue;
 mod reading;
 mod recovery;
+mod references;
 mod removal;
 mod revision;
 mod stopping;

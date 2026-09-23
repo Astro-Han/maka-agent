@@ -29,6 +29,7 @@ mod model_inventory;
 pub mod models;
 pub mod oauth;
 mod project;
+mod references;
 pub mod removal;
 pub(crate) mod view;
 pub use view::draw;
@@ -70,11 +71,13 @@ enum Entity {
         id: String,
     },
     Registration,
+    Input(super::references::Target),
     Connection(std::sync::Arc<super::connections::Row>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
+    Reference,
     Oauth,
     Register,
     Relink,
@@ -92,6 +95,7 @@ pub enum Kind {
 impl Kind {
     pub fn label(self, target: &Target) -> &'static str {
         match (self, &target.entity) {
+            (Self::Reference, _) => "references-title",
             (Self::Oauth, _) => "oauth-title",
             (Self::Credential(change), _) => change.label(),
             (Self::Connection(change), _) => change.label(),
@@ -105,7 +109,8 @@ impl Kind {
             (Self::Archive, Entity::Project { .. }) => "project-archive",
             (Self::Restore, Entity::Project { .. }) => "project-restore",
             _ => match self {
-                Self::Oauth
+                Self::Reference
+                | Self::Oauth
                 | Self::Register
                 | Self::Relink
                 | Self::Locations
@@ -369,7 +374,8 @@ pub async fn execute(
             .map(|session| SessionUpdateResult::Committed {
                 session: Box::new(session),
             }),
-        Kind::Oauth
+        Kind::Reference
+        | Kind::Oauth
         | Kind::Register
         | Kind::Relink
         | Kind::Locations
@@ -489,6 +495,7 @@ impl App {
                         (&target.entity, kind),
                         (Entity::Oauth, Kind::Oauth)
                             | (Entity::Registration, Kind::Register)
+                            | (Entity::Input(_), Kind::Reference)
                             | (Entity::Defaults, Kind::Model)
                             | (
                                 Entity::Connection(_),
@@ -526,6 +533,7 @@ impl App {
                     && self.management.pending.is_none()
                     && self.management_identity(&dialog.target)
             }),
+            Command::Save if self.directory_reference_active() => self.reference_can_select(),
             Command::Save => self.management.dialog.as_ref().is_some_and(|dialog| {
                 dialog.kind != Kind::Oauth
                     && dialog.visible
@@ -717,6 +725,9 @@ impl App {
                 } else {
                     None
                 };
+                if kind == Kind::Reference {
+                    self.management.directory_sequence += 1;
+                }
                 self.management.dialog = Some(Dialog {
                     removal: if kind == Kind::Remove {
                         self.management.removal_sequence += 1;
@@ -741,7 +752,8 @@ impl App {
                     visible: false,
                     blocked: false,
                     error: None,
-                    browser: None,
+                    browser: (kind == Kind::Reference)
+                        .then(|| directory::Browser::new(self.management.directory_sequence)),
                     reviewing: false,
                     chooser,
                     locations,
@@ -753,6 +765,9 @@ impl App {
             Command::Close => {
                 self.management.dialog = None;
                 self.hits.clear();
+            }
+            Command::Save if self.directory_reference_active() => {
+                self.resolve_directory_reference();
             }
             Command::Save => {
                 let dialog = self.management.dialog.as_mut()?;
@@ -788,7 +803,7 @@ impl App {
         None
     }
     pub fn management_request(&mut self) -> Option<Ticket> {
-        if !self.management_enabled(&Command::Save) {
+        if self.directory_reference_active() || !self.management_enabled(&Command::Save) {
             return None;
         }
         let dialog = self.management.dialog.as_mut()?;

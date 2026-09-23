@@ -62,6 +62,7 @@ pub enum Action {
     CopyFile(String),
     Branch(crate::pages::branch::Command),
     Attachment(crate::pages::attachments::Command),
+    References,
     Revision(crate::pages::revision::Command),
     ToggleSymbols,
     ToggleMotion,
@@ -129,6 +130,8 @@ pub struct App {
     pub management: crate::pages::manage::Management,
     pub branch: crate::pages::branch::State,
     pub attachments: crate::pages::attachments::State,
+    pub directories:
+        std::collections::BTreeMap<String, Vec<maka_protocol::turn::DirectoryReference>>,
     pub revision: crate::pages::revision::State,
     pub onboarding: crate::pages::onboarding::Onboarding,
     pub projects: crate::pages::projects::Projects,
@@ -175,6 +178,7 @@ impl App {
             management: Default::default(),
             branch: Default::default(),
             attachments: Default::default(),
+            directories: Default::default(),
             revision: Default::default(),
             onboarding: Default::default(),
             projects: Default::default(),
@@ -270,6 +274,7 @@ impl App {
                 Action::Attachment(crate::pages::attachments::Command::Open),
                 "attachments-add",
             ));
+            commands.push((Action::References, "references-title"));
             commands.push((
                 Action::SendMessage,
                 if self.stop_target().is_some() {
@@ -572,6 +577,7 @@ impl App {
             }
             Action::Manage(command) => return self.management_action(command),
             Action::Attachment(command) => return self.attachment_action(command),
+            Action::References => self.open_references(),
             Action::Branch(command) => return self.branch_action(command),
             Action::Revision(command) => return self.revision_action(command),
             Action::Onboard(command) => return self.onboarding_action(command),
@@ -756,6 +762,12 @@ impl App {
         None
     }
     pub fn enabled(&self, action: &Action) -> bool {
+        if *action == Action::References {
+            return self.management.dialog.is_none()
+                && self
+                    .reference_target()
+                    .is_some_and(|t| self.reference_editable(&t));
+        }
         if let Action::Attachment(command) = action {
             return self.attachment_enabled(command);
         }
@@ -834,6 +846,7 @@ impl App {
                         || self.drafts.iter().any(|(id, editor)| {
                             editor.text().is_empty()
                                 && !self.attachments.has(id)
+                                && !self.has_directories(id)
                                 && !self.tabs.contains(id)
                                 && !self
                                     .sending
@@ -860,6 +873,7 @@ impl App {
                     && !matches!(&self.sessions.detail, crate::pages::sessions::Detail::Missing { id: missing } if *missing == id)
                     && self.attachments.ready(&id)
                     && (self.attachments.has(&id)
+                        || self.has_directories(&id)
                         || self
                             .drafts
                             .get(&id)
@@ -983,6 +997,7 @@ impl App {
                 .find(|(id, editor)| {
                     editor.text().is_empty()
                         && !self.attachments.has(id)
+                        && !self.has_directories(id)
                         && !self.tabs.contains(id)
                         && !self
                             .sending
@@ -993,6 +1008,7 @@ impl App {
             if let Some(empty) = empty {
                 self.drafts.remove(&empty);
                 self.attachments.saved.remove(&empty);
+                self.directories.remove(&empty);
                 self.sending.remove(&empty);
             } else {
                 self.notice = Some(Notice::Local("tabs-drafts-limit"));
@@ -1119,6 +1135,8 @@ impl App {
                 Some(Action::Attachment(
                     crate::pages::attachments::Command::Close,
                 ))
+            } else if self.directory_reference_active() {
+                Some(Action::Manage(crate::pages::manage::Command::Close))
             } else if self.revision.visible {
                 Some(Action::Revision(crate::pages::revision::Command::Close))
             } else if self.branch.visible {
@@ -1149,6 +1167,9 @@ impl App {
         }
         if self.attachments.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
             return self.attachment_input(event);
+        }
+        if self.directory_reference_active() && !matches!(event, Event::Resize(_, _)) {
+            return self.management_input(event);
         }
         if self.revision.visible && !matches!(event, Event::Resize(_, _)) {
             return self.revision_input(event);

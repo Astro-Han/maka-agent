@@ -33,6 +33,7 @@ fn buttons(app: &App) -> Vec<Command> {
     let state = &app.revision;
     let mut buttons = vec![Command::Close];
     if state.phase == Phase::Editing && !state.confirm_discard {
+        buttons.push(Command::Directories);
         buttons.push(if state.resources.visible {
             Command::Content
         } else {
@@ -269,7 +270,19 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 .saved
                 .as_ref()
                 .map_or(0, |s| s.inputs[app.revision.selected].files.len());
-            if *c == Command::Attachments && count > 0 {
+            if *c == Command::Directories {
+                let count = app
+                    .revision
+                    .saved
+                    .as_ref()
+                    .map_or(0, |s| s.inputs[app.revision.selected].directories.len());
+                let icon = app.chrome.symbol("▱", "/");
+                if count > 0 {
+                    format!("{icon} {count}")
+                } else {
+                    icon.into()
+                }
+            } else if *c == Command::Attachments && count > 0 {
                 format!("{} · {count}", app.i18n.text("attachments-title"))
             } else {
                 app.i18n.text(c.label())

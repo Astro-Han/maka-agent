@@ -131,7 +131,9 @@ impl App {
         }
         let text = self.drafts.get(&session)?.text().to_owned();
         if !self.attachments.ready(&session)
-            || (text.trim().is_empty() && !self.attachments.has(&session))
+            || (text.trim().is_empty()
+                && !self.attachments.has(&session)
+                && !self.has_directories(&session))
         {
             return None;
         }
@@ -144,7 +146,11 @@ impl App {
                 text,
                 display_text: None,
                 attachments: self.attachments.references(&session),
-                directory_references: None,
+                directory_references: self
+                    .directories
+                    .get(&session)
+                    .filter(|v| !v.is_empty())
+                    .cloned(),
                 quotes: None,
                 inline_references: None,
             },
@@ -191,6 +197,11 @@ impl App {
                 }
                 self.attachments
                     .clear_sent(&request.session, &request.content.attachments);
+                if self.directories.get(&request.session)
+                    == request.content.directory_references.as_ref()
+                {
+                    self.directories.remove(&request.session);
+                }
                 Delivery::Accepted
             }
             Err(error @ RequestFailure::Unknown(_)) => Delivery::Unknown(Some(error.to_string())),
@@ -245,6 +256,11 @@ impl App {
                 }
                 self.attachments
                     .clear_sent(&request.session, &request.content.attachments);
+                if self.directories.get(&request.session)
+                    == request.content.directory_references.as_ref()
+                {
+                    self.directories.remove(&request.session);
+                }
                 Delivery::Accepted
             }
             // A cancelled admission cannot subsequently execute. Keep the draft for explicit send.

@@ -29,6 +29,7 @@ pub struct Input {
     pub original: sources::Source,
     pub content: MessageContent,
     pub files: Vec<crate::pages::attachments::Saved>,
+    pub directories: Vec<turn::DirectoryReference>,
     pub excluded: Vec<super::resources::Resource>,
 }
 
@@ -38,6 +39,7 @@ impl Input {
             content: original.content.clone(),
             excluded: vec![],
             files: vec![],
+            directories: vec![],
             original,
         }
     }

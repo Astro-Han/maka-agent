@@ -134,6 +134,12 @@ impl Input {
                     .collect()
             })
             .filter(|values: &Vec<_>| !values.is_empty());
+        if !self.directories.is_empty() {
+            content
+                .directory_references
+                .get_or_insert_with(Vec::new)
+                .extend(self.directories.clone());
+        }
         let input_selections = self
             .original
             .input_selections

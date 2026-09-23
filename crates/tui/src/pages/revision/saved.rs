@@ -136,6 +136,7 @@ impl Checkpoint {
         let mut uploads = std::collections::HashSet::new();
         for input in &self.inputs {
             input.validate()?;
+            crate::pages::references::validate(&input.directories, root)?;
             if input.files.len() > 8 {
                 return Err("Too many revision attachments".into());
             }

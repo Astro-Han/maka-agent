@@ -18,6 +18,7 @@
  */
 
 mod attachments;
+mod directories;
 mod draft;
 mod editing;
 mod request;
@@ -59,6 +60,7 @@ pub enum Command {
     Details,
     Resources,
     Attachments,
+    Directories,
     Content,
     ToggleResource(resources::Resource),
 }
@@ -79,6 +81,7 @@ impl Command {
             Self::Resources | Self::ToggleResource(_) => "revision-resources",
             Self::Content => "revision-content",
             Self::Attachments => "attachments-add",
+            Self::Directories => "references-title",
         }
     }
 }
@@ -216,6 +219,7 @@ impl App {
                     (self.tabs.contains(&s.copy.target_session_id) || self.tabs.entries.len() < crate::navigation::tabs::LIMIT)
                     && (self.drafts.contains_key(&s.copy.target_session_id) || self.drafts.len() < crate::navigation::tabs::LIMIT)
                 }),
+            Command::Directories => available && state.phase == Phase::Editing && !state.confirm_discard,
             Command::Attachments => available && !state.confirm_discard && state.saved.is_some()
                 && matches!(state.phase, Phase::Editing | Phase::Uploading | Phase::Ready),
             Command::Select(index) => available && matches!(state.phase, Phase::Editing | Phase::Uploading | Phase::Ready) && !state.confirm_discard
@@ -232,6 +236,10 @@ impl App {
     }
     pub fn revision_action(&mut self, command: Command) -> Option<Action> {
         if !self.revision_enabled(&command) {
+            return None;
+        }
+        if command == Command::Directories {
+            self.open_references();
             return None;
         }
         if command == Command::Attachments {
@@ -263,7 +271,7 @@ impl App {
         }
         let state = &mut self.revision;
         match command {
-            Command::Attachments => unreachable!(),
+            Command::Attachments | Command::Directories => unreachable!(),
             Command::Open(basis) => {
                 state.clear_editors();
                 state.requested = Some(Job::Load {

@@ -29,6 +29,7 @@ use std::collections::VecDeque;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Open(usize),
+    RemoveReference(usize),
     Path,
     Parent,
     Refresh,
@@ -39,6 +40,7 @@ impl Command {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Open(_) => "directory-open",
+            Self::RemoveReference(_) => "references-remove",
             Self::Path => "directory-path",
             Self::Parent => "directory-parent",
             Self::Refresh => "command-refresh",
@@ -71,9 +73,10 @@ pub(super) struct Browser {
     selected: usize,
     focus: usize, // List, path, parent, refresh, previous, next, cancel, register.
     hovered: Option<Manage>,
-    requested: bool,
+    pub(super) requested: bool,
+    pub(super) resolving: bool,
     loading: bool,
-    error: bool,
+    pub(super) error: bool,
     cursor: Option<String>,
     next: Option<String>,
     previous: VecDeque<Option<String>>,
@@ -88,6 +91,7 @@ impl Browser {
             focus: 0,
             hovered: None,
             requested: true,
+            resolving: false,
             loading: false,
             error: false,
             cursor: None,
@@ -122,6 +126,10 @@ impl Browser {
     fn query(&self) -> Query {
         match &self.location {
             None => Query::DirectoryRoots,
+            Some(location) if self.resolving => Query::DirectoryResolve {
+                root_id: location.root_id.clone(),
+                segments: location.segments.clone(),
+            },
             Some(location) => match &self.cursor {
                 None => Query::DirectoryListStart {
                     root_id: location.root_id.clone(),
@@ -154,6 +162,7 @@ impl App {
             return false;
         };
         if !dialog.visible
+            || browser.resolving
             || dialog.blocked
             || self.management.pending.is_some()
             || !self.management_identity(&dialog.target)
@@ -161,7 +170,14 @@ impl App {
             return false;
         }
         match command {
-            Command::Path => true,
+            Command::Path => dialog.kind != super::Kind::Reference,
+            Command::RemoveReference(index) => {
+                !browser.loading
+                    && !browser.requested
+                    && self.directory_reference_target().is_some_and(|t| {
+                        self.reference_editable(t) && *index < self.reference_items(t).len()
+                    })
+            }
             Command::Parent => !browser.loading && browser.location.is_some(),
             Command::Refresh => !browser.loading && !browser.requested,
             Command::Previous => {
@@ -178,9 +194,25 @@ impl App {
         }
     }
     pub(super) fn directory_action(&mut self, command: Command) -> Option<Action> {
+        if let Command::RemoveReference(index) = command {
+            let target = self.directory_reference_target()?.clone();
+            self.reference_items_mut(&target)?.remove(index);
+            if let Some(browser) = self
+                .management
+                .dialog
+                .as_mut()
+                .and_then(|d| d.browser.as_mut())
+            {
+                browser.focus = 6;
+                browser.hovered = None;
+            }
+            self.hits.clear();
+            return None;
+        }
         let dialog = self.management.dialog.as_mut()?;
         let browser = dialog.browser.as_mut()?;
         match command {
+            Command::RemoveReference(_) => unreachable!(),
             Command::Path => {
                 dialog.browser = None;
                 dialog.focus = 1;
@@ -264,6 +296,10 @@ impl App {
             return;
         };
         browser.loading = false;
+        if matches!(request.query, Query::DirectoryResolve { .. }) {
+            self.directory_reference_completed(&request.query, result);
+            return;
+        }
         match result {
             Ok(QueryResult::DirectoryRoots { roots }) => {
                 browser.rows = roots
@@ -303,6 +339,10 @@ impl App {
         }
     }
     pub(super) fn directory_input(&mut self, event: Event) -> (bool, Option<Action>) {
+        let reference = self.directory_reference_active();
+        let count = self
+            .directory_reference_target()
+            .map_or(0, |t| self.reference_items(t).len());
         let dialog = self.management.dialog.as_mut().expect("directory dialog");
         let browser = dialog.browser.as_mut().expect("directory browser");
         if matches!(&event, Event::Key(key) if key.kind != KeyEventKind::Release) {
@@ -314,7 +354,11 @@ impl App {
                     return (true, Some(Action::Quit));
                 }
                 KeyCode::Esc => Some(
-                    if !dialog.visible || dialog.blocked || self.management.pending.is_some() {
+                    if reference
+                        || !dialog.visible
+                        || dialog.blocked
+                        || self.management.pending.is_some()
+                    {
                         Manage::Close
                     } else {
                         Manage::Directory(Command::Path)
@@ -322,11 +366,17 @@ impl App {
                 ),
                 _ if !dialog.visible => return (false, None),
                 KeyCode::Tab => {
-                    browser.focus = (browser.focus + 1) % 8;
+                    browser.focus = (browser.focus + 1) % (8 + count);
+                    if reference && browser.focus == 1 {
+                        browser.focus = 2;
+                    }
                     return (true, None);
                 }
                 KeyCode::BackTab => {
-                    browser.focus = (browser.focus + 7) % 8;
+                    browser.focus = (browser.focus + 7 + count) % (8 + count);
+                    if reference && browser.focus == 1 {
+                        browser.focus = 0;
+                    }
                     return (true, None);
                 }
                 KeyCode::Up | KeyCode::Down => {
@@ -400,7 +450,8 @@ fn focused(browser: &Browser) -> Manage {
         4 => Manage::Directory(Command::Previous),
         5 => Manage::Directory(Command::Next),
         6 => Manage::Close,
-        _ => Manage::Save,
+        7 => Manage::Save,
+        index => Manage::Directory(Command::RemoveReference(index - 8)),
     }
 }
 

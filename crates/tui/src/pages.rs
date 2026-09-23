@@ -26,6 +26,7 @@ pub mod manage;
 pub mod onboarding;
 pub mod projects;
 pub mod queue;
+pub mod references;
 pub mod revision;
 pub mod sending;
 pub mod sessions;

@@ -40,6 +40,15 @@ pub(super) fn content(row: &Value, ascii: bool) -> String {
             text.push_str(&crate::pages::attachments::size(bytes));
         }
     }
+    for reference in row["directoryReferences"].as_array().into_iter().flatten() {
+        if let Some(path) = reference["path"].as_str() {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(if ascii { "/ " } else { "▱ " });
+            text.push_str(&crate::view::safe(path));
+        }
+    }
     text
 }
 
@@ -145,7 +154,7 @@ mod tests {
         );
     }
     #[test]
-    fn attachment_only_prompts_show_names_without_exposing_host_storage_paths() {
+    fn resource_only_prompts_show_selected_directories_but_not_attachment_storage_paths() {
         let mut row = serde_json::json!({"text":"", "attachments":[
             {"name":"布局.md", "bytes":113, "ref":{"kind":"session_file","relativePath":"private-storage"}},
             {"name":"image.png", "bytes":2048}
@@ -158,6 +167,9 @@ mod tests {
         row["text"] = serde_json::json!("raw body");
         row["displayText"] = serde_json::json!("visible body");
         assert!(content(&row, true).starts_with("visible body\n+ 布局.md"));
+        let directory = serde_json::json!({"text":"", "directoryReferences":[{"hostId":"private-root", "path":"/workspace/目录"}]});
+        assert_eq!(content(&directory, false), "▱ /workspace/目录");
+        assert_eq!(content(&directory, true), "/ /workspace/目录");
     }
 
     #[test]

@@ -387,6 +387,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         crate::theme::editor::draw(frame, app, area);
     } else if app.attachments.dialog.is_some() {
         crate::pages::attachments::draw(frame, app, area, base);
+    } else if app.directory_reference_active() {
+        crate::pages::manage::draw(frame, app, area, base);
     } else if app.revision.visible {
         crate::pages::revision::draw(frame, app, area, base);
     } else if app.branch.visible {
@@ -547,6 +549,7 @@ fn icon(app: &App, action: &Action) -> &'static str {
         )) => ("ⓘ", "i"),
         Action::Manage(_) => ("⋯", "."),
         Action::Attachment(_) => ("⊕", "+"),
+        Action::References => ("▱", "/"),
         Action::Branch(_) => ("↳", "+"),
         Action::Revision(_) => ("↶", "<"),
         Action::Onboard(_) => ("⊕", "+"),
@@ -603,6 +606,18 @@ fn action_label(app: &App, action: &Action) -> String {
             ],
         );
     }
+    if let Action::Manage(crate::pages::manage::Command::Directory(
+        crate::pages::manage::directory::Command::RemoveReference(index),
+    )) = action
+        && let Some(target) = app.directory_reference_target()
+        && let Some(item) = app.reference_items(target).get(*index)
+    {
+        return format!(
+            "{} · {}",
+            app.i18n.text("references-remove"),
+            safe(&item.path)
+        );
+    }
     if let Action::CopyFile(path) = action {
         return safe(path);
     }
@@ -627,6 +642,7 @@ fn action_label(app: &App, action: &Action) -> String {
     }
     let key = match action {
         Action::Attachment(command) => command.label(),
+        Action::References => "references-title",
         Action::NextTab => "tabs-next",
         Action::PreviousTab => "tabs-previous",
         Action::CloseTab(_) => "tabs-close",

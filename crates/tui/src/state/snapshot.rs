@@ -35,6 +35,7 @@ pub struct Snapshot {
     tabs: Vec<String>,
     drafts: BTreeMap<String, Saved>,
     attachments: BTreeMap<String, Vec<crate::pages::attachments::Saved>>,
+    directories: BTreeMap<String, Vec<maka_protocol::turn::DirectoryReference>>,
     unresolved: Vec<Submission>,
     locale: LocalePreference,
     theme: crate::theme::Choice,
@@ -60,8 +61,9 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 12,
+            version: 13,
             attachments: app.attachments.saved.clone(),
+            directories: app.directories.clone(),
             root: root.into(),
             tabs: app.tabs.entries.iter().map(|tab| tab.id.clone()).collect(),
             drafts: app
@@ -89,7 +91,7 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if self.version != 12
+        if self.version != 13
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
@@ -122,6 +124,15 @@ impl Snapshot {
             })
         {
             return Err("Invalid saved navigation".into());
+        }
+        if self.directories.len() > LIMIT {
+            return Err("Too many directory drafts".into());
+        }
+        for (session, items) in &self.directories {
+            if !self.drafts.contains_key(session) {
+                return Err("Invalid directory draft destination".into());
+            }
+            crate::pages::references::validate(items, root)?;
         }
         let mut uploads = HashSet::new();
         if self.attachments.len() > LIMIT {
@@ -197,6 +208,7 @@ impl Snapshot {
             app.branch.restore(branch);
         }
         app.attachments.saved = self.attachments;
+        app.directories = self.directories;
         for (id, saved) in self.drafts {
             app.drafts.insert(id, Editor::restore(saved)?);
         }
@@ -256,6 +268,13 @@ mod tests {
         let mut original = app();
         original.apply(Action::Visit(Route::Session("a".into())));
         original.drafts.get_mut("a").unwrap().insert("中文🦀");
+        original.directories.insert(
+            "a".into(),
+            vec![maka_protocol::turn::DirectoryReference {
+                host_id: "root".into(),
+                path: "/selected".into(),
+            }],
+        );
         let request = original.submission().unwrap();
         original.drafts.get_mut("a").unwrap().insert(" new edits");
         original.i18n.preference = LocalePreference::Explicit(Locale::ZhTw);
@@ -284,6 +303,10 @@ mod tests {
         );
         assert_eq!(restored.navigation.current(), Route::Settings);
         assert_eq!(restored.drafts["a"].text(), "中文🦀 new edits");
+        assert_eq!(
+            restored.directories["a"],
+            request.content.directory_references.clone().unwrap()
+        );
         assert_eq!(restored.sending["a"].request.input(), request.input());
         assert!(matches!(
             restored.sending["a"].delivery,
@@ -311,6 +334,20 @@ mod tests {
                 .validate("root")
                 .is_err()
         );
+        for invalid_items in [
+            serde_json::json!([{"hostId":"foreign","path":"/selected"}]),
+            serde_json::json!([{"hostId":"root","path":"relative"}]),
+            serde_json::json!(vec![serde_json::json!({"hostId":"root","path":"/x"}); 5]),
+        ] {
+            let mut invalid: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            invalid["directories"]["a"] = invalid_items;
+            assert!(
+                serde_json::from_value::<Snapshot>(invalid)
+                    .unwrap()
+                    .validate("root")
+                    .is_err()
+            );
+        }
         let mut oauth = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
         oauth["oauth"] = serde_json::json!({"provider":"xai-oauth", "start":{
             "attemptId":"persisted-login", "target":{"kind":"create","providerType":"xai-oauth"}}, "connection":null});
@@ -356,7 +393,7 @@ mod tests {
         request.input().validate().unwrap();
         original.sending.get_mut("a").unwrap().request = request.clone();
         let saved = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
-        assert_eq!(saved["version"], 12);
+        assert_eq!(saved["version"], 13);
         let mut restored = app();
         serde_json::from_value::<Snapshot>(saved.clone())
             .unwrap()

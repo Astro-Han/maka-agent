@@ -32,6 +32,15 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
+    let reference = app.directory_reference_active();
+    let references = app
+        .directory_reference_target()
+        .map(|t| app.reference_items(t).to_vec())
+        .unwrap_or_default();
+    let reference_rows = references.len() as u16;
+    let full = app
+        .directory_reference_target()
+        .is_some_and(|t| app.reference_count(t) >= 4);
     let busy = app.management.pending.is_some();
     let dialog = app.management.dialog.as_mut().expect("directory dialog");
     let browser = dialog.browser.as_mut().expect("directory browser");
@@ -48,7 +57,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     let height = area
         .height
         .saturating_sub(2)
-        .min((browser.rows.len() as u16 + 10).clamp(15, 25));
+        .min((browser.rows.len() as u16 + 10 + reference_rows).clamp(15 + reference_rows, 29));
     let popup = Rect::new(
         area.x + (area.width - width) / 2,
         area.y + (area.height - height) / 2,
@@ -61,7 +70,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         } else {
             ratatui::widgets::BorderType::Rounded
         })
-        .title(app.i18n.text("directory-title"))
+        .title(app.i18n.text(if reference {
+            "references-title"
+        } else {
+            "directory-title"
+        }))
+        .title_alignment(ratatui::layout::Alignment::Center)
         .style(base)
         .border_style(Style::default().fg(app.theme.colors().subtle));
     let inner = block.inner(popup).inner(Margin::new(1, 0));
@@ -100,7 +114,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         inner.x,
         inner.y + 3,
         inner.width,
-        inner.height.saturating_sub(8),
+        inner.height.saturating_sub(8 + reference_rows),
     );
     let offset = (browser.selected + 1).saturating_sub(list.height as usize);
     let enabled = browser.ready() && !dialog.blocked && !busy;
@@ -158,6 +172,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         dialog.error
     } else if browser.error {
         Some("directory-failed")
+    } else if full {
+        Some("references-limit")
     } else {
         let command = browser.hovered.clone().unwrap_or_else(|| focused(browser));
         match command {
@@ -183,7 +199,11 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     let focus = browser.focus;
     let hovered = browser.hovered.clone();
     let button_width = |text: &str| (text.width() as u16 + 2).min(inner.width / 2);
-    let register = app.i18n.text("directory-register");
+    let register = app.i18n.text(if reference {
+        "references-select"
+    } else {
+        "directory-register"
+    });
     let cancel = app.i18n.text("session-cancel");
     let path = app.i18n.text("directory-path");
     let save_width = button_width(&register);
@@ -206,8 +226,28 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         (cancel_rect, cancel, Manage::Close, 6),
         (save, register, Manage::Save, 7),
     ] {
+        if reference && index == 1 {
+            continue;
+        }
         let active = focus == index || hovered.as_ref() == Some(&command);
         button(frame, app, rect, &text, Action::Manage(command), active);
+    }
+    for (index, item) in references.iter().enumerate() {
+        let command = Manage::Directory(Command::RemoveReference(index));
+        let active = focus == index + 8 || hovered.as_ref() == Some(&command);
+        crate::view::list_item(
+            frame,
+            app,
+            Rect::new(
+                inner.x,
+                inner.bottom() - 5 - reference_rows + index as u16,
+                inner.width,
+                1,
+            ),
+            &format!("{}  {}", app.chrome.symbol("×", "x"), safe(&item.path)),
+            Action::Manage(command),
+            active,
+        );
     }
     for (index, command, icon, ascii) in [
         (2, Command::Parent, "↑", "^"),

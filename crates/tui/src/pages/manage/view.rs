@@ -202,7 +202,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 })
             }
             Kind::Rename => None,
-            Kind::Oauth
+            Kind::Reference
+            | Kind::Oauth
             | Kind::Project
             | Kind::Locations
             | Kind::Model

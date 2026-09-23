@@ -67,6 +67,7 @@ pub struct Ticket {
 pub enum Command {
     Open,
     Browse,
+    Directory,
     Close,
     Path,
     Parent,
@@ -82,6 +83,7 @@ impl Command {
         match self {
             Self::Open | Self::Select(_) => "attachments-title",
             Self::Browse => "attachments-add",
+            Self::Directory => "references-title",
             Self::Close => "attachments-close",
             Self::Path => "attachments-path",
             Self::Parent => "directory-parent",
@@ -358,7 +360,7 @@ impl App {
     fn attachment_identity(&self, ticket: &Ticket) -> bool {
         matches!(&self.connection, ConnectionState::Connected {root_id, epoch} if *root_id == ticket.root && *epoch == ticket.epoch)
     }
-    fn attachment_editable(&self, session: &str) -> bool {
+    pub(crate) fn attachment_editable(&self, session: &str) -> bool {
         matches!(self.connection, ConnectionState::Connected { .. })
             && self.drafts.contains_key(session)
             && !(self.chat.session.as_deref() == Some(session) && self.chat.removed)
@@ -369,6 +371,9 @@ impl App {
                 .is_some_and(|sent| sent.delivery.blocks_send())
     }
     pub fn attachment_enabled(&self, command: &Command) -> bool {
+        if *command == Command::Directory {
+            return self.enabled(&Action::References);
+        }
         if *command == Command::Close {
             return true;
         }
@@ -395,6 +400,7 @@ impl App {
         match command {
             Command::Open | Command::Close | Command::Details | Command::Select(_) => true,
             Command::Browse => editable && count < capacity,
+            Command::Directory => unreachable!(),
             Command::Parent | Command::Path | Command::EnterPath | Command::Pick(_) => {
                 editable && count < capacity
             }
@@ -425,6 +431,11 @@ impl App {
         }
     }
     pub fn attachment_action(&mut self, command: Command) -> Option<Action> {
+        if command == Command::Directory {
+            self.attachments.dialog = None;
+            self.open_references();
+            return None;
+        }
         if command == Command::Close {
             self.attachments.dialog = None;
             self.hits.clear();
@@ -479,6 +490,7 @@ impl App {
                 dialog.selected = 0;
                 dialog.top = 0;
             }
+            Command::Directory => unreachable!(),
             Command::Browse => {
                 dialog.browse = true;
                 dialog.selected = 0;
