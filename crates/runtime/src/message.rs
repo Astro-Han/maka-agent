@@ -125,12 +125,27 @@ pub fn validate_sources(
     let mut ids = HashSet::new();
     let mut bytes = 0usize;
     let mut unprepared_bytes = 0usize;
+    let started = sources[0].disposition == MessageDisposition::TurnStarted;
+    let orchestration = sources[0]
+        .submitted_intent
+        .as_ref()
+        .and_then(|intent| intent.turn_orchestration.as_ref());
     for source in sources {
         source.validate()?;
         if !ids.insert(&source.message.message_id)
             || (sources.len() != 1
-                && (source.disposition == MessageDisposition::TurnStarted
-                    || source.submitted_intent.is_some()))
+                && if started {
+                    source.disposition != MessageDisposition::TurnStarted
+                        || source.submitted_placement != Placement::CurrentTurn
+                        || source
+                            .submitted_intent
+                            .as_ref()
+                            .and_then(|intent| intent.turn_orchestration.as_ref())
+                            != orchestration
+                } else {
+                    source.disposition == MessageDisposition::TurnStarted
+                        || source.submitted_intent.is_some()
+                })
         {
             return Err("conflicting root message sources");
         }
@@ -195,5 +210,65 @@ fn append<T: Clone>(target: &mut Option<Vec<T>>, source: Option<&[T]>) {
         target
             .get_or_insert_with(Vec::new)
             .extend_from_slice(source);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atomic_starts_preserve_intent_without_accepting_mixed_queue_sources() {
+        let mut sources: Vec<_> = ["first", "second"]
+            .into_iter()
+            .map(|text| {
+                let content = MessageInput::from(text);
+                RootSourceMessage {
+                    message: DeliveredMessage {
+                        message_id: text.into(),
+                        submitted_content_digest: content.content_digest().unwrap(),
+                        content: content.clone(),
+                    },
+                    unprepared_content: content,
+                    submitted_placement: Placement::CurrentTurn,
+                    disposition: MessageDisposition::TurnStarted,
+                    submitted_intent: Some(SubmittedTurnIntent {
+                        input_selections: std::collections::BTreeMap::from([(
+                            "example".into(),
+                            vec![text.into()],
+                        )]),
+                        turn_orchestration: None,
+                    }),
+                }
+            })
+            .collect();
+        let content = aggregate(sources.iter().map(|s| &s.message.content));
+        assert!(validate_sources(&content, &sources).is_ok());
+        sources[1]
+            .submitted_intent
+            .as_mut()
+            .unwrap()
+            .turn_orchestration = Some(TurnOrchestration {
+            mode: "example".to_owned().try_into().unwrap(),
+            source: TurnOrchestrationSource::HostApi,
+        });
+        assert!(validate_sources(&content, &sources).is_err());
+        sources[1].submitted_intent = None;
+        sources[1].submitted_placement = Placement::NextTurn;
+        assert!(validate_sources(&content, &sources).is_err());
+        sources[1].disposition = MessageDisposition::Followup;
+        assert!(validate_sources(&content, &sources).is_err());
+        sources.reverse();
+        let reversed = aggregate(sources.iter().map(|s| &s.message.content));
+        assert!(validate_sources(&reversed, &sources).is_err());
+        sources[1].disposition = MessageDisposition::Steering;
+        assert!(validate_sources(&reversed, &sources).is_err());
+        sources[1].submitted_intent = None;
+        assert!(validate_sources(&reversed, &sources).is_ok());
+        sources[0].disposition = MessageDisposition::TurnStarted;
+        assert!(
+            validate_sources(&sources[0].message.content, &sources[..1]).is_ok(),
+            "an ordinary NextTurn submit may start an idle Session"
+        );
     }
 }

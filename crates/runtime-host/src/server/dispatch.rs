@@ -165,6 +165,17 @@ impl Host {
                     }
                     result.map(serde_json::to_value)
                 }
+                Operation::TurnBatchStart => {
+                    let input = turn::decode_turn_batch_start_input(&input)?;
+                    let result = self
+                        .executions
+                        .start_batch(input.clone(), connection_id, self.root_id())
+                        .await;
+                    if let Ok(output) = &result {
+                        turn::assert_batch_start_output_for_input(&input, output)?;
+                    }
+                    result.map(serde_json::to_value)
+                }
                 Operation::TurnResumeQuery => {
                     let input = turn::decode_turn_resume_query_input(&input)?;
                     let result = self

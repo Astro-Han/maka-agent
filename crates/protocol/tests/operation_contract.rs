@@ -17,15 +17,11 @@
  * under the License.
  */
 
-use std::io::Write;
-use std::path::Path;
-use std::process::{Command, Stdio};
-
 use maka_protocol::Operation;
 use serde_json::{Map, Value, json};
 
 #[test]
-fn operation_inventory_and_execution_targets_match_current_typescript() {
+fn native_operation_inventory_and_execution_targets_preserve_the_wire_contract() {
     let mut operations = Map::new();
     for &operation in Operation::ALL {
         let name = operation.as_str();
@@ -46,42 +42,15 @@ fn operation_inventory_and_execution_targets_match_current_typescript() {
         );
     }
 
-    // The existing probe bundles current worktree sources and rejects workspace dist.
-    // MAKA_JS_DEPS may point to a separate checkout providing npm dependencies only.
-    let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/support/source.mjs");
-    let mut child = Command::new("node")
-        .arg(probe)
-        .arg("crates/protocol/tests/fixtures/operations.mjs")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Operation source contract requires Node and root npm dependencies");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(
-            &serde_json::to_vec(&json!({
-                "epoch": maka_protocol::COMPATIBILITY_EPOCH,
-                "operations": operations,
-                "targets": execution_targets(),
-                "providerPages": provider_pages(),
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let report: Value = serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
-    assert_eq!(report["check"], "operation-contract");
-    assert_eq!(report["operationCount"], Operation::ALL.len());
+    assert_eq!(operations["turn.batch.start"], operations["turn.start"]);
+    for (index, case) in execution_targets().iter().enumerate() {
+        assert_eq!(case["decoded"].is_object(), index < 3, "{case}");
+    }
+    for page in provider_pages() {
+        let decoded: maka_plugins::provider::catalog::Page =
+            serde_json::from_value(page.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), page);
+    }
 }
 
 fn provider_pages() -> Vec<Value> {

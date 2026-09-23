@@ -253,6 +253,7 @@ fn path_free(request: &Request) -> bool {
         | Operation::SessionReadMarkerSet
         | Operation::SessionConfigurationUpdate
         | Operation::TurnStart
+        | Operation::TurnBatchStart
         | Operation::TurnResumeQuery
         | Operation::TurnResumeStart
         | Operation::TurnMessageQuery

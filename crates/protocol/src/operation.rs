@@ -240,6 +240,7 @@ operations! {
     TurnResumeQuery => ("turn.resume.query", Query, Ready),
     TurnResumeStart => ("turn.resume.start", Command, Ready),
     TurnStart => ("turn.start", Command, Ready),
+    TurnBatchStart => ("turn.batch.start", Command, Ready),
     TurnStop => ("turn.stop", Control, Ready),
     UsageQuery => ("usage.query", Query, Ready),
 }

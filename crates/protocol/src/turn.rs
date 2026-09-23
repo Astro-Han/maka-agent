@@ -18,10 +18,12 @@
  */
 
 //! Direct hosted execution, epoch 141. Use decode functions at JSON boundaries.
+mod batch;
 mod content;
 mod resume;
 mod types;
 use crate::{ProtocolError, Result, codec};
+pub use batch::*;
 pub use content::*;
 pub use resume::*;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -36,6 +38,24 @@ pub const STOP_ERRORS: &[crate::OperationErrorCode] = &[
     crate::OperationErrorCode::InternalFailure,
 ];
 pub use types::*;
+
+pub const START_ERRORS: &[crate::OperationErrorCode] = &[
+    crate::OperationErrorCode::HostNotReady,
+    crate::OperationErrorCode::HostDraining,
+    crate::OperationErrorCode::OperationUnavailable,
+    crate::OperationErrorCode::NotFound,
+    crate::OperationErrorCode::SessionArchived,
+    crate::OperationErrorCode::SessionBusy,
+    crate::OperationErrorCode::OperationConflict,
+    crate::OperationErrorCode::InternalFailure,
+];
+pub const QUERY_ERRORS: &[crate::OperationErrorCode] = &[
+    crate::OperationErrorCode::HostNotReady,
+    crate::OperationErrorCode::HostDraining,
+    crate::OperationErrorCode::OperationUnavailable,
+    crate::OperationErrorCode::NotFound,
+    crate::OperationErrorCode::InternalFailure,
+];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

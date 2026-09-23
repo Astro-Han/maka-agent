@@ -45,6 +45,8 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod batch;
+
 #[derive(Clone, Default)]
 struct Business(Arc<AtomicUsize>);
 

@@ -25,6 +25,7 @@ pub(super) fn supports(operation: Operation) -> bool {
     matches!(
         operation,
         Operation::TurnStart
+            | Operation::TurnBatchStart
             | Operation::TurnQuery
             | Operation::TurnStop
             | Operation::TurnResumeQuery
@@ -34,6 +35,9 @@ pub(super) fn supports(operation: Operation) -> bool {
 pub(super) fn decode_input(operation: Operation, value: &Value) -> Result<Value> {
     let normalized = match operation {
         Operation::TurnStart => serde_json::to_value(turn::decode_turn_start_input(value)?),
+        Operation::TurnBatchStart => {
+            serde_json::to_value(turn::decode_turn_batch_start_input(value)?)
+        }
         Operation::TurnQuery => serde_json::to_value(turn::decode_turn_query_input(value)?),
         Operation::TurnStop => serde_json::to_value(turn::decode_turn_stop_input(value)?),
         Operation::TurnResumeQuery => {
@@ -48,7 +52,7 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> Result<Value>
 }
 pub(super) fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
     match operation {
-        Operation::TurnStart => {
+        Operation::TurnStart | Operation::TurnBatchStart => {
             turn::decode_turn_start_result(value)?;
         }
         Operation::TurnResumeQuery => {
@@ -65,16 +69,9 @@ pub(super) fn decode_output(operation: Operation, value: &Value) -> Result<Value
 }
 pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
     match operation {
-        Operation::TurnStart | Operation::TurnResumeStart => Some(&[
-            Code::HostNotReady,
-            Code::HostDraining,
-            Code::OperationUnavailable,
-            Code::NotFound,
-            Code::SessionArchived,
-            Code::SessionBusy,
-            Code::OperationConflict,
-            Code::InternalFailure,
-        ]),
+        Operation::TurnStart | Operation::TurnBatchStart | Operation::TurnResumeStart => {
+            Some(turn::START_ERRORS)
+        }
         Operation::TurnResumeQuery => Some(&[
             Code::HostNotReady,
             Code::HostDraining,
@@ -83,13 +80,7 @@ pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
             Code::SessionArchived,
             Code::InternalFailure,
         ]),
-        Operation::TurnQuery => Some(&[
-            Code::HostNotReady,
-            Code::HostDraining,
-            Code::OperationUnavailable,
-            Code::NotFound,
-            Code::InternalFailure,
-        ]),
+        Operation::TurnQuery => Some(turn::QUERY_ERRORS),
         Operation::TurnStop => Some(turn::STOP_ERRORS),
         _ => None,
     }

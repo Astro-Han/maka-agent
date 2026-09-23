@@ -32,6 +32,7 @@ mod project;
 mod session;
 mod subscription;
 pub mod transcript;
+mod turn;
 
 pub use connection::{Client, ClientError, HostIdentity, RequestFailure};
 pub use notification::{CatalogNotification, Notification};

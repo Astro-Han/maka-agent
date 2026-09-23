@@ -25,15 +25,54 @@ use uuid::Uuid;
 impl Executions {
     pub(crate) async fn start(
         self: &std::sync::Arc<Self>,
-        mut input: TurnStartInput,
+        input: TurnStartInput,
         connection_id: Uuid,
         root_id: &str,
     ) -> Result<TurnStartResult> {
-        self.ordinary_session(&input.session_id).await?;
         let fingerprint = format!(
             "sha256:{:x}",
             Sha256::digest(serde_json::to_vec(&input).map_err(internal)?)
         );
+        self.start_inputs(
+            TurnBatchStartInput {
+                session_id: input.session_id,
+                turn_id: input.turn_id,
+                messages: vec![TurnStartMessage {
+                    content: input.content,
+                    input_selections: input.input_selections,
+                }],
+                turn_orchestration: input.turn_orchestration,
+                max_steps: input.max_steps,
+            },
+            fingerprint,
+            connection_id,
+            root_id,
+        )
+        .await
+    }
+
+    pub(crate) async fn start_batch(
+        self: &std::sync::Arc<Self>,
+        input: TurnBatchStartInput,
+        connection_id: Uuid,
+        root_id: &str,
+    ) -> Result<TurnStartResult> {
+        let fingerprint = format!(
+            "sha256:{:x}",
+            Sha256::digest(serde_json::to_vec(&input).map_err(internal)?)
+        );
+        self.start_inputs(input, fingerprint, connection_id, root_id)
+            .await
+    }
+
+    async fn start_inputs(
+        self: &std::sync::Arc<Self>,
+        input: TurnBatchStartInput,
+        fingerprint: String,
+        connection_id: Uuid,
+        root_id: &str,
+    ) -> Result<TurnStartResult> {
+        self.ordinary_session(&input.session_id).await?;
         let mut prepared = None;
         loop {
             let admission = self.lock_admission().await;
@@ -74,7 +113,7 @@ impl Executions {
                 drop(admission);
                 prepared = Some(
                     async {
-                        let environment = self
+                        let mut environment = self
                             .prepare_environment(
                                 &input.session_id,
                                 Some(connection_id),
@@ -85,55 +124,106 @@ impl Executions {
                                     .map(|intent| intent.mode.clone()),
                             )
                             .await?;
-                        environment
-                            .expand(input.content.clone().into(), input.input_selections.clone())
-                            .await
+                        let mut contents = Vec::with_capacity(input.messages.len());
+                        let mut blocked = None;
+                        for message in &input.messages {
+                            let (next, content, selection) = environment
+                                .expand(
+                                    message.content.clone().into(),
+                                    message.input_selections.clone(),
+                                )
+                                .await?;
+                            environment = next;
+                            contents.push(content);
+                            if let super::input::Outcome::Blocked { message } = selection {
+                                blocked = Some(message);
+                                break;
+                            }
+                        }
+                        Ok::<_, maka_protocol::OperationError>((environment, contents, blocked))
                     }
                     .await,
                 );
                 continue;
             };
-            let (environment, content, selection) = candidate?;
+            let (environment, contents, blocked) = candidate?;
             let Some((environment, _input_admission)) =
                 environment.commit(self, &input.session_id).await?
             else {
                 continue;
             };
-            if let super::input::Outcome::Blocked { message } = selection {
+            let preparation = contents
+                .iter()
+                .flat_map(|content| content.preparation.iter().cloned())
+                .collect::<Vec<_>>();
+            maka_runtime::input::validate_receipts(&preparation)
+                .map_err(|error| failure(Code::OperationUnavailable, error))?;
+            // Keep the Started/Blocked receipt below the transport envelope
+            // before starting any Run, not after an unencodable acknowledgement.
+            if serde_json::to_vec(&preparation).map_err(internal)?.len() > 700 * 1024 {
+                return Err(failure(
+                    Code::OperationUnavailable,
+                    "Turn preparation receipts exceed response capacity",
+                ));
+            }
+            if let Some(message) = blocked {
                 return Ok(TurnStartResult::Blocked {
                     message,
-                    preparation: content.preparation,
+                    preparation,
                 });
             }
-            let preparation = content.preparation.clone();
-            let unprepared_content: maka_runtime::input::MessageInput =
-                input.content.clone().into();
-            let source = maka_runtime::message::RootSourceMessage {
-                message: maka_runtime::input::DeliveredMessage {
-                    message_id: Uuid::new_v4().to_string(),
-                    content: content.clone(),
-                    submitted_content_digest: unprepared_content
-                        .content_digest()
-                        .map_err(internal)?,
-                },
-                unprepared_content,
-                submitted_placement: maka_runtime::message::Placement::CurrentTurn,
-                disposition: maka_runtime::message::MessageDisposition::TurnStarted,
-                submitted_intent: (!input.input_selections.is_empty()
-                    || input.turn_orchestration.is_some())
-                .then(|| maka_runtime::message::SubmittedTurnIntent {
-                    input_selections: input.input_selections.clone(),
-                    turn_orchestration: input.turn_orchestration.clone(),
-                }),
+            if contents
+                .iter()
+                .map(|content| content.inline_references.as_ref().map_or(0, Vec::len))
+                .sum::<usize>()
+                > 32
+            {
+                return Err(failure(
+                    Code::OperationUnavailable,
+                    "Prepared Turn inputs exceed inline reference capacity",
+                ));
+            }
+            let content = maka_runtime::message::aggregate(&contents);
+            let mut sources = Vec::with_capacity(contents.len());
+            for (message, content) in input.messages.iter().zip(contents) {
+                let unprepared_content: maka_runtime::input::MessageInput =
+                    message.content.clone().into();
+                let source = maka_runtime::message::RootSourceMessage {
+                    message: maka_runtime::input::DeliveredMessage {
+                        message_id: Uuid::new_v4().to_string(),
+                        content: content.clone(),
+                        submitted_content_digest: unprepared_content
+                            .content_digest()
+                            .map_err(internal)?,
+                    },
+                    unprepared_content,
+                    submitted_placement: maka_runtime::message::Placement::CurrentTurn,
+                    disposition: maka_runtime::message::MessageDisposition::TurnStarted,
+                    submitted_intent: (!message.input_selections.is_empty()
+                        || input.turn_orchestration.is_some())
+                    .then(|| maka_runtime::message::SubmittedTurnIntent {
+                        input_selections: message.input_selections.clone(),
+                        turn_orchestration: input.turn_orchestration.clone(),
+                    }),
+                };
+                sources.push(source);
+            }
+            maka_runtime::message::validate_sources(&content, &sources)
+                .map_err(|error| failure(Code::OperationUnavailable, error))?;
+            let input = TurnStartInput {
+                session_id: input.session_id,
+                turn_id: input.turn_id,
+                content: content.clone().into(),
+                input_selections: Default::default(),
+                turn_orchestration: input.turn_orchestration,
+                max_steps: input.max_steps,
             };
-            input.input_selections.clear();
-            input.content = content.clone().into();
             let mut run = self
                 .prepare_message(
                     input,
                     super::prepare::MessageOrigin::Client { root_id },
                     Some(fingerprint),
-                    vec![source],
+                    sources,
                     environment,
                 )
                 .await?;

@@ -37,7 +37,7 @@ pub(crate) struct Environment {
     directory: maka_fs_tools::workspace::directory::PublishedDirectory,
     input_catalog: maka_plugins::contributions::Catalog,
     workspace: maka_plugins::filesystem::ReadRoot,
-    prepared_input: Option<maka_plugins::input::Prepared>,
+    prepared_inputs: Vec<maka_plugins::input::Prepared>,
     cancellation: tokio_util::sync::CancellationToken,
 }
 pub(crate) enum Backend {
@@ -50,7 +50,7 @@ pub(crate) struct ModelEnvironment {
 }
 
 pub(crate) struct Admission {
-    _input: Option<maka_plugins::input::Admission>,
+    _inputs: Vec<maka_plugins::input::Admission>,
     _behavior: Option<maka_plugins::fiber::CallGuard>,
     _behavior_revision: Option<tokio::sync::OwnedRwLockReadGuard<u64>>,
     _prompt: Vec<maka_plugins::fiber::CallGuard>,
@@ -193,7 +193,7 @@ impl Executions {
                 directory,
                 input_catalog: self.plugin_catalog.clone(),
                 workspace,
-                prepared_input: None,
+                prepared_inputs: Vec::new(),
                 cancellation: self.shutdown.child_token(),
             });
         }
@@ -327,7 +327,7 @@ impl Executions {
             directory,
             input_catalog: self.plugin_catalog.clone(),
             workspace,
-            prepared_input: None,
+            prepared_inputs: Vec::new(),
             cancellation: self.shutdown.child_token(),
         })
     }
@@ -367,7 +367,7 @@ impl Environment {
         )
         .await?;
         let content = prepared.content.clone();
-        self.prepared_input = Some(prepared);
+        self.prepared_inputs.push(prepared);
         Ok((self, content, selection))
     }
     /// Caller has repeated canonical replay/active/queue checks under admission.
@@ -425,7 +425,7 @@ impl Environment {
             Backend::Executor(_) => {}
         }
         let mut admission = Admission {
-            _input: None,
+            _inputs: Vec::new(),
             _behavior: None,
             _behavior_revision: None,
             _prompt: Vec::new(),
@@ -447,11 +447,11 @@ impl Environment {
                 })?);
             }
         }
-        if let Some(prepared) = &self.prepared_input {
+        for prepared in &self.prepared_inputs {
             let Some(guard) = prepared.admit().map_err(internal)? else {
                 return Ok(None);
             };
-            admission._input = Some(guard);
+            admission._inputs.push(guard);
         }
         if !executions
             .capabilities
