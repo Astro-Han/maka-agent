@@ -78,6 +78,36 @@ impl EventLog {
         configuration: &T,
         now: u64,
     ) -> Result<SessionCopyResult<T>, StoreError> {
+        self.copy_session_owned(request, configuration, now, None)
+            .await
+    }
+
+    /// The Host binds source access and destination creation authority separately.
+    /// Ownership, the complete creation fingerprint and history commit together.
+    pub async fn copy_plugin_session<T: Serialize + DeserializeOwned + Send + 'static>(
+        &self,
+        request: SessionCopy,
+        configuration: &T,
+        now: u64,
+        origin: super::PluginSession,
+    ) -> Result<SessionCopyResult<T>, StoreError> {
+        origin.validate()?;
+        if origin.session_id != request.target_session_id {
+            return Err(super::invalid(
+                "copy target differs from its creation owner",
+            ));
+        }
+        self.copy_session_owned(request, configuration, now, Some(origin))
+            .await
+    }
+
+    async fn copy_session_owned<T: Serialize + DeserializeOwned + Send + 'static>(
+        &self,
+        request: SessionCopy,
+        configuration: &T,
+        now: u64,
+        origin: Option<super::PluginSession>,
+    ) -> Result<SessionCopyResult<T>, StoreError> {
         self.validate_root()?;
         super::validate_id(&request.source_session_id)?;
         super::validate_id(&request.target_session_id)?;
@@ -105,7 +135,10 @@ impl EventLog {
             return Err(super::invalid("session configuration exceeds 64 KiB"));
         }
         let encoded = serde_json::to_string(&request)?;
-        let fingerprint = maka_runtime::artifact::content_digest(encoded.as_bytes());
+        let fingerprint = origin.as_ref().map_or_else(
+            || maka_runtime::artifact::content_digest(encoded.as_bytes()),
+            |origin| origin.fingerprint.clone(),
+        );
         self.connection.run(move |connection| Box::pin(async move {
             let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
             let previous: Option<String> = sqlx::query_scalar(
@@ -113,6 +146,7 @@ impl EventLog {
             ).bind(&request.target_session_id).fetch_optional(&mut *tx).await?;
             if let Some(previous) = previous {
                 if previous != encoded { return Err(StoreError::SessionConflict); }
+                super::origin::check(&mut tx, &request.target_session_id, origin.as_ref()).await?;
                 let session = super::read(&mut tx, &request.target_session_id).await?
                     .ok_or(StoreError::SessionNotFound)?;
                 return Ok(SessionCopyResult::Committed(Box::new(session)));
@@ -130,10 +164,12 @@ impl EventLog {
                     expected: request.expected_source_revision, actual,
                 });
             }
-            let managed: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM plugin_sessions WHERE session_id = ? AND managed = 1)",
-            ).bind(&request.source_session_id).fetch_one(&mut *tx).await?;
-            if managed {
+            let manager: Option<(String, String)> = sqlx::query_as(
+                "SELECT package_id, scope_id FROM plugin_sessions WHERE session_id = ? AND managed = 1",
+            ).bind(&request.source_session_id).fetch_optional(&mut *tx).await?;
+            if manager.is_some_and(|(package, scope)| origin.as_ref().is_none_or(|origin|
+                origin.creator.package() != package || String::from(origin.creator.scope().clone()) != scope
+            )) {
                 return Err(super::invalid("managed Session history requires its owner's lifecycle"));
             }
             let observed: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence),0) FROM event_log")
@@ -141,6 +177,9 @@ impl EventLog {
             let through = history::resolve_cut(&mut tx, &request.source_session_id, &cut, observed).await?;
             safety::require_safe_through(&mut tx, &request.source_session_id, None, through).await?;
             let lineage = lineage(&mut tx, &request).await?;
+            if let Some(origin) = &origin {
+                super::origin::insert(&mut tx, origin).await?;
+            }
             super::insert(&mut tx, &request.target_session_id, &fingerprint, &configuration, now).await?;
             let state = match request.purpose {
                 CopyPurpose::Revision { .. } => CopyState::Preparing,

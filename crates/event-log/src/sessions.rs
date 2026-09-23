@@ -118,15 +118,7 @@ impl EventLog {
         configuration: &T,
         now: u64,
     ) -> Result<SessionRecord<T>, StoreError> {
-        if claim.creator.scope() == &maka_plugins::composition::Scope::DesktopUi {
-            return Err(invalid("Desktop UI cannot create Host Sessions"));
-        }
-        if let Some(source) = &claim.authority_session_id {
-            validate_id(source)?;
-            if source == &claim.session_id {
-                return Err(invalid("Session cannot authorize its own creation"));
-            }
-        }
+        claim.validate()?;
         self.create_session_owned(
             &claim.session_id,
             &claim.fingerprint,
@@ -158,34 +150,11 @@ impl EventLog {
                 Box::pin(async move {
                     let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
                     if let Some(record) = probe(&mut tx, &id, &fingerprint).await? {
-                        let stored: Option<(String, String, bool, Option<String>)> = sqlx::query_as(
-                            "SELECT package_id, scope_id, managed, authority_session_id FROM plugin_sessions WHERE session_id = ?",
-                        ).bind(&id).fetch_optional(&mut *tx).await?;
-                        let requested = origin.as_ref().map(|origin| (
-                            origin.creator.package().to_owned(), String::from(origin.creator.scope().clone()), origin.managed,
-                            origin.authority_session_id.clone(),
-                        ));
-                        if stored != requested {
-                            return Err(StoreError::SessionConflict);
-                        }
+                        origin::check(&mut tx, &id, origin.as_ref()).await?;
                         return Ok(record);
                     }
-                    if let Some(origin) = origin {
-                        if let Some(source) = &origin.authority_session_id {
-                            let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM session_control WHERE id=?)")
-                                .bind(source).fetch_one(&mut *tx).await?;
-                            if !exists { return Err(StoreError::SessionNotFound); }
-                            copy::retain(&mut tx, source).await?;
-                        }
-                        sqlx::query("INSERT INTO plugin_sessions VALUES (?, ?, ?, ?, ?, ?)")
-                            .bind(&id)
-                            .bind(origin.creator.package())
-                            .bind(String::from(origin.creator.scope().clone()))
-                            .bind(&fingerprint)
-                            .bind(origin.managed)
-                            .bind(origin.authority_session_id)
-                            .execute(&mut *tx)
-                            .await?;
+                    if let Some(origin) = &origin {
+                        origin::insert(&mut tx, origin).await?;
                     }
                     insert(&mut tx, &id, &fingerprint, &configuration, now).await?;
                     let record = read(&mut tx, &id)

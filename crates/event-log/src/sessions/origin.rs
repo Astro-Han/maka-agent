@@ -20,10 +20,10 @@
 use super::validate_id;
 use crate::{EventLog, StoreError};
 use maka_plugins::{composition::Scope, storage::Namespace};
-use sqlx::Row;
+use sqlx::{Row, SqliteConnection};
 
 /// Host-bound creation identity, not a caller-provided authorization credential.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PluginSession {
     pub session_id: String,
     pub creator: Namespace,
@@ -33,6 +33,83 @@ pub struct PluginSession {
     /// Session whose current authority the Host used to create this root.
     /// This is a lifecycle dependency, not a business parent or a new grant.
     pub authority_session_id: Option<String>,
+}
+
+impl PluginSession {
+    pub(super) fn validate(&self) -> Result<(), StoreError> {
+        validate_id(&self.session_id)?;
+        if self.creator.scope() == &Scope::DesktopUi {
+            return Err(super::invalid("Desktop UI cannot create Host Sessions"));
+        }
+        if let Some(source) = &self.authority_session_id {
+            validate_id(source)?;
+            if source == &self.session_id {
+                return Err(super::invalid("Session cannot authorize its own creation"));
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(super) async fn check(
+    connection: &mut SqliteConnection,
+    session: &str,
+    requested: Option<&PluginSession>,
+) -> Result<(), StoreError> {
+    let row = sqlx::query(
+        "SELECT package_id, scope_id, fingerprint, managed, authority_session_id
+         FROM plugin_sessions WHERE session_id=?",
+    )
+    .bind(session)
+    .fetch_optional(connection)
+    .await?;
+    let stored = row
+        .map(|row| {
+            Ok::<_, StoreError>(PluginSession {
+                session_id: session.to_owned(),
+                creator: Namespace::new(
+                    row.try_get::<String, _>("package_id")?,
+                    Scope::try_from(row.try_get::<String, _>("scope_id")?)
+                        .map_err(|error| super::invalid(&error.to_string()))?,
+                )
+                .map_err(|error| super::invalid(&error.to_string()))?,
+                fingerprint: row.try_get("fingerprint")?,
+                managed: row.try_get("managed")?,
+                authority_session_id: row.try_get("authority_session_id")?,
+            })
+        })
+        .transpose()?;
+    if stored.as_ref() != requested {
+        return Err(StoreError::SessionConflict);
+    }
+    Ok(())
+}
+
+pub(super) async fn insert(
+    connection: &mut SqliteConnection,
+    origin: &PluginSession,
+) -> Result<(), StoreError> {
+    if let Some(source) = &origin.authority_session_id {
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM session_control WHERE id=?)")
+                .bind(source)
+                .fetch_one(&mut *connection)
+                .await?;
+        if !exists {
+            return Err(StoreError::SessionNotFound);
+        }
+        super::copy::retain(connection, source).await?;
+    }
+    sqlx::query("INSERT INTO plugin_sessions VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(&origin.session_id)
+        .bind(origin.creator.package())
+        .bind(String::from(origin.creator.scope().clone()))
+        .bind(&origin.fingerprint)
+        .bind(origin.managed)
+        .bind(&origin.authority_session_id)
+        .execute(connection)
+        .await?;
+    Ok(())
 }
 
 impl EventLog {
