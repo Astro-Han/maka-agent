@@ -116,20 +116,20 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.wait_for("Input  1 / 2");
     tui.send("\x1b[200~中文 \x1b[201~".as_bytes());
     tui.wait_for("中文 🦀 @a.rs first");
-    tui.click_text("Attach files");
+    tui.click_text("Add");
     tui.wait_for("Local files");
     tui.wait_for("new-first.txt");
     tui.click_text("new-first.txt");
-    tui.wait_for("Attachments · 1");
+    tui.wait_for("Add · 1");
     tui.send(b"\x1b[6~"); // PageDown selects the next original input.
     tui.wait_for("Input  2 / 2");
     tui.send(b"\x1b[200~edited \x1b[201~");
     tui.wait_for("edited second original");
-    tui.click_text("Attach files");
+    tui.click_text("Add");
     tui.wait_for("Local files");
     tui.wait_for("new-second.txt");
     tui.click_text("new-second.txt");
-    tui.wait_for("Attachments · 1");
+    tui.wait_for("Add · 1");
     tui.click_text("Resources");
     tui.wait_for("note.txt");
     tui.click_text("Quotation");
@@ -150,7 +150,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.send(b"\x11");
     tui.finish();
     let saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
-    assert_eq!(saved["version"], 13);
+    assert_eq!(saved["version"], 14);
     assert_eq!(saved["revision"]["stage"], "draft");
     assert!(saved["attachments"].as_object().unwrap().is_empty());
     for input in saved["revision"]["inputs"].as_array().unwrap() {

@@ -133,10 +133,26 @@ impl App {
         if !self.attachments.ready(&session)
             || (text.trim().is_empty()
                 && !self.attachments.has(&session)
-                && !self.has_directories(&session))
+                && !self.has_directories(&session)
+                && !self.has_skills(&session))
         {
             return None;
         }
+        let input_selections = crate::pages::skills::selections(
+            self.skills
+                .saved
+                .get(&session)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        );
+        if !input_selections.is_empty() && self.stop_target().is_some() {
+            return None;
+        }
+        let placement = if input_selections.is_empty() {
+            placement
+        } else {
+            Placement::CurrentTurn
+        };
         let request = Submission {
             root_id: root_id.clone(),
             origin_epoch: epoch.clone(),
@@ -155,7 +171,7 @@ impl App {
                 inline_references: None,
             },
             placement,
-            input_selections: Default::default(),
+            input_selections,
             turn_orchestration: None,
         };
         self.sending.insert(
@@ -201,6 +217,16 @@ impl App {
                     == request.content.directory_references.as_ref()
                 {
                     self.directories.remove(&request.session);
+                }
+                if self
+                    .skills
+                    .saved
+                    .get(&request.session)
+                    .is_some_and(|items| {
+                        crate::pages::skills::selections(items) == request.input_selections
+                    })
+                {
+                    self.skills.saved.remove(&request.session);
                 }
                 Delivery::Accepted
             }
@@ -260,6 +286,16 @@ impl App {
                     == request.content.directory_references.as_ref()
                 {
                     self.directories.remove(&request.session);
+                }
+                if self
+                    .skills
+                    .saved
+                    .get(&request.session)
+                    .is_some_and(|items| {
+                        crate::pages::skills::selections(items) == request.input_selections
+                    })
+                {
+                    self.skills.saved.remove(&request.session);
                 }
                 Delivery::Accepted
             }

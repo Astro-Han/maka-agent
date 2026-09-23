@@ -63,6 +63,7 @@ pub enum Action {
     Branch(crate::pages::branch::Command),
     Attachment(crate::pages::attachments::Command),
     References,
+    Skills(crate::pages::skills::Command),
     Revision(crate::pages::revision::Command),
     ToggleSymbols,
     ToggleMotion,
@@ -130,6 +131,7 @@ pub struct App {
     pub management: crate::pages::manage::Management,
     pub branch: crate::pages::branch::State,
     pub attachments: crate::pages::attachments::State,
+    pub skills: crate::pages::skills::State,
     pub directories:
         std::collections::BTreeMap<String, Vec<maka_protocol::turn::DirectoryReference>>,
     pub revision: crate::pages::revision::State,
@@ -178,6 +180,7 @@ impl App {
             management: Default::default(),
             branch: Default::default(),
             attachments: Default::default(),
+            skills: Default::default(),
             directories: Default::default(),
             revision: Default::default(),
             onboarding: Default::default(),
@@ -275,6 +278,10 @@ impl App {
                 "attachments-add",
             ));
             commands.push((Action::References, "references-title"));
+            commands.push((
+                Action::Skills(crate::pages::skills::Command::Open),
+                "skills-title",
+            ));
             commands.push((
                 Action::SendMessage,
                 if self.stop_target().is_some() {
@@ -466,6 +473,7 @@ impl App {
             || self.branch.visible
             || self.revision.visible
             || self.attachments.dialog.is_some()
+            || self.skills.dialog.is_some()
             || !self.has_tooltip()
             || self.palette.is_some()
             || self.interactions.visible
@@ -482,6 +490,7 @@ impl App {
             || self.branch.visible
             || self.revision.visible
             || self.attachments.dialog.is_some()
+            || self.skills.dialog.is_some()
             || !matches!(self.navigation.current(), Route::Session(_))
             || self.palette.is_some()
             || self.chrome.details
@@ -506,6 +515,7 @@ impl App {
             && !self.branch.visible
             && !self.revision.visible
             && self.attachments.dialog.is_none()
+            && self.skills.dialog.is_none()
             && self.palette.is_none()
             && self.management.dialog.is_none()
             && self.onboarding.dialog.is_none()
@@ -578,6 +588,7 @@ impl App {
             Action::Manage(command) => return self.management_action(command),
             Action::Attachment(command) => return self.attachment_action(command),
             Action::References => self.open_references(),
+            Action::Skills(command) => self.skills_action(command),
             Action::Branch(command) => return self.branch_action(command),
             Action::Revision(command) => return self.revision_action(command),
             Action::Onboard(command) => return self.onboarding_action(command),
@@ -762,6 +773,9 @@ impl App {
         None
     }
     pub fn enabled(&self, action: &Action) -> bool {
+        if let Action::Skills(command) = action {
+            return self.skills_enabled(command);
+        }
         if *action == Action::References {
             return self.management.dialog.is_none()
                 && self
@@ -793,6 +807,11 @@ impl App {
             return self.queue_enabled(command);
         }
         if *action == Action::SteerMessage {
+            if let Route::Session(id) = self.navigation.current()
+                && self.has_skills(&id)
+            {
+                return false;
+            }
             return self
                 .stop_target()
                 .is_some_and(|target| !self.chat.stop.pending(&target))
@@ -847,6 +866,7 @@ impl App {
                             editor.text().is_empty()
                                 && !self.attachments.has(id)
                                 && !self.has_directories(id)
+                                && !self.has_skills(id)
                                 && !self.tabs.contains(id)
                                 && !self
                                     .sending
@@ -872,8 +892,10 @@ impl App {
                     && !(self.chat.session.as_deref() == Some(&id) && self.chat.removed)
                     && !matches!(&self.sessions.detail, crate::pages::sessions::Detail::Missing { id: missing } if *missing == id)
                     && self.attachments.ready(&id)
+                    && (!self.has_skills(&id) || self.stop_target().is_none())
                     && (self.attachments.has(&id)
                         || self.has_directories(&id)
+                        || self.has_skills(&id)
                         || self
                             .drafts
                             .get(&id)
@@ -998,6 +1020,7 @@ impl App {
                     editor.text().is_empty()
                         && !self.attachments.has(id)
                         && !self.has_directories(id)
+                        && !self.has_skills(id)
                         && !self.tabs.contains(id)
                         && !self
                             .sending
@@ -1009,6 +1032,7 @@ impl App {
                 self.drafts.remove(&empty);
                 self.attachments.saved.remove(&empty);
                 self.directories.remove(&empty);
+                self.skills.saved.remove(&empty);
                 self.sending.remove(&empty);
             } else {
                 self.notice = Some(Notice::Local("tabs-drafts-limit"));
@@ -1028,6 +1052,7 @@ impl App {
             editor.invalidate();
         }
         self.management.invalidate_geometry();
+        self.skills.invalidate_geometry();
         self.management.oauth.invalidate_identity_geometry();
         self.branch.invalidate_geometry();
         self.revision.invalidate_geometry();
@@ -1119,6 +1144,7 @@ impl App {
                 || self.branch.visible
                 || self.revision.visible
                 || self.attachments.dialog.is_some()
+                || self.skills.dialog.is_some()
                 || self.palette.is_some()
                 || self.onboarding.dialog.is_some()
                 || self.management.dialog.is_some()
@@ -1131,6 +1157,8 @@ impl App {
             // Dismiss only the displayed overlay. Never forward this press to the page.
             let action = if self.theme.editor.is_some() {
                 Some(Action::Theme(crate::theme::editor::Command::Close))
+            } else if self.skills.dialog.is_some() {
+                Some(Action::Skills(crate::pages::skills::Command::Close))
             } else if self.attachments.dialog.is_some() {
                 Some(Action::Attachment(
                     crate::pages::attachments::Command::Close,
@@ -1164,6 +1192,9 @@ impl App {
         }
         if self.theme.editor.is_some() && !matches!(event, Event::Resize(_, _)) {
             return self.theme_input(event);
+        }
+        if self.skills.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
+            return self.skills_input(event);
         }
         if self.attachments.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
             return self.attachment_input(event);

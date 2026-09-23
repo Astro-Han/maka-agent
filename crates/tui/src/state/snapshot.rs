@@ -36,6 +36,7 @@ pub struct Snapshot {
     drafts: BTreeMap<String, Saved>,
     attachments: BTreeMap<String, Vec<crate::pages::attachments::Saved>>,
     directories: BTreeMap<String, Vec<maka_protocol::turn::DirectoryReference>>,
+    skills: BTreeMap<String, Vec<crate::pages::skills::Picked>>,
     unresolved: Vec<Submission>,
     locale: LocalePreference,
     theme: crate::theme::Choice,
@@ -61,9 +62,10 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 13,
+            version: 14,
             attachments: app.attachments.saved.clone(),
             directories: app.directories.clone(),
+            skills: app.skills.saved.clone(),
             root: root.into(),
             tabs: app.tabs.entries.iter().map(|tab| tab.id.clone()).collect(),
             drafts: app
@@ -91,7 +93,7 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if self.version != 13
+        if self.version != 14
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
@@ -124,6 +126,15 @@ impl Snapshot {
             })
         {
             return Err("Invalid saved navigation".into());
+        }
+        if self.skills.len() > LIMIT {
+            return Err("Too many Skills drafts".into());
+        }
+        for (session, items) in &self.skills {
+            if !self.drafts.contains_key(session) {
+                return Err("Invalid Skills draft destination".into());
+            }
+            crate::pages::skills::validate(items)?;
         }
         if self.directories.len() > LIMIT {
             return Err("Too many directory drafts".into());
@@ -209,6 +220,7 @@ impl Snapshot {
         }
         app.attachments.saved = self.attachments;
         app.directories = self.directories;
+        app.skills.saved = self.skills;
         for (id, saved) in self.drafts {
             app.drafts.insert(id, Editor::restore(saved)?);
         }
@@ -268,6 +280,13 @@ mod tests {
         let mut original = app();
         original.apply(Action::Visit(Route::Session("a".into())));
         original.drafts.get_mut("a").unwrap().insert("中文🦀");
+        original.skills.saved.insert(
+            "a".into(),
+            vec![crate::pages::skills::Picked {
+                id: "review".into(),
+                name: "Review".into(),
+            }],
+        );
         original.directories.insert(
             "a".into(),
             vec![maka_protocol::turn::DirectoryReference {
@@ -308,6 +327,11 @@ mod tests {
             request.content.directory_references.clone().unwrap()
         );
         assert_eq!(restored.sending["a"].request.input(), request.input());
+        assert_eq!(
+            crate::pages::skills::selections(&restored.skills.saved["a"]),
+            request.input_selections
+        );
+        assert!(restored.skills.dialog.is_none());
         assert!(matches!(
             restored.sending["a"].delivery,
             Delivery::Unknown(None)
@@ -393,7 +417,7 @@ mod tests {
         request.input().validate().unwrap();
         original.sending.get_mut("a").unwrap().request = request.clone();
         let saved = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
-        assert_eq!(saved["version"], 13);
+        assert_eq!(saved["version"], 14);
         let mut restored = app();
         serde_json::from_value::<Snapshot>(saved.clone())
             .unwrap()

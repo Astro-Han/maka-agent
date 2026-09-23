@@ -30,3 +30,4 @@ pub mod references;
 pub mod revision;
 pub mod sending;
 pub mod sessions;
+pub mod skills;

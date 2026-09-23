@@ -39,11 +39,12 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
     });
     let attachment_rows = u16::from(app.attachments.has(id));
     let directory_rows = u16::from(app.has_directories(id));
+    let skill_rows = u16::from(app.has_skills(id));
     let parts = Layout::vertical([
         Constraint::Min(1),
         Constraint::Length(super::queue::height(app, area.height)),
         Constraint::Length(1),
-        Constraint::Length(editor_height + 2 + attachment_rows + directory_rows),
+        Constraint::Length(editor_height + 2 + attachment_rows + directory_rows + skill_rows),
     ])
     .split(area);
     if app.chrome.details {
@@ -226,6 +227,11 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
             Rect::new(input.x, input.y, input.width, 1),
             id,
         );
+        input.y += 1;
+        input.height -= 1;
+    }
+    if skill_rows > 0 && input.height > 1 {
+        crate::pages::skills::chips(frame, app, Rect::new(input.x, input.y, input.width, 1), id);
         input.y += 1;
         input.height -= 1;
     }

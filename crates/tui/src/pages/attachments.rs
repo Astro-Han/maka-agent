@@ -68,6 +68,7 @@ pub enum Command {
     Open,
     Browse,
     Directory,
+    Skills,
     Close,
     Path,
     Parent,
@@ -84,6 +85,7 @@ impl Command {
             Self::Open | Self::Select(_) => "attachments-title",
             Self::Browse => "attachments-add",
             Self::Directory => "references-title",
+            Self::Skills => "skills-title",
             Self::Close => "attachments-close",
             Self::Path => "attachments-path",
             Self::Parent => "directory-parent",
@@ -371,6 +373,9 @@ impl App {
                 .is_some_and(|sent| sent.delivery.blocks_send())
     }
     pub fn attachment_enabled(&self, command: &Command) -> bool {
+        if *command == Command::Skills {
+            return self.skills_enabled(&crate::pages::skills::Command::Open);
+        }
         if *command == Command::Directory {
             return self.enabled(&Action::References);
         }
@@ -400,7 +405,7 @@ impl App {
         match command {
             Command::Open | Command::Close | Command::Details | Command::Select(_) => true,
             Command::Browse => editable && count < capacity,
-            Command::Directory => unreachable!(),
+            Command::Directory | Command::Skills => unreachable!(),
             Command::Parent | Command::Path | Command::EnterPath | Command::Pick(_) => {
                 editable && count < capacity
             }
@@ -431,6 +436,11 @@ impl App {
         }
     }
     pub fn attachment_action(&mut self, command: Command) -> Option<Action> {
+        if command == Command::Skills {
+            self.attachments.dialog = None;
+            self.skills_action(crate::pages::skills::Command::Open);
+            return None;
+        }
         if command == Command::Directory {
             self.attachments.dialog = None;
             self.open_references();
@@ -490,7 +500,7 @@ impl App {
                 dialog.selected = 0;
                 dialog.top = 0;
             }
-            Command::Directory => unreachable!(),
+            Command::Directory | Command::Skills => unreachable!(),
             Command::Browse => {
                 dialog.browse = true;
                 dialog.selected = 0;

@@ -140,7 +140,7 @@ impl Input {
                 .get_or_insert_with(Vec::new)
                 .extend(self.directories.clone());
         }
-        let input_selections = self
+        let mut input_selections: maka_runtime::input::Selections = self
             .original
             .input_selections
             .iter()
@@ -159,6 +159,16 @@ impl Input {
                 (!selected.is_empty()).then(|| (provider.clone(), selected))
             })
             .collect();
+        if !self.skills.is_empty() {
+            let values = input_selections
+                .entry(crate::pages::skills::PROVIDER.into())
+                .or_default();
+            for item in &self.skills {
+                if !values.contains(&item.id) {
+                    values.push(item.id.clone());
+                }
+            }
+        }
         TurnStartMessage {
             content,
             input_selections,

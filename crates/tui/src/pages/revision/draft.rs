@@ -30,6 +30,7 @@ pub struct Input {
     pub content: MessageContent,
     pub files: Vec<crate::pages::attachments::Saved>,
     pub directories: Vec<turn::DirectoryReference>,
+    pub skills: Vec<crate::pages::skills::Picked>,
     pub excluded: Vec<super::resources::Resource>,
 }
 
@@ -40,6 +41,7 @@ impl Input {
             excluded: vec![],
             files: vec![],
             directories: vec![],
+            skills: vec![],
             original,
         }
     }
@@ -95,6 +97,9 @@ impl Input {
 
     pub fn validate(&self) -> Result<(), String> {
         self.validate_resources()?;
+        crate::pages::skills::validate(&self.skills)?;
+        maka_runtime::input::validate_selections(&self.message().input_selections)
+            .map_err(str::to_owned)?;
         // The original resource identities remain immutable; exclusions apply at submission.
         let mut metadata = self.content.clone();
         metadata.text = self.original.content.text.clone();

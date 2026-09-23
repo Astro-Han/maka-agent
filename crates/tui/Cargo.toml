@@ -34,6 +34,8 @@ sys-locale.workspace = true
 maka-client.workspace = true
 maka-event-log.workspace = true
 maka-protocol.workspace = true
+maka-runtime.workspace = true
+maka-skills.workspace = true
 maka-sandbox.workspace = true
 ratatui.workspace = true
 # Level-triggered Unix input retains unread keys when SIGWINCH is also ready.

@@ -36,7 +36,7 @@ use unicode_width::UnicodeWidthStr;
 fn controls(app: &App) -> Vec<Command> {
     let dialog = app.attachments.dialog.as_ref().unwrap();
     if dialog.browse {
-        let mut commands = vec![Command::Close, Command::Directory];
+        let mut commands = vec![Command::Close, Command::Directory, Command::Skills];
         if !app
             .attachment_files(&dialog.session, dialog.input.as_deref())
             .is_empty()
@@ -45,7 +45,12 @@ fn controls(app: &App) -> Vec<Command> {
         }
         commands
     } else {
-        let mut commands = vec![Command::Close, Command::Browse, Command::Directory];
+        let mut commands = vec![
+            Command::Close,
+            Command::Browse,
+            Command::Directory,
+            Command::Skills,
+        ];
         if app.attachment_enabled(&Command::Retry) {
             commands.push(Command::Retry);
         }

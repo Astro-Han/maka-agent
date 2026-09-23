@@ -45,6 +45,7 @@ mod recovery;
 mod references;
 mod removal;
 mod revision;
+mod skills;
 mod stopping;
 mod support;
 mod themes;

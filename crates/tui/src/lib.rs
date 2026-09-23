@@ -48,6 +48,16 @@ pub struct Options {
 }
 
 enum Completed {
+    Skills(
+        pages::skills::Request,
+        Result<
+            (
+                maka_protocol::plugin::RemoteResult,
+                maka_skills::api::InvocableResult,
+            ),
+            String,
+        >,
+    ),
     Revised(
         pages::revision::Request,
         Result<pages::revision::Output, maka_client::RequestFailure>,
@@ -385,6 +395,13 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     Completed::Session(request, result)
                 });
             }
+            if let Some(request) = app.skills_request() {
+                let client = client.clone();
+                jobs.spawn(async move {
+                    let result = pages::skills::execute(&client, &request).await;
+                    Completed::Skills(request, result)
+                });
+            }
             if let Some(request) = app.directory_request() {
                 let client = client.clone();
                 jobs.spawn(async move {
@@ -559,6 +576,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 }
                 Action::Quit => {
                     app.attachments.disconnect();
+                    app.skills.disconnect();
                     app.branch.disconnect();
                     app.revision.disconnect();
                     if let Some(state) = &mut state {
@@ -586,6 +604,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     app.abandon_interaction();
                     app.abandon_pending_submissions();
                     app.attachments.disconnect();
+                    app.skills.disconnect();
                     app.creating = false;
                     jobs = JoinSet::new();
                     history_job = None;
@@ -896,6 +915,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                         if let Some(state) = &mut state { state.changed(); }
                     },
                     Some(Ok(Completed::Directory(request, result))) => app.directory_completed(request, result),
+                    Some(Ok(Completed::Skills(request, result))) => app.skills_completed(request, result),
                     Some(Ok(Completed::ChooseProject(request, result))) => app.choose_project_completed(request, result),
                     Some(Ok(Completed::Locations(request,result))) => app.locations_completed(request,result),
                     Some(Ok(Completed::Models(request,result)))=>app.models_completed(request,result),
@@ -1065,6 +1085,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 app.abandon_interaction();
                 app.abandon_pending_submissions();
                 app.attachments.disconnect();
+                app.skills.disconnect();
                 app.abandon_management();
                 app.branch.disconnect();
                     app.revision.disconnect();
@@ -1087,6 +1108,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
         }
     }
     app.attachments.disconnect();
+    app.skills.disconnect();
     attachment_jobs.abort_all();
     jobs.abort_all();
     // Once Save was pressed, finish the bounded local write and checkpoint the
