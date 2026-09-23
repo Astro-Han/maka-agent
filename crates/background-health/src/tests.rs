@@ -250,7 +250,7 @@ async fn cancellation_drains_probe_and_is_not_reported_as_unhealthy() {
 }
 
 #[tokio::test]
-async fn permission_wait_is_not_limited_by_a_plugin_network_deadline() {
+async fn slow_http_service_is_not_limited_by_a_plugin_deadline() {
     let (mut health, _, _, _) = backend();
     let http = Arc::new(Transport {
         delay: std::time::Duration::from_secs(6),

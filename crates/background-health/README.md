@@ -43,4 +43,4 @@ Logs are opt-in and retain Host's bounded/redacted output representation.
 
 This plugin has no Remote endpoint or private process registry. Tests cover the
 real Agent → Files → Shell path and cross-Session denial, plus HTTP fallback,
-body disposal, cancellation, privacy, and authorization-delay behavior.
+body disposal, cancellation, privacy, and delayed HTTP service behavior (permission waiting is verified by code-path audit).
