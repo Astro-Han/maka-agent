@@ -33,15 +33,16 @@ mod search;
 pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
     let extras = app.stop_target().is_some() && app.enabled(&Action::SendMessage);
     let control_width = if extras { 9 } else { 3 };
-    let width = area.width.saturating_sub(4 + control_width).max(1);
+    let width = area.width.saturating_sub(6 + control_width).max(1);
     let editor_height = app.drafts.get_mut(id).map_or(1, |editor| {
         editor.preferred_height(width, (area.height / 3).clamp(1, 8))
     });
+    let attachment_rows = u16::from(app.attachments.has(id));
     let parts = Layout::vertical([
         Constraint::Min(1),
         Constraint::Length(super::queue::height(app, area.height)),
         Constraint::Length(1),
-        Constraint::Length(editor_height + 2),
+        Constraint::Length(editor_height + 2 + attachment_rows),
     ])
     .split(area);
     if app.chrome.details {
@@ -61,6 +62,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
             && !app.chat.view.text_selection.active()
             && !app.chat.view.text_selection.dragging()
             && app.palette.is_none()
+            && app.attachments.dialog.is_none()
             && !app.interactions.visible
             && app.management.dialog.is_none()
             && app.chat.view.search.is_none();
@@ -192,9 +194,9 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
         } else {
             BorderType::Rounded
         })
-        .padding(Padding::new(2, control_width, 0, 0))
+        .padding(Padding::new(4, control_width, 0, 0))
         .border_style(Style::default().fg(tone::border(app.theme.colors(), focused, breath)));
-    let input = border.inner(parts[3]);
+    let mut input = border.inner(parts[3]);
     frame.render_widget(border, parts[3]);
     frame.render_widget(Paragraph::new(metadata), metadata_area);
     if model_width > 0
@@ -206,14 +208,27 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
             action,
         });
     }
+    if attachment_rows > 0 && input.height > 1 {
+        crate::pages::attachments::chips(
+            frame,
+            app,
+            Rect::new(input.x, input.y, input.width, 1),
+            id,
+        );
+        input.y += 1;
+        input.height -= 1;
+    }
     if input.is_empty() {
         app.invalidate_editor_geometry();
         return;
     }
-    frame.render_widget(
-        Paragraph::new(app.chrome.symbol("›", ">"))
-            .style(Style::default().fg(app.theme.colors().muted)),
-        Rect::new(parts[3].x + 1, input.y, 1, 1),
+    button(
+        frame,
+        app,
+        Rect::new(parts[3].x + 1, input.y, 3, 1),
+        "+",
+        Action::Attachment(crate::pages::attachments::Command::Open),
+        false,
     );
     if let Some(editor) = app.drafts.get_mut(id) {
         editor.draw(frame, input, focused, app.theme.colors());

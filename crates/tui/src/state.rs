@@ -40,6 +40,7 @@ pub struct State {
     oauth: Option<oauth::Request>,
     branch: Option<branch::Request>,
     revision: Option<revision::Request>,
+    attachment: Option<crate::pages::attachments::Ticket>,
     generation: u64,
     job: Option<Writing>,
 }
@@ -50,6 +51,7 @@ struct Writing {
     oauth: Option<oauth::Request>,
     branch: Option<branch::Request>,
     revision: Option<revision::Request>,
+    attachment: Option<crate::pages::attachments::Ticket>,
     generation: u64,
 }
 
@@ -59,6 +61,7 @@ pub struct Written {
     pub oauth: Option<oauth::Request>,
     pub branch: Option<branch::Request>,
     pub revision: Option<revision::Request>,
+    pub attachment: Option<crate::pages::attachments::Ticket>,
 }
 impl State {
     pub async fn open(
@@ -91,6 +94,7 @@ impl State {
                     oauth: None,
                     branch: None,
                     revision: None,
+                    attachment: None,
                     generation: 0,
                     job: None,
                 },
@@ -124,6 +128,7 @@ impl State {
         self.oauth = None;
         self.branch = None;
         self.revision = None;
+        self.attachment = None;
         let mut requests = std::mem::take(&mut self.requests);
         if let Some(job) = &self.job
             && job.generation == self.generation
@@ -139,6 +144,10 @@ impl State {
     }
     pub fn submit_branch(&mut self, request: branch::Request) {
         self.branch = Some(request);
+        self.force();
+    }
+    pub fn submit_attachment(&mut self, request: crate::pages::attachments::Ticket) {
+        self.attachment = Some(request);
         self.force();
     }
     pub fn submit_revision(&mut self, request: revision::Request) {
@@ -168,6 +177,7 @@ impl State {
             oauth: self.oauth.take(),
             branch: self.branch.take(),
             revision: self.revision.take(),
+            attachment: self.attachment.take(),
             generation,
         });
     }
@@ -182,6 +192,11 @@ impl State {
         let job = self.job.take().expect("completed writer");
         Written {
             result,
+            attachment: if job.generation == self.generation {
+                job.attachment
+            } else {
+                None
+            },
             requests: if job.generation == self.generation {
                 job.requests
             } else {
@@ -238,6 +253,7 @@ mod tests {
             oauth: None,
             branch: None,
             revision: None,
+            attachment: None,
             generation: 0,
             job: None,
         };
@@ -252,6 +268,92 @@ mod tests {
         app.apply(Action::Visit(Route::Session("a".into())));
         (directory, state, app)
     }
+
+    #[tokio::test]
+    async fn attachment_checkpoint_precedes_upload_and_reopen_requires_explicit_resume() {
+        use crate::pages::attachments::{Command, Manifest, Prepared, Read, io::Listing};
+        use ratatui::{Terminal, backend::TestBackend};
+        let (directory, mut state, mut app) = fixture();
+        app.apply(Action::Attachment(Command::Open));
+        Terminal::new(TestBackend::new(80, 24))
+            .unwrap()
+            .draw(|f| crate::view::draw(f, &mut app))
+            .unwrap();
+        let browse = app.attachment_browse_request().unwrap();
+        app.attachment_browsed(browse, Ok(Listing::File("/local/file.txt".into())));
+        let (ticket, _, _) = app.attachment_read_request().unwrap();
+        let manifest = Manifest {
+            name: "file.txt".into(),
+            mime: "text/plain".into(),
+            bytes: 1,
+            digest: maka_protocol::artifact::content_digest(b"x"),
+        };
+        let ticket = app
+            .attachment_prepared(
+                ticket,
+                Ok(Read::Prepared(Prepared {
+                    manifest: manifest.clone(),
+                    bytes: b"x".to_vec(),
+                })),
+            )
+            .unwrap();
+        let (release, blocked) = gate(&state).await;
+        state.submit_attachment(ticket.clone());
+        state.start(&app);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), state.completed())
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        blocked.await.unwrap();
+        let written = written(&mut state).await;
+        assert_eq!(written.attachment, Some(ticket.clone()));
+        assert!(written.result.is_ok());
+        let saved = read(&directory);
+        assert_eq!(saved["attachments"]["a"][0]["id"], ticket.id);
+        assert_eq!(
+            saved["attachments"]["a"][0]["manifest"],
+            serde_json::to_value(&manifest).unwrap()
+        );
+        assert!(
+            app.attachment_after_checkpoint(&ticket, &written.result)
+                .is_some()
+        );
+        let (_, _, mut reopened) = fixture();
+        serde_json::from_value::<Snapshot>(saved.clone())
+            .unwrap()
+            .restore(&mut reopened, false)
+            .unwrap();
+        assert!(reopened.attachments.dialog.is_none());
+        assert!(reopened.attachment_read_request().is_none());
+        assert!(!reopened.enabled(&Action::SendMessage));
+        assert_eq!(reopened.attachments.saved["a"][0].id, ticket.id);
+        for (pointer, value) in [
+            ("/attachments/a/0/id", serde_json::json!("not-an-upload-id")),
+            ("/attachments/a/0/path", serde_json::json!("relative.txt")),
+            (
+                "/attachments/a/0/manifest/bytes",
+                serde_json::json!(50 * 1024 * 1024 + 1),
+            ),
+            (
+                "/attachments/a/0/attachment",
+                serde_json::json!({"kind":"other","name":"file.txt","mimeType":"text/plain","bytes":1,
+                "ref":{"kind":"session_file","sessionId":"foreign","relativePath":"foreign"}}),
+            ),
+        ] {
+            let mut invalid = saved.clone();
+            *invalid.pointer_mut(pointer).unwrap() = value;
+            assert!(
+                serde_json::from_value::<Snapshot>(invalid)
+                    .unwrap()
+                    .validate(ROOT)
+                    .is_err(),
+                "{pointer}"
+            );
+        }
+    }
+
     async fn gate(state: &State) -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>) {
         let store = state.store.clone();
         let (ready, started) = tokio::sync::oneshot::channel();
@@ -320,7 +422,7 @@ mod tests {
         assert_eq!(written.revision, Some(request.clone()));
         assert!(written.result.is_ok());
         let bytes = read(&directory);
-        assert_eq!(bytes["version"], 10);
+        assert_eq!(bytes["version"], 11);
         assert_eq!(bytes["revision"]["copy"]["targetSessionId"], "revised");
         assert_eq!(bytes["revision"]["inputs"][0]["content"]["text"], "edited");
         let mut incomplete = bytes.clone();

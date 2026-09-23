@@ -69,6 +69,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         && app.management.dialog.is_none()
         && !app.branch.visible
         && !app.revision.visible
+        && app.attachments.dialog.is_none()
         && app.onboarding.dialog.is_none()
         && app.queue.edit.is_none();
     app.chrome
@@ -292,6 +293,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     } else if app.theme.editor.is_some()
         || app.branch.visible
         || app.revision.visible
+        || app.attachments.dialog.is_some()
         || app.onboarding.dialog.is_some()
         || app.management.dialog.is_some()
         || app.interactions.visible
@@ -383,6 +385,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     }
     if app.theme.editor.is_some() {
         crate::theme::editor::draw(frame, app, area);
+    } else if app.attachments.dialog.is_some() {
+        crate::pages::attachments::draw(frame, app, area, base);
     } else if app.revision.visible {
         crate::pages::revision::draw(frame, app, area, base);
     } else if app.branch.visible {
@@ -542,6 +546,7 @@ fn icon(app: &App, action: &Action) -> &'static str {
             crate::pages::manage::Kind::Locations,
         )) => ("ⓘ", "i"),
         Action::Manage(_) => ("⋯", "."),
+        Action::Attachment(_) => ("⊕", "+"),
         Action::Branch(_) => ("↳", "+"),
         Action::Revision(_) => ("↶", "<"),
         Action::Onboard(_) => ("⊕", "+"),
@@ -621,6 +626,7 @@ fn action_label(app: &App, action: &Action) -> String {
         );
     }
     let key = match action {
+        Action::Attachment(command) => command.label(),
         Action::NextTab => "tabs-next",
         Action::PreviousTab => "tabs-previous",
         Action::CloseTab(_) => "tabs-close",

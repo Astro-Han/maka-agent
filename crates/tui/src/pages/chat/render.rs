@@ -956,10 +956,7 @@ fn gap_after(block: &Block, next: Option<Kind>) -> bool {
 
 fn project(row: &Value, i18n: &I18n, ascii: bool) -> String {
     match row["type"].as_str().unwrap() {
-        "user" => row["displayText"]
-            .as_str()
-            .or_else(|| row["text"].as_str())
-            .map(str::to_owned),
+        "user" => Some(prompt::content(row, ascii)),
         "assistant" => row["text"].as_str().map(str::to_owned),
         "system_note" if row["kind"] == "imported" => {
             row["data"]["text"].as_str().map(str::to_owned)

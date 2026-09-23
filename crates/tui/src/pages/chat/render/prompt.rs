@@ -20,6 +20,29 @@
 use super::*;
 use unicode_width::UnicodeWidthStr;
 
+pub(super) fn content(row: &Value, ascii: bool) -> String {
+    let mut text = row["displayText"]
+        .as_str()
+        .or_else(|| row["text"].as_str())
+        .unwrap_or("")
+        .to_owned();
+    for attachment in row["attachments"].as_array().into_iter().flatten() {
+        let Some(name) = attachment["name"].as_str() else {
+            continue;
+        };
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(if ascii { "+ " } else { "↳ " });
+        text.push_str(&crate::view::safe(name));
+        if let Some(bytes) = attachment["bytes"].as_u64() {
+            text.push_str(" · ");
+            text.push_str(&crate::pages::attachments::size(bytes));
+        }
+    }
+    text
+}
+
 /// Three-line prompt previews, following grok-build's user-message hierarchy.
 pub(super) fn preview(text: &str, width: u16, ascii: bool) -> Result<(Layout, bool), &'static str> {
     // Enough for four wrapped lines, without laying out an entire pasted document.
@@ -105,5 +128,20 @@ mod tests {
             !preview("one\n\n\n\n\n", 20, false).unwrap().1,
             "blank omitted rows do not offer an empty expansion"
         );
+    }
+    #[test]
+    fn attachment_only_prompts_show_names_without_exposing_host_storage_paths() {
+        let mut row = serde_json::json!({"text":"", "attachments":[
+            {"name":"布局.md", "bytes":113, "ref":{"kind":"session_file","relativePath":"private-storage"}},
+            {"name":"image.png", "bytes":2048}
+        ]});
+        let text = content(&row, false);
+        assert_eq!(text, "↳ 布局.md · 113 B\n↳ image.png · 2.0 KiB");
+        let (layout, expandable) = preview(&text, 60, false).unwrap();
+        assert!(!expandable);
+        assert_eq!(layout.text, text);
+        row["text"] = serde_json::json!("raw body");
+        row["displayText"] = serde_json::json!("visible body");
+        assert!(content(&row, true).starts_with("visible body\n+ 布局.md"));
     }
 }

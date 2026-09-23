@@ -29,8 +29,8 @@ use base64::{
 };
 pub use input::*;
 pub use maka_runtime::{
-    artifact::{normalize_name, upload_artifact_id},
-    attachment::MAX_ATTACHMENT_BYTES,
+    artifact::{content_digest, normalize_name, upload_artifact_id},
+    attachment::{MAX_ATTACHMENT_BYTES, sniff_binary_mime},
 };
 pub use operations::*;
 pub use output::*;

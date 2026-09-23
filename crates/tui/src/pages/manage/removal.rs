@@ -294,7 +294,9 @@ impl App {
         }
         // A remote retirement must not take away what the user is typing.
         // Keep local text and uncertain submissions recoverable in the old tab.
-        let draft = self.drafts.get(id).is_some_and(|d| !d.text().is_empty());
+        self.attachments.retire(id);
+        let draft =
+            self.attachments.has(id) || self.drafts.get(id).is_some_and(|d| !d.text().is_empty());
         let sending = self
             .sending
             .get(id)

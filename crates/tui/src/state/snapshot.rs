@@ -34,6 +34,7 @@ pub struct Snapshot {
     pub root: String,
     tabs: Vec<String>,
     drafts: BTreeMap<String, Saved>,
+    attachments: BTreeMap<String, Vec<crate::pages::attachments::Saved>>,
     unresolved: Vec<Submission>,
     locale: LocalePreference,
     theme: crate::theme::Choice,
@@ -59,7 +60,8 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 10,
+            version: 11,
+            attachments: app.attachments.saved.clone(),
             root: root.into(),
             tabs: app.tabs.entries.iter().map(|tab| tab.id.clone()).collect(),
             drafts: app
@@ -87,7 +89,7 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if self.version != 10
+        if self.version != 11
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
@@ -120,6 +122,22 @@ impl Snapshot {
             })
         {
             return Err("Invalid saved navigation".into());
+        }
+        let mut uploads = HashSet::new();
+        if self.attachments.len() > LIMIT {
+            return Err("Too many attachment drafts".into());
+        }
+        for (session, items) in &self.attachments {
+            if !self.drafts.contains_key(session) || items.len() > crate::pages::attachments::LIMIT
+            {
+                return Err("Invalid attachment draft destination or count".into());
+            }
+            for item in items {
+                if !uploads.insert(&item.id) {
+                    return Err("Duplicate attachment upload".into());
+                }
+                item.validate(session)?;
+            }
         }
         for saved in self.drafts.values() {
             // Validate through the editor's actual Unicode and input-size rules.
@@ -175,6 +193,7 @@ impl Snapshot {
         if let Some(branch) = self.branch {
             app.branch.restore(branch);
         }
+        app.attachments.saved = self.attachments;
         for (id, saved) in self.drafts {
             app.drafts.insert(id, Editor::restore(saved)?);
         }
@@ -334,7 +353,7 @@ mod tests {
         request.input().validate().unwrap();
         original.sending.get_mut("a").unwrap().request = request.clone();
         let saved = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
-        assert_eq!(saved["version"], 10);
+        assert_eq!(saved["version"], 11);
         let mut restored = app();
         serde_json::from_value::<Snapshot>(saved.clone())
             .unwrap()

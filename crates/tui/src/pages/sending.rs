@@ -130,7 +130,9 @@ impl App {
             return None;
         }
         let text = self.drafts.get(&session)?.text().to_owned();
-        if text.trim().is_empty() {
+        if !self.attachments.ready(&session)
+            || (text.trim().is_empty() && !self.attachments.has(&session))
+        {
             return None;
         }
         let request = Submission {
@@ -141,7 +143,7 @@ impl App {
             content: MessageContent {
                 text,
                 display_text: None,
-                attachments: None,
+                attachments: self.attachments.references(&session),
                 directory_references: None,
                 quotes: None,
                 inline_references: None,
@@ -187,6 +189,8 @@ impl App {
                 if let Some(editor) = self.drafts.get_mut(&request.session) {
                     editor.clear_if_unchanged(&request.content.text);
                 }
+                self.attachments
+                    .clear_sent(&request.session, &request.content.attachments);
                 Delivery::Accepted
             }
             Err(error @ RequestFailure::Unknown(_)) => Delivery::Unknown(Some(error.to_string())),
@@ -239,6 +243,8 @@ impl App {
                 if let Some(editor) = self.drafts.get_mut(&request.session) {
                     editor.clear_if_unchanged(&request.content.text);
                 }
+                self.attachments
+                    .clear_sent(&request.session, &request.content.attachments);
                 Delivery::Accepted
             }
             // A cancelled admission cannot subsequently execute. Keep the draft for explicit send.

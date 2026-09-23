@@ -17,6 +17,7 @@
  * under the License.
  */
 
+pub mod attachments;
 pub mod branch;
 pub mod chat;
 pub mod connections;

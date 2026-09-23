@@ -182,6 +182,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
     let mut jobs = JoinSet::new();
     // Local configuration I/O is not scoped to a Host connection epoch.
     let mut theme_jobs = JoinSet::new();
+    let mut attachment_jobs = JoinSet::new();
     let mut history_job = None;
     let mut client: Option<Client> = None;
     let mut notifications: Option<mpsc::Receiver<Notification>> = None;
@@ -192,6 +193,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
     #[cfg(unix)]
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
+        if !app.closing
+            && let Some(request) = app.attachment_browse_request()
+        {
+            attachment_jobs.spawn(async move {
+                let result = pages::attachments::io::browse(&request).await;
+                pages::attachments::Completed::Browsed(request, result)
+            });
+        }
         if let Some(request) = app.theme.request() {
             theme_jobs.spawn(async move {
                 let result = request.execute().await;
@@ -205,6 +214,15 @@ pub async fn run(options: Options) -> Result<(), Error> {
             state.start(&app);
         }
         if let Some(client) = &client {
+            if let Some((ticket, saved, transfer)) = app.attachment_read_request() {
+                let client = client.clone();
+                attachment_jobs.spawn(async move {
+                    let result =
+                        pages::attachments::io::prepare(&client, &ticket, saved, transfer).await;
+                    pages::attachments::Completed::Prepared(ticket, result)
+                });
+                dirty = true;
+            }
             if let Some(request) = app.revision_request() {
                 if request.needs_checkpoint() {
                     if let Some(state) = &mut state {
@@ -539,6 +557,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     continue;
                 }
                 Action::Quit => {
+                    app.attachments.disconnect();
                     app.branch.disconnect();
                     app.revision.disconnect();
                     if let Some(state) = &mut state {
@@ -565,6 +584,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     app.abandon_onboarding();
                     app.abandon_interaction();
                     app.abandon_pending_submissions();
+                    app.attachments.disconnect();
                     app.creating = false;
                     jobs = JoinSet::new();
                     history_job = None;
@@ -725,6 +745,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     None => std::future::pending().await,
                 }
             } => {
+                if let Some(ticket) = written.attachment
+                    && let Some((prepared, transfer)) = app.attachment_after_checkpoint(&ticket, &written.result)
+                    && let Some(client) = client.clone() {
+                    attachment_jobs.spawn(async move {
+                        let result = pages::attachments::io::upload(&client, &ticket, prepared, transfer).await;
+                        pages::attachments::Completed::Uploaded(ticket, result)
+                    });
+                }
                 if let Some(request) = written.revision
                     && app.revision_after_checkpoint(&request, &written.result)
                     && let Some(client) = client.clone() {
@@ -816,6 +844,23 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     Some(Err(error)) => return Err(error.into()),
                     None => break,
                 }
+            }
+            _ = tokio::time::sleep(Duration::from_millis(100)), if app.attachments.uploading() && app.chrome.window_focused => { dirty = true; }
+            completed = attachment_jobs.join_next(), if !attachment_jobs.is_empty() => {
+                match completed {
+                    Some(Ok(pages::attachments::Completed::Browsed(request, result))) => app.attachment_browsed(request, result),
+                    Some(Ok(pages::attachments::Completed::Prepared(ticket, result))) => {
+                        if let Some(ticket) = app.attachment_prepared(ticket, result) {
+                            if let Some(state) = &mut state { state.submit_attachment(ticket); }
+                            else { app.attachment_after_checkpoint(&ticket, &Err("TUI checkpoint unavailable".into())); }
+                        }
+                    }
+                    Some(Ok(pages::attachments::Completed::Uploaded(ticket, result))) => app.attachment_uploaded(ticket, result),
+                    Some(Err(error)) => return Err(error.into()),
+                    None => {}
+                }
+                if let Some(state) = &mut state { state.changed(); }
+                dirty = true;
             }
             completed = theme_jobs.join_next(), if !theme_jobs.is_empty() => {
                 if let Some(completed) = completed {
@@ -1018,6 +1063,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 history_job = None;
                 app.abandon_interaction();
                 app.abandon_pending_submissions();
+                app.attachments.disconnect();
                 app.abandon_management();
                 app.branch.disconnect();
                     app.revision.disconnect();
@@ -1039,6 +1085,8 @@ pub async fn run(options: Options) -> Result<(), Error> {
             ) => break,
         }
     }
+    app.attachments.disconnect();
+    attachment_jobs.abort_all();
     jobs.abort_all();
     // Once Save was pressed, finish the bounded local write and checkpoint the
     // resulting choice before exit; dropping Host jobs must not strand it.

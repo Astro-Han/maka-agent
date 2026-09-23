@@ -61,6 +61,7 @@ pub enum Action {
     Copy(crate::pages::chat::render::selection::CopyMode),
     CopyFile(String),
     Branch(crate::pages::branch::Command),
+    Attachment(crate::pages::attachments::Command),
     Revision(crate::pages::revision::Command),
     ToggleSymbols,
     ToggleMotion,
@@ -127,6 +128,7 @@ pub struct App {
     pub inbox: crate::pages::sessions::Sessions,
     pub management: crate::pages::manage::Management,
     pub branch: crate::pages::branch::State,
+    pub attachments: crate::pages::attachments::State,
     pub revision: crate::pages::revision::State,
     pub onboarding: crate::pages::onboarding::Onboarding,
     pub projects: crate::pages::projects::Projects,
@@ -172,6 +174,7 @@ impl App {
             inbox: crate::pages::sessions::Sessions::inbox(),
             management: Default::default(),
             branch: Default::default(),
+            attachments: Default::default(),
             revision: Default::default(),
             onboarding: Default::default(),
             projects: Default::default(),
@@ -263,6 +266,10 @@ impl App {
             if self.has_interaction() {
                 commands.push((Action::OpenInteraction, "interaction-open"));
             }
+            commands.push((
+                Action::Attachment(crate::pages::attachments::Command::Open),
+                "attachments-add",
+            ));
             commands.push((
                 Action::SendMessage,
                 if self.stop_target().is_some() {
@@ -375,6 +382,7 @@ impl App {
             Route::Session(_) => {
                 let mut actions = vec![
                     self.send_action(),
+                    Action::Attachment(crate::pages::attachments::Command::Open),
                     Action::ToggleDetails,
                     Action::ToggleFullscreen,
                 ];
@@ -425,6 +433,7 @@ impl App {
                 || self.inbox.error.is_some())
     }
     pub fn begin_frame(&mut self, area: Rect) {
+        self.attachments.begin_frame();
         self.branch.invalidate_geometry();
         self.revision.begin_frame();
         for item in &self.sessions.items {
@@ -451,6 +460,7 @@ impl App {
         if self.theme.editor.is_some()
             || self.branch.visible
             || self.revision.visible
+            || self.attachments.dialog.is_some()
             || !self.has_tooltip()
             || self.palette.is_some()
             || self.interactions.visible
@@ -466,6 +476,7 @@ impl App {
         if self.theme.editor.is_some()
             || self.branch.visible
             || self.revision.visible
+            || self.attachments.dialog.is_some()
             || !matches!(self.navigation.current(), Route::Session(_))
             || self.palette.is_some()
             || self.chrome.details
@@ -489,6 +500,7 @@ impl App {
         self.theme.editor.is_none()
             && !self.branch.visible
             && !self.revision.visible
+            && self.attachments.dialog.is_none()
             && self.palette.is_none()
             && self.management.dialog.is_none()
             && self.onboarding.dialog.is_none()
@@ -559,6 +571,7 @@ impl App {
                 self.hover = None;
             }
             Action::Manage(command) => return self.management_action(command),
+            Action::Attachment(command) => return self.attachment_action(command),
             Action::Branch(command) => return self.branch_action(command),
             Action::Revision(command) => return self.revision_action(command),
             Action::Onboard(command) => return self.onboarding_action(command),
@@ -743,6 +756,9 @@ impl App {
         None
     }
     pub fn enabled(&self, action: &Action) -> bool {
+        if let Action::Attachment(command) = action {
+            return self.attachment_enabled(command);
+        }
         if let Action::Revision(command) = action {
             return self.revision_enabled(command);
         }
@@ -817,6 +833,7 @@ impl App {
                     && (self.drafts.len() < crate::navigation::tabs::LIMIT
                         || self.drafts.iter().any(|(id, editor)| {
                             editor.text().is_empty()
+                                && !self.attachments.has(id)
                                 && !self.tabs.contains(id)
                                 && !self
                                     .sending
@@ -841,10 +858,12 @@ impl App {
                 connected
                     && !(self.chat.session.as_deref() == Some(&id) && self.chat.removed)
                     && !matches!(&self.sessions.detail, crate::pages::sessions::Detail::Missing { id: missing } if *missing == id)
-                    && self
-                        .drafts
-                        .get(&id)
-                        .is_some_and(|draft| !draft.text().trim().is_empty())
+                    && self.attachments.ready(&id)
+                    && (self.attachments.has(&id)
+                        || self
+                            .drafts
+                            .get(&id)
+                            .is_some_and(|draft| !draft.text().trim().is_empty()))
                     && !self
                         .sending
                         .get(&id)
@@ -963,6 +982,7 @@ impl App {
                 .iter()
                 .find(|(id, editor)| {
                     editor.text().is_empty()
+                        && !self.attachments.has(id)
                         && !self.tabs.contains(id)
                         && !self
                             .sending
@@ -972,6 +992,7 @@ impl App {
                 .map(|(id, _)| id.clone());
             if let Some(empty) = empty {
                 self.drafts.remove(&empty);
+                self.attachments.saved.remove(&empty);
                 self.sending.remove(&empty);
             } else {
                 self.notice = Some(Notice::Local("tabs-drafts-limit"));
@@ -1081,6 +1102,7 @@ impl App {
             && (self.theme.editor.is_some()
                 || self.branch.visible
                 || self.revision.visible
+                || self.attachments.dialog.is_some()
                 || self.palette.is_some()
                 || self.onboarding.dialog.is_some()
                 || self.management.dialog.is_some()
@@ -1093,6 +1115,10 @@ impl App {
             // Dismiss only the displayed overlay. Never forward this press to the page.
             let action = if self.theme.editor.is_some() {
                 Some(Action::Theme(crate::theme::editor::Command::Close))
+            } else if self.attachments.dialog.is_some() {
+                Some(Action::Attachment(
+                    crate::pages::attachments::Command::Close,
+                ))
             } else if self.revision.visible {
                 Some(Action::Revision(crate::pages::revision::Command::Close))
             } else if self.branch.visible {
@@ -1120,6 +1146,9 @@ impl App {
         }
         if self.theme.editor.is_some() && !matches!(event, Event::Resize(_, _)) {
             return self.theme_input(event);
+        }
+        if self.attachments.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
+            return self.attachment_input(event);
         }
         if self.revision.visible && !matches!(event, Event::Resize(_, _)) {
             return self.revision_input(event);
