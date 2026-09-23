@@ -34,6 +34,7 @@ for (const [name, entryPoint] of [
   ['skills', 'crates/skills/src/client.tsx'],
   ['jev', 'crates/jev/src/client.tsx'],
   ['session-recap', 'crates/session-recap/src/client.tsx'],
+  ['goal', 'crates/goal/src/client.tsx'],
   ['web', 'crates/web/src/client.tsx'],
   ['insights', 'crates/insights/src/client.tsx'],
   ['session-import', 'crates/session-import/src/client.tsx'],

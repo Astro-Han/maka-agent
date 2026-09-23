@@ -4822,6 +4822,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "maka-goal"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "maka-plugins",
+ "maka-runtime",
+ "maka-tool-catalog",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "maka-graph"
 version = "0.2.0"
 dependencies = [
@@ -5101,6 +5119,7 @@ dependencies = [
  "maka-config",
  "maka-event-log",
  "maka-fs-tools",
+ "maka-goal",
  "maka-graph",
  "maka-insights",
  "maka-jev",

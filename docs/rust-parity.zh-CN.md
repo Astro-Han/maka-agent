@@ -77,7 +77,7 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | 领域 | 剩余功能 | 目标归属／必要边界 |
 | --- | --- | --- |
 | Plan | 状态与持久回执层完成：修订／放弃、版本与重规划来源检查、冻结提交、进度／中断／恢复／取消、精确重试及固定水位历史分页。工具、Behavior、Remote／Desktop 和实际执行观察尚未接入，非 Agent collaboration mode 仍拒绝准入。 | **插件 + Host。** 插件通过公共存储拥有流程与记录；审批计划不授予沙箱权限，Host 保留授权和 Turn 准入。没有 Host 回执只表示待准入，不能标记正在执行。 |
-| Goal | 查询、arm、控制、续跑、终止、预算与恢复语义。 | **插件 + Host。** Goal 决定后续提交；Host 执行已准入的硬限制并记录用量。插件退休后不能继续提交。 |
+| Goal | `maka.goal` 已提供 Session Inspector、Remote 查询／保存／启动／暂停／取消、持久续跑及精确操作恢复；`GoalStatus` 报告在对应 Invocation 正常结束后生效。 | **插件 + Host。** 插件拥有目标及有限轮次策略，Host 拥有授权、回执和计量。token 阈值按 Session 新增已观测用量停止后续调度，含其他会话活动，非硬 token／总步数上限。保存后需显式启动；旧 `goal.*` RPC、自动绑定用户 Turn 和独立 evaluator 尚未迁移。 |
 | Session recap | `maka.session-recap` 已提供手动生成、操作 ID 幂等、持久回执及 Desktop Session Inspector 展示；使用授权历史与本会话模型，未知结果不自动重试。 | **插件。** 回顾是插件派生数据，不改写规范历史／Session 元数据；输入为有界文本历史，尚无 TS 结构化工具结果投影。自动 idle 触发与旧协议路由未接入。 |
 | Daily review | daily-review 查询／修改与定时复盘待实现。 | **插件 + Host。** 复用 Scheduler、授权历史与模型服务。 |
 | 外部 agent | setup start/query/cancel；具体执行适配、配置、鉴权、对话身份，以及附件／交互／resume／fork。 | **插件 + Host。** CLI／ACP 适配作为 Executor 插件，使用受管理进程／HTTP。已有 Executor 框架不等于已有具体 adapter。Host 负责授权、取消和外部事件落盘。 |
@@ -122,7 +122,7 @@ TS 的 LLM adapter 注册服务于插件模型调用，本身不等于主 Sessio
 
 1. **公共 API 消费者已迁移：**Skills、默认助手、Scheduler、Graph、WorkHub 与外部插件使用同等受限契约；新增消费者时维持 Rust／JS 对等。
 2. **外部验收：**JS workflow fixture 覆盖 UI 授权、持久后台工作、精确回执、停用／恢复以及跨 Host 重启的授权撤销。
-3. **缺失业务领域：**完成 Plan／Goal 和复盘；完成外部 adapter、Insights／健康。复用领域边界，不先在 Host 写新业务再搬一次。
+3. **缺失业务领域：**完成 Plan 和自动复盘；完成外部 adapter，补齐 Goal 的旧客户端协议与自动绑定策略。复用领域边界，不先在 Host 写新业务再搬一次。
 4. **其余核心等价：**完成 Session 生命周期／谱系／迁入迁出、policy、接入／协作、Peer Mesh、provider 和诊断。前面消费者所需的核心命令前置到对应阶段，核心工作不等待全部插件或商店。首批领域验证边界后评估 Code Mode／工具装配迁移，不将其作为功能等价的前提。
 
 每个领域按“真实消费者及不变量 → 最小类型化 API 与消费者一起实现 → 验证生命周期和失败行为 → 删除旧 Host 业务路径”推进。
