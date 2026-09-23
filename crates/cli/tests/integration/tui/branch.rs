@@ -137,6 +137,7 @@ fn branch_preserves_selected_history_and_draft_and_reopens_by_original_receipt()
     });
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     reopened.wait_for("Preserved branch draft");
+    reopened.wait_for("Later reply."); // Restored draft alone does not mean Host is connected.
     reopened.send(b"\x10");
     reopened.wait_for("Check session branch");
     reopened.click_text("Check session branch");

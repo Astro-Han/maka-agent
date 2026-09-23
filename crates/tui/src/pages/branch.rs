@@ -348,6 +348,7 @@ impl App {
         };
         state.pending = Some(request.clone());
         state.phase = if query { Phase::Pending } else { Phase::Saving };
+        state.focus = 0;
         Some(request)
     }
     pub fn branch_after_checkpoint(
@@ -515,6 +516,11 @@ mod tests {
         app.apply(Action::Branch(Command::Confirm));
         let request = app.branch_request().unwrap();
         assert!(!request.query);
+        app.input(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+        assert_eq!(
+            app.branch.focus, 0,
+            "pending dialog has only one focusable action"
+        );
         let saved = serde_json::to_value(app.branch.checkpoint()).unwrap();
         let mut stale = request.clone();
         stale.sequence += 1;
@@ -540,16 +546,42 @@ mod tests {
         let mut recovered = State::default();
         recovered.restore(serde_json::from_value(saved.clone()).unwrap());
         app.branch = recovered;
-        app.connection = ConnectionState::Connected {
-            root_id: "root".into(),
-            epoch: "new-epoch".into(),
-        };
+        app.connection = ConnectionState::Connecting;
         assert!(
             app.branch_request().is_none(),
             "reopen neither writes nor polls"
         );
         app.apply(Action::Branch(Command::Resume));
         frame(&mut app, 80, 24);
+        app.apply(Action::Branch(Command::Query));
+        assert!(
+            app.branch_request().is_none(),
+            "restored drafts do not establish a connection"
+        );
+        app.connection = ConnectionState::Connected {
+            root_id: "root".into(),
+            epoch: "new-epoch".into(),
+        };
+        frame(&mut app, 80, 24);
+        let button = app
+            .hits
+            .iter()
+            .find(|hit| hit.action == Action::Branch(Command::Query))
+            .unwrap()
+            .area;
+        let mut source = super::super::sessions::tests::item("source");
+        source.name = "A source name arriving after the dialog was opened".repeat(4);
+        app.sessions.items.push(source);
+        frame(&mut app, 80, 24);
+        assert_eq!(
+            app.hits
+                .iter()
+                .find(|hit| hit.action == Action::Branch(Command::Query))
+                .unwrap()
+                .area,
+            button,
+            "catalog arrivals cannot move the recovery action under the mouse"
+        );
         app.apply(Action::Branch(Command::Query));
         let query = app.branch_request().unwrap();
         assert!(query.query);

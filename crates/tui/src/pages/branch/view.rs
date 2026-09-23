@@ -40,7 +40,14 @@ impl App {
                 }
                 KeyCode::Esc => Some(Command::Close),
                 KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => {
-                    self.branch.focus ^= 1;
+                    self.branch.focus = if primary(self.branch.phase)
+                        .as_ref()
+                        .is_some_and(|command| self.branch_enabled(command))
+                    {
+                        self.branch.focus ^ 1
+                    } else {
+                        0
+                    };
                     None
                 }
                 KeyCode::Enter => {
@@ -85,21 +92,6 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         .basis
         .as_ref()
         .map(|basis| basis.name.as_str())
-        .or_else(|| {
-            let source = &state.saved.as_ref()?.input.source_session_id;
-            app.sessions
-                .items
-                .iter()
-                .find(|item| item.id == *source)
-                .map(|item| item.name.as_str())
-                .or_else(|| {
-                    app.tabs
-                        .entries
-                        .iter()
-                        .find(|tab| tab.id == *source)
-                        .and_then(|tab| tab.name.as_deref())
-                })
-        })
         .unwrap_or("");
     let mut heading = safe(name);
     if let Some(basis) = &state.basis {
