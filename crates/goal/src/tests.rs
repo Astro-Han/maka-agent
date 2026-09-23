@@ -289,7 +289,19 @@ async fn sealed_handoff_and_unknown_cancellation_do_not_pin_background_work() {
     repo.arm("session", arm(), Meter::default()).await.unwrap();
     let mut saved = repo.read("session").await.unwrap().unwrap();
     saved.goal.reserve().unwrap();
+    let operation = saved
+        .goal
+        .pending
+        .as_ref()
+        .unwrap()
+        .request
+        .operation_id
+        .clone();
     saved.goal.handoff_paused();
+    assert_eq!(
+        saved.goal.last_operation_id.as_deref(),
+        Some(operation.as_str())
+    );
     repo.save(saved).await.unwrap();
     assert!(repo.sessions().await.unwrap().is_empty());
     let mut saved = repo.read("session").await.unwrap().unwrap();

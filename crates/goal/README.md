@@ -51,7 +51,10 @@ confirmed, and cannot replace it with another Goal while acceptance is unknown.
 Failed/cancelled runs require explicit resume. Waiting-for-user never triggers
 another execution. A sealed Host handoff pause stops the Goal and releases its
 keepalive; the user must resume that execution through Session controls before
-resuming the Goal. This plugin does not implement automatic handoff resume. Plugin retirement stops new plugin
+resuming the Goal. Its last operation ID is retained for inspection. Cancelling
+a Goal does not revoke the user's ability to explicitly resume a sealed Host Run
+through Session controls; that manual continuation is outside this Goal's owner.
+This plugin does not implement automatic handoff resume. Plugin retirement stops new plugin
 work; Host still owns accepted executions. Re-enabling reconciles those receipts.
 Revoked authority stops scheduling and releases background keepalive; renewed
 Session consent is checked before resume or cancellation recovery. Incognito

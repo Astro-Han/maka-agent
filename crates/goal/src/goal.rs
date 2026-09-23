@@ -140,6 +140,8 @@ pub struct Goal {
     pub baseline: Meter,
     pub consumed: Meter,
     pub pending: Option<Pending>,
+    #[serde(default)]
+    pub last_operation_id: Option<String>,
     pub report: Option<Report>,
     pub note: String,
     #[serde(default)]
@@ -183,7 +185,10 @@ impl Goal {
         outcome: maka_runtime::event::InvocationOutcome,
         usage: Result<Meter, String>,
     ) {
-        self.pending = None;
+        self.last_operation_id = self
+            .pending
+            .take()
+            .map(|pending| pending.request.operation_id);
         if matches!(self.status, Status::Cancelled | Status::CancellationUnknown) {
             self.status = Status::Cancelled;
             self.note = "Cancellation settled; the accepted execution is no longer running".into();
@@ -223,7 +228,10 @@ impl Goal {
         }
     }
     pub fn handoff_paused(&mut self) {
-        self.pending = None;
+        self.last_operation_id = self
+            .pending
+            .take()
+            .map(|pending| pending.request.operation_id);
         self.report = None;
         if matches!(self.status, Status::Cancelled | Status::CancellationUnknown) {
             self.status = Status::Cancelled;
@@ -336,6 +344,7 @@ impl Repository {
             baseline,
             consumed: Meter::default(),
             pending: None,
+            last_operation_id: None,
             report: None,
             note: String::new(),
             authority_blocked: false,
