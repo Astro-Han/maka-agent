@@ -19,6 +19,26 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function (ctx) {
+  await ctx.remote.method('usage', async (input) => {
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      Array.isArray(input) ||
+      !('grant' in input) ||
+      typeof input.grant !== 'string' ||
+      !('read' in input)
+    )
+      throw new Error('invalid Usage input');
+    const read = /** @type {import('../../../../packages/plugin-sdk/src/usage.js').UsageRead} */ (
+      input.read
+    );
+    try {
+      const page = await ctx.withAuthorization(input.grant, (call) => call.usage.models(read));
+      return JSON.parse(JSON.stringify({ page }));
+    } catch (error) {
+      return { error: error.code };
+    }
+  });
   await ctx.remote.method('network', async (input) => {
     const intent = parseIntent(input);
     return ctx
@@ -242,7 +262,19 @@ export default async function (ctx) {
         if (stale.kind !== 'revision_conflict')
           throw new Error('removal ignored its revision fence');
       }
-      const removal = deletion.data.value;
+      if (deletion.data.kind !== 'present') throw new Error('removal intent was deleted');
+      const value = deletion.data.value;
+      if (
+        !value ||
+        typeof value !== 'object' ||
+        Array.isArray(value) ||
+        !('sessionId' in value) ||
+        typeof value.sessionId !== 'string' ||
+        !('expectedRevision' in value) ||
+        typeof value.expectedRevision !== 'number'
+      )
+        throw new Error('invalid removal intent');
+      const removal = { sessionId: value.sessionId, expectedRevision: value.expectedRevision };
       const previousRemoval = await commands.removalReceipt(removal.sessionId);
       if (!previousRemoval) {
         const removed = await commands.removeSession(removal);
@@ -250,7 +282,8 @@ export default async function (ctx) {
       }
       const durableRemoval = await commands.removalReceipt(removal.sessionId);
       if (
-        durableRemoval?.sessionId !== removal.sessionId ||
+        !durableRemoval ||
+        durableRemoval.sessionId !== removal.sessionId ||
         durableRemoval.archivedSubtaskCount !== 0
       )
         throw new Error('removal receipt did not survive retirement or restart');

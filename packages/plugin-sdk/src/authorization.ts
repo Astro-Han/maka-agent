@@ -27,7 +27,8 @@ export type AuthorizationCapability =
   | 'executions'
   | 'notifications'
   | 'read_sessions'
-  | 'read_history';
+  | 'read_history'
+  | 'read_usage';
 export type AuthorizationScope = 'profile' | `session:${string}`;
 export interface AuthorizationRequest {
   /** Retain across lost replies; changing the proposal requires a new UUID. */

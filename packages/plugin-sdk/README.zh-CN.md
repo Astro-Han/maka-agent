@@ -145,6 +145,12 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 
 `restoreRoot(operationId)` 按当前工作区和来源上限恢复本包／作用域创建的根会话，不依赖原模型；创建记录不会使普通根会话变成独占托管会话。`restoreChild` 要求原始子会话创建请求。两者均不创建资源；不存在的观察不能排除并发创建。`configure` 每次成功选择都会推进 Session revision，包括相同值，以阻止较早的配置 CAS 覆盖它，不修改事件历史。
 
+## 用量
+
+`call.usage.models({ kind: 'start', filter: { from, to, sessionId? } })` 读取已结算的模型物理调用，包含失败重试和辅助调用。Agent 只读当前 Session；独立调用需要 profile 或 Session 范围的 `read_usage` 授权。结果不包含对话正文，缺失用量、报价和结果分别保持未知。
+
+每页最多 100 条／48 KiB。`{ kind: 'continue', cursor }` 重读该页，`nextCursor` 在相同筛选条件与结算快照下翻页。Host 重启使游标失效；每次读取都重新检查当前授权。
+
 ## 模型适配器
 
 `ctx.modelAdapters.register(name, open)` 注册协议适配器。`open('request' | 'conversation')` 返回 `stream(request, context)` 和可选的 `confirm(history)`。Rust 使用 `maka_plugins::model::ProviderAdapter`，共享类型化事件、HTTP 与 WebSocket 契约。模型 override 的 `adapter` 指定贡献名称；默认名称为 `responses`、`chat-completions`、`anthropic-messages`。

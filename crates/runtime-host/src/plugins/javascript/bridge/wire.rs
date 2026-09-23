@@ -77,6 +77,8 @@ pub(super) enum Request {
     HistoryList(SessionList),
     #[serde(rename = "history.read")]
     HistoryRead(HistoryRead),
+    #[serde(rename = "usage.models")]
+    UsageModels(Authorized<maka_plugins::usage::Read>),
     #[serde(rename = "history.sources")]
     HistorySources(HistorySources),
     #[serde(rename = "history.copyMaterial")]
@@ -558,6 +560,13 @@ pub(super) struct SessionList {
 pub(super) struct HistoryRead {
     pub authority: String,
     pub input: maka_plugins::session::history::Read,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Authorized<T> {
+    pub authority: String,
+    pub input: T,
 }
 
 #[derive(Deserialize)]

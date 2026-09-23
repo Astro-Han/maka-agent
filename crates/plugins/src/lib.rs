@@ -51,6 +51,7 @@ pub mod services;
 pub mod session;
 pub mod storage;
 pub mod terminal;
+pub mod usage;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {

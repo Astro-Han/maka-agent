@@ -82,6 +82,7 @@ impl Provider for Issuer {
                 clients: effects.clone(),
                 sessions: effects.clone(),
                 history: effects.clone(),
+                usage: effects.clone(),
                 http: Arc::new(super::http::Http::new(
                     self.executions.clone(),
                     owner.clone(),

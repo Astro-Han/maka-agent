@@ -218,7 +218,9 @@ user/project content paths stay separate from private journals.
   retains accounting facts. Pricing queries and CAS edits use a bounded, revision-pinned
   catalog; custom rates survive restart and bundled-rate updates invalidate old cursors.
   Each admission captures its public provider identity and rate decision; estimates commit
-  with reported usage and survive rejection, edits and recovery. Usage screens are not yet connected.
+  with reported usage and survive rejection, edits and recovery. Public Rust/JS Usage reads
+  recheck scoped authorization and return at most 100 rows / 48 KiB under a fixed settlement
+  fence; continuation cursors expire on Host restart. Usage screens are not yet connected.
 - Subscriptions deliver frames only after `subscription.ready`. Reconnection replays
   active text from the committed log under backpressure; no copied transcript overlay.
 - Model messages, content and tool outcomes are typed through provider projection.

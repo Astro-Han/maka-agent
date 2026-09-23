@@ -21,15 +21,11 @@
 //! Missing counters remain unknown; this layer makes no pricing assumptions.
 
 use crate::{EventLog, StoreError};
-use maka_runtime::{
-    context::ModelPurpose, event::Invocation, execution::ModelBinding, model::ModelUsage,
-};
-use serde::{Deserialize, Serialize};
+pub use maka_runtime::accounting::{AuxiliarySource, ModelAttempt, Origin, Outcome};
 use sqlx::{Connection, Row, sqlite::SqliteRow};
 
 mod auxiliary;
 pub(crate) mod valuation;
-pub use auxiliary::Source as AuxiliarySource;
 
 #[derive(Clone, Debug)]
 pub struct Query {
@@ -51,50 +47,6 @@ impl Query {
             crate::sessions::validate_id(id)?;
         }
         Ok(())
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Outcome {
-    Success,
-    Error,
-    Aborted,
-    /// The invocation ended without a recorded outcome for this admission.
-    Unknown,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ModelAttempt {
-    pub request_id: String,
-    pub origin: Origin,
-    /// Frozen public identity; absent when the invocation had no binding.
-    pub binding: Option<ModelBinding>,
-    pub model_id: String,
-    pub started_at: f64,
-    pub completed_at: f64,
-    pub outcome: Outcome,
-    pub usage: ModelUsage,
-    pub quote: Option<maka_runtime::pricing::Quote>,
-    pub cost_usd: Option<f64>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Origin {
-    Agent {
-        invocation: Invocation,
-        purpose: ModelPurpose,
-    },
-    Auxiliary {
-        source: AuxiliarySource,
-    },
-}
-
-impl ModelAttempt {
-    /// Wall-clock adjustments cannot produce negative reported latency.
-    pub fn latency_ms(&self) -> f64 {
-        (self.completed_at - self.started_at).max(0.0)
     }
 }
 
@@ -145,7 +97,7 @@ impl EventLog {
                     .fetch_one(&mut *tx)
                     .await?;
                     let rows = sqlx::query(
-                        "SELECT event_id, origin, binding, model_id,
+                        "SELECT event_id, origin, session_id, binding, model_id,
                         started_at, completed_at, outcome, usage, quote_json, usd
                  FROM model_usage
                  WHERE completed_at >= ?1 AND completed_at <= ?2
@@ -161,7 +113,21 @@ impl EventLog {
                     .bind(offset as i64)
                     .fetch_all(&mut *tx)
                     .await?;
-                    let attempts = rows.iter().map(read).collect::<Result<Vec<_>, _>>()?;
+                    let mut attempts = Vec::with_capacity(rows.len());
+                    // Leave envelope/cursor headroom. Never truncate one accounting fact.
+                    let mut bytes = 0;
+                    for row in &rows {
+                        let attempt = read(row)?;
+                        let size = serde_json::to_vec(&attempt)?.len() + 1;
+                        if bytes + size > 44 * 1024 {
+                            if attempts.is_empty() {
+                                return Err(invalid("one Usage record exceeds page capacity"));
+                            }
+                            break;
+                        }
+                        bytes += size;
+                        attempts.push(attempt);
+                    }
                     let total = crate::sequence_number(total)?;
                     let end = offset + attempts.len() as u64;
                     tx.commit().await?;
@@ -182,6 +148,7 @@ fn read(row: &SqliteRow) -> Result<ModelAttempt, StoreError> {
     Ok(ModelAttempt {
         request_id: row.try_get("event_id")?,
         origin: serde_json::from_str(row.try_get("origin")?)?,
+        session_id: row.try_get("session_id")?,
         binding: row
             .try_get::<Option<&str>, _>("binding")?
             .map(serde_json::from_str)

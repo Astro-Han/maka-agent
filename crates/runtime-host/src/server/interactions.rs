@@ -90,6 +90,10 @@ impl ClientInteractions for Interactions {
     }
 }
 impl Interactions {
+    pub(crate) fn epoch(&self) -> &str {
+        &self.epoch
+    }
+
     pub(super) fn new(
         log: Arc<EventLog>,
         shutdown: CancellationToken,

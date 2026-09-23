@@ -36,6 +36,7 @@ pub(crate) mod skills;
 pub(crate) mod storage;
 mod terminal;
 pub(crate) mod todo;
+mod usage;
 pub(crate) mod web;
 pub mod wire;
 pub(crate) mod workhub;

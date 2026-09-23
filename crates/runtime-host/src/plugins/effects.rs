@@ -28,8 +28,8 @@ use std::sync::{Arc, Weak};
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Effects {
-    host: Weak<Executions>,
-    owner: Context,
+    pub(super) host: Weak<Executions>,
+    pub(super) owner: Context,
 }
 impl Effects {
     pub fn new(host: Weak<Executions>, owner: Context) -> Self {

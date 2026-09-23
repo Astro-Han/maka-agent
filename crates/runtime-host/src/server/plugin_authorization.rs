@@ -292,6 +292,7 @@ fn allow(authority: &Authority, request: &Request) -> Result<(), OperationError>
             | Capability::ClientCapabilities => &[Operation::TurnStart],
             Capability::Notifications => &[],
             Capability::ReadSessions => &[Operation::SessionCatalogQuery],
+            Capability::ReadUsage => &[Operation::UsageQuery],
             Capability::ReadHistory => &[
                 Operation::SessionCatalogQuery,
                 Operation::SessionTranscriptPage,

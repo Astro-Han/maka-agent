@@ -43,6 +43,7 @@ pub enum Capability {
     Notifications,
     ReadSessions,
     ReadHistory,
+    ReadUsage,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +100,7 @@ impl Request {
                         Capability::Notifications
                             | Capability::ReadSessions
                             | Capability::ReadHistory
+                            | Capability::ReadUsage
                     )
                 }) => {}
             Target::Profile => {
@@ -137,6 +139,13 @@ impl Request {
                 }
                 self.validate_mode(*sandbox_mode)?;
             }
+        }
+        if self.capabilities.contains(&Capability::ReadUsage)
+            && !matches!(self.target, Target::Profile | Target::Session { .. })
+        {
+            return Err(crate::Error::Invalid(
+                "Usage authorization requires a profile or Session target".into(),
+            ));
         }
         Ok(())
     }

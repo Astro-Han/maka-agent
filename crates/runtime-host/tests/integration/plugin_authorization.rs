@@ -23,6 +23,7 @@ use maka_runtime_host::server::{Host, local::LocalListener};
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+mod usage;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn external_background_consent_recovers_and_revokes_without_losing_accepted_work() {
@@ -107,6 +108,7 @@ async fn scenario() {
     let mut root_result = Value::Null;
     let mut network_grant = Value::Null;
     let mut material_copy = Value::Null;
+    let mut usage = usage::Probe::default();
     for reopened in [false, true] {
         let host = Host::open(fixture.owner()).await.unwrap();
         #[cfg(unix)]
@@ -510,6 +512,7 @@ async fn scenario() {
         } else {
             accepted = result["receipt"].clone();
         }
+        usage.check(&mut peer, &client, &document, reopened).await;
         peer.close().await;
         stop.cancel();
         server.await.unwrap().unwrap();

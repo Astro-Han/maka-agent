@@ -297,6 +297,7 @@
   };
   const text = (value) => (typeof value === 'function' ? value : () => value);
   const resources = (authority) => ({
+    usage: Object.freeze({ models: (input) => host('usage.models', { authority, input }) }),
     sessions: Object.freeze({ list: (input = {}) => host('sessions.list', { authority, input }) }),
     history: Object.freeze({
       list: (input = {}) => host('history.list', { authority, input }),

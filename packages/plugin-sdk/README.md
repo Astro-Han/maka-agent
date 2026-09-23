@@ -141,6 +141,12 @@ Native endpoints accepting caller-supplied Host paths declare `Endpoint::requiri
 
 `restoreRoot(operationId)` recovers a root created by this package/scope under current workspace and source ceilings, independently of its original model. Creation provenance does not make an ordinary root exclusively managed. `restoreChild` requires the original child creation request. Neither creates anything; absence does not exclude a concurrent creation. `configure` advances the Session revision on every committed choice, including identical values, fencing older configuration CASes without changing event history.
 
+## Usage
+
+`call.usage.models({ kind: 'start', filter: { from, to, sessionId? } })` reads settled physical model attempts, including failed retries and auxiliary calls. Agent calls see their Session; independent calls need `read_usage` authorization for a profile or Session. Responses contain no conversation bodies. Missing usage, price and outcome remain distinct unknowns.
+
+Each page contains at most 100 attempts / 48 KiB. `{ kind: 'continue', cursor }` re-reads that page; `nextCursor` advances under the same filter and settlement fence. Host restart invalidates cursors; every read checks current authorization.
+
 ## Model adapters
 
 `ctx.modelAdapters.register(name, open)` publishes a protocol adapter. `open('request' | 'conversation')` returns `stream(request, context)` and optional `confirm(history)`. Rust uses `maka_plugins::model::ProviderAdapter` and the same typed events, HTTP and WebSocket contracts. Model overrides select an adapter by `adapter`; defaults are `responses`, `chat-completions` and `anthropic-messages`.

@@ -36,6 +36,7 @@ export function pluginAuthorizationDialog(input: PluginAuthorizationInput, local
     notifications: ['Send notifications', '发送通知'],
     read_sessions: ['Read Session catalog', '读取会话目录'],
     read_history: ['Read conversation history, including archived Sessions', '读取对话历史（包括已归档会话）'],
+    read_usage: ['Read model usage and estimated costs', '读取模型用量和预估费用'],
   };
   const {request} = input.command;
   const target = request.target.kind === 'profile' ? 'profile' : request.target.kind === 'session'

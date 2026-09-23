@@ -434,6 +434,29 @@ export default async function (ctx) {
             generated.usage.output_tokens !== 5
           )
             throw new Error('nested model result or usage was lost');
+          const usage = await call.usage.models({
+            kind: 'start',
+            filter: { from: 0, to: 1e15 },
+          });
+          if (
+            !usage.attempts.some(
+              (row) =>
+                row.origin.kind === 'auxiliary' &&
+                row.usage.input_tokens === 3 &&
+                row.usage.output_tokens === 5,
+            ) ||
+            usage.attempts.some((row) => row.sessionId !== call.invocation.session_id)
+          )
+            throw new Error('Agent accounting lost usage or escaped its Session');
+          try {
+            await call.usage.models({
+              kind: 'start',
+              filter: { from: 0, to: 1e15, sessionId: 'foreign-session' },
+            });
+            throw new Error('Agent Usage read widened authority');
+          } catch (error) {
+            if (error.code !== 'revoked') throw error;
+          }
           for (let generation = 0; generation < 300; generation++) {
             const dynamic = await ctx.prompt.variable('temporary', () => String(generation));
             await dynamic.close();

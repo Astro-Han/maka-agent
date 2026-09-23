@@ -57,6 +57,7 @@ struct State {
     commands: Arc<dyn Access>,
     sessions: Arc<dyn maka_plugins::session::catalog::Queries>,
     history: Arc<dyn maka_plugins::session::history::History>,
+    usage: Arc<dyn maka_plugins::usage::Usage>,
     execution_handles: Mutex<BTreeMap<String, Arc<dyn maka_plugins::execution::Commands>>>,
     authorizations: Arc<dyn maka_plugins::authorization::Access>,
     authorized_calls:
@@ -99,6 +100,7 @@ impl HostBridge {
             commands: host.executions,
             sessions: host.sessions,
             history: host.history,
+            usage: host.usage,
             execution_handles: Mutex::default(),
             authorizations: host.authorizations,
             authorized_calls: Mutex::default(),
@@ -301,6 +303,10 @@ impl State {
                 encode(self.history.copy_session(call, target, input.input).await?)
             }
             Request::SearchModels(input) => encode(self.models.search(input).await?),
+            Request::UsageModels(input) => {
+                let call = self.calls.get(&input.authority)?;
+                encode(self.usage.models(call, input.input).await?)
+            }
             Request::SearchExecutors(input) => encode(self.executors.search(input).await?),
             Request::Revision(input) => {
                 let _lease = self.context.lifecycle.resource_call()?;

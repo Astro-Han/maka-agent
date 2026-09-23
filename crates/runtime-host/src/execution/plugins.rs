@@ -38,6 +38,7 @@ use root::RootGrant;
 mod catalog;
 mod history;
 mod scopes;
+mod usage;
 pub(crate) use scopes::ResourceTarget;
 mod workspace;
 

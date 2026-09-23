@@ -17,25 +17,13 @@
  * under the License.
  */
 
-use super::{Outcome, invalid};
+use super::{AuxiliarySource as Source, Outcome, invalid};
 use crate::{EventLog, StoreError};
-use maka_runtime::{event::Invocation, execution::ModelBinding, model::ModelUsage};
+use maka_runtime::{execution::ModelBinding, model::ModelUsage};
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, SqliteConnection};
 use std::time::SystemTime;
 use uuid::Uuid;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Source {
-    Agent {
-        invocation: Invocation,
-        operation_id: String,
-    },
-    HostEffect {
-        id: Uuid,
-    },
-}
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct Admission {
