@@ -150,6 +150,23 @@ impl Executions {
                 .await
                 .map_err(internal)?;
             if page.is_empty() {
+                // The same recovery owner drains small material batches. Copied
+                // history pins may defer collection until their last owner retires.
+                let mut cursor = None;
+                while self.accepting() {
+                    use maka_event_log::sessions::MaterialCollection;
+                    match self
+                        .log
+                        .collect_session_material(cursor.as_deref())
+                        .await
+                        .map_err(internal)?
+                    {
+                        MaterialCollection::Done => break,
+                        MaterialCollection::Retained(session) => cursor = Some(session),
+                        MaterialCollection::Collected => {}
+                    }
+                    tokio::task::yield_now().await;
+                }
                 return Ok(pending);
             }
             for session in page {

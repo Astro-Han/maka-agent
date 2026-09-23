@@ -35,6 +35,9 @@ async fn tool_accounting_preserves_dispatch_truth_and_snapshot_without_private_b
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("usage.sqlite");
     let log = EventLog::open(&path).await.unwrap();
+    log.create_session("source", "source", &json!({}), 1)
+        .await
+        .unwrap();
     log.append(&event(
         Fact::InvocationOpened {
             configuration: None,
@@ -306,6 +309,42 @@ async fn tool_accounting_preserves_dispatch_truth_and_snapshot_without_private_b
     );
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
+    let revision = log
+        .get_session::<serde_json::Value>("source")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    log.begin_session_removal("source", revision).await.unwrap();
+    log.finish_session_retirement("source").await.unwrap();
+    assert_eq!(
+        log.collect_session_material(None).await.unwrap(),
+        maka_event_log::sessions::MaterialCollection::Collected
+    );
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    while log.collect_session_material(None).await.unwrap()
+        == maka_event_log::sessions::MaterialCollection::Collected
+    {}
+    assert!(matches!(
+        log.prefix(100, 1_000_000).await,
+        Err(maka_event_log::StoreError::MaterialCollected)
+    ));
+    let inspect = rusqlite::Connection::open(&path).unwrap();
+    let (bodies, payloads, leaked): (i64, i64, i64) = inspect
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM event_log WHERE event_json IS NOT NULL),
+         (SELECT COUNT(*) FROM tool_result_payloads),
+         (SELECT COUNT(*) FROM event_log WHERE retained_json LIKE '%private-tool-data%')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!((bodies, payloads, leaked), (0, 0, 0));
+    assert_eq!(
+        log.usage_summary(query()).await.unwrap().summary.tools,
+        totals
+    );
     assert_eq!(
         log.tool_attempts(query(), 0, 100).await.unwrap().attempts,
         page.attempts

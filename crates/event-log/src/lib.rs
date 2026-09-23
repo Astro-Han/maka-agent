@@ -100,6 +100,8 @@ pub enum StoreError {
     InvalidTransition(String),
     #[error("prefix exceeds the requested event or byte limit")]
     PrefixTooLarge,
+    #[error("conversation material in this scope was collected after Session removal")]
+    MaterialCollected,
     #[error("derived transcript identity conflicts with its committed bytes")]
     TranscriptConflict,
     #[error(transparent)]

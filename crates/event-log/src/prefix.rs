@@ -49,6 +49,11 @@ impl EventLog {
         self.connection.run(move |connection| Box::pin(async move {
         let mut transaction = connection.begin().await?;
         let selection = Selection::resolve(&mut transaction, &scope).await?;
+        let collected: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM event_log WHERE invocation_id IS NOT NULL
+             AND event_json IS NULL AND (?1 IS NULL OR event_session=?1))"
+        ).bind(&selection.session).fetch_one(&mut *transaction).await?;
+        if collected { return Err(StoreError::MaterialCollected); }
         let lineage = Selection::predicate("runtime_events", "?2");
         let source = if selection.session.is_some() { "session_history_events" } else { "runtime_events" };
         let session_filter = if selection.session.is_some() {

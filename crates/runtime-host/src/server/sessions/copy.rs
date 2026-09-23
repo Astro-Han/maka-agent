@@ -203,6 +203,7 @@ pub(super) async fn abandon(host: &Host, input: AbandonInput) -> Result<AbandonO
             .map_err(stored)?
         {
             AbandonRevision::Abandoned => {
+                host.executions.request_removal_recovery();
                 host.executions
                     .publish_session_change(&input.target_session_id)
                     .await;

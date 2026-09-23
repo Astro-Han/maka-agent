@@ -60,6 +60,13 @@ pub(crate) async fn initialize_connection(
             return Err(StoreError::UnsupportedDatabase);
         }
     }
+    // A fresh file needs pointer-map pages before SQLx creates its first table.
+    // Reclamation can then return space in small steps without a full VACUUM.
+    if tables == 0 {
+        sqlx::query("PRAGMA auto_vacuum = INCREMENTAL")
+            .execute(&mut *connection)
+            .await?;
+    }
     // Establish Rust identity before SQLx creates its migration ledger, so a
     // crash before migration 1 is distinguishable from an unrelated database.
     if application_id == 0 {

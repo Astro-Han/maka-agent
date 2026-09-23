@@ -25,6 +25,8 @@ pub(crate) use admission::retain;
 pub(crate) mod copy;
 pub use copy::{AbandonRevision, SessionCopy, SessionCopyResult};
 mod execution;
+mod material;
+pub use material::MaterialCollection;
 mod metadata;
 mod origin;
 mod processes;

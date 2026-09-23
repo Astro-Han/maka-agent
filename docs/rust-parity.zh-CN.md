@@ -82,7 +82,7 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | Usage／Pricing | 已实现 Agent 与辅助 SDK 的物理计量、冻结估价、公共 Rust／JS 作用域模型／工具混合活动分页，以及原生／插件共享的报价查询与 CAS 修改。一致快照汇总包含有界完整分组与缺失数据覆盖率；Insights 插件已提供设置报表、筛选、分页、视图持久化和报价编辑；Session Inspector 已使用公共 Session 作用域 Client 插槽。 | **插件 + Host。** 报表和可重建投影可归 Insights 领域；Host 不依赖插件存活来记录用量，并提供一致快照。缺失用量不能视为零。 |
 | 后台健康 | BackgroundTaskHealth 的进程和端点检查。 | **插件 + Host。** 插件解释健康状态并提供工具；Host 提供授权资源观察和有界探测。保存 PID 不等于拥有进程。 |
 | Session 谱系 | 已实现公共 Rust／JS 历史复制和原始输入读取、原生分支／修订创建与放弃、继承历史独立裁剪、Desktop 规范输入编辑及完整持久草稿。已移除 regenerate，修改请求使用编辑重发。 | **Host。** 谱系及工作区只有一个事务权威；插件请求命令，不在私有存储中重做谱系。 |
-| Session 生命周期 | 已实现原生与公共插件删除／预览／回执接口、原子家族退休及队列取消、重启清理和共享 worktree 所有权。无引用规范材料回收及 shared 查询仍待完成。 | **Host。** 保留被引用历史及已接受回执；进程清理不确定时不得删除工作目录。shared 查询需要真实协作授权。 |
+| Session 生命周期 | 已实现原生与公共插件删除／预览／回执接口、原子家族退休及队列取消、重启清理和共享 worktree 所有权。无引用对话正文、工具载荷与请求表面已支持可恢复的分批回收，保留计量、回执及被引用历史；shared 查询仍待完成。 | **Host。** 保留被引用历史及已接受回执；进程清理不确定时不得删除工作目录。shared 查询需要真实协作授权。 |
 | Session 迁入迁出 | bundle 导入／导出；Codex、Claude Code、OpenCode 的统一外部 catalog/source/import。 | **插件 + Host。** 来源解析／发现可以作为 adapter；Host 拥有有界规范导入、身份、附件、来源记录和原子发布。原生 bundle 格式仍是 Host 合同，不能把外部事件字节直接作为可信执行权威。 |
 | Runtime policy | shell／external-agent 消费，普通 named tool profiles。 | **拆分。** shell 启动策略和能力上限留在 Host；外部 agent 设置由对应领域消费。Profile 提供定义，Host 在准入和每步捕获时取能力交集。只保存设置不算完成。 |
 | 接入／协作 | credential rotation prepare/revoke、principal revoke；collaboration access、邀请、grant revoke、principal rename/revoke；Turn-request create/query/decide/acknowledge/withdraw。 | **Host。** 复用凭据和持久化准入权威。插件可以提供流程／UI，但不能决定授权、绕过撤销或拥有规范的已接受 Turn request。 |

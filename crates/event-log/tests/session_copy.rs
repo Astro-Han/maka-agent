@@ -565,6 +565,11 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
         log.finish_session_retirement("source").await.unwrap(),
         maka_event_log::sessions::SessionRetirement::Removed
     );
+    assert_eq!(
+        log.collect_session_material(None).await.unwrap(),
+        maka_event_log::sessions::MaterialCollection::Retained("source".into()),
+        "live descendants retain source proof"
+    );
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(

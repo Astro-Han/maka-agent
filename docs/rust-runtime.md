@@ -350,8 +350,12 @@ over every directly removed member; history access alone is insufficient.
 
 Host drains accepted executions and processes before reclaiming owned worktrees, and
 keeps a shared checkout until its last owner retires. Unproven process cleanup leaves
-the workspace intact without blocking unrelated Sessions. Canonical facts and inherited
-archive proofs remain stored; removal is not secure erasure of historical data.
+the workspace intact without blocking unrelated Sessions. Once no surviving history owner
+needs a removed Session, background batches release its event bodies, tool payloads and
+unshared request surfaces. Original body digests, accounting and terminal proof, identities
+and accepted receipts remain. Inherited archive/checkpoint proofs stay pinned transitively;
+collected bodies cannot be replayed. Incremental vacuum returns unused pages in bounded
+steps; removal is not secure erasure of database/WAL backups.
 
 ## Conversation recall
 

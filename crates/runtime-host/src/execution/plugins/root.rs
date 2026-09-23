@@ -246,6 +246,7 @@ impl BoundCommands {
             let result = match result {
                 Ok(maka_event_log::sessions::AbandonRevision::Abandoned) => {
                     grants.lock().unwrap().remove(&id);
+                    worker.request_removal_recovery();
                     worker.publish_session_change(&id).await;
                     Ok(RevisionDisposition::Abandoned)
                 }

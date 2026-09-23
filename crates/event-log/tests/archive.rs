@@ -785,6 +785,10 @@ async fn inherited_results_prune_and_compact_without_changing_siblings_or_frozen
         maka_event_log::sessions::SessionRetirement::Removed
     );
     assert_eq!(
+        log.collect_session_material(None).await.unwrap(),
+        maka_event_log::sessions::MaterialCollection::Retained("branch".into())
+    );
+    assert_eq!(
         log.read_model_context("nested", None, 100, 65536)
             .await
             .unwrap()

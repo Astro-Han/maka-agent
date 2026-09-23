@@ -31,37 +31,45 @@ CREATE TABLE event_log (
         CASE WHEN kind IN ('model_requested', 'model_completed', 'model_interrupted',
                            'invocation_ended', 'auxiliary_model_started', 'auxiliary_model_settled',
                            'tool_dispatched', 'tool_settled', 'tool_rejected')
-        THEN COALESCE(json_extract(event_json, '$.recorded_at.secs_since_epoch'),
-                      json_extract(event_json, '$.started_at.secs_since_epoch'),
-                      json_extract(event_json, '$.completed_at.secs_since_epoch')) * 1000.0
-            + COALESCE(json_extract(event_json, '$.recorded_at.nanos_since_epoch'),
-                       json_extract(event_json, '$.started_at.nanos_since_epoch'),
-                       json_extract(event_json, '$.completed_at.nanos_since_epoch')) / 1000000.0
+        THEN COALESCE(json_extract(COALESCE(event_json, retained_json), '$.recorded_at.secs_since_epoch'),
+                      json_extract(COALESCE(event_json, retained_json), '$.started_at.secs_since_epoch'),
+                      json_extract(COALESCE(event_json, retained_json), '$.completed_at.secs_since_epoch')) * 1000.0
+            + COALESCE(json_extract(COALESCE(event_json, retained_json), '$.recorded_at.nanos_since_epoch'),
+                       json_extract(COALESCE(event_json, retained_json), '$.started_at.nanos_since_epoch'),
+                       json_extract(COALESCE(event_json, retained_json), '$.completed_at.nanos_since_epoch')) / 1000000.0
         END
     ) STORED,
     accounting_usage TEXT GENERATED ALWAYS AS (
         CASE
-            WHEN kind = 'model_completed' THEN json_extract(event_json, '$.fact.output.usage')
-            WHEN kind = 'model_observed' AND json_extract(event_json, '$.fact.event.kind') = 'finished'
-                THEN json_extract(event_json, '$.fact.event.data.usage')
-            WHEN kind = 'auxiliary_model_usage' THEN json_extract(event_json, '$.usage')
+            WHEN kind = 'model_completed' THEN json_extract(COALESCE(event_json, retained_json), '$.fact.output.usage')
+            WHEN kind = 'model_observed' AND json_extract(COALESCE(event_json, retained_json), '$.fact.event.kind') = 'finished'
+                THEN json_extract(COALESCE(event_json, retained_json), '$.fact.event.data.usage')
+            WHEN kind = 'auxiliary_model_usage' THEN json_extract(COALESCE(event_json, retained_json), '$.usage')
         END
     ) STORED,
     invocation_model TEXT GENERATED ALWAYS AS (
-        CASE WHEN kind = 'invocation_opened' THEN json_extract(event_json, '$.fact.configuration.model') END
+        CASE WHEN kind = 'invocation_opened' THEN json_extract(COALESCE(event_json, retained_json), '$.fact.configuration.model') END
     ) STORED,
     accounting_tool TEXT GENERATED ALWAYS AS (
         CASE
             WHEN kind IN ('tool_dispatched', 'tool_rejected') THEN json_object(
-                'invocation', json_extract(event_json, '$.invocation'),
-                'call', json_extract(event_json, '$.fact.call'),
-                'name', json_extract(event_json, '$.fact.name'),
-                'rejection', json_extract(event_json, '$.fact.reason.kind'))
+                'invocation', json_extract(COALESCE(event_json, retained_json), '$.invocation'),
+                'call', json_extract(COALESCE(event_json, retained_json), '$.fact.call'),
+                'name', json_extract(COALESCE(event_json, retained_json), '$.fact.name'),
+                'rejection', json_extract(COALESCE(event_json, retained_json), '$.fact.reason.kind'))
             WHEN kind = 'tool_settled' THEN json_object(
-                'outcome', json_extract(event_json, '$.fact.outcome.kind'))
+                'outcome', json_extract(COALESCE(event_json, retained_json), '$.fact.outcome.kind'))
         END
     ) STORED,
-    event_json TEXT NOT NULL,
+    event_json TEXT,
+    -- A collected body is absent, never a synthetic replayable RuntimeEvent.
+    retained_json TEXT CHECK(retained_json IS NULL OR json_valid(retained_json)),
+    body_digest TEXT,
+    event_session TEXT GENERATED ALWAYS AS (
+        json_extract(COALESCE(event_json, retained_json), '$.invocation.session_id')
+    ) STORED,
+    CHECK((event_json IS NOT NULL AND retained_json IS NULL AND body_digest IS NULL)
+       OR (event_json IS NULL AND retained_json IS NOT NULL AND body_digest IS NOT NULL)),
     CHECK(invocation_id IS NOT NULL OR operation_id IS NULL)
 );
 
@@ -254,7 +262,18 @@ CREATE TABLE "tool_result_payloads" (
 );
 
 CREATE VIEW runtime_events AS
-    SELECT * FROM event_log WHERE invocation_id IS NOT NULL;
+    SELECT * FROM event_log WHERE invocation_id IS NOT NULL AND event_json IS NOT NULL;
+
+-- Accounting can read compact retained proof, never conversation history.
+CREATE VIEW accounting_events AS
+    SELECT sequence, event_id, invocation_id, kind, operation_id,
+        accounting_at, accounting_usage, invocation_model, accounting_tool,
+        COALESCE(event_json, retained_json) AS event_json
+    FROM event_log;
+
+CREATE INDEX event_material_owner ON event_log(event_session, sequence)
+    WHERE event_json IS NOT NULL;
+CREATE INDEX event_proof_owner ON event_log(event_session, sequence);
 
 -- Copies retain original facts, never execution authority. Flatten membership
 -- at creation so descendants do not query mutable parent Session metadata.
@@ -289,6 +308,11 @@ CREATE TABLE session_revision_sources (
     sequence INTEGER NOT NULL REFERENCES event_log(sequence),
     PRIMARY KEY(session_id, sequence)
 );
+
+CREATE INDEX history_source_owners ON session_history_members(sequence, session_id);
+CREATE INDEX archive_source_owners ON session_history_members(archive_sequence, session_id)
+    WHERE archive_sequence IS NOT NULL;
+CREATE INDEX revision_source_owners ON session_revision_sources(sequence, session_id);
 
 CREATE VIEW session_history_events AS
     SELECT json_extract(event_json, '$.invocation.session_id') AS owner_session_id,
@@ -343,8 +367,8 @@ CREATE TABLE model_valuations (
 );
 
 CREATE INDEX model_usage_observation ON event_log(
-    invocation_id, json_extract(event_json, '$.fact.step_id'), sequence DESC
-) WHERE kind = 'model_observed' AND json_extract(event_json, '$.fact.event.kind') = 'finished';
+    invocation_id, json_extract(COALESCE(event_json, retained_json), '$.fact.step_id'), sequence DESC
+) WHERE kind = 'model_observed' AND json_extract(COALESCE(event_json, retained_json), '$.fact.event.kind') = 'finished';
 
 -- Count physical admissions, not history memberships or accepted responses.
 -- A rejected response can still have provider-reported usage. No mutable
@@ -370,19 +394,19 @@ WITH attempts AS (
             SELECT observed.accounting_usage
             FROM event_log observed INDEXED BY model_usage_observation
             WHERE observed.kind = 'model_observed'
-              AND json_extract(observed.event_json, '$.fact.event.kind') = 'finished'
+              AND json_extract(COALESCE(observed.event_json, observed.retained_json), '$.fact.event.kind') = 'finished'
               AND observed.invocation_id = request.invocation_id
-              AND json_extract(observed.event_json, '$.fact.step_id') = request.operation_id
+              AND json_extract(COALESCE(observed.event_json, observed.retained_json), '$.fact.step_id') = request.operation_id
             ORDER BY observed.sequence DESC LIMIT 1
         ), '{}') AS usage
-    FROM runtime_events request
-    JOIN runtime_events opening ON opening.invocation_id = request.invocation_id
+    FROM accounting_events request
+    JOIN accounting_events opening ON opening.invocation_id = request.invocation_id
         AND opening.kind = 'invocation_opened'
-    LEFT JOIN runtime_events completed ON completed.operation_id = request.operation_id
+    LEFT JOIN accounting_events completed ON completed.operation_id = request.operation_id
         AND completed.kind = 'model_completed'
-    LEFT JOIN runtime_events interrupted ON interrupted.operation_id = request.operation_id
+    LEFT JOIN accounting_events interrupted ON interrupted.operation_id = request.operation_id
         AND interrupted.kind = 'model_interrupted'
-    LEFT JOIN runtime_events terminal ON terminal.invocation_id = request.invocation_id
+    LEFT JOIN accounting_events terminal ON terminal.invocation_id = request.invocation_id
         AND terminal.kind = 'invocation_ended'
     WHERE request.kind = 'model_requested'
 )
@@ -414,7 +438,7 @@ FROM event_log started
 LEFT JOIN event_log settled ON settled.kind = 'auxiliary_model_settled'
     AND json_extract(settled.event_json, '$.request_id') = started.event_id
 LEFT JOIN event_log observed ON observed.kind = 'auxiliary_model_usage'
-    AND json_extract(observed.event_json, '$.request_id') = started.event_id
+    AND json_extract(COALESCE(observed.event_json, observed.retained_json), '$.request_id') = started.event_id
 WHERE started.kind = 'auxiliary_model_started';
 
 CREATE VIEW model_usage AS
@@ -444,12 +468,12 @@ SELECT request.sequence, request.event_id,
         'outcome', CASE json_extract(settled.accounting_tool, '$.outcome')
             WHEN 'succeeded' THEN 'success' WHEN 'failed' THEN 'error' ELSE 'unknown' END)
     END AS result
-FROM runtime_events request
-JOIN runtime_events opening ON opening.invocation_id = request.invocation_id
+FROM accounting_events request
+JOIN accounting_events opening ON opening.invocation_id = request.invocation_id
     AND opening.kind = 'invocation_opened'
-LEFT JOIN runtime_events settled ON settled.invocation_id = request.invocation_id
+LEFT JOIN accounting_events settled ON settled.invocation_id = request.invocation_id
     AND settled.operation_id = request.operation_id AND settled.kind = 'tool_settled'
-LEFT JOIN runtime_events terminal ON terminal.invocation_id = request.invocation_id
+LEFT JOIN accounting_events terminal ON terminal.invocation_id = request.invocation_id
     AND terminal.kind = 'invocation_ended'
 WHERE request.kind IN ('tool_dispatched', 'tool_rejected');
 
