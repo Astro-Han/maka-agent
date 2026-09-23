@@ -96,19 +96,14 @@ async fn op_maka_plugin(
         if method.is_empty() || method.len() > 128 {
             return Err(JsErrorBox::generic("invalid Host method"));
         }
-        let size = serde_json::to_vec(&input)
-            .map_err(|error| JsErrorBox::generic(error.to_string()))?
-            .len();
-        if size
-            > binding
+        let size = encoded_size(
+            &input,
+            binding
                 .bridge
                 .max_input_bytes(&method)
-                .min(32 * 1024 * 1024)
-        {
-            return Err(JsErrorBox::generic(
-                "Host call exceeds its input byte limit",
-            ));
-        }
+                .min(32 * 1024 * 1024),
+        )
+        .map_err(|_| JsErrorBox::generic("Host call exceeds its input byte limit"))?;
         let call = bindings
             .calls
             .clone()
@@ -121,26 +116,44 @@ async fn op_maka_plugin(
             .map_err(|_| JsErrorBox::generic("Host input capacity exhausted"))?;
         (binding.bridge.clone(), binding.closing.clone(), call, bytes)
     };
-    let output_limit = bridge.max_output_bytes(&method).min(32 * 1024 * 1024);
+    let output_limit = bridge
+        .max_output_bytes(&method)
+        .min(64 * 1024 * 1024 + 1024);
     let output = tokio::select! {
         biased;
         _ = closing.cancelled() => Err(failed("plugin instance is retired")),
         output = bridge.call(method, input) => output,
     }
     .map_err(|error| JsErrorBox::generic(error.to_string()))?;
-    if serde_json::to_vec(&output)
-        .map_err(|error| JsErrorBox::generic(error.to_string()))?
-        .len()
-        > output_limit
-    {
-        return Err(JsErrorBox::generic(
-            "Host result exceeds its output byte limit",
-        ));
-    }
+    encoded_size(&output, output_limit)
+        .map_err(|_| JsErrorBox::generic("Host result exceeds its output byte limit"))?;
     // Even an immediately ready Host operation must return control to the VM
     // owner. Otherwise an async JS loop can starve queued revocations/cleanup.
     tokio::task::yield_now().await;
     Ok(output)
+}
+
+// Count encoded bytes without allocating a second copy of a large Host result.
+fn encoded_size(value: &Value, limit: usize) -> serde_json::Result<usize> {
+    struct Counter {
+        size: usize,
+        limit: usize,
+    }
+    impl std::io::Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > self.limit.saturating_sub(self.size) {
+                return Err(std::io::Error::other("Host payload byte limit"));
+            }
+            self.size += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counter = Counter { size: 0, limit };
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(counter.size)
 }
 
 deno_core::extension!(maka_plugins, ops = [op_maka_plugin]);

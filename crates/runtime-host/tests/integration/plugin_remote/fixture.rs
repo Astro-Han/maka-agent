@@ -70,6 +70,16 @@ impl Plugin for Example {
                     )
                     .unwrap();
             } else {
+                staged
+                    .insert(
+                        key(&identity.package_id, "import-history").unwrap(),
+                        Endpoint::new(
+                            bundle.content_digest.clone(),
+                            Handler::Method(Arc::new(ImportHistory)),
+                        )
+                        .requiring_host_paths(),
+                    )
+                    .unwrap();
                 for (name, handler) in [
                     (
                         "echo",
@@ -89,6 +99,29 @@ impl Plugin for Example {
                 }
             }
             Ok(staged)
+        })
+    }
+}
+struct ImportHistory;
+impl Method for ImportHistory {
+    fn call(&self, input: Value, caller: Caller) -> BoxFuture<'static, Result<Value, Error>> {
+        Box::pin(async move {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Input {
+                path: String,
+                session: String,
+            }
+            let input: Input =
+                serde_json::from_value(input).map_err(|error| Error::Invalid(error.to_string()))?;
+            let transcript = maka_session_import::opencode::read(
+                caller.views.as_ref(),
+                input.path,
+                &input.session,
+            )
+            .await
+            .map_err(|error| Error::Provider(error.to_string()))?;
+            serde_json::to_value(transcript).map_err(|error| Error::Provider(error.to_string()))
         })
     }
 }

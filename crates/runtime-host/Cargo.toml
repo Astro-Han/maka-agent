@@ -24,6 +24,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+rusqlite = { workspace = true, features = ["hooks", "limits"] }
 maka-providers.workspace = true
 maka-workhub.workspace = true
 maka-assistant.workspace = true
@@ -77,6 +78,7 @@ tempfile.workspace = true
 
 [dev-dependencies]
 maka-client.workspace = true
+maka-session-import.workspace = true
 tokio-rustls = { version = "0.26.5", default-features = false, features = ["aws_lc_rs", "tls12"] }
 tempfile.workspace = true
 sqlx.workspace = true

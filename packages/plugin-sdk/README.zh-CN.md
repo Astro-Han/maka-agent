@@ -64,6 +64,8 @@ Prompt 回调通过 `call.workspace`、输入准备通过 `request.workspace` �
 
 Remote 的 Session／工作区视图通过 `files` 提供相同接口。读取会重新检查当前凭据与工作区绑定，纳入 Remote 调用的资源结算，并随回调结束失效。序列化的工作区路径仅用于观察，不是访问授权。
 
+`caller.views.queryDatabase({ path, queries })` 通过 `host_paths` Remote 端点读取明确的受信任 Host SQLite 路径。整批查询共用一个读取事务，正确读取 WAL，关闭后才完成结算。Host 数据目录不可访问，当前凭据与 Session 作用域仍有效；不保证抵御同用户恶意并发替换路径。整数以十进制字符串、二进制以 base64 无损传递。只允许读取类内置函数与 schema 查询，不允许修改或加载扩展；上限为 16 条语句、250,000 行、64 MiB 编码结果，工作量与超时采用协作检查，不是 OS 隔离。
+
 `ctx.tools.bind(definitions, capture)` 在每个逻辑模型步骤为一组工具冻结实现及可选上下文。capture 回调获得工作区只读视图，返回 `null` 表示本步不提供该组工具。模型返回的调用使用已冻结的闭包，不重新采样实现；关闭注册会一起撤下整组工具。`alwaysVisible` 可让工具无需搜索即对模型可见。
 
 capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可用的 provider-tool 协议。绑定可为自己注册的名称返回 `providerTools: { Research: { id: 'openai.web_search', args: {} } }`，工具直接由主模型请求执行，不调用本地处理器；仅含此类工具的绑定无需 `invoke`。描述、闭包和上下文一起冻结，物理重试不重新采样。供应商工具不能结束 Host Turn，也不能嵌入 Code Mode。

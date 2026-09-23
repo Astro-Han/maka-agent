@@ -19,6 +19,45 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function activate(ctx) {
+  /** @type {import('../../../../packages/plugin-sdk/src/host.js').RemoteCaller | undefined} */
+  let previousDatabase;
+  const database = async (
+    /** @type {import('../../../../packages/plugin-sdk/src/host.js').Json} */ input,
+    /** @type {import('../../../../packages/plugin-sdk/src/host.js').RemoteCaller} */ caller,
+  ) => {
+    const request =
+      /** @type {import('../../../../packages/plugin-sdk/src/host.js').DatabaseRead} */ (
+        /** @type {unknown} */ (input)
+      );
+    if (previousDatabase) {
+      try {
+        await previousDatabase.views.queryDatabase(request);
+        throw new Error('completed Remote call retained database authority');
+      } catch (error) {
+        if (error.code !== 'revoked') throw error;
+      }
+    }
+    const tables = await caller.views.queryDatabase(request);
+    previousDatabase = caller;
+    return tables.map((table) => ({ ...table }));
+  };
+  await ctx.remote.method('database', database, { access: 'host_paths' });
+  await ctx.remote.method(
+    'database-summary',
+    async (input, caller) => {
+      const tables = await database(input, caller);
+      return tables
+        .flatMap((table) => table.rows)
+        .reduce(
+          (size, row) =>
+            size +
+            row.reduce((sum, cell) => sum + (cell.kind === 'text' ? cell.value.length : 0), 0),
+          0,
+        );
+    },
+    { access: 'host_paths' },
+  );
+  await ctx.remote.method('denied-database', database);
   await ctx.remote.method('uncertain', () => {
     /** @type {import('../../../../packages/plugin-sdk/src/host.js').RemoteFailure} */
     const failure = Object.assign(new Error('publication result needs recovery'), {

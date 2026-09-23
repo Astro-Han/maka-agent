@@ -23,6 +23,7 @@ use maka_plugins::remote::{Access, Error, SessionView, Views, WorkspaceViewInput
 use std::sync::{Arc, Weak};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+mod database;
 mod read;
 use read::ReadGrant;
 
@@ -127,6 +128,18 @@ impl SessionViews {
     }
 }
 impl Views for SessionViews {
+    fn query_database(
+        &self,
+        input: maka_plugins::filesystem::database::Read,
+    ) -> BoxFuture<
+        '_,
+        Result<
+            Vec<maka_plugins::filesystem::database::Table>,
+            maka_plugins::filesystem::database::Error,
+        >,
+    > {
+        Box::pin(database::read(self, input))
+    }
     fn authorize(
         &self,
         request: maka_plugins::authorization::Request,

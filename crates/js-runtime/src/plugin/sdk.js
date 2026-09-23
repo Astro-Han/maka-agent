@@ -672,6 +672,8 @@
               });
               return { ...view, files: readDirectory('view', view.files) };
             },
+            queryDatabase: (input) =>
+              host('remote.queryDatabase', { authority: call.remoteAuthority, input }),
           });
         }
         if (call?.authority) {
