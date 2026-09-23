@@ -25,6 +25,7 @@ use unicode_width::UnicodeWidthStr;
 
 pub const MAX_COPY_BYTES: usize = crate::terminal::MAX_CLIPBOARD_BYTES;
 mod keyboard;
+mod rebase;
 use keyboard::{Caret, Extent};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CopyMode {
@@ -598,6 +599,91 @@ mod tests {
             view.text_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end), None),
             Some(None)
         ));
+    }
+
+    #[test]
+    fn tool_status_updates_preserve_unchanged_body_selection_and_pending_clicks() {
+        let key = MessageKey {
+            turn: "turn".into(),
+            message: "tool".into(),
+            part: Part::Tool,
+        };
+        let body = "+literal 中文🦀";
+        let update = |view: &mut Transcript, revision, header: &str, body: &str| {
+            view.order.clear();
+            let text = format!("{header}\n{body}");
+            let start = header.len() + 1;
+            let end = text.len();
+            view.upsert(
+                key.clone(),
+                Revision::Durable(revision),
+                Kind::Tool(if revision == 1 {
+                    tools::State::Pending
+                } else {
+                    tools::State::Returned
+                }),
+                || tools::Content {
+                    text,
+                    changes: vec![layout::diff::Row {
+                        source: start..end,
+                        kind: layout::diff::Kind::Added,
+                        language: None,
+                    }],
+                    file: None,
+                },
+            );
+        };
+        for width in [80, 38] {
+            let mut view = Transcript::default();
+            update(&mut view, 1, "Patch · Running · created.txt", body);
+            view.blocks.get_mut(&key).unwrap().folded = false;
+            draw(&mut view, width);
+            let start = view.blocks[&key]
+                .layout
+                .as_ref()
+                .unwrap()
+                .text
+                .find(body)
+                .unwrap();
+            let point = position(&view, &key, start);
+            view.text_mouse(mouse(MouseEventKind::Down(MouseButton::Left), point), None);
+            update(&mut view, 2, "Patch · created.txt", body);
+            draw(&mut view, width);
+            assert!(
+                view.text_selection.dragging(),
+                "late result must not lose an unchanged body"
+            );
+            let text = &view.blocks[&key].layout.as_ref().unwrap().text;
+            let end = position(&view, &key, text.find('🦀').unwrap());
+            view.text_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end), None);
+            view.text_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end), None);
+            assert_eq!(view.copy_text(CopyMode::Selection, false).unwrap(), body);
+            update(&mut view, 3, "Patch · confirmed · created.txt", body);
+            draw(&mut view, width);
+            assert_eq!(view.copy_text(CopyMode::Selection, false).unwrap(), body);
+            let point = position(&view, &key, 0);
+            let action = Action::ToggleMessage(key.clone());
+            view.text_mouse(
+                mouse(MouseEventKind::Down(MouseButton::Left), point),
+                Some(action.clone()),
+            );
+            update(&mut view, 4, "Patch · created.txt", body);
+            draw(&mut view, width);
+            assert_eq!(
+                view.text_mouse(mouse(MouseEventKind::Up(MouseButton::Left), point), None),
+                Some(Some(action))
+            );
+            let text = &view.blocks[&key].layout.as_ref().unwrap().text;
+            let a = position(&view, &key, text.find(body).unwrap());
+            let b = position(&view, &key, text.find('🦀').unwrap());
+            drag(&mut view, a, b);
+            update(&mut view, 5, "Patch · created.txt", "changed");
+            draw(&mut view, width);
+            assert!(
+                !view.text_selection.active(),
+                "changed content cannot be copied as the old selection"
+            );
+        }
     }
 
     #[test]

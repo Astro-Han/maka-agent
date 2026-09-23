@@ -666,7 +666,9 @@ impl Chat {
             self.cadence.flush();
             self.dirty = true;
         }
-        if self.dirty && self.stream_wait().is_none() {
+        // Keep text under the pointer stable until release. Incoming content is
+        // still retained in the bounded model and applied on the next draw.
+        if self.dirty && !self.view.text_selection.dragging() && self.stream_wait().is_none() {
             self.view
                 .interactions(&self.snapshot.as_ref().unwrap().interactions);
             self.view.sync(
@@ -755,6 +757,80 @@ mod tests {
     fn batch(start: u64, end: u64, through: u64) -> TranscriptBatch {
         TranscriptBatch { rows: (start..=end).map(|sequence| TranscriptRow { sequence, value: json!({"type":"user","id":format!("m{sequence}"),"turnId":"turn","text":format!("Row {sequence} 中文🦀")}) }).collect(), next_cursor: None, through_sequence: Some(through) }
     }
+    #[test]
+    fn incoming_content_waits_for_mouse_release_without_losing_the_selection() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use render::selection::CopyMode;
+        let mut chat = Chat::default();
+        chat.select(&Route::Session("a".into()));
+        let request = chat.open_query().unwrap();
+        chat.opened(request, Ok(opened()));
+        let body = "+literal 中文🦀";
+        chat.rows.insert(1, json!({"type":"assistant","id":"m","turnId":"t","text":format!("Awaiting result\n{body}")}));
+        chat.dirty = true;
+        let i18n = I18n::new(
+            crate::LocalePreference::Explicit(crate::Locale::En),
+            crate::Locale::En,
+        );
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 12)).unwrap();
+        let draw = |chat: &mut Chat, terminal: &mut ratatui::Terminal<_>| {
+            terminal
+                .draw(|frame| {
+                    chat.draw(frame, frame.area(), &i18n, false);
+                })
+                .unwrap();
+        };
+        draw(&mut chat, &mut terminal);
+        let cells = terminal.backend().buffer();
+        let row = (0..12)
+            .find(|&y| {
+                (0..60)
+                    .map(|x| cells[(x, y)].symbol())
+                    .collect::<String>()
+                    .contains("+literal")
+            })
+            .unwrap();
+        let column = (0..60).find(|&x| cells[(x, row)].symbol() == "+").unwrap();
+        let event = |kind, column| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        chat.view
+            .text_mouse(event(MouseEventKind::Down(MouseButton::Left), column), None);
+        chat.rows.clear();
+        chat.rows.insert(
+            2,
+            json!({"type":"assistant","id":"m","turnId":"t","text":body}),
+        );
+        chat.dirty = true;
+        draw(&mut chat, &mut terminal);
+        assert!(chat.dirty, "defer the model update while dragging");
+        assert!(
+            chat.view
+                .copy_text(CopyMode::Message, false)
+                .unwrap()
+                .contains("Awaiting result")
+        );
+        let end = column + unicode_width::UnicodeWidthStr::width(body) as u16 - 1;
+        chat.view
+            .text_mouse(event(MouseEventKind::Drag(MouseButton::Left), end), None);
+        chat.view
+            .text_mouse(event(MouseEventKind::Up(MouseButton::Left), end), None);
+        draw(&mut chat, &mut terminal);
+        assert!(
+            !chat.dirty,
+            "release applies the latest content immediately"
+        );
+        assert_eq!(
+            chat.view.copy_text(CopyMode::Selection, false).unwrap(),
+            body
+        );
+        assert_eq!(chat.view.copy_text(CopyMode::Message, false).unwrap(), body);
+    }
+
     #[test]
     fn short_tail_fills_visible_space_and_scroll_loads_history_without_unbounded_prefetch() {
         let mut chat = Chat::default();

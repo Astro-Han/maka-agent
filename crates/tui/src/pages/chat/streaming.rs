@@ -63,7 +63,8 @@ impl Markdown {
     pub fn syntax_bytes(&self) -> usize {
         self.code.bytes()
     }
-    /// Caller retains previous only for append-only text with the same width/options.
+    /// Reusing a previous layout requires unchanged width/options; reset this cache
+    /// first when the source changes other than by appending.
     pub fn render(
         &mut self,
         text: &str,

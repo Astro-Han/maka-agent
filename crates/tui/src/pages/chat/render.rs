@@ -368,7 +368,8 @@ impl Transcript {
                 block.file = file;
                 if block.kind != kind || block.text != text || block.changes != changes {
                     if block.kind != kind || !text.starts_with(&block.text) {
-                        block.layout = None;
+                        // Keep the old logical text until selection has been rebased.
+                        block.markdown = Default::default();
                     }
                     block.dirty = true;
                     block.text = text;
@@ -587,6 +588,11 @@ impl Transcript {
             let next = self.order.get(index + 1).map(|key| self.blocks[key].kind);
             let block = self.blocks.get_mut(key).expect("indexed block");
             if block.dirty || block.layout.is_none() {
+                let selected_text = self
+                    .text_selection
+                    .references(key)
+                    .then(|| block.layout.as_ref().map(|layout| layout.text.clone()))
+                    .flatten();
                 let time_width = if width >= 60 {
                     block.time.as_ref().map_or(0, |time| time.len() as u16 + 2)
                 } else {
@@ -673,6 +679,13 @@ impl Transcript {
                     for line in &mut layout.lines {
                         line.mapping.clear();
                     }
+                }
+                if let Some(previous) = selected_text {
+                    self.text_selection.rebase(
+                        key,
+                        &previous,
+                        &block.layout.as_ref().unwrap().text,
+                    );
                 }
                 block.dirty = false;
                 #[cfg(test)]

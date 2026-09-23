@@ -143,17 +143,25 @@ async fn host_waits_do_not_spend_execution_budget_even_for_unawaited_effects() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn javascript_failure_cancels_and_drains_already_admitted_tools() {
+async fn javascript_failure_cancels_and_drains_dispatched_tools() {
+    let dispatched = Arc::new(Notify::new());
     let cancelled = Arc::new(Notify::new());
     let released = Arc::new(Notify::new());
     let tools = {
+        let dispatched = dispatched.clone();
         let cancelled = cancelled.clone();
         let released = released.clone();
         Arc::new(Tools(
-            move |_name, _value, cancel: CancellationToken| -> ToolFuture {
+            move |name, _value, cancel: CancellationToken| -> ToolFuture {
+                let dispatched = dispatched.clone();
                 let cancelled = cancelled.clone();
                 let released = released.clone();
                 Box::pin(async move {
+                    if name == "echo" {
+                        dispatched.notified().await;
+                        return Ok(Value::Null);
+                    }
+                    dispatched.notify_one();
                     cancel.cancelled().await;
                     cancelled.notify_one();
                     released.notified().await;
@@ -162,10 +170,12 @@ async fn javascript_failure_cancels_and_drains_already_admitted_tools() {
             },
         ))
     };
+    // Admission precedes dispatch. Wait for the tool to enter before failing JS,
+    // otherwise cancellation may correctly prevent dispatch altogether.
     let mut task = tokio::spawn(async move {
         executor()
             .execute(
-                "tools.wait({}); throw new Error('cell-failure');".into(),
+                "tools.wait({}); await tools.echo({}); throw new Error('cell-failure');".into(),
                 tools,
                 CancellationToken::new(),
             )
@@ -181,7 +191,7 @@ async fn javascript_failure_cancels_and_drains_already_admitted_tools() {
     );
     released.notify_one();
     assert!(
-        matches!(task.await.unwrap(), Ok(CellResult::Failure { error: CellDiagnostic { kind: CellDiagnosticKind::ExecutionError, message }, tool_calls }) if message.contains("cell-failure") && tool_calls.len() == 1)
+        matches!(task.await.unwrap(), Ok(CellResult::Failure { error: CellDiagnostic { kind: CellDiagnosticKind::ExecutionError, message }, tool_calls }) if message.contains("cell-failure") && tool_calls.len() == 2)
     );
 }
 

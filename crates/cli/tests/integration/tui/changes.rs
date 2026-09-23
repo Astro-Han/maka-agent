@@ -238,6 +238,9 @@ fn code_mode_patch_stops_after_failure_and_keeps_real_tools_visible() {
         std::fs::read_to_string(directory.path().join("later.txt")).unwrap(),
         "not deleted"
     );
+    // The live answer can precede the durable tool page. Wait for the final
+    // result before measuring coordinates; a pending status row can disappear.
+    tui.wait_for("Failed to find expected lines in snapshot: absent");
     tui.wait_for("Patch · created.txt");
     assert!(!tui.screen.snapshot().unwrap().screen.contains("exec"));
     tui.click_text("Patch · created.txt");

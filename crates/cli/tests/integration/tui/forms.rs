@@ -25,13 +25,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteConnection},
 };
 
-struct Provider(Child);
-impl Drop for Provider {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
+mod fixture;
 
 #[test]
 fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() {
@@ -48,35 +42,8 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
             .unwrap(),
     );
     host.wait_for_registration();
-    let mut provider = Provider(
-        Command::new("node")
-            .arg(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../tests/fixtures/client.mjs"),
-            )
-            .arg("--tui-form-root")
-            .arg(&host.root)
-            .arg("--workspace")
-            .arg(directory.path())
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap(),
-    );
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !directory.path().join("provider-ready.json").exists() {
-        assert!(
-            provider.0.try_wait().unwrap().is_none(),
-            "form provider exited"
-        );
-        assert!(
-            Instant::now() < deadline,
-            "form provider did not become ready"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
     let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(fixture::start(&host.root, directory.path()));
     let mut reader = runtime
         .block_on(SqliteConnection::connect_with(
             &SqliteConnectOptions::new()
@@ -137,12 +104,9 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
     tui.send(b"\x1b");
     tui.wait_until(|screen| !screen.contains("Fill the isolated form"));
     std::thread::sleep(Duration::from_millis(250));
-    let count: Value = serde_json::from_slice(
-        &std::fs::read(directory.path().join("model-requests.json")).unwrap(),
-    )
-    .unwrap();
     assert_eq!(
-        count, 2,
+        fixture.requests.load(std::sync::atomic::Ordering::SeqCst),
+        2,
         "an unanswered form must prevent a new model request after exec yielded"
     );
     let pending: i64 = runtime.block_on(sqlx::query_scalar("SELECT COUNT(*) FROM interaction_requests r LEFT JOIN interaction_outcomes o USING(request_id) WHERE o.request_id IS NULL").fetch_one(&mut reader)).unwrap();
@@ -166,12 +130,11 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
     tui.wait_for("No requests waiting for you.");
     tui.send(b"\x1b[1;3D");
     tui.wait_for("Form received exactly once");
-    let result: Value =
-        serde_json::from_slice(&std::fs::read(directory.path().join("form-result.json")).unwrap())
-            .unwrap();
+    let result = runtime.block_on(fixture.provider).unwrap();
+    runtime.block_on(fixture.model).unwrap();
     assert_eq!(
         result,
-        json!({"action":"accept","values":{"name":"中文🦀","count":2,"enabled":false}})
+        json!({"action":"accept","values":{"name":"中文🦀","count":2.0,"enabled":false}})
     );
     let outcomes: Vec<String> = runtime
         .block_on(
@@ -181,20 +144,30 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
         .unwrap();
     assert_eq!(outcomes.len(), 1);
     let outcome: Value = serde_json::from_str(&outcomes[0]).unwrap();
-    assert_eq!(outcome["values"], result["values"]);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(status) = provider.0.try_wait().unwrap() {
-            assert!(status.success());
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "provider must finish after the canonical terminal"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(directory.path().join("form-completed.json").exists());
+    assert_eq!(
+        maka_protocol::capability::decode_form_result(&json!({
+            "action":"accept", "values":outcome["values"]
+        }))
+        .unwrap(),
+        maka_protocol::capability::decode_form_result(&result).unwrap()
+    );
+    tui.wait_for("➤");
+    let settled = runtime
+        .block_on(fixture.client.open_subscription(
+            maka_protocol::subscription::SubscriptionOpenInput {
+                session_id: "tui-form".into(),
+                transcript: maka_protocol::subscription::TranscriptPolicy::None,
+            },
+        ))
+        .unwrap();
+    assert!(matches!(
+        settled.snapshot.root_turn.unwrap().state,
+        maka_protocol::turn::TurnState::Completed { .. }
+    ));
+    runtime
+        .block_on(fixture.client.close_subscription(&settled.subscription_id))
+        .unwrap();
+    fixture.client.disconnect();
     tui.send(b"\x11");
     tui.finish();
     runtime.block_on(reader.close()).unwrap();
