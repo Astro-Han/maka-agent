@@ -72,11 +72,53 @@ export interface SessionRevisionAbandonInput {
   readonly targetSessionId: string;
 }
 
+export interface SessionCopyQueryInput {
+  readonly targetSessionId: string;
+}
+
+export type SessionCopyPurpose =
+  | { readonly kind: 'branch'; readonly turnId: string | null; readonly sideConversation: boolean }
+  | { readonly kind: 'revision'; readonly turnId: string }
+  | { readonly kind: 'empty_side_conversation' };
+
+export interface SessionCopyReceipt {
+  readonly request: {
+    readonly sourceSessionId: string;
+    readonly targetSessionId: string;
+    readonly expectedSourceRevision: number;
+    readonly purpose: SessionCopyPurpose;
+  };
+  readonly state: 'preparing' | 'committed' | 'abandoned';
+}
+
+export interface SessionCopyQueryResult {
+  readonly receipt: SessionCopyReceipt | null;
+}
+
 export type SessionRevisionAbandonResult =
   | { readonly kind: 'abandoned'; readonly sessionId: string }
   | { readonly kind: 'retained'; readonly sessionId: string };
 
 export const SESSION_REVISION_OPERATION_SPECS = {
+  'session.copy.query': defineOperation<
+    SessionCopyQueryInput,
+    SessionCopyQueryResult,
+    (typeof SESSION_COPY_ERRORS)[number]
+  >({
+    mode: 'query',
+    availability: 'ready',
+    errors: SESSION_COPY_ERRORS,
+    decodeInput: (value) => {
+      const input = requireExactRecord(value, 'Session copy query', ['targetSessionId']);
+      return { targetSessionId: requireEntityId(input.targetSessionId, 'targetSessionId') };
+    },
+    decodeOutput: decodeSessionCopyQueryResult,
+    assertOutputForInput: (input, output) => {
+      if (output.receipt && output.receipt.request.targetSessionId !== input.targetSessionId) {
+        throw invalidProtocolFrame('Session copy receipt identity does not match request');
+      }
+    },
+  }),
   'session.branch.create': defineOperation<
     SessionConversationCopyInput,
     SessionConversationCopyResult,
@@ -118,6 +160,70 @@ export const SESSION_REVISION_OPERATION_SPECS = {
     },
   }),
 } as const;
+
+function decodeSessionCopyQueryResult(value: unknown): SessionCopyQueryResult {
+  const result = requireExactRecord(value, 'Session copy query result', ['receipt']);
+  if (result.receipt === null) return { receipt: null };
+  const receipt = requireExactRecord(result.receipt, 'Session copy receipt', ['request', 'state']);
+  const request = requireExactRecord(receipt.request, 'Session copy request', [
+    'sourceSessionId',
+    'targetSessionId',
+    'expectedSourceRevision',
+    'purpose',
+  ]);
+  const sourceSessionId = requireEntityId(request.sourceSessionId, 'sourceSessionId');
+  const targetSessionId = requireEntityId(request.targetSessionId, 'targetSessionId');
+  if (sourceSessionId === targetSessionId) {
+    throw invalidProtocolFrame('Session copy receipt requires distinct Sessions');
+  }
+  const purpose = decodeCopyPurpose(request.purpose);
+  if (
+    (receipt.state !== 'preparing' &&
+      receipt.state !== 'committed' &&
+      receipt.state !== 'abandoned') ||
+    (purpose.kind !== 'revision' && receipt.state !== 'committed')
+  ) {
+    throw invalidProtocolFrame('Invalid Session copy lifecycle');
+  }
+  return {
+    receipt: {
+      request: {
+        sourceSessionId,
+        targetSessionId,
+        purpose,
+        expectedSourceRevision: positiveRevision(
+          request.expectedSourceRevision,
+          'expectedSourceRevision',
+        ),
+      },
+      state: receipt.state,
+    },
+  };
+}
+
+function decodeCopyPurpose(value: unknown): SessionCopyPurpose {
+  const purpose = requireRecord(value, 'Session copy purpose');
+  switch (purpose.kind) {
+    case 'empty_side_conversation':
+      requireExactRecord(purpose, 'empty side conversation', ['kind']);
+      return { kind: purpose.kind };
+    case 'revision':
+      requireExactRecord(purpose, 'revision purpose', ['kind', 'turnId']);
+      return { kind: purpose.kind, turnId: requireEntityId(purpose.turnId, 'turnId') };
+    case 'branch':
+      requireExactRecord(purpose, 'branch purpose', ['kind', 'turnId', 'sideConversation']);
+      if (typeof purpose.sideConversation !== 'boolean') {
+        throw invalidProtocolFrame('Invalid branch sideConversation');
+      }
+      return {
+        kind: purpose.kind,
+        turnId: purpose.turnId === null ? null : requireEntityId(purpose.turnId, 'turnId'),
+        sideConversation: purpose.sideConversation,
+      };
+    default:
+      throw invalidProtocolFrame('Invalid Session copy purpose');
+  }
+}
 
 function decodeSessionRevisionCopyInput(value: unknown): SessionConversationCopyInput {
   const input = decodeSessionConversationCopyInput(value);

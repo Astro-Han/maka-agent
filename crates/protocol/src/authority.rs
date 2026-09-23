@@ -109,6 +109,7 @@ impl Operation {
                 | Self::SessionBranchCreate
                 | Self::SessionCatalogQuery
                 | Self::SessionConfigurationUpdate
+                | Self::SessionCopyQuery
                 | Self::SessionCreate
                 | Self::SessionExecutionBoundaryQuery
                 | Self::SessionLifecycleSet

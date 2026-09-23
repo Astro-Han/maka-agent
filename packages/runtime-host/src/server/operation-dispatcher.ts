@@ -63,7 +63,6 @@ import { SESSION_CATALOG_OPERATION_SPECS } from '../protocol/session-catalog.js'
 import { SESSION_CONTINUITY_OPERATION_SPECS } from '../protocol/session-continuity.js';
 import { SESSION_EFFECT_OPERATION_SPECS } from '../protocol/session-effects.js';
 import { SESSION_RETIREMENT_OPERATION_SPECS } from '../protocol/session-retirement.js';
-import { SESSION_REVISION_OPERATION_SPECS } from '../protocol/session-revision.js';
 import { SESSION_TODO_OPERATION_SPECS } from '../protocol/session-todo.js';
 import { SESSION_TRANSCRIPT_OPERATION_SPECS } from '../protocol/session-transcript.js';
 import { SESSION_TURNS_OPERATION_SPECS } from '../protocol/session-turns.js';
@@ -135,7 +134,10 @@ export type AgentGraphOperationKey = keyof typeof AGENT_GRAPH_OPERATION_SPECS;
 export type SessionContinuityOperationKey =
   | keyof typeof SESSION_CONTINUITY_OPERATION_SPECS
   | keyof typeof SESSION_TRANSCRIPT_OPERATION_SPECS;
-export type SessionRevisionOperationKey = keyof typeof SESSION_REVISION_OPERATION_SPECS;
+export type SessionRevisionOperationKey =
+  | 'session.branch.create'
+  | 'session.revision.create'
+  | 'session.revision.abandon';
 export type SessionRetirementOperationKey = keyof typeof SESSION_RETIREMENT_OPERATION_SPECS;
 export type SessionEffectOperationKey = keyof typeof SESSION_EFFECT_OPERATION_SPECS;
 export type SessionTodoOperationKey = keyof typeof SESSION_TODO_OPERATION_SPECS;

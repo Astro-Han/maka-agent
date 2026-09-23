@@ -48,6 +48,74 @@ pub struct AbandonInput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueryInput {
+    pub target_session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryResult {
+    pub receipt: Option<maka_runtime::session::CopyReceipt>,
+}
+
+pub fn decode_query_input(value: &Value) -> Result<QueryInput> {
+    let input: QueryInput = validation::decode(value)?;
+    validation::entity(&input.target_session_id)?;
+    Ok(input)
+}
+
+pub fn decode_query_result(value: &Value) -> Result<QueryResult> {
+    let mut value = value.clone();
+    crate::codec::exact(
+        crate::codec::record(&value, "Session copy query")?,
+        &["receipt"],
+    )?;
+    if !value["receipt"].is_null() {
+        let purpose = &value["receipt"]["request"]["purpose"];
+        if purpose["kind"] == "branch" {
+            crate::codec::exact(
+                crate::codec::record(purpose, "Branch purpose")?,
+                &["kind", "turnId", "sideConversation"],
+            )?;
+        }
+        let revision = crate::codec::count(
+            &value["receipt"]["request"]["expectedSourceRevision"],
+            "expectedSourceRevision",
+        )?;
+        value["receipt"]["request"]["expectedSourceRevision"] = revision.into();
+    }
+    let output: QueryResult =
+        serde_json::from_value(value).map_err(|error| ProtocolError::invalid(error.to_string()))?;
+    if let Some(receipt) = &output.receipt {
+        let request = &receipt.request;
+        validation::entity(&request.source_session_id)?;
+        validation::entity(&request.target_session_id)?;
+        if request.source_session_id == request.target_session_id
+            || request.expected_source_revision == 0
+        {
+            return Err(ProtocolError::invalid("Invalid copy receipt identity"));
+        }
+        match &request.purpose {
+            Purpose::Branch {
+                turn_id: Some(turn),
+                ..
+            }
+            | Purpose::Revision { turn_id: turn } => validation::entity(turn)?,
+            _ => {}
+        }
+        if receipt.state != maka_runtime::session::CopyState::Committed
+            && !matches!(request.purpose, Purpose::Revision { .. })
+        {
+            return Err(ProtocolError::invalid(
+                "Only revisions have a draft lifecycle",
+            ));
+        }
+    }
+    Ok(output)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -234,5 +302,37 @@ mod tests {
             decode_abandon_output(&abandon, &json!({"kind":"retained", "sessionId":"another"}))
                 .is_err()
         );
+        let receipt = json!({"receipt": {
+            "request": {
+                "sourceSessionId":"source", "targetSessionId":"target",
+                "expectedSourceRevision":2.0, "purpose":{"kind":"revision", "turnId":"turn"}
+            },
+            "state":"abandoned"
+        }});
+        assert_eq!(
+            decode_query_result(&receipt)
+                .unwrap()
+                .receipt
+                .unwrap()
+                .request,
+            revision
+        );
+        assert!(
+            decode_query_result(&json!({"receipt":null}))
+                .unwrap()
+                .receipt
+                .is_none()
+        );
+        let mut branch = receipt;
+        branch["receipt"]["request"]["purpose"] =
+            json!({"kind":"branch", "turnId":null, "sideConversation":false});
+        assert!(decode_query_result(&branch).is_err());
+        branch["receipt"]["state"] = json!("committed");
+        assert!(decode_query_result(&branch).is_ok());
+        branch["receipt"]["request"]["purpose"]
+            .as_object_mut()
+            .unwrap()
+            .remove("turnId");
+        assert!(decode_query_result(&branch).is_err());
     }
 }

@@ -42,6 +42,7 @@ pub(super) enum Output {
     Mutation(SessionUpdateResult),
     Copy(maka_protocol::session::copy::Output),
     Abandon(maka_protocol::session::copy::AbandonOutput),
+    CopyReceipt(maka_protocol::session::copy::QueryResult),
 }
 
 impl Output {
@@ -60,6 +61,7 @@ pub(super) fn supports(operation: Operation) -> bool {
             | Operation::SessionBranchCreate
             | Operation::SessionRevisionCreate
             | Operation::SessionRevisionAbandon
+            | Operation::SessionCopyQuery
             | Operation::SessionCatalogQuery
             | Operation::SessionLifecycleSet
             | Operation::SessionMetadataUpdate
@@ -76,6 +78,9 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol
         }
         Operation::SessionRevisionAbandon => {
             maka_protocol::session::copy::decode_abandon_input(value)?;
+        }
+        Operation::SessionCopyQuery => {
+            maka_protocol::session::copy::decode_query_input(value)?;
         }
         Operation::SessionCreate => {
             decode_session_create_input(value)?;
@@ -109,6 +114,8 @@ pub(super) fn decode_output(operation: Operation, value: &Value) -> maka_protoco
         Operation::SessionBranchCreate | Operation::SessionRevisionCreate
     ) {
         maka_protocol::session::copy::decode_result(value)?;
+    } else if operation == Operation::SessionCopyQuery {
+        maka_protocol::session::copy::decode_query_result(value)?;
     } else if operation == Operation::SessionRevisionAbandon {
         maka_protocol::session::copy::decode_abandon_result(value)?;
     } else if operation == Operation::SessionCatalogQuery {
@@ -142,6 +149,33 @@ pub(super) async fn execute(
             let input =
                 maka_protocol::session::copy::decode_abandon_input(value).map_err(invalid)?;
             copy::abandon(host, input).await.map(Output::Abandon)
+        }
+        Operation::SessionCopyQuery => {
+            let input = maka_protocol::session::copy::decode_query_input(value).map_err(invalid)?;
+            let receipt = log
+                .session_copy_receipt(&input.target_session_id)
+                .await
+                .map_err(stored)?;
+            // Ownership and receipt are committed together. Check after reading
+            // so a concurrent managed creation cannot leak its receipt.
+            crate::session::require_unmanaged(
+                log,
+                &input.target_session_id,
+                OperationErrorCode::OperationConflict,
+            )
+            .await?;
+            if receipt
+                .as_ref()
+                .is_some_and(|receipt| receipt.request.target_session_id != input.target_session_id)
+            {
+                return Err(failure(
+                    OperationErrorCode::InternalFailure,
+                    "Copy receipt target mismatch",
+                ));
+            }
+            Ok(Output::CopyReceipt(
+                maka_protocol::session::copy::QueryResult { receipt },
+            ))
         }
         Operation::SessionCreate => {
             let input = decode_session_create_input(value).map_err(invalid)?;

@@ -28,6 +28,47 @@ import {
 } from '../protocol/index.js';
 
 describe('Session revision protocol', () => {
+  test('copy receipt queries preserve exact identity and reject invalid draft lifecycles', () => {
+    const spec = HOST_OPERATION_SPECS['session.copy.query'];
+    const receipt = {
+      request: {
+        sourceSessionId: 'source',
+        targetSessionId: 'target',
+        expectedSourceRevision: 2,
+        purpose: { kind: 'revision', turnId: 'turn' },
+      },
+      state: 'abandoned',
+    };
+    assert.deepEqual(spec.decodeOutput({ receipt }), { receipt });
+    assert.deepEqual(spec.decodeOutput({ receipt: null }), { receipt: null });
+    const output = spec.decodeOutput({ receipt });
+    spec.assertOutputForInput?.({ targetSessionId: 'target' }, output);
+    assert.throws(
+      () => spec.assertOutputForInput?.({ targetSessionId: 'other' }, output),
+      isInvalidFrame,
+    );
+    const branch = {
+      ...receipt,
+      request: {
+        ...receipt.request,
+        purpose: { kind: 'branch', turnId: null, sideConversation: false },
+      },
+    };
+    assert.throws(() => spec.decodeOutput({ receipt: branch }), isInvalidFrame);
+    assert.deepEqual(spec.decodeOutput({ receipt: { ...branch, state: 'committed' } }), {
+      receipt: { ...branch, state: 'committed' },
+    });
+    assert.throws(
+      () =>
+        spec.decodeOutput({
+          receipt: {
+            ...receipt,
+            request: { ...receipt.request, expectedSourceRevision: 2.5 },
+          },
+        }),
+      isInvalidFrame,
+    );
+  });
   test('accepts only the Side Conversation branch intent', () => {
     assert.deepEqual(
       decodeClientFrame({

@@ -70,7 +70,7 @@ pub enum CopyPurpose {
 
 /// The complete stable operation identity, not just its resolved history cut.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CopyRequest {
     pub source_session_id: String,
     pub target_session_id: String,

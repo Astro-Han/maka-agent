@@ -19,15 +19,84 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { RuntimeHostOperationError } from '@maka/runtime-host/client';
 import type {
   RuntimeHostConnection,
   RuntimeHostSessionSubscription,
 } from '@maka/runtime-host/client';
 import {
   SESSION_CONTINUITY_SCHEMA_VERSION,
+  type SessionCopyReceipt,
   type SubscriptionFrame,
 } from '@maka/runtime-host/protocol';
 import { DesktopRuntimeHostClient } from '../runtime-host-client.js';
+
+test('copy retries recover accepted identity without rereading the source or resurrecting abandoned drafts', async () => {
+  const input = { sourceSessionId: 'source', targetSessionId: 'target', sourceTurnId: 'turn' };
+  let receipt: SessionCopyReceipt | null = null;
+  let sourceReads = 0;
+  let submissions = 0;
+  let hiddenReceiptReads = 0;
+  const session = { id: 'target' };
+  const connection = {
+    request: async (operation: string, request: Record<string, unknown>) => {
+      if (operation === 'session.copy.query') {
+        if (hiddenReceiptReads > 0) {
+          hiddenReceiptReads -= 1;
+          return { receipt: null };
+        }
+        return { receipt };
+      }
+      if (operation === 'session.catalog.query') {
+        sourceReads += 1;
+        return { kind: 'session', session: { id: 'source', revision: sourceReads } };
+      }
+      assert.equal(operation, 'session.revision.create');
+      submissions += 1;
+      if (submissions === 1) {
+        assert.equal(request.expectedSourceRevision, 1);
+        return { kind: 'source_revision_conflict', expectedRevision: 1, actualRevision: 2 };
+      }
+      if (receipt && request.expectedSourceRevision !== receipt.request.expectedSourceRevision) {
+        throw new RuntimeHostOperationError('session.revision.create', 'operation_conflict', 'Copy request changed');
+      }
+      assert.equal(request.expectedSourceRevision, 2, 'replay uses the accepted revision');
+      if (!receipt) {
+        receipt = {
+          request: {
+            sourceSessionId: 'source', targetSessionId: 'target', expectedSourceRevision: 2,
+            purpose: { kind: 'revision', turnId: 'turn' },
+          },
+          state: 'preparing',
+        };
+        throw new Error('reply lost after commit');
+      }
+      if (receipt.state === 'abandoned') throw new Error('target was abandoned');
+      return { kind: 'committed', session };
+    },
+  } as unknown as RuntimeHostConnection;
+  const client = new DesktopRuntimeHostClient(connection);
+  await assert.rejects(client.copySession('revision', input), /reply lost/);
+  assert.equal(await client.copySession('revision', input), session);
+  assert.equal(sourceReads, 2);
+  hiddenReceiptReads = 1;
+  assert.equal(await client.copySession('revision', input), session, 'late commit recovers after source CAS changed');
+  assert.equal(sourceReads, 3);
+  const acceptedSubmissions = submissions;
+  for (const changed of [
+    { ...input, sourceSessionId: 'other-source' },
+    { ...input, sourceTurnId: 'other-turn' },
+    { ...input, intent: 'side_conversation' as const },
+  ]) {
+    await assert.rejects(client.copySession('revision', changed), { code: 'copy_conflict' });
+  }
+  await assert.rejects(client.copySession('branch', input), { code: 'copy_conflict' });
+  assert.equal(submissions, acceptedSubmissions);
+  assert.ok(receipt);
+  receipt = { ...(receipt as SessionCopyReceipt), state: 'abandoned' };
+  await assert.rejects(client.copySession('revision', input), /target was abandoned/);
+  assert.equal(sourceReads, 3);
+});
 
 test('loads a full transcript only on explicit request and closes Sessions before the connection', async () => {
   const lifecycle: string[] = [];

@@ -351,6 +351,16 @@ async fn scenario() {
             foreign_copy["error"]["code"], "operation_conflict",
             "{foreign_copy}"
         );
+        let foreign_receipt = peer
+            .rpc(
+                "session.copy.query",
+                json!({"targetSessionId":created["draft"]}),
+            )
+            .await;
+        assert_eq!(
+            foreign_receipt["error"]["code"], "operation_conflict",
+            "{foreign_receipt}"
+        );
         // Draft removal closes only its own ready subscription, not another
         // Session on the same connection. Reopening replays the tombstone.
         let mut observer = Peer::new(host.clone(), "revision-observer").await;

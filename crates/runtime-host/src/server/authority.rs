@@ -238,6 +238,7 @@ fn path_free(request: &Request) -> bool {
         | Operation::SessionBranchCreate
         | Operation::SessionRevisionCreate
         | Operation::SessionRevisionAbandon
+        | Operation::SessionCopyQuery
         | Operation::SessionExecutionBoundaryQuery
         | Operation::SessionTurnsQuery
         | Operation::SessionTurnLandmarksQuery

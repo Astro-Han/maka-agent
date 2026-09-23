@@ -209,6 +209,7 @@ operations! {
     SessionBranchCreate => ("session.branch.create", Command, Ready),
     SessionCatalogQuery => ("session.catalog.query", Query, Ready),
     SessionConfigurationUpdate => ("session.configuration.update", Command, Ready),
+    SessionCopyQuery => ("session.copy.query", Query, Ready),
     SessionCreate => ("session.create", Command, Ready),
     SessionExecutionBoundaryQuery => ("session.execution_boundary.query", Query, Ready),
     SessionLifecycleSet => ("session.lifecycle.set", Command, Ready),

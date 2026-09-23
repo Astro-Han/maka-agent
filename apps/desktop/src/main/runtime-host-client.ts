@@ -127,6 +127,7 @@ import {
   projectSessionTurnContribution,
   type SessionConversationCopyInput,
   type SessionConversationCopyResult,
+  type SessionCopyReceipt,
   type SessionCreateInput,
   type ExecutionBoundarySummary,
   type SessionLifecycleState,
@@ -170,6 +171,7 @@ export interface SessionRemoveOutcome {
 export type DesktopRuntimeHostClientErrorCode =
   | "catalog_unstable"
   | "client_closed"
+  | "copy_conflict"
   | "projection_unstable"
   | "pricing_snapshot_stale"
   | "pricing_unstable"
@@ -1093,13 +1095,47 @@ export class DesktopRuntimeHostClient {
     kind: "branch" | "revision",
     input: Omit<SessionConversationCopyInput, "expectedSourceRevision">,
   ): Promise<SessionCatalogProjection> {
+    const create = (expectedSourceRevision: number): Promise<SessionConversationCopyResult> => {
+      const request = { ...input, expectedSourceRevision };
+      return kind === "branch"
+        ? this.request("session.branch.create", request)
+        : this.request("session.revision.create", request);
+    };
     for (let attempt = 0; attempt < MAX_OPTIMISTIC_ATTEMPTS; attempt += 1) {
-      const source = await this.#requireSession(input.sourceSessionId);
-      const request = { ...input, expectedSourceRevision: source.revision };
-      const result: SessionConversationCopyResult =
-        kind === "branch"
-          ? await this.request("session.branch.create", request)
-          : await this.request("session.revision.create", request);
+      let { receipt } = await this.request("session.copy.query", {
+        targetSessionId: input.targetSessionId,
+      });
+      let sourceRevision: number | undefined;
+      if (!receipt) {
+        try {
+          sourceRevision = (await this.#requireSession(input.sourceSessionId)).revision;
+        } catch (error) {
+          if (!isMissingSessionError(error)) throw error;
+          // A concurrent copy can commit between the receipt and source reads.
+          ({ receipt } = await this.request("session.copy.query", {
+            targetSessionId: input.targetSessionId,
+          }));
+          if (!receipt) throw error;
+        }
+      }
+      const expectedSourceRevision = receipt
+        ? copyReceiptRevision(kind, input, receipt)
+        : sourceRevision;
+      if (expectedSourceRevision === undefined) throw new Error("Missing copy source revision");
+      let result: SessionConversationCopyResult;
+      try {
+        result = await create(expectedSourceRevision);
+      } catch (error) {
+        if (receipt || !(error instanceof RuntimeHostOperationError) || error.code !== "operation_conflict") {
+          throw error;
+        }
+        // A previously sent request may commit after the initial receipt read.
+        ({ receipt } = await this.request("session.copy.query", {
+          targetSessionId: input.targetSessionId,
+        }));
+        if (!receipt) throw error;
+        result = await create(copyReceiptRevision(kind, input, receipt));
+      }
       if (result.kind === "committed")
         return result.session;
     }
@@ -1801,6 +1837,28 @@ function clientClosed(): DesktopRuntimeHostClientError {
     "client_closed",
     "Desktop Runtime Host Client is closed",
   );
+}
+
+function copyReceiptRevision(
+  kind: "branch" | "revision",
+  input: Omit<SessionConversationCopyInput, "expectedSourceRevision">,
+  receipt: SessionCopyReceipt,
+): number {
+  const { request } = receipt;
+  const { purpose } = request;
+  const samePurpose = kind === "revision"
+    ? purpose.kind === "revision" && purpose.turnId === input.sourceTurnId && input.intent === undefined
+    : input.sourceTurnId === undefined
+      ? purpose.kind === "empty_side_conversation" && input.intent === "side_conversation"
+      : purpose.kind === "branch" && purpose.turnId === input.sourceTurnId &&
+        purpose.sideConversation === (input.intent === "side_conversation");
+  if (
+    request.sourceSessionId !== input.sourceSessionId ||
+    request.targetSessionId !== input.targetSessionId || !samePurpose
+  ) {
+    throw new DesktopRuntimeHostClientError("copy_conflict", "Target Session belongs to a different copy request");
+  }
+  return request.expectedSourceRevision;
 }
 
 function isMissingSessionError(error: unknown): boolean {

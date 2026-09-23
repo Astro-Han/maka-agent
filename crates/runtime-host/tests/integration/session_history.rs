@@ -207,6 +207,13 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
         "sourceSessionId":"source", "targetSessionId":"native-revision",
         "sourceTurnId":"turn", "expectedSourceRevision":source["result"]["session"]["revision"]
     });
+    let absent = operator
+        .rpc(
+            "session.copy.query",
+            json!({"targetSessionId":"native-revision"}),
+        )
+        .await;
+    assert_eq!(absent["result"], json!({"receipt":null}), "{absent}");
     let copied = operator
         .rpc("session.revision.create", request.clone())
         .await;
@@ -223,6 +230,23 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
         )
         .await;
     assert_eq!(renamed["result"]["kind"], "committed", "{renamed}");
+    let receipt = operator
+        .rpc(
+            "session.copy.query",
+            json!({"targetSessionId":"native-revision"}),
+        )
+        .await;
+    assert_eq!(
+        receipt["result"],
+        json!({"receipt": {
+            "request": {
+                "sourceSessionId":"source", "targetSessionId":"native-revision",
+                "expectedSourceRevision":request["expectedSourceRevision"],
+                "purpose":{"kind":"revision", "turnId":"turn"}
+            }, "state":"preparing"
+        }}),
+        "{receipt}"
+    );
     let replayed = operator
         .rpc("session.revision.create", request.clone())
         .await;
@@ -249,6 +273,15 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
     }
     let abandoned_retry = operator.rpc("session.revision.create", request).await;
     assert_eq!(abandoned_retry["error"]["code"], "not_found");
+    let tombstone = operator
+        .rpc(
+            "session.copy.query",
+            json!({"targetSessionId":"native-revision"}),
+        )
+        .await;
+    let mut expected = receipt["result"].clone();
+    expected["receipt"]["state"] = json!("abandoned");
+    assert_eq!(tombstone["result"], expected, "{tombstone}");
     let retained = operator
         .rpc(
             "session.revision.abandon",
