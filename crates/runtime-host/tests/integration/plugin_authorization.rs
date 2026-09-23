@@ -542,6 +542,7 @@ async fn scenario() {
                 from: 0.0,
                 to: f64::MAX,
                 session_id: Some("background-session".into()),
+                through: None,
             },
             0,
             100,

@@ -34,6 +34,7 @@ pub(super) async fn verify(log: &EventLog, expected: usize) {
                 from: 0.0,
                 to: f64::MAX,
                 session_id: Some("js-session".into()),
+                through: None,
             },
             0,
             100,

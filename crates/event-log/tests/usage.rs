@@ -20,62 +20,17 @@
 use maka_event_log::{
     EventLog,
     sessions::{SessionCopy, SessionCopyResult, SessionRetirement},
-    usage::{Outcome, Query},
+    usage::Outcome,
 };
 use maka_runtime::{
-    context::ModelPurpose,
-    event::{
-        EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, LogScope,
-        ModelInterruption, RuntimeEvent,
-    },
+    event::{Fact, InvocationInput, InvocationOutcome, ModelInterruption},
     model::{ModelEvent, ModelFinishReason, ModelStep, ModelUsage},
     session::CopyPurpose,
 };
 use serde_json::json;
-use std::time::{Duration, UNIX_EPOCH};
-
-fn event(fact: Fact, micros: u64) -> EventWrite {
-    let mut event = RuntimeEvent::new(
-        Invocation {
-            session_id: "source".into(),
-            turn_id: "turn".into(),
-            run_id: "run".into(),
-            invocation_id: "invocation".into(),
-        },
-        fact,
-    );
-    event.recorded_at = UNIX_EPOCH + Duration::from_micros(micros);
-    EventWrite::plain(event).unwrap()
-}
-
-fn request(id: &str, micros: u64) -> EventWrite {
-    event(
-        Fact::ModelRequested {
-            step_id: id.into(),
-            model_id: "model".into(),
-            purpose: ModelPurpose::Main,
-            source_scope: LogScope::Session {
-                id: "source".into(),
-            },
-            source_high_water: 0,
-            source_digest: "fixture".into(),
-            input_digest: "frozen-input".into(),
-            route_identity: "frozen-route".into(),
-            checkpoint_event_id: None,
-            context: None,
-            effective_source_digest: None,
-        },
-        micros,
-    )
-}
-
-fn query() -> Query {
-    Query {
-        from: 0.0,
-        to: 100.0,
-        session_id: None,
-    }
-}
+#[path = "usage/fixture.rs"]
+mod fixture;
+use fixture::{event, query, request};
 
 #[tokio::test]
 async fn physical_attempt_usage_survives_rejection_copy_removal_and_reopen() {
@@ -153,7 +108,19 @@ async fn physical_attempt_usage_survives_rejection_copy_removal_and_reopen() {
             11500,
         ),
     ];
-    log.append_batch(&writes).await.unwrap();
+    // The second request exists at the fence, but has not settled yet.
+    log.append_batch(&writes[..5]).await.unwrap();
+    let captured = log.model_attempts(query(), 0, 100).await.unwrap();
+    assert_eq!(captured.total, 1);
+    log.append_batch(&writes[5..]).await.unwrap();
+    let mut fixed = query();
+    fixed.through = Some(captured.through);
+    let historical = log.model_attempts(fixed.clone(), 0, 100).await.unwrap();
+    assert_eq!(historical.attempts, captured.attempts);
+    assert_eq!(historical.total, 1);
+    let mut future = query();
+    future.through = Some(u64::MAX);
+    assert!(log.model_attempts(future, 0, 100).await.is_err());
     let terminal = event(
         Fact::InvocationEnded {
             outcome: InvocationOutcome::Completed,
@@ -243,6 +210,14 @@ async fn physical_attempt_usage_survives_rejection_copy_removal_and_reopen() {
     );
     log.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
+    assert_eq!(
+        reopened
+            .model_attempts(fixed, 0, 100)
+            .await
+            .unwrap()
+            .attempts,
+        captured.attempts
+    );
     assert_eq!(
         reopened
             .model_attempts(query(), 0, 100)

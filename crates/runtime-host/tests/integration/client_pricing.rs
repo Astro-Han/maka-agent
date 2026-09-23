@@ -141,6 +141,7 @@ async fn in_flight_model_quotes_are_frozen_and_next_admission_observes_rate_chan
                 from: 0.0,
                 to: f64::MAX,
                 session_id: Some("priced".into()),
+                through: None,
             },
             0,
             100,

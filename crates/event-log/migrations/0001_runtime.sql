@@ -25,6 +25,30 @@ CREATE TABLE event_log (
     invocation_id TEXT,
     kind TEXT NOT NULL,
     operation_id TEXT,
+    -- Keep compact accounting fields before potentially large JSON overflow
+    -- pages. SQLite derives them from canonical bytes; they cannot be edited.
+    accounting_at REAL GENERATED ALWAYS AS (
+        CASE WHEN kind IN ('model_requested', 'model_completed', 'model_interrupted',
+                           'invocation_ended', 'auxiliary_model_started', 'auxiliary_model_settled')
+        THEN COALESCE(json_extract(event_json, '$.recorded_at.secs_since_epoch'),
+                      json_extract(event_json, '$.started_at.secs_since_epoch'),
+                      json_extract(event_json, '$.completed_at.secs_since_epoch')) * 1000.0
+            + COALESCE(json_extract(event_json, '$.recorded_at.nanos_since_epoch'),
+                       json_extract(event_json, '$.started_at.nanos_since_epoch'),
+                       json_extract(event_json, '$.completed_at.nanos_since_epoch')) / 1000000.0
+        END
+    ) STORED,
+    accounting_usage TEXT GENERATED ALWAYS AS (
+        CASE
+            WHEN kind = 'model_completed' THEN json_extract(event_json, '$.fact.output.usage')
+            WHEN kind = 'model_observed' AND json_extract(event_json, '$.fact.event.kind') = 'finished'
+                THEN json_extract(event_json, '$.fact.event.data.usage')
+            WHEN kind = 'auxiliary_model_usage' THEN json_extract(event_json, '$.usage')
+        END
+    ) STORED,
+    invocation_model TEXT GENERATED ALWAYS AS (
+        CASE WHEN kind = 'invocation_opened' THEN json_extract(event_json, '$.fact.configuration.model') END
+    ) STORED,
     event_json TEXT NOT NULL,
     CHECK(invocation_id IS NOT NULL OR operation_id IS NULL)
 );
@@ -317,13 +341,12 @@ CREATE VIEW agent_model_usage AS
 WITH attempts AS (
     SELECT request.sequence, request.event_id,
         json_extract(request.event_json, '$.invocation') AS invocation,
-        json_extract(opening.event_json, '$.fact.configuration.model') AS binding,
+        opening.invocation_model AS binding,
         json_extract(request.event_json, '$.fact.model_id') AS model_id,
         json_extract(request.event_json, '$.fact.purpose') AS purpose,
-        json_extract(request.event_json, '$.recorded_at') AS started,
-        COALESCE(json_extract(completed.event_json, '$.recorded_at'),
-                 json_extract(interrupted.event_json, '$.recorded_at'),
-                 json_extract(terminal.event_json, '$.recorded_at')) AS ended,
+        request.accounting_at AS started_at,
+        COALESCE(completed.accounting_at, interrupted.accounting_at, terminal.accounting_at) AS completed_at,
+        COALESCE(completed.sequence, interrupted.sequence, terminal.sequence) AS completed_sequence,
         CASE
             WHEN completed.sequence IS NOT NULL THEN 'success'
             WHEN json_extract(interrupted.event_json, '$.fact.status') = 'cancelled' THEN 'aborted'
@@ -331,8 +354,8 @@ WITH attempts AS (
             WHEN json_extract(terminal.event_json, '$.fact.outcome.kind') = 'cancelled' THEN 'aborted'
             WHEN terminal.sequence IS NOT NULL THEN 'unknown'
         END AS outcome,
-        COALESCE(json_extract(completed.event_json, '$.fact.output.usage'), (
-            SELECT json_extract(observed.event_json, '$.fact.event.data.usage')
+        COALESCE(completed.accounting_usage, (
+            SELECT observed.accounting_usage
             FROM event_log observed INDEXED BY model_usage_observation
             WHERE observed.kind = 'model_observed'
               AND json_extract(observed.event_json, '$.fact.event.kind') = 'finished'
@@ -355,10 +378,8 @@ SELECT sequence, event_id,
     json_object('kind', 'agent', 'invocation', json(invocation), 'purpose', purpose) AS origin,
     binding, model_id, outcome, usage,
     json_extract(invocation, '$.session_id') AS session_id,
-    json_extract(started, '$.secs_since_epoch') * 1000.0
-        + json_extract(started, '$.nanos_since_epoch') / 1000000.0 AS started_at,
-    json_extract(ended, '$.secs_since_epoch') * 1000.0
-        + json_extract(ended, '$.nanos_since_epoch') / 1000000.0 AS completed_at
+    started_at, completed_at,
+    completed_sequence
 FROM attempts;
 
 CREATE UNIQUE INDEX auxiliary_model_source ON event_log(json_extract(event_json, '$.source'))
@@ -373,12 +394,10 @@ SELECT started.sequence, started.event_id,
     json_extract(started.event_json, '$.binding') AS binding,
     json_extract(started.event_json, '$.binding.model') AS model_id,
     json_extract(settled.event_json, '$.outcome') AS outcome,
-    COALESCE(json_extract(observed.event_json, '$.usage'), '{}') AS usage,
+    COALESCE(observed.accounting_usage, '{}') AS usage,
     json_extract(started.event_json, '$.session_id') AS session_id,
-    json_extract(started.event_json, '$.started_at.secs_since_epoch') * 1000.0
-        + json_extract(started.event_json, '$.started_at.nanos_since_epoch') / 1000000.0 AS started_at,
-    json_extract(settled.event_json, '$.completed_at.secs_since_epoch') * 1000.0
-        + json_extract(settled.event_json, '$.completed_at.nanos_since_epoch') / 1000000.0 AS completed_at
+    started.accounting_at AS started_at, settled.accounting_at AS completed_at,
+    settled.sequence AS completed_sequence
 FROM event_log started
 LEFT JOIN event_log settled ON settled.kind = 'auxiliary_model_settled'
     AND json_extract(settled.event_json, '$.request_id') = started.event_id

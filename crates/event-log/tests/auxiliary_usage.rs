@@ -60,6 +60,7 @@ fn query() -> Query {
         from: 0.0,
         to: f64::MAX,
         session_id: None,
+        through: None,
     }
 }
 
@@ -155,6 +156,8 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
     log.observe_auxiliary_model(interrupted, complete_usage.clone())
         .await
         .unwrap();
+    let mut fixed = query();
+    fixed.through = Some(log.model_attempts(query(), 0, 100).await.unwrap().through);
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     log.recover_host_effects().await.unwrap();
@@ -168,5 +171,9 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
     assert_eq!(after.attempts[0].quote, Some(quote));
     assert_eq!(after.attempts[0].cost_usd, Some(5.0));
     assert_eq!(after.attempts[1], *attempt);
+    assert_eq!(
+        log.model_attempts(fixed, 0, 100).await.unwrap().attempts,
+        before.attempts
+    );
     log.close().await.unwrap();
 }

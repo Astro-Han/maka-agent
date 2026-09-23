@@ -37,6 +37,8 @@ pub struct Query {
     pub from: f64,
     pub to: f64,
     pub session_id: Option<String>,
+    /// Inclusive canonical fence from the first page, independent of wall-clock time.
+    pub through: Option<u64>,
 }
 
 impl Query {
@@ -97,6 +99,7 @@ impl ModelAttempt {
 }
 
 pub struct ModelPage {
+    pub through: u64,
     pub attempts: Vec<ModelAttempt>,
     pub total: u64,
     pub next_offset: Option<u64>,
@@ -121,14 +124,24 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
+                    let current = crate::sequence_number(
+                        sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM event_log")
+                            .fetch_one(&mut *tx)
+                            .await?,
+                    )?;
+                    let through = query.through.unwrap_or(current);
+                    if through > current {
+                        return Err(invalid("Usage fence is in the future"));
+                    }
                     let total: i64 = sqlx::query_scalar(
                         "SELECT COUNT(*) FROM model_usage
                  WHERE completed_at >= ?1 AND completed_at <= ?2
-                 AND (?3 IS NULL OR session_id = ?3)",
+                 AND (?3 IS NULL OR session_id = ?3) AND completed_sequence <= ?4",
                     )
                     .bind(query.from)
                     .bind(query.to)
                     .bind(&query.session_id)
+                    .bind(through as i64)
                     .fetch_one(&mut *tx)
                     .await?;
                     let rows = sqlx::query(
@@ -137,11 +150,13 @@ impl EventLog {
                  FROM model_usage
                  WHERE completed_at >= ?1 AND completed_at <= ?2
                  AND (?3 IS NULL OR session_id = ?3)
-                 ORDER BY completed_at DESC, sequence DESC LIMIT ?4 OFFSET ?5",
+                 AND completed_sequence <= ?4
+                 ORDER BY completed_at DESC, sequence DESC LIMIT ?5 OFFSET ?6",
                     )
                     .bind(query.from)
                     .bind(query.to)
                     .bind(query.session_id)
+                    .bind(through as i64)
                     .bind(limit)
                     .bind(offset as i64)
                     .fetch_all(&mut *tx)
@@ -151,6 +166,7 @@ impl EventLog {
                     let end = offset + attempts.len() as u64;
                     tx.commit().await?;
                     Ok(ModelPage {
+                        through,
                         attempts,
                         total,
                         next_offset: (end < total).then_some(end),
