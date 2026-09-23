@@ -394,14 +394,13 @@ impl App {
         }
         match result {
             Ok(receipt) => {
-                if let Some(receipt) = &receipt {
-                    if state
+                if let Some(receipt) = &receipt
+                    && state
                         .saved
                         .as_ref()
-                        .is_some_and(|s| s.operation == receipt.operation())
-                    {
-                        state.saved = None;
-                    }
+                        .is_some_and(|saved| saved.operation == receipt.operation())
+                {
+                    state.saved = None;
                 }
                 state.loaded = true;
                 state.receipt = receipt;

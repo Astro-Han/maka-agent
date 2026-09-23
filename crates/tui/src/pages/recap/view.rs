@@ -174,7 +174,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         Some(Receipt::Pending { .. }) => text.push_str(&app.i18n.text("recap-pending")),
         Some(Receipt::Failed { reason, .. }) => {
             text.push_str(&app.i18n.text("recap-failed"));
-            text.push_str("\n");
+            text.push('\n');
             text.push_str(&safe(reason));
         }
         None if state.loaded => text.push_str(&app.i18n.text("recap-empty")),
