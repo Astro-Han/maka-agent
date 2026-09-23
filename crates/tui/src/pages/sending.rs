@@ -23,18 +23,20 @@ use maka_client::{ClientError, RequestFailure};
 use maka_protocol::{
     OperationErrorCode,
     message::{ExecutionResolution, Placement, SubmitInput, SubmitResult},
-    turn::MessageContent,
+    turn::{MessageContent, TurnOrchestration},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Submission {
     pub root_id: String,
     pub origin_epoch: String,
     pub session: String,
     pub id: String,
-    pub text: String,
+    pub content: MessageContent,
     pub placement: Placement,
+    pub input_selections: std::collections::BTreeMap<String, Vec<String>>,
+    pub turn_orchestration: Option<TurnOrchestration>,
 }
 pub enum Delivery {
     Pending,
@@ -64,17 +66,10 @@ impl Submission {
             origin_host_epoch: self.origin_epoch.clone(),
             session_id: self.session.clone(),
             message_id: self.id.clone(),
-            content: MessageContent {
-                text: self.text.clone(),
-                display_text: None,
-                attachments: None,
-                directory_references: None,
-                quotes: None,
-                inline_references: None,
-            },
+            content: self.content.clone(),
             placement: self.placement,
-            input_selections: Default::default(),
-            turn_orchestration: None,
+            input_selections: self.input_selections.clone(),
+            turn_orchestration: self.turn_orchestration.clone(),
         }
     }
 }
@@ -143,8 +138,17 @@ impl App {
             origin_epoch: epoch.clone(),
             session: session.clone(),
             id: uuid::Uuid::new_v4().to_string(),
-            text,
+            content: MessageContent {
+                text,
+                display_text: None,
+                attachments: None,
+                directory_references: None,
+                quotes: None,
+                inline_references: None,
+            },
             placement,
+            input_selections: Default::default(),
+            turn_orchestration: None,
         };
         self.sending.insert(
             session,
@@ -167,7 +171,7 @@ impl App {
         let Some(sent) = self.sending.get_mut(&request.session) else {
             return;
         };
-        if sent.request.id != request.id || sent.request.root_id != request.root_id {
+        if sent.request != request {
             return;
         }
         let retrying = matches!(sent.delivery, Delivery::Retrying);
@@ -181,7 +185,7 @@ impl App {
             Ok(SubmitResult::Blocked { message, .. }) => Delivery::Failed(message),
             Ok(_) => {
                 if let Some(editor) = self.drafts.get_mut(&request.session) {
-                    editor.clear_if_unchanged(&request.text);
+                    editor.clear_if_unchanged(&request.content.text);
                 }
                 Delivery::Accepted
             }
@@ -227,16 +231,13 @@ impl App {
         let Some(sent) = self.sending.get_mut(&request.session) else {
             return;
         };
-        if sent.request.id != request.id
-            || sent.request.root_id != request.root_id
-            || !matches!(sent.delivery, Delivery::Checking)
-        {
+        if sent.request != request || !matches!(sent.delivery, Delivery::Checking) {
             return;
         }
         sent.delivery = match result {
             Ok(Some(ExecutionResolution::Pending { .. } | ExecutionResolution::Owned { .. })) => {
                 if let Some(editor) = self.drafts.get_mut(&request.session) {
-                    editor.clear_if_unchanged(&request.text);
+                    editor.clear_if_unchanged(&request.content.text);
                 }
                 Delivery::Accepted
             }

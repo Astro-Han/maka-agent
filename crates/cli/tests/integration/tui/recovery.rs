@@ -76,9 +76,9 @@ fn recover(after_acceptance: bool) {
             tui.wait_for("storage offline edit");
             std::fs::remove_dir(&checkpoint).unwrap();
             tui.send(b"\x10");
-            tui.wait_for("Retry original message (same ID and text)");
+            tui.wait_for("Retry original message");
             assert!(proxy.requests.lock().unwrap().is_empty(), "storage recovery must not automatically resend");
-            tui.click_text("Retry original message (same ID and text)");
+            tui.click_text("Retry original message");
         }
         tui.wait_for("Delivery uncertain");
         tui.wait_for("connection failed"); // The request failure can precede the connection-close observation.
@@ -99,6 +99,18 @@ fn recover(after_acceptance: bool) {
             // SIGKILL cannot run the normal quit flush; only the prior checkpoint survives.
             tui.child.kill().unwrap();
             assert!(!tui.child.wait().unwrap().success());
+            // Reopen an actual v6 text-only checkpoint, not a synthetic Host
+            // response. The migration must retain the same unknown identity.
+            let mut legacy: serde_json::Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+            legacy["version"] = json!(6);
+            for request in legacy["unresolved"].as_array_mut().unwrap() {
+                let fields = request.as_object_mut().unwrap();
+                let content = fields.remove("content").unwrap();
+                fields.insert("text".into(), content["text"].clone());
+                fields.remove("input_selections");
+                fields.remove("turn_orchestration");
+            }
+            std::fs::write(&checkpoint, serde_json::to_vec(&legacy).unwrap()).unwrap();
         }
         let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
         tui.wait_for(if after_acceptance { "Delivered once." } else { "No messages yet." });
@@ -106,10 +118,10 @@ fn recover(after_acceptance: bool) {
         tui.wait_for("Delivery uncertain");
         assert_eq!(proxy.requests.lock().unwrap().len(), 1, "reopening must not automatically replay");
         tui.send(b"\x10");
-        tui.wait_for("Retry original message (same ID and text)");
+        tui.wait_for("Retry original message");
         // wait_for already waits for a complete synchronized frame. An unrelated
         // last command may be below the viewport when a live turn adds actions.
-        tui.click_text("Retry original message (same ID and text)");
+        tui.click_text("Retry original message");
         // Closing the palette can temporarily cover/erase the old feedback before
         // the checkpoint releases the explicit retry. Observe the real relay too.
         tui.wait_until(|screen| proxy.requests.lock().unwrap().len() == 2 && !screen.contains("Delivery uncertain") && !screen.contains("Sending…") && !screen.contains("Commands · Esc") && screen.contains("plus new edits"));
@@ -248,8 +260,11 @@ impl LostReply {
                                 assert_eq!(original["origin_epoch"], value["input"]["originHostEpoch"]);
                                 assert_eq!(original["session"], value["input"]["sessionId"]);
                                 assert_eq!(original["id"], value["input"]["messageId"]);
-                                assert_eq!(original["text"], value["input"]["content"]["text"]);
+                                assert_eq!(saved["version"], 7);
+                                assert_eq!(original["content"], value["input"]["content"]);
                                 assert_eq!(original["placement"], value["input"]["placement"]);
+                                assert_eq!(original["input_selections"], value["input"].get("inputSelections").cloned().unwrap_or_else(|| json!({})));
+                                assert_eq!(original["turn_orchestration"], value["input"]["turnOrchestration"]);
                                 captured.lock().unwrap().push(value["input"].clone());
                                 if lose && !after_acceptance {
                                     lose = false;

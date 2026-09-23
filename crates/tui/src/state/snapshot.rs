@@ -22,7 +22,7 @@ use crate::{
     editor::{Editor, saved::Saved},
     i18n::LocalePreference,
     navigation::{Route, tabs::LIMIT},
-    pages::sending::{Delivery, Sending, Submission},
+    pages::sending::{Delivery, Sending},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -35,7 +35,7 @@ pub struct Snapshot {
     route: Route,
     tabs: Vec<String>,
     drafts: BTreeMap<String, Saved>,
-    unresolved: Vec<Submission>,
+    unresolved: Vec<super::submission::Saved>,
     locale: LocalePreference,
     terminal_colors: bool,
     #[serde(default)]
@@ -66,7 +66,7 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 6,
+            version: 7,
             root: root.into(),
             route: app.navigation.current(),
             tabs: app.tabs.entries.iter().map(|tab| tab.id.clone()).collect(),
@@ -75,7 +75,10 @@ impl Snapshot {
                 .iter()
                 .map(|(id, editor)| (id.clone(), editor.save()))
                 .collect(),
-            unresolved,
+            unresolved: unresolved
+                .into_iter()
+                .map(|request| super::submission::Saved::Current(Box::new(request)))
+                .collect(),
             locale: app.i18n.preference,
             terminal_colors: app.theme.choice == crate::theme::Choice::Terminal,
             theme: Some(app.theme.choice),
@@ -95,7 +98,7 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if !matches!(self.version, 1..=6)
+        if !matches!(self.version, 1..=7)
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
@@ -158,10 +161,10 @@ impl Snapshot {
         }
         let mut seen = HashSet::new();
         for request in &self.unresolved {
+            let request = request.clone().request(self.version)?;
             if request.root_id != root
                 || !self.drafts.contains_key(&request.session)
-                || !seen.insert(&request.session)
-                || request.text.len() > 256 * 1024
+                || !seen.insert(request.session.clone())
             {
                 return Err("Invalid saved submission identity".into());
             }
@@ -191,6 +194,7 @@ impl Snapshot {
             app.drafts.insert(id, Editor::restore(saved)?);
         }
         for request in self.unresolved {
+            let request = request.request(self.version)?;
             app.sending.insert(
                 request.session.clone(),
                 Sending {
@@ -247,6 +251,15 @@ mod tests {
         };
         app
     }
+    fn text_only_requests(value: &mut serde_json::Value) {
+        for request in value["unresolved"].as_array_mut().unwrap() {
+            let fields = request.as_object_mut().unwrap();
+            let content = fields.remove("content").unwrap();
+            fields.insert("text".into(), content["text"].clone());
+            fields.remove("input_selections");
+            fields.remove("turn_orchestration");
+        }
+    }
     #[test]
     fn checkpoint_restores_drafts_preferences_and_original_unknown_identity_without_dispatching() {
         let mut original = app();
@@ -300,7 +313,7 @@ mod tests {
         assert!(restored.retry_submission().is_none());
         assert!(restored.reconciliation().is_some());
         let mut invalid: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        invalid["version"] = serde_json::json!(7);
+        invalid["version"] = serde_json::json!(8);
         assert!(
             serde_json::from_value::<Snapshot>(invalid)
                 .unwrap()
@@ -308,6 +321,7 @@ mod tests {
                 .is_err()
         );
         let mut legacy: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        text_only_requests(&mut legacy);
         legacy.as_object_mut().unwrap().remove("theme");
         legacy["version"] = serde_json::json!(1);
         legacy.as_object_mut().unwrap().remove("readings");
@@ -316,6 +330,13 @@ mod tests {
         let legacy: Snapshot = serde_json::from_value(legacy).unwrap();
         legacy.validate("root").unwrap();
         assert!(legacy.readings.is_empty());
+        let mut migrated = app();
+        legacy.restore(&mut migrated, false).unwrap();
+        assert_eq!(migrated.sending["a"].request, request);
+        assert!(matches!(
+            migrated.sending["a"].delivery,
+            Delivery::Unknown(None)
+        ));
 
         // v4 adds only the original OAuth query basis. A v3 reader must not
         // silently discard it; current readers still accept v1-v3 without it.
@@ -334,6 +355,7 @@ mod tests {
             oauth["oauth"]
         );
         oauth.as_object_mut().unwrap().remove("theme");
+        text_only_requests(&mut oauth);
         oauth["version"] = serde_json::json!(3);
         assert!(
             serde_json::from_value::<Snapshot>(oauth.clone())
@@ -346,6 +368,104 @@ mod tests {
             .unwrap()
             .validate("root")
             .unwrap();
+    }
+
+    #[test]
+    fn structured_unknown_requests_keep_all_content_and_intent_across_restore_and_retry() {
+        use maka_protocol::message::{Placement, SubmitResult};
+        use serde_json::json;
+
+        let mut original = app();
+        original.apply(Action::Visit(Route::Session("a".into())));
+        original
+            .drafts
+            .get_mut("a")
+            .unwrap()
+            .insert("Original prompt");
+        let mut request = original.submission_for(Placement::CurrentTurn).unwrap();
+        request.content = serde_json::from_value(json!({
+            "text":"Original prompt", "displayText":"🦀 @src/main.rs",
+            "attachments":[{"kind":"image","name":"image.png","mimeType":"image/png","bytes":42,
+                "ref":{"kind":"session_file","sessionId":"source","relativePath":"image.png"}}],
+            "quotes":[{"text":"Original quotation","label":"Source","sourceTurnId":"source-turn"}],
+            "directoryReferences":[{"hostId":"origin-host","path":"/original/workspace"}],
+            "inlineReferences":[{"kind":"workspace_file","value":"@src/main.rs","label":"main.rs","start":3}]
+        })).unwrap();
+        request
+            .input_selections
+            .insert("skills".into(), vec!["review".into()]);
+        request.turn_orchestration =
+            Some(serde_json::from_value(json!({"mode":"code","source":"slash_command"})).unwrap());
+        request.input().validate().unwrap();
+        original.sending.get_mut("a").unwrap().request = request.clone();
+        let saved = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
+        assert_eq!(saved["version"], 7);
+        let mut restored = app();
+        serde_json::from_value::<Snapshot>(saved.clone())
+            .unwrap()
+            .restore(&mut restored, false)
+            .unwrap();
+        assert_eq!(restored.sending["a"].request.input(), request.input());
+        assert!(matches!(
+            restored.sending["a"].delivery,
+            Delivery::Unknown(None)
+        ));
+        let retry = restored.retry_submission().unwrap();
+        assert_eq!(retry, request);
+
+        // Same message ID is not enough: an altered attachment, display or
+        // preparation intent must not release the saved request or its draft.
+        let mut changed = retry.clone();
+        changed.content.attachments.as_mut().unwrap()[0].name = "other.png".into();
+        assert!(!restored.after_checkpoint(&changed, &Ok(())));
+        restored.submitted(
+            changed.clone(),
+            Ok(SubmitResult::Blocked {
+                message: "foreign reply".into(),
+                preparation: vec![],
+            }),
+        );
+        assert!(matches!(restored.sending["a"].delivery, Delivery::Retrying));
+        assert!(restored.after_checkpoint(&retry, &Ok(())));
+        restored.abandon_pending_submissions();
+        let checking = restored.reconciliation().unwrap();
+        let accepted = maka_protocol::message::ExecutionResolution::Pending {
+            message_id: retry.id.clone(),
+        };
+        restored.reconciled(changed, Ok(Some(accepted.clone())));
+        assert!(matches!(restored.sending["a"].delivery, Delivery::Checking));
+        assert_eq!(restored.drafts["a"].text(), "Original prompt");
+        restored.reconciled(checking, Ok(Some(accepted)));
+        assert!(restored.drafts["a"].text().is_empty());
+
+        for (pointer, value) in [
+            ("/version", json!(6)),
+            ("/unresolved/0/placement", json!("next_turn")),
+            ("/unresolved/0/content/inlineReferences/0/start", json!(2)),
+            (
+                "/unresolved/0/content/attachments/0/ref",
+                json!({"kind":"session_context","sessionId":"source","refId":"owned"}),
+            ),
+        ] {
+            let mut invalid = saved.clone();
+            *invalid.pointer_mut(pointer).unwrap() = value;
+            assert!(
+                serde_json::from_value::<Snapshot>(invalid)
+                    .unwrap()
+                    .validate("root")
+                    .is_err(),
+                "{pointer}"
+            );
+        }
+        let mut incomplete = saved;
+        incomplete["unresolved"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("input_selections");
+        assert!(
+            serde_json::from_value::<Snapshot>(incomplete).is_err(),
+            "never downgrade an incomplete structured request to text-only"
+        );
     }
 
     #[test]

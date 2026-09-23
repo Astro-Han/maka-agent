@@ -19,6 +19,7 @@
 
 mod snapshot;
 mod store;
+mod submission;
 
 use crate::{
     app::App,
