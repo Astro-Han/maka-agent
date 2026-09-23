@@ -44,9 +44,6 @@ pub(super) async fn execute(
     input: AuthorizationInput,
 ) -> Result<AuthorizationResult, OperationError> {
     input.validate().map_err(invalid)?;
-    let published = host.plugins.bind_client(&input.client)?;
-    let _lease = published.admit().map_err(invalid)?;
-    let namespace = Namespace::new(input.client.extension_id, input.scope).map_err(invalid)?;
     let principal = match authority.credential() {
         None => Principal::LocalUser {
             client_instance_id: client.into(),
@@ -60,7 +57,9 @@ pub(super) async fn execute(
     if !current.has_grant(Operation::PluginAuthorization) {
         return Err(denied());
     }
-    match input.command {
+    let (namespace, published) = subject(host, &current, &input)?;
+    let _lease = published.admit().map_err(invalid)?;
+    match input.command().clone() {
         AuthorizationCommand::Query { id } => {
             let record = host
                 .configuration
@@ -73,6 +72,12 @@ pub(super) async fn execute(
         }
         AuthorizationCommand::Revoke { id } => {
             let _gate = host.executions.lock_admission().await;
+            let current = principal_authority(&host.configuration, &principal).await?;
+            if !current.has_grant(Operation::PluginAuthorization) {
+                return Err(denied());
+            }
+            let (_, published) = subject(host, &current, &input)?;
+            let _lease = published.admit().map_err(invalid)?;
             host.configuration
                 .revoke_plugin_authorization(namespace, id)
                 .await
@@ -108,6 +113,7 @@ pub(super) async fn execute(
             if !current.has_grant(Operation::PluginAuthorization) {
                 return Err(denied());
             }
+            let (_, published) = subject(host, &current, &input)?;
             let _lease = published.admit().map_err(invalid)?;
             if let Some(result) =
                 previous(&host.configuration, &namespace, &principal, &request).await?
@@ -128,6 +134,39 @@ pub(super) async fn execute(
                 }),
                 Approval::Conflict => Err(conflict()),
             }
+        }
+    }
+}
+
+fn subject(
+    host: &Host,
+    authority: &Authority,
+    input: &AuthorizationInput,
+) -> Result<(Namespace, maka_plugins::fiber::Context), OperationError> {
+    match input {
+        AuthorizationInput::Client { client, scope, .. } => {
+            let published = host.plugins.bind_client(client)?;
+            let namespace =
+                Namespace::new(client.extension_id.clone(), scope.clone()).map_err(invalid)?;
+            Ok((namespace, published.owner))
+        }
+        AuthorizationInput::Remote {
+            binding, target, ..
+        } => {
+            if !authority.has_grant(Operation::PluginRemote) {
+                return Err(denied());
+            }
+            let bound = host.plugins.bind_remote(binding, Some(target))?;
+            if bound.endpoint.value.access == maka_plugins::remote::Access::HostPaths
+                && !authority.can_use_host_paths()
+            {
+                return Err(denied());
+            }
+            let identity = bound.endpoint.owner.identity().map_err(invalid)?;
+            // Storage authority follows the actual backend owner, not a scope
+            // supplied by the application or inherited from a frontend entry.
+            let namespace = Namespace::new(identity.package_id, identity.scope).map_err(invalid)?;
+            Ok((namespace, bound.endpoint.owner))
         }
     }
 }

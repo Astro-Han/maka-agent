@@ -21,6 +21,36 @@ use crate::{Client, ClientError, RequestFailure};
 use maka_protocol::{Operation, plugin::*};
 
 impl Client {
+    pub async fn plugin_authorization(
+        &self,
+        input: AuthorizationInput,
+    ) -> Result<AuthorizationResult, RequestFailure> {
+        let value = self
+            .request(
+                Operation::PluginAuthorization,
+                serde_json::to_value(&input).expect("wire input"),
+            )
+            .await?;
+        let result: AuthorizationResult = serde_json::from_value(value)
+            .map_err(|error| self.invalid_plugin_result(error.to_string()))?;
+        let valid = match (input.command(), &result) {
+            (
+                AuthorizationCommand::Approve { request },
+                AuthorizationResult::Grant { grant: Some(grant) },
+            ) => grant.request == *request,
+            (AuthorizationCommand::Query { id }, AuthorizationResult::Grant { grant }) => {
+                grant.as_ref().is_none_or(|grant| grant.id == *id)
+            }
+            (AuthorizationCommand::Revoke { .. }, AuthorizationResult::Revoked) => true,
+            _ => false,
+        };
+        if !valid {
+            return Err(
+                self.invalid_plugin_result("Plugin authorization does not match the request")
+            );
+        }
+        Ok(result)
+    }
     pub async fn plugin_query(&self, input: Query) -> Result<QueryResult, RequestFailure> {
         let value = self
             .request(

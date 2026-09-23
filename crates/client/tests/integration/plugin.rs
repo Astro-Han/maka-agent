@@ -24,6 +24,42 @@ use serde_json::json;
 use std::time::Duration;
 
 #[tokio::test]
+async fn consent_receipt_for_a_different_proposal_closes_without_approving_again() {
+    let (client, _notices, mut reader, mut writer) = pair_with(maka_client::Operations).await;
+    let proposal = json!({"operationId":uuid::Uuid::new_v4(),"title":"Notifications",
+        "target":{"kind":"profile"},"capabilities":["notifications"]});
+    let input = json!({
+        "binding":{"packageId":"maka.scheduler","method":"terminal","sessionId":null},
+        "target":{"entryId":"maka.scheduler","activation":uuid::Uuid::new_v4(),"registration":uuid::Uuid::new_v4()},
+        "command":{"kind":"approve","request":proposal}
+    });
+    let request = tokio::spawn({
+        let client = client.clone();
+        async move {
+            client
+                .plugin_authorization(serde_json::from_value(input).unwrap())
+                .await
+        }
+    });
+    let frame = reader.read().await.unwrap().unwrap();
+    assert_eq!(frame["operation"], "plugin.authorization");
+    let mut wrong = proposal;
+    wrong["title"] = json!("A different grant");
+    writer.write(&json!({
+        "requestId":frame["requestId"],"operation":frame["operation"],"ok":true,
+        "result":{"kind":"grant","grant":{"id":uuid::Uuid::new_v4(),"request":wrong,"revoked":false}}
+    })).await.unwrap();
+    assert!(matches!(
+        request.await.unwrap(),
+        Err(RequestFailure::Unknown(ClientError::Protocol(_)))
+    ));
+    tokio::time::timeout(Duration::from_secs(1), client.closed())
+        .await
+        .unwrap();
+    assert!(reader.read().await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn remote_calls_validate_variants_without_rebinding_or_replaying_unknown_results() {
     let document = uuid::Uuid::new_v4();
     let stream = uuid::Uuid::new_v4();
