@@ -32,6 +32,7 @@ members = [
     "crates/client",
     "crates/client-capability",
     "crates/config",
+    "crates/desktop",
     "crates/event-log",
     "crates/fs-tools",
     "crates/goal",
