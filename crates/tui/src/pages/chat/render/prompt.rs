@@ -45,12 +45,27 @@ pub(super) fn content(row: &Value, ascii: bool) -> String {
 
 /// Three-line prompt previews, following grok-build's user-message hierarchy.
 pub(super) fn preview(text: &str, width: u16, ascii: bool) -> Result<(Layout, bool), &'static str> {
+    // Attachment-only inputs can leave empty separators at the start of a batched turn.
+    // Spend preview rows on content, preserving indentation and full-message source offsets.
+    let start: usize = text
+        .split_inclusive('\n')
+        .take_while(|line| line.trim().is_empty())
+        .map(str::len)
+        .sum();
+    let text = &text[start..];
     // Enough for four wrapped lines, without laying out an entire pasted document.
     let prefix: String = text
         .graphemes(true)
         .take(usize::from(width) * 4 + 32)
         .collect();
     let mut layout = layout::plain(&prefix, width)?;
+    for line in &mut layout.lines {
+        line.source += start;
+        for span in &mut line.mapping {
+            span.source.start += start;
+            span.source.end += start;
+        }
+    }
     let expandable = layout
         .lines
         .iter()
@@ -143,5 +158,26 @@ mod tests {
         row["text"] = serde_json::json!("raw body");
         row["displayText"] = serde_json::json!("visible body");
         assert!(content(&row, true).starts_with("visible body\n+ 布局.md"));
+    }
+
+    #[test]
+    fn preview_skips_empty_leading_rows_without_losing_indentation_or_source_mapping() {
+        let text = "\n \r\n\n\n\n\n\n\n  保留正文\n↳ 布局.md\nthird\nfourth";
+        let (layout, expandable) = preview(text, 30, false).unwrap();
+        assert!(expandable);
+        assert_eq!(layout.lines.len(), 3);
+        assert_eq!(layout.lines[0].line.to_string(), "  保留正文");
+        assert_eq!(layout.text, "  保留正文\n↳ 布局.md\nthird");
+        assert_eq!(layout.lines[0].source, text.find("  保留正文").unwrap());
+        for span in layout.lines.iter().flat_map(|line| &line.mapping) {
+            assert!(span.exact);
+            assert_eq!(
+                &text[span.source.clone()],
+                &layout.text[span.logical.clone()]
+            );
+        }
+        let (empty, expandable) = preview("\n \r\n", 30, false).unwrap();
+        assert!(!expandable);
+        assert!(empty.text.is_empty());
     }
 }
