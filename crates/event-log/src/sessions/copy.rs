@@ -190,14 +190,15 @@ impl EventLog {
                 .bind(actual as i64).bind(through as i64).bind(observed).bind(encoded).bind(serde_json::to_string(&lineage)?)
                 .bind(state.as_str())
                 .execute(&mut *tx).await?;
-            // Each inherited row carries its original archive visibility, not the
-            // new parent's current view. Later source pruning cannot alter a copy.
+            // Freeze the parent's current projection: its own archives over raw
+            // history, or an already inherited pin. Later pruning cannot change it.
             sqlx::query(
                 "INSERT INTO session_history_members
-                 SELECT ?1, e.sequence, MIN(e.archives_before, ?2),
-                     (SELECT a.sequence FROM runtime_events a WHERE a.kind = 'tool_result_archived'
+                 SELECT ?1, e.sequence,
+                     COALESCE((SELECT a.sequence FROM runtime_events a WHERE a.kind = 'tool_result_archived'
                       AND CAST(json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id') AS TEXT) = e.event_id
-                      AND a.sequence < MIN(e.archives_before, ?2))
+                      AND json_extract(a.event_json,'$.invocation.session_id') = e.owner_session_id
+                      AND a.sequence < ?2), e.archive_sequence)
                  FROM session_history_events e WHERE e.owner_session_id = ?3 AND e.sequence <= ?4",
             ).bind(&request.target_session_id).bind(observed.saturating_add(1))
                 .bind(&request.source_session_id).bind(through as i64).execute(&mut *tx).await?;

@@ -62,11 +62,11 @@ pub(super) async fn read(
            AND json_extract(c.event_json,'$.fact.kind')='model_completed'
            AND json_extract(c.event_json,'$.fact.step_id')=c.operation_id
            AND c.sequence<d.sequence AND d.sequence<t.sequence) AS identities
-         FROM runtime_events t LEFT JOIN runtime_events d ON d.invocation_id = t.invocation_id
+         FROM session_history_events t LEFT JOIN runtime_events d ON d.invocation_id = t.invocation_id
            AND d.operation_id = t.operation_id AND d.kind = 'tool_dispatched'
          LEFT JOIN runtime_events c ON c.invocation_id = t.invocation_id AND c.kind = 'model_completed'
            AND c.operation_id = json_extract(d.event_json, '$.fact.call.origin.step_id')
-         WHERE t.event_id = ? AND t.kind = 'tool_settled' AND json_extract(t.event_json, '$.invocation.session_id') = ?",
+         WHERE t.event_id = ? AND t.kind = 'tool_settled' AND t.owner_session_id = ?",
     ).bind(id).bind(session).fetch_optional(&mut *connection).await?;
     let Some(row) = row else {
         return Ok(None);
@@ -80,10 +80,7 @@ pub(super) async fn read(
         let dispatch: Invocation = serde_json::from_str(row.try_get::<&str, _>("di").ok()?).ok()?;
         let call: ToolCallIdentity =
             serde_json::from_str(row.try_get::<&str, _>("call").ok()?).ok()?;
-        if invocation != dispatch
-            || invocation.session_id != session
-            || !matches!(call.origin, ToolOrigin::Provider { .. })
-        {
+        if invocation != dispatch || !matches!(call.origin, ToolOrigin::Provider { .. }) {
             return None;
         }
         let outcome: &str = row.try_get("outcome").ok()?;

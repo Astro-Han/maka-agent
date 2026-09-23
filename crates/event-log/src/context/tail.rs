@@ -55,8 +55,8 @@ pub(super) async fn read(
     }
     // Archived base bodies are NULL here, never retained with the returned tail.
     let rows = sqlx::query(sqlx::AssertSqlSafe(format!(selected!(
-        "SELECT t.sequence,t.event_id,json_extract(t.event_json,'$.invocation.session_id') AS source_session,
-         CASE WHEN t.inherited = 1 THEN t.archives_before ELSE ?4 END AS archives_before,
+        "SELECT t.sequence,t.event_id,json_extract(a.event_json,'$.invocation.session_id') AS archive_writer,
+         a.sequence + 1 AS archives_before,
          CASE WHEN a.sequence IS NULL THEN t.event_json END AS canonical,
          (SELECT length(payload) FROM tool_result_payloads WHERE event_id=t.event_id) AS raw_bytes", " ORDER BY t.sequence"
     ), filter=filter, archive_filter=archive_filter))).bind(after as i64).bind(through as i64).bind(session).bind(before as i64).bind(&selection.lineage).fetch_all(&mut *connection).await?;
@@ -73,7 +73,7 @@ pub(super) async fn read(
         } else {
             let archived = crate::archive::archived(
                 connection,
-                row.try_get("source_session")?,
+                row.try_get("archive_writer")?,
                 row.try_get("event_id")?,
                 sequence_number(row.try_get("archives_before")?)?,
             )

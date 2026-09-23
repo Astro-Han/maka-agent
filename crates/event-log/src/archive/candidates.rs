@@ -91,14 +91,15 @@ async fn scan(
         .as_deref()
         .expect("prune requires a Session");
     let filter = Selection::predicate("t", "?4");
+    let archive_filter = Selection::archive_predicate("t", "a", "9223372036854775807", "?4");
     let query = format!(
         "SELECT t.sequence,t.event_id,
            COALESCE(length(CAST(json_extract(t.event_json,'$.fact.outcome.model_projection') AS BLOB)),
                     length(CAST(json_extract(t.event_json,'$.fact.outcome.message') AS BLOB)),0)
-         FROM runtime_events t JOIN runtime_events d ON d.invocation_id=t.invocation_id AND d.operation_id=t.operation_id AND d.kind='tool_dispatched'
-         WHERE t.kind='tool_settled' AND t.sequence>?1 AND t.sequence<=?3 AND json_extract(t.event_json,'$.invocation.session_id')=?2
+         FROM session_history_events t JOIN runtime_events d ON d.invocation_id=t.invocation_id AND d.operation_id=t.operation_id AND d.kind='tool_dispatched'
+         WHERE t.kind='tool_settled' AND t.sequence>?1 AND t.sequence<=?3 AND t.owner_session_id=?2
            AND {filter} AND json_extract(d.event_json,'$.fact.call.origin.kind')='provider'
-           AND NOT EXISTS(SELECT 1 FROM runtime_events a WHERE a.kind='tool_result_archived' AND json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id')=t.event_id)
+           AND NOT EXISTS(SELECT 1 FROM runtime_events a WHERE a.kind='tool_result_archived' AND json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id')=t.event_id AND {archive_filter})
            AND (json_extract(t.event_json,'$.fact.outcome.kind')!='failed' OR length(CAST(json_extract(t.event_json,'$.fact.outcome.message') AS BLOB))<=262144)
          ORDER BY t.sequence LIMIT 1"
     );

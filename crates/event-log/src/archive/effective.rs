@@ -35,12 +35,21 @@ pub(crate) async fn digest_selected(
     let session = selection.session.as_deref().ok_or(ArchiveError::Corrupt)?;
     let archive_filter = Selection::predicate("a", "?4");
     let target_filter = Selection::predicate("t", "?5");
+    let pinned_filter = Selection::predicate("t", "?4");
     let broken: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT EXISTS(SELECT 1 FROM runtime_events a LEFT JOIN runtime_events t
            ON t.event_id=json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id')
          WHERE a.kind='tool_result_archived' AND a.sequence < ?1 AND json_extract(a.event_json,'$.invocation.session_id')=?2
-           AND {archive_filter} AND (t.sequence IS NULL OR t.kind!='tool_settled' OR json_extract(t.event_json,'$.invocation.session_id')!=?3))"
-    ))).bind(before as i64).bind(session).bind(session).bind(&selection.lineage).fetch_one(&mut *connection).await?;
+           AND {archive_filter} AND (t.sequence IS NULL OR t.kind!='tool_settled'
+             OR NOT EXISTS(SELECT 1 FROM session_history_events owned WHERE owned.owner_session_id=?3 AND owned.sequence=t.sequence)))
+         OR EXISTS(SELECT 1 FROM session_history_members h
+           JOIN runtime_events t ON t.sequence=h.sequence
+           LEFT JOIN runtime_events a ON a.sequence=h.archive_sequence
+           WHERE h.session_id=?2 AND h.sequence<=?5 AND h.archive_sequence IS NOT NULL AND {pinned_filter}
+             AND (a.kind IS NOT 'tool_result_archived' OR a.sequence<=t.sequence
+               OR json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id') IS NOT t.event_id))"
+    ))).bind(before as i64).bind(session).bind(session).bind(&selection.lineage)
+        .bind(source.high_water as i64).fetch_one(&mut *connection).await?;
     if broken {
         return Err(ArchiveError::Corrupt.into());
     }
@@ -51,8 +60,7 @@ pub(crate) async fn digest_selected(
     let mut after = 0_i64;
     loop {
         let next: Option<(i64,String,String,i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT t.sequence,t.event_id,json_extract(t.event_json,'$.invocation.session_id'),
-             CASE WHEN t.inherited = 1 THEN t.archives_before ELSE ?1 END
+            "SELECT t.sequence,t.event_id,json_extract(a.event_json,'$.invocation.session_id'), a.sequence + 1
              FROM runtime_events a JOIN session_history_events t
              ON t.event_id=CAST(json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id') AS TEXT)
              WHERE a.kind='tool_result_archived' AND t.owner_session_id=?2

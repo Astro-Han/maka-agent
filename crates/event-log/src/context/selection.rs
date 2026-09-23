@@ -157,13 +157,14 @@ impl Selection {
         )
     }
 
-    /// Adopted archives are immutable ownership, not events on the new Run's
-    /// timeline. Only native targets apply the current time and lineage fences.
+    /// Inherited archives are frozen at copy time. New archives belong to this
+    /// owner and follow its time and lineage fences, never the source's changes.
     pub fn archive_predicate(target: &str, archive: &str, before: &str, lineage: &str) -> String {
         let filter = Self::predicate(archive, lineage);
         format!(
             "(({target}.inherited = 1 AND {archive}.sequence = {target}.archive_sequence)
-            OR ({target}.inherited = 0 AND {archive}.sequence < {before} AND {filter}))"
+            OR (json_extract({archive}.event_json,'$.invocation.session_id') = {target}.owner_session_id
+                AND {archive}.sequence < {before} AND {filter}))"
         )
     }
 

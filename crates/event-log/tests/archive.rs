@@ -454,6 +454,296 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
 }
 
 #[tokio::test]
+async fn inherited_results_prune_and_compact_without_changing_siblings_or_frozen_reads() {
+    use maka_event_log::sessions::{SessionCopy, SessionCopyResult};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("copies.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    log.create_session("session", "source", &json!({}), 1)
+        .await
+        .unwrap();
+    open(&log, "original", false).await;
+    let target = tool(&log, "original", "read", "evidence\n".repeat(2_000)).await;
+    end(&log, "original").await;
+    let revision = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    for id in ["branch", "sibling"] {
+        assert!(matches!(
+            log.copy_session(
+                SessionCopy {
+                    source_session_id: "session".into(),
+                    target_session_id: id.into(),
+                    expected_source_revision: revision,
+                    purpose: maka_runtime::session::CopyPurpose::Branch {
+                        turn_id: None,
+                        side_conversation: false
+                    },
+                },
+                &json!({}),
+                2
+            )
+            .await
+            .unwrap(),
+            SessionCopyResult::Committed(_)
+        ));
+    }
+    let frozen = log
+        .read_model_context("branch", None, 100, 65536)
+        .await
+        .unwrap();
+    // A later source archive is neither visible nor a duplicate in the copy.
+    open(&log, "source-prune", false).await;
+    log.append(&archive("source-prune", &target)).await.unwrap();
+    end(&log, "source-prune").await;
+    let candidates = log
+        .prepare_prune_candidates("branch", None, 10, 65536, None)
+        .await
+        .unwrap();
+    assert_eq!(candidates.candidates.len(), 1);
+    assert_eq!(candidates.candidates[0].event_id, target.event().id);
+    let in_branch = |write: EventWrite| {
+        let mut event = write.event().clone();
+        event.invocation.session_id = "branch".into();
+        EventWrite::plain(event).unwrap()
+    };
+    log.append(&in_branch(event(
+        "branch-prune",
+        Fact::InvocationOpened {
+            configuration: None,
+            input: InvocationInput::Message {
+                content: "continue".into(),
+                source_messages: Vec::new(),
+                request_fingerprint: None,
+            },
+        },
+    )))
+    .await
+    .unwrap();
+    let write = in_branch(archive("branch-prune", &target));
+    log.append(&write).await.unwrap();
+    log.append(&write).await.unwrap();
+    assert!(
+        log.append(&in_branch(archive("branch-prune", &target)))
+            .await
+            .is_err()
+    );
+    log.append(&in_branch(event(
+        "branch-prune",
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Completed,
+        },
+    )))
+    .await
+    .unwrap();
+    let pruned = log
+        .read_model_context("branch", None, 100, 65536)
+        .await
+        .unwrap();
+    assert!(pruned.tail.iter().any(
+        |entry| matches!(entry, ContextEvent::Archived(a) if a.event_id == target.event().id)
+    ));
+    assert!(
+        log.prepare_prune_candidates("branch", None, 10, 65536, None)
+            .await
+            .unwrap()
+            .candidates
+            .is_empty()
+    );
+    assert!(
+        log.read_model_context("sibling", None, 100, 8192)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        log.read_frozen_model_context(&frozen.source_evidence, 100, 65536)
+            .await
+            .unwrap()
+            .effective_source_digest,
+        frozen.effective_source_digest
+    );
+    let Fact::ToolResultArchived { placeholder } = &write.event().fact else {
+        panic!()
+    };
+    let bytes = log
+        .read_archive("branch", &placeholder.identity)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        log.read_archive("sibling", &placeholder.identity)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // Copying the copy freezes its local archive, whose writer is not the original Session.
+    let revision = log
+        .get_session::<serde_json::Value>("branch")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    assert!(matches!(
+        log.copy_session(
+            SessionCopy {
+                source_session_id: "branch".into(),
+                target_session_id: "nested".into(),
+                expected_source_revision: revision,
+                purpose: maka_runtime::session::CopyPurpose::Branch {
+                    turn_id: None,
+                    side_conversation: false
+                },
+            },
+            &json!({}),
+            3
+        )
+        .await
+        .unwrap(),
+        SessionCopyResult::Committed(_)
+    ));
+    let adopted = log
+        .read_model_context("nested", None, 100, 65536)
+        .await
+        .unwrap();
+    assert!(adopted.tail.iter().any(
+        |entry| matches!(entry, ContextEvent::Archived(a) if a.event_id == target.event().id)
+    ));
+    assert_eq!(
+        log.read_archive("nested", &placeholder.identity)
+            .await
+            .unwrap()
+            .unwrap(),
+        bytes
+    );
+
+    log.append(&in_branch(event(
+        "branch-compact",
+        Fact::InvocationOpened {
+            configuration: None,
+            input: InvocationInput::ContextCompact {
+                request_fingerprint: "branch-compact".into(),
+            },
+        },
+    )))
+    .await
+    .unwrap();
+    let source = log
+        .prepare_context_compaction(
+            "branch",
+            Some("branch-compact"),
+            100,
+            65536,
+            &CheckpointMode::Standalone,
+        )
+        .await
+        .unwrap();
+    log.append(&in_branch(request(
+        "branch-compact",
+        "summary",
+        Some(&source),
+    )))
+    .await
+    .unwrap();
+    let output: ModelStep = serde_json::from_value(json!({"parts":[{"kind":"text","text_kind":"text","text":SUMMARY}],"finish_reason":"stop","usage":{}})).unwrap();
+    log.append(&in_branch(event(
+        "branch-compact",
+        Fact::ModelCompleted {
+            step_id: "summary".into(),
+            output: output.clone(),
+        },
+    )))
+    .await
+    .unwrap();
+    let checkpoint = in_branch(event(
+        "branch-compact",
+        Fact::ContextCheckpointRecorded {
+            checkpoint: ContextCheckpoint {
+                mode: CheckpointMode::Standalone,
+                covered_through: source.source_evidence.high_water,
+                source_digest: source.source_evidence.digest,
+                previous_checkpoint_id: None,
+                summary: TextSummary::from_model_step(&output, false).unwrap(),
+                summary_step_id: "summary".into(),
+            },
+        },
+    ));
+    log.append_batch(&[
+        checkpoint.clone(),
+        in_branch(event(
+            "branch-compact",
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::ContextCompactFinished {
+                    outcome: CompactOutcome::Compacted {
+                        checkpoint_id: checkpoint.event().id.clone(),
+                    },
+                },
+            },
+        )),
+    ])
+    .await
+    .unwrap();
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(
+        log.read_model_context("branch", None, 100, 65536)
+            .await
+            .unwrap()
+            .baseline
+            .unwrap()
+            .event_id,
+        checkpoint.event().id
+    );
+    assert_eq!(
+        log.read_model_context("nested", None, 100, 65536)
+            .await
+            .unwrap()
+            .effective_source_digest,
+        adopted.effective_source_digest
+    );
+    assert_eq!(
+        log.read_archive("nested", &placeholder.identity)
+            .await
+            .unwrap()
+            .unwrap(),
+        bytes
+    );
+    assert_eq!(
+        log.read_frozen_model_context(&frozen.source_evidence, 100, 65536)
+            .await
+            .unwrap()
+            .effective_source_digest,
+        frozen.effective_source_digest
+    );
+    // A wrong, but foreign-key-valid, pin must not silently restore raw output.
+    let inspect = rusqlite::Connection::open(&path).unwrap();
+    inspect
+        .execute(
+            "UPDATE session_history_members SET archive_sequence=sequence
+        WHERE session_id='nested' AND archive_sequence IS NOT NULL",
+            [],
+        )
+        .unwrap();
+    assert!(
+        log.read_archive("nested", &placeholder.identity)
+            .await
+            .is_err()
+    );
+    assert!(
+        log.read_model_context("nested", None, 100, 65536)
+            .await
+            .is_err()
+    );
+    assert!(
+        log.read_frozen_model_context(&adopted.source_evidence, 100, 65536)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
 async fn bounded_prune_candidates_do_not_materialize_the_old_tail() {
     let directory = tempfile::tempdir().unwrap();
     let log = EventLog::open(&directory.path().join("large.sqlite"))

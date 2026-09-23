@@ -222,7 +222,6 @@ CREATE UNIQUE INDEX session_revision_family ON session_history_copies(
 CREATE TABLE session_history_members (
     session_id TEXT NOT NULL REFERENCES session_history_copies(session_id),
     sequence INTEGER NOT NULL REFERENCES event_log(sequence),
-    archives_before INTEGER NOT NULL CHECK(archives_before > 0),
     archive_sequence INTEGER REFERENCES event_log(sequence),
     PRIMARY KEY(session_id, sequence)
 );
@@ -236,10 +235,9 @@ CREATE TABLE session_revision_sources (
 
 CREATE VIEW session_history_events AS
     SELECT json_extract(event_json, '$.invocation.session_id') AS owner_session_id,
-           0 AS inherited, NULL AS archive_sequence,
-           9223372036854775807 AS archives_before, e.* FROM runtime_events e
+           0 AS inherited, NULL AS archive_sequence, e.* FROM runtime_events e
     UNION ALL
-    SELECT h.session_id, 1, h.archive_sequence, h.archives_before, e.*
+    SELECT h.session_id, 1, h.archive_sequence, e.*
     FROM session_history_members h JOIN runtime_events e ON e.sequence = h.sequence;
 
 CREATE TABLE session_history_artifacts (
@@ -254,7 +252,8 @@ CREATE TABLE session_history_artifacts (
 CREATE INDEX invocation_sequence ON event_log(invocation_id, sequence);
 
 CREATE UNIQUE INDEX archived_tool_result ON event_log(
-    CAST(json_extract(event_json, '$.fact.placeholder.identity.runtime_event_id') AS TEXT)
+    CAST(json_extract(event_json, '$.fact.placeholder.identity.runtime_event_id') AS TEXT),
+    json_extract(event_json, '$.invocation.session_id')
 ) WHERE kind = 'tool_result_archived';
 
 CREATE INDEX session_event_sequence ON event_log(

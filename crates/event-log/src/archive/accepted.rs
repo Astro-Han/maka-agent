@@ -85,17 +85,14 @@ pub(crate) async fn validate_append(
     .await?
     .ok_or(ArchiveError::SourceMismatch)?;
     validate(&target, placeholder)?;
-    let previous: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE kind = 'tool_result_archived'
-         AND json_extract(event_json, '$.fact.placeholder.identity.runtime_event_id') = ?)",
-    )
-    .bind(&target.event_id)
-    .fetch_one(&mut *connection)
-    .await?;
-    if previous {
+    if selected(connection, &event.invocation.session_id, &target.event_id)
+        .await?
+        .is_some()
+    {
         return Err(StoreError::EventConflict);
     }
     let selection = Selection::for_invocation(connection, &event.invocation).await?;
+    validate_selection(connection, &selection, &target.event_id).await?;
     let baseline = read::latest_selected(connection, &selection, i64::MAX as u64).await?;
     if baseline
         .as_ref()
@@ -137,8 +134,9 @@ pub(crate) async fn find(
     let rows: Vec<(i64, Option<String>,String,String)> = sqlx::query_as(
         "SELECT sequence, CASE WHEN length(CAST(event_json AS BLOB)) <= 32768 THEN event_json END,event_id,invocation_id
          FROM runtime_events WHERE kind = 'tool_result_archived'
-         AND json_extract(event_json, '$.fact.placeholder.identity.runtime_event_id') = ? AND sequence < ? LIMIT 2",
-    ).bind(target_id).bind(before as i64).fetch_all(&mut *connection).await?;
+         AND json_extract(event_json, '$.fact.placeholder.identity.runtime_event_id') = ?1 AND sequence < ?2
+         AND json_extract(event_json, '$.invocation.session_id') = ?3 LIMIT 2",
+    ).bind(target_id).bind(before as i64).bind(session).fetch_all(&mut *connection).await?;
     if rows.len() > 1 {
         return Err(ArchiveError::Corrupt.into());
     }
@@ -168,6 +166,7 @@ pub(crate) async fn find(
         return Err(ArchiveError::Corrupt.into());
     }
     let selection = Selection::for_invocation(connection, &event.invocation).await?;
+    validate_selection(connection, &selection, target_id).await?;
     // Do not recurse into checkpoint proofs: those validate their archive source here.
     let baseline =
         read::latest_record(connection, &selection, sequence_number(sequence)? - 1).await?;
@@ -181,6 +180,25 @@ pub(crate) async fn find(
     }
     validate(&target, &placeholder)?;
     Ok(Some((sequence as u64, placeholder)))
+}
+
+async fn validate_selection(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    event_id: &str,
+) -> Result<(), StoreError> {
+    let filter = Selection::predicate("t", "?2");
+    let visible: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT EXISTS(SELECT 1 FROM runtime_events t WHERE t.event_id=?1 AND {filter})"
+    )))
+    .bind(event_id)
+    .bind(&selection.lineage)
+    .fetch_one(connection)
+    .await?;
+    if !visible {
+        return Err(ArchiveError::SourceMismatch.into());
+    }
+    Ok(())
 }
 
 pub(crate) async fn archived(
@@ -209,69 +227,50 @@ pub(crate) async fn archived(
     }))
 }
 
-enum ArchiveCut {
-    Current,
-    Pinned(Option<u64>),
-}
-
-impl ArchiveCut {
-    async fn resolve(
-        &self,
-        connection: &mut SqliteConnection,
-        target: &target::Target,
-    ) -> Result<Option<ArchivedPlaceholder>, StoreError> {
-        let before = match self {
-            Self::Current => i64::MAX as u64,
-            Self::Pinned(None) => return Ok(None),
-            Self::Pinned(Some(sequence)) => sequence + 1,
-        };
-        let found = find(
-            connection,
-            &target.invocation.session_id,
-            &target.event_id,
-            before,
-        )
-        .await?;
-        if let Self::Pinned(expected) = self
-            && found.as_ref().map(|(sequence, _)| *sequence) != *expected
-        {
-            return Err(ArchiveError::Corrupt.into());
-        }
-        Ok(found.map(|(_, placeholder)| placeholder))
-    }
-}
-
-/// Read ownership is separate from the original execution's append authority.
-/// A copied target sees only the archive identity accepted when it was copied.
-async fn owned_target(
+/// Select the owner's archive or its immutable inherited archive, then verify
+/// against the actual writer. A copied archive may come from an intermediate copy.
+async fn selected(
     connection: &mut SqliteConnection,
     session: &str,
     event_id: &str,
-) -> Result<Option<(target::Target, ArchiveCut)>, StoreError> {
-    let owner: Option<(String, bool, Option<i64>)> = sqlx::query_as(
-        "SELECT json_extract(e.event_json,'$.invocation.session_id'),
-                h.sequence IS NOT NULL, h.archive_sequence
-         FROM runtime_events e LEFT JOIN session_history_members h
-           ON h.sequence=e.sequence AND h.session_id=?1
-         WHERE e.event_id=?2 AND e.kind='tool_settled'
-           AND (json_extract(e.event_json,'$.invocation.session_id')=?1 OR h.sequence IS NOT NULL)",
-    )
-    .bind(session)
-    .bind(event_id)
-    .fetch_optional(&mut *connection)
-    .await?;
-    let Some((source, inherited, archive_sequence)) = owner else {
+) -> Result<Option<ArchivedPlaceholder>, StoreError> {
+    let filter = Selection::archive_predicate("t", "a", "9223372036854775807", "NULL");
+    let rows: Vec<(Option<String>, Option<i64>, Option<i64>)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT json_extract(a.event_json,'$.invocation.session_id'), a.sequence, t.archive_sequence
+         FROM session_history_events t LEFT JOIN runtime_events a
+           ON a.kind='tool_result_archived'
+           AND json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id')=t.event_id
+           AND {filter}
+         WHERE t.owner_session_id=?1 AND t.event_id=?2 LIMIT 2"
+    )))
+        .bind(session)
+        .bind(event_id)
+        .fetch_all(&mut *connection)
+        .await?;
+    if rows.len() > 1 {
+        return Err(ArchiveError::Corrupt.into());
+    }
+    let Some((writer, sequence, pinned)) = rows.into_iter().next() else {
         return Ok(None);
     };
-    let cut = if inherited {
-        ArchiveCut::Pinned(archive_sequence.map(sequence_number).transpose()?)
-    } else {
-        ArchiveCut::Current
+    let (writer, sequence) = match (writer, sequence, pinned) {
+        (Some(writer), Some(sequence), _) => (writer, sequence),
+        (None, None, None) => return Ok(None),
+        _ => return Err(ArchiveError::Corrupt.into()),
     };
-    let target = target::read(connection, &source, event_id)
-        .await?
-        .ok_or(ArchiveError::Corrupt)?;
-    Ok(Some((target, cut)))
+    let (accepted_sequence, placeholder) = find(
+        connection,
+        &writer,
+        event_id,
+        sequence_number(sequence)? + 1,
+    )
+    .await?
+    .ok_or(ArchiveError::Corrupt)?;
+    if accepted_sequence != sequence_number(sequence)? {
+        return Err(ArchiveError::Corrupt.into());
+    }
+    Ok(Some(placeholder))
 }
 
 impl EventLog {
@@ -288,16 +287,14 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    let Some((mut target, cut)) =
-                        owned_target(&mut tx, &session, &event_id).await?
-                    else {
+                    let Some(mut target) = target::read(&mut tx, &session, &event_id).await? else {
                         return Ok(None);
                     };
                     target
                         .projection
                         .validate(&target.invocation.session_id)
                         .map_err(|_| ArchiveError::Corrupt)?;
-                    if let Some(placeholder) = cut.resolve(&mut tx, &target).await? {
+                    if let Some(placeholder) = selected(&mut tx, &session, &event_id).await? {
                         validate(&target, &placeholder)?;
                     }
                     // Verify original evidence before rendering typed media locators.
@@ -375,11 +372,10 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    let Some((target, cut)) = owned_target(&mut tx, &session, &event_id).await?
-                    else {
+                    let Some(target) = target::read(&mut tx, &session, &event_id).await? else {
                         return Ok(None);
                     };
-                    let Some(placeholder) = cut.resolve(&mut tx, &target).await? else {
+                    let Some(placeholder) = selected(&mut tx, &session, &event_id).await? else {
                         return Ok(None);
                     };
                     let body = validate(&target, &placeholder)?;

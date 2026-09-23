@@ -322,6 +322,11 @@ Desktop can attach a previewed, committed text snapshot from another Session on 
 Quotes preserve the source name, capture time and truncation marker through storage and model history.
 They are immutable excerpts, not live links or authorization to read the source.
 
+Branch and revision history freezes inherited archive references. Each Session can prune
+remaining inherited tool results and compact its own context without changing its source,
+siblings or earlier frozen reads. A subsequent copy adopts the parent's current projection;
+archive verification always retains the original tool-call evidence.
+
 ## Conversation recall
 
 `maka.recall` publishes lazy `Recall`, `RecallMore` and `RecallMaterial` through public history
