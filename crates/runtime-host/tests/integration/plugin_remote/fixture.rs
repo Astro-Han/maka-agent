@@ -106,24 +106,39 @@ struct ImportHistory;
 impl Method for ImportHistory {
     fn call(&self, input: Value, caller: Caller) -> BoxFuture<'static, Result<Value, Error>> {
         Box::pin(async move {
-            #[derive(serde::Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Input {
-                path: String,
-                session: String,
-            }
-            let input: Input =
+            let input: ImportAction =
                 serde_json::from_value(input).map_err(|error| Error::Invalid(error.to_string()))?;
-            let transcript = maka_session_import::opencode::read(
-                caller.views.as_ref(),
-                input.path,
-                &input.session,
-            )
-            .await
-            .map_err(|error| Error::Provider(error.to_string()))?;
-            serde_json::to_value(transcript).map_err(|error| Error::Provider(error.to_string()))
+            match input {
+                ImportAction::Read { path, session } => {
+                    let transcript =
+                        maka_session_import::opencode::read(caller.views.as_ref(), path, &session)
+                            .await
+                            .map_err(|error| Error::Provider(error.to_string()))?;
+                    serde_json::to_value(transcript)
+                        .map_err(|error| Error::Provider(error.to_string()))
+                }
+                ImportAction::Catalog { path, query } => {
+                    let page =
+                        maka_session_import::catalog::opencode(caller.views.as_ref(), path, query)
+                            .await
+                            .map_err(|error| Error::Provider(error.to_string()))?;
+                    serde_json::to_value(page).map_err(|error| Error::Provider(error.to_string()))
+                }
+            }
         })
     }
+}
+#[derive(serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+enum ImportAction {
+    Read {
+        path: String,
+        session: String,
+    },
+    Catalog {
+        path: String,
+        query: maka_session_import::catalog::Query,
+    },
 }
 impl Method for Adapter {
     fn call(&self, input: Value, caller: Caller) -> BoxFuture<'static, Result<Value, Error>> {
