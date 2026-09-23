@@ -132,6 +132,8 @@ impl Kind {
 }
 struct Block {
     time: Option<String>,
+    // Imported observations are durable too, but are not local Turn boundaries.
+    branchable: bool,
     revision: Revision,
     kind: Kind,
     text: String,
@@ -384,6 +386,7 @@ impl Transcript {
                     key.clone(),
                     Block {
                         time: None,
+                        branchable: false,
                         revision,
                         kind,
                         text,
@@ -476,6 +479,7 @@ impl Transcript {
                 continue;
             }
             let mut key = MessageKey::durable(row);
+            let branchable = matches!(kind, "user" | "assistant") && row["imported"] != true;
             if kind == "assistant"
                 && let Some(thinking) = row["thinking"]["text"].as_str()
             {
@@ -486,6 +490,7 @@ impl Transcript {
                         Kind::Thinking,
                         || thinking.to_owned().into(),
                     );
+                    self.blocks.get_mut(&key).unwrap().branchable = branchable;
                 }
                 if row["text"]
                     .as_str()
@@ -504,9 +509,13 @@ impl Transcript {
                 "turn_state" | "token_usage" => Kind::Meta,
                 _ => Kind::Other,
             };
-            self.upsert(key, Revision::Durable(*sequence), presentation, || {
-                project(row, i18n, ascii).into()
-            });
+            self.upsert(
+                key.clone(),
+                Revision::Durable(*sequence),
+                presentation,
+                || project(row, i18n, ascii).into(),
+            );
+            self.blocks.get_mut(&key).unwrap().branchable = branchable;
             if matches!(presentation, Kind::User | Kind::Assistant) {
                 let block = self.blocks.get_mut(self.order.last().unwrap()).unwrap();
                 // Durable rows are immutable; do not format all history on every delta.
@@ -1435,6 +1444,23 @@ mod tests {
         assert!(screen.contains("Imported answer"));
         assert!(screen.contains("Source ended without a terminal record."));
         assert!(!view.timing_visible());
+        for key in view.order.clone() {
+            view.select(key);
+            assert!(
+                view.selected_branch_point().is_none(),
+                "imported messages are not executable Turn boundaries"
+            );
+        }
+        let mut local = rows.clone();
+        local.insert(5, json!({"type":"user","turnId":"import-is-just-an-id","id":"local","text":"A local Turn after import"}));
+        view.sync(&local, &[], 0, &locale(), false);
+        draw(&mut view, 80, 24);
+        view.select(view.order.last().unwrap().clone());
+        assert_eq!(
+            view.selected_branch_point(),
+            Some(("import-is-just-an-id", "A local Turn after import")),
+            "use provenance, not an identifier prefix or the whole Session's origin"
+        );
     }
 
     #[test]

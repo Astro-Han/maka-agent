@@ -4668,6 +4668,7 @@ dependencies = [
  "maka-event-log",
  "maka-fs-tools",
  "maka-js-runtime",
+ "maka-plugins",
  "maka-process",
  "maka-protocol",
  "maka-runtime",

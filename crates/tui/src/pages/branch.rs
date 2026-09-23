@@ -195,7 +195,7 @@ impl App {
         if self.chat.view.search.is_some() {
             return None;
         }
-        let (turn, text) = self.chat.view.selected_durable_message()?;
+        let (turn, text) = self.chat.view.selected_branch_point()?;
         let super::sessions::Detail::Ready(item) = &self.sessions.detail else {
             return None;
         };
