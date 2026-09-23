@@ -68,6 +68,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         && !app.interactions.visible
         && app.management.dialog.is_none()
         && !app.branch.visible
+        && !app.recap.visible
         && !app.revision.visible
         && app.attachments.dialog.is_none()
         && app.onboarding.dialog.is_none()
@@ -292,6 +293,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         app.i18n.text("state-closing")
     } else if app.theme.editor.is_some()
         || app.branch.visible
+        || app.recap.visible
         || app.revision.visible
         || app.attachments.dialog.is_some()
         || app.onboarding.dialog.is_some()
@@ -391,6 +393,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         crate::pages::manage::draw(frame, app, area, base);
     } else if app.revision.visible {
         crate::pages::revision::draw(frame, app, area, base);
+    } else if app.recap.visible {
+        crate::pages::recap::draw(frame, app, area, base);
     } else if app.branch.visible {
         crate::pages::branch::draw(frame, app, area, base);
     } else if app.onboarding.dialog.is_some() {
@@ -550,6 +554,7 @@ fn icon(app: &App, action: &Action) -> &'static str {
         Action::Manage(_) => ("⋯", "."),
         Action::Attachment(_) => ("⊕", "+"),
         Action::References => ("▱", "/"),
+        Action::Recap(_) => ("≡", "="),
         Action::Branch(_) => ("↳", "+"),
         Action::Revision(_) => ("↶", "<"),
         Action::Onboard(_) => ("⊕", "+"),
@@ -673,6 +678,7 @@ fn action_label(app: &App, action: &Action) -> String {
         Action::CreateSession => "session-create",
         Action::Manage(command) => command.label(),
         Action::Branch(command) => command.label(),
+        Action::Recap(command) => command.label(),
         Action::Revision(command) => command.label(),
         Action::Onboard(command) => command.label(),
         Action::Project(command) => command.label(),

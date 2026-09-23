@@ -48,6 +48,8 @@ pub struct Snapshot {
     pages: Vec<(Route, crate::navigation::state::Saved)>,
     oauth: Option<crate::pages::manage::oauth::saved::Checkpoint>,
     branch: Option<crate::pages::branch::Checkpoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recap: Option<crate::pages::recap::Checkpoint>,
     revision: Option<crate::pages::revision::Checkpoint>,
 }
 
@@ -83,6 +85,7 @@ impl Snapshot {
             pages: app.saved_pages(),
             oauth: app.management.oauth.checkpoint(),
             branch: app.branch.checkpoint(),
+            recap: app.recap.checkpoint(),
             revision: app.revision.checkpoint(),
         }
     }
@@ -187,6 +190,9 @@ impl Snapshot {
                 return Err("Duplicate revision/composer upload".into());
             }
         }
+        if let Some(recap) = &self.recap {
+            recap.validate(root)?;
+        }
         if let Some(branch) = &self.branch {
             branch.validate(root)?;
         }
@@ -203,6 +209,9 @@ impl Snapshot {
         }
         if let Some(revision) = self.revision {
             app.revision.restore(revision);
+        }
+        if let Some(recap) = self.recap {
+            app.recap.restore(recap);
         }
         if let Some(branch) = self.branch {
             app.branch.restore(branch);

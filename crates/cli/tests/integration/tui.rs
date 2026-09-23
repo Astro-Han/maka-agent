@@ -41,6 +41,7 @@ mod onboarding;
 mod projects;
 mod queue;
 mod reading;
+mod recap;
 mod recovery;
 mod references;
 mod removal;
