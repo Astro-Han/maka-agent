@@ -39,6 +39,7 @@ jiff = "0.2.37"
 maka-skills.workspace = true
 maka-web.workspace = true
 maka-insights.workspace = true
+maka-session-import.workspace = true
 maka-event-log.workspace = true
 maka-config.workspace = true
 maka-js-runtime.workspace = true
@@ -78,7 +79,6 @@ tempfile.workspace = true
 
 [dev-dependencies]
 maka-client.workspace = true
-maka-session-import.workspace = true
 tokio-rustls = { version = "0.26.5", default-features = false, features = ["aws_lc_rs", "tls12"] }
 tempfile.workspace = true
 sqlx.workspace = true

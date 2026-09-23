@@ -79,6 +79,7 @@ impl Plugin for Example {
                             Handler::Method(Arc::new(maka_session_import::remote::Import::new(
                                 host.storage,
                                 host.executions,
+                                host.models,
                             ))),
                         )
                         .requiring_host_paths(),

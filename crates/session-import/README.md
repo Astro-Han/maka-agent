@@ -37,4 +37,8 @@ JSONL reads are bounded: 2 GiB per source prefix, 64 MiB per line, one million l
 
 Source configuration uses revision-checked plugin storage. A prepared import atomically saves its explicit destination and normalized payload; removing or changing a source does not change that intent. Delivery reauthorizes the saved destination, queries the Host receipt, appends only the missing suffix, then publishes. Terminal receipts and payload reclamation commit together. Retrying the same operation never creates another copy.
 
-The typed Remote handler exposes source management, catalogs, preparation, delivery, abandonment and paged copy history. It uses only public plugin storage, read and execution APIs. Canonical publication and receipts remain Host-owned; the Host's history limit includes event envelopes, not just converted record bytes.
+The built-in plugin publishes a Desktop settings page and a standalone `maka.session-import/manage` Remote endpoint. Both use the same typed handler for sources, catalogs, model choices, preparation, delivery, abandonment and paged copy history. All capabilities are public plugin APIs. Canonical publication and receipts remain Host-owned; the Host's history limit includes event envelopes, not just converted record bytes.
+
+The Client requires an explicit destination Host workspace and execution configuration. Failed replies and refreshes retain the operation identity; only a confirmed receipt or explicitly setting the attempt aside clears it. Saved imports remain available after reopening the page or restarting the Host.
+
+Run Client recovery acceptance with `node --test crates/session-import/tests/client.test.mjs` from the repository root.

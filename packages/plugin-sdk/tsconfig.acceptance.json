@@ -14,6 +14,7 @@
     "useUnknownInCatchVariables": false
   },
   "include": [
+    "../../crates/session-import/src/client.tsx",
     "../../crates/insights/src/client.tsx",
     "../../crates/insights/src/client/**/*.ts",
     "../../crates/insights/src/client/**/*.tsx",

@@ -3845,7 +3845,7 @@ for (const reply of processDisclosureMessages) {
         { type: 'tool_start', id: `${call.id}-start`, turnId: reply.turnId!, ts: call.ts, stepId: reply.id, toolUseId: call.id, toolName: call.toolName, args: call.args, activityKind: call.activityKind },
       ], messages: [call],
     }, {
-      events: [result,
+      events: [{ ...result, origin: 'host_sdk' },
         ...(reply.thinking ? [{ ...textEvent, type: 'thinking_complete' as const, id: `${reply.id}-thinking-done`, text: reply.thinking.text }] : []),
         { ...textEvent, type: 'text_complete', id: `${reply.id}-text-done`, text: reply.text },
       ], messages: [result, reply],

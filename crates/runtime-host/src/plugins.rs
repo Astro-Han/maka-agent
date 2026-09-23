@@ -34,6 +34,7 @@ mod process;
 pub(crate) mod recall;
 pub(crate) mod remote;
 pub(crate) mod scheduler;
+pub(crate) mod session_import;
 pub(crate) mod skills;
 pub(crate) mod storage;
 mod terminal;
