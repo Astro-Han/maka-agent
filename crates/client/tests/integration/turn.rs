@@ -24,41 +24,47 @@ use serde_json::json;
 use std::time::Duration;
 
 #[tokio::test]
-async fn batch_and_query_bind_receipts_to_the_exact_turn_without_automatic_replay() {
-    for query in [false, true] {
+async fn starts_and_query_bind_receipts_to_the_exact_turn_without_automatic_replay() {
+    for operation in ["turn.start", "turn.batch.start", "turn.query"] {
         for changed in [None, Some("sessionId"), Some("turnId")] {
             let (client, _notices, mut reader, mut writer) =
                 pair_with(maka_client::Operations).await;
             let input = json!({"sessionId":"session","turnId":"turn","messages":[
                 {"content":{"text":"first"}}, {"content":{"text":"second"},"inputSelections":{"example":["chosen"]}}
             ]});
+            let input = if operation == "turn.start" {
+                json!({"sessionId":"session","turnId":"turn","content":{"text":"first"}})
+            } else {
+                input
+            };
             let task = tokio::spawn({
                 let client = client.clone();
-                let input = decode_turn_batch_start_input(&input).unwrap();
+                let input = input.clone();
                 async move {
-                    if query {
+                    if operation == "turn.query" {
                         client
                             .query_turn(TurnQueryInput {
-                                session_id: input.session_id,
-                                turn_id: input.turn_id,
+                                session_id: "session".into(),
+                                turn_id: "turn".into(),
                             })
                             .await
                             .map(|_| ())
+                    } else if operation == "turn.start" {
+                        client
+                            .start_turn(decode_turn_start_input(&input).unwrap())
+                            .await
+                            .map(|_| ())
                     } else {
-                        client.start_turn_batch(input).await.map(|_| ())
+                        client
+                            .start_turn_batch(decode_turn_batch_start_input(&input).unwrap())
+                            .await
+                            .map(|_| ())
                     }
                 }
             });
             let frame = reader.read().await.unwrap().unwrap();
-            assert_eq!(
-                frame["operation"],
-                if query {
-                    "turn.query"
-                } else {
-                    "turn.batch.start"
-                }
-            );
-            if !query {
+            assert_eq!(frame["operation"], operation);
+            if operation != "turn.query" {
                 assert_eq!(frame["input"], input);
             }
             let mut turn =
@@ -66,7 +72,7 @@ async fn batch_and_query_bind_receipts_to_the_exact_turn_without_automatic_repla
             if let Some(field) = changed {
                 turn[field] = json!("other");
             }
-            let result = if query {
+            let result = if operation == "turn.query" {
                 turn
             } else {
                 json!({"kind":"started","turn":turn,"preparation":[]})

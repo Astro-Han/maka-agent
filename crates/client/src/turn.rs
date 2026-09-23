@@ -21,6 +21,28 @@ use crate::{Client, ClientError, RequestFailure};
 use maka_protocol::{Operation, turn::*};
 
 impl Client {
+    /// Start once with the caller's stable identity; unknown outcomes are not retried.
+    pub async fn start_turn(
+        &self,
+        input: TurnStartInput,
+    ) -> Result<TurnStartResult, RequestFailure> {
+        let output = self
+            .request(
+                Operation::TurnStart,
+                serde_json::to_value(&input).expect("wire input"),
+            )
+            .await?;
+        if let Ok(output) = decode_turn_start_result(&output)
+            && assert_start_output_for_input(&input, &output).is_ok()
+        {
+            return Ok(output);
+        }
+        self.disconnect();
+        Err(RequestFailure::Unknown(ClientError::Protocol(
+            "Start receipt does not match the requested Turn".into(),
+        )))
+    }
+
     /// Submit a frozen batch once. Unknown outcomes require an explicit query;
     /// this method never retries or allocates another Turn identity.
     pub async fn start_turn_batch(

@@ -103,6 +103,10 @@ impl OperationRegistry for Operations {
             )?)
             .map_err(|error| maka_protocol::ProtocolError::invalid(error.to_string()));
         }
+        if operation == Operation::TurnStart {
+            return serde_json::to_value(maka_protocol::turn::decode_turn_start_input(value)?)
+                .map_err(|error| maka_protocol::ProtocolError::invalid(error.to_string()));
+        }
         if operation == Operation::TurnQuery {
             maka_protocol::turn::decode_turn_query_input(value)?;
             return Ok(value.clone());
@@ -184,7 +188,7 @@ impl OperationRegistry for Operations {
             maka_protocol::turn::decode_turn_snapshot(value)?;
             return Ok(value.clone());
         }
-        if operation == Operation::TurnBatchStart {
+        if matches!(operation, Operation::TurnStart | Operation::TurnBatchStart) {
             maka_protocol::turn::decode_turn_start_result(value)?;
             return Ok(value.clone());
         }
@@ -258,7 +262,7 @@ impl OperationRegistry for Operations {
         if operation == Operation::TurnStop {
             return Some(maka_protocol::turn::STOP_ERRORS);
         }
-        if operation == Operation::TurnBatchStart {
+        if matches!(operation, Operation::TurnStart | Operation::TurnBatchStart) {
             return Some(maka_protocol::turn::START_ERRORS);
         }
         if operation == Operation::TurnQuery {

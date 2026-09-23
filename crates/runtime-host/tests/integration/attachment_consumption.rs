@@ -18,6 +18,7 @@
  */
 
 #![cfg(unix)]
+use super::support::attachment_client::NativeHost;
 use maka_event_log::{
     EventLog,
     root::{ROOT_DATABASE, RootNamespaces, RootOwner},
@@ -27,12 +28,11 @@ use maka_runtime::{
     input::InvocationInput,
     tool_output::ToolOutput,
 };
-use maka_runtime_host::server::{Host, local::LocalListener};
-use std::{os::unix::fs::PermissionsExt, path::Path, process::Command, time::Duration};
-use tokio_util::sync::CancellationToken;
+use std::{os::unix::fs::PermissionsExt, time::Duration};
+mod workflow;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn original_client_consumes_uploads_with_selected_vision_and_reopens_exact_facts() {
+async fn native_client_consumes_uploads_with_selected_vision_and_reopens_exact_facts() {
     let directory = tempfile::Builder::new()
         .prefix("maka-attachments-")
         .permissions(std::fs::Permissions::from_mode(0o700))
@@ -44,60 +44,22 @@ async fn original_client_consumes_uploads_with_selected_vision_and_reopens_exact
     };
     let root = directory.path().join("root");
     let owner = RootOwner::create(&root, &ns).unwrap();
-    let root_id = owner.root_id().to_owned();
     drop(owner);
     let mut original = None;
+    let mut saved = Vec::new();
     for reopened in [false, true] {
-        let host = Host::open(RootOwner::open(&root, &ns).unwrap())
-            .await
-            .unwrap();
-        let socket = directory.path().join("h.sock");
-        let cancellation = CancellationToken::new();
-        let server = tokio::spawn(
-            LocalListener::bind(&socket)
-                .unwrap()
-                .serve(host, cancellation.clone()),
-        );
-        let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs");
-        let workspace = directory.path().to_owned();
-        let expected_id = root_id.clone();
-        let client = tokio::task::spawn_blocking(move || {
-            let mut command = Command::new("node");
-            command
-                .arg(probe)
-                .arg("--socket")
-                .arg(socket)
-                .args(["--root-id", &expected_id])
-                .arg("--attachment-workspace")
-                .arg(workspace);
-            if reopened {
-                command.arg("--reopened");
-            }
-            command.output().unwrap()
-        });
-        let output = tokio::time::timeout(Duration::from_secs(30), client)
-            .await
-            .unwrap()
-            .unwrap();
-        cancellation.cancel();
-        tokio::time::timeout(Duration::from_secs(5), server)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "stdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            String::from_utf8_lossy(&output.stdout).contains(if reopened {
-                "attachment-consumption-reopened"
-            } else {
-                "attachment-consumption-passed"
-            })
-        );
+        let native = NativeHost::open(
+            RootOwner::open(&root, &ns).unwrap(),
+            &directory.path().join("h.sock"),
+        )
+        .await;
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            workflow::verify(&native.client, directory.path(), reopened, &mut saved),
+        )
+        .await
+        .unwrap();
+        native.close().await;
         let log = EventLog::open(&root.join(ROOT_DATABASE)).await.unwrap();
         let prefix = log.prefix(200, 2 * 1024 * 1024).await.unwrap();
         let mut opened = 0;

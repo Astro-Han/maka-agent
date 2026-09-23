@@ -19,6 +19,7 @@
 
 #![cfg(unix)]
 
+use super::support::attachment_client::NativeHost;
 use maka_event_log::{
     EventLog,
     root::{RootNamespaces, RootOwner},
@@ -27,9 +28,8 @@ use maka_runtime::{
     event::{Fact, ToolOutcome},
     tool_output::{DurableToolProjection, ToolOutput},
 };
-use maka_runtime_host::server::{Host, local::LocalListener};
-use std::{os::unix::fs::PermissionsExt, path::Path, process::Command, time::Duration};
-use tokio_util::sync::CancellationToken;
+use std::{os::unix::fs::PermissionsExt, time::Duration};
+mod workflow;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn large_attachment_results_preserve_raw_without_poisoning_model_history() {
@@ -46,57 +46,23 @@ async fn large_attachment_results_preserve_raw_without_poisoning_model_history()
     let workspace = directory.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
     let owner = RootOwner::create(&root, &ns).unwrap();
-    let root_id = owner.root_id().to_owned();
     drop(owner);
     let mut original = None;
+    let mut saved = Vec::new();
+    let model = workflow::model().await;
     for reopened in [false, true] {
-        let host = Host::open(RootOwner::open(&root, &ns).unwrap())
-            .await
-            .unwrap();
-        let socket = directory.path().join("h.sock");
-        let listener = LocalListener::bind(&socket).unwrap();
-        let cancellation = CancellationToken::new();
-        let server = tokio::spawn(listener.serve(host, cancellation.clone()));
-        let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs");
-        let client_workspace = workspace.clone();
-        let expected_id = root_id.clone();
-        let client = tokio::task::spawn_blocking(move || {
-            let mut command = Command::new("node");
-            command
-                .arg(probe)
-                .arg("--socket")
-                .arg(socket)
-                .args(["--root-id", &expected_id])
-                .arg("--large-output-workspace")
-                .arg(client_workspace);
-            if reopened {
-                command.arg("--reopened");
-            }
-            command.output().unwrap()
-        });
-        let output = tokio::time::timeout(Duration::from_secs(150), client)
-            .await
-            .unwrap()
-            .unwrap();
-        cancellation.cancel();
-        tokio::time::timeout(Duration::from_secs(10), server)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "stdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            String::from_utf8_lossy(&output.stdout).contains(if reopened {
-                "large-output-reopened"
-            } else {
-                "large-output-passed"
-            })
-        );
+        let mut native = NativeHost::open(
+            RootOwner::open(&root, &ns).unwrap(),
+            &directory.path().join("h.sock"),
+        )
+        .await;
+        tokio::time::timeout(
+            Duration::from_secs(150),
+            workflow::verify(&mut native, &workspace, &model.url, reopened, &mut saved),
+        )
+        .await
+        .unwrap();
+        native.close().await;
 
         let log = EventLog::open(&root.join(maka_event_log::root::ROOT_DATABASE))
             .await
@@ -180,4 +146,5 @@ async fn large_attachment_results_preserve_raw_without_poisoning_model_history()
         }
         log.close().await.unwrap();
     }
+    model.finish().await;
 }

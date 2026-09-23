@@ -56,15 +56,12 @@ await withSourceBundle(fileURLToPath(new URL(entry, import.meta.url)), (bundle, 
           ? 150000
           : process.argv.includes('--message-queue-workspace')
             ? 55000
-            : process.argv.includes('--large-output-workspace')
-              ? 120000
-              : process.argv.includes('--sandbox-workspace') ||
-                  process.argv.includes('--shell-workspace') ||
-                  process.argv.includes('--onboarding-workspace') ||
-                  (process.argv.includes('--native-managed') &&
-                    process.argv.includes('--management'))
-                ? 45000
-                : 15000,
+            : process.argv.includes('--sandbox-workspace') ||
+                process.argv.includes('--shell-workspace') ||
+                process.argv.includes('--onboarding-workspace') ||
+                (process.argv.includes('--native-managed') && process.argv.includes('--management'))
+              ? 45000
+              : 15000,
   });
   if (child.error) throw child.error;
   if (child.signal) throw new Error(`Original-client subprocess terminated by ${child.signal}`);

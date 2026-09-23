@@ -60,10 +60,8 @@ import { verifyPruning } from './client-pruning-workflow.mjs';
 import { verifyContextCompact } from './client-context-compact-workflow.mjs';
 import { verifyResume } from './client-resume-workflow.mjs';
 import { verifyWorkspaceImage } from './client-workspace-image-workflow.mjs';
-import { verifyLargeOutput } from './client-large-output-workflow.mjs';
 import { verifyCompatibleChat } from './client-compatible-workflow.mjs';
 import { verifyRelayOptions } from './client-relay-workflow.mjs';
-import { verifyConsumption } from './client-attachment-workflow.mjs';
 
 const workflows = {
   'resume-workspace': { verify: verifyResume, marker: 'resume' },
@@ -71,10 +69,8 @@ const workflows = {
   'pruning-workspace': { verify: verifyPruning, marker: 'pruning' },
   'context-compact-workspace': { verify: verifyContextCompact, marker: 'context-compact' },
   'workspace-image-workspace': { verify: verifyWorkspaceImage, marker: 'workspace-image' },
-  'large-output-workspace': { verify: verifyLargeOutput, marker: 'large-output' },
   'compatible-workspace': { verify: verifyCompatibleChat, marker: 'compatible-options' },
   'relay-workspace': { verify: verifyRelayOptions, marker: 'relay-options' },
-  'attachment-workspace': { verify: verifyConsumption, marker: 'attachment-consumption' },
 };
 
 async function main() {
@@ -162,13 +158,11 @@ async function main() {
         ? 140000
         : values['message-queue-workspace']
           ? 45000 // Includes 1,030 serial durable commands; each request still has its own deadline.
-          : values['large-output-workspace']
-            ? 120000
-            : values['shell-workspace']
-              ? 30000
-              : selected.length
-                ? 15000
-                : 10000,
+          : values['shell-workspace']
+            ? 30000
+            : selected.length
+              ? 15000
+              : 10000,
   );
   try {
     ({ connection, transport } = await openClient(values, input));

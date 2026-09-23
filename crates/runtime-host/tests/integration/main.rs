@@ -96,6 +96,8 @@ mod workhub_public;
 mod workspace_images;
 
 mod support {
+    #[cfg(unix)]
+    pub(crate) mod attachment_client;
     pub(crate) mod client_probe;
     #[cfg(unix)]
     pub(crate) mod execution_drain;
