@@ -24,7 +24,9 @@ use maka_plugins::{
     fiber::Fiber,
     http,
     model::{Connect, Credentials, Error as ModelError, Socket, Transport},
-    provider::{Binding, Connection, Context, Error, authentication::Credential},
+    provider::{
+        Binding, Connection, Context, Error, Provider, Resolve, authentication::Credential,
+    },
 };
 use maka_providers::codex::Codex;
 use serde_json::json;
@@ -32,11 +34,15 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
+#[path = "codex/inventory.rs"]
+mod inventory;
+
 struct Exchange {
     started: Notify,
     release: Notify,
     requests: Mutex<Vec<http::Request>>,
     fail: bool,
+    response: serde_json::Value,
 }
 impl Transport for Exchange {
     fn identity(&self) -> u64 {
@@ -51,10 +57,14 @@ impl Transport for Exchange {
                 return Err(ModelError::Adapter("reply lost".into()));
             }
             Ok(http::Response {
-                head: http::Head { status: 200, url: "https://auth.openai.com/oauth/token".into(), headers: vec![] },
-                body: Arc::new(Body(Mutex::new(Some(serde_json::to_vec(&json!({
-                    "access_token": "replacement-access", "refresh_token": "replacement-refresh", "expires_in": 3600,
-                })).unwrap())))),
+                head: http::Head {
+                    status: 200,
+                    url: "https://auth.openai.com/oauth/token".into(),
+                    headers: vec![],
+                },
+                body: Arc::new(Body(Mutex::new(Some(
+                    serde_json::to_vec(&self.response).unwrap(),
+                )))),
             })
         })
     }
@@ -119,6 +129,11 @@ async fn sent_refresh_settles_after_cancellation_and_unknown_reply_is_never_retr
                 release: Notify::new(),
                 requests: Mutex::new(vec![]),
                 fail,
+                response: json!({
+                    "access_token": "replacement-access",
+                    "refresh_token": "replacement-refresh",
+                    "expires_in": 3600,
+                }),
             });
             let cancellation = CancellationToken::new();
             let context = Context {

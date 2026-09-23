@@ -310,13 +310,6 @@ impl Request<'_> {
                 reasoning.insert(target.into(), value.clone());
             }
         }
-        if reasoning
-            .get("effort")
-            .is_some_and(|effort| effort != "none")
-            && !reasoning.contains_key("summary")
-        {
-            reasoning.insert("summary".into(), json!("detailed"));
-        }
         if !reasoning.is_empty() {
             object.insert("reasoning".into(), Value::Object(reasoning));
         }

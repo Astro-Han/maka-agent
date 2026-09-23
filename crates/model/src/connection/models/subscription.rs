@@ -17,82 +17,8 @@
  * under the License.
  */
 
-use super::{
-    Failure, copy_bool, copy_number, js_truthy, js_whitespace, object_array, optional_array,
-    token_limit,
-};
+use super::{Failure, copy_number, js_truthy, object_array, optional_array, token_limit};
 use serde_json::{Map, Value, json};
-
-pub(super) fn codex(root: &Value) -> Result<Vec<Value>, Failure> {
-    // Subscription inventories require their envelope; a missing field is not an empty list.
-    let rows = root.get("models").ok_or(Failure::InvalidResponse)?;
-    let mut rows: Vec<_> = object_array(Some(rows))?
-        .iter()
-        .filter(|row| {
-            row["slug"]
-                .as_str()
-                .is_some_and(|id| !id.trim_matches(js_whitespace).is_empty())
-                && !row["visibility"].as_str().is_some_and(|s| {
-                    matches!(
-                        s.trim_matches(js_whitespace).to_ascii_lowercase().as_str(),
-                        "hide" | "hidden"
-                    )
-                })
-        })
-        .collect();
-    let priority = |row: &Value| row["priority"].as_f64().unwrap_or(10_000.0);
-    rows.sort_by(|a, b| {
-        priority(a)
-            .partial_cmp(&priority(b))
-            .expect("finite JSON numbers")
-    });
-    rows.into_iter()
-        .map(|row| {
-            let mut model = Map::new();
-            model.insert("id".into(), row["slug"].clone());
-            if let Some(name) = row.get("display_name").and_then(Value::as_str) {
-                model.insert("displayName".into(), name.into());
-            }
-            if row["context_window"].as_f64().is_some_and(|n| n > 0.0) {
-                copy_number(row.get("context_window"), &mut model, "contextWindow");
-            }
-            let mut capabilities = Map::new();
-            if let Some(levels) = row.get("supported_reasoning_levels") {
-                let advertised = object_array(Some(levels))?;
-                let levels: Vec<_> = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
-                    .into_iter()
-                    .filter(|level| {
-                        advertised.iter().any(|entry| {
-                            entry["effort"] == *level
-                                || (*level == "off" && entry["effort"] == "none")
-                        })
-                    })
-                    .collect();
-                capabilities.insert("reasoning".into(), (!levels.is_empty()).into());
-                model.insert("thinkingLevels".into(), json!(levels));
-            }
-            copy_bool(
-                row.get("supports_reasoning_summary_parameter")
-                    .or_else(|| row.get("supports_reasoning_summaries")),
-                &mut model,
-                "supportsReasoningSummary",
-            );
-            if let Some(input) = row.get("input_modalities") {
-                let input = optional_array(Some(input))?;
-                capabilities.insert("vision".into(), input.iter().any(|v| v == "image").into());
-            }
-            copy_bool(
-                row.get("supports_parallel_tool_calls"),
-                &mut capabilities,
-                "parallelToolCalls",
-            );
-            if !capabilities.is_empty() {
-                model.insert("capabilities".into(), Value::Object(capabilities));
-            }
-            Ok(Value::Object(model))
-        })
-        .collect()
-}
 
 pub(super) fn copilot(root: &Value) -> Result<Vec<Value>, Failure> {
     let rows = object_array(Some(root.get("data").ok_or(Failure::InvalidResponse)?))?;
@@ -186,47 +112,4 @@ fn blocked_by_policy(row: &Value) -> bool {
             row["policy"]["state"].as_str(),
             Some("disabled" | "unconfigured")
         )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use maka_runtime::{configuration::ModelInfo, execution::ThinkingLevel};
-
-    #[test]
-    fn codex_preserves_advertised_reasoning_without_guessing_unknown_efforts() {
-        let source = json!({"models":[{
-            "slug":"future-codex", "display_name":"Future Codex", "context_window":272000,
-            "supported_reasoning_levels":[{"effort":"high"},{"effort":"low"},
-                {"effort":"low"},{"effort":"future-level"}],
-            "supports_reasoning_summaries":true, "supports_reasoning_summary_parameter":false,
-            "input_modalities":["text","image"], "supports_parallel_tool_calls":true
-        }, {"slug":"plain", "supported_reasoning_levels":[]}, {"slug":"unknown"}]});
-        let rows = codex(&source).unwrap();
-        let model: ModelInfo = serde_json::from_value(rows[0].clone()).unwrap();
-        model.validate().unwrap();
-        assert_eq!(
-            model.thinking_levels,
-            Some(vec![ThinkingLevel::Low, ThinkingLevel::High])
-        );
-        assert_eq!(model.supports_reasoning_summary, Some(false));
-        assert_eq!(model.capabilities.unwrap().vision, Some(true));
-        assert_eq!(model.display_name.as_deref(), Some("Future Codex"));
-        assert_eq!(rows[1]["thinkingLevels"], json!([]));
-        assert!(rows[2].get("thinkingLevels").is_none());
-        let mut duplicate = rows[0].clone();
-        duplicate["thinkingLevels"] = json!(["low", "low"]);
-        assert!(
-            serde_json::from_value::<ModelInfo>(duplicate)
-                .unwrap()
-                .validate()
-                .is_err()
-        );
-        for invalid in [Value::Null, json!([{"effort":"invalid"}, 1])] {
-            assert!(
-                codex(&json!({"models":[{"slug":"bad","supported_reasoning_levels":invalid}]}))
-                    .is_err()
-            );
-        }
-    }
 }
