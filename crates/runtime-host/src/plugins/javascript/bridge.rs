@@ -273,7 +273,7 @@ impl State {
                 let call = self.calls.get(&input.authority)?;
                 encode(self.history.sources(call, input.input).await?)
             }
-            Request::HistoryCopy(input) => {
+            Request::HistoryCopyMaterial(input) => {
                 let call = self.calls.get(&input.authority)?;
                 let target = self
                     .execution_handles
@@ -289,6 +289,17 @@ impl State {
                 )
             }
             Request::ResolveModel(input) => encode(self.models.resolve(input).await?),
+            Request::HistoryCopySession(input) => {
+                let call = self.calls.get(&input.authority)?;
+                let target = self
+                    .execution_handles
+                    .lock()
+                    .unwrap()
+                    .get(&input.target_handle)
+                    .cloned()
+                    .ok_or_else(|| Error::invalid("execution capability is closed"))?;
+                encode(self.history.copy_session(call, target, input.input).await?)
+            }
             Request::SearchModels(input) => encode(self.models.search(input).await?),
             Request::SearchExecutors(input) => encode(self.executors.search(input).await?),
             Request::Revision(input) => {

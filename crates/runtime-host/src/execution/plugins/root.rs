@@ -17,8 +17,11 @@
  * under the License.
  */
 
-use super::{BoundCommands, ChildSession, Error, Executions, Grant, SessionConfiguration, storage};
+use super::{
+    BoundCommands, ChildSession, Context, Error, Executions, Grant, SessionConfiguration, storage,
+};
 use crate::session::PreparedSession;
+use maka_plugins::session::history::{CopyResult, CopySource};
 use maka_plugins::{
     authorization::Boundary,
     execution::{CreateRoot, RootApproval, SessionBoundary, Target},
@@ -29,6 +32,12 @@ use maka_protocol::session::{
 use maka_runtime::execution::{SandboxMode, WorkspaceIdentity, WorkspaceTarget};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+
+pub(super) struct HistorySeed {
+    pub input: CopySource,
+    pub call: maka_plugins::call::Scope,
+    pub owner: Context,
+}
 
 #[derive(Clone, serde::Serialize)]
 pub(super) struct RootGrant {
@@ -248,6 +257,17 @@ impl BoundCommands {
         Ok(())
     }
     pub(super) async fn root(&self, request: CreateRoot) -> Result<ChildSession, Error> {
+        match self.root_with_history(request, None).await? {
+            CopyResult::Committed { session } => Ok(session),
+            CopyResult::SourceRevisionConflict { .. } => Err(Error::Conflict),
+        }
+    }
+
+    pub(super) async fn root_with_history(
+        &self,
+        request: CreateRoot,
+        history: Option<HistorySeed>,
+    ) -> Result<CopyResult, Error> {
         request
             .validate()
             .map_err(|error| Error::Invalid(error.to_string()))?;
@@ -267,7 +287,7 @@ impl BoundCommands {
         let fingerprint = format!(
             "sha256:{:x}",
             Sha256::digest(
-                serde_json::to_vec(&(approval, &request))
+                serde_json::to_vec(&(approval, &request, history.as_ref().map(|seed| &seed.input)))
                     .map_err(|error| Error::Invalid(error.to_string()))?
             )
         );
@@ -275,6 +295,32 @@ impl BoundCommands {
         let gate = host.interactions.own_admission().await;
         self.authorize_origin(&host).await?;
         recheck_project(&host, observed_project).await?;
+        let history_lease = history
+            .as_ref()
+            .map(|seed| seed.owner.admit().map_err(|_| Error::Revoked))
+            .transpose()?;
+        let existing = host
+            .log
+            .probe_session_create::<SessionConfiguration>(&id, &fingerprint)
+            .await
+            .map_err(storage)?;
+        if existing.is_none()
+            && let Some(seed) = &history
+        {
+            host.check_history_target(&seed.call, &seed.input.session_id)
+                .await?;
+            let source = host
+                .log
+                .get_session::<SessionConfiguration>(&seed.input.session_id)
+                .await
+                .map_err(storage)?
+                .ok_or(Error::NotFound)?;
+            if source.configuration.workspace.host_cwd != approval.workspace.host_cwd {
+                return Err(Error::Invalid(
+                    "copied workspace references require the same destination workspace".into(),
+                ));
+            }
+        }
         let approval = approval.clone();
         let worker = host.clone();
         let grants = self.grants.clone();
@@ -286,11 +332,6 @@ impl BoundCommands {
                 if !worker.accepting() {
                     return Err(Error::Draining);
                 }
-                let existing = worker
-                    .log
-                    .probe_session_create::<SessionConfiguration>(&id, &fingerprint)
-                    .await
-                    .map_err(storage)?;
                 let expected =
                     configuration(&worker, &id, &request, &approval, existing.is_none()).await?;
                 let record = match existing {
@@ -299,24 +340,30 @@ impl BoundCommands {
                         if submission_stop.is_cancelled() {
                             return Err(Error::Revoked);
                         }
-                        let record = worker
-                            .log
-                            .create_plugin_session(
-                                &maka_event_log::sessions::PluginSession {
-                                    session_id: id.clone(),
-                                    creator: namespace.clone(),
-                                    fingerprint: fingerprint.clone(),
-                                    managed: request.managed,
-                                    authority_session_id: approval
-                                        .source
-                                        .as_ref()
-                                        .map(|source| source.session_id.clone()),
-                                },
-                                &expected,
-                                now()?,
-                            )
-                            .await
-                            .map_err(storage)?;
+                        let origin = maka_event_log::sessions::PluginSession {
+                            session_id: id.clone(),
+                            creator: namespace.clone(),
+                            fingerprint: fingerprint.clone(),
+                            managed: request.managed,
+                            authority_session_id: approval.source.as_ref().map(|source| source.session_id.clone()),
+                        };
+                        let record = if let Some(seed) = &history {
+                            match worker.log.copy_plugin_session(
+                                maka_runtime::session::CopyRequest {
+                                    source_session_id: seed.input.session_id.clone(),
+                                    target_session_id: id.clone(),
+                                    expected_source_revision: seed.input.expected_revision,
+                                    purpose: seed.input.purpose.clone(),
+                                }, &expected, now()?, origin,
+                            ).await.map_err(storage)? {
+                                maka_event_log::sessions::SessionCopyResult::Committed(record) => *record,
+                                maka_event_log::sessions::SessionCopyResult::SourceRevisionConflict { expected, actual } => {
+                                    return Ok(CopyResult::SourceRevisionConflict { expected_revision: expected, actual_revision: actual });
+                                }
+                            }
+                        } else {
+                            worker.log.create_plugin_session(&origin, &expected, now()?).await.map_err(storage)?
+                        };
                         if worker.catalog.publish_session(&id).await.is_err() {
                             worker.begin_drain();
                         }
@@ -360,7 +407,7 @@ impl BoundCommands {
                         cwd: expected.workspace.host_cwd,
                     },
                 );
-                Ok(ChildSession { session_id: id })
+                Ok(CopyResult::Committed { session: ChildSession { session_id: id } })
             }
             .await;
             if matches!(result, Err(Error::OutcomeUnknown(_))) {
@@ -368,6 +415,7 @@ impl BoundCommands {
             }
             drop(gate);
             drop(lease);
+            drop(history_lease);
             let _ = send.send(result);
         });
         receive
@@ -505,8 +553,7 @@ async fn configuration(
             Target::Executor { .. } => Default::default(),
         },
         tool_profile: None,
-        // The explicit Host grant supplies the default to bind below. The
-        // interactive create codec restricts Explore to UI-specific modes.
+        // bind below uses the explicit root settings, never global defaults.
         sandbox_mode: None,
         approval_policy: Some(settings.approval_policy),
         collaboration_mode: Some(settings.collaboration_mode),

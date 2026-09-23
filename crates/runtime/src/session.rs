@@ -50,7 +50,12 @@ impl std::str::FromStr for CopyState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum CopyPurpose {
     Branch {
         /// None captures all current history, including later compaction facts.

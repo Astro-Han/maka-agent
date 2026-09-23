@@ -87,6 +87,7 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 - `call.history.list` 使用相同目录格式，包含归档状态和最近消息时间。已准入 Agent 调用可跨 Session 读取受信任 Host profile；Remote／后台调用需要相应范围的 `read_history` 授权。`read({ sessionId, through?, cursor? })` 返回准备进度或固定日志水位下的 UTF-8 文本分块，沿返回的水位和游标读取至 `next` 为 null。每次读取检查当前访问权和来源是否存在，不授予执行权。排序与片段组装属于消费插件。
 - Session 范围的执行命令使用稳定 operation ID：相同内容重试返回原收据，内容变化则冲突。profile Entry 不会自动获得 Session 权限。
 - `call.history.sources({ sessionId, turnId })` 按顺序读取准备前的原始输入，包括已接受的队列编辑和自有附件。最多返回 64 条消息／64 KiB 文本，超限报错，不静默截断。它们不是合并展示行或准入证明；重新提交须使用新身份并重新准备。
+- `call.history.copySession(target, { source, root })` 使用独立的根会话创建能力建立自有历史副本。目标须使用同一工作区；受管理来源只能由所属包／作用域复制。持久保存 operation ID 和源 revision 以精确重试；`target.restoreRoot` 可恢复已接受目标，不重放创建。继承历史不赋予源执行权限。
 - `executions.submit({ orchestrationMode })` 仅选择该次执行的模式，不改变 Session 默认值。`query()` 的 `attentionId` 标识当前阻塞交互集合或交接暂停，不随无关日志写入变化。
 - `call.clients.tools()` 仅列出调用准入时冻结的客户端工具；`call.clients.call({ name, input })` 复用 Host 权限、审批／表单、取消和持久化结算。Model 与 Executor 遵守同一边界，后续发布能力或放宽权限不会扩张它。
 - 存储按包和范围隔离，提供 CAS revision 与原子批次。删除保留 revision；业务迁移由插件负责。

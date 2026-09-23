@@ -24,6 +24,54 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub use maka_runtime::message::EditableMessage;
+pub use maka_runtime::session::CopyPurpose;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CopySource {
+    pub session_id: String,
+    pub expected_revision: u64,
+    pub purpose: CopyPurpose,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CopySession {
+    pub source: CopySource,
+    pub root: crate::execution::CreateRoot,
+}
+impl CopySession {
+    pub fn validate(&self) -> Result<(), CommandError> {
+        self.root
+            .validate()
+            .map_err(|error| CommandError::Invalid(error.to_string()))?;
+        crate::name(&self.source.session_id)
+            .map_err(|error| CommandError::Invalid(error.to_string()))?;
+        if self.source.expected_revision == 0 || self.source.expected_revision >= 1 << 53 {
+            return Err(CommandError::Invalid(
+                "invalid source Session revision".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum CopyResult {
+    Committed {
+        session: crate::execution::ChildSession,
+    },
+    SourceRevisionConflict {
+        expected_revision: u64,
+        actual_revision: u64,
+    },
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -139,6 +187,14 @@ pub enum Page {
 /// Remote/background calls retain their actual principal's ReadHistory scope.
 /// Every page rechecks current access and Session existence, including old fences.
 pub trait History: Send + Sync {
+    /// A new root with owned immutable history. Source read access does not grant
+    /// destination creation; both capabilities and the source workspace are checked.
+    fn copy_session(
+        &self,
+        call: Scope,
+        target: Arc<dyn crate::execution::Commands>,
+        input: CopySession,
+    ) -> BoxFuture<'_, Result<CopyResult, CommandError>>;
     /// Ordered preparation-free opening sources of a Turn, not its aggregated UI row.
     /// Their identities and intent grant no execution authority.
     fn sources(

@@ -57,6 +57,31 @@ export type HistoryPage =
       readonly next: HistoryCursor | null;
     };
 export interface History {
+  /** Copy history into an independently authorized root in the same workspace.
+   * Persist the request's operation ID and source revision for exact retries.
+   * restoreRoot recovers an accepted target without replaying its creation.
+   */
+  copySession(
+    target: import('./execution.js').Executions,
+    input: {
+      source: {
+        sessionId: string;
+        expectedRevision: number;
+        purpose:
+          | { kind: 'branch'; turnId?: string | null; sideConversation: boolean }
+          | { kind: 'empty_side_conversation' }
+          | { kind: 'revision'; turnId: string };
+      };
+      root: Parameters<import('./execution.js').Executions['createRoot']>[0];
+    },
+  ): Promise<
+    | { readonly kind: 'committed'; readonly session: { readonly sessionId: string } }
+    | {
+        readonly kind: 'source_revision_conflict';
+        readonly expectedRevision: number;
+        readonly actualRevision: number;
+      }
+  >;
   /** Ordered Turn-opening messages before preparation, not an aggregated display row.
    * Returns at most 64 messages / 64 KiB of text; oversize input fails without truncation.
    * A new submission needs its own identity and current authorization.

@@ -271,6 +271,25 @@ impl maka_plugins::session::catalog::Queries for Effects {
 }
 
 impl maka_plugins::session::history::History for Effects {
+    fn copy_session(
+        &self,
+        call: Authority,
+        target: Arc<dyn maka_plugins::execution::Commands>,
+        input: maka_plugins::session::history::CopySession,
+    ) -> BoxFuture<
+        '_,
+        Result<maka_plugins::session::history::CopyResult, maka_plugins::execution::CommandError>,
+    > {
+        Box::pin(async move {
+            let host = self
+                .host
+                .upgrade()
+                .ok_or(maka_plugins::execution::CommandError::Draining)?;
+            host.plugin_history_copy_session(self.owner.clone(), call, target, input)
+                .await
+        })
+    }
+
     fn sources(
         &self,
         call: Authority,

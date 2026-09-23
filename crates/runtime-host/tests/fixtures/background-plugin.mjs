@@ -192,7 +192,7 @@ export default async function (ctx) {
       exercise,
     );
   });
-  await ctx.remote.method('root', async (input) => {
+  await ctx.remote.method('root', async (input, caller) => {
     const intent = parseIntent(input);
     const commands = await ctx.executions.restore(intent.grant);
     try {
@@ -318,7 +318,88 @@ export default async function (ctx) {
       const view = await commands.session(root.sessionId);
       if (view.sandboxMode !== 'read-only' || view.target.kind !== 'executor')
         throw new Error('root settings changed');
-      return JSON.parse(JSON.stringify({ root, receipt }));
+      let savedRevision = await ctx.storage.read('copy-source-revision');
+      if (!savedRevision) {
+        [savedRevision] = await ctx.storage.batch([
+          {
+            key: 'copy-source-revision',
+            expectedRevision: null,
+            data: { kind: 'present', value: view.revision },
+          },
+        ]);
+      }
+      if (savedRevision?.data.kind !== 'present' || typeof savedRevision.data.value !== 'number')
+        throw new Error('copy source revision was not persisted');
+      /** @type {Parameters<import('../../../../packages/plugin-sdk/src/history.js').History['copySession']>[1]} */
+      const copyInput = {
+        root: { ...request, operationId: 'history-copy' },
+        source: {
+          sessionId: root.sessionId,
+          expectedRevision: savedRevision.data.value,
+          purpose: { kind: 'branch', turnId: receipt.invocation.turn_id, sideConversation: false },
+        },
+      };
+      const copy = await caller.views.authorize(
+        {
+          operationId: '989b4661-d9d4-42d9-8aee-da2867c38167',
+          title: 'Copy my conversation',
+          target: { kind: 'profile' },
+          capabilities: ['read_history'],
+        },
+        async (history) => {
+          await ctx.withAuthorization(intent.grant, async (withoutHistory) => {
+            try {
+              await withoutHistory.history.copySession(commands, {
+                ...copyInput,
+                root: { ...copyInput.root, operationId: 'unauthorized-copy' },
+              });
+              throw new Error('creation authority became history access');
+            } catch (error) {
+              if (error.code !== 'revoked') throw error;
+            }
+          });
+          const stale = await history.history.copySession(commands, {
+            root: { ...copyInput.root, operationId: 'stale-copy' },
+            source: { ...copyInput.source, expectedRevision: view.revision + 1 },
+          });
+          if (stale.kind !== 'source_revision_conflict' || stale.actualRevision !== view.revision)
+            throw new Error('copy source CAS was not enforced');
+          if (await commands.restoreRoot('stale-copy')) throw new Error('failed CAS left a root');
+          try {
+            await history.history.copySession(commands, {
+              root: { ...copyInput.root, operationId: 'foreign-workspace-copy' },
+              source: { ...copyInput.source, sessionId: 'background-session', expectedRevision: 1 },
+            });
+            throw new Error('workspace references were reinterpreted under a foreign root');
+          } catch (error) {
+            if (error.code !== 'invalid') throw error;
+          }
+          const copied = await history.history.copySession(commands, copyInput);
+          if (copied.kind !== 'committed') throw new Error('exact copy did not commit');
+          const replay = await history.history.copySession(commands, copyInput);
+          if (replay.kind !== 'committed' || replay.session.sessionId !== copied.session.sessionId)
+            throw new Error('copy replay lost its target');
+          try {
+            await history.history.copySession(commands, {
+              ...copyInput,
+              root: { ...copyInput.root, name: 'changed copy' },
+            });
+            throw new Error('changed copy settings reused an accepted identity');
+          } catch (error) {
+            if (error.code !== 'conflict') throw error;
+          }
+          const sources = await history.history.sources({
+            sessionId: copied.session.sessionId,
+            turnId: receipt.invocation.turn_id,
+          });
+          if (sources[0]?.content.text !== 'Independent root work')
+            throw new Error('public copy lost original input');
+          return copied.session;
+        },
+      );
+      const recoveredCopy = await commands.restoreRoot('history-copy');
+      if (recoveredCopy?.sessionId !== copy.sessionId) throw new Error('copy recovery lost owner');
+      return JSON.parse(JSON.stringify({ root, receipt, copy }));
     } finally {
       await commands.close();
     }

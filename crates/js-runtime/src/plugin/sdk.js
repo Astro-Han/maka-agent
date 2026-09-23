@@ -303,6 +303,11 @@
         if (targetHandle === undefined) throw new TypeError('Expected a Host execution capability');
         return host('history.copyMaterial', { authority, targetHandle, input });
       },
+      copySession: (target, input) => {
+        const targetHandle = executionHandles.get(target);
+        if (targetHandle === undefined) throw new TypeError('Expected a Host execution capability');
+        return host('history.copySession', { authority, targetHandle, input });
+      },
     }),
     executions: Object.freeze({
       open: async () => executions(await host('execution.acquire', { authority })),

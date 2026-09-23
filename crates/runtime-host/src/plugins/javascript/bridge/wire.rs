@@ -80,7 +80,9 @@ pub(super) enum Request {
     #[serde(rename = "history.sources")]
     HistorySources(HistorySources),
     #[serde(rename = "history.copyMaterial")]
-    HistoryCopy(HistoryCopy),
+    HistoryCopyMaterial(HistoryTransfer<maka_plugins::session::history::CopyMaterial>),
+    #[serde(rename = "history.copySession")]
+    HistoryCopySession(HistoryTransfer<maka_plugins::session::history::CopySession>),
     #[serde(rename = "models.resolve")]
     ResolveModel(maka_plugins::llm::Selection),
     #[serde(rename = "models.search")]
@@ -559,10 +561,10 @@ pub(super) struct HistorySources {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct HistoryCopy {
+pub(super) struct HistoryTransfer<T> {
     pub authority: String,
     pub target_handle: String,
-    pub input: maka_plugins::session::history::CopyMaterial,
+    pub input: T,
 }
 
 #[derive(Deserialize)]

@@ -28,6 +28,32 @@ use maka_plugins::{
 };
 
 impl Executions {
+    pub(crate) async fn plugin_history_copy_session(
+        self: &std::sync::Arc<Self>,
+        owner: maka_plugins::fiber::Context,
+        call: Scope,
+        target: std::sync::Arc<dyn maka_plugins::execution::Commands>,
+        input: maka_plugins::session::history::CopySession,
+    ) -> Result<maka_plugins::session::history::CopyResult, Error> {
+        input.validate()?;
+        let target = (&*target as &dyn std::any::Any)
+            .downcast_ref::<super::BoundCommands>()
+            .ok_or(Error::Denied)?;
+        if !std::sync::Arc::ptr_eq(self, &target.executions()?) {
+            return Err(Error::Denied);
+        }
+        target
+            .root_with_history(
+                input.root,
+                Some(super::root::HistorySeed {
+                    input: input.source,
+                    call,
+                    owner,
+                }),
+            )
+            .await
+    }
+
     async fn history_boundary(&self, call: &Scope) -> Result<Boundary, Error> {
         if call.identity.agent().is_some() {
             // Installation already trusts plugin code. Normal Agent recall is
