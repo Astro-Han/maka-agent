@@ -1665,7 +1665,6 @@ function registerHostClientIpc(
   registerRuntimeHostUsageIpc({
     ipcMain: scopedIpc,
     client,
-    sendToRenderer,
   });
   registerRuntimeHostWorkspaceIpc({
     ipcMain: scopedIpc,

@@ -86,8 +86,8 @@ impl Probe {
             document,
             &self.grant,
             json!({
-                "kind":"start", "filter":{"from":0,"to":1e15,
-                    "activity":{"search":"\"".repeat(1024),"kind":"tool","status":"rejected"}}
+                "kind":"refine", "cursor":self.cursor,
+                "selection":{"search":"\"".repeat(1024),"kind":"tool","status":"rejected"}
             }),
         )
         .await;
@@ -107,6 +107,10 @@ impl Probe {
         )
         .await;
         assert_eq!(repeated, empty);
+        assert_eq!(
+            empty["summary"], result["summary"],
+            "refining activity retains the headline snapshot"
+        );
 
         let session = approve(peer, client, "session", Some("background-session")).await;
         let scoped = read(peer, client, document, &session, start.clone()).await;

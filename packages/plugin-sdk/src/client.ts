@@ -76,6 +76,8 @@ export interface ClientSlots {
   'settings.page': {
     readonly locale: 'en' | 'zh-CN' | 'zh-TW';
     readonly page: string;
+    /** Opens a raw Session ID in this plugin's originating Host, never the default Host. */
+    readonly onOpenSession?: (sessionId: string) => Promise<void>;
   };
   'application.overlay': { readonly locale: 'en' | 'zh-CN' | 'zh-TW' };
   'session.header.actions': {

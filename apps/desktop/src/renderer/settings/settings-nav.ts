@@ -20,7 +20,6 @@
 import { type ComponentType } from 'react';
 import {
   Activity,
-  BarChart3,
   Bot,
   CalendarDays,
   Cpu,
@@ -84,7 +83,6 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
   { id: 'subagents', Icon: Workflow, enabled: true, group: 'capabilities' },
   { id: 'bot-chat', Icon: Bot, enabled: true, group: 'capabilities' },
   { id: 'search', Icon: Search, enabled: true, group: 'capabilities', badge: 'Beta' },
-  { id: 'usage', Icon: BarChart3, enabled: true, group: 'activity' },
   { id: 'archived-tasks', Icon: ListTodo, enabled: true, group: 'activity' },
   { id: 'import-tasks', Icon: Upload, enabled: true, group: 'activity' },
   { id: 'daily-review', Icon: CalendarDays, enabled: true, group: 'activity' },

@@ -4489,6 +4489,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "maka-insights"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "maka-plugins",
+ "maka-runtime",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "maka-js-runtime"
 version = "0.2.0"
 dependencies = [
@@ -4718,6 +4730,7 @@ dependencies = [
  "maka-event-log",
  "maka-fs-tools",
  "maka-graph",
+ "maka-insights",
  "maka-js-runtime",
  "maka-model",
  "maka-network",

@@ -25,6 +25,8 @@ fn main() {
         "../skills/src/client",
         "../skills/src/client.tsx",
         "../web/src/client.tsx",
+        "../insights/src/client.tsx",
+        "../insights/src/client",
         "../assistant/src/todo/client.tsx",
         "../scheduler/src/client",
         "../scheduler/src/client.tsx",

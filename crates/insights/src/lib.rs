@@ -17,20 +17,5 @@
  * under the License.
  */
 
-import { StatTile } from '@maka/ui';
-
-/** Thin alias over the shared StatTile — feature-local copy of the settings
- *  MetricCard so the Usage feature carries no legacy import (#4425). */
-export function MetricCard(props: { title: string; value: string; detail?: string }) {
-  return (
-    /* One tile language across every settings summary strip: this used to ask
-       for a gray-plate variant while the Permission/Health summaries used the
-       outlined one. StatTile has no variants left to disagree about. */
-    <StatTile
-      className="settingsMetricCard"
-      label={props.title}
-      value={props.value}
-      detail={props.detail}
-    />
-  );
-}
+pub mod plugin;
+mod preferences;

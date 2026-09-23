@@ -6,10 +6,17 @@
     "noEmit": true,
     "incremental": false,
     "jsx": "react-jsx",
+    "paths": {
+      "@maka-agent/plugin-sdk/host": ["./src/host.ts"],
+      "@maka-agent/plugin-sdk/client": ["./src/client.ts"]
+    },
     "types": [],
     "useUnknownInCatchVariables": false
   },
   "include": [
+    "../../crates/insights/src/client.tsx",
+    "../../crates/insights/src/client/**/*.ts",
+    "../../crates/insights/src/client/**/*.tsx",
     "../../crates/runtime-host/tests/fixtures/host-plugin.mjs",
     "../../crates/runtime-host/tests/fixtures/workflow/host.mjs",
     "../../crates/runtime-host/tests/fixtures/workflow/client.tsx",

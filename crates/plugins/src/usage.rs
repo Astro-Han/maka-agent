@@ -62,6 +62,11 @@ pub enum Read {
     Continue {
         cursor: String,
     },
+    /// Change only list filters, retaining the headline range, scope and fence.
+    Refine {
+        cursor: String,
+        selection: Selection,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

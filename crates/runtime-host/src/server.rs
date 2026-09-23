@@ -268,6 +268,7 @@ impl Host {
         }
         crate::plugins::skills::install(&mut setup)?;
         crate::plugins::web::install(&mut setup)?;
+        crate::plugins::insights::install(&mut setup)?;
         crate::plugins::todo::install(&mut setup)?;
         crate::plugins::recall::install(&mut setup)?;
         crate::plugins::assistant::install(&mut setup)?;

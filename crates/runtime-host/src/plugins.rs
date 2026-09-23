@@ -25,6 +25,7 @@ mod entrypoint;
 pub(crate) mod graph;
 pub(crate) mod host;
 mod http;
+pub(crate) mod insights;
 pub(crate) mod javascript;
 pub(crate) mod models;
 mod owner;

@@ -61,6 +61,9 @@ test('external settings pages share publication and reject stale Host, epoch and
   };
   let revision = 0;
   let enabled = true;
+  const opened: string[] = [];
+  let deferSession = false;
+  let resolveSession: ((id: string) => void) | undefined;
   const listeners = new Map<string, () => void>();
   const services: ClientPluginServices = {
     async defaultHost() { throw new Error('Settings must use its selected Host'); },
@@ -70,7 +73,10 @@ test('external settings pages share publication and reject stale Host, epoch and
         method() { throw new Error('No private settings service'); },
         stream() { throw new Error('No private settings service'); },
       }, async close() {} }; },
-      async session(id) { return id; },
+      async session(id) {
+        if (deferSession) return new Promise<string>((resolve) => { resolveSession = resolve; });
+        return host.hostId + '/' + id;
+      },
       async source() { return source; },
       async snapshot() { return { revision: String(revision), connection: host.hostId, entries: enabled ? [{
         entryId: 'example.ui', extensionId: 'example', activation: String(revision),
@@ -84,6 +90,7 @@ test('external settings pages share publication and reject stale Host, epoch and
   function Settings({ host, epoch, verified }: { host: ClientHostRef; epoch: string; verified: boolean }) {
     const [selection, select] = useState<ClientSettingsSelection>();
     return h(ClientPluginSettings, { host, epoch, verified, locale: 'en', selection, onSelect: select,
+      onOpenSession: (id) => { opened.push(id); },
       children: (view) => h('section', {},
         h(SideNav, { children: h(Fragment, {}, h('button', { onClick: () => select(undefined) }, 'Native settings'), view.navigation) }),
         h('input', { 'data-native-draft': true, defaultValue: '' }),
@@ -106,6 +113,8 @@ test('external settings pages share publication and reject stale Host, epoch and
     await until(() => !!button('Preferences'));
     await click('Preferences');
     assert.equal(document.querySelector('[data-plugin-page]')?.textContent, 'first');
+    await click('Open Session');
+    assert.deepEqual(opened, ['first/raw-session']);
     await click('Diagnostics');
     assert.equal(document.querySelectorAll('[data-plugin-page]').length, 1);
     assert.equal(document.querySelector('[data-plugin-page]')?.getAttribute('data-plugin-page'), 'diagnostics');
@@ -128,8 +137,13 @@ test('external settings pages share publication and reject stale Host, epoch and
     assert.equal(document.querySelector('[data-plugin-page]'), null, 'same Entry on another Host cannot take over');
     await click('Preferences');
     assert.equal(document.querySelector('[data-plugin-page]')?.textContent, 'second');
+    deferSession = true;
+    await click('Open Session');
+    assert.ok(resolveSession);
     epoch = 'epoch-2';
     await act(async () => { render(); });
+    await act(async () => { resolveSession!('second/raw-session'); });
+    assert.deepEqual(opened, ['first/raw-session'], 'late projection cannot navigate after an epoch change');
     assert.equal(document.querySelector('[data-plugin-page]'), null);
     await click('Preferences');
     revision++;

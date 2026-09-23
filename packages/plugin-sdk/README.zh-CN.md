@@ -111,6 +111,8 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 
 ## Client SDK
 
+若提供 `settings.page.onOpenSession(rawSessionId)`，它通过来源 Host 映射会话 ID；页面、Host 或连接退休后拒绝跳转。
+
 `ctx.slots.register('tool.detail', toolName, Component, { order? })` 替换精确工具名对应的详情内容，使用 Slot 排序中的首个注册。参数包含 canonical Session、Turn、工具调用身份，以及观察到的参数、结果和有界输出；开放 payload 需自行收窄。原生沙箱／恢复操作保留在扩展之外。渲染器缺失、退出或失败时回退到原生详情。
 
 `ctx.slots.register('settings.page', key, Component, { label, order? })` 在设置页选中的 Host 上同时发布页面与导航项。`label` 是字符串或包含 `en`/`zh-CN`/`zh-TW` 的翻译表；组件接收 `locale` 和注册 key 对应的 `page`。切换 Host、连接或注册后，旧选择失效。插件重连不影响原生设置。其他 Slot 接受可选的 `{ order }`。
@@ -152,6 +154,8 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 活动通过 `model`／`tool` 标签区分。可选 `activity` 按 `kind`、`status` 和字面文本 `search` 筛选；搜索仅忽略 ASCII 大小写，最多 1 KiB UTF-8，不接受控制字符。派发前拒绝没有执行耗时；副作用未知不等于取消。
 
 每页最多 100 条／48 KiB。`{ kind: 'continue', cursor }` 重读该页，`nextCursor` 在相同筛选条件与结算快照下翻页。Host 重启使游标失效；每次读取都重新检查当前授权。
+
+`{ kind: 'refine', cursor, selection }` 修改活动筛选并返回首个匹配页，不改变原作用域、时间范围或快照。
 
 `call.usage.summary(cursor)` 复用相同的范围、Session 和快照，忽略活动列表筛选。Token 和费用小计保留缺失调用数；未报价与已报价但用量不完整分别统计。提供商／模型／工具分组必须完整，否则明确报错（各最多 128 组，整体 48 KiB）。待结算数按范围内的准入时间统计，不计入已完成总额。非有限值或无法精确表示的整数会报错，不变成零。
 

@@ -21,15 +21,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SessionEvent } from '@maka/core/events';
 import type { DesktopSessionSummaryInput } from '../../shared/desktop-session-projection.js';
-import type { UsageStats } from '@maka/core/settings';
-import { EMPTY_USAGE_PROVENANCE } from '@maka/core/usage-ledger-merge';
 import {
   hostAttachmentRefs,
   projectDesktopSessionEvent,
   projectDesktopSessionSummary,
   projectDesktopStoredMessage,
   projectDesktopTurnRecord,
-  projectDesktopUsageStats,
 } from '../../shared/desktop-session-projection.js';
 import { projectDesktopSharedSessionSummary } from '../../shared/shared-session-catalog-projection.js';
 import { sessionCatalogRetiresSession } from '../../shared/runtime-host-identity.js';
@@ -198,56 +195,6 @@ test('projects queued Session attachments into the Desktop host namespace', () =
   assert.throws(() => hostAttachmentRefs({ scope: host, sessionId: 'other' }, refs), /another Host or Session/);
 });
 
-test('projects only present Usage Session ids into the Desktop host namespace', () => {
-  const stats: UsageStats = {
-    summary: {
-      totalRequests: 2,
-      totalCostUsd: 0,
-      totalTokens: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheTokens: 0,
-      cacheMiss: 0,
-      cacheRead: 0,
-      cacheCreation: 0,
-      reasoning: 0,
-    },
-    logs: [
-      {
-        id: 'with-session',
-        ts: 1,
-        kind: 'model',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        provider: 'provider',
-        model: 'model',
-        inputTokens: 0,
-        outputTokens: 0,
-        status: 'success',
-      },
-      {
-        id: 'without-session',
-        ts: 2,
-        kind: 'model',
-        provider: 'provider',
-        model: 'model',
-        inputTokens: 0,
-        outputTokens: 0,
-        status: 'aborted',
-      },
-    ],
-    byProvider: [],
-    byModel: [],
-    byTool: [],
-    pricing: [],
-    provenance: EMPTY_USAGE_PROVENANCE,
-  };
-
-  const projected = projectDesktopUsageStats({ hostId: 'remote-root' }, stats);
-
-  assert.equal(projected.logs[0]?.sessionId, JSON.stringify(['remote-root', 'session-1']));
-  assert.equal(projected.logs[1]?.sessionId, undefined);
-});
 
 
 function summary(id: string): DesktopSessionSummaryInput {

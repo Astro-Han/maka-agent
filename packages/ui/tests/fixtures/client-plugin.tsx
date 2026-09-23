@@ -24,8 +24,9 @@ const plugin: ClientPlugin = {
   activate(ctx, config) {
     const label = typeof config === 'object' && config !== null && 'label' in config
       ? String(config.label) : 'Plugin';
-    ctx.slots.register('settings.page', 'preferences', function Preferences({ page }) {
-      return <p data-plugin-page={page}>{label}</p>;
+    ctx.slots.register('settings.page', 'preferences', function Preferences({ page, onOpenSession }) {
+      return <><p data-plugin-page={page}>{label}</p>{onOpenSession && <button type="button"
+        onClick={() => { void onOpenSession('raw-session').catch(() => {}); }}>Open Session</button>}</>;
     }, { label: { en: 'Preferences', 'zh-CN': '偏好', 'zh-TW': '偏好' } });
     ctx.slots.register('settings.page', 'diagnostics', function Diagnostics({ page }) {
       return <p data-plugin-page={page}>Diagnostics: {label}</p>;

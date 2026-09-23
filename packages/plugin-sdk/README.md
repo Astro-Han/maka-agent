@@ -107,6 +107,8 @@ The installed SDK must recognize the descriptor as provider-executed. Unknown ID
 
 ## Client SDK
 
+When provided, `settings.page.onOpenSession(rawSessionId)` projects the ID through the originating Host and rejects navigation after page, Host or connection retirement.
+
 `ctx.slots.register('tool.detail', toolName, Component, { order? })` replaces the detail body for an exact tool name. The first registration in slot order wins. Props identify the canonical Session, Turn and tool call and carry observed arguments, result and bounded output; open payloads require narrowing. Native sandbox/recovery controls remain outside the extension. Missing, retired or failed renderers fall back to native details.
 
 `ctx.slots.register('settings.page', key, Component, { label, order? })` publishes a page and its navigation entry together on the selected Settings Host. `label` is a string or an `en`/`zh-CN`/`zh-TW` translation map; the component receives `locale` and `page` (the registration key). Selection expires on Host, connection or registration replacement. Native settings remain available while plugins reconnect. Other slots accept optional `{ order }`.
@@ -148,6 +150,8 @@ Native endpoints accepting caller-supplied Host paths declare `Endpoint::requiri
 Activity entries are tagged `model` or `tool`. Optional `activity` filters select `kind`, `status` and a literal ASCII-case-insensitive `search` (at most 1 KiB UTF-8, no control characters). Refusals have no execution duration; unknown tool effects are not cancellations.
 
 Each page contains at most 100 attempts / 48 KiB. `{ kind: 'continue', cursor }` re-reads that page; `nextCursor` advances under the same filter and settlement fence. Host restart invalidates cursors; every read checks current authorization.
+
+`{ kind: 'refine', cursor, selection }` changes activity filters and returns the first matching page without changing the original scope, range or fence.
 
 `call.usage.summary(cursor)` uses the same range, Session and fence, ignoring activity-only filters. Token and cost subtotals include missing-call coverage; unpriced calls differ from priced calls with incomplete usage. Provider/model/tool breakdowns are complete or fail explicitly (128 groups each, 48 KiB overall). Pending counts use admission time within the range and are excluded from completed totals. Nonfinite or inexact integer aggregates fail rather than becoming zero.
 

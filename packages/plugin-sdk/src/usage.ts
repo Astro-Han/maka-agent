@@ -103,7 +103,8 @@ export type UsageRead =
       kind: 'start';
       filter: { from: number; to: number; sessionId?: string | null; activity?: UsageSelection };
     }
-  | { kind: 'continue'; cursor: string };
+  | { kind: 'continue'; cursor: string }
+  | { kind: 'refine'; cursor: string; selection: UsageSelection };
 
 export interface Usage {
   /** Physical calls, including failed retries, auxiliary SDK calls and tool refusals.

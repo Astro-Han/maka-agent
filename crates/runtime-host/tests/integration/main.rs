@@ -50,6 +50,7 @@ mod graph_plugin;
 mod handoff;
 mod host_drain;
 mod input_plugin;
+mod insights_plugin;
 mod javascript_plugins;
 mod large_outputs;
 mod live_pipes;

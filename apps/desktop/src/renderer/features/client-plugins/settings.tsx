@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { ClientSlots } from '@maka-agent/plugin-sdk/client';
 import { ClientSlot } from '@maka/ui/client-plugins';
 import { Banner, SideNavItem, SideNavSection } from '@astryxdesign/core';
@@ -43,6 +43,7 @@ export function ClientPluginSettings(props: {
   locale: ClientSlots['settings.page']['locale'];
   selection?: ClientSettingsSelection;
   onSelect(selection: ClientSettingsSelection): void;
+  onOpenSession?(sessionId: string): void;
   children(view: ClientSettingsView): ReactNode;
 }) {
   const title = props.locale === 'en' ? 'Extensions' : props.locale === 'zh-TW' ? '擴充功能' : '扩展';
@@ -50,10 +51,23 @@ export function ClientPluginSettings(props: {
     ? 'This extension page is unavailable. Select a page from the navigation.'
     : props.locale === 'zh-TW' ? '此擴充功能頁面已不可用，請從導覽選擇頁面。' : '此扩展页面已不可用，请从导航选择页面。'} />;
   const host = props.verified && props.epoch ? props.host : undefined;
-  const { runtime, report } = useClientHost(host);
+  const { runtime, session, report } = useClientHost(host);
   const entries = useClientSlots(runtime).filter((entry) => entry.slot === 'settings.page' && entry.label !== undefined);
   const hostKey = JSON.stringify([host?.profileId, host?.hostId, props.epoch]);
   const selection = props.selection?.hostKey === hostKey && entries.includes(props.selection.entry) ? props.selection.entry : undefined;
+  const current = useRef({ hostKey, selection, session });
+  current.current = { hostKey, selection, session };
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const onOpenSession = props.onOpenSession && session ? async (id: string) => {
+    const projected = await session(id);
+    if (!mounted.current || current.current.hostKey !== hostKey || current.current.selection !== selection ||
+      current.current.session !== session) throw new Error('Extension navigation target retired');
+    props.onOpenSession?.(projected);
+  } : undefined;
   const label = (entry: typeof entries[number]) => typeof entry.label === 'string' ? entry.label : entry.label![props.locale];
   return props.children({
     title: selection ? label(selection) : title,
@@ -62,7 +76,7 @@ export function ClientPluginSettings(props: {
         isSelected={selection === entry} onClick={() => props.onSelect({ hostKey, entry })} />
     ))}</SideNavSection> : null,
     page: selection && runtime ? <ClientSlot store={runtime.slots} name="settings.page"
-      entryId={selection.owner.entryId} entryKey={selection.key} input={{ locale: props.locale, page: selection.key }}
+      entryId={selection.owner.entryId} entryKey={selection.key} input={{ locale: props.locale, page: selection.key, onOpenSession }}
       onError={(identity, error) => report({ identity, error })} /> : unavailable,
   });
 }

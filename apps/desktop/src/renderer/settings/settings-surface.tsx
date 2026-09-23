@@ -17,7 +17,6 @@
  * under the License.
  */
 
-import type { UsageScreenQuery, UsageScreenRequest } from '@maka/core/settings';
 
 import {
   useEffect,
@@ -50,7 +49,6 @@ import type {
   ThemePalette,
   ThemePreference,
   UpdateAppSettingsResult,
-  UsageRange,
 } from '@maka/core/settings';
 import type {
   IdentifiedLlmConnection,
@@ -95,7 +93,6 @@ import { settingsActionErrorMessage } from '../application/contracts/settings-pr
 import { SessionBundleTasks } from '../features/session-bundle';
 import { ImportTasksSettingsPage } from './import-tasks-settings-page';
 import { TasksSettingsPage, type ArchivedTasksBridge } from '../features/session-navigation/index.js';
-import { UsageScopeMount, UsageSettingsPage, type UsageScopeHandle } from './usage-settings-page';
 import type { UiLocaleUpdateGate } from './ui-locale-update-gate';
 import { getSettingsSharedCopy } from '../application/contracts/settings-presentation/settings-shared-copy.js';
 import {
@@ -387,37 +384,6 @@ function SettingsSurfaceContent(
   const selectedRuntimeHostEpoch = selectedProfileId
     ? runtimeHostLifecycleByProfile.get(selectedProfileId)?.epoch
     : undefined;
-  // Usage feature scope wiring (issue #4425). The Host-scoped stats read and the
-  // settings-update reconciliation are bound here (the `window.maka` bridge path
-  // stays in this file). The scope is mounted above the loading/error gate below,
-  // so a loaded snapshot survives a Skeleton/Banner state or a section change; it
-  // takes `usageTargetKey` (host:epoch) as a prop and clears itself when the
-  // target changes, so a Host/generation change never remounts the rest of the
-  // Settings surface. `usageScopeRef.fenceTarget()` rejects an in-flight old-Host
-  // load synchronously at a Host change, before React re-renders the new target.
-  const usageScopeRef = useRef<UsageScopeHandle>(null);
-  const readUsage = (range: UsageRange | Extract<UsageScreenRequest, {kind: 'activity'}>, query?: UsageScreenQuery) =>
-    selectedRuntimeHost ? window.maka.settings.usageStats(range, selectedRuntimeHost, query) : Promise.resolve(null);
-  const usageServices = {
-    loadUsageStats: async (range: UsageRange, query?: UsageScreenQuery) => {
-      const result = await readUsage(range, query);
-      if (result && 'kind' in result && result.kind !== 'screen_response_too_large') throw new Error('Invalid Usage screen response');
-      return result;
-    },
-    loadUsageActivity: async (input: Extract<UsageScreenRequest, {kind: 'activity'}>) => {
-      const result = await readUsage(input);
-      if (!result || !('kind' in result)) throw new Error('Invalid Usage activity response');
-      return result;
-    },
-    updateUsageSettings: (patch: Partial<AppSettings['usage']>) =>
-      updateSettings({ usage: patch }).then((result) => result.settings.usage),
-  };
-  // `selectedRuntimeHostKey` is the one authority for the `profileId:hostId`
-  // shape (`runtimeHostSettingsKey`); usage keys on it plus the epoch so a
-  // same-key reconnect (epoch bump) still changes the target.
-  const usageTargetKey = selectedRuntimeHostKey
-    ? `${selectedRuntimeHostKey}:${selectedRuntimeHostEpoch ?? ''}`
-    : 'no-host';
   function commitSelectedRuntimeHostProfile(
     profileId: string,
     snapshot = runtimeHosts,
@@ -427,8 +393,7 @@ function SettingsSurfaceContent(
     const nextKey = nextHost ? runtimeHostSettingsKey(nextHost) : undefined;
     // Reject old-Host reads and writes synchronously with the authority
     // change, before React renders the newly selected profile.
-    const targetChanged = runtimeHostRequestAuthority.selectTarget(nextKey, lifecycle?.epoch);
-    if (targetChanged) usageScopeRef.current?.fenceTarget();
+    runtimeHostRequestAuthority.selectTarget(nextKey, lifecycle?.epoch);
     selectedProfileIdRef.current = profileId;
     setSelectedProfileId(profileId);
   }
@@ -748,9 +713,6 @@ function SettingsSurfaceContent(
           setRuntimeHostCatalog(invalidateSettingsResourceGeneration);
           setRuntimeHostSettings(invalidateSettingsResourceGeneration);
           setRuntimeHostConnections(invalidateSettingsResourceGeneration);
-          // Usage is Host-owned: drop its snapshot and fence its in-flight load
-          // here too, so an old-generation load cannot land before the re-render.
-          usageScopeRef.current?.fenceTarget();
         }
       }
       void reloadRuntimeHosts().catch(() => undefined);
@@ -856,6 +818,7 @@ function SettingsSurfaceContent(
   return (
     <ClientPluginSettings host={selectedRuntimeHost} epoch={selectedRuntimeHostEpoch}
       verified={runtimeHostTargetVerified} locale={locale}
+      onOpenSession={props.onOpenSession}
       selection={route.kind === 'plugin' ? route.selection : undefined}
       onSelect={(selection) => setRoute({ kind: 'plugin', selection })}>
     {(pluginSettings) => <div className="settingsSurface" data-modal="true" data-maka-assistant-section={section ?? 'extension'}>
@@ -972,13 +935,6 @@ function SettingsSurfaceContent(
               )}
               content={(
                 <LayoutContent padding={6} isScrollable={false}>
-                  <UsageScopeMount
-                    ref={usageScopeRef}
-                    targetKey={usageTargetKey}
-                    services={usageServices}
-                    loadErrorTitle={copy.usageLoadFailed}
-                    describeError={(error) => settingsActionErrorMessage(error, locale)}
-                  >
                   {route.kind === 'plugin' ? pluginSettings.page : loading ? (
                     <SettingsSkeleton />
                   ) : requiresRuntimeHost &&
@@ -1077,7 +1033,6 @@ function SettingsSurfaceContent(
                       </RuntimeHostSettingsTarget>
                     </>
                   )}
-                  </UsageScopeMount>
                 </LayoutContent>
               )}
             />
@@ -1163,10 +1118,6 @@ function SettingsPageBody(props: {
       return <ExternalAgentsSettingsPage settings={props.settings} onUpdate={props.onUpdateSettings} />;
     case 'subagents':
       return props.runtimeHost ? <ClientPluginSlot host={props.runtimeHost} name="application.manage" input={{section: 'subagents', locale}} /> : null;
-    case 'usage':
-      // State lives in the persistent `UsageScopeMount` above the loading gate;
-      // this view is disposable and reads it from context.
-      return <UsageSettingsPage settings={props.settings.usage} onOpenSession={props.onOpenSession} />;
     case 'bot-chat':
       return (
         <BotChatSettingsPage

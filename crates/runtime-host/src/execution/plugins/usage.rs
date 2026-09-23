@@ -122,6 +122,11 @@ impl Executions {
                 let cursor = Cursor::decode(&cursor, self.interactions.epoch())?;
                 (cursor.filter, Some(cursor.through), cursor.offset)
             }
+            Read::Refine { cursor, selection } => {
+                let mut cursor = Cursor::decode(&cursor, self.interactions.epoch())?;
+                cursor.filter.activity = selection;
+                (cursor.filter, Some(cursor.through), 0)
+            }
         };
         filter.validate()?;
         let requested = filter.clone();

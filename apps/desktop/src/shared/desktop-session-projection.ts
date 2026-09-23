@@ -27,7 +27,6 @@ import type {
   ToolResultContent,
 } from '@maka/core/events';
 import type { SessionSummary, StoredMessage, TurnRecord } from '@maka/core/session';
-import type { UsageStats } from '@maka/core/settings';
 import type { RuntimeHostProfileKind } from '@maka/runtime-host/profile-kind';
 import { desktopSessionKey, parseDesktopSessionKey, type DesktopHostRef } from './runtime-host-identity.js';
 
@@ -273,20 +272,4 @@ export function projectDesktopDailyReviewSummary(
       id: projectSessionId(host, session.id),
     })),
   };
-}
-
-export function projectDesktopUsageActivity(
-  host: DesktopHostRef,
-  logs: UsageStats['logs'],
-): UsageStats['logs'] {
-  return logs.map((log) => ({
-    ...log,
-    ...(log.sessionId === undefined
-      ? {}
-      : { sessionId: projectSessionId(host, log.sessionId) }),
-  }));
-}
-
-export function projectDesktopUsageStats(host: DesktopHostRef, stats: UsageStats): UsageStats {
-  return { ...stats, logs: projectDesktopUsageActivity(host, stats.logs) };
 }
