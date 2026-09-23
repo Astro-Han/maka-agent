@@ -63,7 +63,7 @@ export interface ClientSlots {
     readonly locale: 'en' | 'zh-CN' | 'zh-TW';
     readonly toolUseId: string;
     readonly toolName: string;
-    readonly status: 'running' | 'completed' | 'errored' | 'interrupted';
+    readonly status: 'running' | 'completed' | 'errored' | 'interrupted' | 'unknown';
     readonly args: unknown;
     readonly result?: unknown;
     readonly output?: readonly {

@@ -103,6 +103,8 @@ pub enum Content {
     },
     User {
         text: String,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        imported: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         display_text: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,6 +118,8 @@ pub enum Content {
     },
     Assistant {
         text: String,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        imported: bool,
         model_id: String,
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         interrupted: bool,

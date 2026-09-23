@@ -65,6 +65,17 @@
         return { ...page, bytes: Uint8Array.from(page.bytes) };
       },
       list: (input = {}) => host(`${prefix}.list`, { handle, input }),
+      openFile: async (input) => {
+        const opened = await host(`${prefix}.openFile`, { handle, input });
+        return Object.freeze({
+          info: Object.freeze(opened.info),
+          read: async (input = {}) => {
+            const page = await host('pinnedFile.read', { handle: opened.handle, input });
+            return { ...page, bytes: Uint8Array.from(page.bytes) };
+          },
+          close: () => host('pinnedFile.close', { handle: opened.handle }),
+        });
+      },
     });
   const processes = (authority) => {
     const open = (handle) =>

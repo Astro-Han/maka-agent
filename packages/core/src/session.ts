@@ -776,6 +776,8 @@ export type StoredMessage =
   | SystemNoteMessage;
 
 export interface UserMessage extends MessageContent {
+  /** Foreign history, not an input admitted for local execution. */
+  imported?: true;
   /** Derived from the admitted WorkHub action; does not change physical Turn identity. */
   coordinationActionId?: string;
   type: 'user';
@@ -799,7 +801,23 @@ export function userFacingText(message: Pick<UserMessage, 'text' | 'displayText'
  * exactly the notes the runtime writes.
  */
 export function isUserVisibleSessionSystemNote(kind: string): boolean {
-  return isRuntimeSystemNoteKind(kind);
+  return kind === 'imported' || isRuntimeSystemNoteKind(kind);
+}
+
+/** Historical observations never establish a local execution's state. */
+export function isImportedMessage(message: StoredMessage): boolean {
+  switch (message.type) {
+    case 'user':
+    case 'assistant':
+      return message.imported === true;
+    case 'tool_call':
+    case 'tool_result':
+      return message.origin === 'imported';
+    case 'system_note':
+      return message.kind === 'imported';
+    default:
+      return false;
+  }
 }
 
 /**
@@ -821,6 +839,7 @@ export function isConversationTextMessage(message: StoredMessage): boolean {
 }
 
 export interface AssistantMessage {
+  imported?: true;
   type: 'assistant';
   interrupted?: true;
   id: string;
@@ -1276,6 +1295,7 @@ export interface SystemNoteMessage {
 const USER_MESSAGE_SHAPE = defineObjectShape<UserMessage>()(
   ['type', 'id', 'turnId', 'ts', 'text'],
   [
+    'imported',
     'displayText',
     'attachments',
     'directoryReferences',
@@ -1288,7 +1308,7 @@ const USER_MESSAGE_SHAPE = defineObjectShape<UserMessage>()(
 );
 const ASSISTANT_MESSAGE_SHAPE = defineObjectShape<AssistantMessage>()(
   ['type', 'id', 'turnId', 'ts', 'text', 'modelId'],
-  ['thinking', 'contentOrder', 'providerOptions', 'interrupted'],
+  ['thinking', 'contentOrder', 'providerOptions', 'interrupted', 'imported'],
 );
 const TOOL_CALL_MESSAGE_SHAPE = defineObjectShape<ToolCallMessage>()(
   ['type', 'id', 'turnId', 'ts', 'toolName', 'args'],
@@ -1542,6 +1562,7 @@ function decodeMessage(
       if (
         hasExactShape(message, USER_MESSAGE_SHAPE) &&
         hasMessageEnvelope(message, true) &&
+        (message.imported === undefined || message.imported === true) &&
         (message.origin === undefined || decodeTurnOrigin(message.origin) !== undefined) &&
         (message.coordinationActionId === undefined ||
           (typeof message.coordinationActionId === 'string' &&
@@ -1579,6 +1600,7 @@ function decodeMessage(
       if (
         hasExactShape(message, ASSISTANT_MESSAGE_SHAPE) &&
         hasMessageEnvelope(message, true) &&
+        (message.imported === undefined || message.imported === true) &&
         typeof message.text === 'string' &&
         typeof message.modelId === 'string' &&
         (message.interrupted === undefined || message.interrupted === true) &&
@@ -1944,6 +1966,7 @@ export function deriveTurnRecords(messages: readonly StoredMessage[]): TurnRecor
   const order: string[] = [];
   const buckets = new Map<string, StoredMessage[]>();
   for (const message of messages) {
+    if (isImportedMessage(message)) continue;
     const turnId = (message as { turnId?: string }).turnId;
     if (!turnId) continue;
     if (!buckets.has(turnId)) {

@@ -475,28 +475,38 @@ impl Transcript {
             {
                 continue;
             }
+            let mut key = MessageKey::durable(row);
+            if kind == "assistant"
+                && let Some(thinking) = row["thinking"]["text"].as_str()
+            {
+                if !thinking.trim().is_empty() {
+                    self.upsert(
+                        key.clone(),
+                        Revision::Durable(*sequence),
+                        Kind::Thinking,
+                        || thinking.to_owned().into(),
+                    );
+                }
+                if row["text"]
+                    .as_str()
+                    .is_none_or(|text| text.trim().is_empty())
+                {
+                    continue;
+                }
+                key.part = Part::Text;
+            }
             let presentation = match kind {
                 "user" => Kind::User,
-                "assistant" if row["thinking"]["text"].is_string() => Kind::Thinking,
                 "assistant" => Kind::Assistant,
+                "system_note" if row["kind"] == "imported" => Kind::Meta,
                 "tool_call" | "tool_result" => Kind::Other,
                 "turn_state" if row["status"].as_str() == Some("failed") => Kind::Failure,
                 "turn_state" | "token_usage" => Kind::Meta,
                 _ => Kind::Other,
             };
-            if presentation == Kind::Thinking
-                && row["thinking"]["text"]
-                    .as_str()
-                    .is_some_and(|text| text.trim().is_empty())
-            {
-                continue;
-            }
-            self.upsert(
-                MessageKey::durable(row),
-                Revision::Durable(*sequence),
-                presentation,
-                || project(row, i18n, ascii).into(),
-            );
+            self.upsert(key, Revision::Durable(*sequence), presentation, || {
+                project(row, i18n, ascii).into()
+            });
             if matches!(presentation, Kind::User | Kind::Assistant) {
                 let block = self.blocks.get_mut(self.order.last().unwrap()).unwrap();
                 // Durable rows are immutable; do not format all history on every delta.
@@ -928,10 +938,10 @@ fn project(row: &Value, i18n: &I18n, ascii: bool) -> String {
             .as_str()
             .or_else(|| row["text"].as_str())
             .map(str::to_owned),
-        "assistant" => row["thinking"]["text"]
-            .as_str()
-            .or_else(|| row["text"].as_str())
-            .map(str::to_owned),
+        "assistant" => row["text"].as_str().map(str::to_owned),
+        "system_note" if row["kind"] == "imported" => {
+            row["data"]["text"].as_str().map(str::to_owned)
+        }
         "turn_state" => {
             let key = match row["status"].as_str() {
                 Some("running") => "session-running",
@@ -1393,6 +1403,38 @@ mod tests {
             narrow.contains("Hello") && !narrow.contains(&time),
             "narrow screens prioritize content over timestamps"
         );
+    }
+
+    #[test]
+    fn imported_history_keeps_answer_and_reasoning_without_inventing_live_work() {
+        let rows = BTreeMap::from([
+            (
+                1,
+                json!({"type":"user","turnId":"foreign","id":"u","imported":true,"text":"Question"}),
+            ),
+            (
+                2,
+                json!({"type":"tool_call","turnId":"foreign","id":"call","origin":"imported","modelVisibility":"hidden","toolName":"foreign-tool","args":{}}),
+            ),
+            (
+                3,
+                json!({"type":"assistant","turnId":"foreign","id":"a","imported":true,"text":"Imported answer","thinking":{"text":"Imported reasoning"}}),
+            ),
+            (
+                4,
+                json!({"type":"system_note","turnId":"foreign","id":"note","kind":"imported","data":{"text":"Source ended without a terminal record."}}),
+            ),
+        ]);
+        let mut view = Transcript::default();
+        view.sync(&rows, &[], 0, &locale(), false);
+        assert_eq!(view.order.len(), 5);
+        assert_eq!(view.tool_status(&view.order[1]), Some("tool-missing"));
+        assert_eq!(view.order[2].part, Part::Thinking);
+        assert_eq!(view.order[3].part, Part::Text);
+        let screen = draw(&mut view, 80, 20);
+        assert!(screen.contains("Imported answer"));
+        assert!(screen.contains("Source ended without a terminal record."));
+        assert!(!view.timing_visible());
     }
 
     #[test]

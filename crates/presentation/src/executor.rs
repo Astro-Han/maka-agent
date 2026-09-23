@@ -40,6 +40,7 @@ impl Execution {
                 turn_id: event.invocation.turn_id.clone(),
                 ts,
                 content: Content::Assistant {
+                    imported: false,
                     text: String::new(),
                     model_id: binding.executor_id.as_str().into(),
                     interrupted: false,

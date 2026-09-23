@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { deriveTurnRecords, isUserVisibleSessionSystemNote } from '@maka/core/session';
+import { deriveTurnRecords, isImportedMessage, isUserVisibleSessionSystemNote } from '@maka/core/session';
 import { foldTimeline } from './timeline-fold.js';
 import {
   isInFlightToolStatus,
@@ -143,6 +143,7 @@ export interface ToolActivityItem {
 }
 
 function systemNoteLabel(kind: string, data: unknown, locale: UiLocale): string {
+  if (kind === "imported" && data && typeof data === "object" && "text" in data && typeof data.text === "string") return data.text;
   const copy = getConversationCopy(locale).messages.systemNotes;
   if (kind === "context_compacted") return copy.contextCompacted;
   if (kind === "context_compaction_failed_open") return copy.contextCompactionFailedOpen;
@@ -217,7 +218,7 @@ export function materializeTools(
         ...(call.stepId !== undefined ? { stepId: call.stepId } : {}),
         status: result
           ? materializeToolResultStatus(result)
-          : unfinishedToolActivityStatus(turnStatusById.get(call.turnId)),
+          : call.origin === "imported" ? "unknown" : unfinishedToolActivityStatus(turnStatusById.get(call.turnId)),
         args: projectToolActivityArgs(call.toolName, call.args),
         result: result?.content,
         durationMs: result?.durationMs,
@@ -355,7 +356,7 @@ export type TurnTimelineItem =
  */
 export interface TurnViewModel {
   turnId: string;
-  status: TurnStatus;
+  status: TurnStatus | "historical";
   /**
    * See `TurnRecord.statusSource` — whether `status` is evidence or a reading.
    * Absent on hand-built view models, which are treated as non-evidence.
@@ -708,14 +709,14 @@ export function materializeTurns(
   // replays to interleave a step's thinking/text with its paired tools.
   const messagesByTurn = new Map<string, StoredMessage[]>();
 
-  function ensureTurn(turnId: string, startedAt: number): TurnViewModel {
+  function ensureTurn(turnId: string, startedAt: number, historical: boolean): TurnViewModel {
     let turn = byId.get(turnId);
     if (!turn) {
       const record = turnRecordById.get(turnId);
       turn = {
         turnId,
-        status: record?.status ?? "completed",
-        statusSource: record?.statusSource ?? "inferred",
+        status: record?.status ?? (historical ? "historical" : "completed"),
+        statusSource: record?.statusSource ?? (historical ? undefined : "inferred"),
         ...(record?.retriedFromTurnId
           ? { retriedFromTurnId: record.retriedFromTurnId }
           : {}),
@@ -743,7 +744,7 @@ export function materializeTurns(
   for (const message of messages) {
     const turnId = (message as { turnId?: string }).turnId ?? looseTurnId;
     const ts = (message as { ts?: number }).ts ?? 0;
-    const turn = ensureTurn(turnId, ts);
+    const turn = ensureTurn(turnId, ts, isImportedMessage(message));
     const turnMessageList = messagesByTurn.get(turnId);
     if (turnMessageList) turnMessageList.push(message);
     else messagesByTurn.set(turnId, [message]);
@@ -761,7 +762,7 @@ export function materializeTurns(
       // streaming turn stays at undefined ("进行中" per kenji's PR82 review)
       // instead of ticking up against the current clock and forcing visible
       // re-renders. Recomputed as each step lands, so it ends at the last step.
-      if (message.ts !== undefined && message.ts >= turn.startedAt) {
+      if (!message.imported && message.ts !== undefined && message.ts >= turn.startedAt) {
         turn.durationMs = message.ts - turn.startedAt;
       }
     } else if (

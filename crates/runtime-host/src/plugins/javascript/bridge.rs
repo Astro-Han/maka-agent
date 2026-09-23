@@ -36,6 +36,7 @@ use wire::{Error, Request};
 
 struct State {
     inputs: maka_plugins::filesystem::ReadInputs,
+    open_files: Mutex<BTreeMap<String, maka_plugins::filesystem::PinnedFile>>,
     preferences: Arc<dyn maka_plugins::preferences::Preferences>,
     source: Arc<super::remote::Source>,
     processes: Arc<dyn maka_plugins::process::Processes>,
@@ -80,6 +81,7 @@ impl HostBridge {
     ) -> Self {
         Self(Arc::new(State {
             inputs: host.inputs,
+            open_files: Mutex::default(),
             preferences: host.preferences,
             source,
             http: host.http,
@@ -129,10 +131,11 @@ impl HostBridge {
 }
 impl Bridge for HostBridge {
     fn max_output_bytes(&self, method: &str) -> usize {
-        if method == "model.io" {
-            32 * 1024 * 1024
-        } else {
-            1024 * 1024
+        match method {
+            "model.io" => 32 * 1024 * 1024,
+            // A 1 MiB byte page expands to at most 4 MiB in a JSON array.
+            "inputs.read" | "view.read" | "pinnedFile.read" => 5 * 1024 * 1024,
+            _ => 1024 * 1024,
         }
     }
     fn max_input_bytes(&self, method: &str) -> usize {
@@ -229,6 +232,19 @@ impl State {
             message: "private files are unavailable in this scope".into(),
         })
     }
+    fn opened_file(&self, file: maka_plugins::filesystem::PinnedFile) -> Result<Value, Error> {
+        let mut files = self.open_files.lock().unwrap();
+        files.retain(|_, file| !file.is_released());
+        if files.len() >= 128 {
+            return Err(Error::invalid(
+                "open-file capacity exceeded; close unused files",
+            ));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let value = json!({"handle":id, "info":file.info()});
+        files.insert(id, file);
+        Ok(value)
+    }
     async fn call(&self, request: Request) -> Result<Value, Error> {
         // Initialization may access declared Services and data, not submit work.
         // Execution commands independently require effective business admission.
@@ -261,6 +277,37 @@ impl State {
             }
             Request::ViewList(input) => {
                 encode(self.calls.read(&input.handle)?.list(input.input).await?)
+            }
+            Request::InputOpenFile(input) => {
+                let view = self
+                    .inputs
+                    .open(&input.handle)?
+                    .ok_or_else(|| Error::invalid("unknown input mount"))?;
+                self.opened_file(view.open_file(input.input).await?)
+            }
+            Request::ViewOpenFile(input) => self.opened_file(
+                self.calls
+                    .read(&input.handle)?
+                    .open_file(input.input)
+                    .await?,
+            ),
+            Request::PinnedFileRead(input) => {
+                let file = self
+                    .open_files
+                    .lock()
+                    .unwrap()
+                    .get(&input.handle)
+                    .cloned()
+                    .ok_or(maka_plugins::Error::Retired)?;
+                encode(file.read(input.input).await?)
+            }
+            Request::PinnedFileClose(input) => {
+                let file = self.open_files.lock().unwrap().get(&input.handle).cloned();
+                if let Some(file) = file {
+                    file.close().await?;
+                    self.open_files.lock().unwrap().remove(&input.handle);
+                }
+                Ok(Value::Null)
             }
             Request::Sessions(input) => {
                 let call = self.calls.get(&input.authority)?;

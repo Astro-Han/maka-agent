@@ -19,7 +19,7 @@
 
 /** Footer availability follows settled Turn state, not optimistic transcript content. */
 
-import type { TurnStatus } from '@maka/core/session';
+import type { TurnViewModel } from '@maka/ui';
 
 import type { UiLocale } from '@maka/core/ui-locale';
 import { getDesktopConversationCopy } from './locales/conversation-copy.js';
@@ -47,7 +47,7 @@ export interface TurnFooterAction {
 }
 
 export interface TurnFooterContext {
-  status: TurnStatus;
+  status: TurnViewModel['status'];
   /**
    * True when the turn has at least one materialized assistant message
    * with non-empty text. Disables `copy` for empty turns (running

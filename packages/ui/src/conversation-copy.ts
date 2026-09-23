@@ -267,6 +267,7 @@ export interface ConversationCopy {
     processDetails: string;
     processDuration: (minutes: number, seconds: number) => string;
     turnStatusCompleted: (elapsed?: string) => string;
+    turnStatusHistorical: string;
     turnStatusAborted: (elapsed?: string) => string;
     turnStatusFailed: (elapsed?: string) => string;
     providerRetryScheduled: (seconds: number, attempt: number, maxAttempts: number) => string;
@@ -592,6 +593,7 @@ const CONVERSATION_COPY = {
         stepLimit: '已达到本轮工具步骤上限，任务可能尚未完成。发送“继续”即可接着处理。',
       },
       turnStatusCompleted: (elapsed?: string) => elapsed ? `完成 · ${elapsed}` : '已完成',
+      turnStatusHistorical: '导入记录',
       turnStatusAborted: (elapsed?: string) => elapsed ? `已中止 · ${elapsed}` : '已中止',
       turnStatusFailed: (elapsed?: string) => elapsed ? `失败 · ${elapsed}` : '失败',
     },
@@ -772,6 +774,7 @@ const CONVERSATION_COPY = {
         stepLimit: '已達到本輪工具步驟上限，任務可能尚未完成。傳送“繼續”即可接著處理。',
       },
       turnStatusCompleted: (elapsed?: string) => elapsed ? `完成 · ${elapsed}` : '已完成',
+      turnStatusHistorical: '匯入記錄',
       turnStatusAborted: (elapsed?: string) => elapsed ? `已中止 · ${elapsed}` : '已中止',
       turnStatusFailed: (elapsed?: string) => elapsed ? `失敗 · ${elapsed}` : '失敗',
     },
@@ -949,6 +952,7 @@ const CONVERSATION_COPY = {
         stepLimit: 'Reached the configured step limit. The task may be incomplete. Send “continue” to resume.',
       },
       turnStatusCompleted: (elapsed?: string) => elapsed ? `Done · ${elapsed}` : 'Done',
+      turnStatusHistorical: 'Imported history',
       turnStatusAborted: (elapsed?: string) => elapsed ? `Stopped · ${elapsed}` : 'Stopped',
       turnStatusFailed: (elapsed?: string) => elapsed ? `Failed · ${elapsed}` : 'Failed',
     },

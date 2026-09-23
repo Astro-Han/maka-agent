@@ -30,7 +30,7 @@ export type SettledToolActivityStatus = 'completed' | 'errored' | 'interrupted';
 export type InFlightToolActivityStatus = 'running';
 
 /** The whole tool-row status vocabulary, owned here so it is spelled once. */
-export type ToolActivityStatus = InFlightToolActivityStatus | SettledToolActivityStatus;
+export type ToolActivityStatus = InFlightToolActivityStatus | SettledToolActivityStatus | 'unknown';
 
 export function isInFlightToolStatus(
   status: ToolActivityStatus,

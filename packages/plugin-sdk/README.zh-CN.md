@@ -52,6 +52,8 @@ Prompt 回调接收类型化的 Session 或模型步骤上下文，不伪造工�
 
 Prompt 回调通过 `call.workspace`、输入准备通过 `request.workspace` 取得有界的目录只读视图。视图随回调结束失效，不能写入、执行命令、越过工作区或保留给后台工作。`ctx.inputs.names()` 列出显式挂载的非敏感输入；`ctx.inputs.at(name)` 提供相同的 read/list 接口，只开放选定文件或子树并随插件退休失效。默认允许边界内的符号链接；`symlinks: 'reject'` 可拒绝末端链接，挂载白名单也约束链接目标。
 
+`view.openFile({ path })` 固定普通文件及打开时的长度。`info` 包含长度与修改时间；`read({ offset, limit })` 每次至多读取 1 MiB，不包含后续追加内容。路径替换不会重定向句柄，但原地修改仍可见，需要多遍一致性的格式由消费者校验摘要。固定前缀内截断会明确失败。Rust `PinnedFile::with_reader` 在阻塞线程批量执行相同的有界读取；每批检查当前授权，回调结束或 Fiber 退休会关闭文件。`close()` 等待实际释放，每个获准根目录最多持有 32 个文件。
+
 `call.files.entries` 与 `ctx.data` 共用有界字节／目录操作：read、write、list、stat、createDirectory、sync、remove 和禁止覆盖目标的 rename。路径必须相对根目录，不跟随链接，父目录需已存在；写入支持 `createNew` 和普通权限位。读取／列目录观察退休信号，已准入写入继续结算。事务与崩溃恢复由插件负责。`{ kind: 'directory', path }` 授权只允许文件访问，不创建工作区标记；目录被替换后授权失效。`withAuthorization(id, (call, grant, boundary) => ...)` 同时提供当前授权的观察信息。只读视图的 `location()` 用于展示或提出授权申请，不授予路径访问权限。
 
 显式 `network` 授权独立于文件／进程沙箱：只读工作区可以使用 Host HTTP，但不会因此获得文件写入或进程权限。Agent HTTP 仍需自己的执行授权。重启恢复时重新检查当前授权；撤销后拒绝新请求。
@@ -87,6 +89,7 @@ capture 收到不含秘密的 `model`：选定模型 ID、生效的能力和可�
 - `call.history.list` 使用相同目录格式，包含归档状态和最近消息时间。已准入 Agent 调用可跨 Session 读取受信任 Host profile；Remote／后台调用需要相应范围的 `read_history` 授权。`read({ sessionId, through?, cursor? })` 返回准备进度或固定日志水位下的 UTF-8 文本分块，沿返回的水位和游标读取至 `next` 为 null。每次读取检查当前访问权和来源是否存在，不授予执行权。排序与片段组装属于消费插件。
 - Session 范围的执行命令使用稳定 operation ID：相同内容重试返回原收据，内容变化则冲突。profile Entry 不会自动获得 Session 权限。
 - `executions.importSession` 使用根会话创建授权暂存历史记录。持久保存 operation ID，按回执中的记录位置追加，再按精确总数发布；相同重试恢复原回执。暂存不出现在 Session 列表，发布重新检查当前权限上限，且必须包含用户或助手对话。上限为 7,500 条、6 MiB 规范材料，每批至多八条；超限明确失败，不发布残缺对话。导入工具仅是历史观察，不执行、不计量。`inspect` 恢复进度；`abandon` 只放弃未发布导入，不删除已发布 Session。
+- 按来源顺序分别导入 `tool_call` 和 `tool_result`。适配器在来源 Session 内规范化 `callId`，结果沿用对应键；不为未完成调用虚构结果。
 - `call.history.sources({ sessionId, turnId })` 按顺序读取准备前的原始输入，包括已接受的队列编辑和自有附件。最多返回 64 条消息／64 KiB 文本，超限报错，不静默截断。它们不是合并展示行或准入证明；重新提交须使用新身份并重新准备。
 - `call.history.copySession(target, { source, root })` 使用独立的根会话创建能力建立自有历史副本。目标须使用同一工作区；受管理来源只能由所属包／作用域复制。持久保存 operation ID 和源 revision 以精确重试；`target.restoreRoot` 可恢复已接受目标，不重放创建。继承历史不赋予源执行权限。
 - `target.abandonRevision(operationId)` 仅删除未使用的自有修订。已接受工作会保留会话；重试及重启后返回持久决定。删除草稿只关闭其订阅，不断开连接。

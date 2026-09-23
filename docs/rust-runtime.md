@@ -563,7 +563,10 @@ only after current permission checks. Exact retries survive restart; abandonment
 releases unpublished material. Imports participate in transcript, history copies
 and compaction, not local execution or accounting. Canonical input is bounded to
 7,500 records / 6 MiB so the new Session can continue within the runtime history
-budget. Source adapters and the Desktop import flow are not yet available.
+budget. Desktop labels these messages as imported history, without inferring local
+completion or duration. Tool calls and results retain their separate source
+positions; missing results stay unknown. Source adapters and the Desktop import
+flow are not yet available.
 
 ## Conversation recall
 

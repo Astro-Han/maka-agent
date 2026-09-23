@@ -58,6 +58,7 @@ impl Tools {
                         ts,
                         format!("{}:source:{index}", event.id),
                         Content::Assistant {
+                            imported: false,
                             text,
                             model_id: output.model.clone().unwrap_or_default(),
                             interrupted: false,

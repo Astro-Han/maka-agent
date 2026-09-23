@@ -77,11 +77,10 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
         ),
         record(
             "tool",
-            Content::Tool {
+            Content::ToolCall {
+                call_id: "foreign-call".into(),
                 name: "old-command".into(),
                 input: Some(json!({"command":"do not run"})),
-                output: Some(json!({"result":"historical"})),
-                is_error: false,
             },
         ),
         record(
@@ -90,6 +89,14 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
                 text: "the original answer".into(),
                 model: Some("foreign-model".into()),
                 thinking: Some("original thought".into()),
+            },
+        ),
+        record(
+            "result",
+            Content::ToolResult {
+                call_id: "foreign-call".into(),
+                output: json!({"result":"historical"}),
+                is_error: false,
             },
         ),
     ];
@@ -165,10 +172,10 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
         .await
         .unwrap();
     assert!(log.publish_session_import("imported", 3).await.is_err());
-    let receipt = log.publish_session_import("imported", 4).await.unwrap();
+    let receipt = log.publish_session_import("imported", 5).await.unwrap();
     assert_eq!(receipt.state, ImportState::Published);
     assert_eq!(
-        log.publish_session_import("imported", 4).await.unwrap(),
+        log.publish_session_import("imported", 5).await.unwrap(),
         receipt
     );
     assert_eq!(
@@ -226,6 +233,28 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
     assert!(text.contains("retained, not a prefill"));
     assert!(text.contains("the original answer"));
 
+    let rows: Vec<_> = prefix
+        .events
+        .iter()
+        .flat_map(|event| {
+            maka_presentation::InvocationView::new(1024 * 1024)
+                .unwrap()
+                .push(event)
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(rows.len(), 5);
+    let call = &rows[2].message;
+    assert!(matches!(
+        rows[3].message.content,
+        maka_presentation::Content::Assistant { .. }
+    ));
+    let maka_presentation::Content::ToolResult { tool_use_id, .. } = &rows[4].message.content
+    else {
+        panic!("result must retain its position after the intervening answer");
+    };
+    assert_eq!(tool_use_id, &call.id);
+
     let copy = log
         .copy_session(
             SessionCopy {
@@ -249,7 +278,7 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
             .unwrap()
             .tail
             .len(),
-        4
+        5
     );
 
     let invocation = Invocation {
@@ -281,7 +310,7 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
             .unwrap()
             .tail
             .len(),
-        4
+        5
     );
     let prefix = log
         .scoped_prefix(

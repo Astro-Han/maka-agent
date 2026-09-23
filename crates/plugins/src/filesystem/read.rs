@@ -18,6 +18,7 @@
  */
 
 //! Read-only input capabilities; never execution authority.
+mod file;
 use super::directory::Directory;
 use crate::{
     Error,
@@ -26,6 +27,7 @@ use crate::{
 };
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::fs::OpenOptions;
+pub use file::{FileInfo, OpenFile, PinnedFile, PinnedReader, ReadRange};
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -110,6 +112,7 @@ pub trait ReadAuthorization: Send + Sync {
 pub struct ReadRoot {
     directory: Directory,
     files: Option<Arc<BTreeSet<String>>>,
+    open_files: Arc<tokio::sync::Semaphore>,
 }
 impl ReadRoot {
     /// Capture on the embedding's blocking worker, before publishing a view.
@@ -117,6 +120,7 @@ impl ReadRoot {
         Directory::capture(path.as_ref()).map(|directory| Self {
             directory,
             files: None,
+            open_files: Arc::new(tokio::sync::Semaphore::new(32)),
         })
     }
 
@@ -141,6 +145,7 @@ impl ReadRoot {
         Self {
             directory: Directory::from_handle(directory, path),
             files: None,
+            open_files: Arc::new(tokio::sync::Semaphore::new(32)),
         }
     }
     pub async fn open(path: impl AsRef<Path>) -> io::Result<Self> {
@@ -165,6 +170,7 @@ impl ReadRoot {
             owner,
             cancellation,
             authorization: None,
+            open_files: self.open_files.clone(),
         }
     }
 }
@@ -211,6 +217,7 @@ pub struct ReadDirectory {
     owner: Context,
     cancellation: CancellationToken,
     authorization: Option<Arc<dyn ReadAuthorization>>,
+    open_files: Arc<tokio::sync::Semaphore>,
 }
 impl ReadDirectory {
     /// Display location only. It never grants authority to reopen the pathname.
@@ -263,6 +270,25 @@ impl ReadDirectory {
         let input = input.into();
         self.with_reader(move |reader| reader.list(input)).await?
     }
+
+    /// Pin a regular file and its current length, not immutable contents. The
+    /// consumer detects in-place changes when its format needs a stable snapshot.
+    /// At most 32 files may be held across views of the same admitted root.
+    pub async fn open_file(&self, input: OpenFile) -> Result<PinnedFile, ReadError> {
+        let slot = self
+            .open_files
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| invalid("open-file capacity exceeded; close unused files"))?;
+        let (file, info, slot) = self
+            .with_reader(move |reader| {
+                let (file, metadata) = reader.open(&input.path, input.symlinks)?;
+                let info = FileInfo::capture(&metadata)?;
+                Ok::<_, ReadError>((file, info, slot))
+            })
+            .await??;
+        PinnedFile::new(self.clone(), file, info, slot)
+    }
 }
 
 /// A synchronous, borrowed read capability for native batch algorithms.
@@ -284,41 +310,10 @@ impl Reader<'_> {
             file: input,
             symlinks,
         } = input.into();
-        relative(&input.path)?;
-        if self
-            .view
-            .files
-            .as_ref()
-            .is_some_and(|files| !selected(files, Path::new(&input.path)))
-        {
-            return Err(invalid("file is outside the mounted input selection"));
-        }
         if input.limit == 0 || input.limit > 1024 * 1024 || input.offset > (1_u64 << 53) - 1 {
             return Err(invalid("invalid read range"));
         }
-        let (parent, name) = self
-            .view
-            .root
-            .resolve(Path::new(&input.path), symlinks.follow())?;
-        if self.view.files.as_ref().is_some_and(|files| {
-            let path = parent.relative(Path::new(&name));
-            !selected(files, &path)
-        }) {
-            return Err(invalid(
-                "link target is outside the mounted input selection",
-            ));
-        }
-        let mut options = OpenOptions::new();
-        options.read(true).follow(FollowSymlinks::No);
-        #[cfg(unix)]
-        {
-            use cap_std::fs::OpenOptionsExt;
-            options.custom_flags(libc::O_NONBLOCK);
-        }
-        let mut file = parent.dir().open_with(name, &options)?;
-        if !file.metadata()?.is_file() {
-            return Err(invalid("expected a regular file"));
-        }
+        let (mut file, _) = self.open(&input.path, symlinks)?;
         file.seek(SeekFrom::Start(input.offset))?;
         let mut bytes = Vec::new();
         let mut reader = file.take(input.limit as u64 + 1);
@@ -334,6 +329,45 @@ impl Reader<'_> {
         let next_offset = (bytes.len() > input.limit).then_some(input.offset + input.limit as u64);
         bytes.truncate(input.limit);
         Ok(FilePage { bytes, next_offset })
+    }
+
+    fn open(
+        &self,
+        path: &str,
+        symlinks: Symlinks,
+    ) -> Result<(cap_std::fs::File, cap_std::fs::Metadata), ReadError> {
+        self.check()?;
+        relative(path)?;
+        if self
+            .view
+            .files
+            .as_ref()
+            .is_some_and(|files| !selected(files, Path::new(path)))
+        {
+            return Err(invalid("file is outside the mounted input selection"));
+        }
+        let (parent, name) = self.view.root.resolve(Path::new(path), symlinks.follow())?;
+        if self.view.files.as_ref().is_some_and(|files| {
+            let path = parent.relative(Path::new(&name));
+            !selected(files, &path)
+        }) {
+            return Err(invalid(
+                "link target is outside the mounted input selection",
+            ));
+        }
+        let mut options = OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let file = parent.dir().open_with(name, &options)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(invalid("expected a regular file"));
+        }
+        Ok((file, metadata))
     }
 
     pub fn list(&self, input: impl Into<ListInput>) -> Result<DirectoryPage, ReadError> {

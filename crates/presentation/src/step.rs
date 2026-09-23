@@ -242,6 +242,7 @@ impl Part {
             turn_id: self.turn_id.clone(),
             ts: self.timestamp,
             content: Content::Assistant {
+                imported: false,
                 text,
                 model_id: model.into(),
                 interrupted,

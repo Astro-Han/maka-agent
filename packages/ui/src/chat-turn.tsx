@@ -588,7 +588,7 @@ export const TurnView = memo(function TurnView(props: {
             directoryReferences={turn.user.directoryReferences}
             inlineReferences={turn.user.inlineReferences}
             onEditUserMessage={
-              props.onEditUserMessage && !turn.user.hostOrigin
+              props.onEditUserMessage && !turn.user.hostOrigin && turn.status !== 'historical'
                 ? () => props.onEditUserMessage?.(turn.turnId)
                 : undefined
             }
@@ -924,6 +924,10 @@ export interface TurnStatusRowProps {
 function TurnStatusRow(props: TurnStatusRowProps): ReactNode {
   const locale = useUiLocale();
   const copy = getConversationCopy(locale).messages;
+
+  if (props.status === 'historical') {
+    return <span className="maka-turn-statusbar-text">{copy.turnStatusHistorical}</span>;
+  }
 
   if (props.status === 'running') {
     const retry = props.providerRetry?.event;

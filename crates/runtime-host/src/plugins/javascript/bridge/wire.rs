@@ -43,6 +43,14 @@ pub(super) enum Request {
     ViewRead(Execution<maka_plugins::filesystem::ReadViewInput>),
     #[serde(rename = "view.list")]
     ViewList(Execution<maka_plugins::filesystem::ListInput>),
+    #[serde(rename = "inputs.openFile")]
+    InputOpenFile(Execution<maka_plugins::filesystem::OpenFile>),
+    #[serde(rename = "view.openFile")]
+    ViewOpenFile(Execution<maka_plugins::filesystem::OpenFile>),
+    #[serde(rename = "pinnedFile.read")]
+    PinnedFileRead(Execution<maka_plugins::filesystem::ReadRange>),
+    #[serde(rename = "pinnedFile.close")]
+    PinnedFileClose(Handle),
     #[serde(rename = "preferences.read")]
     Preferences,
     #[serde(rename = "remote.session")]

@@ -29,6 +29,7 @@ export interface ToolActivityCopy {
   status: {
     sandboxBlocked: string;
     interrupted: string;
+    unknown: string;
   };
   output: {
     redacted: string;
@@ -177,7 +178,7 @@ export interface ToolActivityCopy {
 const TOOL_ACTIVITY_COPY = {
   'zh-CN': {
     errorLabel: '错误',
-    status: { sandboxBlocked: '可能被沙箱阻止', interrupted: '已中断' },
+    status: { sandboxBlocked: '可能被沙箱阻止', interrupted: '已中断', unknown: '来源未记录结果' },
     output: { redacted: '[已脱敏]', truncated: '输出已截断' },
     copy: {
       idle: '复制',
@@ -278,7 +279,7 @@ const TOOL_ACTIVITY_COPY = {
   },
   'zh-TW': {
     errorLabel: '錯誤',
-    status: { sandboxBlocked: '可能被沙箱阻止', interrupted: '已中斷' },
+    status: { sandboxBlocked: '可能被沙箱阻止', interrupted: '已中斷', unknown: '來源未記錄結果' },
     output: { redacted: '[已脫敏]', truncated: '輸出已截斷' },
     copy: {
       idle: '複製',
@@ -379,7 +380,7 @@ const TOOL_ACTIVITY_COPY = {
   },
   en: {
     errorLabel: 'Error',
-    status: { sandboxBlocked: 'Possibly blocked by sandbox', interrupted: 'Interrupted' },
+    status: { sandboxBlocked: 'Possibly blocked by sandbox', interrupted: 'Interrupted', unknown: 'Result not recorded by source' },
     output: { redacted: '[Redacted]', truncated: 'Output truncated' },
     copy: {
       idle: 'Copy',

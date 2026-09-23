@@ -115,6 +115,7 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
     tokio::time::timeout(Duration::from_secs(40), async {
         let fixture = ClientFixture::new("maka-js-plugin-");
         std::fs::write(fixture.workspace.join("native-proof.txt"), "native and JS share authority\n").unwrap();
+        std::fs::write(fixture.workspace.join("binary-page"), vec![255; 1024 * 1024]).unwrap();
         std::fs::write(fixture.workspace.join("unshared.txt"), "not granted").unwrap();
         let service = package(&fixture.workspace, "example.service", "shared", SERVICE, false);
         let source = CONSUMER.replace("'__PROTOCOL_EXECUTABLE__'", &serde_json::to_string(&std::env::current_exe().unwrap()).unwrap())
@@ -128,7 +129,7 @@ async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_d
                 input_roots: maka_plugins::filesystem::ReadRoots(std::collections::BTreeMap::from([(
                     "public-notes".into(),
                     maka_plugins::filesystem::ReadRoot::open(&fixture.workspace).await.unwrap()
-                        .select(["native-proof.txt".into()].into()).unwrap(),
+                        .select(["native-proof.txt".into(), "binary-page".into()].into()).unwrap(),
                 )])),
                 plugins: services::setup(), ..Default::default()
             }).await.unwrap();

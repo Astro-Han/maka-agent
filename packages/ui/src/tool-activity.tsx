@@ -642,6 +642,7 @@ function astryxToolStatus(item: ToolActivityItem): ChatToolCallItem['status'] {
   switch (toolActivityPresentationStatus(item)) {
     case 'completed': return 'complete';
     case 'errored':
+    case 'unknown':
     case 'interrupted': return 'error';
     case 'running': return 'running';
   }
@@ -655,6 +656,7 @@ function astryxToolStatus(item: ToolActivityItem): ChatToolCallItem['status'] {
  * would make a screen reader announce the same word twice.
  */
 function toolCallErrorMessage(item: ToolActivityItem, locale: UiLocale): string | undefined {
+  if (item.status === 'unknown') return getToolActivityCopy(locale).status.unknown;
   if (item.status !== 'errored') return undefined;
   return summarizeErrorText(formatUserVisibleToolText(
     redactSecrets(extractErrorText(item.result, locale)),
@@ -671,6 +673,7 @@ function toolCallErrorMessage(item: ToolActivityItem, locale: UiLocale): string 
  */
 function outcomeWord(item: ToolActivityItem, locale: UiLocale): string | undefined {
   const copy = getToolActivityCopy(locale).status;
+  if (item.status === 'unknown') return copy.unknown;
   if (item.status === 'interrupted') return copy.interrupted;
   if (item.status === 'errored' && isSandboxDeniedTool(item)) return copy.sandboxBlocked;
   return undefined;

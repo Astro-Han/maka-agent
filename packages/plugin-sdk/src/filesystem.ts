@@ -75,6 +75,22 @@ export interface Files {
 export interface ReadDirectory extends ReadFiles<'follow' | 'reject'> {
   /** Observed mount location, not filesystem authority or a promise of continued identity. */
   location(): Promise<string>;
+  /** Fixed file object and readable prefix. At most 32 open files per admitted root. */
+  openFile(input: { path: string; symlinks?: 'follow' | 'reject' }): Promise<PinnedFile>;
+}
+/** Appends are excluded; in-place changes are not frozen. The format consumer
+ * validates digests between passes when it needs a consistent snapshot.
+ * Authorization is checked per read; the source callback and Fiber bound lifetime.
+ */
+export interface PinnedFile {
+  readonly info: { readonly length: number; readonly modifiedAt: number | null };
+  /** At most 1 MiB, default 64 KiB. Truncation within the prefix is an error. */
+  read(input?: { offset?: number; limit?: number }): Promise<{
+    bytes: Uint8Array;
+    nextOffset: number | null;
+  }>;
+  /** Idempotent; resolves after the OS handle is released. */
+  close(): Promise<void>;
 }
 /** Private files never follow symlinks; input views may follow confined aliases. */
 export interface ReadFiles<Links extends 'follow' | 'reject' = 'reject'> {

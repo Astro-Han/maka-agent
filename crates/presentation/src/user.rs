@@ -35,6 +35,7 @@ pub(super) fn project(
         turn_id: turn.into(),
         ts,
         content: Content::User {
+            imported: false,
             text: content.text.clone(),
             display_text: content.display_text.clone(),
             attachments: content.attachments.clone(),

@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { ShellRunSnapshotResult, ShellRunUpdate } from '@maka/core/events';
 import type { ShellRunToolResult } from '@maka/core/shell-run-result';
-import type { StoredMessage } from '@maka/core/session';
+import { decodeCanonicalMessage, deriveTurnRecords, type StoredMessage } from '@maka/core/session';
 import { createTranscriptProjection, valuesEqual } from '../transcript-projection.js';
 import { foldShellRunToolActivities, timelineTools, type ToolActivityItem, type TurnViewModel } from '../materialize.js';
 import type { LiveTurnProjection } from '../live-turn-projection.js';
@@ -67,6 +67,34 @@ function streamingTurn(text: string): LiveTurnProjection {
 }
 
 describe('incremental transcript projection', () => {
+  test('imported history preserves observations without inventing local execution or completion', () => {
+    const messages = [
+      { type: 'user', id: 'u', turnId: 'foreign', ts: 1, imported: true, text: 'question' },
+      { type: 'tool_call', id: 'call', turnId: 'foreign', ts: 2,
+        toolName: 'foreign-tool', args: {}, origin: 'imported', modelVisibility: 'hidden' },
+      { type: 'assistant', id: 'a', turnId: 'foreign', ts: 3, imported: true,
+        text: 'partial answer', modelId: 'foreign-model', thinking: { text: 'reasoning' } },
+      { type: 'system_note', id: 'n', turnId: 'foreign', ts: 4, kind: 'imported',
+        data: { text: 'The source ended without a terminal record.' } },
+    ].map(decodeCanonicalMessage);
+    assert.deepEqual(deriveTurnRecords(messages), []);
+    const projection = createTranscriptProjection();
+    const input = { sessionId: SESSION, messages, locale: 'en' as const };
+    const [turn] = projection.project(input);
+    assert.equal(turn?.status, 'historical');
+    assert.equal(turn?.durationMs, undefined);
+    assert.equal(turn?.tools[0]?.status, 'unknown');
+    assert.equal(turn?.notes[0]?.text, 'The source ended without a terminal record.');
+    const [updated] = projection.project({ ...input, messages: [...messages,
+      decodeCanonicalMessage({ type: 'tool_result', id: 'result', toolUseId: 'call',
+        turnId: 'foreign', ts: 5, isError: false, content: { kind: 'json', value: 'observed' },
+        origin: 'imported', modelVisibility: 'hidden' }),
+    ] });
+    assert.equal(updated?.status, 'historical');
+    assert.equal(updated?.tools[0]?.status, 'completed');
+    assert.equal(updated?.tools[0]?.toolUseId, 'call');
+  });
+
   test('a locale change rematerializes localized system notes', () => {
     const projection = createTranscriptProjection();
     const messages: StoredMessage[] = [{

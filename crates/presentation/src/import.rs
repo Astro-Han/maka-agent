@@ -44,6 +44,7 @@ pub(super) fn project(
     let content = match &record.content {
         import::Content::User { text } => Content::User {
             text: text.clone(),
+            imported: true,
             display_text: None,
             attachments: None,
             quotes: None,
@@ -56,6 +57,7 @@ pub(super) fn project(
             thinking,
         } => Content::Assistant {
             text: text.clone(),
+            imported: true,
             model_id: model.clone().unwrap_or_default(),
             interrupted: false,
             thinking: thinking.as_ref().map(|text| Thinking {
@@ -68,15 +70,13 @@ pub(super) fn project(
             kind: crate::message::ImportedNoteKind::Imported,
             data: crate::message::ImportedNote { text: text.clone() },
         },
-        import::Content::Tool {
+        import::Content::ToolCall {
+            call_id,
             name,
             input,
-            output,
-            is_error,
         } => {
-            let call_id = format!("{}:call", event.id);
-            let mut rows = vec![make(
-                call_id.clone(),
+            return Ok(vec![make(
+                import::tool_call_id(&event.invocation.session_id, call_id),
                 Content::ToolCall {
                     tool_name: name.clone(),
                     args: input.clone().unwrap_or_else(|| json!({})),
@@ -87,24 +87,22 @@ pub(super) fn project(
                         model_visibility: Hidden::Hidden,
                     },
                 },
-            )];
-            if let Some(output) = output {
-                rows.push(make(
-                    event.id.clone(),
-                    Content::ToolResult {
-                        tool_use_id: call_id,
-                        is_error: *is_error,
-                        content: ToolContent::Json {
-                            value: output.clone(),
-                        },
-                        metadata: ToolMetadata::Imported {
-                            model_visibility: Hidden::Hidden,
-                        },
-                    },
-                ));
-            }
-            return Ok(rows);
+            )]);
         }
+        import::Content::ToolResult {
+            call_id,
+            output,
+            is_error,
+        } => Content::ToolResult {
+            tool_use_id: import::tool_call_id(&event.invocation.session_id, call_id),
+            is_error: *is_error,
+            content: ToolContent::Json {
+                value: output.clone(),
+            },
+            metadata: ToolMetadata::Imported {
+                model_visibility: Hidden::Hidden,
+            },
+        },
     };
     Ok(vec![make(event.id.clone(), content)])
 }

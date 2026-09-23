@@ -78,10 +78,14 @@ pub enum Content {
         thinking: Option<String>,
     },
     /// Foreign tool activity remains an observation, not a replayable tool call.
-    Tool {
+    ToolCall {
+        call_id: String,
         name: String,
         input: Option<serde_json::Value>,
-        output: Option<serde_json::Value>,
+    },
+    ToolResult {
+        call_id: String,
+        output: serde_json::Value,
         is_error: bool,
     },
     Note {
@@ -110,6 +114,12 @@ impl Record {
         if self.timestamp.is_some_and(|ts| ts > 9_007_199_254_740_991) {
             return Err("invalid imported timestamp");
         }
+        if let Content::ToolCall { call_id, .. } | Content::ToolResult { call_id, .. } =
+            &self.content
+            && (call_id.is_empty() || call_id.len() > 1024 || call_id.chars().any(char::is_control))
+        {
+            return Err("invalid imported tool identity");
+        }
         if serde_json::to_vec(self)
             .map_err(|_| "invalid imported record")?
             .len()
@@ -123,7 +133,19 @@ impl Record {
     pub fn is_conversation(&self) -> bool {
         match &self.content {
             Content::User { text } | Content::Assistant { text, .. } => !text.trim().is_empty(),
-            Content::Tool { .. } | Content::Note { .. } => false,
+            Content::ToolCall { .. } | Content::ToolResult { .. } | Content::Note { .. } => false,
         }
     }
+}
+
+/// An adapter normalizes foreign call keys within the source Session. Copies
+/// retain the original canonical Session identity, so their links stay stable.
+pub fn tool_call_id(session_id: &str, call_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    for part in [session_id, call_id] {
+        hash.update((part.len() as u64).to_be_bytes());
+        hash.update(part.as_bytes());
+    }
+    format!("import-tool:{:x}", hash.finalize())
 }

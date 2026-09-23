@@ -23,8 +23,9 @@ pub mod entries;
 mod read;
 use maka_runtime::read::ReadInput;
 pub use read::{
-    ListInput, ReadAuthorization, ReadDirectory, ReadError, ReadInput as ReadViewInput, ReadInputs,
-    ReadRoot, ReadRoots, Reader, Symlinks,
+    FileInfo, ListInput, OpenFile, PinnedFile, PinnedReader, ReadAuthorization, ReadDirectory,
+    ReadError, ReadInput as ReadViewInput, ReadInputs, ReadRange, ReadRoot, ReadRoots, Reader,
+    Symlinks,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

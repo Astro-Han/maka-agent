@@ -138,6 +138,11 @@ impl Card<'_> {
                 outcome::shell(self.call.map(|(_, call)| call), &result["content"])
                     .unwrap_or(State::Returned)
             }
+        } else if self
+            .call
+            .is_some_and(|(_, call)| call["origin"] == "imported")
+        {
+            State::Missing
         } else if waiting {
             State::Waiting
         } else if self.closed {

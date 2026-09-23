@@ -26,7 +26,8 @@ export interface SessionImportSource {
 export type SessionImportContent =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string; model?: string | null; thinking?: string | null }
-  | { kind: 'tool'; name: string; input?: unknown; output?: unknown; isError: boolean }
+  | { kind: 'tool_call'; callId: string; name: string; input?: unknown }
+  | { kind: 'tool_result'; callId: string; output: unknown; isError: boolean }
   | { kind: 'note'; text: string };
 
 export interface SessionImportRecord {

@@ -55,12 +55,15 @@ export default async function (ctx) {
 
   /** @type {import('../../../../packages/plugin-sdk/src/host.js').ReadDirectory | undefined} */
   let preparedFiles;
+  /** @type {import('../../../../packages/plugin-sdk/src/host.js').PinnedFile | undefined} */
+  let preparedFile;
   const revision = await ctx.revision();
   const behaviorRevision = await ctx.revision();
   let invalidated = false;
   await ctx.input.prepare('example.review', async (request) => {
     const basis = await revision.capture();
     preparedFiles = request.workspace;
+    preparedFile = await request.workspace.openFile({ path: 'native-proof.txt' });
     const proof = await request.workspace.read({ path: 'native-proof.txt', limit: 6 });
     if (new TextDecoder().decode(proof.bytes) !== 'native' || proof.nextOffset !== 6)
       throw new Error('preparation lost bounded workspace access');
@@ -307,6 +310,15 @@ export default async function (ctx) {
           if (error.code !== 'revoked') throw error;
         }
       }
+      if (preparedFile) {
+        try {
+          await preparedFile.read();
+          throw new Error('pinned file survived its source callback');
+        } catch (error) {
+          if (error.code !== 'revoked') throw error;
+        }
+        await preparedFile.close();
+      }
       const proof = await call.workspace.read({ path: 'native-proof.txt' });
       if (!new TextDecoder().decode(proof.bytes).includes('native and JS'))
         throw new Error('prompt workspace access failed');
@@ -325,6 +337,41 @@ export default async function (ctx) {
       const mounted = await ctx.inputs.at('public-notes').read({ path: 'native-proof.txt' });
       if (new TextDecoder().decode(mounted.bytes) !== new TextDecoder().decode(proof.bytes))
         throw new Error('native and JS see different input mounts');
+      const pinned = await ctx.inputs.at('public-notes').openFile({ path: 'native-proof.txt' });
+      if (pinned.info.length !== mounted.bytes.length) throw new Error('pinned length mismatch');
+      const first = await pinned.read({ limit: 6 });
+      if (first.nextOffset !== 6) throw new Error('pinned cursor mismatch');
+      const last = await pinned.read({ offset: first.nextOffset });
+      if (
+        new TextDecoder().decode(first.bytes) !== 'native' ||
+        last.nextOffset !== null ||
+        last.bytes.length !== mounted.bytes.length - 6
+      )
+        throw new Error('pinned byte range lost its boundary');
+      await pinned.close();
+      await pinned.close();
+      const binary = await ctx.inputs.at('public-notes').openFile({ path: 'binary-page' });
+      const bytes = await binary.read({ limit: 1024 * 1024 });
+      if (
+        bytes.bytes.length !== 1024 * 1024 ||
+        bytes.bytes[0] !== 255 ||
+        bytes.bytes.at(-1) !== 255 ||
+        bytes.nextOffset !== null
+      )
+        throw new Error('JS byte-page capacity differs from the native contract');
+      await Promise.all([binary.close(), binary.close()]);
+      try {
+        await pinned.read();
+        throw new Error('closed pinned file remained readable');
+      } catch (error) {
+        if (error.code !== 'revoked') throw error;
+      }
+      try {
+        await ctx.inputs.at('public-notes').openFile({ path: 'unshared.txt' });
+        throw new Error('pinned file escaped input selection');
+      } catch (error) {
+        if (error.code !== 'invalid') throw error;
+      }
       try {
         await ctx.inputs.at('public-notes').read({ path: 'unshared.txt' });
         throw new Error('input mount ignored its file selection');
