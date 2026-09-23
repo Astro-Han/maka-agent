@@ -102,7 +102,9 @@ fn deletion_confirms_cas_and_remote_retirement_preserves_recoverable_draft() {
             .is_some()
     );
     tui.send(b"\x1b");
-    tui.wait_for("Concurrent deletion target");
+    tui.wait_until(|s| {
+        s.contains("Concurrent deletion target") && !s.contains("This session changed elsewhere.")
+    });
     tui.send(b"\x10");
     tui.wait_for("Delete session");
     tui.click_text("Delete session");

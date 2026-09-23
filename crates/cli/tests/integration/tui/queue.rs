@@ -63,6 +63,7 @@ fn real_host_queue_edits_retracts_promotes_and_steers_at_the_model_boundary() {
     tui.wait_for("Message…");
     tui.send(b"root task\x13");
     tui.wait_for("Queue gate one");
+    tui.wait_for("Message…");
     let start = runtime.block_on(observe(&client));
     let root_turn = start.root_turn.unwrap();
     for text in [
@@ -125,7 +126,9 @@ fn real_host_queue_edits_retracts_promotes_and_steers_at_the_model_boundary() {
     }));
     tui.wait_for("↗ promote-me");
     tui.click_text("Message…");
-    tui.send("direct-steering 中文🦀\x0f".as_bytes()); // Ctrl+O does not cancel the running request.
+    tui.send("direct-steering 中文🦀".as_bytes());
+    tui.wait_for("direct-steering 中文🦀"); // Observe the edit before waiting for its removal.
+    tui.send(b"\x0f"); // Ctrl+O does not cancel the running request.
     tui.wait_for("Message…");
     runtime.block_on(wait_queue(&client, |snapshot| {
         snapshot.queue.steering.len() == 2

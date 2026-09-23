@@ -200,7 +200,7 @@ impl App {
         self.connections
             .rows
             .iter()
-            .any(|current| current.id == row.id && current.revision == row.revision)
+            .any(|current| current.id == row.id)
     }
     pub fn rename_connection_action(&self) -> Option<Action> {
         self.management_commands()
@@ -717,5 +717,65 @@ mod tests {
         assert!(!app.management_enabled(&Command::Save));
         app.apply(Action::Manage(Command::Close));
         assert!(!app.management_enabled(&Command::Open(target, kind)));
+    }
+    #[test]
+    fn opening_uses_current_connection_but_never_rebases_an_existing_dialog() {
+        let mut app = App::new(
+            "/unused".into(),
+            I18n::new(LocalePreference::Explicit(Locale::En), Locale::En),
+        );
+        app.connection = ConnectionState::Connected {
+            root_id: "root".into(),
+            epoch: "epoch".into(),
+        };
+        app.apply(Action::Visit(Route::Connections));
+        load(&mut app);
+        let action = app.rename_connection_action().unwrap();
+        let current = std::sync::Arc::make_mut(&mut app.connections.rows[0]);
+        current.revision = 8;
+        current.name = "Updated".into();
+        current.base_url = Some("https://updated.example/v1".into());
+        assert!(app.enabled(&action));
+        app.apply(action.clone());
+        let dialog = app.management.dialog.as_ref().unwrap();
+        assert_eq!(dialog.target.name, "Updated");
+        assert_eq!(dialog.editor.text(), "Updated");
+        let Entity::Connection(row) = &dialog.target.entity else {
+            panic!()
+        };
+        assert_eq!(row.revision, 8);
+        assert_eq!(row.base_url.as_deref(), Some("https://updated.example/v1"));
+
+        // A later read must not silently authorize the edited form on a new basis.
+        std::sync::Arc::make_mut(&mut app.connections.rows[0]).revision = 9;
+        let mut screen = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+        let ticket = app.management_request().unwrap();
+        let Entity::Connection(row) = &ticket.target.entity else {
+            panic!()
+        };
+        assert_eq!(row.revision, 8);
+        app.management_completed(ticket, Err(RequestFailure::Unknown(ClientError::Timeout)));
+        app.apply(Action::Manage(Command::Close));
+        assert!(
+            !app.enabled(&action),
+            "unknown outcome needs an authoritative read"
+        );
+
+        load(&mut app);
+        app.connections.rows.clear();
+        assert!(
+            !app.enabled(&action),
+            "a removed connection cannot be opened"
+        );
+        load(&mut app);
+        app.connection = ConnectionState::Connected {
+            root_id: "another-root".into(),
+            epoch: "epoch".into(),
+        };
+        assert!(
+            !app.enabled(&action),
+            "connection IDs never cross Host identity"
+        );
     }
 }

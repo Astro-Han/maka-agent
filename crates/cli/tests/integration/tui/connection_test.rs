@@ -24,6 +24,7 @@ use serde_json::json;
 
 fn open(tui: &mut Pty) {
     tui.send(b"\x10");
+    tui.wait_for("Commands · Esc closes");
     tui.wait_for("Test connection");
     tui.click_text("Test connection");
     tui.wait_for("incur usage");
@@ -160,8 +161,21 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
             tokio::task::yield_now().await;
         }
     });
-    tui.send(b"\x10");
-    tui.wait_for("Open workspace");
+    // Establish a freshly loaded row, then change it with the menu held open.
+    for name in ["Before menu open", "Updated while menu open"] {
+        runtime.block_on(async {
+            let (_, items) = catalog(&client).await;
+            client.request(Operation::ConnectionCatalogUpdate,json!({
+                "expected":{"connectionId":id,"revision":items[0]["revision"]},
+                "changes":{"name":name,"baseUrl":url,"enabled":true,"enabledModelIds":["fixture-model"]}
+            })).await.unwrap();
+        });
+        tui.wait_for(name);
+        if name == "Before menu open" {
+            tui.send(b"\x10");
+            tui.wait_for("Test connection");
+        }
+    }
     assert!(
         !tui.screen
             .snapshot()
@@ -169,6 +183,12 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
             .screen
             .contains("Host check passed")
     );
+    let updated = runtime.block_on(catalog(&client));
+    tui.click_text("Test connection");
+    tui.wait_for("incur usage");
+    tui.send(b"\x1b");
+    tui.wait_until(|s| !s.contains("incur usage"));
+    assert_eq!(runtime.block_on(catalog(&client)), updated);
     tui.send(b"\x11");
     tui.finish();
     client.disconnect();

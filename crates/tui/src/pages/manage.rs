@@ -591,7 +591,19 @@ impl App {
                 self.hits.clear();
             }
             Command::Directory(command) => return self.directory_action(command),
-            Command::Open(target, kind) => {
+            Command::Open(mut target, kind) => {
+                if let Entity::Connection(row) = &target.entity {
+                    // A menu names an entity, not a write basis. Read its latest
+                    // confirmed projection when opening; the dialog then freezes
+                    // that basis for review and Host CAS, even across refreshes.
+                    let current = self
+                        .connections
+                        .rows
+                        .iter()
+                        .find(|item| item.id == row.id)?;
+                    target.name = current.name.clone();
+                    target.entity = Entity::Connection(current.clone());
+                }
                 if kind == Kind::Oauth {
                     self.oauth_open(&target);
                 }
