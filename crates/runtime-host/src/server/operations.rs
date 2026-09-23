@@ -260,6 +260,9 @@ impl OperationRegistry for Operations {
         } else {
             match operation {
                 Operation::SessionCreate => Some(sessions::CREATE_ERRORS),
+                Operation::SessionBranchCreate
+                | Operation::SessionRevisionCreate
+                | Operation::SessionRevisionAbandon => Some(sessions::copy::ERRORS),
                 Operation::SessionCatalogQuery => Some(sessions::QUERY_ERRORS),
                 Operation::SessionLifecycleSet => Some(sessions::LIFECYCLE_ERRORS),
                 Operation::SessionMetadataUpdate => Some(sessions::mutation::METADATA_ERRORS),

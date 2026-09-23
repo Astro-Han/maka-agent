@@ -18,6 +18,7 @@
  */
 
 pub(super) mod configuration;
+pub(super) mod copy;
 pub(super) mod create;
 pub(super) use crate::session::model;
 pub(super) mod mutation;
@@ -39,6 +40,8 @@ pub(super) enum Output {
     Query(SessionCatalogQueryResult),
     Item(Box<SessionCatalogProjection>),
     Mutation(SessionUpdateResult),
+    Copy(maka_protocol::session::copy::Output),
+    Abandon(maka_protocol::session::copy::AbandonOutput),
 }
 
 impl Output {
@@ -54,6 +57,9 @@ pub(super) fn supports(operation: Operation) -> bool {
     matches!(
         operation,
         Operation::SessionCreate
+            | Operation::SessionBranchCreate
+            | Operation::SessionRevisionCreate
+            | Operation::SessionRevisionAbandon
             | Operation::SessionCatalogQuery
             | Operation::SessionLifecycleSet
             | Operation::SessionMetadataUpdate
@@ -65,6 +71,12 @@ pub(super) fn supports(operation: Operation) -> bool {
 
 pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
     match operation {
+        Operation::SessionBranchCreate | Operation::SessionRevisionCreate => {
+            maka_protocol::session::copy::decode_input(operation, value)?;
+        }
+        Operation::SessionRevisionAbandon => {
+            maka_protocol::session::copy::decode_abandon_input(value)?;
+        }
         Operation::SessionCreate => {
             decode_session_create_input(value)?;
         }
@@ -92,7 +104,14 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol
 }
 
 pub(super) fn decode_output(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    if operation == Operation::SessionCatalogQuery {
+    if matches!(
+        operation,
+        Operation::SessionBranchCreate | Operation::SessionRevisionCreate
+    ) {
+        maka_protocol::session::copy::decode_result(value)?;
+    } else if operation == Operation::SessionRevisionAbandon {
+        maka_protocol::session::copy::decode_abandon_result(value)?;
+    } else if operation == Operation::SessionCatalogQuery {
         decode_session_catalog_query_result(value)?;
     } else if matches!(
         operation,
@@ -114,6 +133,16 @@ pub(super) async fn execute(
 ) -> Result<Output> {
     let log = host.log.as_ref();
     match operation {
+        Operation::SessionBranchCreate | Operation::SessionRevisionCreate => {
+            let input =
+                maka_protocol::session::copy::decode_input(operation, value).map_err(invalid)?;
+            copy::create(host, input).await.map(Output::Copy)
+        }
+        Operation::SessionRevisionAbandon => {
+            let input =
+                maka_protocol::session::copy::decode_abandon_input(value).map_err(invalid)?;
+            copy::abandon(host, input).await.map(Output::Abandon)
+        }
         Operation::SessionCreate => {
             let input = decode_session_create_input(value).map_err(invalid)?;
             let item = create::create(host, input.clone()).await?;

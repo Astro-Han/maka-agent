@@ -34,7 +34,10 @@ use serde_json::json;
 #[tokio::test]
 async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_status() {
     let fixture = ClientFixture::new("maka-revision-catalog-");
-    let cwd = fixture.workspace.to_string_lossy().into_owned();
+    let cwd =
+        maka_fs_tools::workspace::project::host_path(&fixture.workspace.canonicalize().unwrap())
+            .unwrap()
+            .to_owned();
     let configuration = PreparedSession::new(serde_json::from_value(json!({
         "sessionId":"source", "workspace":{"kind":"host_path","path":cwd}, "executorId":"fixture"
     })).unwrap()).unwrap().bind(
@@ -194,6 +197,70 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
         catalog["result"]["session"]["revisionState"], "committed",
         "{catalog}"
     );
+    let source = operator
+        .rpc(
+            "session.catalog.query",
+            json!({"kind":"get", "sessionId":"source"}),
+        )
+        .await;
+    let request = json!({
+        "sourceSessionId":"source", "targetSessionId":"native-revision",
+        "sourceTurnId":"turn", "expectedSourceRevision":source["result"]["session"]["revision"]
+    });
+    let copied = operator
+        .rpc("session.revision.create", request.clone())
+        .await;
+    assert_eq!(copied["ok"], true, "{copied}");
+    assert_eq!(copied["result"]["kind"], "committed");
+    assert_eq!(copied["result"]["session"]["revisionState"], "preparing");
+    let renamed = operator
+        .rpc(
+            "session.metadata.update",
+            json!({
+                "sessionId":"source", "expectedRevision":request["expectedSourceRevision"],
+                "patch":{"name":"Changed after copy"}
+            }),
+        )
+        .await;
+    assert_eq!(renamed["result"]["kind"], "committed", "{renamed}");
+    let replayed = operator
+        .rpc("session.revision.create", request.clone())
+        .await;
+    assert_eq!(
+        replayed, copied,
+        "a lost reply must not recapture changed source settings"
+    );
+    let mut changed = request.clone();
+    changed["sourceTurnId"] = json!("different-turn");
+    let conflict = operator.rpc("session.revision.create", changed).await;
+    assert_eq!(conflict["error"]["code"], "operation_conflict");
+    let mut stale = request.clone();
+    stale["targetSessionId"] = json!("stale-native-revision");
+    let conflict = operator.rpc("session.revision.create", stale).await;
+    assert_eq!(conflict["result"]["kind"], "source_revision_conflict");
+    for _ in 0..2 {
+        let abandoned = operator
+            .rpc(
+                "session.revision.abandon",
+                json!({"targetSessionId":"native-revision"}),
+            )
+            .await;
+        assert_eq!(abandoned["result"]["kind"], "abandoned", "{abandoned}");
+    }
+    let abandoned_retry = operator.rpc("session.revision.create", request).await;
+    assert_eq!(abandoned_retry["error"]["code"], "not_found");
+    let retained = operator
+        .rpc(
+            "session.revision.abandon",
+            json!({"targetSessionId":"revision"}),
+        )
+        .await;
+    assert_eq!(retained["result"]["kind"], "retained", "{retained}");
+    let side = operator.rpc("session.branch.create", json!({
+        "sourceSessionId":"source", "targetSessionId":"empty-side",
+        "expectedSourceRevision":renamed["result"]["session"]["revision"], "intent":"side_conversation"
+    })).await;
+    assert_eq!(side["result"]["kind"], "committed", "{side}");
     observer.close().await;
     operator.close().await;
     stop.cancel();

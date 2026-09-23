@@ -111,7 +111,7 @@ pub fn decode_input(operation: Operation, value: &Value) -> Result<Input> {
 }
 
 pub fn decode_output(input: &Input, value: &Value) -> Result<Output> {
-    let output: Output = validation::decode(value)?;
+    let output = decode_result(value)?;
     let matches = match &output {
         Output::Committed { session } => session.id == input.target_session_id,
         Output::SourceRevisionConflict {
@@ -126,6 +126,24 @@ pub fn decode_output(input: &Input, value: &Value) -> Result<Output> {
     Ok(output)
 }
 
+pub fn decode_result(value: &Value) -> Result<Output> {
+    let output: Output = validation::decode(value)?;
+    match &output {
+        Output::Committed { .. } => {
+            super::decode_session_catalog_projection(&value["session"])?;
+        }
+        Output::SourceRevisionConflict {
+            expected_revision,
+            actual_revision,
+        } => {
+            if *expected_revision == 0 || *actual_revision == 0 {
+                return Err(ProtocolError::invalid("Invalid Session copy revisions"));
+            }
+        }
+    }
+    Ok(output)
+}
+
 pub fn decode_abandon_input(value: &Value) -> Result<AbandonInput> {
     let input: AbandonInput = validation::decode(value)?;
     validation::entity(&input.target_session_id)?;
@@ -133,7 +151,7 @@ pub fn decode_abandon_input(value: &Value) -> Result<AbandonInput> {
 }
 
 pub fn decode_abandon_output(input: &AbandonInput, value: &Value) -> Result<AbandonOutput> {
-    let output: AbandonOutput = validation::decode(value)?;
+    let output = decode_abandon_result(value)?;
     let (AbandonOutput::Abandoned { session_id } | AbandonOutput::Retained { session_id }) =
         &output;
     if session_id != &input.target_session_id {
@@ -141,6 +159,14 @@ pub fn decode_abandon_output(input: &AbandonInput, value: &Value) -> Result<Aban
             "Abandon receipt does not match its request",
         ));
     }
+    Ok(output)
+}
+
+pub fn decode_abandon_result(value: &Value) -> Result<AbandonOutput> {
+    let output: AbandonOutput = validation::decode(value)?;
+    let (AbandonOutput::Abandoned { session_id } | AbandonOutput::Retained { session_id }) =
+        &output;
+    validation::entity(session_id)?;
     Ok(output)
 }
 

@@ -235,6 +235,9 @@ fn path_free(request: &Request) -> bool {
         | Operation::CredentialVaultSet
         | Operation::CredentialVaultDelete
         | Operation::SessionCatalogQuery
+        | Operation::SessionBranchCreate
+        | Operation::SessionRevisionCreate
+        | Operation::SessionRevisionAbandon
         | Operation::SessionExecutionBoundaryQuery
         | Operation::SessionTurnsQuery
         | Operation::SessionTurnLandmarksQuery

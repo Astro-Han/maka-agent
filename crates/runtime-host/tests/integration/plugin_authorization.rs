@@ -343,6 +343,14 @@ async fn scenario() {
             "patch":{"sandboxMode":"danger-full-access"}
         })).await;
         assert_eq!(ordinary["ok"], false, "{ordinary}");
+        let foreign_copy = peer.rpc("session.revision.create", json!({
+            "sourceSessionId":created["root"]["sessionId"], "targetSessionId":"native-cannot-copy-managed",
+            "sourceTurnId":created["receipt"]["invocation"]["turn_id"], "expectedSourceRevision":managed["revision"]
+        })).await;
+        assert_eq!(
+            foreign_copy["error"]["code"], "operation_conflict",
+            "{foreign_copy}"
+        );
         // Draft removal closes only its own ready subscription, not another
         // Session on the same connection. Reopening replays the tombstone.
         let mut observer = Peer::new(host.clone(), "revision-observer").await;
