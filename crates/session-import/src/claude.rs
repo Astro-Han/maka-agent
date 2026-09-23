@@ -21,6 +21,7 @@
 //! the same pinned prefix and verifies its digest before returning any history.
 mod lineage;
 mod wire;
+pub(crate) use wire::synthetic;
 
 use crate::{
     Error, Fingerprint, Transcript, jsonl,

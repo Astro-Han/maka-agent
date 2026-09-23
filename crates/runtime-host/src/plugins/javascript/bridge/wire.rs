@@ -45,6 +45,10 @@ pub(super) enum Request {
     ViewList(Execution<maka_plugins::filesystem::ListInput>),
     #[serde(rename = "inputs.openFile")]
     InputOpenFile(Execution<maka_plugins::filesystem::OpenFile>),
+    #[serde(rename = "inputs.fileInfo")]
+    InputFileInfo(Execution<maka_plugins::filesystem::OpenFile>),
+    #[serde(rename = "view.fileInfo")]
+    ViewFileInfo(Execution<maka_plugins::filesystem::OpenFile>),
     #[serde(rename = "view.openFile")]
     ViewOpenFile(Execution<maka_plugins::filesystem::OpenFile>),
     #[serde(rename = "pinnedFile.read")]
@@ -450,7 +454,7 @@ impl From<maka_plugins::filesystem::ReadError> for Error {
             ReadError::Retired => Code::Revoked,
             ReadError::Invalid(_) => Code::Invalid,
             ReadError::Io(error) if error.kind() == std::io::ErrorKind::NotFound => Code::NotFound,
-            ReadError::Io(_) => Code::Unavailable,
+            ReadError::Io(_) | ReadError::ScanLimit { .. } => Code::Unavailable,
         };
         Self {
             code,

@@ -19,6 +19,7 @@
 
 //! External conversation formats. Source discovery and conversion belong to this
 //! plugin, not the Host's execution or canonical event authority.
+pub mod catalog;
 pub mod claude;
 pub mod codex;
 mod jsonl;

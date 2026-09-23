@@ -338,6 +338,9 @@ export default async function (ctx) {
       if (new TextDecoder().decode(mounted.bytes) !== new TextDecoder().decode(proof.bytes))
         throw new Error('native and JS see different input mounts');
       const pinned = await ctx.inputs.at('public-notes').openFile({ path: 'native-proof.txt' });
+      const info = await ctx.inputs.at('public-notes').fileInfo({ path: 'native-proof.txt' });
+      if (info.length !== pinned.info.length || info.modifiedAt !== pinned.info.modifiedAt)
+        throw new Error('file metadata disagrees with the captured file');
       if (pinned.info.length !== mounted.bytes.length) throw new Error('pinned length mismatch');
       const first = await pinned.read({ limit: 6 });
       if (first.nextOffset !== 6) throw new Error('pinned cursor mismatch');

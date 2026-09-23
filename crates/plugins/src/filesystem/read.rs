@@ -30,6 +30,7 @@ use cap_std::fs::OpenOptions;
 pub use file::{FileInfo, OpenFile, PinnedFile, PinnedReader, ReadRange};
 use serde::Deserialize;
 use std::{
+    cell::Cell,
     collections::{BTreeMap, BTreeSet},
     io::{self, Read, Seek, SeekFrom},
     path::{Component, Path},
@@ -89,6 +90,8 @@ pub enum ReadError {
     Retired,
     #[error("invalid read operation: {0}")]
     Invalid(String),
+    #[error("directory scan exceeds {max} entries per read batch")]
+    ScanLimit { max: u64 },
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -247,7 +250,10 @@ impl ReadDirectory {
         let view = self.clone();
         tokio::task::spawn_blocking(move || {
             let _lease = lease;
-            let reader = Reader { view: &view };
+            let reader = Reader {
+                view: &view,
+                visited: Cell::new(0),
+            };
             reader.check()?;
             if let Some(ticket) = &mut ticket {
                 ticket.start();
@@ -269,6 +275,12 @@ impl ReadDirectory {
     pub async fn list(&self, input: impl Into<ListInput>) -> Result<DirectoryPage, ReadError> {
         let input = input.into();
         self.with_reader(move |reader| reader.list(input)).await?
+    }
+
+    /// Observe a regular file without retaining an open-file resource.
+    pub async fn file_info(&self, input: OpenFile) -> Result<FileInfo, ReadError> {
+        self.with_reader(move |reader| reader.file_info(input))
+            .await?
     }
 
     /// Pin a regular file and its current length, not immutable contents. The
@@ -295,8 +307,13 @@ impl ReadDirectory {
 /// No mutable file, directory handle or ambient pathname is exposed.
 pub struct Reader<'a> {
     view: &'a ReadDirectory,
+    visited: Cell<u64>,
 }
 impl Reader<'_> {
+    pub fn file_info(&self, input: OpenFile) -> Result<FileInfo, ReadError> {
+        let (_, metadata) = self.open(&input.path, input.symlinks)?;
+        FileInfo::capture(&metadata)
+    }
     fn check(&self) -> Result<(), ReadError> {
         if self.view.cancellation.is_cancelled() {
             Err(ReadError::Retired)
@@ -376,65 +393,22 @@ impl Reader<'_> {
             files: input,
             symlinks,
         } = input.into();
-        if !input.path.is_empty() {
-            relative(&input.path)?;
-        }
         if input.limit == 0
             || input.limit > 1024
             || input.after.as_ref().is_some_and(|s| s.len() > 4096)
         {
             return Err(invalid("invalid directory page"));
         }
-        let directory = self
-            .view
-            .root
-            .open(Path::new(&input.path), symlinks.follow())?;
-        if self
-            .view
-            .files
-            .as_ref()
-            .is_some_and(|files| !visible(files, &directory.relative(Path::new(""))))
-        {
-            return Err(invalid("directory is outside the mounted input selection"));
-        }
         let mut entries = BTreeMap::new();
-        for entry in directory.dir().entries()? {
-            self.check()?;
-            let entry = entry?;
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| invalid("filename is not UTF-8"))?;
-            let path = if input.path.is_empty() {
-                name.clone()
-            } else {
-                format!("{}/{name}", input.path)
-            };
-            if self.view.files.as_ref().is_some_and(|files| {
-                !visible(files, Path::new(&path))
-                    || !visible(files, &directory.relative(Path::new(&name)))
-            }) {
-                continue;
+        self.visit_directory(&input.path, symlinks, |entry| {
+            if input.after.as_ref().is_none_or(|after| &entry.name > after) {
+                entries.insert(entry.name.clone(), entry);
+                if entries.len() > input.limit + 1 {
+                    entries.pop_last();
+                }
             }
-            if input.after.as_ref().is_some_and(|after| &name <= after) {
-                continue;
-            }
-            if !directory.readable(Path::new(&name)) {
-                continue;
-            }
-            let kind = entry.file_type()?;
-            let kind = if kind.is_file() {
-                Kind::File
-            } else if kind.is_dir() {
-                Kind::Directory
-            } else {
-                Kind::Other
-            };
-            entries.insert(name.clone(), Entry { name, kind });
-            if entries.len() > input.limit + 1 {
-                entries.pop_last();
-            }
-        }
+            Ok::<_, ReadError>(())
+        })?;
         let next_after = if entries.len() > input.limit {
             entries.pop_last();
             entries.last_key_value().map(|(name, _)| name.clone())
@@ -445,6 +419,73 @@ impl Reader<'_> {
             entries: entries.into_values().collect(),
             next_after,
         })
+    }
+
+    /// Visit authorized entries once, in filesystem order. All directory scans
+    /// in this batch share a 100,000-entry budget, including filtered entries.
+    pub fn visit_directory<E: From<ReadError>>(
+        &self,
+        path: &str,
+        symlinks: Symlinks,
+        mut visit: impl FnMut(Entry) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.check()?;
+        if !path.is_empty() {
+            relative(path)?;
+        }
+        let directory = self
+            .view
+            .root
+            .open(Path::new(path), symlinks.follow())
+            .map_err(ReadError::from)?;
+        if self
+            .view
+            .files
+            .as_ref()
+            .is_some_and(|files| !visible(files, &directory.relative(Path::new(""))))
+        {
+            return Err(invalid("directory is outside the mounted input selection").into());
+        }
+        for entry in directory.dir().entries().map_err(ReadError::from)? {
+            self.check()?;
+            if self.visited.get() == 100_000 {
+                return Err(ReadError::ScanLimit { max: 100_000 }.into());
+            }
+            self.visited.set(self.visited.get() + 1);
+            let entry = entry.map_err(ReadError::from)?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| invalid("filename is not UTF-8"))?;
+            let entry_path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}/{name}")
+            };
+            if self.view.files.as_ref().is_some_and(|files| {
+                !visible(files, Path::new(&entry_path))
+                    || !visible(files, &directory.relative(Path::new(&name)))
+            }) {
+                continue;
+            }
+            if !directory.readable(Path::new(&name)) {
+                continue;
+            }
+            let kind = match entry.file_type() {
+                Ok(kind) => kind,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(ReadError::from(error).into()),
+            };
+            let kind = if kind.is_file() {
+                Kind::File
+            } else if kind.is_dir() {
+                Kind::Directory
+            } else {
+                Kind::Other
+            };
+            visit(Entry { name, kind })?;
+        }
+        Ok(())
     }
 }
 fn relative(path: &str) -> Result<(), ReadError> {
@@ -549,6 +590,25 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["allowed"]
         );
+        view.with_reader(|reader| {
+            // Filtered entries consume the same scan budget as visible ones.
+            // Start near the cap without creating 100,001 fixture files.
+            reader.visited.set(99_999);
+            assert!(matches!(
+                reader.visit_directory("", Symlinks::Reject, |_| Ok::<_, ReadError>(())),
+                Err(ReadError::ScanLimit { max: 100_000 })
+            ));
+            assert!(matches!(
+                reader.list(ListFiles {
+                    path: String::new(),
+                    after: None,
+                    limit: 10
+                }),
+                Err(ReadError::ScanLimit { max: 100_000 })
+            ));
+        })
+        .await
+        .unwrap();
         let workspace = root.bind(owner.context(), cancellation.clone());
         assert!(workspace.read(read("../private")).await.is_err());
         #[cfg(unix)]
