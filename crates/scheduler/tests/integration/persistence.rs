@@ -17,6 +17,7 @@
  * under the License.
  */
 
+use super::support::SqlStore;
 use futures_util::{FutureExt, future::BoxFuture};
 use maka_event_log::EventLog;
 use maka_plugins::storage::{Mutation, Record, Store, StoreError};
@@ -28,8 +29,6 @@ use maka_scheduler::{
 };
 use std::sync::Arc;
 use tokio::sync::Notify;
-mod support;
-use support::SqlStore;
 
 struct PausedRead {
     inner: SqlStore,

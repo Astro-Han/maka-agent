@@ -158,6 +158,11 @@ pub(super) async fn submit(
         return Err(invalid("Unknown reminder action"));
     }
     let operation_id = uuid::Uuid::parse_str(&revision).map_err(invalid)?;
+    let recorded = service
+        .creation(operation_id)
+        .await
+        .map_err(error)?
+        .is_some();
     let input = (|| {
         let title = take(&mut fields, "title")?;
         let intent_body = take(&mut fields, "intent")?;
@@ -170,9 +175,11 @@ pub(super) async fn submit(
             max_fires: None,
             expires_at: None,
         };
-        input
-            .validate(jiff::Timestamp::now().as_millisecond())
-            .map_err(invalid)?;
+        if !recorded {
+            input
+                .validate(jiff::Timestamp::now().as_millisecond())
+                .map_err(invalid)?;
+        }
         Ok::<_, Error>(input)
     })();
     let input = match input {
@@ -187,31 +194,40 @@ pub(super) async fn submit(
             });
         }
     };
-    let grant = match grant {
-        Some(id) => id,
-        None => match service
-            .backend
-            .authorization(Origin::User { grant: None }, input.effect.clone())
-            .await
-        {
-            Ok(authorization) => authorization.grant,
-            Err(crate::Error::AuthorizationRequired) => {
-                return Ok(Reply::Consent {
-                    request: Request {
-                        operation_id,
-                        title: "Scheduled reminders".into(),
-                        target: Target::Profile,
-                        capabilities: [Capability::Notifications].into(),
-                    },
-                });
-            }
-            Err(failure) => return Err(error(failure)),
-        },
+    let grant = if recorded {
+        // Reconciliation is a read of the original creation, not a new grant.
+        // The owner still checks the complete immutable input fingerprint.
+        None
+    } else {
+        Some(match grant {
+            Some(id) => id,
+            None => match service
+                .backend
+                .authorization(Origin::User { grant: None }, input.effect.clone())
+                .await
+            {
+                Ok(authorization) => authorization.grant,
+                Err(crate::Error::AuthorizationRequired) => {
+                    return Ok(Reply::Consent {
+                        request: Request {
+                            operation_id,
+                            title: "Scheduled reminders".into(),
+                            target: Target::Profile,
+                            capabilities: [Capability::Notifications].into(),
+                        },
+                    });
+                }
+                Err(failure) => return Err(error(failure)),
+            },
+        })
     };
-    let MutationResult::Task { task } = service
+    let MutationResult::Created { task_id, .. } = service
         .mutate(
-            Mutation::Create { input },
-            Origin::User { grant: Some(grant) },
+            Mutation::CreateOnce {
+                operation_id,
+                input,
+            },
+            Origin::User { grant },
         )
         .await
         .map_err(error)?
@@ -220,7 +236,7 @@ pub(super) async fn submit(
     };
     Ok(Reply::Applied {
         route: serde_json::to_value(super::Route {
-            task: Some(task.id),
+            task: Some(task_id),
             ..super::Route::default()
         })
         .map_err(invalid)?,

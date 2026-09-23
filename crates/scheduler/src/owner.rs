@@ -41,13 +41,37 @@ pub struct Handle {
     view: watch::Receiver<Arc<View>>,
     wake: Arc<Notify>,
 }
-struct Command {
+enum Command {
+    Mutate(Box<Edit>),
+    Creation {
+        operation_id: uuid::Uuid,
+        reply: oneshot::Sender<Result<Option<String>, Error>>,
+    },
+}
+struct Edit {
     mutation: Mutation,
     expected_revision: Option<u64>,
     origin: Origin,
     reply: oneshot::Sender<Result<MutationResult, Error>>,
 }
 impl Handle {
+    /// Serialized with writes. None only means no committed receipt was observed.
+    pub async fn creation(&self, operation_id: uuid::Uuid) -> Result<Option<String>, Error> {
+        let (reply, receive) = oneshot::channel();
+        self.commands
+            .try_send(Command::Creation {
+                operation_id,
+                reply,
+            })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => Error::Busy,
+                mpsc::error::TrySendError::Closed(_) => Error::Closed,
+            })?;
+        tokio::time::timeout(Duration::from_secs(10), receive)
+            .await
+            .map_err(|_| Error::Unavailable("creation query deadline exceeded".into()))?
+            .map_err(|_| Error::Closed)?
+    }
     pub fn snapshot(&self) -> Arc<View> {
         self.view.borrow().clone()
     }
@@ -88,12 +112,12 @@ impl Handle {
     ) -> Result<MutationResult, Error> {
         let (reply, receive) = oneshot::channel();
         self.commands
-            .try_send(Command {
+            .try_send(Command::Mutate(Box::new(Edit {
                 mutation,
                 expected_revision,
                 origin,
                 reply,
-            })
+            })))
             .map_err(|error| match error {
                 mpsc::error::TrySendError::Full(_) => Error::Busy,
                 mpsc::error::TrySendError::Closed(_) => Error::Closed,
@@ -215,6 +239,20 @@ pub fn start(
                 }
                 command = requests.recv() => {
                     let Some(command) = command else { return Ok(()); };
+                    let command = match command {
+                        Command::Mutate(command) => *command,
+                        Command::Creation { operation_id, reply } => {
+                            if !reply.is_closed() {
+                                let result = if reload {
+                                    Err(Error::Unavailable("scheduler is recovering".into()))
+                                } else {
+                                    owner.controller.creation(operation_id).await
+                                };
+                                let _ = reply.send(result);
+                            }
+                            continue;
+                        }
+                    };
                     if command.reply.is_closed() { continue; }
                     if reload {
                         let _ = command.reply.send(Err(Error::Unavailable("scheduler is recovering".into())));

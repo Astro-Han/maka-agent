@@ -17,8 +17,9 @@
  * under the License.
  */
 
-mod support;
+mod creation;
 
+use super::support::SqlStore;
 use futures_util::future::BoxFuture;
 use maka_event_log::EventLog;
 use maka_plugins::storage::{Mutation as StoreMutation, Record, Store, StoreError};
@@ -40,7 +41,6 @@ use std::{
     },
     time::Duration,
 };
-use support::SqlStore;
 use tokio::sync::{Notify, mpsc};
 use tokio_util::sync::CancellationToken;
 

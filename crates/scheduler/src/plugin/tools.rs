@@ -109,6 +109,9 @@ impl ToolPreparer for Tools {
                         crate::command::MutationResult::Deleted { task_id } => {
                             json!({"deleted":task_id})
                         }
+                        crate::command::MutationResult::Created { .. } => {
+                            return Err(failed("unexpected creation receipt for a tool mutation"));
+                        }
                     };
                     Ok(output.into())
                 })

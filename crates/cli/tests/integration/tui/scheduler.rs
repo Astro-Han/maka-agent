@@ -285,8 +285,22 @@ fn scheduler_creation_requires_consent_then_reuses_only_a_live_grant() {
         let tasks = remote(&client, "request", json!({"kind":"query","query":{"kind":"list"}})).await;
         assert_eq!(tasks["tasks"].as_array().unwrap().len(), 2);
         for task in tasks["tasks"].as_array().unwrap() {
+            let operation = task["id"].as_str().unwrap().strip_prefix("task-").unwrap();
+            let receipt = remote(&client, "request", json!({"kind":"creation","operationId":operation})).await;
+            assert_eq!(receipt, json!({"operationId":operation,"taskId":task["id"]}));
+            let timing = remote(&client, "terminal", json!({"kind":"read","route":{"task":task["id"],"timing":true}})).await;
+            let mut fields = timing["page"]["fields"].as_array().unwrap().iter().map(|field| (field["id"].as_str().unwrap().to_owned(), field["control"]["value"].clone())).collect::<serde_json::Map<_, _>>();
+            fields.insert("title".into(), task["title"].clone());
+            fields.insert("intent".into(), task["intent"]["body"].clone());
             remote(&client, "request", json!({"kind":"mutate","mutation":{"kind":"delete","taskId":task["id"]}})).await;
+            assert_eq!(remote(&client, "request", json!({"kind":"creation","operationId":operation})).await, receipt);
+            let replay = remote(&client, "terminal", json!({"kind":"submit",
+                "route":{"creation":{"kind":"form","schedule":task["schedule"]["kind"]}},
+                "revision":operation,"action":"create","fields":fields})).await;
+            assert_eq!(replay["kind"], "applied", "committed creation needs no new grant");
+            assert_eq!(replay["route"]["task"], task["id"]);
         }
+        assert!(remote(&client, "request", json!({"kind":"query","query":{"kind":"list"}})).await["tasks"].as_array().unwrap().is_empty(), "replaying a receipt never resurrects deleted work");
         assert!(tokio::time::timeout(Duration::from_millis(50), listener.accept()).await.is_err());
     });
     client.disconnect();

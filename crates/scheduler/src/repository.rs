@@ -35,6 +35,14 @@ pub struct Saved {
     pub revision: u64,
     pub plan: Plan,
 }
+/// Compact durable receipt, retained even when the task is edited or deleted.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct Creation {
+    pub operation_id: uuid::Uuid,
+    pub fingerprint: String,
+    pub task_id: String,
+}
 pub struct Catalog {
     pub revision: Option<u64>,
     pub plans: BTreeMap<String, Saved>,
@@ -57,6 +65,29 @@ impl Repository {
     }
     fn key(&self, id: &str) -> String {
         format!("{}task:{id}", self.prefix)
+    }
+    fn creation_key(&self, operation_id: uuid::Uuid) -> String {
+        format!("{}creation:{operation_id}", self.prefix)
+    }
+    pub(crate) async fn creation(
+        &self,
+        operation_id: uuid::Uuid,
+    ) -> Result<Option<Creation>, Error> {
+        let Some(record) = self.storage.read(self.creation_key(operation_id)).await? else {
+            return Ok(None);
+        };
+        let receipt: Creation = decode(&record)?;
+        if receipt.operation_id != operation_id
+            || receipt.task_id != format!("task-{operation_id}")
+            || receipt.fingerprint.len() != 64
+            || !receipt
+                .fingerprint
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(invalid("invalid scheduled-task creation receipt"));
+        }
+        Ok(Some(receipt))
     }
     pub async fn load(&self) -> Result<Catalog, Error> {
         // A concurrent writer may change the index between reads. Reject that
@@ -116,9 +147,23 @@ impl Repository {
     /// Save task bytes and the catalog revision in one CAS batch. Losing the reply
     /// requires reload, never treating the previous in-memory copy as authority.
     pub async fn save(&self, catalog: &mut Catalog, plan: Plan) -> Result<(), Error> {
+        self.save_with_creation(catalog, plan, None).await
+    }
+    pub(crate) async fn save_with_creation(
+        &self,
+        catalog: &mut Catalog,
+        plan: Plan,
+        creation: Option<Creation>,
+    ) -> Result<(), Error> {
         plan.validate()?;
         let id = plan.task.id.clone();
         let previous = catalog.plans.get(&id).map(|saved| saved.revision);
+        if creation
+            .as_ref()
+            .is_some_and(|receipt| receipt.task_id != id || previous.is_some())
+        {
+            return Err(invalid("creation must insert a new task"));
+        }
         let mut ids = catalog.plans.keys().cloned().collect::<Vec<_>>();
         if previous.is_none() {
             if ids.len() >= MAX_TASKS {
@@ -131,26 +176,35 @@ impl Repository {
             ids.push(id.clone());
             ids.sort();
         }
-        let records = self
-            .storage
-            .batch(vec![
-                Mutation {
-                    key: self.index(),
-                    expected_revision: catalog.revision,
-                    data: present(&Index {
-                        schema_version: 1,
-                        ids,
-                    })?,
-                },
-                Mutation {
-                    key: self.key(&id),
-                    expected_revision: previous,
-                    data: present(&plan)?,
-                },
-            ])
-            .await?;
-        if records.len() != 2 {
-            return Err(invalid("storage returned an invalid batch receipt"));
+        let mut mutations = vec![
+            Mutation {
+                key: self.index(),
+                expected_revision: catalog.revision,
+                data: present(&Index {
+                    schema_version: 1,
+                    ids,
+                })?,
+            },
+            Mutation {
+                key: self.key(&id),
+                expected_revision: previous,
+                data: present(&plan)?,
+            },
+        ];
+        if let Some(receipt) = creation {
+            mutations.push(Mutation {
+                key: self.creation_key(receipt.operation_id),
+                expected_revision: None,
+                data: present(&receipt)?,
+            });
+        }
+        let count = mutations.len();
+        let records = self.storage.batch(mutations).await?;
+        if records.len() != count {
+            return Err(maka_plugins::storage::StoreError::OutcomeUnknown(
+                "storage returned an invalid batch receipt".into(),
+            )
+            .into());
         }
         catalog.revision = Some(records[0].revision);
         catalog.plans.insert(
@@ -195,7 +249,10 @@ impl Repository {
             ])
             .await?;
         if records.len() != 2 {
-            return Err(invalid("storage returned an invalid batch receipt"));
+            return Err(maka_plugins::storage::StoreError::OutcomeUnknown(
+                "storage returned an invalid batch receipt".into(),
+            )
+            .into());
         }
         catalog.revision = Some(records[0].revision);
         catalog.plans.remove(id);

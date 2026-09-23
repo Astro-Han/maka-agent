@@ -36,8 +36,16 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum Request {
+    Creation {
+        operation_id: uuid::Uuid,
+    },
     Query {
         query: Query,
     },
@@ -83,6 +91,10 @@ impl Method for Service {
             let request: Request =
                 serde_json::from_value(input).map_err(|error| Error::Invalid(error.to_string()))?;
             match request {
+                Request::Creation { operation_id } => Ok(json!({
+                    "operationId": operation_id,
+                    "taskId": service.creation(operation_id).await.map_err(error)?,
+                })),
                 Request::Query { query } => {
                     query.validate().map_err(error)?;
                     encode(service.query(query).map_err(error)?)
@@ -154,9 +166,10 @@ pub(super) fn error(error: crate::Error) -> Error {
             | maka_runtime::tools::ToolError::Persistence(_),
         ) => Error::CleanupUnconfirmed,
         crate::Error::Closed => Error::Retired,
-        crate::Error::Invalid(_) | crate::Error::Time(_) | crate::Error::AuthorizationRequired => {
-            Error::Invalid(error.to_string())
-        }
+        crate::Error::Invalid(_)
+        | crate::Error::Time(_)
+        | crate::Error::AuthorizationRequired
+        | crate::Error::CreationConflict => Error::Invalid(error.to_string()),
         _ => Error::Provider(error.to_string()),
     }
 }

@@ -73,19 +73,42 @@ impl Query {
     deny_unknown_fields
 )]
 pub enum Mutation {
-    Create { input: Create },
-    Update { task_id: String, patch: Update },
-    Pause { task_id: String },
-    Resume { task_id: String },
-    ClearHistory { task_id: String },
-    TriggerNow { task_id: String },
-    Delete { task_id: String },
-    Snooze { task_id: String, delay_ms: i64 },
+    Create {
+        input: Create,
+    },
+    /// A caller-owned identity for creation that can be reconciled after losing a reply.
+    CreateOnce {
+        operation_id: uuid::Uuid,
+        input: Create,
+    },
+    Update {
+        task_id: String,
+        patch: Update,
+    },
+    Pause {
+        task_id: String,
+    },
+    Resume {
+        task_id: String,
+    },
+    ClearHistory {
+        task_id: String,
+    },
+    TriggerNow {
+        task_id: String,
+    },
+    Delete {
+        task_id: String,
+    },
+    Snooze {
+        task_id: String,
+        delay_ms: i64,
+    },
 }
 impl Mutation {
     pub fn task_id(&self) -> Option<&str> {
         match self {
-            Self::Create { .. } => None,
+            Self::Create { .. } | Self::CreateOnce { .. } => None,
             Self::Update { task_id, .. }
             | Self::Pause { task_id }
             | Self::Resume { task_id }
@@ -141,8 +164,16 @@ pub enum QueryResult {
     rename_all_fields = "camelCase"
 )]
 pub enum MutationResult {
-    Task { task: Box<Task> },
-    Deleted { task_id: String },
+    Task {
+        task: Box<Task>,
+    },
+    Created {
+        operation_id: uuid::Uuid,
+        task_id: String,
+    },
+    Deleted {
+        task_id: String,
+    },
 }
 
 fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>

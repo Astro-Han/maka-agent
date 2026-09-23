@@ -41,6 +41,8 @@ pub enum Error {
     NotFound,
     #[error("scheduled task changed since it was read")]
     RevisionConflict,
+    #[error("scheduled-task creation identity was used for different input")]
+    CreationConflict,
     #[error("Approve background access in the Scheduler UI before creating this task")]
     AuthorizationRequired,
     #[error("scheduler is closed")]

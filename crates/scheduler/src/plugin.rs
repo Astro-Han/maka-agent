@@ -170,6 +170,10 @@ struct Service {
     backend: Arc<backend::Backend>,
 }
 impl Service {
+    async fn creation(&self, operation_id: uuid::Uuid) -> Result<Option<String>, crate::Error> {
+        let _lease = self.context.admit().map_err(|_| crate::Error::Closed)?;
+        self.handle.creation(operation_id).await
+    }
     fn query(&self, query: Query) -> Result<QueryResult, crate::Error> {
         let _lease = self.context.admit().map_err(|_| crate::Error::Closed)?;
         self.handle.query(query)

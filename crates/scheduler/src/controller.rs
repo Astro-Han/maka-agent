@@ -27,6 +27,7 @@ use crate::{
     repository::{Catalog, Repository},
     task::Status,
 };
+use sha2::{Digest, Sha256};
 
 /// Serializes business edits; only successful CAS acknowledgements replace memory.
 pub struct Controller {
@@ -117,6 +118,14 @@ impl Controller {
                 self.timezone.clone(),
                 now,
             )?,
+            Mutation::CreateOnce {
+                operation_id,
+                input,
+            } => {
+                return self
+                    .create_once(operation_id, input, origin, now, dispatcher)
+                    .await;
+            }
             Mutation::Update { task_id, patch } => self.plan(&task_id)?.update(patch, now)?,
             Mutation::Pause { task_id } => self.plan(&task_id)?.pause(now),
             Mutation::Resume { task_id } => self.plan(&task_id)?.resume(now)?,
@@ -156,6 +165,68 @@ impl Controller {
         };
         self.repository.save(&mut self.catalog, next).await?;
         Ok(result)
+    }
+    /// Reports an immutable creation fact, not the task's current existence or state.
+    pub async fn creation(&self, operation_id: uuid::Uuid) -> Result<Option<String>, Error> {
+        Ok(self
+            .repository
+            .creation(operation_id)
+            .await?
+            .map(|receipt| receipt.task_id))
+    }
+    async fn create_once(
+        &mut self,
+        operation_id: uuid::Uuid,
+        input: crate::task::Create,
+        origin: Origin,
+        now: i64,
+        dispatcher: &dyn Dispatcher,
+    ) -> Result<MutationResult, Error> {
+        let creator = origin.creator()?;
+        let fingerprint = format!(
+            "{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&(&input, &creator, &self.timezone))
+                    .map_err(|error| invalid(error.to_string()))?
+            )
+        );
+        // A committed retry is a read, even after expiry or grant revocation.
+        // It must not authorize again or recreate a task that was subsequently deleted.
+        if let Some(receipt) = self.repository.creation(operation_id).await? {
+            if receipt.fingerprint != fingerprint {
+                return Err(Error::CreationConflict);
+            }
+            return Ok(MutationResult::Created {
+                operation_id,
+                task_id: receipt.task_id,
+            });
+        }
+        let task_id = format!("task-{operation_id}");
+        let mut plan = Plan::create(task_id.clone(), input, creator, self.timezone.clone(), now)?;
+        plan.misfire = self.misfire;
+        plan.authorization = Some(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                dispatcher.authorize(origin, plan.task.effect.clone()),
+            )
+            .await
+            .map_err(|_| Error::Unavailable("authorization deadline exceeded".into()))??,
+        );
+        self.repository
+            .save_with_creation(
+                &mut self.catalog,
+                plan,
+                Some(crate::repository::Creation {
+                    operation_id,
+                    fingerprint,
+                    task_id: task_id.clone(),
+                }),
+            )
+            .await?;
+        Ok(MutationResult::Created {
+            operation_id,
+            task_id,
+        })
     }
     fn plan(&self, id: &str) -> Result<&Plan, Error> {
         self.catalog
