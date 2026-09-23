@@ -23,7 +23,7 @@ mod submission;
 
 use crate::{
     app::App,
-    pages::{branch, manage::oauth, sending::Submission},
+    pages::{branch, manage::oauth, revision, sending::Submission},
 };
 use maka_client::Error;
 use snapshot::Snapshot;
@@ -40,6 +40,7 @@ pub struct State {
     requests: Vec<Submission>,
     oauth: Option<oauth::Request>,
     branch: Option<branch::Request>,
+    revision: Option<revision::Request>,
     generation: u64,
     job: Option<Writing>,
 }
@@ -49,6 +50,7 @@ struct Writing {
     requests: Vec<Submission>,
     oauth: Option<oauth::Request>,
     branch: Option<branch::Request>,
+    revision: Option<revision::Request>,
     generation: u64,
 }
 
@@ -57,6 +59,7 @@ pub struct Written {
     pub requests: Vec<Submission>,
     pub oauth: Option<oauth::Request>,
     pub branch: Option<branch::Request>,
+    pub revision: Option<revision::Request>,
 }
 impl State {
     pub async fn open(
@@ -88,6 +91,7 @@ impl State {
                     requests: Vec::new(),
                     oauth: None,
                     branch: None,
+                    revision: None,
                     generation: 0,
                     job: None,
                 },
@@ -120,6 +124,7 @@ impl State {
     pub fn cancel_requests(&mut self) -> Vec<Submission> {
         self.oauth = None;
         self.branch = None;
+        self.revision = None;
         let mut requests = std::mem::take(&mut self.requests);
         if let Some(job) = &self.job
             && job.generation == self.generation
@@ -135,6 +140,10 @@ impl State {
     }
     pub fn submit_branch(&mut self, request: branch::Request) {
         self.branch = Some(request);
+        self.force();
+    }
+    pub fn submit_revision(&mut self, request: revision::Request) {
+        self.revision = Some(request);
         self.force();
     }
     pub fn idle(&self) -> bool {
@@ -159,6 +168,7 @@ impl State {
             requests,
             oauth: self.oauth.take(),
             branch: self.branch.take(),
+            revision: self.revision.take(),
             generation,
         });
     }
@@ -180,6 +190,11 @@ impl State {
             },
             oauth: if job.generation == self.generation {
                 job.oauth
+            } else {
+                None
+            },
+            revision: if job.generation == self.generation {
+                job.revision
             } else {
                 None
             },
@@ -223,6 +238,7 @@ mod tests {
             requests: vec![],
             oauth: None,
             branch: None,
+            revision: None,
             generation: 0,
             job: None,
         };
@@ -259,6 +275,83 @@ mod tests {
             &std::fs::read(directory.path().join(ROOT).join("default/state.json")).unwrap(),
         )
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn revision_writer_persists_frozen_identity_and_cancels_obsolete_save_authority() {
+        use crate::pages::revision::{Checkpoint, Command};
+        use serde_json::json;
+        let (directory, mut state, mut app) = fixture();
+        let saved: Checkpoint=serde_json::from_value(json!({
+            "root":ROOT,"origin_epoch":"epoch",
+            "copy":{"sourceSessionId":"a","targetSessionId":"revised","expectedSourceRevision":1,
+                "purpose":{"kind":"revision","turnId":"old-turn"}},
+            "turn_id":"new-turn","inputs":[
+                {"original":{"messageId":"one","content":{"text":"original"}},"content":{"text":"edited"}}
+            ],"stage":"draft","batch":null
+        })).unwrap();
+        saved.validate(ROOT).unwrap();
+        app.revision.restore(saved);
+        app.apply(Action::Revision(Command::Resume));
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|f| {
+                crate::pages::revision::draw(
+                    f,
+                    &mut app,
+                    f.area(),
+                    ratatui::style::Style::default(),
+                )
+            })
+            .unwrap();
+        app.apply(Action::Revision(Command::Send));
+        let request = app.revision_request().unwrap();
+        let (release, blocked) = gate(&state).await;
+        state.submit_revision(request.clone());
+        state.start(&app);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), state.completed())
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        blocked.await.unwrap();
+        let written = written(&mut state).await;
+        assert_eq!(written.revision, Some(request.clone()));
+        assert!(written.result.is_ok());
+        let bytes = read(&directory);
+        assert_eq!(bytes["version"], 8);
+        assert_eq!(bytes["revision"]["copy"]["targetSessionId"], "revised");
+        assert_eq!(bytes["revision"]["inputs"][0]["content"]["text"], "edited");
+        let mut obsolete = bytes.clone();
+        obsolete["version"] = json!(7);
+        assert!(
+            serde_json::from_value::<Snapshot>(obsolete)
+                .unwrap()
+                .validate(ROOT)
+                .is_err()
+        );
+        let mut reopened = App::new(
+            "/unused".into(),
+            I18n::new(LocalePreference::Auto, Locale::En),
+        );
+        serde_json::from_value::<Snapshot>(bytes)
+            .unwrap()
+            .restore(&mut reopened, false)
+            .unwrap();
+        assert!(!reopened.revision.visible);
+        assert!(reopened.revision_request().is_none());
+        assert!(app.revision_after_checkpoint(&request, &written.result));
+        assert!(!app.revision_after_checkpoint(&request, &written.result));
+        state.submit_revision(request);
+        let (release, blocked) = gate(&state).await;
+        state.start(&app);
+        state.cancel_requests();
+        app.revision.disconnect();
+        release.send(()).unwrap();
+        blocked.await.unwrap();
+        assert!(self::written(&mut state).await.revision.is_none());
     }
 
     #[tokio::test]

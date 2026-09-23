@@ -68,6 +68,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         && !app.interactions.visible
         && app.management.dialog.is_none()
         && !app.branch.visible
+        && !app.revision.visible
         && app.onboarding.dialog.is_none()
         && app.queue.edit.is_none();
     app.chrome
@@ -290,6 +291,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         app.i18n.text("state-closing")
     } else if app.theme.editor.is_some()
         || app.branch.visible
+        || app.revision.visible
         || app.onboarding.dialog.is_some()
         || app.management.dialog.is_some()
         || app.interactions.visible
@@ -381,6 +383,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     }
     if app.theme.editor.is_some() {
         crate::theme::editor::draw(frame, app, area);
+    } else if app.revision.visible {
+        crate::pages::revision::draw(frame, app, area, base);
     } else if app.branch.visible {
         crate::pages::branch::draw(frame, app, area, base);
     } else if app.onboarding.dialog.is_some() {
@@ -539,6 +543,7 @@ fn icon(app: &App, action: &Action) -> &'static str {
         )) => ("ⓘ", "i"),
         Action::Manage(_) => ("⋯", "."),
         Action::Branch(_) => ("↳", "+"),
+        Action::Revision(_) => ("↶", "<"),
         Action::Onboard(_) => ("⊕", "+"),
         Action::Forward | Action::NextSessions => ("›", ">"),
         Action::Refresh | Action::RefreshSession | Action::RefreshSessions => ("↻", "R"),
@@ -646,6 +651,7 @@ fn action_label(app: &App, action: &Action) -> String {
         Action::CreateSession => "session-create",
         Action::Manage(command) => command.label(),
         Action::Branch(command) => command.label(),
+        Action::Revision(command) => command.label(),
         Action::Onboard(command) => command.label(),
         Action::Project(command) => command.label(),
         Action::Connection(command) => command.label(),

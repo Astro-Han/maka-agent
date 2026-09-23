@@ -54,6 +54,8 @@ pub struct Snapshot {
     oauth: Option<crate::pages::manage::oauth::saved::Checkpoint>,
     #[serde(default)]
     branch: Option<crate::pages::branch::Checkpoint>,
+    #[serde(default)]
+    revision: Option<crate::pages::revision::Checkpoint>,
 }
 
 impl Snapshot {
@@ -66,7 +68,7 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 7,
+            version: 8,
             root: root.into(),
             route: app.navigation.current(),
             tabs: app.tabs.entries.iter().map(|tab| tab.id.clone()).collect(),
@@ -91,6 +93,7 @@ impl Snapshot {
             pages: app.saved_pages(),
             oauth: app.management.oauth.checkpoint(),
             branch: app.branch.checkpoint(),
+            revision: app.revision.checkpoint(),
         }
     }
 
@@ -98,7 +101,7 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if !matches!(self.version, 1..=7)
+        if !matches!(self.version, 1..=8)
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
@@ -111,6 +114,7 @@ impl Snapshot {
             || (self.version < 5 && self.theme.is_some())
             || (self.version >= 5 && self.theme.is_none())
             || (self.version < 6 && self.branch.is_some())
+            || (self.version < 8 && self.revision.is_some())
         {
             return Err("Unsupported or mismatched TUI checkpoint".into());
         }
@@ -173,6 +177,9 @@ impl Snapshot {
         if let Some(oauth) = &self.oauth {
             oauth.validate()?;
         }
+        if let Some(revision) = &self.revision {
+            revision.validate(root)?;
+        }
         if let Some(branch) = &self.branch {
             branch.validate(root)?;
         }
@@ -186,6 +193,9 @@ impl Snapshot {
         }
         if let Some(oauth) = self.oauth {
             app.management.oauth.restore(&self.root, oauth);
+        }
+        if let Some(revision) = self.revision {
+            app.revision.restore(revision);
         }
         if let Some(branch) = self.branch {
             app.branch.restore(branch);
@@ -313,7 +323,7 @@ mod tests {
         assert!(restored.retry_submission().is_none());
         assert!(restored.reconciliation().is_some());
         let mut invalid: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        invalid["version"] = serde_json::json!(8);
+        invalid["version"] = serde_json::json!(9);
         assert!(
             serde_json::from_value::<Snapshot>(invalid)
                 .unwrap()
@@ -399,7 +409,7 @@ mod tests {
         request.input().validate().unwrap();
         original.sending.get_mut("a").unwrap().request = request.clone();
         let saved = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
-        assert_eq!(saved["version"], 7);
+        assert_eq!(saved["version"], 8);
         let mut restored = app();
         serde_json::from_value::<Snapshot>(saved.clone())
             .unwrap()

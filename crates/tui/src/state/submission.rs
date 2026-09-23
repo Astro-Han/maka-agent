@@ -44,7 +44,7 @@ pub(super) struct Legacy {
 impl Saved {
     pub fn request(self, version: u32) -> Result<Submission, String> {
         match self {
-            Self::Current(request) if version == 7 => Ok(*request),
+            Self::Current(request) if (7..=8).contains(&version) => Ok(*request),
             Self::Legacy(request) if (1..=6).contains(&version) => Ok(Submission {
                 root_id: request.root_id,
                 origin_epoch: request.origin_epoch,

@@ -61,6 +61,7 @@ pub enum Action {
     Copy(crate::pages::chat::render::selection::CopyMode),
     CopyFile(String),
     Branch(crate::pages::branch::Command),
+    Revision(crate::pages::revision::Command),
     ToggleSymbols,
     ToggleMotion,
     RefreshSessions,
@@ -126,6 +127,7 @@ pub struct App {
     pub inbox: crate::pages::sessions::Sessions,
     pub management: crate::pages::manage::Management,
     pub branch: crate::pages::branch::State,
+    pub revision: crate::pages::revision::State,
     pub onboarding: crate::pages::onboarding::Onboarding,
     pub projects: crate::pages::projects::Projects,
     pub connections: crate::pages::connections::Connections,
@@ -170,6 +172,7 @@ impl App {
             inbox: crate::pages::sessions::Sessions::inbox(),
             management: Default::default(),
             branch: Default::default(),
+            revision: Default::default(),
             onboarding: Default::default(),
             projects: Default::default(),
             connections: Default::default(),
@@ -220,6 +223,7 @@ impl App {
         ];
         commands.extend(self.management_commands());
         commands.extend(self.branch_commands());
+        commands.extend(self.revision_commands());
         commands.extend(self.oauth_commands());
         if let Some(action) = self.default_model_action() {
             commands.push((action, "default-model-title"));
@@ -422,6 +426,7 @@ impl App {
     }
     pub fn begin_frame(&mut self, area: Rect) {
         self.branch.invalidate_geometry();
+        self.revision.begin_frame();
         for item in &self.sessions.items {
             self.tabs.rename(&item.id, &item.name);
         }
@@ -445,6 +450,7 @@ impl App {
     pub fn tooltip_wait(&self) -> Option<Duration> {
         if self.theme.editor.is_some()
             || self.branch.visible
+            || self.revision.visible
             || !self.has_tooltip()
             || self.palette.is_some()
             || self.interactions.visible
@@ -459,6 +465,7 @@ impl App {
     pub fn selection_wait(&self, now: Instant) -> Option<Duration> {
         if self.theme.editor.is_some()
             || self.branch.visible
+            || self.revision.visible
             || !matches!(self.navigation.current(), Route::Session(_))
             || self.palette.is_some()
             || self.chrome.details
@@ -481,6 +488,7 @@ impl App {
     pub fn tooltip_visible(&self) -> bool {
         self.theme.editor.is_none()
             && !self.branch.visible
+            && !self.revision.visible
             && self.palette.is_none()
             && self.management.dialog.is_none()
             && self.onboarding.dialog.is_none()
@@ -552,6 +560,7 @@ impl App {
             }
             Action::Manage(command) => return self.management_action(command),
             Action::Branch(command) => return self.branch_action(command),
+            Action::Revision(command) => return self.revision_action(command),
             Action::Onboard(command) => return self.onboarding_action(command),
             Action::Project(command) => return self.project_action(command),
             Action::Connection(command) => self.connection_action(command),
@@ -734,6 +743,9 @@ impl App {
         None
     }
     pub fn enabled(&self, action: &Action) -> bool {
+        if let Action::Revision(command) = action {
+            return self.revision_enabled(command);
+        }
         if let Action::Branch(command) = action {
             return self.branch_enabled(command);
         }
@@ -981,6 +993,7 @@ impl App {
         self.management.invalidate_geometry();
         self.management.oauth.invalidate_identity_geometry();
         self.branch.invalidate_geometry();
+        self.revision.invalidate_geometry();
         self.onboarding.invalidate_geometry();
         self.tabs.invalidate_geometry();
         if let Some(reader) = self.chat.reader_mut() {
@@ -1067,6 +1080,7 @@ impl App {
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && (self.theme.editor.is_some()
                 || self.branch.visible
+                || self.revision.visible
                 || self.palette.is_some()
                 || self.onboarding.dialog.is_some()
                 || self.management.dialog.is_some()
@@ -1079,6 +1093,8 @@ impl App {
             // Dismiss only the displayed overlay. Never forward this press to the page.
             let action = if self.theme.editor.is_some() {
                 Some(Action::Theme(crate::theme::editor::Command::Close))
+            } else if self.revision.visible {
+                Some(Action::Revision(crate::pages::revision::Command::Close))
             } else if self.branch.visible {
                 Some(Action::Branch(crate::pages::branch::Command::Close))
             } else if self.onboarding.dialog.is_some() {
@@ -1104,6 +1120,9 @@ impl App {
         }
         if self.theme.editor.is_some() && !matches!(event, Event::Resize(_, _)) {
             return self.theme_input(event);
+        }
+        if self.revision.visible && !matches!(event, Event::Resize(_, _)) {
+            return self.revision_input(event);
         }
         if self.branch.visible && !matches!(event, Event::Resize(_, _)) {
             return self.branch_input(event);

@@ -42,6 +42,7 @@ mod queue;
 mod reading;
 mod recovery;
 mod removal;
+mod revision;
 mod stopping;
 mod support;
 mod themes;

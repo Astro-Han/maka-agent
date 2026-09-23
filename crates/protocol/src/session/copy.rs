@@ -22,7 +22,7 @@ use crate::{Operation, ProtocolError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use maka_runtime::session::{CopyPurpose as Purpose, CopyRequest as Input};
+pub use maka_runtime::session::{CopyPurpose as Purpose, CopyRequest as Input, CopyState as State};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(

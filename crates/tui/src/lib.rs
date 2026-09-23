@@ -48,6 +48,10 @@ pub struct Options {
 }
 
 enum Completed {
+    Revised(
+        pages::revision::Request,
+        Result<pages::revision::Output, maka_client::RequestFailure>,
+    ),
     Branched(
         pages::branch::Request,
         Result<pages::branch::Output, maka_client::RequestFailure>,
@@ -201,6 +205,25 @@ pub async fn run(options: Options) -> Result<(), Error> {
             state.start(&app);
         }
         if let Some(client) = &client {
+            if let Some(request) = app.revision_request() {
+                if request.needs_checkpoint() {
+                    if let Some(state) = &mut state {
+                        state.submit_revision(request);
+                    } else {
+                        app.revision_after_checkpoint(
+                            &request,
+                            &Err("TUI checkpoint unavailable".into()),
+                        );
+                    }
+                } else {
+                    let client = client.clone();
+                    jobs.spawn(async move {
+                        let result = pages::revision::execute(&client, &request).await;
+                        Completed::Revised(request, result)
+                    });
+                }
+                dirty = true;
+            }
             if let Some(request) = app.branch_request() {
                 if request.query {
                     let client = client.clone();
@@ -517,6 +540,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 }
                 Action::Quit => {
                     app.branch.disconnect();
+                    app.revision.disconnect();
                     if let Some(state) = &mut state {
                         app.oauth_abandon_checkpoint();
                         for request in state.cancel_requests() {
@@ -531,6 +555,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 }
                 Action::Connect => {
                     app.branch.disconnect();
+                    app.revision.disconnect();
                     if let Some(state) = &mut state {
                         state.cancel_requests();
                     }
@@ -700,6 +725,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     None => std::future::pending().await,
                 }
             } => {
+                if let Some(request) = written.revision
+                    && app.revision_after_checkpoint(&request, &written.result)
+                    && let Some(client) = client.clone() {
+                    jobs.spawn(async move {
+                        let result = pages::revision::execute(&client, &request).await;
+                        Completed::Revised(request, result)
+                    });
+                }
                 if let Some(request) = written.branch
                     && app.branch_after_checkpoint(&request, &written.result)
                     && let Some(client) = client.clone() {
@@ -794,6 +827,10 @@ pub async fn run(options: Options) -> Result<(), Error> {
             }
             completed = jobs.join_next(), if !jobs.is_empty() => {
                 match completed {
+                    Some(Ok(Completed::Revised(request, result))) => {
+                        app.revision_completed(request, result);
+                        if let Some(state) = &mut state { state.changed(); }
+                    }
                     Some(Ok(Completed::Branched(request, result))) => {
                         app.branch_completed(request, result);
                         if let Some(state) = &mut state { state.changed(); }
@@ -983,6 +1020,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 app.abandon_pending_submissions();
                 app.abandon_management();
                 app.branch.disconnect();
+                    app.revision.disconnect();
                 app.management.oauth.abandon();
                 app.abandon_onboarding();
                 app.creating = false;

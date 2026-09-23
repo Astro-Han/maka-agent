@@ -32,11 +32,11 @@ pub use view::draw;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Basis {
-    root: String,
-    epoch: String,
-    source: String,
-    revision: u64,
-    turn: String,
+    pub(super) root: String,
+    pub(super) epoch: String,
+    pub(super) source: String,
+    pub(super) revision: u64,
+    pub(super) turn: String,
     name: String,
     excerpt: String,
 }
@@ -181,7 +181,7 @@ impl App {
         };
         vec![(Action::Branch(Command::Open(basis)), "branch-title")]
     }
-    fn branch_basis(&self) -> Option<Basis> {
+    pub(super) fn branch_basis(&self) -> Option<Basis> {
         let ConnectionState::Connected { root_id, epoch } = &self.connection else {
             return None;
         };
@@ -430,7 +430,7 @@ impl App {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{Locale, LocalePreference, i18n::I18n};
     use crossterm::event::{
@@ -448,7 +448,7 @@ mod tests {
             })
             .unwrap();
     }
-    fn fixture() -> (App, Basis) {
+    pub(crate) fn fixture() -> (App, Basis) {
         let mut app = App::new(
             "/unused".into(),
             I18n::new(LocalePreference::Auto, Locale::En),
