@@ -262,6 +262,43 @@ impl Platform {
                 items
             }
             View::Commands => Vec::new(),
+            View::TerminalViews => {
+                let scopes = query
+                    .root_id
+                    .clone()
+                    .map(|scope| vec![scope])
+                    .unwrap_or_else(|| snapshot.desired.roots.keys().cloned().collect());
+                let mut items = Vec::new();
+                for scope in scopes {
+                    for (name, endpoint) in self
+                        .catalog
+                        .snapshot::<maka_plugins::remote::Endpoint>(&scope)
+                        .entries
+                    {
+                        let Ok(identity) = endpoint.owner.identity() else {
+                            continue;
+                        };
+                        if identity.scope != scope || !endpoint.is_effective() {
+                            continue;
+                        }
+                        let Some(descriptor) = endpoint.value.terminal_view() else {
+                            continue;
+                        };
+                        let Some(method) = name.strip_prefix(&format!("{}/", identity.package_id))
+                        else {
+                            continue;
+                        };
+                        items.push(encode(TerminalViewProjection {
+                            package_id: identity.package_id.clone(),
+                            scope_id: scope.clone(),
+                            method: method.into(),
+                            target: endpoint.value.target(&identity),
+                            descriptor: descriptor.clone(),
+                        })?);
+                    }
+                }
+                items
+            }
             View::Status => unreachable!(),
         };
         page(query, items)

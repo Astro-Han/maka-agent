@@ -155,7 +155,7 @@ pub fn validate_remote_result(value: &Value) -> Result<Value> {
     }
     Ok(value.clone())
 }
-fn validate_target(target: &Target) -> Result<()> {
+pub(super) fn validate_target(target: &Target) -> Result<()> {
     super::client::identity(&target.entry_id)?;
     super::client::activation_id(&target.activation)
 }

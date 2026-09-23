@@ -197,16 +197,30 @@ export default async function activate(ctx) {
     { access: 'host_paths' },
   );
   const state = { generation: 0, opening: 0, active: 0, stopped: 0 };
-  let echo = await ctx.remote.method('echo', (input, caller) => ({
-    input,
-    client: caller.clientInstanceId,
-    session: caller.sessionId,
-    generation: state.generation,
-  }));
+  const terminalView = {
+    version: 1,
+    context: 'application',
+    title: { fallback: 'Echo', translations: { 'zh-CN': '回显', 'zh-TW': '回顯' } },
+  };
+  let echo = await ctx.remote.method(
+    'echo',
+    (input, caller) => ({
+      input,
+      client: caller.clientInstanceId,
+      session: caller.sessionId,
+      generation: state.generation,
+    }),
+    { terminalView },
+  );
+  await ctx.remote.method('terminal-extra', () => null, {
+    terminalView,
+  });
   await ctx.remote.method('replace', async () => {
     await echo.close();
     state.generation++;
-    echo = await ctx.remote.method('echo', (input) => ({ input, generation: state.generation }));
+    echo = await ctx.remote.method('echo', (input) => ({ input, generation: state.generation }), {
+      terminalView,
+    });
     return true;
   });
   await ctx.remote.method('stats', () => ({ ...state }));

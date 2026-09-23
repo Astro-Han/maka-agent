@@ -52,6 +52,7 @@ pub mod services;
 pub mod session;
 pub mod storage;
 pub mod terminal;
+pub mod terminal_ui;
 pub mod usage;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

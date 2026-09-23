@@ -144,6 +144,7 @@ pub struct Endpoint {
     pub content_digest: Option<String>,
     pub handler: Handler,
     registration: Uuid,
+    terminal_view: Option<crate::terminal_ui::Descriptor>,
 }
 #[derive(Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -161,6 +162,7 @@ impl Endpoint {
             content_digest: Some(content_digest),
             handler,
             registration: Uuid::new_v4(),
+            terminal_view: None,
         }
     }
     /// An application/CLI endpoint does not require a plugin frontend bundle.
@@ -170,11 +172,30 @@ impl Endpoint {
             content_digest: None,
             handler,
             registration: Uuid::new_v4(),
+            terminal_view: None,
         }
     }
     pub fn requiring_host_paths(mut self) -> Self {
         self.access = Access::HostPaths;
         self
+    }
+    pub fn with_terminal_view(
+        mut self,
+        descriptor: crate::terminal_ui::Descriptor,
+    ) -> Result<Self, crate::Error> {
+        descriptor.validate()?;
+        if !matches!(self.handler, Handler::Method(_)) {
+            return Err(crate::Error::Invalid(
+                "Terminal views require a Remote method".into(),
+            ));
+        }
+        self.terminal_view = Some(descriptor);
+        Ok(self)
+    }
+    pub fn terminal_view(&self) -> Option<&crate::terminal_ui::Descriptor> {
+        matches!(self.handler, Handler::Method(_))
+            .then_some(self.terminal_view.as_ref())
+            .flatten()
     }
     pub fn target(&self, owner: &Identity) -> Target {
         Target {

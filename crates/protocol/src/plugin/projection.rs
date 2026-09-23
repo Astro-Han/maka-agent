@@ -122,3 +122,13 @@ pub struct ExecutorCapabilities {
     pub thinking: bool,
     pub tool_activity: bool,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalViewProjection {
+    pub package_id: String,
+    pub scope_id: Scope,
+    pub method: String,
+    pub target: maka_plugins::remote::Target,
+    pub descriptor: maka_plugins::terminal_ui::Descriptor,
+}

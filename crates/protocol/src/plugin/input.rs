@@ -31,6 +31,7 @@ pub enum View {
     Tools,
     Commands,
     Executors,
+    TerminalViews,
     Failures,
 }
 
@@ -119,7 +120,11 @@ pub fn decode_input(operation: Operation, value: &Value) -> Result<Input> {
             if query.root_id.is_some()
                 && !matches!(
                     query.view,
-                    View::Entries | View::Tools | View::Commands | View::Executors
+                    View::Entries
+                        | View::Tools
+                        | View::Commands
+                        | View::Executors
+                        | View::TerminalViews
                 )
             {
                 return Err(invalid("this plugin view does not accept a root"));

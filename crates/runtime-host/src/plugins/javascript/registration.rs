@@ -57,12 +57,16 @@ pub(super) enum Registration {
         callback: u32,
         #[serde(default)]
         access: maka_plugins::remote::Access,
+        #[serde(default, rename = "terminalView")]
+        terminal_view: Option<maka_plugins::terminal_ui::Descriptor>,
     },
     RemoteStream {
         name: String,
         callback: u32,
         #[serde(default)]
         access: maka_plugins::remote::Access,
+        #[serde(default, rename = "terminalView")]
+        terminal_view: Option<maka_plugins::terminal_ui::Descriptor>,
     },
     #[serde(rename_all = "camelCase")]
     Executor {
@@ -248,11 +252,13 @@ pub(super) fn stage_entries(
                 name,
                 callback,
                 access,
+                terminal_view,
             }
             | Registration::RemoteStream {
                 name,
                 callback,
                 access,
+                terminal_view,
             } => {
                 validate_callback(callback)?;
                 let handler = Arc::new(super::remote::Remote(Arc::new(callbacks::Callback {
@@ -268,6 +274,11 @@ pub(super) fn stage_entries(
                 let mut endpoint =
                     maka_plugins::remote::Endpoint::new(source.content_digest.clone(), handler);
                 endpoint.access = access;
+                if let Some(descriptor) = terminal_view {
+                    endpoint = endpoint
+                        .with_terminal_view(descriptor)
+                        .map_err(super::message)?;
+                }
                 staged
                     .insert(
                         maka_plugins::remote::key(&source.package_id, &name)

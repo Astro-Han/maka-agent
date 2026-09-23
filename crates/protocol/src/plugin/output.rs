@@ -19,7 +19,7 @@
 
 use super::{
     CommandProjection, EntryProjection, ExecutorProjection, Failure, PackageProjection,
-    ToolProjection,
+    TerminalViewProjection, ToolProjection,
 };
 use crate::{Operation, ProtocolError, Result, codec};
 use serde::{Deserialize, Serialize};
@@ -112,6 +112,7 @@ pub enum QueryResult {
     Tools(Page<ToolProjection>),
     Commands(Page<CommandProjection>),
     Executors(Page<ExecutorProjection>),
+    TerminalViews(Page<TerminalViewProjection>),
     Failures(Page<Failure>),
 }
 
@@ -167,6 +168,17 @@ pub fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
                 QueryResult::Tools(page) => page.items.len(),
                 QueryResult::Commands(page) => page.items.len(),
                 QueryResult::Executors(page) => page.items.len(),
+                QueryResult::TerminalViews(page) => {
+                    for item in &page.items {
+                        super::client::identity(&item.package_id)?;
+                        super::client::identity(&item.method)?;
+                        super::remote::validate_target(&item.target)?;
+                        item.descriptor
+                            .validate()
+                            .map_err(|error| ProtocolError::invalid(error.to_string()))?;
+                    }
+                    page.items.len()
+                }
                 QueryResult::Failures(page) => page.items.len(),
             };
             if count > 64 {
@@ -269,5 +281,27 @@ mod tests {
             .is_err()
         );
         assert!(super::super::decode_input(Operation::PluginCompositionApply, &json!({"baseGeneration":1,"operations":[{"type":"move","entryId":"example","position":-1}]})).is_err());
+        super::super::decode_input(
+            Operation::PluginPlatformQuery,
+            &json!({"view":"terminal_views","rootId":"profile","limit":1}),
+        )
+        .unwrap();
+        let page = json!({"view":"terminal_views","nextCursor":null,"items":[{
+            "packageId":"example","scopeId":"profile","method":"manage",
+            "target":{"entryId":"example","activation":uuid::Uuid::new_v4().to_string(),
+                "registration":uuid::Uuid::new_v4()},
+            "descriptor":{"version":1,"title":{"fallback":"Manage","translations":{}},
+                "context":"application"}
+        }]});
+        decode_output(Operation::PluginPlatformQuery, &page).unwrap();
+        for (pointer, invalid) in [
+            ("/items/0/descriptor/version", json!(2)),
+            ("/items/0/target", Value::Null),
+            ("/items/0/method", json!("not a method")),
+        ] {
+            let mut rejected = page.clone();
+            *rejected.pointer_mut(pointer).unwrap() = invalid;
+            assert!(decode_output(Operation::PluginPlatformQuery, &rejected).is_err());
+        }
     }
 }

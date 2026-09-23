@@ -240,6 +240,48 @@ async fn scenario(vm: &str) {
     )
     .await;
     let (binding, target) = bind(&mut peer, &client, "echo").await;
+    let views = success(
+        peer.rpc(
+            "plugin.platform.query",
+            json!({
+                "view":"terminal_views", "rootId":"profile", "limit":1
+            }),
+        )
+        .await,
+    );
+    let projected: maka_protocol::plugin::QueryResult =
+        serde_json::from_value(views.clone()).unwrap();
+    maka_protocol::plugin::decode_output(maka_protocol::Operation::PluginPlatformQuery, &views)
+        .unwrap();
+    let maka_protocol::plugin::QueryResult::TerminalViews(page) = projected else {
+        panic!("terminal view page expected")
+    };
+    assert_eq!(page.items.len(), 1);
+    let descriptor = &page.items[0];
+    assert_eq!(descriptor.package_id, "example.remote");
+    assert_eq!(descriptor.method, "echo");
+    assert_eq!(serde_json::to_value(&descriptor.target).unwrap(), target);
+    assert_eq!(descriptor.descriptor.title.resolve("zh-CN"), "回显");
+    assert_eq!(descriptor.descriptor.title.resolve("zh-TW"), "回顯");
+    let continuation = json!({"view":"terminal_views", "rootId":"profile", "limit":1,
+        "cursor":page.next_cursor.unwrap()});
+    let last = success(
+        peer.rpc("plugin.platform.query", continuation.clone())
+            .await,
+    );
+    assert_eq!(last["items"][0]["method"], "terminal-extra");
+    assert!(last["nextCursor"].is_null());
+    // Discovery pins the actual registration; a native caller need not load any bundle.
+    let native_binding = json!({"packageId":"example.remote", "method":"echo", "sessionId":null});
+    assert_eq!(
+        rpc(
+            &mut peer,
+            json!({"kind":"call", "binding":native_binding,
+        "target":target,"document":document,"input":"from view"})
+        )
+        .await["value"]["input"],
+        "from view"
+    );
     let call = json!({"kind":"call","binding":binding,"target":target,"document":document,"input":"hello"});
     assert_eq!(rpc(&mut peer, call.clone()).await["value"]["generation"], 0);
     let (replace, replacement) = bind(&mut peer, &client, "replace").await;
@@ -249,6 +291,18 @@ async fn scenario(vm: &str) {
         "operation_conflict"
     );
     let (_, next) = bind(&mut peer, &client, "echo").await;
+    assert_eq!(
+        peer.rpc("plugin.platform.query", continuation).await["error"]["code"],
+        "stale_cursor"
+    );
+    let views = success(
+        peer.rpc(
+            "plugin.platform.query",
+            json!({"view":"terminal_views","rootId":"profile"}),
+        )
+        .await,
+    );
+    assert_eq!(views["items"][0]["target"], next);
     assert_eq!(target["activation"], next["activation"]);
     assert_ne!(target["registration"], next["registration"]);
     assert_eq!(
