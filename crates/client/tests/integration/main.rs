@@ -24,6 +24,7 @@ mod credential;
 mod interaction;
 mod message;
 mod oauth;
+mod plugin;
 mod presentation;
 mod project;
 mod session;

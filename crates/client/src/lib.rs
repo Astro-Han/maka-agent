@@ -28,6 +28,7 @@ mod message;
 mod notification;
 mod oauth;
 mod operations;
+mod plugin;
 mod presentation;
 mod project;
 mod session;
