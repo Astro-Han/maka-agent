@@ -28,7 +28,7 @@ use maka_plugins::{
     },
 };
 use maka_runtime::{
-    configuration::{ApiProtocol, ModelCapabilities, ModelInfo},
+    configuration::{ApiProtocol, ModelInfo},
     execution::ThinkingLevel,
 };
 use serde::{Deserialize, Serialize};
@@ -98,17 +98,15 @@ impl Provider for Codex {
                 .overrides
                 .as_ref()
                 .and_then(|o| o.thinking_levels.clone())
-                .unwrap_or_else(|| {
-                    vec![
-                        ThinkingLevel::Low,
-                        ThinkingLevel::Medium,
-                        ThinkingLevel::High,
-                        ThinkingLevel::Xhigh,
-                    ]
-                });
-            if request.thinking_level.is_some_and(|level| {
-                level != ThinkingLevel::Off && !thinking_levels.contains(&level)
-            }) {
+                .or_else(|| info.thinking_levels.clone())
+                .unwrap_or_default();
+            let level = request.thinking_level.or_else(|| {
+                request
+                    .overrides
+                    .as_ref()
+                    .and_then(|o| o.default_thinking_level)
+            });
+            if level.is_some_and(|level| !thinking_levels.contains(&level)) {
                 return Err(Error::Invalid(
                     "unsupported subscription thinking level".into(),
                 ));
@@ -118,19 +116,22 @@ impl Provider for Codex {
                 .and_then(|c| c.parallel_tool_calls)
                 .unwrap_or(true);
             let mut options = json!({"openai":{"store":false,"parallelToolCalls":parallel}});
-            if let Some(level) = request
-                .thinking_level
-                .or(Some(ThinkingLevel::Medium).filter(|l| thinking_levels.contains(l)))
-            {
+            if let Some(level) = level {
                 options["openai"]["reasoningEffort"] = match level {
                     ThinkingLevel::Off => json!("none"),
                     level => {
                         serde_json::to_value(level).map_err(|e| Error::Invalid(e.to_string()))?
                     }
                 };
-                if level != ThinkingLevel::Off {
-                    options["openai"]["reasoningSummary"] = json!("auto");
-                }
+            }
+            let summary = info
+                .supports_reasoning_summary
+                .unwrap_or(info.capabilities.and_then(|c| c.reasoning) != Some(false));
+            if summary && level != Some(ThinkingLevel::Off) {
+                options["openai"]["reasoningSummary"] = json!("auto");
+            }
+            if summary || level.is_some() {
+                options["openai"]["forceReasoning"] = json!(true);
             }
             let model = Model {
                 adapter: request
@@ -228,7 +229,7 @@ impl Provider for Codex {
                     }
                     bytes.extend_from_slice(&chunk);
                 }
-                decode(&bytes)
+                super::decode_model_inventory(&bytes)
             }
             .await;
             response.body.cancel();
@@ -240,53 +241,4 @@ impl Provider for Codex {
             result
         })
     }
-}
-
-fn decode(bytes: &[u8]) -> Result<Vec<ModelInfo>, Error> {
-    #[derive(Deserialize)]
-    struct Inventory {
-        models: Vec<Row>,
-    }
-    #[derive(Deserialize)]
-    struct Row {
-        slug: String,
-        visibility: Option<String>,
-        context_window: Option<u64>,
-        #[serde(default = "priority")]
-        priority: f64,
-    }
-    fn priority() -> f64 {
-        10_000.0
-    }
-    let mut inventory: Inventory = serde_json::from_slice(bytes)
-        .map_err(|_| Error::Invalid("invalid subscription inventory".into()))?;
-    inventory
-        .models
-        .sort_by(|a, b| a.priority.total_cmp(&b.priority));
-    inventory
-        .models
-        .into_iter()
-        .filter(|r| {
-            !r.slug.trim().is_empty()
-                && !r
-                    .visibility
-                    .as_ref()
-                    .is_some_and(|v| matches!(v.trim().to_lowercase().as_str(), "hide" | "hidden"))
-        })
-        .map(|row| {
-            let mut info = ModelInfo::new(row.slug);
-            info.context_window = row.context_window.filter(|n| *n > 0);
-            info.capabilities = Some(ModelCapabilities {
-                chat: Some(true),
-                vision: Some(true),
-                reasoning: Some(true),
-                function_calling: Some(true),
-                parallel_tool_calls: Some(true),
-                web_search: Some(true),
-                ..Default::default()
-            });
-            info.validate().map_err(Error::Invalid)?;
-            Ok(info)
-        })
-        .collect()
 }

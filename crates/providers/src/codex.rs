@@ -27,8 +27,10 @@ use maka_plugins::{
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio_util::sync::CancellationToken;
+mod inventory;
 mod login;
 mod provider;
+pub use inventory::decode_model_inventory;
 use provider::configuration;
 
 pub const ID: &str = "maka.codex";

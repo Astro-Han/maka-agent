@@ -27,6 +27,10 @@ mod subscription;
 
 /// Decode the native providers' `data` envelope into canonical catalog rows.
 pub(super) fn decode(body: &[u8], kind: DiscoveryKind) -> Result<Vec<ModelInfo>, Failure> {
+    if matches!(kind, DiscoveryKind::Codex) {
+        return maka_providers::codex::decode_model_inventory(body)
+            .map_err(|_| Failure::InvalidResponse);
+    }
     let text = String::from_utf8_lossy(body);
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     let root: Value = serde_json::from_str(text).map_err(|_| Failure::InvalidResponse)?;
@@ -34,7 +38,6 @@ pub(super) fn decode(body: &[u8], kind: DiscoveryKind) -> Result<Vec<ModelInfo>,
         return Err(Failure::InvalidResponse);
     }
     let rows = match kind {
-        DiscoveryKind::Codex => subscription::codex(&root)?,
         DiscoveryKind::Copilot => subscription::copilot(&root)?,
         _ => object_array(root.get("data"))?
             .iter()

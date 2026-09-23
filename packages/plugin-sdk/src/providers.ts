@@ -40,6 +40,8 @@ export interface ModelInfo {
   contextWindow?: number;
   inputLimit?: number;
   maxOutputTokens?: number;
+  thinkingLevels?: readonly ThinkingLevel[];
+  supportsReasoningSummary?: boolean;
   knowledgeCutoff?: string;
   structuredOutput?: boolean;
   lastUpdated?: string;
@@ -51,6 +53,7 @@ export interface ModelOverride {
   codeMode?: boolean;
   applyPatch?: boolean;
   thinkingLevels?: readonly ThinkingLevel[];
+  defaultThinkingLevel?: ThinkingLevel;
   vision?: boolean;
   contextWindow?: number;
   compactionThreshold?: number;
@@ -62,7 +65,7 @@ export interface ModelOverride {
   knowledgeCutoff?: string;
   capabilities?: Omit<ModelCapabilities, 'vision'>;
   modalities?: ModelInfo['modalities'];
-  serviceTier?: 'auto' | 'default' | 'flex' | 'priority';
+  serviceTier?: 'fast';
 }
 export interface ProviderIdentity {
   packageId: string;
