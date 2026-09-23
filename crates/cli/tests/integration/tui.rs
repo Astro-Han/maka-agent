@@ -825,7 +825,7 @@ impl Pty {
     fn spawn_at(args: &[&str], workspace: Option<&std::path::Path>) -> Self {
         let mut master = -1;
         let mut slave = -1;
-        let size = libc::winsize {
+        let mut size = libc::winsize {
             ws_row: 40,
             ws_col: 120,
             ws_xpixel: 0,
@@ -837,8 +837,8 @@ impl Pty {
                     &mut master,
                     &mut slave,
                     std::ptr::null_mut(),
-                    std::ptr::null(),
-                    &size,
+                    std::ptr::null_mut(),
+                    &raw mut size,
                 )
             },
             0
@@ -876,7 +876,7 @@ impl Pty {
             .stderr(slave.try_clone().unwrap());
         unsafe {
             command.pre_exec(|| {
-                if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY, 0) < 0 {
+                if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 Ok(())
