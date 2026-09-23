@@ -18,11 +18,19 @@
  */
 
 use super::support::{client_probe::ClientFixture, peer::Peer};
+use maka_client::{Client, Notification};
 use maka_event_log::sessions::SessionRetirement;
 use maka_fs_tools::worktree::Worktrees;
-use maka_protocol::session::{SandboxMode, WorkspaceProjection, WorkspaceTarget};
+use maka_protocol::session::{
+    SandboxMode, SessionRemoveInput, SessionRemovePreviewInput, SessionRemoveQueryInput,
+    SessionRemoveQueryResult, SessionRemoveResult, WorkspaceProjection, WorkspaceTarget,
+};
+use maka_protocol::subscription::{
+    AssistantObservationFrame, ObservationFrame, SubscriptionClosedReason, SubscriptionOpenInput,
+    TranscriptPolicy,
+};
 use maka_runtime_host::{
-    server::{Host, local::LocalListener},
+    server::{Host, HostOperations, local::LocalListener},
     session::{PreparedSession, SessionConfiguration, SessionTarget},
 };
 use serde_json::json;
@@ -113,7 +121,15 @@ async fn removal_recovers_without_its_requester_and_releases_only_the_last_works
                 .unwrap()
                 .serve(host.clone(), stop.clone()),
         );
-        let mut peer = Peer::new(host.clone(), "removal").await;
+        let (mut peer, hello) = Peer::handshake(host.clone(), "removal").await;
+        let (client, mut notices) = Client::connect(
+            maka_client::local::open_stream(&endpoint).await.unwrap(),
+            hello["rootId"].as_str().unwrap(),
+            hello["hostEpoch"].as_str().unwrap(),
+            HostOperations,
+        )
+        .await
+        .unwrap();
         let mut read = sqlx::SqliteConnection::connect_with(
             &sqlx::sqlite::SqliteConnectOptions::new()
                 .filename(root.join(maka_event_log::root::ROOT_DATABASE))
@@ -136,6 +152,16 @@ async fn removal_recovers_without_its_requester_and_releases_only_the_last_works
         .await
         .unwrap();
         read.close().await.unwrap();
+        assert!(
+            matches!(
+                client.query_session_removal(SessionRemoveQueryInput {
+                    session_id: session.into(),
+                }).await.unwrap(),
+                SessionRemoveQueryResult::Removed { session_id, archived_subtask_count: 0 }
+                    if session_id == session
+            ),
+            "native Client can reconcile after the accepting process disappeared"
+        );
         if session == "first" {
             worktrees.inspect(&binding).unwrap();
             let selected = peer
@@ -166,24 +192,95 @@ async fn removal_recovers_without_its_requester_and_releases_only_the_last_works
             "unrelated Session remains available: {visible}"
         );
         if session == "last" {
-            let missing = peer
-                .rpc("session.remove.query", json!({"sessionId":"source"}))
+            let opened = client
+                .open_subscription(SubscriptionOpenInput {
+                    session_id: "source".into(),
+                    transcript: TranscriptPolicy::Tail { max_bytes: 1024 },
+                })
+                .await
+                .unwrap();
+            client
+                .ready_subscription(&opened.subscription_id)
+                .await
+                .unwrap();
+            let missing = client
+                .query_session_removal(SessionRemoveQueryInput {
+                    session_id: "source".into(),
+                })
                 .await;
-            assert_eq!(missing["result"]["kind"], "missing", "{missing}");
-            let preview = peer
-                .rpc("session.remove.preview", json!({"sessionId":"source"}))
-                .await;
-            assert_eq!(preview["result"]["archivableSubtaskCount"], 0, "{preview}");
+            assert_eq!(missing.unwrap(), SessionRemoveQueryResult::Missing);
+            let preview = client
+                .preview_session_removal(SessionRemovePreviewInput {
+                    session_id: "source".into(),
+                })
+                .await
+                .unwrap();
+            assert_eq!(preview.archivable_subtask_count, 0);
+            let conflict = client
+                .remove_session(SessionRemoveInput {
+                    session_id: "source".into(),
+                    expected_revision: 2,
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                conflict,
+                SessionRemoveResult::RevisionConflict {
+                    expected_revision: 2,
+                    actual_revision: 1,
+                }
+            );
+            assert!(client.session("source").await.unwrap().is_some());
             let input = json!({"sessionId":"source", "expectedRevision":1});
-            let removed = peer.rpc("session.remove", input.clone()).await;
-            assert_eq!(removed["result"]["kind"], "removed", "{removed}");
+            let removed = client
+                .remove_session(SessionRemoveInput {
+                    session_id: "source".into(),
+                    expected_revision: 1,
+                })
+                .await
+                .unwrap();
+            assert!(
+                matches!(removed, SessionRemoveResult::Removed { ref session_id, .. } if session_id == "source")
+            );
             let replay = peer.rpc("session.remove", input).await;
-            assert_eq!(replay["result"], removed["result"], "{replay}");
-            let receipt = peer
-                .rpc("session.remove.query", json!({"sessionId":"source"}))
-                .await;
-            assert_eq!(receipt["result"], removed["result"], "{receipt}");
+            assert_eq!(
+                replay["result"],
+                serde_json::to_value(&removed).unwrap(),
+                "{replay}"
+            );
+            let receipt = client
+                .query_session_removal(SessionRemoveQueryInput {
+                    session_id: "source".into(),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                receipt,
+                SessionRemoveQueryResult::Removed {
+                    session_id: "source".into(),
+                    archived_subtask_count: 0,
+                }
+            );
+            assert!(client.session("source").await.unwrap().is_none());
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Notification::Observation(frame) = notices.recv().await.unwrap()
+                        && let ObservationFrame::Assistant(AssistantObservationFrame::Closed {
+                            subscription_id,
+                            reason,
+                            ..
+                        }) = *frame
+                    {
+                        assert_eq!(subscription_id, opened.subscription_id);
+                        assert_eq!(reason, SubscriptionClosedReason::SessionRemoved);
+                        break;
+                    }
+                }
+            })
+            .await
+            .unwrap();
         }
+        client.disconnect();
         peer.close().await;
         stop.cancel();
         server.await.unwrap().unwrap();

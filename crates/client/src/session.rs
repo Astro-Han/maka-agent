@@ -185,6 +185,58 @@ impl Client {
         Ok(output)
     }
 
+    pub async fn preview_session_removal(
+        &self,
+        input: SessionRemovePreviewInput,
+    ) -> Result<SessionRemovePreviewResult, RequestFailure> {
+        let value = self
+            .request(
+                Operation::SessionRemovePreview,
+                serde_json::to_value(input).expect("wire input"),
+            )
+            .await?;
+        decode_session_remove_preview_result(&value).map_err(|e| self.invalid_session(e))
+    }
+
+    pub async fn remove_session(
+        &self,
+        input: SessionRemoveInput,
+    ) -> Result<SessionRemoveResult, RequestFailure> {
+        let value = self
+            .request(
+                Operation::SessionRemove,
+                serde_json::to_value(&input).expect("wire input"),
+            )
+            .await?;
+        let output = decode_session_remove_result(&value).map_err(|e| self.invalid_session(e))?;
+        assert_remove_output_for_input(&input, &output).map_err(|e| self.invalid_session(e))?;
+        Ok(output)
+    }
+
+    /// Read the durable receipt without resubmitting a possibly admitted removal.
+    /// `Missing` alone does not prove that an earlier request was not admitted.
+    pub async fn query_session_removal(
+        &self,
+        input: SessionRemoveQueryInput,
+    ) -> Result<SessionRemoveQueryResult, RequestFailure> {
+        let value = self
+            .request(
+                Operation::SessionRemoveQuery,
+                serde_json::to_value(&input).expect("wire input"),
+            )
+            .await?;
+        let output =
+            decode_session_remove_query_result(&value).map_err(|e| self.invalid_session(e))?;
+        if let SessionRemoveQueryResult::Removed { session_id, .. } = &output
+            && *session_id != input.session_id
+        {
+            return Err(self.invalid_session(ProtocolError::invalid(
+                "Session removal receipt does not match request",
+            )));
+        }
+        Ok(output)
+    }
+
     fn invalid_session(&self, error: ProtocolError) -> RequestFailure {
         self.disconnect();
         RequestFailure::Unknown(ClientError::Protocol(error.to_string()))

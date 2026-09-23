@@ -158,3 +158,59 @@ async fn mutations_reject_foreign_identity_revision_and_lifecycle_acknowledgemen
             .unwrap();
     }
 }
+
+#[tokio::test]
+async fn removal_rejects_foreign_receipts_and_never_retries_an_unknown_mutation() {
+    for case in 0..4 {
+        let (client, _notices, mut reader, mut writer) = pair_with(maka_client::Operations).await;
+        let request = tokio::spawn({
+            let client = client.clone();
+            async move {
+                if case == 2 {
+                    client
+                        .query_session_removal(SessionRemoveQueryInput {
+                            session_id: "wanted".into(),
+                        })
+                        .await
+                        .map(|_| ())
+                } else {
+                    client
+                        .remove_session(SessionRemoveInput {
+                            session_id: "wanted".into(),
+                            expected_revision: 7,
+                        })
+                        .await
+                        .map(|_| ())
+                }
+            }
+        });
+        let frame = reader.read().await.unwrap().unwrap();
+        assert_eq!(frame["input"]["sessionId"], "wanted");
+        if case == 3 {
+            // The Host may have accepted the write; transport loss must not retry it.
+            writer.close_after_flush().await.unwrap();
+            assert!(matches!(
+                request.await.unwrap(),
+                Err(RequestFailure::Unknown(_))
+            ));
+        } else {
+            let result = if case == 1 {
+                json!({"kind":"revision_conflict","expectedRevision":8,"actualRevision":9})
+            } else {
+                json!({"kind":"removed","sessionId":"other","archivedSubtaskCount":0})
+            };
+            writer.write(&json!({"requestId":frame["requestId"],"operation":frame["operation"],"ok":true,"result":result})).await.unwrap();
+            assert!(matches!(
+                request.await.unwrap(),
+                Err(RequestFailure::Unknown(ClientError::Protocol(_)))
+            ));
+        }
+        tokio::time::timeout(Duration::from_secs(1), client.closed())
+            .await
+            .unwrap();
+        assert!(
+            reader.read().await.unwrap().is_none(),
+            "must not resend removal"
+        );
+    }
+}
