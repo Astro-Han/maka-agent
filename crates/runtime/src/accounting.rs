@@ -17,11 +17,15 @@
  * under the License.
  */
 
-//! Physical model attempts; independent of conversation membership and current prices.
+//! Physical accounting; independent of conversation membership and current prices.
 
 use crate::{context::ModelPurpose, event::Invocation, execution::ModelBinding, model::ModelUsage};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+mod activity;
+mod tool;
+pub use activity::{Activity, ActivityKind, ActivityStatus, Selection};
+pub use tool::{ToolAttempt, ToolResult, ToolStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

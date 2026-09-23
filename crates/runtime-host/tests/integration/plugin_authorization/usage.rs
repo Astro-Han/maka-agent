@@ -52,12 +52,20 @@ impl Probe {
         let result = read(peer, client, document, &self.grant, start.clone()).await;
         let page = &result["page"];
         assert!(page["total"].as_u64().unwrap() > 0, "{result}");
+        assert!(
+            page["attempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["kind"] == "model")
+        );
         for row in page["attempts"].as_array().unwrap() {
-            let attempt: maka_plugins::usage::ModelAttempt =
+            let activity: maka_plugins::usage::Activity =
                 serde_json::from_value(row.clone()).unwrap();
-            assert_eq!(attempt.cost_usd, None);
-            assert_eq!(attempt.quote.unwrap().provider_id, "openai-compatible");
-            assert!(row.get("prompt").is_none() && row.get("text").is_none());
+            if let maka_plugins::usage::Activity::Model(attempt) = activity {
+                assert_eq!(attempt.cost_usd, None);
+                assert_eq!(attempt.quote.unwrap().provider_id, "openai-compatible");
+            }
         }
         let replay = read(
             peer,
@@ -70,6 +78,32 @@ impl Probe {
         assert_eq!(replay, result, "re-reading preserves the same snapshot");
         self.cursor = page["cursor"].clone();
 
+        // A valid maximum-size literal search must fit in a round-trippable
+        // cursor even when JSON escaping doubles its encoded size.
+        let empty = read(
+            peer,
+            client,
+            document,
+            &self.grant,
+            json!({
+                "kind":"start", "filter":{"from":0,"to":1e15,
+                    "activity":{"search":"\"".repeat(1024),"kind":"tool","status":"rejected"}}
+            }),
+        )
+        .await;
+        assert_eq!(empty["page"]["total"], 0, "{empty}");
+        let repeated = read(
+            peer,
+            client,
+            document,
+            &self.grant,
+            json!({
+                "kind":"continue", "cursor":empty["page"]["cursor"]
+            }),
+        )
+        .await;
+        assert_eq!(repeated, empty);
+
         let session = approve(peer, client, "session", Some("background-session")).await;
         let scoped = read(peer, client, document, &session, start.clone()).await;
         assert!(
@@ -77,7 +111,11 @@ impl Probe {
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|row| row["sessionId"] == "background-session")
+                .all(|row| if row["kind"] == "model" {
+                    row["attempt"]["sessionId"] == "background-session"
+                } else {
+                    row["attempt"]["invocation"]["session_id"] == "background-session"
+                })
         );
         let denied = read(
             peer,

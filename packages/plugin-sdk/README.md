@@ -143,7 +143,9 @@ Native endpoints accepting caller-supplied Host paths declare `Endpoint::requiri
 
 ## Usage
 
-`call.usage.models({ kind: 'start', filter: { from, to, sessionId? } })` reads settled physical model attempts, including failed retries and auxiliary calls. Agent calls see their Session; independent calls need `read_usage` authorization for a profile or Session. Responses contain no conversation bodies. Missing usage, price and outcome remain distinct unknowns.
+`call.usage.activity({ kind: 'start', filter: { from, to, sessionId?, activity? } })` reads physical model and tool attempts, including failed retries, auxiliary calls and pre-dispatch refusals. Agent calls see their Session; independent calls need `read_usage` authorization for a profile or Session. Responses contain no conversation bodies. Missing usage, price and outcome remain distinct unknowns.
+
+Activity entries are tagged `model` or `tool`. Optional `activity` filters select `kind`, `status` and a literal ASCII-case-insensitive `search` (at most 1 KiB UTF-8, no control characters). Refusals have no execution duration; unknown tool effects are not cancellations.
 
 Each page contains at most 100 attempts / 48 KiB. `{ kind: 'continue', cursor }` re-reads that page; `nextCursor` advances under the same filter and settlement fence. Host restart invalidates cursors; every read checks current authorization.
 

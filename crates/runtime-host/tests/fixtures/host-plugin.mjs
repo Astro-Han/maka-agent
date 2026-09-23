@@ -437,18 +437,24 @@ export default async function (ctx) {
             generated.usage.output_tokens !== 5
           )
             throw new Error('nested model result or usage was lost');
-          const usage = await call.usage.models({
+          const usage = await call.usage.activity({
             kind: 'start',
             filter: { from: 0, to: 1e15 },
           });
           if (
             !usage.attempts.some(
               (row) =>
-                row.origin.kind === 'auxiliary' &&
-                row.usage.input_tokens === 3 &&
-                row.usage.output_tokens === 5,
+                row.kind === 'model' &&
+                row.attempt.origin.kind === 'auxiliary' &&
+                row.attempt.usage.input_tokens === 3 &&
+                row.attempt.usage.output_tokens === 5,
             ) ||
-            usage.attempts.some((row) => row.sessionId !== call.invocation.session_id)
+            usage.attempts.some(
+              (row) =>
+                (row.kind === 'model'
+                  ? row.attempt.sessionId
+                  : row.attempt.invocation.session_id) !== call.invocation.session_id,
+            )
           )
             throw new Error('Agent accounting lost usage or escaped its Session');
           try {
@@ -461,7 +467,7 @@ export default async function (ctx) {
             if (error.code !== 'revoked') throw error;
           }
           try {
-            await call.usage.models({
+            await call.usage.activity({
               kind: 'start',
               filter: { from: 0, to: 1e15, sessionId: 'foreign-session' },
             });

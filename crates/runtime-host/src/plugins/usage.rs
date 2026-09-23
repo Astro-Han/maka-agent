@@ -26,11 +26,11 @@ use maka_plugins::{
 };
 
 impl Usage for Effects {
-    fn models(&self, call: Scope, input: Read) -> BoxFuture<'_, Result<Page, CommandError>> {
+    fn activity(&self, call: Scope, input: Read) -> BoxFuture<'_, Result<Page, CommandError>> {
         Box::pin(async move {
             let _lease = self.owner.admit().map_err(|_| CommandError::Revoked)?;
             let host = self.host.upgrade().ok_or(CommandError::Draining)?;
-            host.plugin_usage_models(call, input).await
+            host.plugin_usage_activity(call, input).await
         })
     }
 }

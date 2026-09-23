@@ -21,10 +21,13 @@
 //! Missing counters remain unknown; this layer makes no pricing assumptions.
 
 use crate::{EventLog, StoreError};
-pub use maka_runtime::accounting::{AuxiliarySource, ModelAttempt, Origin, Outcome};
-use sqlx::{Connection, Row, sqlite::SqliteRow};
+pub use maka_runtime::accounting::{
+    Activity, AuxiliarySource, ModelAttempt, Origin, Outcome, Selection, ToolAttempt,
+};
+use sqlx::{Row, sqlite::SqliteRow};
 
 mod auxiliary;
+mod reads;
 pub(crate) mod valuation;
 
 #[derive(Clone, Debug)]
@@ -50,96 +53,51 @@ impl Query {
     }
 }
 
-pub struct ModelPage {
+pub struct Page<T> {
     pub through: u64,
-    pub attempts: Vec<ModelAttempt>,
+    pub attempts: Vec<T>,
     pub total: u64,
     pub next_offset: Option<u64>,
 }
 
 impl EventLog {
-    /// Bounded, settled model admissions (Agent inference, compaction and Host SDK).
-    /// Includes failed physical retries and provider usage from rejected output.
-    /// Session removal retains these canonical facts; copies do not duplicate them.
+    pub async fn usage_activity(
+        &self,
+        query: Query,
+        selection: Selection,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Page<Activity>, StoreError> {
+        selection.validate().map_err(invalid)?;
+        reads::page(
+            self,
+            query,
+            offset,
+            limit,
+            reads::View::Activity(selection),
+            read_activity,
+        )
+        .await
+    }
+
+    /// Settled physical admissions, not copied conversation membership.
     pub async fn model_attempts(
         &self,
         query: Query,
         offset: u64,
         limit: u32,
-    ) -> Result<ModelPage, StoreError> {
-        self.validate_root()?;
-        query.validate()?;
-        if offset > i64::MAX as u64 || !(1..=100).contains(&limit) {
-            return Err(invalid("invalid Usage page"));
-        }
-        self.connection
-            .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin().await?;
-                    let current = crate::sequence_number(
-                        sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM event_log")
-                            .fetch_one(&mut *tx)
-                            .await?,
-                    )?;
-                    let through = query.through.unwrap_or(current);
-                    if through > current {
-                        return Err(invalid("Usage fence is in the future"));
-                    }
-                    let total: i64 = sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM model_usage
-                 WHERE completed_at >= ?1 AND completed_at <= ?2
-                 AND (?3 IS NULL OR session_id = ?3) AND completed_sequence <= ?4",
-                    )
-                    .bind(query.from)
-                    .bind(query.to)
-                    .bind(&query.session_id)
-                    .bind(through as i64)
-                    .fetch_one(&mut *tx)
-                    .await?;
-                    let rows = sqlx::query(
-                        "SELECT event_id, origin, session_id, binding, model_id,
-                        started_at, completed_at, outcome, usage, quote_json, usd
-                 FROM model_usage
-                 WHERE completed_at >= ?1 AND completed_at <= ?2
-                 AND (?3 IS NULL OR session_id = ?3)
-                 AND completed_sequence <= ?4
-                 ORDER BY completed_at DESC, sequence DESC LIMIT ?5 OFFSET ?6",
-                    )
-                    .bind(query.from)
-                    .bind(query.to)
-                    .bind(query.session_id)
-                    .bind(through as i64)
-                    .bind(limit)
-                    .bind(offset as i64)
-                    .fetch_all(&mut *tx)
-                    .await?;
-                    let mut attempts = Vec::with_capacity(rows.len());
-                    // Leave envelope/cursor headroom. Never truncate one accounting fact.
-                    let mut bytes = 0;
-                    for row in &rows {
-                        let attempt = read(row)?;
-                        let size = serde_json::to_vec(&attempt)?.len() + 1;
-                        if bytes + size > 44 * 1024 {
-                            if attempts.is_empty() {
-                                return Err(invalid("one Usage record exceeds page capacity"));
-                            }
-                            break;
-                        }
-                        bytes += size;
-                        attempts.push(attempt);
-                    }
-                    let total = crate::sequence_number(total)?;
-                    let end = offset + attempts.len() as u64;
-                    tx.commit().await?;
-                    Ok(ModelPage {
-                        through,
-                        attempts,
-                        total,
-                        next_offset: (end < total).then_some(end),
-                    })
-                })
-            })
-            .await
+    ) -> Result<Page<ModelAttempt>, StoreError> {
+        reads::page(self, query, offset, limit, reads::View::Models, read).await
+    }
+
+    /// Dispatched tools and known refusals, without inputs or result bodies.
+    pub async fn tool_attempts(
+        &self,
+        query: Query,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Page<ToolAttempt>, StoreError> {
+        reads::page(self, query, offset, limit, reads::View::Tools, read_tool).await
     }
 }
 
@@ -168,4 +126,27 @@ fn read(row: &SqliteRow) -> Result<ModelAttempt, StoreError> {
 
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidTransition(message.into())
+}
+
+fn read_tool(row: &SqliteRow) -> Result<ToolAttempt, StoreError> {
+    Ok(ToolAttempt {
+        request_id: row.try_get("event_id")?,
+        invocation: serde_json::from_str(row.try_get("invocation")?)?,
+        call: serde_json::from_str(row.try_get("call")?)?,
+        name: row.try_get("name")?,
+        binding: row
+            .try_get::<Option<&str>, _>("binding")?
+            .map(serde_json::from_str)
+            .transpose()?,
+        completed_at: row.try_get("completed_at")?,
+        result: serde_json::from_str(row.try_get("result")?)?,
+    })
+}
+
+fn read_activity(row: &SqliteRow) -> Result<Activity, StoreError> {
+    match row.try_get::<&str, _>("kind")? {
+        "model" => Ok(Activity::Model(read(row)?)),
+        "tool" => Ok(Activity::Tool(read_tool(row)?)),
+        _ => Err(invalid("invalid accounting activity kind")),
+    }
 }

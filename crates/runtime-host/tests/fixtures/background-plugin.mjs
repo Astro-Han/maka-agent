@@ -49,7 +49,7 @@ export default async function (ctx) {
       input.read
     );
     try {
-      const page = await ctx.withAuthorization(input.grant, (call) => call.usage.models(read));
+      const page = await ctx.withAuthorization(input.grant, (call) => call.usage.activity(read));
       return JSON.parse(JSON.stringify({ page }));
     } catch (error) {
       return { error: error.code };

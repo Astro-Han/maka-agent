@@ -40,7 +40,7 @@ struct Cursor {
 }
 impl Cursor {
     fn decode(value: &str, generation: &str) -> Result<Self, Error> {
-        if value.len() > 1024 {
+        if value.len() > 8192 {
             return Err(Error::Invalid("oversized Usage cursor".into()));
         }
         let cursor: Self = serde_json::from_slice(
@@ -61,7 +61,7 @@ impl Cursor {
     fn encode(&self) -> Result<String, Error> {
         let bytes = serde_json::to_vec(self).map_err(|_| invalid_cursor())?;
         let encoded = URL_SAFE_NO_PAD.encode(bytes);
-        if encoded.len() > 1024 {
+        if encoded.len() > 8192 {
             return Err(invalid_cursor());
         }
         Ok(encoded)
@@ -81,7 +81,7 @@ impl Executions {
         }
     }
 
-    pub(crate) async fn plugin_usage_models(
+    pub(crate) async fn plugin_usage_activity(
         &self,
         call: Scope,
         input: Read,
@@ -101,13 +101,14 @@ impl Executions {
         }
         let result = self
             .log
-            .model_attempts(
+            .usage_activity(
                 maka_event_log::usage::Query {
                     from: filter.from,
                     to: filter.to,
                     session_id: filter.session_id.clone(),
                     through,
                 },
+                filter.activity.clone(),
                 offset,
                 100,
             )

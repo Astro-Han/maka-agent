@@ -45,19 +45,71 @@ export interface UsagePage {
   /** Re-read the same page. Cursors expire on Host restart and confer no access. */
   cursor: string;
   nextCursor: string | null;
-  attempts: readonly ModelAttempt[];
+  attempts: readonly Activity[];
   total: number;
 }
 
+export interface ToolAttempt {
+  requestId: string;
+  invocation: Invocation;
+  call: {
+    tool_call_id: string;
+    origin:
+      | { kind: 'provider'; step_id: string }
+      | {
+          kind: 'code_mode' | 'code_cell';
+          parent_operation_id: string;
+          parent_tool_call_id: string;
+        }
+      | { kind: 'standalone' }
+      | {
+          kind: 'host_sdk';
+          package_id: string;
+          entry_id: string;
+          activation: string;
+          parent_operation_id: string | null;
+        };
+  };
+  name: string;
+  binding: ModelChoice['model'] | null;
+  completedAt: number;
+  result:
+    | {
+        kind: 'rejected';
+        reason:
+          | 'unavailable'
+          | 'invalid_input'
+          | 'policy_denied'
+          | 'preparation_failed'
+          | 'exclusive_conflict'
+          | 'cancelled';
+      }
+    | { kind: 'settled'; startedAt: number; outcome: 'success' | 'error' | 'unknown' };
+}
+
+export type Activity =
+  | { kind: 'model'; attempt: ModelAttempt }
+  | { kind: 'tool'; attempt: ToolAttempt };
+
+export interface UsageSelection {
+  kind?: 'model' | 'tool' | null;
+  status?: 'success' | 'error' | 'aborted' | 'unknown' | 'rejected' | null;
+  /** Literal ASCII-case-insensitive substring, at most 1 KiB UTF-8; no control characters. */
+  search?: string;
+}
+
 export type UsageRead =
-  | { kind: 'start'; filter: { from: number; to: number; sessionId?: string | null } }
+  | {
+      kind: 'start';
+      filter: { from: number; to: number; sessionId?: string | null; activity?: UsageSelection };
+    }
   | { kind: 'continue'; cursor: string };
 
 export interface Usage {
-  /** Settled physical calls, including failed retries and auxiliary SDK calls.
+  /** Physical calls, including failed retries, auxiliary SDK calls and tool refusals.
    * At most 100 rows / 48 KiB. Missing counters or rates remain unknown.
    * Agent calls see their Session; independent calls need read_usage consent
    * with a profile or Session target. No conversation bodies are exposed.
    */
-  models(input: UsageRead): Promise<UsagePage>;
+  activity(input: UsageRead): Promise<UsagePage>;
 }

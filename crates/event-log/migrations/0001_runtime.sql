@@ -29,7 +29,8 @@ CREATE TABLE event_log (
     -- pages. SQLite derives them from canonical bytes; they cannot be edited.
     accounting_at REAL GENERATED ALWAYS AS (
         CASE WHEN kind IN ('model_requested', 'model_completed', 'model_interrupted',
-                           'invocation_ended', 'auxiliary_model_started', 'auxiliary_model_settled')
+                           'invocation_ended', 'auxiliary_model_started', 'auxiliary_model_settled',
+                           'tool_dispatched', 'tool_settled', 'tool_rejected')
         THEN COALESCE(json_extract(event_json, '$.recorded_at.secs_since_epoch'),
                       json_extract(event_json, '$.started_at.secs_since_epoch'),
                       json_extract(event_json, '$.completed_at.secs_since_epoch')) * 1000.0
@@ -48,6 +49,17 @@ CREATE TABLE event_log (
     ) STORED,
     invocation_model TEXT GENERATED ALWAYS AS (
         CASE WHEN kind = 'invocation_opened' THEN json_extract(event_json, '$.fact.configuration.model') END
+    ) STORED,
+    accounting_tool TEXT GENERATED ALWAYS AS (
+        CASE
+            WHEN kind IN ('tool_dispatched', 'tool_rejected') THEN json_object(
+                'invocation', json_extract(event_json, '$.invocation'),
+                'call', json_extract(event_json, '$.fact.call'),
+                'name', json_extract(event_json, '$.fact.name'),
+                'rejection', json_extract(event_json, '$.fact.reason.kind'))
+            WHEN kind = 'tool_settled' THEN json_object(
+                'outcome', json_extract(event_json, '$.fact.outcome.kind'))
+        END
     ) STORED,
     event_json TEXT NOT NULL,
     CHECK(invocation_id IS NOT NULL OR operation_id IS NULL)
@@ -410,6 +422,57 @@ SELECT calls.*, accounting.quote_json, valuation.usd
 FROM (SELECT * FROM agent_model_usage UNION ALL SELECT * FROM auxiliary_model_usage) calls
 LEFT JOIN model_accounting accounting ON accounting.request_id = calls.event_id
 LEFT JOIN model_valuations valuation ON valuation.request_id = calls.event_id;
+
+CREATE INDEX tool_usage_requests ON event_log(sequence)
+    WHERE kind IN ('tool_dispatched', 'tool_rejected');
+
+-- Refusal is a known non-dispatch, not an executed tool with fabricated duration.
+CREATE VIEW tool_usage AS
+SELECT request.sequence, request.event_id,
+    json_extract(request.accounting_tool, '$.invocation') AS invocation,
+    json_extract(request.accounting_tool, '$.invocation.session_id') AS session_id,
+    json_extract(request.accounting_tool, '$.call') AS call,
+    json_extract(request.accounting_tool, '$.name') AS name,
+    opening.invocation_model AS binding,
+    CASE WHEN request.kind = 'tool_rejected' THEN request.accounting_at
+        ELSE COALESCE(settled.accounting_at, terminal.accounting_at) END AS completed_at,
+    CASE WHEN request.kind = 'tool_rejected' THEN request.sequence
+        ELSE COALESCE(settled.sequence, terminal.sequence) END AS completed_sequence,
+    CASE WHEN request.kind = 'tool_rejected' THEN json_object(
+        'kind', 'rejected', 'reason', json_extract(request.accounting_tool, '$.rejection'))
+    ELSE json_object('kind', 'settled', 'startedAt', request.accounting_at,
+        'outcome', CASE json_extract(settled.accounting_tool, '$.outcome')
+            WHEN 'succeeded' THEN 'success' WHEN 'failed' THEN 'error' ELSE 'unknown' END)
+    END AS result
+FROM runtime_events request
+JOIN runtime_events opening ON opening.invocation_id = request.invocation_id
+    AND opening.kind = 'invocation_opened'
+LEFT JOIN runtime_events settled ON settled.invocation_id = request.invocation_id
+    AND settled.operation_id = request.operation_id AND settled.kind = 'tool_settled'
+LEFT JOIN runtime_events terminal ON terminal.invocation_id = request.invocation_id
+    AND terminal.kind = 'invocation_ended'
+WHERE request.kind IN ('tool_dispatched', 'tool_rejected');
+
+-- Common ordering and filtering across kinds; bodies never enter this projection.
+CREATE VIEW usage_activity AS
+SELECT 'model' AS kind, sequence, event_id, session_id, completed_sequence,
+    binding, completed_at, origin, model_id, started_at, outcome, usage, quote_json, usd,
+    NULL AS invocation, NULL AS call, NULL AS name, NULL AS result,
+    outcome AS status,
+    COALESCE(session_id, '') || ' ' || model_id || ' ' ||
+        COALESCE(json_extract(binding, '$.connection_slug'), '') || ' ' ||
+        COALESCE(json_extract(quote_json, '$.providerId'), '') AS search
+FROM model_usage
+UNION ALL
+SELECT 'tool', sequence, event_id, session_id, completed_sequence,
+    binding, completed_at, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    invocation, call, name, result,
+    CASE WHEN json_extract(result, '$.kind') = 'rejected' THEN 'rejected'
+        ELSE json_extract(result, '$.outcome') END,
+    session_id || ' ' || name || ' ' ||
+        COALESCE(json_extract(binding, '$.connection_slug'), '') || ' ' ||
+        COALESCE(json_extract(binding, '$.model'), '')
+FROM tool_usage;
 
 CREATE UNIQUE INDEX message_steering_identity ON event_log(
     json_extract(event_json, '$.invocation.session_id'),

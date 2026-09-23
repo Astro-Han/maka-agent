@@ -46,6 +46,18 @@ pub fn parse_provider_result_id(id: &str) -> Option<(&str, usize)> {
     (provider_result_id(event, index) == id).then_some((event, index))
 }
 
+/// Refusal category without input-derived explanation text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RejectionKind {
+    Unavailable,
+    InvalidInput,
+    PolicyDenied,
+    PreparationFailed,
+    ExclusiveConflict,
+    Cancelled,
+}
+
 /// A known refusal before durable dispatch: no tool effect was admitted.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]

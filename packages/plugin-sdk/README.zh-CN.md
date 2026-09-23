@@ -147,7 +147,9 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 
 ## 用量
 
-`call.usage.models({ kind: 'start', filter: { from, to, sessionId? } })` 读取已结算的模型物理调用，包含失败重试和辅助调用。Agent 只读当前 Session；独立调用需要 profile 或 Session 范围的 `read_usage` 授权。结果不包含对话正文，缺失用量、报价和结果分别保持未知。
+`call.usage.activity({ kind: 'start', filter: { from, to, sessionId?, activity? } })` 读取模型和工具的物理调用，包含失败重试、辅助调用及派发前拒绝。Agent 只读当前 Session；独立调用需要 profile 或 Session 范围的 `read_usage` 授权。结果不包含对话正文，缺失用量、报价和结果分别保持未知。
+
+活动通过 `model`／`tool` 标签区分。可选 `activity` 按 `kind`、`status` 和字面文本 `search` 筛选；搜索仅忽略 ASCII 大小写，最多 1 KiB UTF-8，不接受控制字符。派发前拒绝没有执行耗时；副作用未知不等于取消。
 
 每页最多 100 条／48 KiB。`{ kind: 'continue', cursor }` 重读该页，`nextCursor` 在相同筛选条件与结算快照下翻页。Host 重启使游标失效；每次读取都重新检查当前授权。
 

@@ -19,6 +19,7 @@
 
 use maka_event_log::{EventLog, usage::Query};
 use maka_runtime::{
+    accounting::{Activity, Selection},
     context::ModelPurpose,
     event::{
         EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, LogScope, RuntimeEvent,
@@ -100,13 +101,16 @@ async fn accounting_pages_bound_bytes_without_dropping_records_or_reading_respon
     let mut seen = BTreeSet::new();
     loop {
         let page = log
-            .model_attempts(query.clone(), offset, 100)
+            .usage_activity(query.clone(), Selection::default(), offset, 100)
             .await
             .unwrap();
         assert_eq!(page.total, 80);
         assert!(!page.attempts.is_empty() && page.attempts.len() < 80);
-        assert!(serde_json::to_vec(&page.attempts).unwrap().len() <= 44 * 1024);
-        for attempt in page.attempts {
+        assert!(serde_json::to_vec(&page.attempts).unwrap().len() <= 32 * 1024);
+        for activity in page.attempts {
+            let Activity::Model(attempt) = activity else {
+                panic!("unexpected tool activity")
+            };
             assert!(seen.insert(attempt.request_id));
             assert_eq!(attempt.session_id.as_deref(), Some("usage"));
         }

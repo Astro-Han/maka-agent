@@ -305,9 +305,9 @@ impl State {
                 encode(self.history.copy_session(call, target, input.input).await?)
             }
             Request::SearchModels(input) => encode(self.models.search(input).await?),
-            Request::UsageModels(input) => {
+            Request::UsageActivity(input) => {
                 let call = self.calls.get(&input.authority)?;
-                encode(self.usage.models(call, input.input).await?)
+                encode(self.usage.activity(call, input.input).await?)
             }
             Request::PricingQuery(input) => encode(self.pricing.query(input).await?),
             Request::PricingUpdate(input) => {
