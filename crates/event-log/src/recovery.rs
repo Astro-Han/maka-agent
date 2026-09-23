@@ -20,7 +20,7 @@
 use futures_util::TryStreamExt;
 use maka_runtime::event::Invocation;
 use serde_json::Value;
-use sqlx::{Connection, Row};
+use sqlx::{Connection, Row, SqliteConnection};
 
 use crate::{EventLog, StoreError};
 
@@ -68,6 +68,22 @@ macro_rules! unresolved {
 }
 pub(crate) use unresolved;
 
+pub(crate) async fn require_local(
+    connection: &mut SqliteConnection,
+    invocation: &str,
+) -> Result<(), StoreError> {
+    if sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM imported_invocations WHERE invocation_id=?)",
+    )
+    .bind(invocation)
+    .fetch_one(connection)
+    .await?
+    {
+        return Err(StoreError::ImportedInvocation);
+    }
+    Ok(())
+}
+
 pub struct InvocationRecovery {
     pub unfinished_executor: bool,
     pub unfinished_model_steps: Vec<String>,
@@ -100,6 +116,7 @@ impl EventLog {
         let invocation = invocation.clone();
         self.connection.run(move |connection| Box::pin(async move {
         let mut transaction = connection.begin().await?;
+        require_local(&mut transaction, &invocation.invocation_id).await?;
         let identity: String = sqlx::query_scalar(
             "SELECT json_extract(event_json, '$.invocation') FROM runtime_events
              WHERE invocation_id = ? AND kind = 'invocation_opened'",
@@ -169,7 +186,7 @@ impl EventLog {
                     json_extract(opening.event_json, '$.invocation.turn_id'),
                     json_extract(opening.event_json, '$.invocation.run_id'),
                     opening.invocation_id
-             FROM runtime_events AS opening
+             FROM local_runtime_events AS opening
              WHERE opening.kind = 'invocation_opened'
              AND NOT EXISTS(SELECT 1 FROM runtime_events AS terminal
                  WHERE terminal.invocation_id = opening.invocation_id

@@ -60,6 +60,7 @@ pub(crate) async fn apply(
     tx: &mut SqliteConnection,
     source: &Invocation,
 ) -> Result<(TurnBoundary, Option<u64>), StoreError> {
+    crate::recovery::require_local(tx, &source.invocation_id).await?;
     let prefix = crate::run_prefix::read(
         tx,
         &source.session_id,
