@@ -52,7 +52,7 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let row: Option<(String, String)> = sqlx::query_as(
-                        "SELECT request_json, state FROM session_history_copies WHERE session_id=?",
+                        "SELECT request_json, state FROM session_history_copies WHERE session_id=? AND bundle_digest IS NULL",
                     )
                     .bind(target)
                     .fetch_optional(connection)
@@ -141,10 +141,11 @@ impl EventLog {
         );
         self.connection.run(move |connection| Box::pin(async move {
             let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-            let previous: Option<String> = sqlx::query_scalar(
-                "SELECT request_json FROM session_history_copies WHERE session_id = ?",
+            let previous: Option<(String, Option<String>)> = sqlx::query_as(
+                "SELECT request_json,bundle_digest FROM session_history_copies WHERE session_id = ?",
             ).bind(&request.target_session_id).fetch_optional(&mut *tx).await?;
-            if let Some(previous) = previous {
+            if let Some((previous, bundle_digest)) = previous {
+                if bundle_digest.is_some() { return Err(StoreError::SessionConflict); }
                 if previous != encoded { return Err(StoreError::SessionConflict); }
                 super::removal::require_mutable(&mut tx, &request.target_session_id).await?;
                 super::origin::check(&mut tx, &request.target_session_id, origin.as_ref()).await?;
@@ -186,7 +187,7 @@ impl EventLog {
                 CopyPurpose::Revision { .. } => CopyState::Preparing,
                 _ => CopyState::Committed,
             };
-            sqlx::query("INSERT INTO session_history_copies VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            sqlx::query("INSERT INTO session_history_copies(session_id,source_session_id,source_revision,through_sequence,observed_through,request_json,lineage_json,state) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(&request.target_session_id).bind(&request.source_session_id)
                 .bind(actual as i64).bind(through as i64).bind(observed).bind(encoded).bind(serde_json::to_string(&lineage)?)
                 .bind(state.as_str())

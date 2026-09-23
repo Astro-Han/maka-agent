@@ -47,7 +47,7 @@ impl EventLog {
         super::removal::require_mutable(&mut tx, &id).await?;
         let record: SessionRecord<T> = read(&mut tx, &id).await?.ok_or(StoreError::SessionNotFound)?;
         let active: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM runtime_events AS opening
+            "SELECT EXISTS(SELECT 1 FROM local_runtime_events AS opening
              WHERE opening.kind = 'invocation_opened'
              AND json_extract(opening.event_json, '$.invocation.session_id') = ?
              AND NOT EXISTS(SELECT 1 FROM runtime_events AS terminal

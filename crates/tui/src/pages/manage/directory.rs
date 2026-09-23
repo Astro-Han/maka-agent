@@ -71,6 +71,9 @@ pub(super) struct Browser {
     pub location: Option<Location>,
     rows: Vec<Row>,
     selected: usize,
+    top: usize,
+    area: Option<ratatui::layout::Rect>,
+    dragging: bool,
     focus: usize, // List, path, parent, refresh, previous, next, cancel, register.
     hovered: Option<Manage>,
     pub(super) requested: bool,
@@ -88,6 +91,9 @@ impl Browser {
             location: None,
             rows: vec![],
             selected: 0,
+            top: 0,
+            area: None,
+            dragging: false,
             focus: 0,
             hovered: None,
             requested: true,
@@ -107,10 +113,14 @@ impl Browser {
     }
     pub fn invalidate_geometry(&mut self) {
         self.hovered = None;
+        self.area = None;
+        self.dragging = false;
     }
     fn reset(&mut self) {
         self.rows.clear();
         self.selected = 0;
+        self.top = 0;
+        self.invalidate_geometry();
         self.next = None;
         self.hovered = None;
         self.error = false;
@@ -143,6 +153,42 @@ impl Browser {
             },
         }
     }
+    fn scroll_mouse(&mut self, mouse: crossterm::event::MouseEvent) -> bool {
+        let Some(area) = self.area else { return false };
+        match mouse.kind {
+            MouseEventKind::Up(MouseButton::Left) if self.dragging => {
+                self.dragging = false;
+                return true;
+            }
+            MouseEventKind::Down(MouseButton::Left)
+                if self.rows.len() > usize::from(area.height)
+                    && mouse.column == area.right() - 1
+                    && area.contains((mouse.column, mouse.row).into()) =>
+            {
+                self.dragging = true;
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.dragging => {}
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+                if area.contains((mouse.column, mouse.row).into()) =>
+            {
+                self.move_selection(mouse.kind == MouseEventKind::ScrollDown);
+                self.hovered = None;
+                return true;
+            }
+            _ => return false,
+        }
+        let max = self.rows.len().saturating_sub(usize::from(area.height));
+        let row = mouse
+            .row
+            .saturating_sub(area.y)
+            .min(area.height.saturating_sub(1));
+        self.top = usize::from(row) * max / usize::from(area.height.saturating_sub(1).max(1));
+        self.selected = self.top;
+        self.focus = 0;
+        self.hovered = None;
+        true
+    }
+
     fn move_selection(&mut self, down: bool) {
         self.focus = 0;
         self.selected = if down {
@@ -347,6 +393,7 @@ impl App {
         let browser = dialog.browser.as_mut().expect("directory browser");
         if matches!(&event, Event::Key(key) if key.kind != KeyEventKind::Release) {
             browser.hovered = None;
+            browser.dragging = false;
         }
         let command = match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
@@ -407,6 +454,9 @@ impl App {
                 _ => None,
             },
             Event::Mouse(mouse) if dialog.visible => {
+                if browser.scroll_mouse(mouse) {
+                    return (true, None);
+                }
                 let hit = self
                     .hits
                     .iter()
@@ -422,12 +472,6 @@ impl App {
                         let changed = browser.hovered != hit;
                         browser.hovered = hit;
                         return (changed, None);
-                    }
-                    MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
-                        if matches!(hit, Some(Manage::Directory(Command::Open(_)))) =>
-                    {
-                        browser.move_selection(mouse.kind == MouseEventKind::ScrollDown);
-                        return (true, None);
                     }
                     _ => None,
                 }
@@ -462,6 +506,138 @@ mod tests {
     use crossterm::event::KeyEvent;
     use maka_protocol::project::{DirectoryEntry, DirectoryRoot};
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn directory_scrollbar_drags_without_opening_rows_and_resize_retires_its_geometry() {
+        use crossterm::event::MouseEvent;
+        fn browser(app: &App) -> &Browser {
+            app.management
+                .dialog
+                .as_ref()
+                .unwrap()
+                .browser
+                .as_ref()
+                .unwrap()
+        }
+        fn draw(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| crate::view::draw(frame, app))
+                .unwrap();
+            terminal.backend().buffer().clone()
+        }
+        let mouse = |kind, column, row| {
+            Event::Mouse(MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        for locale in Locale::ALL {
+            let mut app = App::new(
+                "/unused".into(),
+                I18n::new(LocalePreference::Explicit(locale), locale),
+            );
+            app.connection = ConnectionState::Connected {
+                root_id: "host".into(),
+                epoch: "epoch".into(),
+            };
+            app.apply(app.register_project_action().unwrap());
+            draw(&mut app, 80, 28);
+            app.apply(Action::Manage(Manage::Browse));
+            let query = app.directory_request().unwrap();
+            app.directory_completed(
+                query,
+                Ok(QueryResult::DirectoryRoots {
+                    roots: vec![DirectoryRoot {
+                        id: "r".into(),
+                        label: "Published".into(),
+                    }],
+                }),
+            );
+            draw(&mut app, 80, 28);
+            app.apply(Action::Manage(Manage::Directory(Command::Open(0))));
+            let query = app.directory_request().unwrap();
+            app.directory_completed(
+                query,
+                Ok(QueryResult::DirectoryPage {
+                    root_id: "r".into(),
+                    segments: vec![],
+                    next_cursor: None,
+                    entries: (0..96)
+                        .map(|index| DirectoryEntry {
+                            name: format!("目录-{index:03}"),
+                        })
+                        .collect(),
+                }),
+            );
+            for (width, height, ascii) in [(80, 28, false), (52, 22, true)] {
+                app.chrome.ascii = ascii;
+                let buffer = draw(&mut app, width, height);
+                let area = browser(&app).area.unwrap();
+                let bar = area.right() - 1;
+                let glyph = if ascii { "#" } else { "┃" };
+                assert!(buffer.content.iter().any(|cell| cell.symbol() == glyph));
+                assert!(
+                    !app.hits
+                        .iter()
+                        .any(|hit| hit.area.contains((bar, area.y).into())),
+                    "scrollbar is not a directory row"
+                );
+                app.input(mouse(MouseEventKind::Down(MouseButton::Left), bar, area.y));
+                app.input(mouse(
+                    MouseEventKind::Drag(MouseButton::Left),
+                    bar,
+                    area.bottom() + 2,
+                ));
+                let buffer = draw(&mut app, width, height);
+                assert_eq!(browser(&app).top, 96 - usize::from(area.height));
+                assert_eq!(
+                    buffer[(bar, area.bottom() - 1)].symbol(),
+                    glyph,
+                    "thumb reaches the true bottom"
+                );
+                assert!(
+                    app.directory_request().is_none(),
+                    "dragging cannot open or register a directory"
+                );
+                assert!(app.management.pending.is_none());
+                app.input(mouse(
+                    MouseEventKind::Up(MouseButton::Left),
+                    bar,
+                    area.bottom() + 2,
+                ));
+                assert!(!browser(&app).dragging);
+                app.input(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+                draw(&mut app, width, height);
+                assert_eq!(browser(&app).top, 0);
+                app.input(mouse(MouseEventKind::Down(MouseButton::Left), bar, area.y));
+                app.input(Event::Resize(40, 16));
+                assert!(browser(&app).area.is_none());
+                assert!(!browser(&app).dragging);
+                app.input(mouse(
+                    MouseEventKind::Drag(MouseButton::Left),
+                    bar,
+                    area.bottom() - 1,
+                ));
+                assert_eq!(browser(&app).top, 0);
+                draw(&mut app, 40, 16);
+                assert!(browser(&app).area.is_none());
+            }
+            draw(&mut app, 80, 28);
+            app.input(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
+            draw(&mut app, 80, 28);
+            app.input(Event::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            )));
+            let query = app.directory_request().unwrap();
+            assert!(
+                matches!(query.query,Query::DirectoryListStart { segments,.. } if segments == ["目录-095"])
+            );
+        }
+    }
 
     #[test]
     fn directory_picker_bounds_reads_and_keeps_host_identity_across_modal_lifetimes() {

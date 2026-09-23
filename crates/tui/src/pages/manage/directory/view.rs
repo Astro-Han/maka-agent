@@ -26,7 +26,7 @@ use ratatui::{
     Frame,
     layout::{Margin, Rect},
     style::Style,
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -45,6 +45,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     let dialog = app.management.dialog.as_mut().expect("directory dialog");
     let browser = dialog.browser.as_mut().expect("directory browser");
     if area.width < 42 || area.height < 17 {
+        browser.invalidate_geometry();
         dialog.visible = false;
         crate::view::clear_overlay(frame, area);
         frame.render_widget(
@@ -116,8 +117,19 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         inner.width,
         inner.height.saturating_sub(8 + reference_rows),
     );
-    let offset = (browser.selected + 1).saturating_sub(list.height as usize);
-    let enabled = browser.ready() && !dialog.blocked && !busy;
+    let capacity = usize::from(list.height).max(1);
+    browser.top = browser
+        .top
+        .min(browser.selected)
+        .max(browser.selected.saturating_sub(capacity - 1))
+        .min(browser.rows.len().saturating_sub(capacity));
+    let offset = browser.top;
+    let scrollable = browser.rows.len() > capacity;
+    let enabled = browser.ready() && !browser.resolving && !dialog.blocked && !busy;
+    browser.area = enabled.then_some(list);
+    if !enabled {
+        browser.dragging = false;
+    }
     for (index, row) in browser
         .rows
         .iter()
@@ -125,7 +137,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         .skip(offset)
         .take(list.height as usize)
     {
-        let rect = Rect::new(list.x, list.y + (index - offset) as u16, list.width, 1);
+        let rect = Rect::new(
+            list.x,
+            list.y + (index - offset) as u16,
+            list.width.saturating_sub(if scrollable { 2 } else { 0 }),
+            1,
+        );
         let command = Manage::Directory(Command::Open(index));
         let active = browser.focus == 0 && browser.selected == index
             || browser.hovered.as_ref() == Some(&command);
@@ -150,6 +167,24 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 action: Action::Manage(command),
             });
         }
+    }
+    if scrollable {
+        let colors = app.theme.colors();
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_symbol(Some(if app.chrome.ascii { "|" } else { "│" }))
+            .thumb_symbol(if app.chrome.ascii { "#" } else { "┃" })
+            .track_style(Style::default().fg(colors.subtle))
+            .thumb_style(Style::default().fg(if enabled {
+                colors.accent
+            } else {
+                colors.subtle
+            }));
+        let mut scroll = ScrollbarState::new(browser.rows.len().saturating_sub(capacity) + 1)
+            .position(offset)
+            .viewport_content_length(capacity);
+        frame.render_stateful_widget(scrollbar, list, &mut scroll);
     }
     if browser.rows.is_empty() && !browser.error {
         let key = if browser.loading || browser.requested {

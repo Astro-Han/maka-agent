@@ -290,7 +290,7 @@ impl EventLog {
 
 async fn settled(connection: &mut SqliteConnection, session: &str) -> Result<bool, StoreError> {
     let unsettled: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events o WHERE o.kind='invocation_opened'
+        "SELECT EXISTS(SELECT 1 FROM local_runtime_events o WHERE o.kind='invocation_opened'
             AND json_extract(o.event_json, '$.invocation.session_id')=?1
             AND NOT EXISTS(SELECT 1 FROM runtime_events t
                 WHERE t.invocation_id=o.invocation_id AND t.kind='invocation_ended'))

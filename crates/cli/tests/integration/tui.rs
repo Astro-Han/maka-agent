@@ -403,6 +403,10 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.click_text("Allow once");
     tui.wait_for("Decision recorded by Host.");
     tui.send(b"\x1b");
+    // Background output may already contain the next question while the approval
+    // is still open. Publish its dismissal before sending another escape-prefixed
+    // input sequence; a bare Esc followed by SGR can merge in the terminal parser.
+    tui.wait_until(|screen| !screen.contains("Review request"));
     tui.wait_for("Approval complete");
     tui.wait_for("Question · Waiting for you"); // Not the previous approval's still-visible indicator.
     tui.wait_for("!");
