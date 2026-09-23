@@ -27,7 +27,7 @@ use ratatui::{
     Frame,
     layout::{Margin, Rect},
     style::{Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
@@ -39,6 +39,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     }
     let colors = app.theme.colors();
     let locale = app.i18n.locale().id();
+    let form_width = area.width.saturating_sub(1).min(52);
     let mut lines = Vec::new();
     let mut controls = Vec::new();
     let state = &app.extensions;
@@ -84,17 +85,13 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
             controls.push((lines.len(), 2, Command::Row(index)));
             lines.push(Line::raw(row.title.resolve(locale).to_owned()));
             lines.push(Line::styled(
-                row.description.clone(),
+                fit(&row.description, usize::from(area.width.saturating_sub(1))),
                 Style::default().fg(colors.muted),
             ));
             lines.push(Line::default());
         }
         for (index, field) in page.fields.iter().enumerate() {
             let start = lines.len();
-            lines.push(Line::styled(
-                field.label.resolve(locale).to_owned(),
-                Style::default().fg(colors.muted),
-            ));
             match &field.control {
                 Control::Toggle { .. } => {
                     let checked = state
@@ -103,13 +100,32 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
                         .and_then(serde_json::Value::as_bool)
                         .unwrap_or(false);
                     let mark = if checked {
-                        app.chrome.symbol("●", "[x]")
+                        app.chrome.symbol("━●", "[x]")
                     } else {
-                        app.chrome.symbol("○", "[ ]")
+                        app.chrome.symbol("○─", "[ ]")
                     };
-                    lines.push(Line::raw(format!(" {mark}")));
+                    let label = fit(
+                        field.label.resolve(locale),
+                        usize::from(form_width.saturating_sub(6)),
+                    );
+                    let gap = usize::from(form_width).saturating_sub(
+                        unicode_width::UnicodeWidthStr::width(label.as_str())
+                            + unicode_width::UnicodeWidthStr::width(mark),
+                    );
+                    lines.push(Line::from(vec![
+                        Span::raw(label),
+                        Span::raw(" ".repeat(gap)),
+                        Span::styled(
+                            mark,
+                            Style::default().fg(if checked { colors.accent } else { colors.muted }),
+                        ),
+                    ]));
                 }
                 Control::Text { multiline, .. } => {
+                    lines.push(Line::styled(
+                        fit(field.label.resolve(locale), usize::from(form_width)),
+                        Style::default().fg(colors.muted),
+                    ));
                     lines.push(Line::default());
                     if *multiline {
                         lines.extend([Line::default(), Line::default()]);
@@ -119,9 +135,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
             controls.push((start, lines.len() - start, Command::Field(index)));
             lines.push(Line::default());
         }
-        for (index, action) in page.actions.iter().enumerate() {
+        for index in 0..page.actions.len() {
             controls.push((lines.len(), 1, Command::Submit(index)));
-            lines.push(Line::raw(action.label.resolve(locale).to_owned()).centered());
+            lines.push(Line::default());
             lines.push(Line::default());
         }
     } else {
@@ -189,13 +205,39 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
         let rect = Rect::new(
             area.x,
             area.y + y as u16,
-            area.width.saturating_sub(1),
+            if matches!(command, Command::Field(_) | Command::Submit(_)) {
+                form_width
+            } else {
+                area.width.saturating_sub(1)
+            },
             (end - (*start).max(top)) as u16,
         );
-        app.hits.push(Hit {
-            area: rect,
-            action: Action::Extension(command.clone()),
-        });
+        if let Command::Submit(action_index) = command {
+            let action = &app.extensions.page.as_ref().unwrap().actions[*action_index];
+            let label =
+                if app.extensions.applied.as_deref() == Some(&action.id) && !app.extensions.busy {
+                    format!(
+                        "{} {}",
+                        app.chrome.symbol("✓", "+"),
+                        action.label.resolve(locale)
+                    )
+                } else {
+                    action.label.resolve(locale).to_owned()
+                };
+            crate::view::button(
+                frame,
+                app,
+                rect,
+                &label,
+                Action::Extension(command.clone()),
+                app.focus == Focus::List && app.extensions.selected == index,
+            );
+        } else {
+            app.hits.push(Hit {
+                area: rect,
+                action: Action::Extension(command.clone()),
+            });
+        }
         if let Command::Field(field_index) = command
             && let Some(field) = app
                 .extensions
@@ -218,7 +260,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
                     && index == app.extensions.selected
                     && app.palette.is_none()
                     && !app.extensions.busy
-                    && !app.extensions.blocked,
+                    && !app.extensions.blocked
+                    && field.enabled,
                 colors,
             );
         }
@@ -226,10 +269,35 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     if total > usize::from(area.height) {
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .track_symbol(Some(app.chrome.symbol("│", "|")))
+                .thumb_symbol(app.chrome.symbol("┃", "#"))
+                .track_style(Style::default().fg(colors.subtle))
+                .thumb_style(Style::default().fg(colors.muted))
                 .begin_symbol(None)
                 .end_symbol(None),
             area,
             &mut ScrollbarState::new(total.saturating_sub(usize::from(area.height))).position(top),
         );
     }
+}
+
+fn fit(text: &str, width: usize) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    if text.width() <= width {
+        return text.into();
+    }
+    let mut result = String::new();
+    let mut cells = 0;
+    for glyph in text.graphemes(true) {
+        if cells + glyph.width() >= width {
+            break;
+        }
+        result.push_str(glyph);
+        cells += glyph.width();
+    }
+    if width > 0 {
+        result.push('…');
+    }
+    result
 }

@@ -37,6 +37,10 @@ pub enum CatalogView {
     deny_unknown_fields
 )]
 pub enum CatalogInput {
+    Lookup {
+        context: WorkspaceContext,
+        reference: String,
+    },
     Start {
         context: WorkspaceContext,
         view: CatalogView,
@@ -51,12 +55,15 @@ pub enum CatalogInput {
 impl CatalogInput {
     pub fn context(&self) -> &WorkspaceContext {
         match self {
-            Self::Start { context, .. } | Self::Continue { context, .. } => context,
+            Self::Start { context, .. }
+            | Self::Continue { context, .. }
+            | Self::Lookup { context, .. } => context,
         }
     }
     pub fn view(&self) -> CatalogView {
         match self {
             Self::Start { view, .. } | Self::Continue { view, .. } => *view,
+            Self::Lookup { .. } => CatalogView::Governance,
         }
     }
     pub fn uses_host_paths(&self) -> bool {

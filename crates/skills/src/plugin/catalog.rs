@@ -39,7 +39,7 @@ impl Skills {
         let cursor_revision =
             maka_runtime::artifact::content_digest(&encode(&(&revision, input.view()))?);
         let offset = match input {
-            CatalogInput::Start { .. } => 0,
+            CatalogInput::Start { .. } | CatalogInput::Lookup { .. } => 0,
             CatalogInput::Continue {
                 revision: expected,
                 cursor,
@@ -127,6 +127,9 @@ impl Skills {
             }
             CatalogView::Governance => governance,
         };
+        if let CatalogInput::Lookup { reference, .. } = input {
+            items.retain(|item| matches!(item, CatalogItem::Skill(item) | CatalogItem::DiscoveryDiagnostic(item) if &item.reference == reference));
+        }
         items.sort_by(|a, b| key(a).cmp(&key(b)));
         if offset > items.len()
             || matches!(input, CatalogInput::Continue { .. }) && offset == items.len()

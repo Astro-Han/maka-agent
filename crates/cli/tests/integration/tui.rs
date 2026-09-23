@@ -27,6 +27,7 @@ mod connections;
 mod credentials;
 mod enabled_models;
 mod environment;
+mod extensions;
 mod forms;
 mod frames;
 mod imports;

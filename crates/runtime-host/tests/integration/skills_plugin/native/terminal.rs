@@ -91,7 +91,7 @@ pub(super) async fn exercise(client: &Client, session: &str) {
                 continue;
             }
             assert!(references.insert(row.id.clone()), "repeated row");
-            if row.title.fallback == "Review 0" {
+            if row.title.fallback == "Review 128" {
                 chosen = Some(row.route.clone());
             }
         }

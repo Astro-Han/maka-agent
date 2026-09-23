@@ -355,7 +355,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         app.i18n.text("chat-browse-help")
     } else if app.focus == Focus::Queue {
         app.i18n.text("queue-help")
-    } else if app.focus == Focus::List && app.navigation.current() == Route::Connections {
+    } else if app.focus == Focus::List
+        && matches!(
+            app.navigation.current(),
+            Route::Connections | Route::Extensions
+        )
+    {
         String::new()
     } else if app.focus == Focus::List && app.navigation.current() == Route::Projects {
         if app.projects.selected.is_some() {

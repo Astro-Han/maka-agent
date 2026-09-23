@@ -243,7 +243,9 @@ impl App {
         ];
         if self.navigation.current() == Route::Extensions {
             commands.extend(self.page_actions().into_iter().filter_map(|action| {
-                if let Action::Extension(command) = &action {
+                if let Action::Extension(command) = &action
+                    && *command != crate::pages::extensions::Command::Refresh
+                {
                     Some((action.clone(), command.label()))
                 } else {
                     None
@@ -385,12 +387,7 @@ impl App {
     }
     pub fn page_actions(&self) -> Vec<Action> {
         let mut actions = match self.navigation.current() {
-            Route::Extensions => vec![
-                Action::Extension(crate::pages::extensions::Command::Back),
-                Action::Extension(crate::pages::extensions::Command::Refresh),
-                Action::Extension(crate::pages::extensions::Command::Next),
-                Action::Extension(crate::pages::extensions::Command::Discard),
-            ],
+            Route::Extensions => self.extensions_actions(),
             Route::Connections => self.connection_actions(),
             Route::Projects => self.project_actions(),
             Route::Inbox => {

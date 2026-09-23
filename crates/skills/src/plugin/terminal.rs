@@ -85,17 +85,24 @@ impl Method for View {
                     if route.offset >= MAX_ITEMS || !route.offset.is_multiple_of(WINDOW) {
                         return Err(invalid("Invalid Skills page offset"));
                     }
-                    let input = match &route.cursor {
-                        None => CatalogInput::Start {
+                    let input = if let Some(reference) = &route.reference {
+                        CatalogInput::Lookup {
                             context,
-                            view: CatalogView::Governance,
-                        },
-                        Some(cursor) => CatalogInput::Continue {
-                            context,
-                            view: CatalogView::Governance,
-                            revision: cursor.revision.clone(),
-                            cursor: cursor.cursor.clone(),
-                        },
+                            reference: reference.clone(),
+                        }
+                    } else {
+                        match &route.cursor {
+                            None => CatalogInput::Start {
+                                context,
+                                view: CatalogView::Governance,
+                            },
+                            Some(cursor) => CatalogInput::Continue {
+                                context,
+                                view: CatalogView::Governance,
+                                revision: cursor.revision.clone(),
+                                cursor: cursor.cursor.clone(),
+                            },
+                        }
                     };
                     match skills
                         .query(&input, view.workspace, view.files)
@@ -118,7 +125,10 @@ impl Method for View {
                     fields,
                 } => {
                     let route: Route = serde_json::from_value(route).map_err(invalid)?;
-                    let reference = route.reference.ok_or_else(|| invalid("Select a Skill"))?;
+                    let reference = route
+                        .reference
+                        .clone()
+                        .ok_or_else(|| invalid("Select a Skill"))?;
                     if action != "save" || fields.len() != 2 {
                         return Err(invalid("Unknown Skill action or fields"));
                     }
@@ -153,7 +163,9 @@ impl Method for View {
                         .outcome
                     {
                         MutationOutcome::Committed { .. } | MutationOutcome::Unchanged { .. } => {
-                            Reply::Applied { route: Value::Null }
+                            Reply::Applied {
+                                route: serde_json::to_value(route).map_err(invalid)?,
+                            }
                         }
                         MutationOutcome::RevisionConflict { .. } => Reply::Conflict,
                         MutationOutcome::Rejected { reason } => Reply::Rejected {
@@ -237,7 +249,7 @@ fn project(
                 description: display(&item.description, 160, false),
                 route: serde_json::to_value(Route {
                     reference: Some(item.reference.clone()),
-                    ..route.clone()
+                    ..Route::default()
                 })
                 .map_err(invalid)?,
             });

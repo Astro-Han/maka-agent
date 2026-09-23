@@ -89,6 +89,7 @@ pub struct State {
     session: Option<String>,
     pub(super) directory: Vec<TerminalViewProjection>,
     next: Option<String>,
+    loaded: bool,
     pub(super) view: Option<TerminalViewProjection>,
     pub(super) page: Option<Page>,
     route: Value,
@@ -99,6 +100,7 @@ pub struct State {
     pub(super) busy: bool,
     writing: bool,
     pub(super) blocked: bool,
+    pub(super) applied: Option<String>,
     pub(super) message: Option<Message>,
     pub(super) selected: usize,
     pub(super) top: usize,
@@ -129,8 +131,11 @@ impl State {
         self.pending = None;
         self.busy = false;
         self.blocked = self.view.is_some();
+        self.loaded = false;
+        self.directory.clear();
+        self.next = None;
         // Retain drafts, but revoke every operation on the old registration.
-        self.message = Some(Message::Local(if self.writing {
+        self.message = self.blocked.then_some(Message::Local(if self.writing {
             "extensions-unknown"
         } else {
             "extensions-disconnected"
@@ -195,12 +200,42 @@ impl State {
 }
 
 impl App {
+    pub fn extensions_actions(&self) -> Vec<Action> {
+        let mut commands = Vec::new();
+        if self.extensions.view.is_some() {
+            commands.push(Command::Back);
+        }
+        if self.extensions.dirty() || self.extensions.blocked {
+            commands.push(Command::Discard);
+        } else {
+            commands.push(Command::Refresh);
+        }
+        if self.extensions.view.is_none() && self.extensions.next.is_some() {
+            commands.push(Command::Next);
+        }
+        commands.into_iter().map(Action::Extension).collect()
+    }
     pub fn extensions_request(&mut self) -> Option<Request> {
         let ConnectionState::Connected { root_id, epoch } = &self.connection else {
             return None;
         };
         if self.extensions.busy {
             return None;
+        }
+        if self.navigation.current() == Route::Extensions
+            && !self.extensions.loaded
+            && !self.extensions.blocked
+            && self.extensions.view.is_none()
+            && self.extensions.pending.is_none()
+        {
+            // Restoring navigation is a fresh read, not restoring an old registration.
+            if self.extensions.session.is_none()
+                && let Route::Session(id) = self.navigation.destination(false)
+                && self.tabs.contains(&id)
+            {
+                self.extensions.session = Some(id);
+            }
+            self.extensions.pending = Some(Work::Directory(None));
         }
         let work = self.extensions.pending.take()?;
         self.extensions.busy = true;
@@ -233,6 +268,7 @@ impl App {
         state.area = None;
         match result {
             Ok(Output::Directory(page)) => {
+                state.loaded = true;
                 state.directory = page.items;
                 state.next = page.next_cursor;
                 state.page = None;
@@ -244,8 +280,22 @@ impl App {
             }
             Ok(Output::Page(Reply::Page { page })) => state.install(page),
             Ok(Output::Page(Reply::Applied { route })) => {
+                state.applied = match &request.work {
+                    Work::Page {
+                        input:
+                            Input::Submit {
+                                route: source,
+                                action,
+                                ..
+                            },
+                        ..
+                    } if source == &route => Some(action.clone()),
+                    _ => None,
+                };
+                if state.route != route {
+                    state.history.clear();
+                }
                 state.route = route;
-                state.history.clear();
                 state.page = None;
                 state.drafts.clear();
                 state.editors.clear();
@@ -347,6 +397,7 @@ impl App {
         }
         self.focus = Focus::List;
         let state = &mut self.extensions;
+        state.applied = None;
         match command {
             Command::Choose(index) => {
                 state.view = Some(state.directory[index].clone());
@@ -599,6 +650,7 @@ impl App {
             _ => return false,
         };
         if changed {
+            state.applied = None;
             state
                 .drafts
                 .insert(field.id.clone(), Value::String(editor.text().into()));
