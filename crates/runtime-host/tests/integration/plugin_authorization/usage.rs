@@ -21,7 +21,7 @@ use super::{Peer, Value, json, remote, success};
 
 #[derive(Default)]
 pub(super) struct Probe {
-    grant: Value,
+    pub(super) grant: Value,
     cursor: Value,
 }
 impl Probe {

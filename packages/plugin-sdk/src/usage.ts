@@ -37,17 +37,7 @@ export interface ModelAttempt {
   completedAt: number;
   outcome: 'success' | 'error' | 'aborted' | 'unknown';
   usage: ModelGeneration['usage'];
-  quote: {
-    providerId: string;
-    revision: number;
-    pricing: {
-      modelKey: string;
-      inputUsdPer1M: number;
-      outputUsdPer1M: number;
-      cacheReadUsdPer1M?: number;
-      cacheWriteUsdPer1M?: number;
-    } | null;
-  } | null;
+  quote: import('./pricing.js').PriceQuote | null;
   costUsd: number | null;
 }
 

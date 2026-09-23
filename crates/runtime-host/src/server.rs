@@ -43,7 +43,7 @@ mod operations;
 mod outbound;
 pub(crate) mod plugin_authorization;
 mod plugin_remote;
-mod pricing;
+pub(crate) mod pricing;
 mod projects;
 mod sandbox_setup;
 pub(crate) use projects::Usage as ProjectUsage;
@@ -132,6 +132,7 @@ pub struct Host {
     // Log connections close before root authority is released.
     log: Arc<EventLog>,
     configuration: Arc<ConfigurationStore>,
+    pricing: Arc<pricing::Catalog>,
     connection_effects: connection_effects::ConnectionEffects,
     oauth: oauth::Coordinator,
     changes: broadcast::Sender<serde_json::Value>,
@@ -221,6 +222,11 @@ impl Host {
         log.begin_message_epoch(&epoch).await?;
         let changes = broadcast::channel(64).0;
         let change_revision = Arc::new(AtomicU64::new(0));
+        let pricing = pricing::Catalog::new(
+            configuration.clone(),
+            changes.clone(),
+            change_revision.clone(),
+        );
         let project_usage =
             ProjectUsage::new(log.clone(), changes.clone(), change_revision.clone());
         let session_catalog = Arc::new(catalog_feed::CatalogFeed::new(
@@ -301,6 +307,7 @@ impl Host {
             configuration.clone(),
             root.root_id().into(),
             std::mem::take(&mut options.input_roots),
+            pricing.clone(),
         ));
         let (plugins, plugin_owner) = crate::plugins::Platform::open(
             log.clone(),
@@ -343,6 +350,7 @@ impl Host {
             project_usage,
             log,
             configuration,
+            pricing,
             connection_effects: connection_effects::ConnectionEffects::default(),
             oauth: oauth::Coordinator::default(),
             changes,

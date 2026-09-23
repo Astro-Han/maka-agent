@@ -147,6 +147,10 @@ Native endpoints accepting caller-supplied Host paths declare `Endpoint::requiri
 
 Each page contains at most 100 attempts / 48 KiB. `{ kind: 'continue', cursor }` re-reads that page; `nextCursor` advances under the same filter and settlement fence. Host restart invalidates cursors; every read checks current authorization.
 
+## Pricing
+
+`ctx.pricing.query({ kind: 'start' })` reads the public rate catalog during activation. Continue with the returned revision and `nextOffset`; `revision_changed` requires a new scan. `call.pricing.update({ expectedRevision, mutation })` requires explicit profile `manage_pricing` consent. Edits share the native CAS and configuration notices, affect future admissions only, and finish after admission even if the caller stops waiting. A lost reply can yield `revision_conflict` on retry; query before choosing another edit.
+
 ## Model adapters
 
 `ctx.modelAdapters.register(name, open)` publishes a protocol adapter. `open('request' | 'conversation')` returns `stream(request, context)` and optional `confirm(history)`. Rust uses `maka_plugins::model::ProviderAdapter` and the same typed events, HTTP and WebSocket contracts. Model overrides select an adapter by `adapter`; defaults are `responses`, `chat-completions` and `anthropic-messages`.

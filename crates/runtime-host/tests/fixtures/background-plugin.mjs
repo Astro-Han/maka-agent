@@ -19,6 +19,22 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function (ctx) {
+  await ctx.remote.method('pricing', async (input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || !('operation' in input))
+      throw new Error('invalid pricing input');
+    if (input.operation === 'query') return ctx.pricing.query({ kind: 'start' });
+    if (!('grant' in input) || typeof input.grant !== 'string' || !('update' in input))
+      throw new Error('invalid price edit');
+    const update =
+      /** @type {import('../../../../packages/plugin-sdk/src/pricing.js').PricingUpdate} */ (
+        input.update
+      );
+    try {
+      return await ctx.withAuthorization(input.grant, (call) => call.pricing.update(update));
+    } catch (error) {
+      return { error: error.code };
+    }
+  });
   await ctx.remote.method('usage', async (input) => {
     if (
       !input ||

@@ -58,6 +58,7 @@ const capabilities: readonly AuthorizationCapability[] = [
   'read_sessions',
   'read_history',
   'read_usage',
+  'manage_pricing',
 ];
 
 export const PLUGIN_AUTHORIZATION_OPERATION_SPECS = {
@@ -193,7 +194,8 @@ function proposal(value: unknown): AuthorizationRequest {
             capability !== 'notifications' &&
             capability !== 'read_sessions' &&
             capability !== 'read_history' &&
-            capability !== 'read_usage',
+            capability !== 'read_usage' &&
+            capability !== 'manage_pricing',
         )
       )
         throw invalidProtocolFrame('Profile has no workspace authority');
@@ -237,6 +239,8 @@ function proposal(value: unknown): AuthorizationRequest {
     resolved.kind !== 'session'
   )
     throw invalidProtocolFrame('Usage authorization requires a profile or Session target');
+  if (requested.includes('manage_pricing') && resolved.kind !== 'profile')
+    throw invalidProtocolFrame('Pricing changes require profile authorization');
   return { operationId: uuid(row.operationId), title, capabilities: requested, target: resolved };
 }
 function authorizationMode(value: unknown, requested: AuthorizationRequest['capabilities']) {

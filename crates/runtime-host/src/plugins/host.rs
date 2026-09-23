@@ -31,6 +31,7 @@ pub(crate) struct Issuer {
     inputs: maka_plugins::filesystem::ReadRoots,
     executions: Weak<Executions>,
     configuration: Arc<maka_config::ConfigurationStore>,
+    pricing: Arc<crate::server::pricing::Catalog>,
     root: String,
 }
 impl Issuer {
@@ -39,11 +40,13 @@ impl Issuer {
         configuration: Arc<maka_config::ConfigurationStore>,
         root: String,
         inputs: maka_plugins::filesystem::ReadRoots,
+        pricing: Arc<crate::server::pricing::Catalog>,
     ) -> Arc<Self> {
         Arc::new(Self {
             inputs,
             executions: Arc::downgrade(executions),
             configuration,
+            pricing,
             root,
         })
     }
@@ -83,6 +86,10 @@ impl Provider for Issuer {
                 sessions: effects.clone(),
                 history: effects.clone(),
                 usage: effects.clone(),
+                pricing: Arc::new(super::pricing::Prices::new(
+                    self.pricing.clone(),
+                    effects.clone(),
+                )),
                 http: Arc::new(super::http::Http::new(
                     self.executions.clone(),
                     owner.clone(),

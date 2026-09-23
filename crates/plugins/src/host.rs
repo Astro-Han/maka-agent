@@ -33,6 +33,7 @@ pub struct Services {
     pub sessions: Arc<dyn crate::session::catalog::Queries>,
     pub history: Arc<dyn crate::session::history::History>,
     pub usage: Arc<dyn crate::usage::Usage>,
+    pub pricing: Arc<dyn crate::pricing::Prices>,
     pub authorizations: Arc<dyn crate::authorization::Access>,
     pub permissions: Arc<dyn crate::permissions::Access>,
     pub files: Arc<dyn crate::filesystem::Files>,

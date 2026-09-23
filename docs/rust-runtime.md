@@ -217,6 +217,8 @@ user/project content paths stay separate from private journals.
   outcomes remain unknown. History copies do not duplicate usage, and Session removal
   retains accounting facts. Pricing queries and CAS edits use a bounded, revision-pinned
   catalog; custom rates survive restart and bundled-rate updates invalidate old cursors.
+  Rust/JS plugins share this catalog and mutation path; edits require explicit profile
+  pricing consent and cannot be authorized by an Agent invocation alone.
   Each admission captures its public provider identity and rate decision; estimates commit
   with reported usage and survive rejection, edits and recovery. Public Rust/JS Usage reads
   recheck scoped authorization and return at most 100 rows / 48 KiB under a fixed settlement

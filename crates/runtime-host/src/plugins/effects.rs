@@ -56,7 +56,7 @@ impl Effects {
                 .await
         }
     }
-    async fn owned<T: Send + 'static>(
+    pub(super) async fn owned<T: Send + 'static>(
         &self,
         authority: Authority,
         effect: impl FnOnce(

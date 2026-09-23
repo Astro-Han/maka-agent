@@ -19,6 +19,9 @@
 
 /** @param {import('../../../../packages/plugin-sdk/src/host.js').HostContext} ctx */
 export default async function (ctx) {
+  const rates = await ctx.pricing.query({ kind: 'start' });
+  if (rates.kind !== 'page' || rates.entries.length === 0)
+    throw new Error('public rate catalog is unavailable during activation');
   const choice = await ctx.models.resolve({
     kind: 'named',
     connectionSlug: 'recovery',
@@ -448,6 +451,15 @@ export default async function (ctx) {
             usage.attempts.some((row) => row.sessionId !== call.invocation.session_id)
           )
             throw new Error('Agent accounting lost usage or escaped its Session');
+          try {
+            await call.pricing.update({
+              expectedRevision: rates.revision,
+              mutation: { kind: 'delete', modelKey: '!unauthorized:price' },
+            });
+            throw new Error('Agent authority became profile price-edit consent');
+          } catch (error) {
+            if (error.code !== 'revoked') throw error;
+          }
           try {
             await call.usage.models({
               kind: 'start',

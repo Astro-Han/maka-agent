@@ -23,6 +23,7 @@ use maka_runtime_host::server::{Host, local::LocalListener};
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+mod pricing;
 mod usage;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
@@ -109,6 +110,7 @@ async fn scenario() {
     let mut network_grant = Value::Null;
     let mut material_copy = Value::Null;
     let mut usage = usage::Probe::default();
+    let mut pricing = pricing::Probe::default();
     for reopened in [false, true] {
         let host = Host::open(fixture.owner()).await.unwrap();
         #[cfg(unix)]
@@ -513,6 +515,9 @@ async fn scenario() {
             accepted = result["receipt"].clone();
         }
         usage.check(&mut peer, &client, &document, reopened).await;
+        pricing
+            .check(&host, &mut peer, &client, &document, &usage.grant, reopened)
+            .await;
         peer.close().await;
         stop.cancel();
         server.await.unwrap().unwrap();

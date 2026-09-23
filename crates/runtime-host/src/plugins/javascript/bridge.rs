@@ -58,6 +58,7 @@ struct State {
     sessions: Arc<dyn maka_plugins::session::catalog::Queries>,
     history: Arc<dyn maka_plugins::session::history::History>,
     usage: Arc<dyn maka_plugins::usage::Usage>,
+    pricing: Arc<dyn maka_plugins::pricing::Prices>,
     execution_handles: Mutex<BTreeMap<String, Arc<dyn maka_plugins::execution::Commands>>>,
     authorizations: Arc<dyn maka_plugins::authorization::Access>,
     authorized_calls:
@@ -101,6 +102,7 @@ impl HostBridge {
             sessions: host.sessions,
             history: host.history,
             usage: host.usage,
+            pricing: host.pricing,
             execution_handles: Mutex::default(),
             authorizations: host.authorizations,
             authorized_calls: Mutex::default(),
@@ -306,6 +308,16 @@ impl State {
             Request::UsageModels(input) => {
                 let call = self.calls.get(&input.authority)?;
                 encode(self.usage.models(call, input.input).await?)
+            }
+            Request::PricingQuery(input) => encode(self.pricing.query(input).await?),
+            Request::PricingUpdate(input) => {
+                let call = self.calls.get(&input.authority)?;
+                encode(
+                    self.pricing
+                        .update(call, input.input)
+                        .await
+                        .map_err(Error::tool)?,
+                )
             }
             Request::SearchExecutors(input) => encode(self.executors.search(input).await?),
             Request::Revision(input) => {

@@ -296,7 +296,12 @@
     });
   };
   const text = (value) => (typeof value === 'function' ? value : () => value);
+  const pricing = Object.freeze({ query: (input) => host('pricing.query', input) });
   const resources = (authority) => ({
+    pricing: Object.freeze({
+      ...pricing,
+      update: (input) => host('pricing.update', { authority, input }),
+    }),
     usage: Object.freeze({ models: (input) => host('usage.models', { authority, input }) }),
     sessions: Object.freeze({ list: (input = {}) => host('sessions.list', { authority, input }) }),
     history: Object.freeze({
@@ -542,6 +547,7 @@
           resolve: (selection) => host('models.resolve', selection),
           search: (query = {}) => host('models.search', query),
         }),
+        pricing,
         async revision() {
           const handle = await host('revision', { kind: 'new' });
           let closed = false;

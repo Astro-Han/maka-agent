@@ -37,6 +37,7 @@ export type * from './providers.js';
 export type * from './clients.js';
 export type * from './history.js';
 export type * from './usage.js';
+export type * from './pricing.js';
 
 /** Independent API version, used by runtime.sdkVersion in maka.extension.json. */
 export const HOST_SDK_VERSION = 1;
@@ -137,6 +138,7 @@ export interface ResourceContext {
   /** Trusted Agent recall reads the Host profile; independent scopes use read_history. */
   readonly history: import('./history.js').History;
   readonly usage: import('./usage.js').Usage;
+  readonly pricing: import('./pricing.js').Prices;
   readonly files: Files;
   readonly llm: import('./llm.js').Llm;
   readonly clients: import('./clients.js').ClientCapabilities;
@@ -393,6 +395,8 @@ export interface HostContext {
       selection: { kind: 'default' } | { kind: 'named'; connectionSlug: string; model: string },
     ): Promise<import('./llm.js').ModelChoice | null>;
   };
+  /** Non-secret rates, readable during activation. */
+  readonly pricing: import('./pricing.js').PricingCatalog;
   /** Non-secret user preferences; no configuration or execution authority. */
   readonly preferences: {
     read(): Promise<{

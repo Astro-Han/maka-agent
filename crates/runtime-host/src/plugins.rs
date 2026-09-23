@@ -28,6 +28,7 @@ mod http;
 pub(crate) mod javascript;
 pub(crate) mod models;
 mod owner;
+mod pricing;
 mod process;
 pub(crate) mod recall;
 pub(crate) mod remote;

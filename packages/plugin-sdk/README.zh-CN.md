@@ -151,6 +151,10 @@ Remote 回调可以抛出携带 `RemoteFailure.code` 的 `Error`。`outcome_unkn
 
 每页最多 100 条／48 KiB。`{ kind: 'continue', cursor }` 重读该页，`nextCursor` 在相同筛选条件与结算快照下翻页。Host 重启使游标失效；每次读取都重新检查当前授权。
 
+## 报价
+
+`ctx.pricing.query({ kind: 'start' })` 在激活期间即可读取公共报价。使用返回的 revision 与 `nextOffset` 继续分页，遇到 `revision_changed` 则重新读取。`call.pricing.update({ expectedRevision, mutation })` 需要 profile 范围的 `manage_pricing` 明确授权。修改复用原生 CAS 与配置通知，只影响后续准入；已接受的修改不会因调用者停止等待而中断。丢回复后重试可能返回 `revision_conflict`，应先查询再决定下一次修改。
+
 ## 模型适配器
 
 `ctx.modelAdapters.register(name, open)` 注册协议适配器。`open('request' | 'conversation')` 返回 `stream(request, context)` 和可选的 `confirm(history)`。Rust 使用 `maka_plugins::model::ProviderAdapter`，共享类型化事件、HTTP 与 WebSocket 契约。模型 override 的 `adapter` 指定贡献名称；默认名称为 `responses`、`chat-completions`、`anthropic-messages`。

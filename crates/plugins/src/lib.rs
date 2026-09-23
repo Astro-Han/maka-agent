@@ -39,6 +39,7 @@ pub mod model;
 pub mod package;
 pub mod permissions;
 pub mod preferences;
+pub mod pricing;
 pub mod process;
 pub mod prompt;
 pub mod provider;

@@ -44,6 +44,7 @@ pub enum Capability {
     ReadSessions,
     ReadHistory,
     ReadUsage,
+    ManagePricing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +102,7 @@ impl Request {
                             | Capability::ReadSessions
                             | Capability::ReadHistory
                             | Capability::ReadUsage
+                            | Capability::ManagePricing
                     )
                 }) => {}
             Target::Profile => {
@@ -145,6 +147,12 @@ impl Request {
         {
             return Err(crate::Error::Invalid(
                 "Usage authorization requires a profile or Session target".into(),
+            ));
+        }
+        if self.capabilities.contains(&Capability::ManagePricing) && self.target != Target::Profile
+        {
+            return Err(crate::Error::Invalid(
+                "pricing changes require profile authorization".into(),
             ));
         }
         Ok(())
