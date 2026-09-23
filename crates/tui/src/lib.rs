@@ -48,6 +48,10 @@ pub struct Options {
 }
 
 enum Completed {
+    Branched(
+        pages::branch::Request,
+        Result<pages::branch::Output, maka_client::RequestFailure>,
+    ),
     Removal(
         pages::manage::removal::Request,
         Result<pages::manage::removal::Output, maka_client::RequestFailure>,
@@ -197,6 +201,23 @@ pub async fn run(options: Options) -> Result<(), Error> {
             state.start(&app);
         }
         if let Some(client) = &client {
+            if let Some(request) = app.branch_request() {
+                if request.query {
+                    let client = client.clone();
+                    jobs.spawn(async move {
+                        let result = pages::branch::execute(&client, &request).await;
+                        Completed::Branched(request, result)
+                    });
+                } else if let Some(state) = &mut state {
+                    state.submit_branch(request);
+                } else {
+                    app.branch_after_checkpoint(
+                        &request,
+                        &Err("TUI checkpoint unavailable".into()),
+                    );
+                }
+                dirty = true;
+            }
             if let Some(request) = app.oauth_request() {
                 if request.needs_checkpoint() {
                     if let Some(state) = &mut state {
@@ -495,6 +516,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     continue;
                 }
                 Action::Quit => {
+                    app.branch.disconnect();
                     if let Some(state) = &mut state {
                         app.oauth_abandon_checkpoint();
                         for request in state.cancel_requests() {
@@ -508,6 +530,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     break;
                 }
                 Action::Connect => {
+                    app.branch.disconnect();
                     if let Some(state) = &mut state {
                         state.cancel_requests();
                     }
@@ -677,6 +700,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     None => std::future::pending().await,
                 }
             } => {
+                if let Some(request) = written.branch
+                    && app.branch_after_checkpoint(&request, &written.result)
+                    && let Some(client) = client.clone() {
+                    jobs.spawn(async move {
+                        let result = pages::branch::execute(&client, &request).await;
+                        Completed::Branched(request, result)
+                    });
+                }
                 if let Some(request) = written.oauth
                     && app.oauth_after_checkpoint(&request, &written.result)
                     && let Some(client) = client.clone() {
@@ -763,6 +794,10 @@ pub async fn run(options: Options) -> Result<(), Error> {
             }
             completed = jobs.join_next(), if !jobs.is_empty() => {
                 match completed {
+                    Some(Ok(Completed::Branched(request, result))) => {
+                        app.branch_completed(request, result);
+                        if let Some(state) = &mut state { state.changed(); }
+                    }
                     Some(Ok(Completed::Oauth(request, result))) => {
                         if let Some(service) = app.oauth_completed(request, result) {
                             oauth_service = Some(service);
@@ -947,6 +982,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 app.abandon_interaction();
                 app.abandon_pending_submissions();
                 app.abandon_management();
+                app.branch.disconnect();
                 app.management.oauth.abandon();
                 app.abandon_onboarding();
                 app.creating = false;

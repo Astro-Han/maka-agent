@@ -67,6 +67,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         && app.palette.is_none()
         && !app.interactions.visible
         && app.management.dialog.is_none()
+        && !app.branch.visible
         && app.onboarding.dialog.is_none()
         && app.queue.edit.is_none();
     app.chrome
@@ -288,6 +289,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let hint = if app.closing {
         app.i18n.text("state-closing")
     } else if app.theme.editor.is_some()
+        || app.branch.visible
         || app.onboarding.dialog.is_some()
         || app.management.dialog.is_some()
         || app.interactions.visible
@@ -379,6 +381,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     }
     if app.theme.editor.is_some() {
         crate::theme::editor::draw(frame, app, area);
+    } else if app.branch.visible {
+        crate::pages::branch::draw(frame, app, area, base);
     } else if app.onboarding.dialog.is_some() {
         crate::pages::onboarding::draw(frame, app, area, base);
     } else if app.management.dialog.is_some() {
@@ -534,6 +538,7 @@ fn icon(app: &App, action: &Action) -> &'static str {
             crate::pages::manage::Kind::Locations,
         )) => ("ⓘ", "i"),
         Action::Manage(_) => ("⋯", "."),
+        Action::Branch(_) => ("↳", "+"),
         Action::Onboard(_) => ("⊕", "+"),
         Action::Forward | Action::NextSessions => ("›", ">"),
         Action::Refresh | Action::RefreshSession | Action::RefreshSessions => ("↻", "R"),
@@ -640,6 +645,7 @@ fn action_label(app: &App, action: &Action) -> String {
         Action::RetrySubmission => "chat-retry-original",
         Action::CreateSession => "session-create",
         Action::Manage(command) => command.label(),
+        Action::Branch(command) => command.label(),
         Action::Onboard(command) => command.label(),
         Action::Project(command) => command.label(),
         Action::Connection(command) => command.label(),

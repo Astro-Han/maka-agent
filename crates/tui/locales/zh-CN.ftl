@@ -704,3 +704,15 @@ theme-role-number = 数字
 theme-role-function = 函数
 theme-role-type = 类型
 theme-role-operator = 运算符
+
+branch-title = 从此轮分支
+branch-resume = 查看会话分支
+branch-create = 创建分支
+branch-query = 查询结果
+branch-open = 打开分支
+branch-note = 保留到所选轮次的对话。两个会话共用同一个工作目录。
+branch-wait = 正在创建分支…
+branch-unknown = 结果尚未确认，请先查询本次请求，不要重复创建。
+branch-save-failed = 无法保存恢复信息，尚未发送创建请求。
+branch-ready = 分支已就绪，原对话和草稿保持不变。
+branch-unavailable = 来源已变化或分支不可用，请关闭后重新选择轮次。

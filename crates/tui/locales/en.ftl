@@ -704,3 +704,15 @@ theme-role-number = Number
 theme-role-function = Function
 theme-role-type = Type
 theme-role-operator = Operator
+
+branch-title = Branch from this turn
+branch-resume = Check session branch
+branch-create = Create branch
+branch-query = Check result
+branch-open = Open branch
+branch-note = Keep the conversation through the selected turn. Both sessions share the same working directory.
+branch-wait = Creating branch…
+branch-unknown = Result not yet confirmed. Check this request before creating another branch.
+branch-save-failed = Could not save the recovery identity. No creation request was sent.
+branch-ready = Branch is ready. Your original conversation and draft are unchanged.
+branch-unavailable = The source changed or this branch is unavailable. Close and select the turn again.

@@ -19,6 +19,7 @@
 
 #![cfg(unix)]
 
+mod branch;
 mod changes;
 mod connection_test;
 mod connections;

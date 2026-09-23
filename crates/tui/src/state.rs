@@ -22,7 +22,7 @@ mod store;
 
 use crate::{
     app::App,
-    pages::{manage::oauth, sending::Submission},
+    pages::{branch, manage::oauth, sending::Submission},
 };
 use maka_client::Error;
 use snapshot::Snapshot;
@@ -38,6 +38,7 @@ pub struct State {
     deadline: Option<Instant>,
     requests: Vec<Submission>,
     oauth: Option<oauth::Request>,
+    branch: Option<branch::Request>,
     generation: u64,
     job: Option<Writing>,
 }
@@ -46,6 +47,7 @@ struct Writing {
     task: tokio::task::JoinHandle<Result<(), String>>,
     requests: Vec<Submission>,
     oauth: Option<oauth::Request>,
+    branch: Option<branch::Request>,
     generation: u64,
 }
 
@@ -53,6 +55,7 @@ pub struct Written {
     pub result: Result<(), String>,
     pub requests: Vec<Submission>,
     pub oauth: Option<oauth::Request>,
+    pub branch: Option<branch::Request>,
 }
 impl State {
     pub async fn open(
@@ -83,6 +86,7 @@ impl State {
                     deadline: None,
                     requests: Vec::new(),
                     oauth: None,
+                    branch: None,
                     generation: 0,
                     job: None,
                 },
@@ -114,6 +118,7 @@ impl State {
     }
     pub fn cancel_requests(&mut self) -> Vec<Submission> {
         self.oauth = None;
+        self.branch = None;
         let mut requests = std::mem::take(&mut self.requests);
         if let Some(job) = &self.job
             && job.generation == self.generation
@@ -125,6 +130,10 @@ impl State {
     }
     pub fn submit_oauth(&mut self, request: oauth::Request) {
         self.oauth = Some(request);
+        self.force();
+    }
+    pub fn submit_branch(&mut self, request: branch::Request) {
+        self.branch = Some(request);
         self.force();
     }
     pub fn idle(&self) -> bool {
@@ -148,6 +157,7 @@ impl State {
             }),
             requests,
             oauth: self.oauth.take(),
+            branch: self.branch.take(),
             generation,
         });
     }
@@ -169,6 +179,11 @@ impl State {
             },
             oauth: if job.generation == self.generation {
                 job.oauth
+            } else {
+                None
+            },
+            branch: if job.generation == self.generation {
+                job.branch
             } else {
                 None
             },
@@ -206,6 +221,7 @@ mod tests {
             deadline: None,
             requests: vec![],
             oauth: None,
+            branch: None,
             generation: 0,
             job: None,
         };
@@ -242,6 +258,97 @@ mod tests {
             &std::fs::read(directory.path().join(ROOT).join("default/state.json")).unwrap(),
         )
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn branch_dispatch_waits_for_its_own_snapshot_and_reopen_only_recovers_identity() {
+        use crate::pages::branch::Command;
+        let (directory, mut state, mut app) = fixture();
+        app.chat.select(&app.navigation.current());
+        app.sessions.detail = crate::pages::sessions::Detail::Ready(Box::new(
+            crate::pages::sessions::tests::item("a"),
+        ));
+        app.chat.view.sync(&std::collections::BTreeMap::from([(1,serde_json::json!({"type":"user","id":"message","turnId":"turn","text":"Branch point"}))]),&[],0,&app.i18n,false);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|f| {
+                app.chat.view.draw(f, f.area(), false).unwrap();
+            })
+            .unwrap();
+        app.chat.view.enter();
+        let open = app.branch_commands()[0].0.clone();
+        app.apply(open);
+        terminal
+            .draw(|f| {
+                crate::pages::branch::draw(f, &mut app, f.area(), ratatui::style::Style::default())
+            })
+            .unwrap();
+        app.apply(Action::Branch(Command::Confirm));
+        let request = app.branch_request().unwrap();
+        let (release, blocked) = gate(&state).await;
+        state.submit_branch(request.clone());
+        state.start(&app);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), state.completed())
+                .await
+                .is_err()
+        );
+        app.apply(Action::Branch(Command::Close));
+        app.apply(Action::Visit(Route::Settings));
+        state.changed();
+        release.send(()).unwrap();
+        blocked.await.unwrap();
+        let written = written(&mut state).await;
+        assert_eq!(written.branch, Some(request.clone()));
+        assert!(written.result.is_ok());
+        let bytes = read(&directory);
+        assert_eq!(
+            bytes["branch"],
+            serde_json::to_value(app.branch.checkpoint()).unwrap()
+        );
+        assert!(app.branch_after_checkpoint(&request, &written.result));
+        assert!(!app.branch_after_checkpoint(&request, &written.result));
+        let mut reopened = App::new(
+            "/unused".into(),
+            I18n::new(LocalePreference::Auto, Locale::En),
+        );
+        serde_json::from_value::<Snapshot>(bytes.clone())
+            .unwrap()
+            .restore(&mut reopened, false)
+            .unwrap();
+        assert!(!reopened.branch.visible);
+        assert!(reopened.branch_request().is_none());
+        assert_eq!(
+            serde_json::to_value(reopened.branch.checkpoint()).unwrap(),
+            bytes["branch"]
+        );
+        let mut obsolete = bytes.clone();
+        obsolete["version"] = serde_json::json!(5);
+        assert!(
+            serde_json::from_value::<Snapshot>(obsolete)
+                .unwrap()
+                .validate(ROOT)
+                .is_err(),
+            "v5 cannot silently discard branch recovery"
+        );
+        let mut foreign = bytes;
+        foreign["branch"]["root"] = serde_json::json!("foreign");
+        assert!(
+            serde_json::from_value::<Snapshot>(foreign)
+                .unwrap()
+                .validate(ROOT)
+                .is_err()
+        );
+        state.submit_branch(request);
+        state.force();
+        state.start(&app);
+        state.cancel_requests();
+        app.branch.disconnect();
+        assert!(
+            self::written(&mut state).await.branch.is_none(),
+            "cancelled IO completion cannot release a write"
+        );
     }
 
     #[tokio::test]

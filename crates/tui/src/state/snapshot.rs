@@ -52,6 +52,8 @@ pub struct Snapshot {
     pages: Vec<(Route, crate::navigation::state::Saved)>,
     #[serde(default)]
     oauth: Option<crate::pages::manage::oauth::saved::Checkpoint>,
+    #[serde(default)]
+    branch: Option<crate::pages::branch::Checkpoint>,
 }
 
 impl Snapshot {
@@ -64,7 +66,7 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 5,
+            version: 6,
             root: root.into(),
             route: app.navigation.current(),
             tabs: app.tabs.entries.iter().map(|tab| tab.id.clone()).collect(),
@@ -85,6 +87,7 @@ impl Snapshot {
             navigation: Some(app.navigation.clone()),
             pages: app.saved_pages(),
             oauth: app.management.oauth.checkpoint(),
+            branch: app.branch.checkpoint(),
         }
     }
 
@@ -92,7 +95,7 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if !matches!(self.version, 1..=5)
+        if !matches!(self.version, 1..=6)
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
@@ -103,7 +106,8 @@ impl Snapshot {
             || self.pages.len() > LIMIT + Route::PAGE_COUNT
             || (self.version < 4 && self.oauth.is_some())
             || (self.version < 5 && self.theme.is_some())
-            || (self.version == 5 && self.theme.is_none())
+            || (self.version >= 5 && self.theme.is_none())
+            || (self.version < 6 && self.branch.is_some())
         {
             return Err("Unsupported or mismatched TUI checkpoint".into());
         }
@@ -166,6 +170,9 @@ impl Snapshot {
         if let Some(oauth) = &self.oauth {
             oauth.validate()?;
         }
+        if let Some(branch) = &self.branch {
+            branch.validate(root)?;
+        }
         Ok(())
     }
 
@@ -176,6 +183,9 @@ impl Snapshot {
         }
         if let Some(oauth) = self.oauth {
             app.management.oauth.restore(&self.root, oauth);
+        }
+        if let Some(branch) = self.branch {
+            app.branch.restore(branch);
         }
         for (id, saved) in self.drafts {
             app.drafts.insert(id, Editor::restore(saved)?);
@@ -290,7 +300,7 @@ mod tests {
         assert!(restored.retry_submission().is_none());
         assert!(restored.reconciliation().is_some());
         let mut invalid: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        invalid["version"] = serde_json::json!(6);
+        invalid["version"] = serde_json::json!(7);
         assert!(
             serde_json::from_value::<Snapshot>(invalid)
                 .unwrap()

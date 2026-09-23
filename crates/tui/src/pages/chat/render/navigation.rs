@@ -20,6 +20,15 @@
 use super::*;
 
 impl Transcript {
+    /// A branch boundary must come from an explicitly selected durable message,
+    /// not the implicit first-visible fallback or a live-only stream block.
+    pub fn selected_durable_message(&self) -> Option<(&str, &str)> {
+        let key = self.selected.as_ref()?;
+        let block = self.blocks.get(key)?;
+        (self.order.contains(key) && matches!(block.revision, Revision::Durable(_)))
+            .then_some((key.turn.as_str(), block.text.as_str()))
+    }
+
     pub fn selection(&self) -> Option<MessageKey> {
         self.selected
             .as_ref()
