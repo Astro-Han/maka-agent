@@ -2684,6 +2684,12 @@ const makaBridge = {
     },
   },
   sessionBundles: {
+    async preview(projectedId) {
+      const scope = await localRuntimeHostRef();
+      const { sessionId, hostId } = parseDesktopSessionKey(projectedId);
+      if (hostId !== scope.hostId) throw new Error('Session bundles require a Local Host Session');
+      return invokeWhenReady('session-bundle:preview', scope, sessionId) as ReturnType<MakaBridge['sessionBundles']['preview']>;
+    },
     // Both halves name a path the Electron picker chose, which is a path on
     // THIS machine, and the protocol interprets it on the Host's filesystem.
     // Those are the same filesystem only for the Local Host, so both are routed
@@ -2693,18 +2699,13 @@ const makaBridge = {
     async export(input: {
       sessionId: string;
       suggestedName: string;
-      confirmedSubtree?: readonly string[];
+      expectedSubtreeDigest: string;
     }): Promise<SessionBundleExportIpcResult> {
       const scope = await localRuntimeHostRef();
-      const { sessionId } = parseDesktopSessionKey(input.sessionId);
-      // Unprojected here, where the boundary already is: the renderer holds
-      // host-scoped ids and the Host knows only its own, so a digest computed
-      // upstream would compare two different alphabets and never match.
-      const confirmed = input.confirmedSubtree?.map(
-        (projected) => parseDesktopSessionKey(projected).sessionId,
-      );
+      const { sessionId, hostId } = parseDesktopSessionKey(input.sessionId);
+      if (hostId !== scope.hostId) throw new Error('Session bundles require a Local Host Session');
       return (await invokeWhenReady(
-        'session-bundle:export', scope, sessionId, input.suggestedName, confirmed,
+        'session-bundle:export', scope, sessionId, input.suggestedName, input.expectedSubtreeDigest,
       )) as SessionBundleExportIpcResult;
     },
     async import(): Promise<SessionBundleImportIpcResult> {

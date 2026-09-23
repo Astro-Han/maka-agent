@@ -64,6 +64,10 @@ export interface HostSessionBundleCoordinatorOptions {
 
 export class HostSessionBundleCoordinator {
   readonly handlers: SessionBundleOperationHandlerMap = {
+    'session-bundle.preview': async () => ({
+      ok: false,
+      error: { code: 'operation_unavailable', message: 'Native bundles require the Rust Host' },
+    }),
     'session-bundle.export': (input) => this.export(input),
     'session-bundle.import': (input) => this.import(input),
   };

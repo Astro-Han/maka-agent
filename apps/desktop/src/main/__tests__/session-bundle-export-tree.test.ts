@@ -39,7 +39,7 @@ afterEach(() => {
 });
 
 describe('session bundle export tree', () => {
-  it('nests a subagent subtree and counts the whole thing', async () => {
+  it('nests known descendants without claiming the export inventory', async () => {
     const rendered = await render([
       task('root', 'Refactor compaction'),
       subagentTask('child-a', 'Find the call sites', 'root', 'Explore'),
@@ -48,11 +48,7 @@ describe('session bundle export tree', () => {
       task('unrelated', 'Say hello'),
     ]);
 
-    // Three descendants, not the two children: a subagent spawns its own, and a
-    // bundle rooted here carries all of them.
-    assert.match(rendered.container.textContent, /Carries 3 subagent conversations/);
-    // The child that has one of its own says so too.
-    assert.match(rendered.container.textContent, /Carries 1 subagent conversation/);
+    assert.doesNotMatch(rendered.container.textContent, /Carries \d/);
     // Nesting is structural, not an indent class: a child lives inside the list
     // that belongs to its parent, which is what draws one continuous rule.
     assert.equal(
@@ -77,7 +73,6 @@ describe('session bundle export tree', () => {
       { ...task('child', 'A child'), subagent: { parentSessionId: 'root', agentName: 'Explore' } },
     ]);
     assert.equal(rendered.container.querySelectorAll('.maka-export-subtree').length, 1);
-    assert.match(rendered.container.textContent, /Carries 1 subagent conversation/);
     await rendered.dispose();
   });
 

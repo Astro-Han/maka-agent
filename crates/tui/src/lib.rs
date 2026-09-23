@@ -1090,11 +1090,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
                             app.connections.refresh();
                             app.chat.context.refresh();
                         }
-                        if notice.kind == "session.catalog.changed"
-                            && let Some(id) = &notice.session_id {
+                        if notice.kind == "session.catalog.changed" {
+                            if let Some(id) = &notice.session_id {
                                 app.sessions.invalidate(id);
-                                app.inbox.refresh();
+                            } else {
+                                app.sessions.refresh();
                             }
+                            app.inbox.refresh();
+                        }
                         app.notice = Some(Notice::Catalog { kind: notice.kind, revision: notice.revision.to_string() });
                     }
                     Some(Notification::Observation(frame)) => {

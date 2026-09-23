@@ -21,6 +21,7 @@
 import { useRef, useState } from 'react';
 import { createSessionCatalogController } from '../../src/renderer/application/contracts/session-catalog/session-catalog-state.js';
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { ClientPluginServicesProvider, type ClientPluginServices } from '../../src/renderer/features/client-plugins/index.js';
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { ToastProvider, useToast } from '@maka/ui';
 import type {
@@ -133,8 +134,23 @@ const noop = () => undefined;
 // Both halves open a native file dialog, which a story has none of. Cancelled is
 // the outcome that leaves the page exactly as it was.
 const sessionBundleServices: SessionBundleServices = {
+  previewBundle: async () => ({ ok: true, sessionCount: 1, subtreeDigest: '0'.repeat(64) }),
   exportBundle: async () => ({ ok: false, reason: 'canceled' }),
   importBundle: async () => ({ ok: false, reason: 'canceled' }),
+};
+
+// Native settings with no Client Contributions installed.
+const emptyClientPlugins: ClientPluginServices = {
+  defaultHost: async () => ({ profileId: 'local', hostId: 'storybook-local' }),
+  subscribeDefaultHost: () => noop,
+  connect: (host) => ({
+    snapshot: async () => ({ revision: '1', connection: host.hostId, entries: [] }),
+    source: async () => { throw new Error('No Client Contribution is installed'); },
+    remote: () => { throw new Error('No Client Contribution is installed'); },
+    session: async (id) => JSON.stringify([host.hostId, id]),
+    subscribe: () => noop,
+    subscribeContext: () => noop,
+  }),
 };
 
 function makeConnection(input: {
@@ -1598,6 +1614,7 @@ function useArchivedTasksStoryBridge(seed: readonly SessionSummary[]): ArchivedT
     const catalog = createSessionCatalogController();
     catalog.commitSessions(seed.map((session) => ({
       ...session,
+      activityAt: session.lastMessageAt ?? NOW,
       revision: 1,
       runtimeHostId: 'storybook-local',
       approvalPolicy: { kind: 'on-request' },
@@ -1854,6 +1871,7 @@ function renderedLinkColors(renderedLink: HTMLElement) {
 }
 
 type SettingsStoryProps = {
+  bundleServices?: SessionBundleServices;
   reopenable?: boolean;
   section: SettingsSection;
   connections?: LlmConnection[];
@@ -1898,6 +1916,7 @@ function fieldChrome(element: HTMLElement) {
  */
 function SettingsStory(props: SettingsStoryProps) {
   return (
+    <ClientPluginServicesProvider services={emptyClientPlugins}>
     <ToastProvider>
       <AppUpdateServicesProvider services={settingsAppUpdateServices}>
         <AppUpdateProvider>
@@ -1905,6 +1924,7 @@ function SettingsStory(props: SettingsStoryProps) {
         </AppUpdateProvider>
       </AppUpdateServicesProvider>
     </ToastProvider>
+    </ClientPluginServicesProvider>
   );
 }
 
@@ -1951,7 +1971,7 @@ function SettingsStoryFrame(props: SettingsStoryProps) {
       >
         <ConnectionSettingsServicesProvider services={connectionSettingsServices}>
           <RuntimeHostManagementServicesProvider services={runtimeHostManagementServices}>
-            <SessionBundleServicesProvider services={sessionBundleServices}>
+            <SessionBundleServicesProvider services={props.bundleServices ?? sessionBundleServices}>
             {open && <SettingsSurface
               onClose={noop}
               themePref={themePref}
@@ -3459,19 +3479,32 @@ export const ImportTasks: Story = {
 /**
  * Real path: 设置 → 导入/导出任务 → 导出任务.
  *
- * A bundle can be rooted at any node, so every row exports; the nesting says
- * which subtree a row would carry, and the count on a parent is the whole
- * subtree rather than its children.
+ * Known catalog links are displayed, but confirmation uses the Host inventory,
+ * including archived descendants not shown here. Cancel returns focus and admission.
  */
 export const ImportTasksExport: Story = {
   decorators: [withSettingsBridge],
   render: () => (
-    <SettingsStory section="import-tasks" archivedTaskSessions={exportTaskSessions} />
+    <SettingsStory section="import-tasks" archivedTaskSessions={exportTaskSessions}
+      bundleServices={{
+        ...sessionBundleServices,
+        // The Host also carries two archived descendants absent from this catalog page.
+        previewBundle: async () => ({ ok: true, sessionCount: 6, subtreeDigest: 'a'.repeat(64) }),
+        exportBundle: async () => { throw new Error('Canceled confirmation must not open the file picker'); },
+      }}
+    />
   ),
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body);
     await userEvent.click(await body.findByRole('radio', { name: '导出任务' }));
     await body.findByText('Refactor the compaction module');
+    const action = await body.findByRole('button', { name: '导出「Refactor the compaction module」' });
+    await userEvent.click(action);
+    await body.findByText('连同 5 个子 Agent 对话一起导出？');
+    await userEvent.click(await body.findByRole('button', { name: '取消' }));
+    await waitFor(() => {
+      if (action.hasAttribute('disabled')) throw new Error('Canceled export did not release the action');
+    });
   },
 };
 

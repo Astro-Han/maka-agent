@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod bundle;
 pub(super) mod configuration;
 pub(super) mod copy;
 pub(super) mod create;
@@ -38,6 +39,9 @@ type Result<T> = std::result::Result<T, OperationError>;
 #[derive(serde::Serialize)]
 #[serde(untagged)]
 pub(super) enum Output {
+    BundlePreviewed(maka_protocol::session::bundle::Previewed),
+    BundleExported(maka_protocol::session::bundle::Exported),
+    BundleImported(maka_protocol::session::bundle::Imported),
     Query(SessionCatalogQueryResult),
     Item(Box<SessionCatalogProjection>),
     Mutation(SessionUpdateResult),
@@ -68,6 +72,24 @@ pub(super) async fn execute(
 ) -> Result<Output> {
     let log = host.log.as_ref();
     match operation {
+        Operation::SessionBundlePreview => bundle::preview(
+            host,
+            maka_protocol::session::bundle::decode_preview(value).map_err(invalid)?,
+        )
+        .await
+        .map(Output::BundlePreviewed),
+        Operation::SessionBundleExport => bundle::export(
+            host,
+            maka_protocol::session::bundle::decode_export(value).map_err(invalid)?,
+        )
+        .await
+        .map(Output::BundleExported),
+        Operation::SessionBundleImport => bundle::import(
+            host,
+            maka_protocol::session::bundle::decode_import(value).map_err(invalid)?,
+        )
+        .await
+        .map(Output::BundleImported),
         Operation::SessionRemove => {
             removal::remove(host, decode_session_remove_input(value).map_err(invalid)?)
                 .await

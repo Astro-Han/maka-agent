@@ -3179,7 +3179,9 @@ describe('non-serving Runtime Host kernel', () => {
           activeConnection.subscribeConfigurationChanges(resolve);
         });
         const observedCatalog = new Promise<string>((resolve) => {
-          activeConnection.subscribeSessionCatalogChanges(({ sessionId }) => resolve(sessionId));
+          activeConnection.subscribeSessionCatalogChanges(({ sessionId }) => {
+            if (sessionId) resolve(sessionId);
+          });
         });
         releaseFactory();
         host = await hostTask;

@@ -174,6 +174,10 @@ export type SessionBundleExportIpcResult =
   | { readonly ok: true; readonly sessionCount: number; readonly path: string }
   | SessionBundleFailure;
 
+export type SessionBundlePreviewIpcResult =
+  | { readonly ok: true; readonly sessionCount: number; readonly subtreeDigest: string }
+  | SessionBundleFailure;
+
 export type SessionBundleImportIpcResult =
   | { readonly ok: true; readonly sessionCount: number }
   | SessionBundleFailure;
@@ -1349,6 +1353,7 @@ export interface MakaBridge {
     }, host?: DesktopRuntimeHostRef): Promise<ExternalSessionImportIpcResult<DesktopSessionSummary>>;
   };
   sessionBundles: {
+    preview(sessionId: string): Promise<SessionBundlePreviewIpcResult>;
     /**
      * Picks a destination, then writes the Session and its subagent subtree.
      *
@@ -1359,8 +1364,7 @@ export interface MakaBridge {
     export(input: {
       sessionId: string;
       suggestedName: string;
-      /** Projected ids of the Sessions the user was shown. See the Host operation. */
-      confirmedSubtree?: readonly string[];
+      expectedSubtreeDigest: string;
     }): Promise<SessionBundleExportIpcResult>;
     /** Picks a `.maka-session` file and merges it into the Local workspace. */
     import(): Promise<SessionBundleImportIpcResult>;

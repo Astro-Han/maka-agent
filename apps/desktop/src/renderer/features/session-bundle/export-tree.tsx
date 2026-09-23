@@ -27,17 +27,11 @@ import { useUiLocale } from '@maka/ui';
 import type { DesktopSessionSummary } from '../../../shared/desktop-session-projection.js';
 import { getExternalSessionImportCopy } from '../../locales/external-session-import-copy.js';
 
-/**
- * The local tasks, as the tree a bundle would carry.
- *
- * A bundle can be rooted at any node -- a subagent Session has its own complete
- * history -- so every row exports, and the nesting says which subtree a row
- * would take with it.
- */
+/** Known catalog relationships; only the Host preview defines export membership. */
 export function ExportTree(props: {
   sessions: readonly DesktopSessionSummary[];
   isBusy: boolean;
-  onExport: (session: DesktopSessionSummary, subtree: readonly string[]) => void;
+  onExport: (session: DesktopSessionSummary) => void;
 }): ReactElement {
   const copy = getExternalSessionImportCopy(useUiLocale());
 
@@ -46,23 +40,6 @@ export function ExportTree(props: {
   // archived child nests under a parent that never draws it, so nobody renders
   // it at all.
   const visible = props.sessions.filter((session) => !session.isArchived);
-  // Two subtrees, on purpose. The visible one decides what is drawn; this one
-  // is every linked descendant, archived included, because that is the set the
-  // Host fences and exports. Confirming from the drawn one would name a
-  // different set than the file holds -- and would be refused as stale forever
-  // for any parent with an archived child.
-  const wholeTree = projectLinkedSessionTree(props.sessions);
-  const wholeSubtree = (sessionId: string): readonly string[] => {
-    const ids = [sessionId];
-    const pending = [...(wholeTree.childrenByParentId.get(sessionId) ?? [])];
-    while (pending.length > 0) {
-      const next = pending.pop();
-      if (next === undefined) continue;
-      ids.push(next.id);
-      pending.push(...(wholeTree.childrenByParentId.get(next.id) ?? []));
-    }
-    return ids;
-  };
   // The read model the rest of the app projects lineage with, rather than a
   // second one maintained here. It resolves both spellings of the link, drops a
   // parent that is not in the list, and refuses a cycle -- which `subagentParent`
@@ -71,24 +48,9 @@ export function ExportTree(props: {
   const childrenOf = (sessionId: string): readonly DesktopSessionSummary[] =>
     (tree.childrenByParentId.get(sessionId) ?? []) as readonly DesktopSessionSummary[];
 
-  const descendantCount = (sessionId: string): number => {
-    // A subagent spawns its own, so this walks the subtree rather than counting
-    // one level.
-    let count = 0;
-    const pending = [...childrenOf(sessionId)];
-    while (pending.length > 0) {
-      const next = pending.pop();
-      if (next === undefined) continue;
-      count += 1;
-      pending.push(...childrenOf(next.id));
-    }
-    return count;
-  };
-
   if (tree.roots.length === 0) return <EmptyState title={copy.exportEmpty} />;
 
   const node = (session: DesktopSessionSummary, depth: number): ReactElement => {
-    const carried = descendantCount(session.id);
     const agent = session.subagent?.agentName ?? session.subagentRuntime?.agentName;
     const children = childrenOf(session.id);
     return (
@@ -99,9 +61,6 @@ export function ExportTree(props: {
               <span className="maka-export-name">{session.name ?? session.id}</span>
               {agent ? <Badge variant="neutral" label={agent} /> : null}
             </HStack>
-            {carried > 0 && (
-              <span className="maka-export-carries">{copy.exportCarriesSubagents(carried)}</span>
-            )}
           </VStack>
           <Button
             // A root is what someone came here to export; a child is usually
@@ -111,7 +70,7 @@ export function ExportTree(props: {
             label={copy.exportAction}
             aria-label={copy.exportActionFor(session.name ?? session.id)}
             isDisabled={props.isBusy}
-            onClick={() => props.onExport(session, wholeSubtree(session.id))}
+            onClick={() => props.onExport(session)}
           />
         </div>
         {children.length > 0 && (

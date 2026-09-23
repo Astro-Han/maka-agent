@@ -140,6 +140,7 @@ operations! {
     ExternalAgentsSetupStart => ("external_agents.setup.start", Command, Ready),
     ExternalAgentsSetupQuery => ("external_agents.setup.query", Query, Ready),
     ExternalAgentsSetupCancel => ("external_agents.setup.cancel", Control, Ready),
+    SessionBundlePreview => ("session-bundle.preview", Query, Ready),
     SessionBundleExport => ("session-bundle.export", Command, Ready),
     SessionBundleImport => ("session-bundle.import", Command, Ready),
     ExternalSessionImport => ("external-session.import", Command, Ready),

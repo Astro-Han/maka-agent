@@ -66,6 +66,7 @@ pub(super) async fn payload(
 pub struct StagedBundle {
     pub(super) database: SqliteConnection,
     pub(super) summary: BundleSummary,
+    history_validated: bool,
 }
 
 impl StagedBundle {
@@ -119,7 +120,11 @@ impl StagedBundle {
         }
         .await;
         match result {
-            Ok(summary) => Ok(Self { database, summary }),
+            Ok(summary) => Ok(Self {
+                database,
+                summary,
+                history_validated: false,
+            }),
             Err(error) => {
                 database.close().await.map_err(StoreError::from)?;
                 Err(error.into())
@@ -167,7 +172,12 @@ impl StagedBundle {
     /// Validate original history before any position or proof relocation. This
     /// does not bind destination workspaces, grant execution or publish Sessions.
     pub async fn validate_history(&mut self) -> Result<(), BundleError> {
-        super::validation::validate(&mut self.database).await?;
+        // Staged source bytes are private and immutable after read. Callers may
+        // validate before acquiring destination admission without repeating it.
+        if !self.history_validated {
+            super::validation::validate(&mut self.database).await?;
+            self.history_validated = true;
+        }
         Ok(())
     }
 

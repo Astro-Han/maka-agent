@@ -926,6 +926,7 @@ async function renderPage(options: {
     // not, which made every case fail on the provider rather than the case.
     const withServices = createElement(SessionBundleServicesProvider, {
       services: {
+        previewBundle: async () => ({ ok: true, sessionCount: 1, subtreeDigest: '0'.repeat(64) }) as const,
         exportBundle: async () => ({ ok: false, reason: 'canceled' }) as const,
         importBundle: async () => ({ ok: false, reason: 'canceled' }) as const,
       },

@@ -247,7 +247,9 @@ test('one Local IPC owner and one authenticated WebSocket Client control the sam
       (grant) => grant.kind === 'session_observation',
     )!;
     const guestCatalogChanged = new Promise<string>((resolve) => {
-      guest?.subscribeSessionCatalogChanges((frame) => resolve(frame.sessionId));
+      guest?.subscribeSessionCatalogChanges((frame) => {
+        if (frame.sessionId) resolve(frame.sessionId);
+      });
     });
     await local.request('collaboration.grant.revoke', {
       grantId: observationGrant.grantId,
@@ -271,7 +273,9 @@ test('one Local IPC owner and one authenticated WebSocket Client control the sam
     );
 
     const catalogChanged = new Promise<string>((resolve) => {
-      local?.subscribeSessionCatalogChanges((frame) => resolve(frame.sessionId));
+      local?.subscribeSessionCatalogChanges((frame) => {
+        if (frame.sessionId) resolve(frame.sessionId);
+      });
     });
     const renamed = await remote.request('session.metadata.update', {
       sessionId: 'shared-session',

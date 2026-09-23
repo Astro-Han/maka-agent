@@ -180,7 +180,6 @@ interface SessionBundleActions {
   readonly importBundle: () => Promise<void>;
   readonly exportTask: (
     session: DesktopSessionSummary,
-    subtree: readonly string[],
   ) => Promise<void>;
 }
 
@@ -263,26 +262,29 @@ function useSessionBundleActions(): SessionBundleActions {
         if (mountedRef.current) setBusy(false);
       }
     },
-    exportTask: async (session, subtree) => {
-      const carried = subtree.length - 1;
-      if (carried > 0) {
-        // The row names one task and the file holds several. Saying so before
-        // the save dialog is the last point where that is still a decision.
-        const confirmed = await toast.confirm({
-          title: copy.exportSubtreeConfirmTitle(carried),
-          description: copy.exportSubtreeConfirmBody,
-          confirmLabel: copy.exportAction,
-          cancelLabel: getSettingsSharedCopy(locale).cancel,
-        });
-        if (!confirmed) return;
-      }
+    exportTask: async (session) => {
       setBusy(true);
       setNote(undefined);
       try {
+        const preview = await services.previewBundle(session.id);
+        if (!preview.ok) {
+          settle(preview);
+          return;
+        }
+        const carried = preview.sessionCount - 1;
+        if (carried > 0) {
+          const confirmed = await toast.confirm({
+            title: copy.exportSubtreeConfirmTitle(carried),
+            description: copy.exportSubtreeConfirmBody,
+            confirmLabel: copy.exportAction,
+            cancelLabel: getSettingsSharedCopy(locale).cancel,
+          });
+          if (!confirmed) return;
+        }
         const result = await services.exportBundle({
           sessionId: session.id,
           suggestedName: session.name ?? session.id,
-          confirmedSubtree: subtree,
+          expectedSubtreeDigest: preview.subtreeDigest,
         });
         settle(result.ok ? { ok: true, text: copy.exported(result.sessionCount) } : result);
       } catch (error) {

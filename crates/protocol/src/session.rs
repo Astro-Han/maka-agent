@@ -20,6 +20,7 @@
 //! Session catalog and retirement wire contracts.
 //! Use the decode functions at the JSON boundary; they enforce semantic limits
 //! in addition to the owned serde representations.
+pub mod bundle;
 mod configuration;
 pub mod copy;
 mod mutation;
