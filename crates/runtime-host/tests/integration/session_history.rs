@@ -17,7 +17,8 @@
  * under the License.
  */
 
-use maka_event_log::{EventLog, sessions::SessionCopyResult};
+use super::support::{client_probe::ClientFixture, peer::Peer};
+use maka_event_log::sessions::SessionCopyResult;
 use maka_protocol::session::{RevisionState, SandboxMode, WorkspaceProjection, WorkspaceTarget};
 use maka_runtime::{
     event::{EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent},
@@ -32,17 +33,16 @@ use serde_json::json;
 
 #[tokio::test]
 async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_status() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("history.sqlite");
-    let cwd = directory.path().to_string_lossy().into_owned();
+    let fixture = ClientFixture::new("maka-revision-catalog-");
+    let cwd = fixture.workspace.to_string_lossy().into_owned();
     let configuration = PreparedSession::new(serde_json::from_value(json!({
         "sessionId":"source", "workspace":{"kind":"host_path","path":cwd}, "executorId":"fixture"
     })).unwrap()).unwrap().bind(
         WorkspaceProjection { target: WorkspaceTarget::HostPath { path: cwd.clone() }, host_cwd: cwd },
         SessionTarget::Executor { executor_id: "fixture".to_owned().try_into().unwrap(), settings: Default::default() },
-        SandboxMode::ReadOnly,
+        SandboxMode::DangerFullAccess,
     );
-    let log = EventLog::open(&path).await.unwrap();
+    let log = fixture.log().await;
     log.create_session("source", "source", &configuration, 1)
         .await
         .unwrap();
@@ -149,9 +149,57 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
             assert!(projected.revision_state.is_none());
         }
     }
-    log.retain_session("revision").await.unwrap();
     log.close().await.unwrap();
-    let log = EventLog::open(&path).await.unwrap();
+    let host = maka_runtime_host::server::Host::open(fixture.owner())
+        .await
+        .unwrap();
+    #[cfg(unix)]
+    let endpoint = fixture.workspace.parent().unwrap().join("revision.sock");
+    #[cfg(windows)]
+    let endpoint =
+        std::path::PathBuf::from(format!(r"\\.\pipe\maka-revision-{}", uuid::Uuid::new_v4()));
+    let stop = tokio_util::sync::CancellationToken::new();
+    let _cleanup = stop.clone().drop_guard();
+    let server = tokio::spawn(
+        maka_runtime_host::server::local::LocalListener::bind(&endpoint)
+            .unwrap()
+            .serve(host.clone(), stop.clone()),
+    );
+    // A catalog-only observer must hear retention even without a canonical
+    // invocation or a Session/PTY subscription driving its connection loop.
+    let mut observer = Peer::new(host.clone(), "revision-catalog").await;
+    let mut operator = Peer::new(host.clone(), "revision-shell").await;
+    let started = operator
+        .rpc(
+            "runtime.resource.start",
+            json!({
+                "sessionId":"revision", "launchId":"draft-shell", "command":"exit 0"
+            }),
+        )
+        .await;
+    assert_eq!(started["ok"], true, "{started}");
+    loop {
+        let notice = observer.frame().await;
+        if notice["kind"] == "session.catalog.changed" && notice["sessionId"] == "revision" {
+            break;
+        }
+    }
+    let catalog = observer
+        .rpc(
+            "session.catalog.query",
+            json!({"kind":"get", "sessionId":"revision"}),
+        )
+        .await;
+    assert_eq!(
+        catalog["result"]["session"]["revisionState"], "committed",
+        "{catalog}"
+    );
+    observer.close().await;
+    operator.close().await;
+    stop.cancel();
+    server.await.unwrap().unwrap();
+    drop(host);
+    let log = fixture.log().await;
     let projection = catalog_projection(
         log.get_session::<SessionConfiguration>("revision")
             .await

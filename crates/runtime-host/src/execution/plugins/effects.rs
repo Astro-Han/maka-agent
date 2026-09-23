@@ -155,6 +155,12 @@ impl Executions {
             .await
             .map_err(ToolError::from)?;
         let _admitted = owner.admit().map_err(failed)?;
+        let session = match &boundary {
+            maka_plugins::authorization::Boundary::Session { boundary, .. } => {
+                Some(boundary.session_id.clone())
+            }
+            _ => None,
+        };
         let request = Request {
             source: call.identity.clone(),
             owner: owner.identity().map_err(failed)?,
@@ -165,6 +171,9 @@ impl Executions {
             self.begin_drain();
             ToolError::Persistence(error.to_string())
         })?;
+        if let Some(session) = session {
+            self.publish_session_change(&session).await;
+        }
         drop(gate);
         let result = if cancellation.is_cancelled() {
             Err(failed("cancelled before effect"))

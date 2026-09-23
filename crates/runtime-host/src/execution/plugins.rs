@@ -99,7 +99,9 @@ impl Executions {
         &self,
         session: &str,
     ) -> Result<(), StoreError> {
-        self.log.retain_session(session).await
+        self.log.retain_session(session).await?;
+        self.publish_session_change(session).await;
+        Ok(())
     }
 
     pub(crate) async fn admit_plugin_process(

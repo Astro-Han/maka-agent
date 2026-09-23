@@ -150,6 +150,13 @@ impl Executions {
     pub(crate) fn active_count(&self) -> usize {
         self.active.lock().unwrap().len()
     }
+
+    /// Notification failure cannot discard an already accepted operation.
+    pub(crate) async fn publish_session_change(&self, session: &str) {
+        if self.catalog.publish_session(session).await.is_err() {
+            self.begin_drain();
+        }
+    }
     pub(crate) fn accepting(&self) -> bool {
         !self.shutdown.is_cancelled()
             && *self

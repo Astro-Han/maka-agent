@@ -247,9 +247,7 @@ impl BoundCommands {
             let result = match result {
                 Ok(maka_event_log::sessions::AbandonRevision::Abandoned) => {
                     grants.lock().unwrap().remove(&id);
-                    if worker.catalog.publish_session(&id).await.is_err() {
-                        worker.begin_drain();
-                    }
+                    worker.publish_session_change(&id).await;
                     Ok(RevisionDisposition::Abandoned)
                 }
                 Ok(maka_event_log::sessions::AbandonRevision::Retained) => {
@@ -454,8 +452,12 @@ impl BoundCommands {
                         } else {
                             worker.log.create_plugin_session(&origin, &expected, now()?).await.map_err(storage)?
                         };
-                        if worker.catalog.publish_session(&id).await.is_err() {
-                            worker.begin_drain();
+                        let changed = std::iter::once(id.as_str())
+                            .chain(history.as_ref().map(|seed| seed.input.session_id.as_str()))
+                            .chain(approval.source.as_ref().map(|source| source.session_id.as_str()))
+                            .collect::<std::collections::BTreeSet<_>>();
+                        for session in changed {
+                            worker.publish_session_change(session).await;
                         }
                         record
                     }

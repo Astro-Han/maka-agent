@@ -118,7 +118,7 @@ pub(super) async fn start(host: &Host, input: ResourceStartInput) -> Result<Outc
     let size = TerminalSize::new(80, 24).unwrap();
     let record = ShellRun {
         id: uuid::Uuid::new_v4().to_string(),
-        session_id: input.session_id,
+        session_id: input.session_id.clone(),
         source_run_id: None,
         source_turn_id: input.launch_id.clone(),
         source_tool_call_id: input.launch_id,
@@ -162,7 +162,11 @@ pub(super) async fn start(host: &Host, input: ResourceStartInput) -> Result<Outc
         Err(ShellError::Rejected(message)) => return Ok(failure(Code::OperationConflict, message)),
         Err(error) => return Ok(fault(host, error)),
     };
-    match handle.ready().await {
+    let ready = handle.ready().await;
+    host.executions
+        .publish_session_change(&input.session_id)
+        .await;
+    match ready {
         Ok(record) => match projected((*record).clone()) {
             Ok(result) => Ok(result),
             Err(error) => {

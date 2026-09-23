@@ -164,7 +164,9 @@ impl Worker {
             .shells
             .start_pty(record, prepared.command, self.input.size)
             .map_err(super::failed)?;
-        handle.clone().ready().await.map_err(super::failed)?;
+        let ready = handle.clone().ready().await;
+        self.host.publish_session_change(session).await;
+        ready.map_err(super::failed)?;
         drop(prepared.gate);
         Ok(handle)
     }
