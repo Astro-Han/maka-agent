@@ -99,10 +99,13 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         {
             // A live but unreachable writer is not a stale lock. The command
             // must leave on its own deadline without taking over that Root.
+            // Run the finite worker directly: its exit, unlike the observer's
+            // timeout, proves cleanup before we release this writer or mutate.
             let owner = RootOwner::open(&fixture.root, &namespaces).unwrap();
             let started = Instant::now();
             let waiting = Command::new(executable)
                 .args([
+                    "--operation-worker",
                     "host",
                     "activate",
                     "--root-id",
@@ -114,6 +117,12 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
                 .unwrap();
             assert!(!waiting.status.success());
             assert!(started.elapsed() < Duration::from_secs(3));
+            assert!(
+                String::from_utf8_lossy(&waiting.stderr)
+                    .contains("Host did not become Ready before the activation deadline"),
+                "{waiting:?}"
+            );
+            assert_eq!(query("status")["operation"], "idle");
             assert!(RootOwner::open(&fixture.root, &namespaces).is_err());
             assert_eq!(query("status")["deployment"], installed);
             drop(owner);
