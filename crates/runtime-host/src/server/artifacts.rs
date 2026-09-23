@@ -29,59 +29,6 @@ use maka_protocol::{
 use serde_json::Value;
 pub(super) use staging::Uploads;
 
-pub(super) fn supports(operation: Operation) -> bool {
-    matches!(
-        operation,
-        Operation::ArtifactIngest | Operation::ArtifactQuery | Operation::ArtifactDelete
-    )
-}
-
-pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
-    const QUERY: &[Code] = &[
-        Code::HostNotReady,
-        Code::HostDraining,
-        Code::OperationUnavailable,
-        Code::InternalFailure,
-        Code::InvalidRequest,
-        Code::NotFound,
-        Code::PersistenceFailed,
-    ];
-    const MUTATION: &[Code] = &[
-        Code::HostNotReady,
-        Code::HostDraining,
-        Code::OperationUnavailable,
-        Code::InternalFailure,
-        Code::InvalidRequest,
-        Code::NotFound,
-        Code::PersistenceFailed,
-        Code::OperationConflict,
-    ];
-    supports(operation).then_some(if operation.mode() == OperationMode::Query {
-        QUERY
-    } else {
-        MUTATION
-    })
-}
-
-pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    let result = match operation {
-        Operation::ArtifactIngest => serde_json::to_value(decode_ingest_input(value)?),
-        Operation::ArtifactQuery => serde_json::to_value(decode_query_input(value)?),
-        Operation::ArtifactDelete => serde_json::to_value(decode_delete_input(value)?),
-        _ => unreachable!("Artifact operation"),
-    };
-    result.map_err(|error| maka_protocol::ProtocolError::invalid(error.to_string()))
-}
-pub(super) fn decode_output(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
-    let result = match operation {
-        Operation::ArtifactIngest => serde_json::to_value(decode_ingest_result(value)?),
-        Operation::ArtifactQuery => serde_json::to_value(decode_query_result(value)?),
-        Operation::ArtifactDelete => serde_json::to_value(decode_delete_result(value)?),
-        _ => unreachable!("Artifact operation"),
-    };
-    result.map_err(|error| maka_protocol::ProtocolError::invalid(error.to_string()))
-}
-
 pub(super) async fn execute(
     host: &Host,
     connection: uuid::Uuid,

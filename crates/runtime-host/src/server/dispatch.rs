@@ -124,7 +124,7 @@ impl Host {
         if context::supports(operation) {
             return context::execute(self, operation, &input).await;
         }
-        if super::artifacts::supports(operation) {
+        if maka_protocol::artifact::supports(operation) {
             return super::artifacts::execute(self, connection_id, operation, &input).await;
         }
         if super::interactions::supports(operation) {

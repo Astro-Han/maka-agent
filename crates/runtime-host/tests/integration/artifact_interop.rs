@@ -28,11 +28,13 @@ use maka_runtime::artifact::{
 };
 use maka_runtime_host::server::{Host, local::LocalListener};
 use sqlx::Connection;
-use std::{os::unix::fs::PermissionsExt, path::Path, process::Command, time::Duration};
+use std::{os::unix::fs::PermissionsExt, time::Duration};
+
+mod workflow;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn original_client_uploads_queries_retries_disconnects_and_reopens_canonical_blobs() {
+async fn client_uploads_queries_retries_disconnects_and_reopens_canonical_blobs() {
     let directory = tempfile::Builder::new()
         .prefix("maka-artifact-")
         .permissions(std::fs::Permissions::from_mode(0o700))
@@ -54,46 +56,33 @@ async fn original_client_uploads_queries_retries_disconnects_and_reopens_canonic
         let socket = directory.path().join("host.sock");
         let listener = LocalListener::bind(&socket).unwrap();
         let cancellation = CancellationToken::new();
+        let _cleanup = cancellation.clone().drop_guard();
+        let (peer, hello) =
+            super::support::peer::Peer::handshake(host.clone(), "artifact-bootstrap").await;
+        peer.close().await;
+        let endpoint = workflow::Endpoint {
+            path: socket,
+            root: root_id.clone(),
+            epoch: hello["hostEpoch"].as_str().unwrap().into(),
+        };
         let server = tokio::spawn(listener.serve(host, cancellation.clone()));
-        let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs");
-        let workspace = directory.path().to_owned();
-        let expected_id = root_id.clone();
-        let client = tokio::task::spawn_blocking(move || {
-            let mut command = Command::new("node");
-            command
-                .arg(probe)
-                .arg("--socket")
-                .arg(socket)
-                .args(["--root-id", &expected_id])
-                .arg("--artifact-workspace")
-                .arg(workspace);
-            if reopened {
-                command.arg("--reopened");
-            }
-            command.output().unwrap()
-        });
-        let output = tokio::time::timeout(Duration::from_secs(30), client)
-            .await
-            .unwrap()
-            .unwrap();
+        let (client, _notices) = endpoint.open().await;
+        if !reopened {
+            workflow::initialize(&client, directory.path()).await;
+        }
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            workflow::verify(&client, &endpoint, reopened),
+        )
+        .await
+        .unwrap();
+        client.disconnect();
         cancellation.cancel();
         tokio::time::timeout(Duration::from_secs(5), server)
             .await
             .unwrap()
             .unwrap()
             .unwrap();
-        assert!(
-            output.status.success(),
-            "stdout: {}\nstderr: {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let marker = if reopened {
-            "original-client-artifact-reopen"
-        } else {
-            "original-client-artifact-workflow"
-        };
-        assert!(String::from_utf8_lossy(&output.stdout).contains(marker));
         let path = root.join(ROOT_DATABASE);
         let log = EventLog::open(&path).await.unwrap();
         let id = upload_artifact_id("session", "durable-upload");

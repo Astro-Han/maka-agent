@@ -27,6 +27,9 @@ use serde_json::Value;
 pub struct Operations;
 impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if maka_protocol::artifact::supports(operation) {
+            return maka_protocol::artifact::decode_input(operation, value);
+        }
         if operation == Operation::ClientCapabilityReplace {
             maka_protocol::capability::decode_replace_input(value)?;
             return Ok(value.clone());
@@ -59,6 +62,10 @@ impl OperationRegistry for Operations {
         }
         if operation == Operation::ConnectionCatalogSetDefaultTarget {
             maka_protocol::configuration::decode_set_default_target_input(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::ConnectionCatalogCreate {
+            maka_protocol::configuration::decode_create_connection_input(value)?;
             return Ok(value.clone());
         }
         if operation == Operation::ConnectionCatalogUpdate {
@@ -120,6 +127,9 @@ impl OperationRegistry for Operations {
         }
     }
     fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if maka_protocol::artifact::supports(operation) {
+            return maka_protocol::artifact::decode_output(operation, value);
+        }
         if operation == Operation::ClientCapabilityReplace {
             maka_protocol::capability::decode_registration_result(value)?;
             return Ok(value.clone());
@@ -148,7 +158,8 @@ impl OperationRegistry for Operations {
         }
         if matches!(
             operation,
-            Operation::ConnectionCatalogUpdate
+            Operation::ConnectionCatalogCreate
+                | Operation::ConnectionCatalogUpdate
                 | Operation::ConnectionCatalogRemove
                 | Operation::ConnectionCatalogSetDefaultTarget
         ) {
@@ -197,6 +208,9 @@ impl OperationRegistry for Operations {
         }
     }
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
+        if let Some(errors) = maka_protocol::artifact::errors(operation) {
+            return Some(errors);
+        }
         if operation == Operation::ClientCapabilityReplace {
             return Some(&[
                 OperationErrorCode::HostNotReady,
@@ -224,6 +238,7 @@ impl OperationRegistry for Operations {
                 | Operation::ConnectionOnboardingSave
                 | Operation::ConnectionModelsFetch
                 | Operation::ConnectionTestRun
+                | Operation::ConnectionCatalogCreate
                 | Operation::ConnectionCatalogUpdate
                 | Operation::ConnectionCatalogRemove
                 | Operation::ConnectionCatalogSetDefaultTarget

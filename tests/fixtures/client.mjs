@@ -37,7 +37,6 @@ const entries = [
   ['--system-prompt-workspace', 'client-system-prompt-entry.mjs'],
   ['--model-overrides-workspace', 'client-model-overrides-entry.mjs'],
   ['--runtime-policy-workspace', 'client-runtime-policy-entry.mjs'],
-  ['--artifact-workspace', 'client-artifact-entry.mjs'],
 ];
 const entry = entries.find(([flag]) => process.argv.includes(flag))?.[1] ?? 'client-entry.mjs';
 await withSourceBundle(fileURLToPath(new URL(entry, import.meta.url)), (bundle, inputs) => {

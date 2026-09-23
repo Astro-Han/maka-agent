@@ -18,8 +18,7 @@
  */
 
 use super::{
-    access, artifacts, bootstrap, capabilities, configuration, context, interactions, sessions,
-    turns,
+    access, bootstrap, capabilities, configuration, context, interactions, sessions, turns,
 };
 use maka_protocol::OperationErrorCode;
 use maka_protocol::subscription as subscriptions;
@@ -90,8 +89,8 @@ impl OperationRegistry for Operations {
         if context::supports(operation) {
             return context::decode_input(operation, value);
         }
-        if artifacts::supports(operation) {
-            return artifacts::decode_input(operation, value);
+        if maka_protocol::artifact::supports(operation) {
+            return maka_protocol::artifact::decode_input(operation, value);
         }
         if interactions::supports(operation) {
             return interactions::decode_input(operation, value);
@@ -171,8 +170,8 @@ impl OperationRegistry for Operations {
         if context::supports(operation) {
             return context::decode_output(operation, value);
         }
-        if artifacts::supports(operation) {
-            return artifacts::decode_output(operation, value);
+        if maka_protocol::artifact::supports(operation) {
+            return maka_protocol::artifact::decode_output(operation, value);
         }
         if interactions::supports(operation) {
             return interactions::decode_output(operation, value);
@@ -250,7 +249,7 @@ impl OperationRegistry for Operations {
         if let Some(errors) = context::errors(operation) {
             return Some(errors);
         }
-        if let Some(errors) = artifacts::errors(operation) {
+        if let Some(errors) = maka_protocol::artifact::errors(operation) {
             return Some(errors);
         }
         if let Some(errors) = interactions::errors(operation) {

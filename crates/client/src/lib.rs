@@ -18,6 +18,7 @@
  */
 
 //! Interactive Host connection. The reader never waits for a UI request.
+mod artifact;
 mod configuration;
 mod connection;
 mod credential;

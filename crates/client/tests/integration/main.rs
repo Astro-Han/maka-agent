@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod artifact;
 mod configuration;
 mod connection;
 mod credential;

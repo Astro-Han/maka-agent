@@ -18,6 +18,7 @@
  */
 
 mod input;
+mod operations;
 mod output;
 mod preview;
 mod result_codec;
@@ -27,7 +28,11 @@ use base64::{
     engine::{GeneralPurpose, GeneralPurposeConfig},
 };
 pub use input::*;
-use maka_runtime::attachment::MAX_ATTACHMENT_BYTES;
+pub use maka_runtime::{
+    artifact::{normalize_name, upload_artifact_id},
+    attachment::MAX_ATTACHMENT_BYTES,
+};
+pub use operations::*;
 pub use output::*;
 pub use result_codec::*;
 use serde::de::DeserializeOwned;
