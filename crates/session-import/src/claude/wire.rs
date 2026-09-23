@@ -167,7 +167,7 @@ impl Content {
         }
     }
 }
-pub(super) fn synthetic(text: &str) -> bool {
+pub(crate) fn synthetic(text: &str) -> bool {
     let text = text.trim_start();
     if text.starts_with("[Request interrupted by user") {
         return true;

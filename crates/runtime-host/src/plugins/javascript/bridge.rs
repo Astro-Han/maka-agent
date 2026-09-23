@@ -285,6 +285,19 @@ impl State {
                     .ok_or_else(|| Error::invalid("unknown input mount"))?;
                 self.opened_file(view.open_file(input.input).await?)
             }
+            Request::InputFileInfo(input) => {
+                let view = self
+                    .inputs
+                    .open(&input.handle)?
+                    .ok_or_else(|| Error::invalid("unknown input mount"))?;
+                encode(view.file_info(input.input).await?)
+            }
+            Request::ViewFileInfo(input) => encode(
+                self.calls
+                    .read(&input.handle)?
+                    .file_info(input.input)
+                    .await?,
+            ),
             Request::ViewOpenFile(input) => self.opened_file(
                 self.calls
                     .read(&input.handle)?

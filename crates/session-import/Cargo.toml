@@ -31,9 +31,9 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 thiserror.workspace = true
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
-

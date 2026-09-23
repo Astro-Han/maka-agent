@@ -19,8 +19,8 @@
 
 use super::{DiscoveryFailure, ScanError, Source, check_cancelled};
 use maka_plugins::{
-    filesystem::entries::{Kind, ListFiles, ReadFile},
-    filesystem::{ListInput, ReadError as FileError, ReadViewInput, Reader, Symlinks},
+    filesystem::entries::{Kind, ReadFile},
+    filesystem::{ReadError as FileError, ReadViewInput, Reader, Symlinks},
 };
 use std::{
     collections::BTreeSet,
@@ -39,6 +39,16 @@ pub(super) struct Captured<'a, 'view> {
 pub(super) enum EntriesError {
     Scan(ScanError),
     Read(DiscoveryFailure),
+}
+impl From<FileError> for EntriesError {
+    fn from(error: FileError) -> Self {
+        match error {
+            FileError::Retired => Self::Scan(ScanError::Cancelled),
+            FileError::ScanLimit { .. } => Self::Scan(ScanError::LimitExceeded),
+            FileError::Io(error) => Self::Read(classify(&error)),
+            FileError::Invalid(_) => Self::Read(DiscoveryFailure::BlockedPath),
+        }
+    }
 }
 pub(super) enum ReadError {
     Cancelled,
@@ -78,32 +88,16 @@ impl<'a, 'view> Captured<'a, 'view> {
         cancellation: &CancellationToken,
     ) -> Result<Vec<OsString>, EntriesError> {
         let mut names = Vec::new();
-        let mut after = None;
-        loop {
-            check_cancelled(cancellation).map_err(EntriesError::Scan)?;
-            let page = match self.reader.list(ListInput {
-                files: ListFiles {
-                    path: portable(&self.path)
-                        .map_err(|_| EntriesError::Read(DiscoveryFailure::BlockedPath))?,
-                    after,
-                    limit: 1024,
-                },
-                symlinks: Symlinks::Reject,
-            }) {
-                Ok(page) => page,
-                Err(FileError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
-                    return Ok(names);
-                }
-                Err(FileError::Retired) => return Err(EntriesError::Scan(ScanError::Cancelled)),
-                Err(FileError::Io(error)) => return Err(EntriesError::Read(classify(&error))),
-                Err(FileError::Invalid(_)) => {
-                    return Err(EntriesError::Read(DiscoveryFailure::BlockedPath));
-                }
-            };
-            for entry in page.entries {
+        let path =
+            portable(&self.path).map_err(|_| EntriesError::Read(DiscoveryFailure::BlockedPath))?;
+        let budget = *remaining as u64;
+        let result = self
+            .reader
+            .visit_directory(&path, Symlinks::Reject, |entry| {
+                check_cancelled(cancellation).map_err(|_| FileError::Retired)?;
                 *remaining = remaining
                     .checked_sub(1)
-                    .ok_or(EntriesError::Scan(ScanError::LimitExceeded))?;
+                    .ok_or(FileError::ScanLimit { max: budget })?;
                 let name = OsString::from(entry.name);
                 if matches!(entry.kind, Kind::Directory) {
                     self.directories.insert(name.clone());
@@ -112,12 +106,15 @@ impl<'a, 'view> Captured<'a, 'view> {
                     self.files.insert(name.clone());
                 }
                 names.push(name);
-            }
-            after = page.next_after;
-            if after.is_none() {
-                return Ok(names);
-            }
+                Ok::<_, FileError>(())
+            });
+        match result {
+            Ok(()) => {}
+            Err(FileError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
         }
+        names.sort();
+        Ok(names)
     }
 
     pub(super) fn read_skill(
@@ -182,6 +179,9 @@ pub(super) fn read_view(
         Err(FileError::Io(error)) => Err(read_error(error)),
         Err(FileError::Retired) => Err(ReadError::Cancelled),
         Err(FileError::Invalid(_)) => Err(ReadError::Failure(DiscoveryFailure::BlockedPath)),
+        Err(FileError::ScanLimit { .. }) => {
+            Err(ReadError::Failure(DiscoveryFailure::SourceTooLarge))
+        }
     }
 }
 fn portable(path: &Path) -> Result<String, ()> {

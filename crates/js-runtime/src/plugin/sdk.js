@@ -76,6 +76,7 @@
           close: () => host('pinnedFile.close', { handle: opened.handle }),
         });
       },
+      fileInfo: (input) => host(`${prefix}.fileInfo`, { handle, input }),
     });
   const processes = (authority) => {
     const open = (handle) =>

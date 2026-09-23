@@ -322,7 +322,7 @@ async fn directory_status(files: &ReadDirectory, path: &str) -> Result<LocationS
         }
         Err(ReadError::Invalid(_)) => LocationStatus::BlockedPath,
         Err(ReadError::Retired) => return Err(Error::Retired),
-        Err(ReadError::Io(_)) => LocationStatus::ReadFailed,
+        Err(ReadError::Io(_) | ReadError::ScanLimit { .. }) => LocationStatus::ReadFailed,
     })
 }
 fn rejected(reason: LocationRejection) -> LocationResult {

@@ -77,13 +77,19 @@ export interface ReadDirectory extends ReadFiles<'follow' | 'reject'> {
   location(): Promise<string>;
   /** Fixed file object and readable prefix. At most 32 open files per admitted root. */
   openFile(input: { path: string; symlinks?: 'follow' | 'reject' }): Promise<PinnedFile>;
+  /** Observe a regular file without retaining an open-file resource. */
+  fileInfo(input: { path: string; symlinks?: 'follow' | 'reject' }): Promise<FileInfo>;
+}
+export interface FileInfo {
+  readonly length: number;
+  readonly modifiedAt: number | null;
 }
 /** Appends are excluded; in-place changes are not frozen. The format consumer
  * validates digests between passes when it needs a consistent snapshot.
  * Authorization is checked per read; the source callback and Fiber bound lifetime.
  */
 export interface PinnedFile {
-  readonly info: { readonly length: number; readonly modifiedAt: number | null };
+  readonly info: FileInfo;
   /** At most 1 MiB, default 64 KiB. Truncation within the prefix is an error. */
   read(input?: { offset?: number; limit?: number }): Promise<{
     bytes: Uint8Array;
