@@ -43,6 +43,7 @@ pub(super) enum Output {
     Copy(maka_protocol::session::copy::Output),
     Abandon(maka_protocol::session::copy::AbandonOutput),
     CopyReceipt(maka_protocol::session::copy::QueryResult),
+    Sources(maka_protocol::session::sources::Output),
 }
 
 impl Output {
@@ -62,6 +63,7 @@ pub(super) fn supports(operation: Operation) -> bool {
             | Operation::SessionRevisionCreate
             | Operation::SessionRevisionAbandon
             | Operation::SessionCopyQuery
+            | Operation::SessionSourcesQuery
             | Operation::SessionCatalogQuery
             | Operation::SessionLifecycleSet
             | Operation::SessionMetadataUpdate
@@ -73,6 +75,9 @@ pub(super) fn supports(operation: Operation) -> bool {
 
 pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol::Result<Value> {
     match operation {
+        Operation::SessionSourcesQuery => {
+            maka_protocol::session::sources::decode_input(value)?;
+        }
         Operation::SessionBranchCreate | Operation::SessionRevisionCreate => {
             maka_protocol::session::copy::decode_input(operation, value)?;
         }
@@ -114,6 +119,8 @@ pub(super) fn decode_output(operation: Operation, value: &Value) -> maka_protoco
         Operation::SessionBranchCreate | Operation::SessionRevisionCreate
     ) {
         maka_protocol::session::copy::decode_result(value)?;
+    } else if operation == Operation::SessionSourcesQuery {
+        maka_protocol::session::sources::decode_output(value)?;
     } else if operation == Operation::SessionCopyQuery {
         maka_protocol::session::copy::decode_query_result(value)?;
     } else if operation == Operation::SessionRevisionAbandon {
@@ -140,6 +147,36 @@ pub(super) async fn execute(
 ) -> Result<Output> {
     let log = host.log.as_ref();
     match operation {
+        Operation::SessionSourcesQuery => {
+            let input = maka_protocol::session::sources::decode_input(value).map_err(invalid)?;
+            let messages = log
+                .editable_turn(&input.session_id, &input.turn_id)
+                .await
+                .map_err(stored)?;
+            if messages.is_empty()
+                || log
+                    .get_session::<SessionConfiguration>(&input.session_id)
+                    .await
+                    .map_err(stored)?
+                    .is_none()
+            {
+                return Err(failure(
+                    OperationErrorCode::NotFound,
+                    "Turn source input not found",
+                ));
+            }
+            crate::session::require_unmanaged(
+                log,
+                &input.session_id,
+                OperationErrorCode::OperationConflict,
+            )
+            .await?;
+            Ok(Output::Sources(maka_protocol::session::sources::Output {
+                session_id: input.session_id,
+                turn_id: input.turn_id,
+                messages: messages.into_iter().map(Into::into).collect(),
+            }))
+        }
         Operation::SessionBranchCreate | Operation::SessionRevisionCreate => {
             let input =
                 maka_protocol::session::copy::decode_input(operation, value).map_err(invalid)?;

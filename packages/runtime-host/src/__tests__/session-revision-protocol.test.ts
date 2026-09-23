@@ -28,6 +28,40 @@ import {
 } from '../protocol/index.js';
 
 describe('Session revision protocol', () => {
+  test('Turn source views preserve ordered raw input without weakening new-message limits', () => {
+    const spec = HOST_OPERATION_SPECS['session.sources.query'];
+    const result = {
+      sessionId: 'target',
+      turnId: 'turn',
+      messages: [
+        { messageId: 'first', content: { text: '\n'.repeat(60 * 1024) } },
+        {
+          messageId: 'second',
+          content: { text: 'second', quotes: [{ text: 'q'.repeat(40_000) }] },
+          inputSelections: { skills: ['review'] },
+        },
+      ],
+    };
+    assert.deepEqual(spec.decodeOutput(result), result);
+    spec.assertOutputForInput?.({ sessionId: 'target', turnId: 'turn' }, result);
+    assert.throws(
+      () => spec.assertOutputForInput?.({ sessionId: 'other', turnId: 'turn' }, result),
+      isInvalidFrame,
+    );
+    assert.throws(
+      () => spec.decodeOutput({ ...result, messages: [result.messages[0], result.messages[0]] }),
+      isInvalidFrame,
+    );
+    assert.throws(
+      () =>
+        HOST_OPERATION_SPECS['turn.start'].decodeInput({
+          sessionId: 'target',
+          turnId: 'new',
+          content: result.messages[0].content,
+        }),
+      isInvalidFrame,
+    );
+  });
   test('copy receipt queries preserve exact identity and reject invalid draft lifecycles', () => {
     const spec = HOST_OPERATION_SPECS['session.copy.query'];
     const receipt = {

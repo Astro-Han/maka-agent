@@ -110,6 +110,7 @@ impl Operation {
                 | Self::SessionCatalogQuery
                 | Self::SessionConfigurationUpdate
                 | Self::SessionCopyQuery
+                | Self::SessionSourcesQuery
                 | Self::SessionCreate
                 | Self::SessionExecutionBoundaryQuery
                 | Self::SessionLifecycleSet

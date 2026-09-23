@@ -272,6 +272,13 @@ async fn scenario() {
         }
         let result = state(&mut peer, &client, &document).await;
         assert_eq!(result["progress"]["state"], "ended", "{result}");
+        let sources = success(peer.rpc("session.sources.query", json!({
+            "sessionId":"background-session", "turnId":result["receipt"]["invocation"]["turn_id"]
+        })).await);
+        assert_eq!(
+            sources["messages"][0]["content"]["quotes"][0]["text"],
+            "q".repeat(40_000)
+        );
         assert_eq!(
             result["progress"]["outcome"]["kind"], "completed",
             "{result}"
@@ -360,6 +367,13 @@ async fn scenario() {
         assert_eq!(
             foreign_receipt["error"]["code"], "operation_conflict",
             "{foreign_receipt}"
+        );
+        let foreign_sources = peer.rpc("session.sources.query", json!({
+            "sessionId":created["root"]["sessionId"], "turnId":created["receipt"]["invocation"]["turn_id"]
+        })).await;
+        assert_eq!(
+            foreign_sources["error"]["code"], "operation_conflict",
+            "{foreign_sources}"
         );
         // Draft removal closes only its own ready subscription, not another
         // Session on the same connection. Reopening replays the tombstone.

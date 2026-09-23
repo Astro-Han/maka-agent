@@ -2293,6 +2293,7 @@ function executionClient(overrides: Partial<ExecutionClient>): ExecutionClient {
     interruptTurn: unavailable,
     listSessionTurns: unavailable,
     listSessionTurnLandmarks: unavailable,
+    readTurnSources: unavailable,
     queryMessageExecutions: unavailable,
     queryMessages: unavailable,
     queryTurnResume: unavailable,

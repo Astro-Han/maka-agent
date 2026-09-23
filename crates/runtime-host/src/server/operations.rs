@@ -264,6 +264,7 @@ impl OperationRegistry for Operations {
                 | Operation::SessionRevisionCreate
                 | Operation::SessionRevisionAbandon => Some(sessions::copy::ERRORS),
                 Operation::SessionCopyQuery => Some(sessions::copy::ERRORS),
+                Operation::SessionSourcesQuery => Some(maka_protocol::session::sources::ERRORS),
                 Operation::SessionCatalogQuery => Some(sessions::QUERY_ERRORS),
                 Operation::SessionLifecycleSet => Some(sessions::LIFECYCLE_ERRORS),
                 Operation::SessionMetadataUpdate => Some(sessions::mutation::METADATA_ERRORS),

@@ -1245,6 +1245,7 @@ export interface MakaBridge {
       input: DesktopBranchFromTurnInput & { sideConversation?: false },
     ): Promise<DesktopSessionSummary>;
     reviseBeforeTurn(sessionId: string, input: DesktopReviseBeforeTurnInput): Promise<DesktopSessionSummary>;
+    readTurnSources(sessionId: string, turnId: string): Promise<readonly import('@maka/runtime-host/protocol').SessionSourceMessage[]>;
     respondToSandboxBoundary(sessionId: string, response: SandboxBoundaryResponse): Promise<void>;
     respondToClientCapability(
       sessionId: string,

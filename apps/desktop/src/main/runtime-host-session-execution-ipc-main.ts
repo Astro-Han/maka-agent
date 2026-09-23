@@ -114,6 +114,7 @@ type RuntimeHostSessionExecutionClient = Pick<
   | "interruptTurn"
   | 'listSessionTurns'
   | 'listSessionTurnLandmarks'
+  | 'readTurnSources'
   | 'queryMessageExecutions'
   | 'queryMessages'
   | "queryTurnResume"
@@ -406,6 +407,9 @@ export function registerRuntimeHostSessionExecutionIpc(
         requiredId(sessionId, 'Session'),
         turnId === null ? null : requiredId(turnId, 'Turn'),
       ),
+  );
+  handleReconnectableRead(ipcMain, 'sessions:readTurnSources', (_event, sessionId: unknown, turnId: unknown) =>
+    deps.client.readTurnSources(requiredId(sessionId, 'Session'), requiredId(turnId, 'Turn')),
   );
   handleReconnectableRead(
     ipcMain,

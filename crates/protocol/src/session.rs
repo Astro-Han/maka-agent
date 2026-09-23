@@ -23,6 +23,7 @@
 mod configuration;
 pub mod copy;
 mod mutation;
+pub mod sources;
 mod types;
 mod validation;
 use crate::{ProtocolError, Result};

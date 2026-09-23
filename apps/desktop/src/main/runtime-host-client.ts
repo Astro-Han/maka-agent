@@ -1142,6 +1142,11 @@ export class DesktopRuntimeHostClient {
     throw revisionConflict(`${kind} copy`, input.sourceSessionId);
   }
 
+  async readTurnSources(sessionId: string, turnId: string) {
+    const result = await this.request("session.sources.query", { sessionId, turnId });
+    return result.messages;
+  }
+
   async ingestAttachment(input: {
     sessionId: string;
     name: string;

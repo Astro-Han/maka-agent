@@ -68,6 +68,7 @@ import { SESSION_TURNS_OPERATION_SPECS } from './session-turns.js';
 import { SESSION_TODO_OPERATION_SPECS } from './session-todo.js';
 import { SESSION_COLLABORATION_OPERATION_SPECS } from './session-collaboration.js';
 import { SESSION_REVISION_OPERATION_SPECS } from './session-revision.js';
+import { SESSION_SOURCES_OPERATION_SPECS } from './session-sources.js';
 import { SESSION_BUNDLE_OPERATION_SPECS } from './session-bundle.js';
 import { SESSION_RETIREMENT_OPERATION_SPECS } from './session-retirement.js';
 import { SESSION_EFFECT_OPERATION_SPECS } from './session-effects.js';
@@ -188,6 +189,7 @@ export * from './scheduled-task.js';
 export * from './session-catalog.js';
 export * from './session-collaboration.js';
 export * from './session-revision.js';
+export * from './session-sources.js';
 export * from './session-retirement.js';
 export * from './session-transcript.js';
 export * from './session-turns.js';
@@ -228,6 +230,7 @@ export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
   SESSION_CATALOG_OPERATION_SPECS,
   SESSION_EFFECT_OPERATION_SPECS,
   SESSION_REVISION_OPERATION_SPECS,
+  SESSION_SOURCES_OPERATION_SPECS,
   SESSION_BUNDLE_OPERATION_SPECS,
   SESSION_RETIREMENT_OPERATION_SPECS,
   ARTIFACT_OPERATION_SPECS,
@@ -339,6 +342,7 @@ export const REMOTE_OWNER_OPERATION_GRANTS = Object.freeze([
   'session.catalog.query',
   'session.configuration.update',
   'session.copy.query',
+  'session.sources.query',
   'session.create',
   'session.execution_boundary.query',
   'session.lifecycle.set',

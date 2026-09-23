@@ -61,7 +61,7 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
             configuration: None,
             input: InvocationInput::Message {
                 source_messages: vec![RootSourceMessage {
-                    unprepared_content: content.clone(),
+                    unprepared_content: "unprepared source".into(),
                     message: DeliveredMessage {
                         message_id: "message".into(),
                         submitted_content_digest: content.content_digest().unwrap(),
@@ -220,6 +220,23 @@ async fn catalog_revisions_preserve_branch_origin_without_inheriting_execution_s
     assert_eq!(copied["ok"], true, "{copied}");
     assert_eq!(copied["result"]["kind"], "committed");
     assert_eq!(copied["result"]["session"]["revisionState"], "preparing");
+    for session in ["source", "branch", "native-revision"] {
+        let sources = operator
+            .rpc(
+                "session.sources.query",
+                json!({"sessionId":session, "turnId":"turn"}),
+            )
+            .await;
+        assert_eq!(
+            sources["result"],
+            json!({
+                "sessionId":session, "turnId":"turn", "messages":[{
+                    "messageId":"message", "content":{"text":"unprepared source"}
+                }]
+            }),
+            "{sources}"
+        );
+    }
     let renamed = operator
         .rpc(
             "session.metadata.update",

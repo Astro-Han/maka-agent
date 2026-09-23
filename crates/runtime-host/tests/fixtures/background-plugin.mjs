@@ -663,7 +663,7 @@ export default async function (ctx) {
           const receipt = await commands.submit({
             operationId: intent.operation,
             sessionId: 'background-session',
-            content: { text: 'Run authorized work' },
+            content: { text: 'Run authorized work', quotes: [{ text: 'q'.repeat(40_000) }] },
           });
           let result = await commands.query(intent.operation);
           while (result.progress.state !== 'ended' && !ctx.signal.aborted) {

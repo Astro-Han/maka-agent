@@ -2160,6 +2160,20 @@ const makaBridge = {
       return invokeProjectedSessionRuntimeHost('sessions:listTurnLandmarks', sessionId, turnId);
     },
     branchFromTurn: invokeBranchFromTurn,
+    async readTurnSources(sessionId, turnId) {
+      const session = await runtimeHostSessionRef(sessionId);
+      const sources = await invokeWhenReady('sessions:readTurnSources', session.scope, session.sessionId, turnId) as
+        readonly import('@maka/runtime-host/protocol').SessionSourceMessage[];
+      return sources.map((source) => ({
+        ...source,
+        content: {
+          ...source.content,
+          ...(source.content.attachments ? {
+            attachments: projectDesktopAttachmentRefs(session.scope, source.content.attachments),
+          } : {}),
+        },
+      }));
+    },
     async reviseBeforeTurn(sessionId: string, input: DesktopReviseBeforeTurnInput): Promise<DesktopSessionSummary> {
       const ref = await runtimeHostSessionRef(sessionId);
       const summary = await invokeWhenReady(
