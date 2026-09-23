@@ -252,6 +252,14 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
     drop(inspect);
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(
+        log.session_copy_receipt("branch").await.unwrap(),
+        Some(maka_runtime::session::CopyReceipt {
+            request: request.clone(),
+            state: maka_runtime::session::CopyState::Committed,
+        }),
+        "the exact request is recoverable without the source catalog"
+    );
     assert_eq!(copy(&log, request).await, first);
     for session in ["branch", "nested"] {
         let prefix = log
@@ -880,6 +888,19 @@ async fn draft_abandonment_serializes_with_acceptance_and_preserves_identity_aft
     );
     assert!(
         log.get_session::<Value>("discarded")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        log.session_copy_receipt("discarded").await.unwrap(),
+        Some(maka_runtime::session::CopyReceipt {
+            request: request("discarded"),
+            state: CopyState::Abandoned,
+        })
+    );
+    assert!(
+        log.session_copy_receipt("never-created")
             .await
             .unwrap()
             .is_none()

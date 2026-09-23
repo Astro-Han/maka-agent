@@ -39,6 +39,36 @@ pub enum SessionCopyResult<T> {
 }
 
 impl EventLog {
+    /// Recover the original request before re-reading a changed or deleted source.
+    /// Absence is not a reservation: a concurrent copy may still commit this ID.
+    pub async fn session_copy_receipt(
+        &self,
+        target: &str,
+    ) -> Result<Option<maka_runtime::session::CopyReceipt>, StoreError> {
+        self.validate_root()?;
+        super::validate_id(target)?;
+        let target = target.to_owned();
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let row: Option<(String, String)> = sqlx::query_as(
+                        "SELECT request_json, state FROM session_history_copies WHERE session_id=?",
+                    )
+                    .bind(target)
+                    .fetch_optional(connection)
+                    .await?;
+                    row.map(|(request, state)| {
+                        Ok(maka_runtime::session::CopyReceipt {
+                            request: serde_json::from_str(&request)?,
+                            state: state.parse().map_err(super::invalid)?,
+                        })
+                    })
+                    .transpose()
+                })
+            })
+            .await
+    }
+
     /// Host-authorized history copy. The caller validates destination configuration
     /// against the captured source revision; no execution or workspace is cloned.
     /// Exact retries precede source CAS, including after a lost commit response.

@@ -43,8 +43,36 @@ pub fn catalog_projection(
     mut record: SessionRecord<SessionConfiguration>,
 ) -> SessionCatalogProjection {
     let execution = record.execution.take();
+    let lineage = record.lineage.take();
+    let copy_state = record.copy_state;
     let pending_since = record.pending_interaction_since;
     let mut projection = metadata_projection(record);
+    let branch = match lineage.as_deref() {
+        Some(maka_runtime::session::Lineage::Branch { origin }) => Some(origin),
+        Some(maka_runtime::session::Lineage::Revision {
+            root_session_id,
+            parent_session_id,
+            turn_id,
+            index,
+            branch,
+        }) => {
+            projection.revision_root_session_id = Some(root_session_id.clone());
+            projection.revision_parent_session_id = Some(parent_session_id.clone());
+            projection.revision_of_turn_id = Some(turn_id.clone());
+            projection.revision_index = Some(*index);
+            projection.revision_state = match copy_state {
+                Some(maka_runtime::session::CopyState::Preparing) => Some(RevisionState::Preparing),
+                Some(maka_runtime::session::CopyState::Committed) => Some(RevisionState::Committed),
+                None | Some(maka_runtime::session::CopyState::Abandoned) => None,
+            };
+            branch.as_ref()
+        }
+        None => None,
+    };
+    if let Some(branch) = branch {
+        projection.parent_session_id = Some(branch.parent_session_id.clone());
+        projection.branch_of_turn_id = branch.turn_id.clone();
+    }
     projection.activity_at = projection.created_at;
     if let Some(since) = pending_since {
         projection.status = SessionStatus::WaitingForUser;

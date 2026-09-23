@@ -73,6 +73,15 @@ pub struct CopyRequest {
     pub purpose: CopyPurpose,
 }
 
+/// Durable copy identity and lifecycle, including a target that was abandoned.
+/// Reading this receipt neither adopts the target nor grants execution authority.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CopyReceipt {
+    pub request: CopyRequest,
+    pub state: CopyState,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BranchOrigin {

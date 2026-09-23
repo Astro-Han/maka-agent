@@ -81,6 +81,7 @@ mod resume;
 mod retirement;
 mod runtime_policy;
 mod scheduler_plugin;
+mod session_history;
 mod skills_management;
 mod skills_plugin;
 mod system_prompt;
