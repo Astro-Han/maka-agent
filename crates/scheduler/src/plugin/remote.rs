@@ -139,7 +139,7 @@ impl Method for Service {
 fn encode(value: impl serde::Serialize) -> Result<Value, Error> {
     serde_json::to_value(value).map_err(|error| Error::Invalid(error.to_string()))
 }
-fn error(error: crate::Error) -> Error {
+pub(super) fn error(error: crate::Error) -> Error {
     match error {
         crate::Error::OutcomeUnknown
         | crate::Error::Storage(maka_plugins::storage::StoreError::OutcomeUnknown(_)) => {

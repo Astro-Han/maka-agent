@@ -43,6 +43,7 @@ pub struct Handle {
 }
 struct Command {
     mutation: Mutation,
+    expected_revision: Option<u64>,
     origin: Origin,
     reply: oneshot::Sender<Result<MutationResult, Error>>,
 }
@@ -68,10 +69,28 @@ impl Handle {
         mutation: Mutation,
         origin: Origin,
     ) -> Result<MutationResult, Error> {
+        self.enqueue(mutation, origin, None).await
+    }
+    pub async fn mutate_if_current(
+        &self,
+        mutation: Mutation,
+        origin: Origin,
+        expected_revision: u64,
+    ) -> Result<MutationResult, Error> {
+        self.enqueue(mutation, origin, Some(expected_revision))
+            .await
+    }
+    async fn enqueue(
+        &self,
+        mutation: Mutation,
+        origin: Origin,
+        expected_revision: Option<u64>,
+    ) -> Result<MutationResult, Error> {
         let (reply, receive) = oneshot::channel();
         self.commands
             .try_send(Command {
                 mutation,
+                expected_revision,
                 origin,
                 reply,
             })
@@ -201,7 +220,7 @@ pub fn start(
                         let _ = command.reply.send(Err(Error::Unavailable("scheduler is recovering".into())));
                         continue;
                     }
-                    let result = owner.controller.mutate(command.mutation, command.origin, owner.clock.now(), owner.dispatcher.as_ref()).await;
+                    let result = owner.controller.mutate_at_revision(command.mutation, command.origin, command.expected_revision, owner.clock.now(), owner.dispatcher.as_ref()).await;
                     if matches!(result, Err(Error::Storage(_))) {
                         owner.failed(result.as_ref().err().unwrap());
                         reload = true;
@@ -257,6 +276,7 @@ impl Owner {
         self.updates.send_replace(Arc::new(View {
             revision: previous.revision,
             tasks: previous.tasks.clone(),
+            task_revisions: previous.task_revisions.clone(),
             ready: false,
             pending_work: previous.pending_work,
             error: Some(error.to_string()),

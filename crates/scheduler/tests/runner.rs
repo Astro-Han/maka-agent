@@ -36,13 +36,172 @@ use maka_scheduler::{
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicI64, Ordering},
+        atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
 use support::SqlStore;
 use tokio::sync::{Notify, mpsc};
 use tokio_util::sync::CancellationToken;
+
+#[tokio::test]
+async fn queued_form_revision_fences_same_task_before_authorization_but_not_unrelated_edits() {
+    use maka_scheduler::command::{Query, QueryResult, Update};
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let temp = tempfile::tempdir().unwrap();
+        let log = Arc::new(
+            EventLog::open(&temp.path().join("forms.sqlite"))
+                .await
+                .unwrap(),
+        );
+        let repository = Repository::new(Arc::new(SqlStore(log.clone())), "main").unwrap();
+        let controller = Controller::open(repository, "UTC".into(), 1000)
+            .await
+            .unwrap();
+        let (entered, _calls) = mpsc::unbounded_channel();
+        let dispatcher = Arc::new(DeliveryHost {
+            authorizations: AtomicUsize::new(0),
+            calls: Mutex::default(),
+            entered,
+            release: Notify::new(),
+        });
+        let stop = CancellationToken::new();
+        let (handle, worker) = owner::start(
+            controller,
+            dispatcher.clone(),
+            Arc::new(ManualClock(AtomicI64::new(1000))),
+            stop.clone(),
+        );
+        let worker = tokio::spawn(worker);
+        until(&handle, |view| view.ready).await;
+        let create = || Mutation::Create {
+            input: input(
+                Schedule::Once { run_at: 100_000 },
+                Effect::Notify(Notification::Local),
+            ),
+        };
+        let MutationResult::Task { task } = handle
+            .mutate(create(), Origin::User { grant: None })
+            .await
+            .unwrap()
+        else {
+            panic!("task")
+        };
+        let read = || {
+            let QueryResult::Task {
+                task: Some(task),
+                revision: Some(revision),
+            } = handle
+                .query(Query::Get {
+                    task_id: task.id.clone(),
+                })
+                .unwrap()
+            else {
+                panic!("versioned task")
+            };
+            (task, revision)
+        };
+        let (_, original) = read();
+        handle
+            .mutate(create(), Origin::User { grant: None })
+            .await
+            .unwrap();
+        handle
+            .mutate_if_current(
+                Mutation::Pause {
+                    task_id: task.id.clone(),
+                },
+                Origin::User { grant: None },
+                original,
+            )
+            .await
+            .unwrap();
+        let (paused, current) = read();
+        assert_eq!(paused.status, Status::Paused);
+        assert_eq!(
+            paused.updated_at, task.updated_at,
+            "two writes can share a millisecond"
+        );
+        assert_ne!(current, original);
+        let count = dispatcher.authorizations.load(Ordering::SeqCst);
+        assert!(matches!(
+            handle
+                .mutate_if_current(
+                    Mutation::Update {
+                        task_id: task.id.clone(),
+                        patch: Update {
+                            title: Some("Must not overwrite".into()),
+                            effect: Some(Effect::Notify(Notification::Local)),
+                            ..Default::default()
+                        }
+                    },
+                    Origin::User { grant: None },
+                    original
+                )
+                .await,
+            Err(maka_scheduler::Error::RevisionConflict)
+        ));
+        assert_eq!(dispatcher.authorizations.load(Ordering::SeqCst), count);
+        assert_eq!(read().0, paused);
+        // Two submitted forms with the same revision cannot both win in the queue.
+        let a = handle.mutate_if_current(
+            Mutation::Update {
+                task_id: task.id.clone(),
+                patch: Update {
+                    title: Some("A".into()),
+                    ..Default::default()
+                },
+            },
+            Origin::User { grant: None },
+            current,
+        );
+        let b = handle.mutate_if_current(
+            Mutation::Update {
+                task_id: task.id.clone(),
+                patch: Update {
+                    title: Some("B".into()),
+                    ..Default::default()
+                },
+            },
+            Origin::User { grant: None },
+            current,
+        );
+        let (a, b) = tokio::join!(a, b);
+        assert!(matches!(
+            (&a, &b),
+            (Ok(_), Err(maka_scheduler::Error::RevisionConflict))
+                | (Err(maka_scheduler::Error::RevisionConflict), Ok(_))
+        ));
+        let (_, current) = read();
+        handle
+            .mutate_if_current(
+                Mutation::Delete {
+                    task_id: task.id.clone(),
+                },
+                Origin::User { grant: None },
+                current,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            handle
+                .mutate_if_current(
+                    Mutation::Resume {
+                        task_id: task.id.clone()
+                    },
+                    Origin::User { grant: None },
+                    current
+                )
+                .await,
+            Err(maka_scheduler::Error::RevisionConflict)
+        ));
+        stop.cancel();
+        worker.await.unwrap().unwrap();
+        log.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
 
 struct ManualClock(AtomicI64);
 struct LostSettlement {
@@ -87,6 +246,7 @@ impl Clock for ManualClock {
     }
 }
 struct DeliveryHost {
+    authorizations: AtomicUsize,
     calls: Mutex<Vec<Fire>>,
     entered: mpsc::UnboundedSender<Fire>,
     release: Notify,
@@ -98,6 +258,7 @@ impl Dispatcher for DeliveryHost {
         _: Effect,
     ) -> BoxFuture<'_, Result<Authorization, maka_scheduler::Error>> {
         Box::pin(async move {
+            self.authorizations.fetch_add(1, Ordering::SeqCst);
             Ok(Authorization {
                 grant: maka_plugins::authorization::Id(uuid::Uuid::nil()),
             })
@@ -168,6 +329,7 @@ async fn slow_delivery_does_not_block_edits_and_recovery_never_duplicates_unknow
         let clock = Arc::new(ManualClock(AtomicI64::new(1000)));
         let (entered, mut calls) = mpsc::unbounded_channel();
         let host = Arc::new(DeliveryHost {
+            authorizations: AtomicUsize::new(0),
             calls: Mutex::default(),
             entered,
             release: Notify::new(),

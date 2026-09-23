@@ -543,8 +543,12 @@ impl App {
         if self.focus != Focus::List || self.extensions.area.is_none() {
             return false;
         }
+        let multiline = matches!(self.extensions.selected_command(), Some(Command::Field(index))
+            if self.extensions.page.as_ref().is_some_and(|page| page.fields[index].enabled
+                && matches!(page.fields[index].control, Control::Text { multiline: true, .. })));
         if let Event::Key(key) = event
             && key.kind != KeyEventKind::Release
+            && !(multiline && matches!(key.code, KeyCode::Enter | KeyCode::Up | KeyCode::Down))
             && !key
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)

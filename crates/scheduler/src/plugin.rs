@@ -19,6 +19,7 @@
 
 mod backend;
 mod remote;
+mod terminal;
 mod tools;
 
 use crate::{
@@ -149,6 +150,7 @@ impl Plugin for Builtin {
             staged
                 .insert("ScheduledTask", tools::register(service.clone())?)
                 .map_err(display)?;
+            terminal::publish(service.clone(), &mut staged)?;
             remote::publish(service, &bundle, &mut staged)?;
             context
                 .services

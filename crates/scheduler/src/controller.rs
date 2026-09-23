@@ -78,17 +78,28 @@ impl Controller {
         now: i64,
         dispatcher: &dyn Dispatcher,
     ) -> Result<MutationResult, Error> {
+        self.mutate_at_revision(request, origin, None, now, dispatcher)
+            .await
+    }
+    pub(crate) async fn mutate_at_revision(
+        &mut self,
+        request: Mutation,
+        origin: Origin,
+        expected_revision: Option<u64>,
+        now: i64,
+        dispatcher: &dyn Dispatcher,
+    ) -> Result<MutationResult, Error> {
+        // This check runs in the owner queue, before authorization or persistence.
+        if let Some(expected) = expected_revision {
+            let id = request
+                .task_id()
+                .ok_or_else(|| invalid("create has no task revision"))?;
+            if self.catalog.plans.get(id).map(|saved| saved.revision) != Some(expected) {
+                return Err(Error::RevisionConflict);
+            }
+        }
         if let Some(invocation) = origin.agent()? {
-            let id = match &request {
-                Mutation::Create { .. } => None,
-                Mutation::Update { task_id, .. }
-                | Mutation::Pause { task_id }
-                | Mutation::Resume { task_id }
-                | Mutation::ClearHistory { task_id }
-                | Mutation::Snooze { task_id, .. }
-                | Mutation::TriggerNow { task_id }
-                | Mutation::Delete { task_id } => Some(task_id),
-            };
+            let id = request.task_id();
             if let Some(id) = id
                 && !matches!(&self.plan(id)?.task.created_by,
                     crate::task::Creator::Agent { session_id } if *session_id == invocation.session_id)

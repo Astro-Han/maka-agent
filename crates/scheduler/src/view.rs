@@ -30,6 +30,7 @@ use std::{collections::BTreeMap, sync::Arc};
 pub struct View {
     pub revision: u64,
     pub tasks: BTreeMap<String, Arc<Task>>,
+    pub(crate) task_revisions: BTreeMap<String, u64>,
     pub error: Option<String>,
     pub ready: bool,
     pub pending_work: bool,
@@ -52,6 +53,11 @@ impl View {
         Self {
             revision: catalog.revision.unwrap_or(0),
             tasks,
+            task_revisions: catalog
+                .plans
+                .iter()
+                .map(|(id, saved)| (id.clone(), saved.revision))
+                .collect(),
             error: None,
             ready: true,
             pending_work: catalog.plans.values().any(|saved| {
@@ -71,6 +77,7 @@ impl View {
         query.validate()?;
         match query {
             Query::Get { task_id } => Ok(QueryResult::Task {
+                revision: self.task_revisions.get(&task_id).copied(),
                 task: self
                     .tasks
                     .get(&task_id)

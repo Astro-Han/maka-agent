@@ -82,6 +82,20 @@ pub enum Mutation {
     Delete { task_id: String },
     Snooze { task_id: String, delay_ms: i64 },
 }
+impl Mutation {
+    pub fn task_id(&self) -> Option<&str> {
+        match self {
+            Self::Create { .. } => None,
+            Self::Update { task_id, .. }
+            | Self::Pause { task_id }
+            | Self::Resume { task_id }
+            | Self::ClearHistory { task_id }
+            | Self::TriggerNow { task_id }
+            | Self::Delete { task_id }
+            | Self::Snooze { task_id, .. } => Some(task_id),
+        }
+    }
+}
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Update {
@@ -115,6 +129,7 @@ pub enum QueryResult {
         actual: u64,
     },
     Task {
+        revision: Option<u64>,
         task: Option<Box<Task>>,
     },
 }

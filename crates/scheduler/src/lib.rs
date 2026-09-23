@@ -39,6 +39,8 @@ pub enum Error {
     Resource(#[from] maka_runtime::tools::ToolError),
     #[error("scheduled task does not exist")]
     NotFound,
+    #[error("scheduled task changed since it was read")]
+    RevisionConflict,
     #[error("scheduler is closed")]
     Closed,
     #[error("scheduler command queue is full")]
