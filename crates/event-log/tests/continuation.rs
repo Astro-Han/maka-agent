@@ -29,6 +29,8 @@ use maka_runtime::{
     input::InvocationInput,
 };
 
+#[path = "continuation/bundle.rs"]
+mod bundle;
 #[path = "continuation/fixtures.rs"]
 mod fixtures;
 #[path = "continuation/handoff.rs"]

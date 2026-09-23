@@ -186,7 +186,7 @@ async fn reservation(
     ).bind(session).fetch_optional(tx).await?)
 }
 
-async fn reservation_conflict(
+pub(crate) async fn reservation_conflict(
     tx: &mut SqliteConnection,
     run: &str,
     invocation: &str,

@@ -17,19 +17,55 @@
  * under the License.
  */
 
-use super::{BundleError, BundleSummary, format::Record, reader::Reader};
+use super::{
+    BundleError, BundleSummary,
+    format::{Blob, MAX_BLOB_BYTES, Record},
+    reader::Reader,
+};
 use crate::StoreError;
+use maka_runtime::artifact::content_digest;
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
 use tokio::io::AsyncRead;
 
 static MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./src/bundle/migrations");
 
+pub(super) async fn payload(
+    staged: &mut SqliteConnection,
+    number: i64,
+    descriptor: &Blob,
+) -> Result<Vec<u8>, StoreError> {
+    if descriptor.bytes() > MAX_BLOB_BYTES {
+        return Err(StoreError::PrefixTooLarge);
+    }
+    let mut payload = Vec::with_capacity(descriptor.bytes() as usize);
+    while payload.len() < descriptor.bytes() as usize {
+        let chunk: Vec<u8> =
+            sqlx::query_scalar("SELECT payload FROM chunks WHERE frame=? AND offset=?")
+                .bind(number)
+                .bind(payload.len() as i64)
+                .fetch_one(&mut *staged)
+                .await?;
+        if chunk.is_empty() || chunk.len() > descriptor.bytes() as usize - payload.len() {
+            return Err(StoreError::InvalidTransition(
+                "staged blob length differs".into(),
+            ));
+        }
+        payload.extend_from_slice(&chunk);
+    }
+    if content_digest(&payload) != descriptor.digest() {
+        return Err(StoreError::InvalidTransition(
+            "staged blob digest differs".into(),
+        ));
+    }
+    Ok(payload)
+}
+
 /// Private decoded transfer, not yet accepted history. Only Host-authored SQL
 /// opens this staging database; input never supplies a SQLite file or schema.
 /// Dropping it also closes SQLite's automatically deleted temporary database.
 pub struct StagedBundle {
-    database: SqliteConnection,
-    summary: BundleSummary,
+    pub(super) database: SqliteConnection,
+    pub(super) summary: BundleSummary,
 }
 
 impl StagedBundle {
@@ -93,6 +129,39 @@ impl StagedBundle {
 
     pub fn summary(&self) -> &BundleSummary {
         &self.summary
+    }
+
+    /// Source metadata is untrusted historical data, not destination authority.
+    /// Read one configuration at a time rather than materializing the catalog.
+    pub async fn configuration<T: serde::de::DeserializeOwned>(
+        &mut self,
+        session: &str,
+    ) -> Result<T, BundleError> {
+        let json: String = sqlx::query_scalar(
+            "SELECT record_json FROM frames WHERE kind='session' AND json_extract(record_json,'$.id')=?",
+        )
+        .bind(session)
+        .fetch_one(&mut self.database)
+        .await
+        .map_err(StoreError::from)?;
+        let Record::Session { configuration, .. } =
+            serde_json::from_str(&json).map_err(StoreError::from)?
+        else {
+            unreachable!()
+        };
+        serde_json::from_value(configuration)
+            .map_err(StoreError::from)
+            .map_err(Into::into)
+    }
+
+    pub async fn artifact_count(&mut self) -> Result<u64, BundleError> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM frames WHERE kind='blob' AND json_extract(record_json,'$.resource')='artifact'",
+        )
+        .fetch_one(&mut self.database)
+        .await
+        .map_err(StoreError::from)?;
+        crate::sequence_number(count).map_err(Into::into)
     }
 
     /// Validate original history before any position or proof relocation. This

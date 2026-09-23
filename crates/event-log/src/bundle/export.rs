@@ -104,7 +104,8 @@ async fn catalog<W: AsyncWrite + Unpin>(
             Option<String>,
         ) = sqlx::query_as(
             "SELECT created_at,updated_at,archived,configuration,
-               (SELECT authority_session_id FROM plugin_sessions WHERE session_id=live.id)
+               COALESCE((SELECT authority_session_id FROM plugin_sessions WHERE session_id=live.id),
+                 (SELECT parent_session_id FROM session_bundle_members WHERE session_id=live.id))
              FROM session_control live WHERE id=?",
         )
         .bind(&session.id)

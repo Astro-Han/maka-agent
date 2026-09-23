@@ -32,7 +32,11 @@ use std::collections::{BTreeMap, VecDeque};
 pub(super) struct Copies(VecDeque<Copy>);
 
 impl Copies {
-    pub async fn read(staged: &mut SqliteConnection, fence: u64) -> Result<Self, StoreError> {
+    pub async fn read(
+        staged: &mut SqliteConnection,
+        fence: u64,
+        positions: Option<&crate::bundle::relocation::Positions>,
+    ) -> Result<Self, StoreError> {
         let mut copies = Vec::new();
         let mut after = 0i64;
         loop {
@@ -45,10 +49,14 @@ impl Copies {
             if copies.len() == MAX_SESSIONS {
                 return Err(StoreError::PrefixTooLarge);
             }
-            let Record::Copy(copy) = serde_json::from_str(&json)? else {
+            let Record::Copy(mut copy) = serde_json::from_str(&json)? else {
                 unreachable!()
             };
             shape(&copy, fence)?;
+            if let Some(positions) = positions {
+                copy.through = positions.fence(copy.through);
+                copy.observed_through = positions.fence(copy.observed_through);
+            }
             copies.push(copy);
             after = number;
         }
@@ -86,6 +94,7 @@ impl Copies {
         staged: &mut SqliteConnection,
         db: &mut SqliteConnection,
         through: u64,
+        positions: Option<&crate::bundle::relocation::Positions>,
     ) -> Result<(), StoreError> {
         while self
             .0
@@ -94,7 +103,7 @@ impl Copies {
         {
             let copy = self.0.pop_front().expect("eligible copy");
             let request = &copy.request;
-            sqlx::query("INSERT INTO session_history_copies VALUES(?,?,?,?,?,?,?,?)")
+            sqlx::query("INSERT INTO session_history_copies(session_id,source_session_id,source_revision,through_sequence,observed_through,request_json,lineage_json,state) VALUES(?,?,?,?,?,?,?,?)")
                 .bind(&request.target_session_id)
                 .bind(&request.source_session_id)
                 .bind(request.expected_source_revision as i64)
@@ -120,6 +129,10 @@ impl Copies {
                         sequence,
                         archive_sequence,
                     } => {
+                        let sequence = positions.map_or(Ok(sequence), |p| p.event(sequence))?;
+                        let archive_sequence = archive_sequence
+                            .map(|n| positions.map_or(Ok(n), |p| p.event(n)))
+                            .transpose()?;
                         if sequence > copy.through
                             || archive_sequence.is_some_and(|a| a > copy.observed_through)
                         {
@@ -133,6 +146,7 @@ impl Copies {
                             .await?;
                     }
                     Record::RevisionSource { session, sequence } => {
+                        let sequence = positions.map_or(Ok(sequence), |p| p.event(sequence))?;
                         let CopyPurpose::Revision { turn_id } = &request.purpose else {
                             return Err(invalid("revision evidence requires a Revision copy"));
                         };

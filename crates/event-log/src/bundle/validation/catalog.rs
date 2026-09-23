@@ -74,6 +74,19 @@ pub(super) async fn validate(
         return Err(invalid("bundle catalog differs from its inventory"));
     }
     for (id, edges) in &mut parents {
+        // Proof-only owners may end at a frozen prefix. Selected Sessions must
+        // remain usable: foreign work cannot later be sealed by local recovery.
+        let unfinished: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM runtime_events o WHERE o.event_session=?
+             AND o.kind='invocation_opened' AND NOT EXISTS(SELECT 1 FROM runtime_events t
+               WHERE t.invocation_id=o.invocation_id AND t.kind='invocation_ended'))",
+        )
+        .bind(id)
+        .fetch_one(&mut *original)
+        .await?;
+        if unfinished {
+            return Err(invalid("bundle selected Session contains unfinished work"));
+        }
         let missing_input: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM session_history_copies WHERE session_id=?1
              AND json_extract(request_json,'$.purpose.kind')='revision'

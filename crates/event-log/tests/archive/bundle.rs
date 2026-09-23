@@ -20,6 +20,8 @@
 use super::*;
 #[path = "../bundle/fixtures.rs"]
 mod bundle_fixtures;
+#[path = "../bundle/import.rs"]
+mod bundle_import;
 
 #[tokio::test]
 async fn bundle_checkpoint_requires_its_atomic_terminal_even_with_a_valid_transfer_digest() {
@@ -55,6 +57,7 @@ async fn bundle_checkpoint_requires_its_atomic_terminal_even_with_a_valid_transf
         .unwrap();
     staged.validate_history().await.unwrap();
     staged.close().await.unwrap();
+    bundle_import::roundtrip(&bytes).await;
     let altered = frames::rewrite_events(&bytes, |event| event["id"] != pair[1].event().id);
     maka_event_log::bundle::inspect(altered.as_slice())
         .await
@@ -157,6 +160,7 @@ async fn bundle_archive_closure_preserves_lineage_instead_of_exporting_intermedi
         .unwrap();
     staged.validate_history().await.unwrap();
     staged.close().await.unwrap();
+    bundle_import::roundtrip(&bytes).await;
     let events: Vec<RuntimeEvent> = exported
         .iter()
         .filter(|r| r["kind"] == "event")

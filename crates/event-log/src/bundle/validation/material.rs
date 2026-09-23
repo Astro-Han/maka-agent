@@ -20,10 +20,12 @@
 use super::invalid;
 use crate::{
     StoreError,
-    bundle::format::{Blob, MAX_BLOB_BYTES, Record},
+    bundle::{
+        format::{Blob, Record},
+        stage::payload,
+    },
 };
 use maka_runtime::{
-    artifact::content_digest,
     composition::RequestComposition,
     event::{Fact, RuntimeEvent, ToolOutcome},
     tool_output::decode_raw_tool_result,
@@ -94,33 +96,6 @@ async fn descriptor(
         Ok((number, blob))
     })
     .transpose()
-}
-
-async fn payload(
-    staged: &mut SqliteConnection,
-    number: i64,
-    descriptor: &Blob,
-) -> Result<Vec<u8>, StoreError> {
-    if descriptor.bytes() > MAX_BLOB_BYTES {
-        return Err(StoreError::PrefixTooLarge);
-    }
-    let mut payload = Vec::with_capacity(descriptor.bytes() as usize);
-    while payload.len() < descriptor.bytes() as usize {
-        let chunk: Vec<u8> =
-            sqlx::query_scalar("SELECT payload FROM chunks WHERE frame=? AND offset=?")
-                .bind(number)
-                .bind(payload.len() as i64)
-                .fetch_one(&mut *staged)
-                .await?;
-        if chunk.is_empty() || chunk.len() > descriptor.bytes() as usize - payload.len() {
-            return Err(invalid("staged blob length differs"));
-        }
-        payload.extend_from_slice(&chunk);
-    }
-    if content_digest(&payload) != descriptor.digest() {
-        return Err(invalid("staged blob digest differs"));
-    }
-    Ok(payload)
 }
 
 pub(super) async fn check_bindings(
