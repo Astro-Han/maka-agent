@@ -208,14 +208,27 @@ CREATE TABLE session_history_copies (
     through_sequence INTEGER NOT NULL CHECK(through_sequence >= 0),
     observed_through INTEGER NOT NULL CHECK(observed_through >= through_sequence),
     request_json TEXT NOT NULL,
+    lineage_json TEXT NOT NULL CHECK(json_valid(lineage_json)),
     CHECK(session_id != source_session_id)
 );
+
+CREATE UNIQUE INDEX session_revision_family ON session_history_copies(
+    CAST(json_extract(lineage_json, '$.root_session_id') AS TEXT),
+    CAST(json_extract(lineage_json, '$.index') AS INTEGER)
+) WHERE json_extract(lineage_json, '$.kind') = 'revision';
 
 CREATE TABLE session_history_members (
     session_id TEXT NOT NULL REFERENCES session_history_copies(session_id),
     sequence INTEGER NOT NULL REFERENCES event_log(sequence),
     archives_before INTEGER NOT NULL CHECK(archives_before > 0),
     archive_sequence INTEGER REFERENCES event_log(sequence),
+    PRIMARY KEY(session_id, sequence)
+);
+
+-- Revision input is editable evidence, not part of the destination conversation.
+CREATE TABLE session_revision_sources (
+    session_id TEXT NOT NULL REFERENCES session_history_copies(session_id),
+    sequence INTEGER NOT NULL REFERENCES event_log(sequence),
     PRIMARY KEY(session_id, sequence)
 );
 
@@ -378,6 +391,16 @@ CREATE TABLE message_sources (
 );
 
 CREATE INDEX message_source_identity ON message_sources(message_id, event_id);
+
+CREATE VIEW session_message_sources AS
+    SELECT session_id AS owner_session_id, session_id AS source_session_id, message_id, event_id
+    FROM message_sources
+    UNION ALL
+    SELECT h.session_id, s.session_id, s.message_id, s.event_id FROM session_history_members h
+    JOIN runtime_events e ON e.sequence=h.sequence JOIN message_sources s ON s.event_id=e.event_id
+    UNION ALL
+    SELECT r.session_id, s.session_id, s.message_id, s.event_id FROM session_revision_sources r
+    JOIN runtime_events e ON e.sequence=r.sequence JOIN message_sources s ON s.event_id=e.event_id;
 
 CREATE TABLE transcript_rows (
     sequence INTEGER NOT NULL CHECK(sequence >= 0),

@@ -127,7 +127,10 @@ async fn repeated_checkpoints_cross_old_history_limits_with_bounded_tail_and_exa
                 source_session_id: "session".into(),
                 target_session_id: "copied-session".into(),
                 expected_source_revision: revision,
-                cut: HistoryCut::End,
+                purpose: maka_runtime::session::CopyPurpose::Branch {
+                    turn_id: None,
+                    side_conversation: false
+                },
             },
             &json!({}),
             2

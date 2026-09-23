@@ -218,7 +218,7 @@ impl EventLog {
         let inserted = sqlx::query(
             "INSERT INTO event_log (event_id, invocation_id, kind, operation_id, event_json)
              SELECT ?1, ?2, ?3, ?4, ?5 WHERE NOT EXISTS (
-                 SELECT 1 FROM message_sources WHERE session_id = ?6 AND message_id = ?1
+                 SELECT 1 FROM session_message_sources WHERE owner_session_id = ?6 AND message_id = ?1
                  UNION ALL SELECT 1 FROM message_admissions WHERE session_id = ?6 AND message_id = ?1)",
         )
         .bind(&event.id)

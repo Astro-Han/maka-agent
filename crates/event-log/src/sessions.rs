@@ -61,6 +61,7 @@ pub struct SessionRecord<T> {
     /// Oldest unresolved interaction, read from canonical facts in the same snapshot.
     #[serde(skip)]
     pub pending_interaction_since: Option<u64>,
+    pub lineage: Option<Box<maka_runtime::session::Lineage>>,
 }
 
 #[derive(Clone, Debug)]
@@ -362,8 +363,13 @@ pub(crate) async fn read<T: DeserializeOwned>(
     id: &str,
 ) -> Result<Option<SessionRecord<T>>, StoreError> {
     let raw = sqlx::query(
-        "SELECT id, revision, created_at, updated_at, archived, configuration FROM session_control WHERE id = ?",
-    ).bind(id).fetch_optional(&mut *connection).await?;
+        "SELECT id, revision, created_at, updated_at, archived, configuration,
+            (SELECT lineage_json FROM session_history_copies WHERE session_id = id)
+         FROM session_control WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&mut *connection)
+    .await?;
     if let Some(row) = raw {
         let configuration: String = row.try_get(5)?;
         if configuration.len() > MAX_CONFIGURATION_BYTES {
@@ -371,6 +377,10 @@ pub(crate) async fn read<T: DeserializeOwned>(
         }
         let configuration_digest = maka_runtime::artifact::content_digest(configuration.as_bytes());
         let configuration = serde_json::from_str(&configuration)?;
+        let lineage = row
+            .try_get::<Option<String>, _>(6)?
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?;
         let execution = execution::read(connection, id).await?;
         let read_state = read_state::read(connection, id).await?;
         let pending_since: Option<i64> = sqlx::query_scalar(
@@ -396,6 +406,7 @@ pub(crate) async fn read<T: DeserializeOwned>(
             execution,
             read_state,
             pending_interaction_since,
+            lineage,
         }))
     } else {
         Ok(None)

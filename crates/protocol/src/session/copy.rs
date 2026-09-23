@@ -22,28 +22,7 @@ use crate::{Operation, ProtocolError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Operation-specific choices cannot turn a missing revision boundary into an
-/// empty branch, or attach a side-conversation intent to a revision.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Purpose {
-    Branch {
-        turn_id: String,
-        side_conversation: bool,
-    },
-    EmptySideConversation,
-    Revision {
-        turn_id: String,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Input {
-    pub source_session_id: String,
-    pub target_session_id: String,
-    pub expected_source_revision: u64,
-    pub purpose: Purpose,
-}
+pub use maka_runtime::session::{CopyPurpose as Purpose, CopyRequest as Input};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -110,7 +89,7 @@ pub fn decode_input(operation: Operation, value: &Value) -> Result<Input> {
     }
     let purpose = match (operation, input.source_turn_id, input.intent) {
         (Operation::SessionBranchCreate, Some(turn_id), intent) => Purpose::Branch {
-            turn_id,
+            turn_id: Some(turn_id),
             side_conversation: intent.is_some(),
         },
         (Operation::SessionBranchCreate, None, Some(Intent::SideConversation)) => {
@@ -200,7 +179,7 @@ mod tests {
                 .unwrap()
                 .purpose,
             Purpose::Branch {
-                turn_id: "turn".into(),
+                turn_id: Some("turn".into()),
                 side_conversation: true
             }
         );

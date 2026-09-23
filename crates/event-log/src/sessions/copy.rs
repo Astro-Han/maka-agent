@@ -23,18 +23,11 @@ use crate::{
     context::{HistoryCut, history, safety},
     sequence_number,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use maka_runtime::session::{BranchOrigin, CopyPurpose, Lineage};
+use serde::{Serialize, de::DeserializeOwned};
 use sqlx::Connection;
 
-/// Stable copy identity. Configuration is captured only on the first commit.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SessionCopy {
-    pub source_session_id: String,
-    pub target_session_id: String,
-    pub expected_source_revision: u64,
-    pub cut: HistoryCut,
-}
+pub use maka_runtime::session::CopyRequest as SessionCopy;
 
 #[derive(Debug)]
 pub enum SessionCopyResult<T> {
@@ -62,7 +55,16 @@ impl EventLog {
         {
             return Err(super::invalid("invalid Session copy identity or revision"));
         }
-        if let HistoryCut::BeforeTurn(turn) | HistoryCut::ThroughTurn(turn) = &request.cut {
+        let cut = match &request.purpose {
+            CopyPurpose::Branch {
+                turn_id: Some(turn),
+                ..
+            } => HistoryCut::ThroughTurn(turn.clone()),
+            CopyPurpose::Branch { turn_id: None, .. } => HistoryCut::End,
+            CopyPurpose::EmptySideConversation => HistoryCut::Empty,
+            CopyPurpose::Revision { turn_id } => HistoryCut::BeforeTurn(turn_id.clone()),
+        };
+        if let HistoryCut::BeforeTurn(turn) | HistoryCut::ThroughTurn(turn) = &cut {
             super::validate_id(turn)?;
         }
         let configuration = serde_json::to_string(configuration)?;
@@ -103,12 +105,13 @@ impl EventLog {
             }
             let observed: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence),0) FROM event_log")
                 .fetch_one(&mut *tx).await?;
-            let through = history::resolve_cut(&mut tx, &request.source_session_id, &request.cut, observed).await?;
+            let through = history::resolve_cut(&mut tx, &request.source_session_id, &cut, observed).await?;
             safety::require_safe_through(&mut tx, &request.source_session_id, None, through).await?;
+            let lineage = lineage(&mut tx, &request).await?;
             super::insert(&mut tx, &request.target_session_id, &fingerprint, &configuration, now).await?;
-            sqlx::query("INSERT INTO session_history_copies VALUES (?, ?, ?, ?, ?, ?)")
+            sqlx::query("INSERT INTO session_history_copies VALUES (?, ?, ?, ?, ?, ?, ?)")
                 .bind(&request.target_session_id).bind(&request.source_session_id)
-                .bind(actual as i64).bind(through as i64).bind(observed).bind(encoded)
+                .bind(actual as i64).bind(through as i64).bind(observed).bind(encoded).bind(serde_json::to_string(&lineage)?)
                 .execute(&mut *tx).await?;
             // Each inherited row carries its original archive visibility, not the
             // new parent's current view. Later source pruning cannot alter a copy.
@@ -122,10 +125,79 @@ impl EventLog {
             ).bind(&request.target_session_id).bind(observed.saturating_add(1))
                 .bind(&request.source_session_id).bind(through as i64).execute(&mut *tx).await?;
             crate::artifacts::history::retain(&mut tx, &request.source_session_id, &request.target_session_id, now).await?;
+            if let CopyPurpose::Revision { turn_id } = &request.purpose {
+                let retained = sqlx::query(
+                    "INSERT INTO session_revision_sources
+                     SELECT ?1, sequence FROM session_history_events
+                     WHERE owner_session_id = ?2 AND sequence <= ?3
+                       AND kind = 'invocation_opened'
+                       AND json_extract(event_json, '$.invocation.turn_id') = ?4
+                       AND json_extract(event_json, '$.fact.input.kind') = 'message'
+                       AND json_array_length(event_json, '$.fact.input.source_messages') > 0"
+                ).bind(&request.target_session_id).bind(&request.source_session_id).bind(observed)
+                    .bind(turn_id).execute(&mut *tx).await?;
+                if retained.rows_affected() == 0 { return Err(super::invalid("revision Turn has no editable input")); }
+                crate::artifacts::history::retain_revision(&mut tx, &request.source_session_id, &request.target_session_id, now).await?;
+            }
             let session = super::read(&mut tx, &request.target_session_id).await?
                 .ok_or(StoreError::SessionNotFound)?;
             tx.commit().await.map_err(StoreError::CommitUnknown)?;
             Ok(SessionCopyResult::Committed(Box::new(session)))
         })).await
     }
+}
+
+async fn lineage(
+    connection: &mut sqlx::SqliteConnection,
+    request: &SessionCopy,
+) -> Result<Lineage, StoreError> {
+    let turn_id = match &request.purpose {
+        CopyPurpose::Branch { turn_id, .. } => {
+            return Ok(Lineage::Branch {
+                origin: BranchOrigin {
+                    parent_session_id: request.source_session_id.clone(),
+                    turn_id: turn_id.clone(),
+                },
+            });
+        }
+        CopyPurpose::EmptySideConversation => {
+            return Ok(Lineage::Branch {
+                origin: BranchOrigin {
+                    parent_session_id: request.source_session_id.clone(),
+                    turn_id: None,
+                },
+            });
+        }
+        CopyPurpose::Revision { turn_id } => turn_id,
+    };
+    let source: Option<String> =
+        sqlx::query_scalar("SELECT lineage_json FROM session_history_copies WHERE session_id = ?")
+            .bind(&request.source_session_id)
+            .fetch_optional(&mut *connection)
+            .await?;
+    let source: Option<Lineage> = source.map(|json| serde_json::from_str(&json)).transpose()?;
+    let root = match &source {
+        Some(Lineage::Revision {
+            root_session_id, ..
+        }) => root_session_id.clone(),
+        _ => request.source_session_id.clone(),
+    };
+    let index: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(CAST(json_extract(lineage_json, '$.index') AS INTEGER)), 1) + 1
+         FROM session_history_copies WHERE json_extract(lineage_json, '$.kind') = 'revision'
+         AND CAST(json_extract(lineage_json, '$.root_session_id') AS TEXT) = ?",
+    )
+    .bind(&root)
+    .fetch_one(connection)
+    .await?;
+    if index as u64 > super::MAX_SAFE_INTEGER {
+        return Err(super::invalid("revision family exhausted"));
+    }
+    Ok(Lineage::Revision {
+        root_session_id: root,
+        parent_session_id: request.source_session_id.clone(),
+        turn_id: turn_id.clone(),
+        index: index as u64,
+        branch: source.as_ref().and_then(Lineage::branch).cloned(),
+    })
 }

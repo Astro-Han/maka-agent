@@ -118,11 +118,9 @@ impl EventLog {
             let mut tx = connection.begin().await?;
             let row: Option<(i64, Option<String>)> = sqlx::query_as(
                 "SELECT e.sequence, CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1048576 THEN e.event_json END
-                 FROM message_sources s JOIN runtime_events e ON e.event_id=s.event_id
-                 LEFT JOIN session_history_members h ON h.sequence=e.sequence AND h.session_id=?1
-                 WHERE s.message_id=?2 AND e.kind='invocation_opened'
-                   AND json_extract(e.event_json,'$.invocation.turn_id')=?3
-                   AND (s.session_id=?1 OR h.sequence IS NOT NULL)"
+                 FROM session_message_sources s JOIN runtime_events e ON e.event_id=s.event_id
+                 WHERE s.owner_session_id=?1 AND s.message_id=?2 AND e.kind='invocation_opened'
+                   AND json_extract(e.event_json,'$.invocation.turn_id')=?3"
             ).bind(&session).bind(&message).bind(&turn).fetch_optional(&mut *tx).await?;
             let Some((sequence, json)) = row else { return Ok(None); };
             let proof = decode_root(sequence, json, &message)?;

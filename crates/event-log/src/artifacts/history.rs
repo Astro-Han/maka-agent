@@ -167,6 +167,57 @@ pub(crate) async fn retain(
     Ok(())
 }
 
+pub(crate) async fn retain_revision(
+    tx: &mut SqliteConnection,
+    source: &str,
+    target: &str,
+    now: u64,
+) -> Result<(), StoreError> {
+    let mut after = 0_i64;
+    loop {
+        let row: Option<(i64, String)> = sqlx::query_as(
+            "SELECT e.sequence, e.event_json FROM session_revision_sources s
+             JOIN runtime_events e ON e.sequence=s.sequence
+             WHERE s.session_id=? AND s.sequence>? ORDER BY s.sequence LIMIT 1",
+        )
+        .bind(target)
+        .bind(after)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((sequence, json)) = row else { break };
+        let event: RuntimeEvent = serde_json::from_str(&json)?;
+        let Fact::InvocationOpened {
+            input: InvocationInput::Message {
+                source_messages, ..
+            },
+            ..
+        } = event.fact
+        else {
+            return Err(invalid("revision source is not a message opening"));
+        };
+        for source_message in source_messages {
+            for attachment in source_message
+                .unprepared_content
+                .attachments
+                .iter()
+                .flatten()
+            {
+                retain_one(
+                    tx,
+                    source,
+                    target,
+                    &attachment.storage_ref,
+                    Some(attachment),
+                    now,
+                )
+                .await?;
+            }
+        }
+        after = sequence;
+    }
+    Ok(())
+}
+
 async fn retain_one(
     tx: &mut SqliteConnection,
     source: &str,

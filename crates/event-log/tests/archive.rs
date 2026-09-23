@@ -95,7 +95,10 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
                 source_session_id: "session".into(),
                 target_session_id: "unpruned-copy".into(),
                 expected_source_revision: initial_revision,
-                cut: HistoryCut::ThroughTurn("old".into()),
+                purpose: maka_runtime::session::CopyPurpose::Branch {
+                    turn_id: Some("old".into()),
+                    side_conversation: false
+                },
             },
             &json!({}),
             2
@@ -240,7 +243,10 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
                 source_session_id: "session".into(),
                 target_session_id: "archived-copy".into(),
                 expected_source_revision: final_revision,
-                cut: HistoryCut::ThroughTurn("old".into()),
+                purpose: maka_runtime::session::CopyPurpose::Branch {
+                    turn_id: Some("old".into()),
+                    side_conversation: false
+                },
             },
             &json!({}),
             3

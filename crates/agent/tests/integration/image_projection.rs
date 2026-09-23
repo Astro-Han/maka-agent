@@ -67,7 +67,7 @@ async fn reopened_user_and_typed_tool_images_share_actual_byte_budget_with_curre
         let revision = log.get_session::<Value>("session").await.unwrap().unwrap().revision;
         assert!(matches!(log.copy_session(maka_event_log::sessions::SessionCopy {
             source_session_id: "session".into(), target_session_id: "branch".into(),
-            expected_source_revision: revision, cut: maka_event_log::context::HistoryCut::End,
+            expected_source_revision: revision, purpose: maka_runtime::session::CopyPurpose::Branch { turn_id: None, side_conversation: false },
         }, &json!({}), 2).await.unwrap(), maka_event_log::sessions::SessionCopyResult::Committed(_)));
         log.close().await.unwrap();
 

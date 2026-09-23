@@ -100,8 +100,9 @@ pub(crate) async fn validate_source_id(
     message_id: &str,
 ) -> Result<(), StoreError> {
     let used: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE event_id = ?
-             AND json_extract(event_json, '$.invocation.session_id') = ?)",
+        "SELECT EXISTS(SELECT 1 FROM session_history_events WHERE event_id = ?1 AND owner_session_id = ?2
+             UNION ALL SELECT 1 FROM session_message_sources
+             WHERE owner_session_id=?2 AND source_session_id!=?2 AND message_id=?1)",
     )
     .bind(message_id)
     .bind(session)
@@ -112,9 +113,9 @@ pub(crate) async fn validate_source_id(
     }
     if let Some(event_id) = maka_runtime::tool_call::parse_metered_usage_id(message_id) {
         let used: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE event_id = ?1
+            "SELECT EXISTS(SELECT 1 FROM session_history_events WHERE event_id = ?1
                  AND kind = 'tool_settled'
-                 AND json_extract(event_json, '$.invocation.session_id') = ?2)",
+                 AND owner_session_id = ?2)",
         )
         .bind(event_id)
         .bind(session)
@@ -126,9 +127,9 @@ pub(crate) async fn validate_source_id(
     }
     if let Some((event_id, index)) = maka_runtime::tool_call::parse_provider_result_id(message_id) {
         let used: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE event_id = ?1
+            "SELECT EXISTS(SELECT 1 FROM session_history_events WHERE event_id = ?1
                  AND kind = 'model_completed'
-                 AND json_extract(event_json, '$.invocation.session_id') = ?2
+                 AND owner_session_id = ?2
                  AND json_extract(event_json, ?3) = 'tool_result')",
         )
         .bind(event_id)
@@ -145,13 +146,13 @@ pub(crate) async fn validate_source_id(
     if message_id.starts_with("tool_") {
         let used: bool = sqlx::query_scalar(
                 "SELECT EXISTS(
-                    SELECT 1 FROM runtime_events WHERE kind IN ('tool_dispatched', 'tool_rejected')
-                    AND json_extract(event_json, '$.invocation.session_id') = ?1
+                    SELECT 1 FROM session_history_events WHERE kind IN ('tool_dispatched', 'tool_rejected')
+                    AND owner_session_id = ?1
                     AND maka_tool_use_id(invocation_id, operation_id) = ?2
                     UNION ALL
-                    SELECT 1 FROM runtime_events event, json_each(event_json, '$.fact.output.parts') part
+                    SELECT 1 FROM session_history_events event, json_each(event_json, '$.fact.output.parts') part
                     WHERE event.kind = 'model_completed'
-                    AND json_extract(event.event_json, '$.invocation.session_id') = ?1
+                    AND event.owner_session_id = ?1
                     AND json_extract(part.value, '$.kind') = 'tool_call'
                     AND maka_tool_use_id(event.invocation_id, event.operation_id || ':' ||
                         json_extract(part.value, '$.call.id')) = ?2)"
@@ -168,7 +169,7 @@ async fn reject_claim(
     id: &str,
 ) -> Result<(), StoreError> {
     let claimed: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM message_sources WHERE session_id = ?1 AND message_id = ?2
+        "SELECT EXISTS(SELECT 1 FROM session_message_sources WHERE owner_session_id = ?1 AND message_id = ?2
          UNION ALL SELECT 1 FROM message_admissions WHERE session_id = ?1 AND message_id = ?2)",
     )
     .bind(session)

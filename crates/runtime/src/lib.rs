@@ -40,6 +40,7 @@ pub mod oauth;
 pub mod provider;
 pub mod read;
 pub mod scope;
+pub mod session;
 pub mod shell_result;
 pub mod shell_run;
 pub mod terminal;
