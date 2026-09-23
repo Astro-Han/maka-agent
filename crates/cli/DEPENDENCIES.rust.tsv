@@ -392,6 +392,7 @@ maka-event-log@0.2.0		X
 maka-fs-tools@0.2.0		X														
 maka-graph@0.2.0		X														
 maka-insights@0.2.0		X														
+maka-jev@0.2.0		X														
 maka-js-runtime@0.2.0		X														
 maka-model@0.2.0		X														
 maka-network@0.2.0		X														
@@ -405,6 +406,7 @@ maka-runtime@0.2.0		X
 maka-runtime-host@0.2.0		X														
 maka-sandbox@0.2.0		X														
 maka-scheduler@0.2.0		X														
+maka-session-import@0.2.0		X														
 maka-skills@0.2.0		X														
 maka-tool-catalog@0.2.0		X														
 maka-tools@0.2.0		X														
