@@ -35,6 +35,9 @@ fn host_directory_reference_survives_restart_and_sends_without_text_or_registrat
     let published = directory.path().join("published");
     let selected = published.join("目录 target");
     std::fs::create_dir_all(&selected).unwrap();
+    for index in 0..40 {
+        std::fs::create_dir(published.join(format!("folder-{index:02}"))).unwrap();
+    }
     let host = super::super::candidate::CandidateFixture::new(directory.path().join("root"));
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let stop = tokio_util::sync::CancellationToken::new();
@@ -78,7 +81,10 @@ fn host_directory_reference_survives_restart_and_sends_without_text_or_registrat
     tui.click_text("Host directories");
     tui.wait_for("Published folders");
     tui.click_text("Published folders");
+    tui.wait_for("┃");
+    tui.drag_text_to_row("┃", 38);
     tui.wait_for("目录 target");
+    tui.send(b"\x1b[<0;1;39m");
     tui.click_text("目录 target");
     tui.wait_for("No subdirectories");
     tui.click_text("Reference this directory");
