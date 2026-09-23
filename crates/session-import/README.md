@@ -29,6 +29,7 @@ Converts Codex, Claude Code and OpenCode conversations into historical records t
 - Tool calls and results retain their source order and correlation. Missing outcomes stay missing.
 - Filesystem catalogs read bounded summaries (Codex: 512 KiB; Claude: 256 KiB head and tail), apply workspace/archive filters, and paginate by modification time and relative path. Query-bound cursors resume after the last delivered entry, including when the 48 KiB wire budget cuts a page short.
 - OpenCode catalogs read root Sessions in bounded database batches, ordered by source time and identity. Workspace and text matching use the same normalization as filesystem catalogs; cursors bind the query and database. Pages observe a live source, not a retained snapshot.
+- Codex catalogs select the highest `state_N.sqlite` generation and read at most 100,000 index entries under the public database budget. Rust normalizes timestamps and retains only the next page's candidates; rollout paths still require the public file capability. An unavailable initial database falls back to files, never an older database. Continuations retain their selected generation or filesystem source.
 - Source workspace/model values are observations, not execution configuration. No credentials or provider options enter the result.
 - Corrupt interior JSON, inconsistent source identity and changing multi-pass input fail the import. Only an unfinished final JSON write is omitted and identified in the fingerprint.
 

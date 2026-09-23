@@ -96,7 +96,7 @@ pub(super) fn read(
         archived,
     }))
 }
-fn safe_id(id: &str, claude: bool) -> bool {
+pub(super) fn safe_id(id: &str, claude: bool) -> bool {
     !id.is_empty()
         && id.len() <= 128
         && id.bytes().all(|byte| {
@@ -271,12 +271,12 @@ struct Meta {
 }
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum Origin {
+pub(super) enum Origin {
     Text(String),
     Object { custom: Option<String> },
 }
 impl Origin {
-    fn supported(&self) -> bool {
+    pub(super) fn supported(&self) -> bool {
         fn supported(value: &str) -> bool {
             matches!(value, "cli" | "exec" | "vscode" | "atlas" | "chatgpt")
         }

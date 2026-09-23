@@ -5149,6 +5149,7 @@ name = "maka-session-import"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "dunce",
  "maka-plugins",
  "maka-runtime",
  "serde",

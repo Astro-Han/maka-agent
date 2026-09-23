@@ -17,11 +17,13 @@
  * under the License.
  */
 
-//! Live, bounded filesystem catalogs. Cursors bind the query and root, not a
+//! Live, bounded source catalogs. Cursors bind the query and root, not a
 //! snapshot of a source application that may keep appending between requests.
+mod codex;
 mod database;
 mod summary;
 use crate::{Error, transcript::source_cwd};
+pub use codex::list as codex;
 pub use database::opencode;
 use maka_plugins::filesystem::{
     OpenFile, ReadDirectory, ReadError, Reader, Symlinks, entries::Kind,
@@ -125,15 +127,7 @@ fn prepare(mut query: Query) -> Result<Query, Error> {
 
 pub async fn list(view: &ReadDirectory, format: Format, query: Query) -> Result<Page, Error> {
     let query = prepare(query)?;
-    let encoded = serde_json::to_vec(&(
-        format,
-        view.location(),
-        &query.cwd,
-        &query.text,
-        query.include_archived,
-    ))
-    .map_err(|_| Error::Invalid("invalid catalog query"))?;
-    let hash = format!("{:x}", Sha256::digest(encoded));
+    let hash = query_hash(view, format, &query)?;
     let after = query
         .cursor
         .as_ref()
@@ -148,6 +142,18 @@ pub async fn list(view: &ReadDirectory, format: Format, query: Query) -> Result<
         .transpose()?;
     view.with_reader(move |reader| scan(reader, format, query, hash, after))
         .await?
+}
+
+fn query_hash(view: &ReadDirectory, format: Format, query: &Query) -> Result<String, Error> {
+    let encoded = serde_json::to_vec(&(
+        format,
+        view.location(),
+        &query.cwd,
+        &query.text,
+        query.include_archived,
+    ))
+    .map_err(|_| Error::Invalid("invalid catalog query"))?;
+    Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
 fn scan(
