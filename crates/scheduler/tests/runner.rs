@@ -91,6 +91,7 @@ async fn queued_form_revision_fences_same_task_before_authorization_but_not_unre
             let QueryResult::Task {
                 task: Some(task),
                 revision: Some(revision),
+                ..
             } = handle
                 .query(Query::Get {
                     task_id: task.id.clone(),

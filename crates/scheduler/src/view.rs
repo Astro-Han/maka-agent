@@ -30,10 +30,15 @@ use std::{collections::BTreeMap, sync::Arc};
 pub struct View {
     pub revision: u64,
     pub tasks: BTreeMap<String, Arc<Task>>,
-    pub(crate) task_revisions: BTreeMap<String, u64>,
+    pub(crate) task_versions: BTreeMap<String, TaskVersion>,
     pub error: Option<String>,
     pub ready: bool,
     pub pending_work: bool,
+}
+#[derive(Clone)]
+pub(crate) struct TaskVersion {
+    revision: u64,
+    timezone: String,
 }
 impl View {
     pub(crate) fn committed(catalog: &Catalog, previous: &Self) -> Self {
@@ -53,10 +58,18 @@ impl View {
         Self {
             revision: catalog.revision.unwrap_or(0),
             tasks,
-            task_revisions: catalog
+            task_versions: catalog
                 .plans
                 .iter()
-                .map(|(id, saved)| (id.clone(), saved.revision))
+                .map(|(id, saved)| {
+                    (
+                        id.clone(),
+                        TaskVersion {
+                            revision: saved.revision,
+                            timezone: saved.plan.timezone.clone(),
+                        },
+                    )
+                })
                 .collect(),
             error: None,
             ready: true,
@@ -77,7 +90,14 @@ impl View {
         query.validate()?;
         match query {
             Query::Get { task_id } => Ok(QueryResult::Task {
-                revision: self.task_revisions.get(&task_id).copied(),
+                revision: self
+                    .task_versions
+                    .get(&task_id)
+                    .map(|version| version.revision),
+                timezone: self
+                    .task_versions
+                    .get(&task_id)
+                    .map(|version| version.timezone.clone()),
                 task: self
                     .tasks
                     .get(&task_id)

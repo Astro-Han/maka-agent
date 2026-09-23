@@ -276,7 +276,7 @@ impl Owner {
         self.updates.send_replace(Arc::new(View {
             revision: previous.revision,
             tasks: previous.tasks.clone(),
-            task_revisions: previous.task_revisions.clone(),
+            task_versions: previous.task_versions.clone(),
             ready: false,
             pending_work: previous.pending_work,
             error: Some(error.to_string()),

@@ -130,6 +130,7 @@ pub enum QueryResult {
     },
     Task {
         revision: Option<u64>,
+        timezone: Option<String>,
         task: Option<Box<Task>>,
     },
 }

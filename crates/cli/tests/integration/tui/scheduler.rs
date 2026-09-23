@@ -48,24 +48,13 @@ fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_mode
         )
         .await;
         // Setup uses the existing consent authority, not a second task store.
-        let snapshot = client
-            .request(Operation::PluginClientQuery, json!({"kind":"snapshot"}))
-            .await
-            .unwrap();
-        let entry = snapshot["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|entry| entry["entryId"] == "maka.scheduler.ui")
-            .unwrap();
+        let binding = RemoteBinding::Package { package_id: "maka.scheduler".into(), method: "terminal".into(), session_id: None };
+        let RemoteResult::Bound { target, .. } = client.plugin_remote(RemoteRequest::Bind { binding: binding.clone() }).await.unwrap() else { panic!("terminal") };
         let grant = client
             .request(
                 Operation::PluginAuthorization,
                 json!({
-                    "client":{"entryId":entry["entryId"],"extensionId":entry["extensionId"],
-                        "activation":entry["activation"],"contentDigest":entry["contentDigest"],
-                        "clientDigest":entry["clientDigest"]},
-                    "scope":"profile", "command":{"kind":"approve", "request":{
+                    "binding":binding, "target":target, "command":{"kind":"approve", "request":{
                         "operationId":uuid::Uuid::new_v4(), "title":"Fixture reminder",
                         "target":{"kind":"profile"}, "capabilities":["notifications"]
                     }}
@@ -83,7 +72,7 @@ fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_mode
             "request",
             json!({"kind":"mutate","grant":grant["grant"]["id"],
                 "mutation":{"kind":"create","input":{"title":"Scheduled fixture",
-                    "intentBody":"Original note","schedule":{"kind":"once","runAt":run_at},
+                "intentBody":"Original note","schedule":{"kind":"interval","everySeconds":600,"startAt":run_at},
                     "effect":{"kind":"notify","channel":"local"}}}
             }),
         )
@@ -118,6 +107,24 @@ fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_mode
     assert_eq!(paused["task"]["status"], "paused");
     tui.click_text("Resume");
     tui.wait_for("Pause");
+    tui.click_text("Interval");
+    tui.wait_for("Every (seconds)");
+    tui.click_text("Every (seconds)");
+    tui.send(b"\x01\x1b[200~9\x1b[201~");
+    tui.click_text("Save");
+    tui.wait_for("Check the date, UTC offset and recurrence fields");
+    tui.click_text("Every (seconds)");
+    tui.send(b"\x01\x1b[200~900\x1b[201~");
+    tui.click_text("Save");
+    tui.wait_for("✓ Save");
+    let rescheduled = runtime.block_on(remote(&client, "request", query()));
+    assert_eq!(rescheduled["task"]["schedule"]["everySeconds"], 900);
+    assert_eq!(
+        rescheduled["task"]["schedule"]["startAt"],
+        first["task"]["schedule"]["startAt"]
+    );
+    tui.send(b"\x1b");
+    tui.wait_for("First line");
     runtime.block_on(remote(
         &client,
         "request",

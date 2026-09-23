@@ -17,6 +17,8 @@
  * under the License.
  */
 
+mod timing;
+
 use super::{ID, Service, remote::error};
 use crate::{
     authorization::Origin,
@@ -46,6 +48,7 @@ struct Route {
     revision: Option<u64>,
     offset: usize,
     task: Option<String>,
+    timing: bool,
 }
 
 pub(super) fn publish(service: Service, staged: &mut Staged) -> Result<(), String> {
@@ -78,33 +81,87 @@ impl Method for View {
                     fields,
                 } => {
                     let route = decode(route)?;
-                    let task_id = route.task.clone().ok_or_else(|| invalid("Select a task"))?;
-                    let mutation = mutation(task_id, &action, fields)?;
-                    let revision = revision.parse::<u64>().map_err(invalid)?;
-                    match service
-                        .handle
-                        .mutate_if_current(mutation, Origin::User { grant: None }, revision)
-                        .await
-                    {
-                        Ok(_) => Reply::Applied {
-                            route: serde_json::to_value(route).map_err(invalid)?,
-                        },
-                        Err(crate::Error::RevisionConflict) => Reply::Conflict,
-                        Err(crate::Error::Invalid(_) | crate::Error::Time(_)) => Reply::Rejected {
-                            message: Text::localized(
-                                "Check the task fields and status",
-                                "请检查任务内容和状态",
-                                "請檢查任務內容和狀態",
-                            ),
-                        },
-                        Err(failure) => return Err(error(failure)),
-                    }
+                    submit(&service, route, revision, action, fields).await?
                 }
             };
             reply.validate().map_err(invalid)?;
             serde_json::to_value(reply).map_err(invalid)
         })
     }
+}
+
+async fn submit(
+    service: &Service,
+    route: Route,
+    revision: String,
+    action: String,
+    fields: BTreeMap<String, Value>,
+) -> Result<Reply, Error> {
+    let task_id = route.task.clone().ok_or_else(|| invalid("Select a task"))?;
+    let revision = revision.parse::<u64>().map_err(invalid)?;
+    let mutation = if route.timing {
+        if action != "save_schedule" {
+            return Err(invalid("Unknown schedule action"));
+        }
+        let QueryResult::Task {
+            task: Some(task),
+            revision: Some(current),
+            timezone: Some(timezone),
+        } = service
+            .query(Query::Get {
+                task_id: task_id.clone(),
+            })
+            .map_err(error)?
+        else {
+            return Ok(Reply::Conflict);
+        };
+        if current != revision {
+            return Ok(Reply::Conflict);
+        }
+        let patch = match timing::update(&task.schedule, &timezone, fields) {
+            Ok(schedule) => schedule,
+            Err(_) => {
+                return Ok(Reply::Rejected {
+                    message: Text::localized(
+                        "Check the date, UTC offset and recurrence fields",
+                        "请检查日期、时区偏移和重复规则",
+                        "請檢查日期、時區偏移和重複規則",
+                    ),
+                });
+            }
+        };
+        Mutation::Update {
+            task_id,
+            patch: Update {
+                schedule: (patch != task.schedule).then_some(patch),
+                ..Update::default()
+            },
+        }
+    } else {
+        mutation(task_id, &action, fields)?
+    };
+    // The preliminary read only decodes the form; the owner still checks the
+    // same revision after any concurrent edit before accepting this mutation.
+    Ok(
+        match service
+            .handle
+            .mutate_if_current(mutation, Origin::User { grant: None }, revision)
+            .await
+        {
+            Ok(_) => Reply::Applied {
+                route: serde_json::to_value(route).map_err(invalid)?,
+            },
+            Err(crate::Error::RevisionConflict) => Reply::Conflict,
+            Err(crate::Error::Invalid(_) | crate::Error::Time(_)) => Reply::Rejected {
+                message: Text::localized(
+                    "Check the task fields and status",
+                    "请检查任务内容和状态",
+                    "請檢查任務內容和狀態",
+                ),
+            },
+            Err(failure) => return Err(error(failure)),
+        },
+    )
 }
 
 fn decode(value: Value) -> Result<Route, Error> {
@@ -114,6 +171,7 @@ fn decode(value: Value) -> Result<Route, Error> {
         serde_json::from_value(value).map_err(invalid)?
     };
     if route.offset >= 64
+        || route.timing && route.task.is_none()
         || !route.offset.is_multiple_of(WINDOW)
         || route.task.is_some()
             && (route.cursor.is_some() || route.revision.is_some() || route.offset != 0)
@@ -128,8 +186,13 @@ fn read(service: &Service, route: Route) -> Result<Reply, Error> {
             QueryResult::Task {
                 task: Some(task),
                 revision: Some(revision),
+                timezone: Some(timezone),
             } => Ok(Reply::Page {
-                page: detail(*task, revision),
+                page: if route.timing {
+                    timing::page(&task, revision, &timezone)?
+                } else {
+                    detail(*task, revision)
+                },
             }),
             QueryResult::Task { task: None, .. } => Ok(Reply::Rejected {
                 message: Text::localized("Task no longer exists", "任务已不存在", "任務已不存在"),
@@ -175,6 +238,7 @@ fn read(service: &Service, route: Route) -> Result<Reply, Error> {
                     revision: Some(revision),
                     offset: route.offset + WINDOW,
                     task: None,
+                    timing: false,
                 })
             } else {
                 next_cursor.map(|cursor| Route {
@@ -198,10 +262,22 @@ fn read(service: &Service, route: Route) -> Result<Reply, Error> {
 }
 fn detail(task: Task, revision: u64) -> Page {
     let mut page = empty(Text::plain(display(&task.title, 256, false)), revision);
+    page.rows.push(Row {
+        id: "schedule".into(),
+        title: timing::title(&task.schedule),
+        description: String::new(),
+        route: serde_json::to_value(Route {
+            task: Some(task.id.clone()),
+            timing: true,
+            ..Route::default()
+        })
+        .expect("task route"),
+    });
     page.body = format!("{}  {}", status(task.status), instant(task.next_fire_at));
     let Intent::Text { body } = task.intent;
     // Never save a sanitized or truncated field over the original task content.
-    let editable = body.len() <= INTENT_BYTES
+    let editable = matches!(task.status, Status::Active | Status::Paused)
+        && body.len() <= INTENT_BYTES
         && display(&body, INTENT_BYTES, true) == body
         && display(&task.title, 512, false) == task.title;
     if editable {
