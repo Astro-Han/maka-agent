@@ -4657,6 +4657,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "maka-background-health"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "maka-plugins",
+ "maka-runtime",
+ "maka-tool-catalog",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "maka-cli"
 version = "0.2.0"
 dependencies = [
@@ -5078,6 +5095,7 @@ dependencies = [
  "libc",
  "maka-agent",
  "maka-assistant",
+ "maka-background-health",
  "maka-client",
  "maka-client-capability",
  "maka-config",

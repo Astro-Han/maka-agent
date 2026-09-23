@@ -22,6 +22,7 @@ mod artifact_boundary;
 mod artifact_interop;
 mod attachment_consumption;
 mod auto_context;
+mod background_health_plugin;
 mod client_access;
 mod client_anthropic_options;
 mod client_capability;
