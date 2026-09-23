@@ -24,6 +24,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
+    Remote(#[from] maka_plugins::remote::Error),
+    #[error(transparent)]
     Read(#[from] ReadError),
     #[error(transparent)]
     Database(#[from] maka_plugins::filesystem::database::Error),

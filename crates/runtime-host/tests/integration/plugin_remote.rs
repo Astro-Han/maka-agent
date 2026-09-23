@@ -38,6 +38,7 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod catalog;
 mod fixture;
 mod javascript;
 use fixture::{Example, State};
@@ -136,6 +137,7 @@ async fn scenario() {
         rpc(&mut peer, json!({"kind":"bind","binding":import_binding})).await["target"].clone();
     let import_call = json!({"kind":"call","binding":import_binding,"target":import_target,
         "document":document,"input":{"path":database_path,"action":"read","session":"selected"}});
+    catalog::codex(&mut peer, &fixture.workspace, import_call.clone()).await;
     let imported = rpc(&mut peer, import_call.clone()).await;
     let transcript: maka_session_import::Transcript =
         serde_json::from_value(imported["value"].clone()).unwrap();

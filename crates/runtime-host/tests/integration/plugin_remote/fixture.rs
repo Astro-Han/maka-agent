@@ -124,6 +124,13 @@ impl Method for ImportHistory {
                             .map_err(|error| Error::Provider(error.to_string()))?;
                     serde_json::to_value(page).map_err(|error| Error::Provider(error.to_string()))
                 }
+                ImportAction::CodexCatalog { path, query } => {
+                    let page =
+                        maka_session_import::catalog::codex(caller.views.as_ref(), path, query)
+                            .await
+                            .map_err(|error| Error::Provider(error.to_string()))?;
+                    serde_json::to_value(page).map_err(|error| Error::Provider(error.to_string()))
+                }
             }
         })
     }
@@ -136,6 +143,10 @@ enum ImportAction {
         session: String,
     },
     Catalog {
+        path: String,
+        query: maka_session_import::catalog::Query,
+    },
+    CodexCatalog {
         path: String,
         query: maka_session_import::catalog::Query,
     },
