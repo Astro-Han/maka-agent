@@ -21,6 +21,33 @@ use crate::{Client, ClientError, RequestFailure};
 use maka_protocol::{Operation, plugin::*};
 
 impl Client {
+    pub async fn plugin_query(&self, input: Query) -> Result<QueryResult, RequestFailure> {
+        let value = self
+            .request(
+                Operation::PluginPlatformQuery,
+                serde_json::to_value(&input).expect("wire input"),
+            )
+            .await?;
+        let result: QueryResult = serde_json::from_value(value)
+            .map_err(|error| self.invalid_plugin_result(error.to_string()))?;
+        let actual = match &result {
+            QueryResult::Status(_) => View::Status,
+            QueryResult::Packages(_) => View::Packages,
+            QueryResult::Entries(_) => View::Entries,
+            QueryResult::Tools(_) => View::Tools,
+            QueryResult::Commands(_) => View::Commands,
+            QueryResult::Executors(_) => View::Executors,
+            QueryResult::TerminalViews(_) => View::TerminalViews,
+            QueryResult::Failures(_) => View::Failures,
+        };
+        if actual != input.view {
+            return Err(self.invalid_plugin_result(
+                "Plugin directory response does not match the requested view",
+            ));
+        }
+        Ok(result)
+    }
+
     /// Calls one operation on the current connection. Never binds a replacement or
     /// replays an unknown call; the caller owns document and stream lifetimes.
     pub async fn plugin_remote(

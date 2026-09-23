@@ -38,10 +38,11 @@ pub enum Route {
     Inbox,
     Projects,
     Connections,
+    Extensions,
 }
 
 impl Route {
-    pub const PAGE_COUNT: usize = Self::ALL.len() + 1;
+    pub const PAGE_COUNT: usize = Self::ALL.len() + 2;
     pub const ALL: [Self; 6] = [
         Self::Workspace,
         Self::Host,
@@ -60,12 +61,14 @@ impl Route {
             Self::Inbox => "route-inbox",
             Self::Projects => "route-projects",
             Self::Connections => "route-connections",
+            Self::Extensions => "route-extensions",
         }
     }
     pub fn section(&self) -> Self {
         match self {
             Self::Session(_) => Self::Workspace,
             Self::Connections => Self::Settings,
+            Self::Extensions => Self::Host,
             _ => self.clone(),
         }
     }

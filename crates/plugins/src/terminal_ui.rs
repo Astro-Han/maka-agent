@@ -17,7 +17,9 @@
  * under the License.
  */
 
-//! Navigation metadata belongs to the Remote endpoint's exact registration.
+//! Native terminal views share the Remote endpoint's exact registration.
+
+pub mod page;
 
 use crate::Error;
 use serde::{Deserialize, Serialize};
@@ -34,6 +36,21 @@ pub struct Text {
     pub translations: BTreeMap<String, String>,
 }
 impl Text {
+    pub fn plain(value: impl Into<String>) -> Self {
+        Self {
+            fallback: value.into(),
+            translations: BTreeMap::new(),
+        }
+    }
+    pub fn localized(en: &str, zh_cn: &str, zh_tw: &str) -> Self {
+        Self {
+            fallback: en.into(),
+            translations: BTreeMap::from([
+                ("zh-CN".into(), zh_cn.into()),
+                ("zh-TW".into(), zh_tw.into()),
+            ]),
+        }
+    }
     pub fn resolve(&self, locale: &str) -> &str {
         self.translations
             .get(locale)

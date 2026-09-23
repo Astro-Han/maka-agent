@@ -1,0 +1,138 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::{Request, Work};
+use maka_client::{Client, ClientError, RequestFailure};
+use maka_plugins::terminal_ui::page::{Reply, Request as Input};
+use maka_protocol::plugin::{
+    Page, Query, QueryResult, RemoteBinding, RemoteRequest, RemoteResult, TerminalViewProjection,
+    View,
+};
+
+pub enum Output {
+    Directory(Page<TerminalViewProjection>),
+    Page(Reply),
+}
+pub struct Failure {
+    pub unknown: bool,
+}
+fn failure(error: RequestFailure, writing: bool) -> Failure {
+    let unknown = matches!(&error, RequestFailure::Unknown(_))
+        || matches!(&error,
+        RequestFailure::Rejected(ClientError::Rejected(error)) if matches!(error.code,
+        maka_protocol::OperationErrorCode::OutcomeUnknown | maka_protocol::OperationErrorCode::CommitOutcomeUnknown));
+    Failure {
+        unknown: writing && unknown,
+    }
+}
+pub async fn execute(client: &Client, request: &Request) -> Result<Output, Failure> {
+    match &request.work {
+        Work::Directory(cursor) => {
+            let result = client
+                .plugin_query(Query {
+                    view: View::TerminalViews,
+                    root_id: Some(maka_plugins::composition::Scope::Profile),
+                    cursor: cursor.clone(),
+                    limit: Some(16),
+                })
+                .await
+                .map_err(|error| failure(error, false))?;
+            match result {
+                QueryResult::TerminalViews(page) => Ok(Output::Directory(page)),
+                _ => Err(Failure { unknown: false }),
+            }
+        }
+        Work::Page { view, input } => {
+            input.validate().map_err(|_| Failure { unknown: false })?;
+            let RemoteResult::Document { document } = client
+                .plugin_remote(RemoteRequest::OpenDocument)
+                .await
+                .map_err(|error| failure(error, false))?
+            else {
+                return Err(Failure { unknown: false });
+            };
+            let result = client
+                .plugin_remote(RemoteRequest::Call {
+                    binding: RemoteBinding::Package {
+                        package_id: view.package_id.clone(),
+                        method: view.method.clone(),
+                        session_id: request.session.clone(),
+                    },
+                    target: view.target.clone(),
+                    document,
+                    input: serde_json::to_value(input).expect("terminal request"),
+                })
+                .await;
+            // The finite call always owns cleanup, even after navigation. Do not
+            // replace a known write receipt with a CloseDocument failure.
+            let closed = client
+                .plugin_remote(RemoteRequest::CloseDocument { document })
+                .await;
+            let writing = matches!(input, Input::Submit { .. });
+            let RemoteResult::Value { value } = result.map_err(|error| failure(error, writing))?
+            else {
+                return Err(Failure { unknown: writing });
+            };
+            let reply: Reply =
+                serde_json::from_value(value).map_err(|_| Failure { unknown: writing })?;
+            reply.validate().map_err(|_| Failure { unknown: writing })?;
+            if !matches!(
+                (&input, &reply),
+                (
+                    Input::Read { .. },
+                    Reply::Page { .. } | Reply::Conflict | Reply::Rejected { .. }
+                ) | (
+                    Input::Submit { .. },
+                    Reply::Applied { .. } | Reply::Conflict | Reply::Rejected { .. }
+                )
+            ) {
+                return Err(Failure { unknown: writing });
+            }
+            if !writing {
+                closed.map_err(|error| failure(error, false))?;
+            }
+            Ok(Output::Page(reply))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maka_protocol::{OperationError, OperationErrorCode};
+
+    #[test]
+    fn host_unknown_write_receipts_and_transport_loss_are_not_rejections() {
+        for (code, unknown) in [
+            (OperationErrorCode::OutcomeUnknown, true),
+            (OperationErrorCode::CommitOutcomeUnknown, true),
+            (OperationErrorCode::OperationConflict, false),
+            (OperationErrorCode::InvalidRequest, false),
+        ] {
+            let error = RequestFailure::Rejected(ClientError::Rejected(OperationError {
+                code,
+                message: "detail".into(),
+            }));
+            assert_eq!(failure(error.clone(), true).unknown, unknown);
+            assert!(!failure(error, false).unknown);
+        }
+        assert!(failure(RequestFailure::Unknown(ClientError::Timeout), true).unknown);
+        assert!(!failure(RequestFailure::NotDispatched(ClientError::Timeout), true).unknown);
+    }
+}

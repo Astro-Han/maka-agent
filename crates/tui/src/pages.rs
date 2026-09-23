@@ -22,6 +22,7 @@ pub mod branch;
 pub mod chat;
 pub mod commands;
 pub mod connections;
+pub mod extensions;
 pub mod interactions;
 pub mod manage;
 pub mod onboarding;

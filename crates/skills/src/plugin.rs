@@ -43,6 +43,7 @@ mod preferences;
 mod preview;
 pub mod remote;
 mod snapshot;
+mod terminal;
 mod tools;
 mod user;
 pub use snapshot::{InputPreparation, Snapshot};
@@ -206,6 +207,7 @@ impl Plugin for Builtin {
                 .map_err(|error| error.to_string())?;
             let mut staged = Staged::default();
             tools::publish(&skills, &mut staged)?;
+            terminal::publish(&skills, &mut staged)?;
             if let Some(client) = client {
                 remote::publish(&skills, &mut staged, client.clone())?;
                 services

@@ -48,6 +48,10 @@ pub struct Options {
 }
 
 enum Completed {
+    Extension(
+        pages::extensions::Request,
+        Result<pages::extensions::Output, pages::extensions::io::Failure>,
+    ),
     Skills(
         pages::skills::Request,
         Result<
@@ -418,6 +422,13 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     Completed::Session(request, result)
                 });
             }
+            if let Some(request) = app.extensions_request() {
+                let client = client.clone();
+                jobs.spawn(async move {
+                    let result = pages::extensions::execute(&client, &request).await;
+                    Completed::Extension(request, result)
+                });
+            }
             if let Some(request) = app.skills_request() {
                 let client = client.clone();
                 jobs.spawn(async move {
@@ -600,6 +611,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 Action::Quit => {
                     app.attachments.disconnect();
                     app.skills.disconnect();
+                    app.extensions.disconnect();
                     app.recap.disconnect();
                     app.branch.disconnect();
                     app.revision.disconnect();
@@ -629,6 +641,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     app.abandon_pending_submissions();
                     app.attachments.disconnect();
                     app.skills.disconnect();
+                    app.extensions.disconnect();
                     app.recap.disconnect();
                     app.creating = false;
                     jobs = JoinSet::new();
@@ -952,6 +965,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                         if let Some(state) = &mut state { state.changed(); }
                     },
                     Some(Ok(Completed::Directory(request, result))) => app.directory_completed(request, result),
+                    Some(Ok(Completed::Extension(request, result))) => app.extensions_complete(request, result),
                     Some(Ok(Completed::Skills(request, result))) => app.skills_completed(request, result),
                     Some(Ok(Completed::ChooseProject(request, result))) => app.choose_project_completed(request, result),
                     Some(Ok(Completed::Locations(request,result))) => app.locations_completed(request,result),
@@ -1126,7 +1140,8 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 app.abandon_pending_submissions();
                 app.attachments.disconnect();
                 app.skills.disconnect();
-                    app.recap.disconnect();
+                app.extensions.disconnect();
+                app.recap.disconnect();
                 app.abandon_management();
                 app.branch.disconnect();
                     app.revision.disconnect();
@@ -1150,6 +1165,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
     }
     app.attachments.disconnect();
     app.skills.disconnect();
+    app.extensions.disconnect();
     app.recap.disconnect();
     attachment_jobs.abort_all();
     jobs.abort_all();

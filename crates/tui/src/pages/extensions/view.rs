@@ -1,0 +1,235 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::Command;
+use crate::{
+    app::{Action, App, Focus, Hit},
+    pages::chat::layout,
+};
+use maka_plugins::terminal_ui::page::Control;
+use ratatui::{
+    Frame,
+    layout::{Margin, Rect},
+    style::{Modifier, Style},
+    text::Line,
+    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+};
+
+pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
+    app.extensions.invalidate_geometry();
+    let area = area.inner(Margin::new(2, 1));
+    if area.is_empty() {
+        return;
+    }
+    let colors = app.theme.colors();
+    let locale = app.i18n.locale().id();
+    let mut lines = Vec::new();
+    let mut controls = Vec::new();
+    let state = &app.extensions;
+    if let Some(message) = &state.message {
+        let message = match message {
+            super::Message::Local(key) => app.i18n.text(key),
+            super::Message::Remote(text) => text.resolve(locale).into(),
+        };
+        for line in layout::plain(&message, area.width.saturating_sub(1))
+            .unwrap()
+            .lines
+        {
+            lines.push(line.line.style(Style::default().fg(colors.warning)));
+        }
+        lines.push(Line::default());
+    }
+    if state.busy {
+        lines.push(Line::styled(
+            app.i18n.text("extensions-loading"),
+            Style::default().fg(colors.muted),
+        ));
+        lines.push(Line::default());
+    }
+    if let Some(page) = &state.page {
+        lines.push(Line::styled(
+            page.title.resolve(locale).to_owned(),
+            Style::default()
+                .fg(colors.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+        lines.push(Line::default());
+        if !page.body.is_empty() {
+            lines.extend(
+                layout::plain(&page.body, area.width.saturating_sub(1))
+                    .unwrap()
+                    .lines
+                    .into_iter()
+                    .map(|line| line.line),
+            );
+            lines.push(Line::default());
+        }
+        for (index, row) in page.rows.iter().enumerate() {
+            controls.push((lines.len(), 2, Command::Row(index)));
+            lines.push(Line::raw(row.title.resolve(locale).to_owned()));
+            lines.push(Line::styled(
+                row.description.clone(),
+                Style::default().fg(colors.muted),
+            ));
+            lines.push(Line::default());
+        }
+        for (index, field) in page.fields.iter().enumerate() {
+            let start = lines.len();
+            lines.push(Line::styled(
+                field.label.resolve(locale).to_owned(),
+                Style::default().fg(colors.muted),
+            ));
+            match &field.control {
+                Control::Toggle { .. } => {
+                    let checked = state
+                        .drafts
+                        .get(&field.id)
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+                    let mark = if checked {
+                        app.chrome.symbol("●", "[x]")
+                    } else {
+                        app.chrome.symbol("○", "[ ]")
+                    };
+                    lines.push(Line::raw(format!(" {mark}")));
+                }
+                Control::Text { multiline, .. } => {
+                    lines.push(Line::default());
+                    if *multiline {
+                        lines.extend([Line::default(), Line::default()]);
+                    }
+                }
+            }
+            controls.push((start, lines.len() - start, Command::Field(index)));
+            lines.push(Line::default());
+        }
+        for (index, action) in page.actions.iter().enumerate() {
+            controls.push((lines.len(), 1, Command::Submit(index)));
+            lines.push(Line::raw(action.label.resolve(locale).to_owned()).centered());
+            lines.push(Line::default());
+        }
+    } else {
+        for (index, view) in state.directory.iter().enumerate() {
+            controls.push((lines.len(), 2, Command::Choose(index)));
+            lines.push(Line::raw(view.descriptor.title.resolve(locale).to_owned()));
+            let detail = if view.descriptor.context == maka_plugins::terminal_ui::Context::Session
+                && state.session.is_none()
+            {
+                app.i18n.text("extensions-needs-session")
+            } else {
+                view.package_id.clone()
+            };
+            lines.push(Line::styled(detail, Style::default().fg(colors.muted)));
+            lines.push(Line::default());
+        }
+        if state.directory.is_empty() && !state.busy && state.message.is_none() {
+            lines.push(Line::styled(
+                app.i18n.text("extensions-empty"),
+                Style::default().fg(colors.muted),
+            ));
+        }
+    }
+    let state = &mut app.extensions;
+    if state.reveal {
+        if let Some((start, height, _)) = controls.get(state.selected) {
+            if *start < state.top {
+                state.top = *start;
+            } else if start + height > state.top + usize::from(area.height) {
+                state.top = (start + height).saturating_sub(usize::from(area.height));
+            }
+        }
+        state.reveal = false;
+    }
+    state.top = state
+        .top
+        .min(lines.len().saturating_sub(usize::from(area.height)));
+    state.area = Some(area);
+    let top = state.top;
+    let total = lines.len();
+    for (index, (start, height, command)) in controls.iter().enumerate() {
+        let action = Action::Extension(command.clone());
+        let enabled = app.enabled(&action);
+        let focused = app.palette.is_none()
+            && (app.focus == Focus::List && app.extensions.selected == index
+                || app.hover.as_ref() == Some(&action));
+        if focused || !enabled {
+            let style = Style::default().fg(if !enabled {
+                colors.muted
+            } else {
+                colors.accent
+            });
+            for line in lines.iter_mut().skip(*start).take(*height) {
+                *line = line.clone().style(style);
+            }
+        }
+    }
+    frame.render_widget(Paragraph::new(lines).scroll((top as u16, 0)), area);
+    for (index, (start, height, command)) in controls.iter().enumerate() {
+        let end = (start + height).min(top + usize::from(area.height));
+        if end <= top || *start >= top + usize::from(area.height) {
+            continue;
+        }
+        let y = start.saturating_sub(top);
+        let rect = Rect::new(
+            area.x,
+            area.y + y as u16,
+            area.width.saturating_sub(1),
+            (end - (*start).max(top)) as u16,
+        );
+        app.hits.push(Hit {
+            area: rect,
+            action: Action::Extension(command.clone()),
+        });
+        if let Command::Field(field_index) = command
+            && let Some(field) = app
+                .extensions
+                .page
+                .as_ref()
+                .and_then(|page| page.fields.get(*field_index))
+            && let Some(editor) = app.extensions.editors.get_mut(&field.id)
+            && *start >= top
+            && *start + height <= top + usize::from(area.height)
+        {
+            editor.draw(
+                frame,
+                Rect::new(
+                    rect.x,
+                    rect.y + 1,
+                    rect.width,
+                    rect.height.saturating_sub(1),
+                ),
+                app.focus == Focus::List
+                    && index == app.extensions.selected
+                    && app.palette.is_none()
+                    && !app.extensions.busy
+                    && !app.extensions.blocked,
+                colors,
+            );
+        }
+    }
+    if total > usize::from(area.height) {
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None),
+            area,
+            &mut ScrollbarState::new(total.saturating_sub(usize::from(area.height))).position(top),
+        );
+    }
+}

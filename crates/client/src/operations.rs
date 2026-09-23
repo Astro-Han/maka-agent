@@ -29,7 +29,7 @@ impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
         if matches!(
             operation,
-            Operation::PluginRemote | Operation::PluginClientQuery
+            Operation::PluginRemote | Operation::PluginClientQuery | Operation::PluginPlatformQuery
         ) {
             maka_protocol::plugin::decode_input(operation, value)?;
             return Ok(value.clone());
@@ -140,7 +140,7 @@ impl OperationRegistry for Operations {
     fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
         if matches!(
             operation,
-            Operation::PluginRemote | Operation::PluginClientQuery
+            Operation::PluginRemote | Operation::PluginClientQuery | Operation::PluginPlatformQuery
         ) {
             return maka_protocol::plugin::decode_output(operation, value);
         }
@@ -227,7 +227,7 @@ impl OperationRegistry for Operations {
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
         if matches!(
             operation,
-            Operation::PluginRemote | Operation::PluginClientQuery
+            Operation::PluginRemote | Operation::PluginClientQuery | Operation::PluginPlatformQuery
         ) {
             return Some(maka_protocol::plugin::ERRORS);
         }

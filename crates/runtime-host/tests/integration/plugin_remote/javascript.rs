@@ -270,7 +270,26 @@ async fn scenario(vm: &str) {
             .await,
     );
     assert_eq!(last["items"][0]["method"], "terminal-extra");
-    assert!(last["nextCursor"].is_null());
+    // Builtins can contribute pages too; only this fixture's two registrations
+    // are fixed. Continue the real directory without assuming it ends here.
+    let mut cursor = last["nextCursor"].clone();
+    let mut cursors = std::collections::HashSet::new();
+    while !cursor.is_null() {
+        assert!(cursors.insert(cursor.as_str().unwrap().to_owned()));
+        assert!(cursors.len() < 64, "fixture directory must stay bounded");
+        let page = success(
+            peer.rpc(
+                "plugin.platform.query",
+                json!({
+                    "view":"terminal_views", "rootId":"profile", "limit":1, "cursor":cursor
+                }),
+            )
+            .await,
+        );
+        assert_eq!(page["items"].as_array().unwrap().len(), 1);
+        assert_ne!(page["items"][0]["packageId"], "example.remote");
+        cursor = page["nextCursor"].clone();
+    }
     // Discovery pins the actual registration; a native caller need not load any bundle.
     let native_binding = json!({"packageId":"example.remote", "method":"echo", "sessionId":null});
     assert_eq!(

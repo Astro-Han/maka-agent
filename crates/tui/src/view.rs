@@ -270,6 +270,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let page = columns[1].inner(Margin::new(1, 0));
 
     match app.navigation.current() {
+        Route::Extensions => crate::pages::extensions::draw(frame, app, page),
         Route::Connections => crate::pages::connections::draw(frame, app, page),
         Route::Projects => crate::pages::projects::draw(frame, app, page),
         Route::Workspace | Route::Inbox => crate::pages::sessions::draw_catalog(frame, app, page),
@@ -490,6 +491,14 @@ fn icon(app: &App, action: &Action) -> &'static str {
         Action::Visit(Route::Settings) => ("⛭", "S"),
         Action::Visit(Route::Help) => ("?", "?"),
         Action::Visit(Route::Projects) => ("▦", "P"),
+        Action::Visit(Route::Extensions) => ("◇", "E"),
+        Action::Extension(command) => match command {
+            crate::pages::extensions::Command::Refresh => ("↻", "R"),
+            crate::pages::extensions::Command::Back => ("‹", "<"),
+            crate::pages::extensions::Command::Next => ("›", ">"),
+            crate::pages::extensions::Command::Discard => ("×", "x"),
+            _ => ("◇", "E"),
+        },
         Action::Visit(Route::Connections) => ("⇄", "C"),
         Action::Connection(command) => match command {
             crate::pages::connections::Command::Select(_) => ("⇄", "C"),
@@ -654,6 +663,7 @@ fn action_label(app: &App, action: &Action) -> String {
         Action::Attachment(command) => command.label(),
         Action::References => "references-title",
         Action::Skills(command) => command.label(),
+        Action::Extension(command) => command.label(),
         Action::NextTab => "tabs-next",
         Action::PreviousTab => "tabs-previous",
         Action::CloseTab(_) => "tabs-close",
@@ -744,7 +754,11 @@ fn page_lines(app: &App) -> Vec<Line<'static>> {
         )
     };
     match app.navigation.current() {
-        Route::Workspace | Route::Inbox | Route::Projects | Route::Connections => vec![],
+        Route::Workspace
+        | Route::Inbox
+        | Route::Projects
+        | Route::Connections
+        | Route::Extensions => vec![],
         Route::Session(_) => crate::pages::sessions::detail_lines(app),
         Route::Host => {
             let mut lines = vec![Line::raw(root()), Line::raw("")];

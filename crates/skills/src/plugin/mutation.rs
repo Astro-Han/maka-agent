@@ -73,7 +73,9 @@ impl Skills {
         }
         if !matches!(
             input.mutation,
-            Mutation::SetEnabled { .. } | Mutation::SetPinned { .. }
+            Mutation::SetEnabled { .. }
+                | Mutation::SetPinned { .. }
+                | Mutation::SetPreferences { .. }
         ) {
             return self
                 .mutate_files(input, workspace, workspace_files, sources, revision)
@@ -108,6 +110,12 @@ impl Skills {
         match input.mutation {
             Mutation::SetEnabled { enabled, .. } => next.enabled = enabled,
             Mutation::SetPinned { pinned, .. } => next.pinned = pinned,
+            Mutation::SetPreferences {
+                enabled, pinned, ..
+            } => {
+                next.enabled = enabled;
+                next.pinned = pinned;
+            }
             _ => unreachable!("preference mutation"),
         }
         if prior == next {

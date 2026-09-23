@@ -44,6 +44,12 @@ pub enum Mutation {
         reference: String,
         enabled: bool,
     },
+    SetPreferences {
+        #[serde(rename = "ref")]
+        reference: String,
+        enabled: bool,
+        pinned: bool,
+    },
     SetPinned {
         #[serde(rename = "ref")]
         reference: String,
@@ -55,6 +61,7 @@ impl Mutation {
         match self {
             Self::SetEnabled { reference, .. }
             | Self::SetPinned { reference, .. }
+            | Self::SetPreferences { reference, .. }
             | Self::Delete { reference } => Some(reference),
             Self::UpdateManaged(update) => Some(&update.reference),
             Self::CreateStarter | Self::Install { .. } => None,

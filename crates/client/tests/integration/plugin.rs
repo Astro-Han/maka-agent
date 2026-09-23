@@ -187,3 +187,43 @@ async fn plugin_catalog_binds_page_progress_and_bundle_identity_to_the_request()
             .unwrap();
     }
 }
+
+#[tokio::test]
+async fn terminal_directory_rejects_a_different_valid_view_without_retrying() {
+    for valid in [true, false] {
+        let (client, _notices, mut reader, mut writer) = pair_with(maka_client::Operations).await;
+        let request = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .plugin_query(
+                        serde_json::from_value(
+                            json!({"view":"terminal_views","rootId":"profile","limit":16}),
+                        )
+                        .unwrap(),
+                    )
+                    .await
+            }
+        });
+        let frame = reader.read().await.unwrap().unwrap();
+        assert_eq!(frame["operation"], "plugin.platform.query");
+        let result = json!({"view":if valid { "terminal_views" } else { "tools" }, "items":[], "nextCursor":null});
+        writer.write(&json!({"requestId":frame["requestId"],"operation":frame["operation"],"ok":true,"result":result})).await.unwrap();
+        if valid {
+            request.await.unwrap().unwrap();
+            client.disconnect();
+        } else {
+            assert!(matches!(
+                request.await.unwrap(),
+                Err(RequestFailure::Unknown(ClientError::Protocol(_)))
+            ));
+        }
+        tokio::time::timeout(Duration::from_secs(1), client.closed())
+            .await
+            .unwrap();
+        assert!(
+            reader.read().await.unwrap().is_none(),
+            "directory failure cannot trigger a replacement request"
+        );
+    }
+}

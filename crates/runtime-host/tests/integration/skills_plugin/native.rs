@@ -17,6 +17,8 @@
  * under the License.
  */
 
+mod terminal;
+
 use super::{ClientFixture, Host, LocalListener, Peer, Provider, configure, converged, disabled};
 use maka_client::{Client, ClientError, Operations, RequestFailure};
 use maka_protocol::{
@@ -143,6 +145,7 @@ async fn native_candidates_page_by_session_and_reject_changed_catalog_and_retire
     assert_eq!(items.len(), 1);
     assert!(ids.insert(items[0].id.clone()));
     assert_eq!(ids.len(), MAX_ITEMS + 1);
+    terminal::exercise(&client, "candidates").await;
     // A real file change invalidates a cursor; no automatic restart hides the change.
     std::fs::write(
         fixture.workspace.join(".maka/skills/review-000/SKILL.md"),

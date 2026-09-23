@@ -64,6 +64,7 @@ pub enum Action {
     Recap(crate::pages::recap::Command),
     Attachment(crate::pages::attachments::Command),
     References,
+    Extension(crate::pages::extensions::Command),
     Skills(crate::pages::skills::Command),
     Revision(crate::pages::revision::Command),
     ToggleSymbols,
@@ -134,6 +135,7 @@ pub struct App {
     pub recap: crate::pages::recap::State,
     pub attachments: crate::pages::attachments::State,
     pub skills: crate::pages::skills::State,
+    pub extensions: crate::pages::extensions::State,
     pub directories:
         std::collections::BTreeMap<String, Vec<maka_protocol::turn::DirectoryReference>>,
     pub revision: crate::pages::revision::State,
@@ -184,6 +186,7 @@ impl App {
             recap: Default::default(),
             attachments: Default::default(),
             skills: Default::default(),
+            extensions: Default::default(),
             directories: Default::default(),
             revision: Default::default(),
             onboarding: Default::default(),
@@ -223,6 +226,10 @@ impl App {
             (Action::Visit(Route::Settings), "command-settings"),
             (Action::Visit(Route::Connections), "route-connections"),
             (
+                Action::Extension(crate::pages::extensions::Command::Open),
+                "route-extensions",
+            ),
+            (
                 Action::Onboard(crate::pages::onboarding::Command::Open),
                 "onboard-title",
             ),
@@ -234,6 +241,15 @@ impl App {
             (Action::ToggleSidebar, "command-sidebar"),
             (Action::Quit, "command-quit"),
         ];
+        if self.navigation.current() == Route::Extensions {
+            commands.extend(self.page_actions().into_iter().filter_map(|action| {
+                if let Action::Extension(command) = &action {
+                    Some((action.clone(), command.label()))
+                } else {
+                    None
+                }
+            }));
+        }
         commands.extend(self.management_commands());
         commands.extend(self.branch_commands());
         commands.extend(self.recap_commands());
@@ -369,6 +385,12 @@ impl App {
     }
     pub fn page_actions(&self) -> Vec<Action> {
         let mut actions = match self.navigation.current() {
+            Route::Extensions => vec![
+                Action::Extension(crate::pages::extensions::Command::Back),
+                Action::Extension(crate::pages::extensions::Command::Refresh),
+                Action::Extension(crate::pages::extensions::Command::Next),
+                Action::Extension(crate::pages::extensions::Command::Discard),
+            ],
             Route::Connections => self.connection_actions(),
             Route::Projects => self.project_actions(),
             Route::Inbox => {
@@ -421,6 +443,7 @@ impl App {
                 actions
             }
             Route::Host => vec![
+                Action::Extension(crate::pages::extensions::Command::Open),
                 if matches!(self.connection, ConnectionState::Connected { .. }) {
                     Action::Refresh
                 } else {
@@ -546,6 +569,9 @@ impl App {
     }
     fn refresh_action(&self) -> Option<Action> {
         match self.navigation.current() {
+            Route::Extensions => Some(Action::Extension(
+                crate::pages::extensions::Command::Refresh,
+            )),
             Route::Connections => Some(Action::Connection(
                 crate::pages::connections::Command::Refresh,
             )),
@@ -597,6 +623,7 @@ impl App {
             Action::Attachment(command) => return self.attachment_action(command),
             Action::References => self.open_references(),
             Action::Skills(command) => self.skills_action(command),
+            Action::Extension(command) => self.extensions_action(command),
             Action::Branch(command) => return self.branch_action(command),
             Action::Recap(command) => return self.recap_action(command),
             Action::Revision(command) => return self.revision_action(command),
@@ -782,6 +809,9 @@ impl App {
         None
     }
     pub fn enabled(&self, action: &Action) -> bool {
+        if let Action::Extension(command) = action {
+            return self.extensions_enabled(command);
+        }
         if let Action::Skills(command) = action {
             return self.skills_enabled(command);
         }
@@ -1059,6 +1089,7 @@ impl App {
     }
 
     pub fn invalidate_editor_geometry(&mut self) {
+        self.extensions.invalidate_geometry();
         self.modal_area = None;
         if let Some(editor) = &mut self.theme.editor {
             editor.invalidate();
@@ -1398,6 +1429,9 @@ impl App {
             }
             return (outcome, None);
         }
+        if self.extensions_input(&event) {
+            return (true, None);
+        }
         let action = match event {
             Event::Resize(_, _) => {
                 self.chat.area = None;
@@ -1522,6 +1556,7 @@ impl App {
                                                 | Route::Inbox
                                                 | Route::Projects
                                                 | Route::Connections
+                                                | Route::Extensions
                                         ) {
                                         Focus::List
                                     } else if !backwards
@@ -1567,6 +1602,7 @@ impl App {
                                                 | Route::Inbox
                                                 | Route::Projects
                                                 | Route::Connections
+                                                | Route::Extensions
                                         ) {
                                         Focus::List
                                     } else if backwards

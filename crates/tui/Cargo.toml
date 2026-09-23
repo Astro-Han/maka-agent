@@ -34,6 +34,7 @@ sys-locale.workspace = true
 maka-client.workspace = true
 maka-event-log.workspace = true
 maka-protocol.workspace = true
+maka-plugins.workspace = true
 maka-runtime.workspace = true
 maka-skills.workspace = true
 maka-sandbox.workspace = true
