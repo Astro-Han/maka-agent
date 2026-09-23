@@ -37,6 +37,7 @@ maka-graph.workspace = true
 maka-scheduler.workspace = true
 jiff = "0.2.37"
 maka-skills.workspace = true
+maka-session-recap.workspace = true
 maka-jev.workspace = true
 maka-web.workspace = true
 maka-insights.workspace = true
