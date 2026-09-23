@@ -82,6 +82,9 @@ impl Host {
             self.plugins.wake_background_work();
             return Ok(Outcome::success(serde_json::json!({})));
         }
+        if maka_protocol::pricing::supports(operation) {
+            return super::pricing::execute(self, operation, &input).await;
+        }
         if operation == Operation::HostUpgradePrepare {
             return match self
                 .prepare_retirement(

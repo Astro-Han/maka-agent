@@ -43,6 +43,7 @@ mod operations;
 mod outbound;
 pub(crate) mod plugin_authorization;
 mod plugin_remote;
+mod pricing;
 mod projects;
 mod sandbox_setup;
 pub(crate) use projects::Usage as ProjectUsage;

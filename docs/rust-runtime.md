@@ -215,7 +215,9 @@ user/project content paths stay separate from private journals.
 - Accounting counts physical model admissions, including failed retries and auxiliary
   plugin calls. Provider usage survives rejected output; missing counters and unresolved
   outcomes remain unknown. History copies do not duplicate usage, and Session removal
-  retains accounting facts. Usage screens and pricing are not yet connected.
+  retains accounting facts. Pricing queries and CAS edits use a bounded, revision-pinned
+  catalog; custom rates survive restart and bundled-rate updates invalidate old cursors.
+  Usage screens and per-call valuation are not yet connected.
 - Subscriptions deliver frames only after `subscription.ready`. Reconnection replays
   active text from the committed log under backpressure; no copied transcript overlay.
 - Model messages, content and tool outcomes are typed through provider projection.

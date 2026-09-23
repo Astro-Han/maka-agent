@@ -23,6 +23,17 @@ CREATE TABLE connection_catalog (
     default_target TEXT
 );
 INSERT INTO connection_catalog VALUES(1, 0, NULL);
+CREATE TABLE pricing_authority (
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    revision INTEGER NOT NULL CHECK(revision BETWEEN 0 AND 9007199254740991),
+    builtin_digest TEXT
+);
+INSERT INTO pricing_authority VALUES(1, 0, NULL);
+CREATE TABLE pricing_overrides (
+    model_key TEXT PRIMARY KEY,
+    sort_key BLOB NOT NULL,
+    record_json TEXT NOT NULL CHECK(json_valid(record_json) AND length(CAST(record_json AS BLOB)) <= 4096)
+);
 CREATE TABLE connections (
     connection_id TEXT PRIMARY KEY,
     slug TEXT NOT NULL UNIQUE,

@@ -32,6 +32,11 @@ import {
   buildConnectionModelCatalogEntries,
 } from '../../packages/core/src/model-catalog.ts';
 import { getModelCapabilities } from '@ai-sdk/anthropic/internal';
+import { BUILTIN_PRICING } from '../../packages/runtime/src/telemetry/builtin-pricing.ts';
+
+export function outputPricingFacts() {
+  return BUILTIN_PRICING;
+}
 
 export function outputProviderFacts() {
   return Object.fromEntries(

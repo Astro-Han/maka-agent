@@ -18,6 +18,7 @@
  */
 
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -26,6 +27,7 @@ const directory = resolve(process.argv[2]);
 const require = createRequire(join(resolve(process.env.MAKA_JS_DEPS || root), 'package.json'));
 const { build } = require('esbuild');
 const metadata = join(directory, 'model-metadata.generated.ts');
+const pricing = join(directory, 'model-pricing.generated.ts');
 const { main } = await import('../sync-model-metadata.mjs');
 await main([
   'node',
@@ -34,6 +36,8 @@ await main([
   join(root, 'scripts/model-metadata/models-dev-api.snapshot.json'),
   '--output',
   metadata,
+  '--pricing-output',
+  pricing,
 ]);
 const bundle = join(directory, 'catalog-facts-source.mjs');
 const result = await build({
@@ -51,6 +55,9 @@ const result = await build({
       setup(build) {
         build.onResolve({ filter: /^\.\/model-metadata\.generated\.js$/ }, () => ({
           path: metadata,
+        }));
+        build.onResolve({ filter: /^\.\/model-pricing\.generated\.js$/ }, () => ({
+          path: pricing,
         }));
         build.onResolve({ filter: /^@maka\// }, async ({ path }) => {
           const [, name, ...subpath] = path.split('/');
@@ -89,3 +96,15 @@ await writeFile(
   JSON.stringify(source.outputProviderFacts()),
 );
 await writeFile(join(directory, 'catalog-oracle.json'), JSON.stringify(source.oracleFixtures()));
+const pricingFacts = JSON.stringify(
+  source
+    .outputPricingFacts()
+    .sort((left, right) =>
+      left.modelKey < right.modelKey ? -1 : left.modelKey > right.modelKey ? 1 : 0,
+    ),
+);
+await writeFile(join(directory, 'pricing-facts.json'), pricingFacts);
+await writeFile(
+  join(directory, 'pricing-digest.txt'),
+  createHash('sha256').update(pricingFacts).digest('hex'),
+);

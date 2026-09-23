@@ -40,6 +40,7 @@ pub mod onboarding;
 pub mod operation;
 pub mod operation_error;
 pub mod plugin;
+pub mod pricing;
 pub mod project;
 pub mod request_headers;
 pub mod resource;

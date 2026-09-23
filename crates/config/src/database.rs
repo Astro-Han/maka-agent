@@ -139,5 +139,6 @@ async fn initialize(connection: &mut SqliteConnection) -> std::result::Result<()
     )
     .execute(&mut *connection)
     .await?;
+    crate::pricing::initialize(connection).await?;
     Ok(())
 }

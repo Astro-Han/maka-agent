@@ -35,6 +35,7 @@ mod client_onboarding;
 mod client_openai_options;
 mod client_patch;
 mod client_plugins;
+mod client_pricing;
 mod client_questions;
 mod client_remote_access;
 mod client_shell;

@@ -223,6 +223,8 @@ fn path_free(request: &Request) -> bool {
         | Operation::ConnectionCatalogQuery
         | Operation::ExecutorCatalogQuery
         | Operation::ModelProviderCatalogQuery
+        | Operation::PricingQuery
+        | Operation::PricingMutate
         | Operation::ConnectionModelsFetch
         | Operation::ConnectionOnboardingVerify
         | Operation::ConnectionOnboardingSave

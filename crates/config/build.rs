@@ -23,6 +23,7 @@ fn main() {
         "../../scripts/rust/generate-catalog-facts.mjs",
         "../../scripts/rust/catalog-facts-entry.mjs",
         "../../packages/core/src",
+        "../../packages/runtime/src/telemetry/builtin-pricing.ts",
         "../../scripts/sync-model-metadata.mjs",
         "../../scripts/model-metadata/models-dev-api.snapshot.json",
         "../../package-lock.json",

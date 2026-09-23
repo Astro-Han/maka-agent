@@ -33,6 +33,7 @@ pub mod onboarding;
 pub mod plugin_authorization;
 mod plugin_credentials;
 mod policy;
+pub mod pricing;
 pub mod projection;
 mod vault;
 
