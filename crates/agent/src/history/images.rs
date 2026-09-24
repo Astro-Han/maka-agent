@@ -62,9 +62,20 @@ pub(crate) async fn materialize(
     vision: bool,
     cancellation: &CancellationToken,
 ) -> Result<Vec<Message>, RunError> {
-    materialize_replay(log, events, anchor, session, vision, cancellation, None).await
+    materialize_replay(
+        log,
+        events,
+        anchor,
+        session,
+        vision,
+        cancellation,
+        None,
+        false,
+    )
+    .await
 }
 
+#[allow(clippy::too_many_arguments)] // Model projection needs both the replay cut and admission policy.
 pub(crate) async fn materialize_replay(
     log: &EventLog,
     events: &[maka_event_log::context::ContextEvent],
@@ -73,6 +84,7 @@ pub(crate) async fn materialize_replay(
     vision: bool,
     cancellation: &CancellationToken,
     replay: Option<super::Replay<'_>>,
+    prior_unknown: bool,
 ) -> Result<Vec<Message>, RunError> {
     let mut targets = Vec::new();
     let selected = anchor
@@ -81,7 +93,14 @@ pub(crate) async fn materialize_replay(
         .chain(events.iter().map(super::EventRef::from));
     let resources =
         super::resources::Resources::load(log, session, selected.clone(), cancellation).await?;
-    let mut messages = super::build(selected, &resources, &mut targets, vision, replay)?;
+    let mut messages = super::build(
+        selected,
+        &resources,
+        &mut targets,
+        vision,
+        replay,
+        prior_unknown,
+    )?;
     let mut remaining = IMAGE_BUDGET;
     let mut omitted = BTreeMap::<usize, usize>::new();
     for target in targets {

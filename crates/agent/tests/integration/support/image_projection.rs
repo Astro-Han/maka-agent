@@ -74,6 +74,7 @@ pub fn input(base: &str, attachments: Value) -> RunInput {
         supports_vision: true,
         configuration: invocation::configuration(maka_tools::ToolMode::Direct),
         work: maka_agent::RunWork::Message {
+            allow_prior_unknown: false,
             source_messages: Vec::new(),
             message: serde_json::from_value(json!({"text":"current", "attachments":attachments}))
                 .unwrap(),

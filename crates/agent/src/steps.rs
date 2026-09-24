@@ -24,6 +24,7 @@ use maka_tools::RunTools;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+#[allow(clippy::too_many_arguments)] // Admission policy must remain visible across the step loop.
 pub(super) async fn run(
     inner: &Arc<Inner>,
     input: &RunInput,
@@ -32,6 +33,7 @@ pub(super) async fn run(
     cancellation: &CancellationToken,
     continuation_base: Option<u64>,
     handoff: &crate::HandoffGate,
+    prior_unknown: bool,
 ) -> Result<maka_runtime::event::InvocationOutcome, RunError> {
     let lane = maka_model::Conversation::default();
     let tools = RunTools::new(
@@ -83,6 +85,7 @@ pub(super) async fn run(
                         cancellation,
                         continuation_base,
                         &intent.successor_invocation_id,
+                        prior_unknown,
                     )
                     .await
                     .ok()?;
@@ -122,17 +125,30 @@ pub(super) async fn run(
             if cancellation.is_cancelled() {
                 return Err(RunError::Cancelled);
             }
-            let mut source = inner
-                .log
-                .read_model_context(
-                    &input.invocation.session_id,
-                    Some(&input.invocation.invocation_id),
-                    maka_runtime::context::MAX_HISTORY_EVENTS,
-                    maka_runtime::context::MAX_HISTORY_BYTES,
-                )
-                .await?;
+            let mut source = if prior_unknown {
+                inner
+                    .log
+                    .read_manual_message_context(
+                        &input.invocation.session_id,
+                        &input.invocation.invocation_id,
+                        maka_runtime::context::MAX_HISTORY_EVENTS,
+                        maka_runtime::context::MAX_HISTORY_BYTES,
+                    )
+                    .await?
+            } else {
+                inner
+                    .log
+                    .read_model_context(
+                        &input.invocation.session_id,
+                        Some(&input.invocation.invocation_id),
+                        maka_runtime::context::MAX_HISTORY_EVENTS,
+                        maka_runtime::context::MAX_HISTORY_BYTES,
+                    )
+                    .await?
+            };
             if tools.code_idle()
                 && compaction == CompactionBudget::Available
+                && !prior_unknown
                 && auto_context::due(input, &source)
             {
                 compaction = CompactionBudget::Failed;
@@ -162,12 +178,20 @@ pub(super) async fn run(
             let request_tools = tools
                 .capture(&input.configuration.cwd, cancellation.clone())
                 .await?;
+            let unknown_notice =
+                prior_unknown.then(|| model_attempt::prior_unknown_notice(&source));
+            if unknown_notice.as_deref() == Some("") {
+                return Err(RunError::ReconciliationRequired(
+                    "unknown prior tool is missing from model context".into(),
+                ));
+            }
             let surface = Arc::new(
                 crate::request_composition::Surface::capture(
                     &request_tools,
                     &inner.model,
                     input,
                     cancellation,
+                    unknown_notice.as_deref(),
                 )
                 .await?,
             );
@@ -179,6 +203,7 @@ pub(super) async fn run(
                 cancellation,
                 continuation_base,
                 &input.invocation.invocation_id,
+                prior_unknown,
             )
             .await?;
             let result = model_attempt::execute(
@@ -259,22 +284,34 @@ pub(super) async fn run(
             // Pruning/compaction require a settled boundary. A yielded cell is
             // still live work, not a corrupt boundary or a reason to cancel it.
             // Defer maintenance until it settles; the model can still call wait.
-            if tools.code_idle() {
+            if tools.code_idle() && !prior_unknown {
                 prune::run(inner, input, cancellation).await?;
             }
             if step_tools.finished() {
                 return Ok(maka_runtime::event::InvocationOutcome::Completed);
             }
             if step + 1 < max_steps && !cancellation.is_cancelled() && lane.needs_confirmation() {
-                let source = inner
-                    .log
-                    .read_model_context(
-                        &input.invocation.session_id,
-                        Some(&input.invocation.invocation_id),
-                        10_000,
-                        8 * 1024 * 1024,
-                    )
-                    .await?;
+                let source = if prior_unknown {
+                    inner
+                        .log
+                        .read_manual_message_context(
+                            &input.invocation.session_id,
+                            &input.invocation.invocation_id,
+                            10_000,
+                            8 * 1024 * 1024,
+                        )
+                        .await?
+                } else {
+                    inner
+                        .log
+                        .read_model_context(
+                            &input.invocation.session_id,
+                            Some(&input.invocation.invocation_id),
+                            10_000,
+                            8 * 1024 * 1024,
+                        )
+                        .await?
+                };
                 let replay = model_attempt::prompt(
                     inner,
                     input,
@@ -283,6 +320,7 @@ pub(super) async fn run(
                     cancellation,
                     continuation_base,
                     &input.invocation.invocation_id,
+                    prior_unknown,
                 )
                 .await?;
                 let ids: Vec<_> = local_calls.iter().map(|call| call.id.as_str()).collect();

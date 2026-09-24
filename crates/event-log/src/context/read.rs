@@ -30,6 +30,25 @@ use maka_runtime::{
 use sqlx::{Connection, SqliteConnection};
 
 impl EventLog {
+    /// Check an explicit user's fresh message against all prior facts. The
+    /// returned bit only marks whether a sealed unknown dispatch is present.
+    pub async fn check_manual_message_history(&self, session: &str) -> Result<bool, StoreError> {
+        self.validate_root()?;
+        crate::sessions::validate_id(session)?;
+        let session = session.to_owned();
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    let pending =
+                        safety::require_manual_message_safe(&mut tx, &session, None).await?;
+                    tx.commit().await?;
+                    Ok(pending)
+                })
+            })
+            .await
+    }
+
     pub async fn read_model_context(
         &self,
         session: &str,
@@ -37,7 +56,18 @@ impl EventLog {
         max_events: usize,
         max_bytes: usize,
     ) -> Result<ModelContextSource, StoreError> {
-        self.context_source(session, current, max_events, max_bytes, None)
+        self.context_source(session, current, max_events, max_bytes, None, false)
+            .await
+    }
+
+    pub async fn read_manual_message_context(
+        &self,
+        session: &str,
+        current: &str,
+        max_events: usize,
+        max_bytes: usize,
+    ) -> Result<ModelContextSource, StoreError> {
+        self.context_source(session, Some(current), max_events, max_bytes, None, true)
             .await
     }
 
@@ -49,8 +79,15 @@ impl EventLog {
         max_bytes: usize,
         mode: &CheckpointMode,
     ) -> Result<ModelContextSource, StoreError> {
-        self.context_source(session, current, max_events, max_bytes, Some(mode.clone()))
-            .await
+        self.context_source(
+            session,
+            current,
+            max_events,
+            max_bytes,
+            Some(mode.clone()),
+            false,
+        )
+        .await
     }
 
     async fn context_source(
@@ -60,6 +97,7 @@ impl EventLog {
         max_events: usize,
         max_bytes: usize,
         mode: Option<CheckpointMode>,
+        manual_message: bool,
     ) -> Result<ModelContextSource, StoreError> {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
@@ -70,7 +108,26 @@ impl EventLog {
                     let mut tx = connection.begin().await?;
                     let opening =
                         safety::current_opening(&mut tx, &session, current.as_deref()).await?;
-                    safety::require_safe(&mut tx, &session, current.as_deref()).await?;
+                    if manual_message {
+                        let Some((_, event)) = &opening else {
+                            return Err(invalid("manual message has no active opening"));
+                        };
+                        if !matches!(
+                            &event.fact,
+                            Fact::InvocationOpened {
+                                input: maka_runtime::input::InvocationInput::Message { .. },
+                                ..
+                            }
+                        ) {
+                            return Err(invalid(
+                                "manual message context requires a message opening",
+                            ));
+                        }
+                        safety::require_manual_message_safe(&mut tx, &session, current.as_deref())
+                            .await?;
+                    } else {
+                        safety::require_safe(&mut tx, &session, current.as_deref()).await?;
+                    }
                     let selection = match &opening {
                         Some((_, event)) => Selection::for_opening(&mut tx, event).await?,
                         None => Selection::session(&session),

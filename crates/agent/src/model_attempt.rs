@@ -30,6 +30,7 @@ use maka_runtime::{
     model::ModelStep,
 };
 use serde_json::json;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -43,6 +44,7 @@ pub(super) enum Attempt {
     Summary,
 }
 
+#[allow(clippy::too_many_arguments)] // Keep the admitted history policy explicit at each model request.
 pub(super) async fn prompt(
     inner: &Inner,
     input: &RunInput,
@@ -51,6 +53,7 @@ pub(super) async fn prompt(
     cancellation: &CancellationToken,
     continuation_base: Option<u64>,
     current: &str,
+    prior_unknown: bool,
 ) -> Result<Vec<Message>, RunError> {
     let route = route_identity(input)?;
     let replay = continuation_base.map(|base| history::Replay {
@@ -67,6 +70,7 @@ pub(super) async fn prompt(
         input.supports_vision,
         cancellation,
         replay,
+        prior_unknown,
     )
     .await?;
     if let Some(baseline) = &source.baseline {
@@ -82,18 +86,88 @@ pub(super) async fn prompt(
         };
         prompt.insert(0, Message::user(text));
     }
-    if purpose == ModelPurpose::Main
-        && let Some(system) = &input.configuration.system_prompt
-    {
-        prompt.insert(
-            0,
-            Message::System {
-                content: system.text.clone(),
-                provider_options: None,
-            },
-        );
+    if purpose == ModelPurpose::Main {
+        let system_text = input
+            .configuration
+            .system_prompt
+            .as_ref()
+            .map(|system| system.text.clone())
+            .unwrap_or_default();
+        if !system_text.is_empty() {
+            prompt.insert(
+                0,
+                Message::System {
+                    content: system_text,
+                    provider_options: None,
+                },
+            );
+        }
     }
     Ok(prompt)
+}
+
+pub(super) fn prior_unknown_notice(source: &ModelContextSource) -> String {
+    let events =
+        source
+            .anchor
+            .iter()
+            .map(|event| &event.event)
+            .chain(source.tail.iter().filter_map(|event| match event {
+                maka_event_log::context::ContextEvent::Canonical(event) => Some(&event.event),
+                maka_event_log::context::ContextEvent::Archived(_) => None,
+            }));
+    let events: Vec<_> = events.collect();
+    let sealed: HashSet<_> = events
+        .iter()
+        .filter_map(|event| match &event.fact {
+            Fact::InvocationEnded {
+                outcome: maka_runtime::event::InvocationOutcome::Failed { class, .. },
+            } if class == "outcome_unknown" => Some(event.invocation.invocation_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    let settled: HashSet<_> = events
+        .iter()
+        .filter_map(|event| match &event.fact {
+            Fact::ToolSettled { operation_id, .. } => Some((
+                event.invocation.invocation_id.as_str(),
+                operation_id.as_str(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let unknown: Vec<_> = events
+        .iter()
+        .filter_map(|event| match &event.fact {
+            Fact::ToolDispatched {
+                operation_id, name, ..
+            } if sealed.contains(event.invocation.invocation_id.as_str())
+                && !settled.contains(&(
+                    event.invocation.invocation_id.as_str(),
+                    operation_id.as_str(),
+                )) =>
+            {
+                Some((name.as_str(), operation_id.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    if unknown.is_empty() {
+        return String::new();
+    }
+    let mut notice = String::from(
+        "Prior execution was interrupted after these tools were dispatched. Their results were never recorded; effects may or may not have happened. Inspect current state before repeating any action. This is historical uncertainty, not a new tool result:",
+    );
+    for (name, operation) in unknown.iter().take(64) {
+        notice.push_str(&format!("\n- {name} (operation {operation})"));
+    }
+    if unknown.len() > 64 {
+        notice.push_str(&format!(
+            "\n- and {} more unknown operations",
+            unknown.len() - 64
+        ));
+    }
+    notice
 }
 
 pub(super) async fn execute(
@@ -181,6 +255,7 @@ pub(super) async fn execute(
                 cancellation,
                 continuation_base,
                 &input.invocation.invocation_id,
+                false,
             )
             .await?;
             if surface.apply(replay) != prompt {
