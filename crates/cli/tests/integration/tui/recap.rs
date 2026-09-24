@@ -145,7 +145,7 @@ fn recap_uses_native_remote_preserves_draft_and_reads_saved_result_after_reopen(
     tui.send(b"\x1b[<0;2;2M\x1b[<0;2;2m");
     tui.wait_until(|s| !s.contains("Recap confirmed:"));
     tui.wait_for("Keep this unsent draft");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     reopened.wait_for("Keep this unsent draft");
@@ -154,7 +154,7 @@ fn recap_uses_native_remote_preserves_draft_and_reads_saved_result_after_reopen(
     reopened.click_text("Session recap");
     reopened.wait_for("Recap confirmed:");
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     model.abort();
     client.disconnect();

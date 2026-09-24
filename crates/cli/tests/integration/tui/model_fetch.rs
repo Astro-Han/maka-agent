@@ -193,7 +193,7 @@ fn model_fetch_confirms_network_writes_rechecks_effects_and_preserves_user_confi
             .unwrap();
         assert_eq!(credential["status"]["revision"], 2);
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     assert!(!String::from_utf8_lossy(&tui.output).contains("discovery-secret"));
     client.disconnect();

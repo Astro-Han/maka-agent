@@ -30,6 +30,7 @@ mod policy;
 mod query;
 mod service;
 mod setup;
+mod shutdown;
 mod store;
 mod update;
 mod updates;
@@ -45,6 +46,7 @@ pub(super) use policy::{
 };
 pub(super) use query::Status;
 pub(super) use setup::Setup;
+pub(super) use shutdown::shutdown as shutdown_local;
 pub(super) use update::{Expected, Update};
 
 use clap::{Args, ValueEnum};

@@ -280,7 +280,7 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
         }).await.unwrap();
         assert!(matches!(result,maka_protocol::configuration::CatalogMutationResult::RevisionConflict { .. }));
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

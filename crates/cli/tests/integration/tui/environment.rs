@@ -110,7 +110,7 @@ fn host_inherits_proxy_for_model_discovery_and_tui_turn_without_manual_configura
     tui.wait_for("Inherited proxy works");
     runtime.block_on(server).unwrap();
     assert!(!String::from_utf8_lossy(&tui.output).contains("proxy-secret"));
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

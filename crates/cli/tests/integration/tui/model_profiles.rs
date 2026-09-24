@@ -155,7 +155,7 @@ fn model_profiles_preserve_full_table_validate_inherited_limits_and_reject_concu
             1
         );
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

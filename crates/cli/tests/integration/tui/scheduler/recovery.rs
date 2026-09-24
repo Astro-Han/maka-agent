@@ -103,7 +103,7 @@ fn terminal_creation_reopens_queries_and_retries_without_duplicating_or_resurrec
             }
             let tasks = remote(&client, "request", json!({"kind":"query","query":{"kind":"list"}})).await;
             assert_eq!(tasks["tasks"].as_array().unwrap().len(), usize::from(!accepted));
-            reopened.send(b"\x11");
+            reopened.close_terminal();
             reopened.finish();
             for task in tasks["tasks"].as_array().unwrap() {
                 assert_eq!(task["title"], "Saved original reminder");

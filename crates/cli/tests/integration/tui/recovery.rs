@@ -85,7 +85,7 @@ fn recover(after_acceptance: bool) {
         tui.send(b"\x1b[200~ plus new edits\x1b[201~");
         tui.wait_for("plus new edits");
         if after_acceptance {
-            tui.send(b"\x11");
+            tui.close_terminal();
             tui.finish();
         } else {
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -117,7 +117,7 @@ fn recover(after_acceptance: bool) {
         let input: SubmitInput = serde_json::from_value(requests[0].clone()).unwrap();
         assert_eq!(input.origin_host_epoch, client.identity.host_epoch);
         assert_eq!(input.content.text, "original 中文🦀");
-        tui.send(b"\x11");
+        tui.close_terminal();
         tui.finish();
         drop(proxy);
         let first = client.submit_message(input.clone()).await.unwrap();

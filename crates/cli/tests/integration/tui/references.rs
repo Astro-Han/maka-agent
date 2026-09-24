@@ -95,7 +95,7 @@ fn host_directory_reference_survives_restart_and_sends_without_text_or_registrat
     tui.wait_for(selected.to_str().unwrap());
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
     tui.wait_until(|s| !s.contains("Reference this directory"));
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let state = directory
         .path()
@@ -115,7 +115,7 @@ fn host_directory_reference_survives_restart_and_sends_without_text_or_registrat
     reopened.send(b"\x13");
     reopened.wait_for("Directory received.");
     reopened.wait_for(selected.to_str().unwrap());
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     let body = runtime.block_on(model).unwrap();
     assert!(

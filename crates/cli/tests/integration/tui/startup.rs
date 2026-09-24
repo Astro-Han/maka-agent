@@ -52,6 +52,11 @@ fn fresh_terminals_share_one_on_demand_host_and_reopen_the_same_root() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let client = runtime.block_on(super::support::client(&root));
     first.send(b"\x11");
+    first.wait_for("Force quit");
+    first.send(b"\x1b");
+    first.wait_until(|screen| !screen.contains("Force quit"));
+    first.filter_command("Close interface only");
+    first.click_text("Close interface only");
     first.finish();
     runtime
         .block_on(client.request(maka_protocol::Operation::HostStatus, serde_json::json!({})))
@@ -61,7 +66,18 @@ fn fresh_terminals_share_one_on_demand_host_and_reopen_the_same_root() {
         original.host_epoch
     );
     second.send(b"\x11");
+    second.wait_for("Force quit");
+    // Enter defaults to cancel; forcing requires an explicit choice.
+    second.send(b"\r");
+    second.wait_until(|screen| !screen.contains("Force quit"));
+    runtime
+        .block_on(client.request(maka_protocol::Operation::HostStatus, serde_json::json!({})))
+        .unwrap();
+    second.send(b"\x11");
+    second.wait_for("Force quit");
+    second.click_text("Force quit");
     second.finish();
+    assert!(RootOwner::open(&root, &RootNamespaces::for_current_account().unwrap()).is_ok());
     client.disconnect();
     drop(client);
     wait_for_idle(&root);
@@ -82,8 +98,28 @@ fn fresh_terminals_share_one_on_demand_host_and_reopen_the_same_root() {
     let current = read_discovery(&root).unwrap();
     assert_eq!(current.root_id, original.root_id);
     assert_ne!(current.host_epoch, original.host_epoch);
+    // The Host must not be retired until the local checkpoint is durable.
+    let checkpoint = directory
+        .path()
+        .join("tui-state")
+        .join(&current.root_id)
+        .join("first/state.json");
+    std::fs::remove_file(&checkpoint).unwrap();
+    std::fs::create_dir(&checkpoint).unwrap();
+    reopened.send(b"\x11");
+    reopened.wait_for("Local changes not saved");
+    assert_eq!(
+        read_discovery(&root).unwrap().host_epoch,
+        current.host_epoch
+    );
+    assert!(RootOwner::open(&root, &namespaces).is_err());
+    std::fs::remove_dir(&checkpoint).unwrap();
     reopened.send(b"\x11");
     reopened.finish();
+    assert!(
+        RootOwner::open(&root, &namespaces).is_ok(),
+        "quit must await root release, not the idle timer"
+    );
     wait_for_idle(&root);
 }
 

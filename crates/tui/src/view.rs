@@ -64,6 +64,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let animated = app.chrome.motion
         && app.chrome.window_focused
         && !app.closing
+        && app.shutdown.prompt.is_none()
         && app.palette.is_none()
         && !app.interactions.visible
         && app.management.dialog.is_none()
@@ -292,7 +293,11 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         Focus::Page => app.page_actions().get(app.selected_control).cloned(),
         _ => None,
     };
-    let hint = if app.closing {
+    let hint = if app.shutdown.stopping {
+        app.i18n.text("shutdown-working")
+    } else if app.shutdown.prompt.is_some() {
+        String::new()
+    } else if app.closing {
         app.i18n.text("state-closing")
     } else if app.extensions.consent_visible()
         || app.theme.editor.is_some()
@@ -395,7 +400,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
             action: Action::Visit(Route::Host),
         });
     }
-    if app.extensions.consent_visible() {
+    if app.shutdown.prompt.is_some() {
+        crate::shutdown::draw(frame, app, area, base);
+    } else if app.extensions.consent_visible() {
         crate::pages::extensions::draw_consent(frame, app, area, base);
     } else if app.theme.editor.is_some() {
         crate::theme::editor::draw(frame, app, area);
@@ -613,7 +620,7 @@ fn icon(app: &App, action: &Action) -> &'static str {
         Action::CycleLocale => ("文", "L"),
         Action::ToggleSymbols => ("◇", "A"),
         Action::ToggleMotion => ("≈", "M"),
-        Action::Quit => ("×", "X"),
+        Action::Quit | Action::Detach | Action::ConfirmQuit | Action::CancelQuit => ("×", "X"),
     };
     app.chrome.symbol(unicode, ascii)
 }
@@ -752,6 +759,9 @@ fn action_label(app: &App, action: &Action) -> String {
         Action::ToggleSymbols => "command-symbols",
         Action::ToggleMotion => "command-motion",
         Action::Quit => "footer-quit",
+        Action::Detach => "command-detach",
+        Action::ConfirmQuit => "shutdown-force",
+        Action::CancelQuit => "shutdown-cancel",
     };
     app.i18n.text(key)
 }
@@ -886,8 +896,9 @@ fn control(
         return;
     }
     let enabled = app.enabled(&action);
-    let destructive = matches!(action, Action::Manage(crate::pages::manage::Command::Save))
-        && app.management.destructive();
+    let destructive = action == Action::ConfirmQuit
+        || (matches!(action, Action::Manage(crate::pages::manage::Command::Save))
+            && app.management.destructive());
     let caution = matches!(action, Action::Manage(crate::pages::manage::Command::Save))
         && app.sandbox_disabling();
     let style = if !enabled {

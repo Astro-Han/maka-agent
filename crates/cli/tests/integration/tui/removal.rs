@@ -152,7 +152,7 @@ fn deletion_confirms_cas_and_remote_retirement_preserves_recoverable_draft() {
             .screen
             .contains("recover this local draft")
     );
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     reopened.wait_for("This session is no longer available.");
@@ -172,7 +172,7 @@ fn deletion_confirms_cas_and_remote_retirement_preserves_recoverable_draft() {
             .revision,
         1
     );
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     client.disconnect();
     host.retire_registered();

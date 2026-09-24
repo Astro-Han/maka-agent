@@ -101,7 +101,7 @@ fn connection_setup_verifies_without_writes_masks_keys_and_creates_first_chat() 
     tui.send(b"hello after onboarding\x13");
     tui.wait_for("Onboarded model replied");
     runtime.block_on(provider).unwrap();
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

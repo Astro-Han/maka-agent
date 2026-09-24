@@ -187,7 +187,7 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
     open(&mut tui, false);
     tui.wait_for("No saved key");
     tui.send(b"never-persist-key-draft");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let checkpoint = directory
         .path()

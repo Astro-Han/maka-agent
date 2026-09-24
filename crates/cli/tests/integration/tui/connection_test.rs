@@ -186,7 +186,7 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
     tui.send(b"\x1b");
     tui.wait_until(|s| !s.contains("incur usage"));
     assert_eq!(runtime.block_on(catalog(&client)), updated);
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

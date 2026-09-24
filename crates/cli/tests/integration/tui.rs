@@ -49,6 +49,7 @@ mod removal;
 mod revision;
 mod sandbox;
 mod scheduler;
+mod shutdown;
 mod skills;
 mod startup;
 mod stopping;
@@ -160,7 +161,7 @@ fn real_pty_default_entry_routes_mouse_modal_resize_and_restores_terminal() {
     tui.wait_until(|screen| !screen.contains("▤ Workspace") && screen.contains("⛭"));
     tui.click_text("◉");
     tui.wait_for("refusing to initialize a nonempty State Root");
-    tui.send(b"\x11"); // Ctrl+Q
+    tui.close_terminal();
     tui.finish();
     let mut termios = unsafe { std::mem::zeroed::<libc::termios>() };
     assert_eq!(
@@ -644,14 +645,14 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.send(b"\x0e"); // Ctrl+N: create using this process's workspace.
     tui.wait_for("New conversation");
     tui.wait_for("No messages yet.");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     assert!(
         runtime
             .block_on(client.session(&second[0].id))
             .unwrap()
             .is_some(),
-        "quitting the TUI must leave the Host running"
+        "closing a terminal must leave its separately owned Host running"
     );
     client.disconnect();
     host.retire_registered();
@@ -933,6 +934,15 @@ impl Pty {
     }
     fn send(&mut self, bytes: &[u8]) {
         self.master.write_all(bytes).unwrap();
+    }
+    fn close_terminal(&mut self) {
+        // These fixtures own their Host separately. Terminal termination saves
+        // local state without requesting whole-Host exit; startup/shutdown tests
+        // exercise the interactive Ctrl+Q and command-palette choices explicitly.
+        assert_eq!(
+            unsafe { libc::kill(self.child.id() as libc::pid_t, libc::SIGTERM) },
+            0
+        );
     }
     fn filter_command(&mut self, label: &str) {
         self.send(b"\x10");

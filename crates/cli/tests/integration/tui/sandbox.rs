@@ -265,7 +265,7 @@ fn composer_sandbox_choice_requires_confirmation_and_preserves_approval_and_conc
     );
     tui.send(b"\x1b");
     tui.wait_until(|screen| !screen.contains("Cancel"));
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

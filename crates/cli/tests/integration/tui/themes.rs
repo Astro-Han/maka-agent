@@ -49,7 +49,7 @@ fn visual_custom_theme_saves_reopens_and_rejects_external_changes_without_losing
     let saved = std::fs::read(&path).unwrap();
     let json: serde_json::Value = serde_json::from_slice(&saved).unwrap();
     assert_eq!(json["colors"]["accent"], "#89abcd");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
 
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
@@ -66,7 +66,7 @@ fn visual_custom_theme_saves_reopens_and_rejects_external_changes_without_losing
     reopened.wait_for("#123456");
     reopened.click_text("Save & apply");
     reopened.wait_for("Palette: External");
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
 
     std::fs::write(&path, b"not-json").unwrap();
@@ -75,7 +75,7 @@ fn visual_custom_theme_saves_reopens_and_rejects_external_changes_without_losing
     invalid.wait_for("Invalid theme");
     invalid.click_text("◐");
     invalid.wait_for("Palette: Maka dark");
-    invalid.send(b"\x11");
+    invalid.close_terminal();
     invalid.finish();
     assert_eq!(std::fs::read(&path).unwrap(), b"not-json");
     host.retire_registered();

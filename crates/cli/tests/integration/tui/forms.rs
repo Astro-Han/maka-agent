@@ -168,7 +168,7 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
         .block_on(fixture.client.close_subscription(&settled.subscription_id))
         .unwrap();
     fixture.client.disconnect();
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     runtime.block_on(reader.close()).unwrap();
     host.retire_registered();

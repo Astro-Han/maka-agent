@@ -114,7 +114,7 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
     tui.wait_for("attachment 中文.txt");
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
     tui.wait_until(|s| !s.contains("Remove"));
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let checkpoint = directory
         .path()
@@ -175,7 +175,7 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
     let screen = reopened.screen.snapshot().unwrap().screen;
     assert!(screen.contains("attachment 中文.txt"));
     assert!(screen.contains("vision.png"));
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     let body = runtime.block_on(model).unwrap();
     assert!(body.to_string().contains("attachment 中文.txt"));

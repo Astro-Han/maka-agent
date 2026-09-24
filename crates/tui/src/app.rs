@@ -91,6 +91,9 @@ pub enum Action {
     OpenInteraction,
     Interaction(crate::pages::interactions::Command),
     Quit,
+    Detach,
+    ConfirmQuit,
+    CancelQuit,
     NextTab,
     PreviousTab,
     CloseTab(String),
@@ -161,6 +164,7 @@ pub struct App {
     pub notice: Option<Notice>,
     pub state_error: Option<String>,
     pub closing: bool,
+    pub shutdown: crate::shutdown::State,
     pub theme: crate::theme::Theme,
     pub refreshing: bool,
     pub creating: bool,
@@ -210,6 +214,7 @@ impl App {
             notice: None,
             state_error: None,
             closing: false,
+            shutdown: Default::default(),
             theme: crate::theme::Theme::default(),
             refreshing: false,
             creating: false,
@@ -240,6 +245,7 @@ impl App {
             (Action::Connect, "command-connect"),
             (Action::ToggleSidebar, "command-sidebar"),
             (Action::Quit, "command-quit"),
+            (Action::Detach, "command-detach"),
         ];
         if self.navigation.current() == Route::Extensions {
             commands.extend(self.page_actions().into_iter().filter_map(|action| {
@@ -474,6 +480,7 @@ impl App {
                 || self.inbox.error.is_some())
     }
     pub fn begin_frame(&mut self, area: Rect) {
+        self.shutdown.visible = false;
         self.attachments.begin_frame();
         self.branch.invalidate_geometry();
         self.recap.invalidate_geometry();
@@ -808,12 +815,21 @@ impl App {
                 self.refreshing = true;
                 return Some(action);
             }
-            Action::Quit => return Some(action),
+            Action::Quit | Action::Detach | Action::ConfirmQuit => return Some(action),
+            Action::CancelQuit => {
+                self.shutdown = Default::default();
+                self.hits.clear();
+                self.hover = None;
+            }
             _ => {}
         }
         None
     }
     pub fn enabled(&self, action: &Action) -> bool {
+        if *action == Action::ConfirmQuit {
+            return matches!(self.shutdown.prompt, Some(crate::shutdown::Prompt::Busy))
+                && !self.shutdown.stopping;
+        }
         if let Action::Extension(command) = action {
             return self.extensions_enabled(command);
         }
@@ -1094,6 +1110,7 @@ impl App {
     }
 
     pub fn invalidate_editor_geometry(&mut self) {
+        self.shutdown.visible = false;
         self.extensions.invalidate_geometry();
         self.modal_area = None;
         if let Some(editor) = &mut self.theme.editor {
@@ -1139,6 +1156,14 @@ impl App {
     /// Only the displayed frame contributes hit regions. Overlay rendering
     /// replaces that list, so a mouse event cannot reach a covered page.
     pub fn input(&mut self, event: Event) -> (bool, Option<Action>) {
+        if self.shutdown.stopping
+            && !matches!(
+                event,
+                Event::Resize(_, _) | Event::FocusLost | Event::FocusGained
+            )
+        {
+            return (false, None);
+        }
         if self.closing {
             match &event {
                 Event::Key(key)
@@ -1211,6 +1236,9 @@ impl App {
     }
 
     fn dispatch_input(&mut self, event: Event) -> (bool, Option<Action>) {
+        if self.shutdown.prompt.is_some() && !matches!(event, Event::Resize(_, _)) {
+            return self.shutdown_input(event);
+        }
         if let Event::Mouse(mouse) = &event
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && (self.extensions.consent_visible()

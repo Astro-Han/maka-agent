@@ -146,7 +146,7 @@ fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_mode
     assert_eq!(actual["task"]["title"], "Changed elsewhere");
     assert_eq!(actual["task"]["intent"]["body"], "Changed remote note");
     assert_eq!(actual["task"]["fireCount"], 0);
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Draft preserved");
@@ -177,7 +177,7 @@ fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_mode
     let merged = runtime.block_on(remote(&client, "request", query()));
     assert_eq!(merged["task"]["intent"]["body"], "Keep this draft");
     assert_eq!(merged["task"]["title"], "Changed elsewhere");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     runtime.block_on(async {
         assert!(
@@ -256,7 +256,8 @@ fn scheduler_creation_requires_consent_then_reuses_only_a_live_grant() {
     tui.send(b"\x1b[200~Consent fixture\x1b[201~");
     tui.click_text("Content");
     tui.send(b"\x1b[200~First reminder\x1b[201~");
-    tui.send(b"\x11");
+    tui.wait_for("First reminder");
+    tui.close_terminal();
     tui.finish();
     let checkpoint = directory
         .path()
@@ -333,7 +334,7 @@ fn scheduler_creation_requires_consent_then_reuses_only_a_live_grant() {
         runtime.block_on(remote(&client, "request", json!({"kind":"grants"}))),
         grants
     );
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     runtime.block_on(async {
         let binding = RemoteBinding::Package { package_id: "maka.scheduler".into(), method: "terminal".into(), session_id: None };

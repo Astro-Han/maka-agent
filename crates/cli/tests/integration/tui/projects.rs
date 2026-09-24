@@ -198,7 +198,7 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
     tui.send(b"project draft");
     tui.send(b"\x1b[1;3D");
     tui.wait_for("Renamed project");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Renamed project"); // Restored route re-queries after connection, not a false empty state.
@@ -355,7 +355,7 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
     tui.wait_until(|text| !text.contains("Preferred Host directory") && text.contains("TUI 项目"));
     tui.send(b"\x1b[1;3C");
     tui.wait_for("project draft");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     cancellation.cancel();

@@ -85,7 +85,7 @@ fn oauth_entry_uses_host_enrollment_mouse_keyboard_and_never_starts_on_dismiss()
         before,
         "enrollment and dismissal do not save credentials or connections"
     );
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.child.as_mut().unwrap().kill().unwrap();
@@ -179,7 +179,7 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
             requests,
             "NotFound is not permission to restart"
         );
-        reopened.send(b"\x11");
+        reopened.close_terminal();
         reopened.finish();
         assert_eq!(catalog(&client).await, before);
         drop(relay);

@@ -42,7 +42,7 @@ fn restart_keeps_forward_history_and_keyboard_control_without_replaying_actions(
     tui.wait_for("Move focus between controls");
     tui.send(b"\x1b[1;3D"); // Alt+Left.
     tui.wait_for("Icons: Unicode");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
 
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
@@ -58,14 +58,14 @@ fn restart_keeps_forward_history_and_keyboard_control_without_replaying_actions(
     reopened.click_text("Host");
     reopened.wait_for("Host epoch:");
     reopened.send(b"\x1b[1;3C"); // New destination replaces the previous forward branch.
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
 
     let mut branched = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     branched.wait_for("Host epoch:");
     branched.send(b"\x1b[1;3D");
     branched.wait_for("No sessions yet.");
-    branched.send(b"\x11");
+    branched.close_terminal();
     branched.finish();
     host.retire_registered();
 }

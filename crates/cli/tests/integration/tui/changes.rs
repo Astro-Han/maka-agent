@@ -146,7 +146,7 @@ fn real_edits_show_request_diff_without_claiming_a_file_snapshot_and_copy_withou
     tui.wait_for("old_string:");
     tui.wait_for("new_string:");
     tui.wait_for("whitespace");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();
@@ -277,7 +277,7 @@ fn code_mode_patch_stops_after_failure_and_keeps_real_tools_visible() {
     tui.filter_command("Show execution details");
     tui.click_text("Show execution details");
     tui.wait_for("exec");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

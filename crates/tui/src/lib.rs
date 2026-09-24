@@ -26,6 +26,7 @@ mod i18n;
 mod motion;
 mod navigation;
 mod pages;
+mod shutdown;
 mod state;
 mod terminal;
 mod theme;
@@ -38,6 +39,7 @@ pub use i18n::{Locale, LocalePreference};
 use maka_client::{Client, Error, Notification};
 use maka_protocol::Operation;
 use serde_json::{Value, json};
+pub use shutdown::{ShutdownOutcome, ShutdownRequest};
 use std::{path::PathBuf, time::Duration};
 use tokio::{sync::mpsc, task::JoinSet};
 
@@ -174,12 +176,14 @@ enum Completed {
     ),
 }
 
-pub async fn run<F, C>(options: Options, connect: F) -> Result<(), Error>
+pub async fn run<F, C, S, D>(options: Options, connect: F, shutdown: S) -> Result<(), Error>
 where
     F: Fn(PathBuf) -> C,
     C: std::future::Future<Output = Result<(Client, mpsc::Receiver<Notification>), Error>>
         + Send
         + 'static,
+    S: Fn(ShutdownRequest) -> D,
+    D: std::future::Future<Output = Result<ShutdownOutcome, Error>> + Send + 'static,
 {
     let i18n = i18n::I18n::from_environment(options.locale)?;
     let (_guard, mut screen) = terminal::Guard::enter(&i18n)?;
@@ -218,9 +222,25 @@ where
     let mut effect = app.apply(Action::Connect);
     let mut dirty = true;
     let mut flushed = false;
+    let mut shutdown_target: Option<ShutdownRequest> = None;
+    // Host disconnection is expected during shutdown; this task must outlive
+    // the connection-scoped jobs and wait for actual storage/root release.
+    let mut shutdown_job = None;
     #[cfg(unix)]
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
+        if !app.closing && app.shutdown.prompt.is_none() {
+            shutdown_target = None;
+        }
+        if app.closing && flushed && shutdown_job.is_none() {
+            if let Some(target) = shutdown_target.clone() {
+                app.shutdown.stopping = true;
+                shutdown_job = Some(tokio::spawn(shutdown(target)));
+                dirty = true;
+            } else {
+                break;
+            }
+        }
         app.advance_revision_uploads();
         if !app.closing
             && let Some(request) = app.attachment_browse_request()
@@ -236,13 +256,17 @@ where
                 (request, result)
             });
         }
-        if let Some(state) = &mut state {
+        if let Some(state) = &mut state
+            && !(app.closing && flushed)
+        {
             if app.closing && state.wait().is_some() {
                 state.force();
             }
             state.start(&app);
         }
-        if let Some(client) = &client {
+        if let Some(client) = &client
+            && !app.closing
+        {
             if let Some((ticket, saved, transfer)) = app.attachment_read_request() {
                 let client = client.clone();
                 attachment_jobs.spawn(async move {
@@ -539,6 +563,7 @@ where
         // Paging can depend on the just-measured viewport. Dispatch before
         // waiting for input, including when motion is disabled and the app is idle.
         if let Some(client) = &client
+            && !app.closing
             && let Some(request) = app.chat.page_query()
         {
             let client = client.clone();
@@ -637,7 +662,28 @@ where
                     dirty = true;
                     continue;
                 }
-                Action::Quit => {
+                Action::Quit | Action::Detach | Action::ConfirmQuit => {
+                    match action {
+                        Action::Quit => {
+                            shutdown_target = client.as_ref().map(|client| ShutdownRequest {
+                                root: app.root.clone(),
+                                identity: client.identity.clone(),
+                                interrupt: false,
+                            });
+                        }
+                        Action::ConfirmQuit => {
+                            if !matches!(app.shutdown.prompt, Some(shutdown::Prompt::Busy)) {
+                                continue;
+                            }
+                            if let Some(target) = &mut shutdown_target {
+                                target.interrupt = true;
+                            }
+                        }
+                        Action::Detach => shutdown_target = None,
+                        _ => unreachable!(),
+                    }
+                    app.shutdown = shutdown::State::default();
+                    flushed = false;
                     app.attachments.disconnect();
                     app.skills.disconnect();
                     app.extensions.disconnect();
@@ -654,7 +700,9 @@ where
                         dirty = true;
                         continue;
                     }
-                    break;
+                    app.closing = true;
+                    flushed = true;
+                    continue;
                 }
                 Action::Connect => {
                     app.branch.disconnect();
@@ -804,6 +852,22 @@ where
         let state_wait = state.as_ref().and_then(state::State::wait);
         let oauth_wait = app.oauth_wait();
         tokio::select! {
+            result = async {
+                match &mut shutdown_job {
+                    Some(job) => job.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                shutdown_job = None;
+                app.closing = false;
+                match result {
+                    Ok(Ok(ShutdownOutcome::Stopped)) => break,
+                    Ok(Ok(ShutdownOutcome::Busy)) => app.shutdown.show(shutdown::Prompt::Busy),
+                    Ok(Err(error)) => app.shutdown.show(shutdown::Prompt::Failed(error.to_string())),
+                    Err(error) => app.shutdown.show(shutdown::Prompt::Failed(error.to_string())),
+                }
+                dirty = true;
+            }
             _ = async {
                 match oauth_wait {
                     Some(wait) => tokio::time::sleep(wait).await,
@@ -893,7 +957,6 @@ where
                 if app.state_error.is_some() { app.closing = false; }
                 if app.closing && state.as_ref().is_some_and(state::State::idle) {
                     flushed = true;
-                    break;
                 }
                 dirty = true;
             }

@@ -94,6 +94,7 @@ impl Tui {
                 profile: self.profile.unwrap_or_else(|| "default".into()),
             },
             crate::deployment::connect_local,
+            crate::deployment::shutdown_local,
         )
         .await
     }

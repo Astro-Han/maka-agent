@@ -263,7 +263,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
         );
         assert!(moved.is_dir(), "switching must not move existing files");
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

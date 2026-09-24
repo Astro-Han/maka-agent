@@ -163,7 +163,7 @@ fn enabled_models_searches_full_catalog_keeps_manual_ids_and_applies_only_confir
         );
         assert_eq!(items[0]["requestBodyOverlay"]["temperature"], 0.2);
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();
