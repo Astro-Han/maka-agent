@@ -74,12 +74,12 @@ impl Saved {
         let mut members = HashSet::new();
         let groups = self.groups.iter().all(|(key, items)| {
             key.valid()
-                && key.part == Part::Activity
+                && key.part.members().is_some()
                 && keys.insert(key)
                 && !items.is_empty()
                 && items.iter().all(|member| {
                     member.valid()
-                        && member.part == Part::Tool
+                        && Some(member.part) == key.part.members()
                         && member.turn == key.turn
                         && members.insert(member)
                 })

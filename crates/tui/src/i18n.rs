@@ -313,6 +313,7 @@ mod tests {
             ("line", "2"),
             ("column", "5"),
             ("setting", "Palette"),
+            ("title", "Plan"),
         ];
         for locale in Locale::ALL {
             assert_eq!(messages(SOURCES[locale.index()]), keys);

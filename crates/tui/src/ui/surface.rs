@@ -154,7 +154,10 @@ impl<M: Clone> Surface<M> {
             self.hover = None;
         }
         let colors = context.colors;
-        for item in items.iter().filter(|item| item.enabled && self.popover.is_none()) {
+        for item in items
+            .iter()
+            .filter(|item| item.enabled && self.popover.is_none())
+        {
             // Keyboard focus and the pointer stay distinguishable: focus takes
             // the selection, hover only lifts the row.
             let style = if context.focused && Some(&item.id) == self.focus.as_ref() {
@@ -931,7 +934,10 @@ mod tests {
         let mut surface = Surface::default();
         let rows = [("alpha", true), ("gamma", true)];
         let screen = draw(&mut surface, 50, 12, tree(&[0], 0, &rows));
-        let y = screen.lines().position(|line| line.contains("gamma")).unwrap() as u16;
+        let y = screen
+            .lines()
+            .position(|line| line.contains("gamma"))
+            .unwrap() as u16;
         surface.input(&mouse(MouseEventKind::Moved, 30, y));
         let mut terminal = Terminal::new(TestBackend::new(50, 12)).unwrap();
         let colors = crate::theme::Palette::default();
@@ -951,7 +957,11 @@ mod tests {
             .unwrap();
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(0, 0)].bg, colors.selection, "focused category");
-        assert_eq!(buffer[(30, y)].bg, colors.surface, "hovered row is only lifted");
+        assert_eq!(
+            buffer[(30, y)].bg,
+            colors.surface,
+            "hovered row is only lifted"
+        );
     }
 
     #[test]

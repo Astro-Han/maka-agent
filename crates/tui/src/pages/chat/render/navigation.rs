@@ -119,7 +119,7 @@ impl Transcript {
         if self.order.contains(key) {
             return Some(key.clone());
         }
-        let replacement = if self.trace && key.part == Part::Activity {
+        let replacement = if self.trace && key.part.members().is_some() {
             self.groups.get(key).and_then(|members| members.first())
         } else {
             self.membership.get(key)

@@ -22,19 +22,28 @@ use super::*;
 use tools::{Activity, State};
 
 impl MessageKey {
-    fn group(&self) -> Self {
+    fn group(&self, part: Part) -> Self {
         Self {
-            part: Part::Activity,
+            part,
             ..self.clone()
         }
     }
 }
 
 impl Transcript {
-    fn activity_member(&self, key: &MessageKey) -> bool {
+    /// The folding summary a block may join: read/search tool calls, or
+    /// reasoning summaries. Anything else ends a run.
+    fn fold(&self, key: &MessageKey) -> Option<Part> {
         let block = &self.blocks[key];
-        block.activity.is_some()
+        if block.activity.is_some()
             && matches!(block.kind, Kind::Tool(State::Pending | State::Returned))
+        {
+            Some(Part::Activity)
+        } else if block.kind == Kind::Thinking {
+            Some(Part::Reasoning)
+        } else {
+            None
+        }
     }
 
     pub(super) fn reconcile_groups(&mut self, i18n: &I18n) {
@@ -47,15 +56,15 @@ impl Transcript {
         let old_membership = std::mem::take(&mut self.membership);
         let mut start = 0;
         while start < self.source_order.len() {
-            if !self.activity_member(&self.source_order[start]) {
+            let Some(part) = self.fold(&self.source_order[start]) else {
                 start += 1;
                 continue;
-            }
+            };
             let turn = &self.source_order[start].turn;
             let mut end = start + 1;
             while end < self.source_order.len()
                 && self.source_order[end].turn == *turn
-                && self.activity_member(&self.source_order[end])
+                && self.fold(&self.source_order[end]) == Some(part)
             {
                 end += 1;
             }
@@ -66,57 +75,20 @@ impl Transcript {
                 let key = members
                     .iter()
                     .filter_map(|key| old_membership.get(key))
-                    .find(|key| !self.groups.contains_key(*key))
+                    .find(|key| key.part == part && !self.groups.contains_key(*key))
                     .cloned()
                     .unwrap_or_else(|| {
                         members
                             .iter()
-                            .map(MessageKey::group)
+                            .map(|member| member.group(part))
                             .find(|key| !self.groups.contains_key(key))
                             .expect("unclaimed group identity")
                     });
-                let reads = members
-                    .iter()
-                    .filter(|key| self.blocks[*key].activity == Some(Activity::Read))
-                    .count();
-                let searches = members.len() - reads;
-                let pending = members
-                    .iter()
-                    .filter(|key| self.blocks[*key].kind == Kind::Tool(State::Pending))
-                    .count();
-                self.upsert(
-                    key.clone(),
-                    Revision::Group {
-                        reads,
-                        searches,
-                        pending,
-                    },
-                    Kind::Activity,
-                    || {
-                        let mut parts = Vec::new();
-                        for (label, count) in [
-                            ("tool-group-reads", reads),
-                            ("tool-group-searches", searches),
-                        ] {
-                            if count > 0 {
-                                parts.push(i18n.format(label, &[("count", &count.to_string())]));
-                            }
-                        }
-                        let summary = parts.join(" · ");
-                        let summary = if pending == 0 {
-                            summary
-                        } else {
-                            i18n.format(
-                                "tool-group-pending",
-                                &[("summary", &summary), ("count", &pending.to_string())],
-                            )
-                        };
-                        tools::Content {
-                            emphasis: Some(0..summary.len()),
-                            ..summary.into()
-                        }
-                    },
-                );
+                if part == Part::Activity {
+                    self.summarize_activity(key.clone(), &members, i18n);
+                } else {
+                    self.summarize_reasoning(key.clone(), &members, i18n);
+                }
                 for member in &members {
                     self.membership.insert(member.clone(), key.clone());
                 }
@@ -127,7 +99,7 @@ impl Transcript {
         // If a group dissolves, keep reading its surviving real tool, not an
         // unrelated message that happens to occupy the old screen coordinate.
         if let Some(anchor) = &mut self.anchor
-            && anchor.key.part == Part::Activity
+            && anchor.key.part.members().is_some()
             && !self.groups.contains_key(&anchor.key)
             && let Some(member) = old_groups.get(&anchor.key).and_then(|members| {
                 members
@@ -139,7 +111,7 @@ impl Transcript {
             anchor.source = 0;
         }
         if let Some(key) = &self.selected
-            && key.part == Part::Activity
+            && key.part.members().is_some()
             && !self.groups.contains_key(key)
         {
             self.selected = old_groups
@@ -151,6 +123,78 @@ impl Transcript {
                 })
                 .cloned();
         }
+    }
+
+    fn summarize_activity(&mut self, key: MessageKey, members: &[MessageKey], i18n: &I18n) {
+        let reads = members
+            .iter()
+            .filter(|key| self.blocks[*key].activity == Some(Activity::Read))
+            .count();
+        let searches = members.len() - reads;
+        let pending = members
+            .iter()
+            .filter(|key| self.blocks[*key].kind == Kind::Tool(State::Pending))
+            .count();
+        self.upsert(
+            key,
+            Revision::Group {
+                reads,
+                searches,
+                pending,
+            },
+            Kind::Activity,
+            || {
+                let mut parts = Vec::new();
+                for (label, count) in [
+                    ("tool-group-reads", reads),
+                    ("tool-group-searches", searches),
+                ] {
+                    if count > 0 {
+                        parts.push(i18n.format(label, &[("count", &count.to_string())]));
+                    }
+                }
+                let summary = parts.join(" · ");
+                let summary = if pending == 0 {
+                    summary
+                } else {
+                    i18n.format(
+                        "tool-group-pending",
+                        &[("summary", &summary), ("count", &pending.to_string())],
+                    )
+                };
+                tools::Content {
+                    emphasis: Some(0..summary.len()),
+                    ..summary.into()
+                }
+            },
+        );
+    }
+
+    /// One row for a run of reasoning parts: the newest step's title, which
+    /// keeps changing while the model streams, and how many steps there are.
+    fn summarize_reasoning(&mut self, key: MessageKey, members: &[MessageKey], i18n: &I18n) {
+        let latest = &self.blocks[members.last().expect("a run has members")];
+        let revision = match latest.revision {
+            Revision::Durable(revision) | Revision::Live(revision) => Some(revision),
+            _ => None,
+        };
+        let title = title(&latest.text);
+        let count = members.len();
+        self.upsert(
+            key,
+            Revision::Steps {
+                count,
+                latest: revision,
+            },
+            Kind::Steps,
+            || {
+                i18n.format(
+                    "thinking-steps",
+                    &[("title", &title), ("count", &count.to_string())],
+                )
+                .into()
+            },
+        );
     }
 
     pub(super) fn arrange_groups(&mut self) {
@@ -184,7 +228,7 @@ impl Transcript {
         if let Some(anchor) = &mut self.anchor
             && !self.order.contains(&anchor.key)
         {
-            if self.trace && anchor.key.part == Part::Activity {
+            if self.trace && anchor.key.part.members().is_some() {
                 if let Some(member) = self
                     .groups
                     .get(&anchor.key)
@@ -199,6 +243,21 @@ impl Transcript {
             }
         }
     }
+}
+
+/// A reasoning summary's first line, without its Markdown heading or emphasis.
+fn title(text: &str) -> String {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    let line = line.trim_start_matches('#').trim();
+    let line = line
+        .strip_prefix("**")
+        .and_then(|line| line.strip_suffix("**"))
+        .unwrap_or(line);
+    crate::view::safe(line)
 }
 
 #[cfg(test)]
@@ -231,6 +290,67 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect()
+    }
+
+    #[test]
+    fn consecutive_reasoning_folds_into_one_live_row_and_survives_reading_restore() {
+        let i18n = I18n::new(LocalePreference::Explicit(Locale::En), Locale::En);
+        let thought = |id: &str, text: &str| json!({"type":"assistant","turnId":"turn","id":id,"thinking":{"text":text}});
+        let rows = BTreeMap::from([
+            (
+                1,
+                json!({"type":"user","turnId":"turn","id":"ask","text":"Solve it"}),
+            ),
+            (
+                2,
+                thought("t1", "**Checking digit arrangements**\n\nDetail one."),
+            ),
+            (3, thought("t2", "## Relating digit sums")),
+            (4, thought("t3", "**Verifying maximality proof**")),
+            (
+                5,
+                json!({"type":"assistant","turnId":"turn","id":"answer","text":"981"}),
+            ),
+        ]);
+        let mut view = Transcript::default();
+        view.sync(&rows, &[], 0, &i18n, false);
+        let group = view.order[1].clone();
+        assert_eq!(group.part, Part::Reasoning);
+        assert_eq!(view.order.len(), 3, "three steps become one row");
+        let screen = draw(&mut view, 80, false);
+        assert!(
+            screen.contains("◆ Verifying maximality proof · 3 steps"),
+            "{screen}"
+        );
+        assert!(!screen.contains("Checking digit arrangements"));
+        view.toggle(&group);
+        let screen = draw(&mut view, 80, false);
+        for step in ["  ◆ Checking digit arrangements", "  ◆ Relating digit sums"] {
+            assert!(screen.contains(step), "{step} in {screen}");
+        }
+        // A streaming step joins the run and retitles it as it arrives.
+        let id = SessionAssistantStreamIdentity {
+            kind: AssistantStreamKind::Thinking,
+            turn_id: "turn".into(),
+            message_id: "live".into(),
+        };
+        let mut stream = LiveText::default();
+        stream.text = "**Writing the answer**".into();
+        let without_answer: BTreeMap<_, _> = rows
+            .clone()
+            .into_iter()
+            .filter(|(sequence, _)| *sequence < 5)
+            .collect();
+        view.sync(&without_answer, &[(id, stream)], 1, &i18n, false);
+        view.toggle(&group);
+        assert!(draw(&mut view, 80, false).contains("◆ Writing the answer · 4 steps"));
+        // Reading state keeps the fold and its membership across a restore.
+        view.sync(&rows, &[], 2, &i18n, false);
+        view.toggle(&group);
+        let mut restored = Transcript::resume(view.take_reading());
+        restored.sync(&rows, &[], 0, &i18n, false);
+        assert!(!restored.folded(&group));
+        assert!(draw(&mut restored, 80, false).contains("  ◆ Relating digit sums"));
     }
 
     #[test]

@@ -147,7 +147,7 @@ fn real_pty_default_entry_routes_mouse_modal_resize_and_restores_terminal() {
     // labels. The page, colors and connection survive every change. Left
     // returns from the clicked row to the categories, at the current one.
     tui.send(b"\x1b[D");
-    tui.wait_for("Ctrl+B Navigation");
+    tui.wait_until(|screen| !screen.contains("Choose Palette"));
     tui.send(b"\x1b[B");
     tui.wait_for("English ▾"); // MAKA_LOCALE=en is an explicit preference.
     tui.send(b"\x1b[C");

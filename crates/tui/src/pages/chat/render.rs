@@ -58,7 +58,19 @@ enum Part {
     Thinking,
     Tool,
     Activity,
+    /// A run of reasoning summaries folded under one row.
+    Reasoning,
     Timing,
+}
+impl Part {
+    /// The member part a folding summary row gathers, if this is one.
+    fn members(self) -> Option<Self> {
+        match self {
+            Self::Activity => Some(Self::Tool),
+            Self::Reasoning => Some(Self::Thinking),
+            _ => None,
+        }
+    }
 }
 impl MessageKey {
     fn durable(row: &Value) -> Self {
@@ -93,6 +105,10 @@ enum Revision {
         searches: usize,
         pending: usize,
     },
+    Steps {
+        count: usize,
+        latest: Option<u64>,
+    },
     Tool {
         call: Option<u64>,
         result: Option<u64>,
@@ -106,6 +122,8 @@ enum Kind {
     Thinking,
     Tool(super::tools::State),
     Activity,
+    /// Summary row of consecutive reasoning parts.
+    Steps,
     Failure,
     Other,
     Meta,
@@ -119,9 +137,14 @@ impl Kind {
                 | Self::Thinking
                 | Self::Tool(_)
                 | Self::Activity
+                | Self::Steps
                 | Self::Failure
                 | Self::Other
         )
+    }
+    /// Folding summary rows always disclose their members.
+    fn group(self) -> bool {
+        matches!(self, Self::Activity | Self::Steps)
     }
     fn foldable(self) -> bool {
         !matches!(self, Self::Meta | Self::Timing)
@@ -663,7 +686,7 @@ impl Transcript {
                     } else {
                         layout::plain(&preview, preview_width)?
                     };
-                    block.expandable = block.kind == Kind::Activity
+                    block.expandable = block.kind.group()
                         || more_lines
                         || preview.len() < first_len
                         || layout
@@ -712,7 +735,7 @@ impl Transcript {
                     )?
                 });
                 if !block.folded {
-                    block.expandable = block.kind == Kind::Activity
+                    block.expandable = block.kind.group()
                         || block
                             .layout
                             .as_ref()
@@ -982,7 +1005,7 @@ impl Transcript {
             Kind::Tool(state) if header && state.problem() => {
                 line.style(Style::default().fg(state.color(self.colors)))
             }
-            Kind::Thinking => {
+            Kind::Thinking | Kind::Steps => {
                 let mut line = line;
                 for span in &mut line.spans {
                     span.style.fg = Some(crate::view::tone::thinking(self.colors));
@@ -1090,12 +1113,11 @@ fn gap_after(block: &Block, next: Option<Kind>) -> bool {
     matches!(
         block.kind,
         Kind::User | Kind::Assistant | Kind::Failure | Kind::Timing
-    ) || (block.kind.foldable()
-        && block.expandable
-        && !block.folded
-        && block.kind != Kind::Activity)
-        || (matches!(block.kind, Kind::Tool(_) | Kind::Activity | Kind::Thinking)
-            && matches!(next, Some(Kind::User | Kind::Assistant)))
+    ) || (block.kind.foldable() && block.expandable && !block.folded && !block.kind.group())
+        || (matches!(
+            block.kind,
+            Kind::Tool(_) | Kind::Activity | Kind::Steps | Kind::Thinking
+        ) && matches!(next, Some(Kind::User | Kind::Assistant)))
 }
 
 fn project(row: &Value, i18n: &I18n, ascii: bool) -> String {

@@ -390,7 +390,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
             app.i18n.text("sessions-help")
         }
     } else {
-        app.i18n.text("shell-shortcuts")
+        // No standing tutorial: shortcuts live in Help and the command palette.
+        String::new()
     };
     frame.render_widget(
         Paragraph::new(hint).centered().style(Style::default().fg(
