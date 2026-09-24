@@ -141,8 +141,9 @@ Our tests are in [tests/gpui_kit.rs](tests/gpui_kit.rs); other evidence is gpui-
 | Unmeasured rows are unknown | Pass in GPUI; gpui-kit's `is_scrolled_up` counts unknown as scrolled up, so the jump button can show for a frame while following is off | gpui-pre `list.rs` `test_follow_tail_reengagement_not_fooled_by_unmeasured_items`; gpui-component `message_scroller.rs:58-63` | one-line upstream fix |
 | Prompt pinned at top while the reply grows | Missing: `MessageScroller` fixes alignment and follow mode and has no end space | gpui-component `message_scroller.rs:36-38` | trailing spacer row sized to the viewport, or an upstream option |
 | User scroll, scroll back, scrollbar drag | Pass | gpui-pre `list.rs` `test_follow_tail_disengages_on_user_scroll`, `…_on_scrollbar_reposition`, `…_reengages_when_scrolled_back_to_bottom`, `…_reengages_after_scrollbar_drag_to_bottom_while_growing` | use as is |
-| Remeasure only changed rows; expand keeps position | Pass, when the caller remeasures the toggled row | `remeasure_items`, `splice`; gpui-pre `test_remeasure_item_preserves_scroll_offset` | caller calls `remeasure_items` |
-| Unclosed markers hidden while streaming | Fail: `Hello **bol` renders `**` | `an_unclosed_emphasis_does_not_show_its_marker_while_streaming` (ignored) | upstream |
+| Remeasure only changed rows | Pass, when the caller remeasures the changed row | `remeasure_items`, `splice`; gpui-pre `test_remeasure_item_preserves_scroll_offset` | caller calls `remeasure_items` |
+| Expanding a row while following keeps it under the pointer | Missing: following snaps back to the tail; GPUI's `ListState::pause_following_tail` would hold it, but `MessageScrollerState` does not expose it | gpui-pre `elements/list.rs:646`; gpui-component `message_scroller.rs:26` | one-method upstream addition |
+| Unclosed markers hidden while streaming | Fail: `Hello **bol` renders `**` | `an_unclosed_emphasis_does_not_show_its_marker_while_streaming` (ignored) | upstream, or accept the literal markers: mending in the app makes the text non-append, which loses the fade |
 | Streamed parse equals full parse | Pass for tables, lists, fences | `a_streamed_table_renders_like_a_full_parse`, `a_streamed_list_and_fence_render_like_a_full_parse`; last block reparsed, gpui-base `text/state.rs:961` | use as is |
 | Fade is paint-only, refades past the common prefix, full opacity on attach | Pass | gpui-base `text/inline.rs:103`, `text/stream_fade.rs` `record`, `note_replace` | use as is |
 | Fade, `Spinner`, `ShimmerText` redraw rate | Fail: display rate while visible; the fade costs 3.5 s CPU per 17 s reply | measured on the spike; gpui-base `text/state.rs:761` | upstream (issue drafted); local patch meanwhile |
@@ -150,10 +151,11 @@ Our tests are in [tests/gpui_kit.rs](tests/gpui_kit.rs); other evidence is gpui-
 | Undo per gesture, composition as one step | Pass | `test_ime_composition_undoes_as_one_unit`, `test_undo_manager_composition_cancel_leaves_no_entry`, `test_edit_after_composition_is_separate_undo` | use as is |
 | Enter family and modified deletes | Pass: `shift-`, `ctrl-`, `alt-backspace` bound; Enter submits or inserts by `submit_on_enter` | gpui-base `input/base/state.rs:133-150`, `:1887` | use as is |
 | Paste images and files | Hook exists; ordering is ours | gpui-component `input/textarea.rs:123` `on_paste` | composer |
-| Overlay takes focus on open | Pass | `an_opened_popover_takes_focus_so_escape_closes_it` | use as is |
+| An opened overlay handles its keys | Pass: Escape closes it once opened | `an_opened_popover_takes_focus_so_escape_closes_it` | use as is |
 | Trigger click closes an open popover | Pass | `clicking_the_trigger_of_an_open_popover_closes_it` | use as is |
-| Selection across soft-wrapped rows | Not tested (needs drag geometry) | | check by hand |
+| Selection across views and blocks, copy in document order | Pass: a window-level selection layer joins text views in document order and caches their copies | gpui-base `text_selection.rs` `plain_projection_caches_multiple_participant_copies_in_document_order`, `cross_participant_selection_excludes_participants_outside_its_document_interval`, `shift_extension_falls_back_when_the_anchor_participant_was_swept` | wire the transcript into one selection scope |
+| Selection when its start scrolls out of view; soft-wrap row starts | Not tested; gpui-base falls back when the anchor view is swept, where Waku keeps the spans | | check by hand |
 | Enter while an IME composes | Not tested (OS input path) | | check by hand with Pinyin |
 | Streaming code highlight stability | Not tested; highlighting needs the `tree-sitter` feature | | decide when code blocks are styled |
 
-Nothing found forces the transcript or markdown off gpui-kit. The gaps are the fade rate, marker mending and prompt pinning, all fixable upstream or in the list's row content.
+Nothing found forces the transcript or markdown off gpui-kit. The gaps are the fade rate, marker mending, prompt pinning and pausing the follow while a row expands, each fixable upstream or in the list's row content.
