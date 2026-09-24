@@ -126,6 +126,16 @@ impl Editor {
         self.layout.rows.len().min(maximum as usize).max(1) as u16
     }
 
+    /// Rows the text wraps to at `width`, leaving the cached layout alone.
+    pub fn rows(&self, width: u16) -> u16 {
+        let rows = if self.layout.width == width {
+            self.layout.rows.len()
+        } else {
+            Layout::new(&self.text, width).rows.len()
+        };
+        rows.max(1) as u16
+    }
+
     pub fn invalidate_geometry(&mut self) {
         self.area = None;
         self.dragging = false;

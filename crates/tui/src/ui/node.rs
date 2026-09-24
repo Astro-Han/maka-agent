@@ -93,6 +93,10 @@ pub enum Kind<M> {
     },
     /// A one-cell divider across the parent's cross axis.
     Rule,
+    /// A region its owner paints and drives, such as a text editor. The
+    /// kernel places it and makes it a focus stop: a click only focuses it,
+    /// Enter activates it, and the owner takes every other key.
+    Slot,
     /// Vertical scrolling for content taller than its rectangle.
     Scroll(Box<Node<M>>),
 }
@@ -161,6 +165,9 @@ impl<M> Node<M> {
             .size(Size::Fixed(width));
         node.role = Some(role);
         node
+    }
+    pub fn slot(key: impl Into<Cow<'static, str>>, rows: u16) -> Self {
+        Self::new(key, Kind::Slot).size(Size::Fixed(rows))
     }
     pub fn rule(key: impl Into<Cow<'static, str>>) -> Self {
         Self::new(key, Kind::Rule).size(Size::Fixed(1))

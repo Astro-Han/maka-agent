@@ -22,13 +22,7 @@ use crate::{
     app::{Action, App},
     ui::{Role, Sheet, Tone},
 };
-use ratatui::{
-    Frame,
-    layout::{Margin, Rect},
-    style::Style,
-    text::Line,
-    widgets::{Block, Paragraph, Wrap},
-};
+use ratatui::{Frame, layout::Rect, style::Style, text::Line};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -89,39 +83,51 @@ pub(crate) fn note_lines(text: &str, width: u16) -> Vec<Line<'static>> {
     lines
 }
 
-/// Confirmations without a text field: archiving and restoring, and testing,
-/// fetching models for, enabling, disabling or removing a connection. Cancel
-/// is the default, so Enter alone never changes anything.
-pub(crate) fn confirm_sheet(app: &App) -> Option<Sheet<Action>> {
+/// Every management dialog without a sub-view of its own: confirmations
+/// (archive, restore, connection test, model fetch, enable, disable, remove),
+/// text fields (rename, workspace, register, relink, endpoint) with their
+/// review step, and credentials. Confirmations of a change open on Cancel;
+/// text dialogs open in their field, where Enter saves.
+pub(crate) fn sheet(app: &App) -> Option<Sheet<Action>> {
     use super::connection::Change;
-    let dialog = app.management.dialog.as_ref().filter(|dialog| {
-        matches!(
-            dialog.kind,
-            Kind::Archive
-                | Kind::Restore
-                | Kind::Connection(
-                    Change::FetchModels
-                        | Change::Test
-                        | Change::Enable
-                        | Change::Disable
-                        | Change::Remove
-                )
-        )
-    })?;
-    let label = dialog.kind.label(&dialog.target);
+    let dialog = app
+        .management
+        .dialog
+        .as_ref()
+        .filter(|dialog| dialog.plain())?;
+    if dialog.credentials.is_some() {
+        return Some(super::credentials::sheet(app, dialog));
+    }
     let busy = app.management.pending.is_some();
-    let key = format!("{label}:{}", dialog.target.name);
-    let sheet = |key: String| {
-        Sheet::new(key, app.i18n.text(label)).text(
+    let kind = dialog.kind;
+    let label = kind.label(&dialog.target);
+    let result = dialog
+        .connection_test
+        .as_ref()
+        .filter(|_| !busy && dialog.error.is_none());
+    let step = match (result.is_some(), dialog.reviewing) {
+        (true, _) => "result",
+        (_, true) => "review",
+        _ => "edit",
+    };
+    let title = match (dialog.reviewing, kind.edits_endpoint()) {
+        (true, true) => "connection-endpoint-confirm",
+        (true, false) => "project-relink-confirm",
+        _ => label,
+    };
+    let mut sheet = Sheet::new(
+        format!("{label}:{}:{step}", dialog.target.name),
+        app.i18n.text(title),
+    );
+    // What the dialog is about, unless its field already holds it.
+    if !matches!(kind, Kind::Rename | Kind::Register) {
+        sheet = sheet.text(
             "name",
             &crate::view::safe(&dialog.target.name),
             Tone::Normal,
-        )
-    };
-    if let Some(test) = dialog.connection_test.as_ref()
-        && !busy
-        && dialog.error.is_none()
-    {
+        );
+    }
+    if let Some(test) = result {
         let tone = if matches!(
             test,
             maka_protocol::connection_effects::ConnectionTestProjection::Failed { .. }
@@ -131,7 +137,7 @@ pub(crate) fn confirm_sheet(app: &App) -> Option<Sheet<Action>> {
             Tone::Accent
         };
         return Some(
-            sheet(format!("{key}:result"))
+            sheet
                 .text(
                     "result",
                     &super::connection_test::text(test, &app.i18n),
@@ -147,195 +153,51 @@ pub(crate) fn confirm_sheet(app: &App) -> Option<Sheet<Action>> {
                 .focus("close"),
         );
     }
-    let (note, tone) = if busy {
-        (
-            if dialog.kind == Kind::Connection(Change::Test) {
+    if kind.edits_text() && !dialog.reviewing {
+        let (width, height) = app.frame_size.unwrap_or((80, 24));
+        let tall = kind.edits_path() || kind.edits_endpoint();
+        let most = if tall && height >= 14 { 3 } else { 1 };
+        let rows = dialog
+            .editor
+            .rows(crate::ui::content_width(width))
+            .min(most);
+        // Busy keeps the field focused but read-only; only a blocked
+        // dialog gives its focus away for good.
+        sheet = sheet.field(
+            "field",
+            None,
+            rows,
+            Action::Manage(Command::Save),
+            !dialog.blocked,
+        );
+    } else if kind.edits_text() {
+        // Under review: exactly what will be written, read-only.
+        sheet = sheet.text(
+            "value",
+            &crate::view::safe(dialog.editor.text()),
+            Tone::Normal,
+        );
+    }
+    let note = if busy {
+        Some((
+            if kind == Kind::Connection(Change::Test) {
                 "connection-test-working"
             } else {
                 "session-saving"
             },
             Tone::Subtle,
-        )
-    } else if let Some(error) = dialog.error {
-        (error, Tone::Warning)
+        ))
+    } else if let Some(error) = dialog.editor.error.or(dialog.error) {
+        Some((error, Tone::Warning))
     } else {
-        (
-            match dialog.kind {
-                Kind::Connection(change) => change.note(),
-                _ if matches!(dialog.target.entity, Entity::Project { .. }) => {
-                    "project-archive-note"
-                }
-                _ => "session-archive-note",
-            },
-            Tone::Subtle,
-        )
-    };
-    Some(
-        sheet(key)
-            .text("note", &app.i18n.text(note), tone)
-            .button(
-                "cancel",
-                app.i18n.text("session-cancel"),
-                Role::Normal,
-                Action::Manage(Command::Close),
-                app.enabled(&Action::Manage(Command::Close)),
-            )
-            .button(
-                "save",
-                app.i18n.text(label),
-                if app.management.destructive() {
-                    Role::Destructive
-                } else {
-                    Role::Primary
-                },
-                Action::Manage(Command::Save),
-                app.enabled(&Action::Manage(Command::Save)),
-            )
-            .focus("cancel"),
-    )
-}
-
-pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
-    if app
-        .management
-        .dialog
-        .as_ref()
-        .is_some_and(|d| d.kind == Kind::Remove)
-    {
-        app.hits.clear();
-        super::removal::draw(frame, app, area, base);
-        return;
-    }
-    if app
-        .management
-        .dialog
-        .as_ref()
-        .is_some_and(|dialog| dialog.kind == Kind::Oauth)
-    {
-        super::oauth::draw(frame, app, area, base);
-        return;
-    }
-    app.hits.clear();
-    if app
-        .management
-        .dialog
-        .as_ref()
-        .is_some_and(|d| d.sandbox.is_some())
-    {
-        super::sandbox::draw(frame, app, area, base);
-        return;
-    }
-    if app
-        .management
-        .dialog
-        .as_ref()
-        .is_some_and(|d| d.enabled_models.is_some())
-    {
-        super::enabled_models::draw(frame, app, area, base);
-        return;
-    }
-    if app
-        .management
-        .dialog
-        .as_ref()
-        .is_some_and(|d| d.credentials.is_some())
-    {
-        super::credentials::draw(frame, app, area, base);
-        return;
-    }
-    if app
-        .management
-        .dialog
-        .as_ref()
-        .is_some_and(|d| d.models.is_some())
-    {
-        super::models::draw(frame, app, area, base);
-        return;
-    }
-    if app
-        .management
-        .dialog
-        .as_ref()
-        .is_some_and(|d| d.locations.is_some())
-    {
-        super::locations::draw(frame, app, area, base);
-        return;
-    }
-    if app
-        .management
-        .dialog
-        .as_ref()
-        .is_some_and(|d| d.chooser.is_some())
-    {
-        super::choose_project::draw(frame, app, area, base);
-        return;
-    }
-    if app
-        .management
-        .dialog
-        .as_ref()
-        .is_some_and(|d| d.browser.is_some())
-    {
-        super::directory::draw(frame, app, area, base);
-        return;
-    }
-    let busy = app.management.pending.is_some();
-    let Some(dialog) = &mut app.management.dialog else {
-        return;
-    };
-    let width = area.width.saturating_sub(2).min(64);
-    let editing = dialog.kind.edits_text() && !dialog.reviewing;
-    let workspace = dialog.kind.edits_path();
-    let endpoint_review = dialog.kind.edits_endpoint() && dialog.reviewing;
-    let endpoint_lines =
-        endpoint_review.then(|| note_lines(dialog.editor.text(), width.saturating_sub(4)));
-    let field_height = if let Some(lines) = &endpoint_lines {
-        lines.len() as u16
-    } else if workspace || dialog.kind.edits_endpoint() {
-        dialog.editor.preferred_height(
-            width.saturating_sub(4),
-            if area.height >= 14 { 3 } else { 1 },
-        )
-    } else {
-        1
-    };
-    let name_rows = u16::from(
-        matches!(dialog.kind, Kind::Workspace | Kind::Relink) || dialog.kind.edits_endpoint(),
-    );
-    let text = if busy {
-        Some(
-            if dialog.kind == Kind::Connection(super::connection::Change::Test) {
-                "connection-test-working"
-            } else {
-                "session-saving"
-            },
-        )
-    } else {
-        dialog.editor.error.or(dialog.error).or(match dialog.kind {
-            Kind::Connection(change) => {
-                Some(if dialog.kind.edits_endpoint() && !dialog.reviewing {
-                    "connection-endpoint-edit-note"
-                } else {
-                    change.note()
-                })
+        match kind {
+            Kind::Connection(_) if kind.edits_endpoint() && !dialog.reviewing => {
+                Some("connection-endpoint-edit-note")
             }
-            Kind::Rename => None,
-            Kind::Reference
-            | Kind::Oauth
-            | Kind::Project
-            | Kind::Locations
-            | Kind::Model
-            | Kind::Sandbox
-            | Kind::Remove
-            | Kind::Credential(_) => {
-                unreachable!("readers drawn separately")
-            }
+            Kind::Connection(change) => Some(change.note()),
             Kind::Register => Some("project-register-note"),
-            Kind::Relink => Some(if dialog.reviewing {
-                "project-relink-note"
-            } else {
-                "project-relink-path-note"
-            }),
+            Kind::Relink if dialog.reviewing => Some("project-relink-note"),
+            Kind::Relink => Some("project-relink-path-note"),
             Kind::Workspace
                 if matches!(
                     dialog.target.entity,
@@ -348,194 +210,130 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 Some("session-workspace-project-note")
             }
             Kind::Workspace => Some("session-workspace-note"),
-            Kind::Archive | Kind::Restore => unreachable!("confirmations are sheets"),
-        })
-    }
-    .map(|key| app.i18n.text(key));
-    let content = text
-        .as_ref()
-        .map(|text| note_lines(text, width.saturating_sub(4)));
-    let lines = content.as_ref().map_or(0, Vec::len);
-    let required_height = 6 + name_rows + field_height + lines as u16;
-    if required_height > area.height.saturating_sub(2) {
-        dialog.visible = false;
-        dialog.editor.invalidate_geometry();
-        crate::view::clear_overlay(frame, area);
-        frame.render_widget(
-            Paragraph::new(app.i18n.text("terminal-small")).wrap(Wrap { trim: false }),
-            area.inner(Margin::new(1, 1)),
-        );
-        return;
-    }
-    let height = area.height.saturating_sub(2).min(required_height);
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    let block = Block::bordered()
-        .border_type(if app.chrome.ascii {
-            ratatui::widgets::BorderType::Plain
-        } else {
-            ratatui::widgets::BorderType::Rounded
-        })
-        .title(app.i18n.text(if endpoint_review {
-            "connection-endpoint-confirm"
-        } else if dialog.reviewing {
-            "project-relink-confirm"
-        } else {
-            dialog.kind.label(&dialog.target)
-        }))
-        .style(base)
-        .border_style(Style::default().fg(app.theme.colors().subtle));
-    let inner = block.inner(popup).inner(Margin::new(1, 0));
-    app.modal_area = Some(popup);
-    crate::view::clear_overlay(frame, popup);
-    frame.render_widget(block, popup);
-    dialog.visible = true;
-    if name_rows > 0 {
-        frame.render_widget(
-            Paragraph::new(crate::view::safe(&dialog.target.name)),
-            Rect::new(inner.x, inner.y, inner.width, 1),
-        );
-    }
-    let name_area = Rect::new(inner.x, inner.y + 1 + name_rows, inner.width, field_height);
-    if let Some(lines) = endpoint_lines {
-        dialog.editor.invalidate_geometry();
-        frame.render_widget(Paragraph::new(lines), name_area);
-    } else if dialog.kind.edits_text() {
-        frame.render_widget(
-            Block::default().style(Style::default().bg(app.theme.colors().surface)),
-            name_area,
-        );
-        dialog.editor.draw(
-            frame,
-            name_area,
-            editing && dialog.focus == 0 && !busy && !dialog.blocked,
-            app.theme.colors(),
-        );
-    } else {
-        frame.render_widget(
-            Paragraph::new(crate::view::safe(&dialog.target.name)),
-            name_area,
-        );
-    }
-    if let Some(content) = content {
-        frame.render_widget(
-            Paragraph::new(content).style(Style::default().fg(
-                if dialog.error.is_some() || dialog.editor.error.is_some() {
-                    app.theme.colors().warning
-                } else {
-                    app.theme.colors().subtle
-                },
-            )),
-            Rect::new(
-                inner.x,
-                name_area.bottom() + 1,
-                inner.width,
-                inner.bottom().saturating_sub(name_area.bottom() + 2),
-            ),
-        );
-    }
-    let focus = dialog.focus;
-    let kind = dialog.kind;
-    let reviewing = dialog.reviewing;
-    let buttons_start = usize::from(editing) + usize::from(kind == Kind::Register);
-    let save_label = if kind.edits_endpoint() {
-        if reviewing {
-            "connection-endpoint-apply"
-        } else {
-            "connection-endpoint-review"
+            Kind::Archive | Kind::Restore
+                if matches!(dialog.target.entity, Entity::Project { .. }) =>
+            {
+                Some("project-archive-note")
+            }
+            Kind::Archive | Kind::Restore => Some("session-archive-note"),
+            // A rename needs no explanation; other kinds have sub-views.
+            _ => None,
         }
-    } else if kind == Kind::Relink {
-        if reviewing {
-            "project-relink-apply"
-        } else {
-            "project-relink-review"
-        }
-    } else if kind == Kind::Register {
-        "project-register-apply"
-    } else if workspace {
-        "session-workspace-apply"
-    } else if editing {
-        "session-save"
-    } else {
-        kind.label(&dialog.target)
+        .map(|key| (key, Tone::Subtle))
     };
-    let save_width =
-        (unicode_width::UnicodeWidthStr::width(app.i18n.text(save_label).as_str()) as u16 + 2)
-            .min(inner.width / 2);
-    let cancel_width =
-        (unicode_width::UnicodeWidthStr::width(app.i18n.text("session-cancel").as_str()) as u16
-            + 2)
-        .min(inner.width / 2);
-    let save = Rect::new(
-        inner.right() - save_width,
-        inner.bottom() - 1,
-        save_width,
-        1,
-    );
-    let edit_label = if kind.edits_endpoint() {
-        "connection-endpoint-edit"
-    } else {
-        "project-relink-edit"
-    };
-    let edit_width = if reviewing {
-        (app.i18n.text(edit_label).width() as u16 + 2).min(inner.width / 3)
-    } else {
-        0
-    };
-    let cancel = Rect::new(
-        save.x
-            .saturating_sub(cancel_width + 2 + edit_width)
-            .max(inner.x),
-        save.y,
-        cancel_width,
-        1,
-    );
-    for (rect, label, command, focused) in [
-        (
-            cancel,
-            "session-cancel",
-            Command::Close,
-            focus == buttons_start,
-        ),
-        (
-            save,
-            save_label,
-            Command::Save,
-            focus == if reviewing { 2 } else { buttons_start + 1 },
-        ),
-    ] {
-        crate::view::button(
-            frame,
-            app,
-            rect,
-            &app.i18n.text(label),
-            Action::Manage(command),
-            focused,
-        );
+    if let Some((key, tone)) = note {
+        sheet = sheet.text("note", &app.i18n.text(key), tone);
     }
-    if reviewing {
-        crate::view::button(
-            frame,
-            app,
-            Rect::new(save.x.saturating_sub(edit_width + 1), save.y, edit_width, 1),
-            &app.i18n.text(edit_label),
+    let cancel = |sheet: Sheet<Action>| {
+        sheet.button(
+            "cancel",
+            app.i18n.text("session-cancel"),
+            Role::Normal,
+            Action::Manage(Command::Close),
+            app.enabled(&Action::Manage(Command::Close)),
+        )
+    };
+    let save = |sheet: Sheet<Action>, label: &str| {
+        sheet.button(
+            "save",
+            app.i18n.text(label),
+            if app.management.destructive() {
+                Role::Destructive
+            } else {
+                Role::Primary
+            },
+            Action::Manage(Command::Save),
+            app.enabled(&Action::Manage(Command::Save)),
+        )
+    };
+    if dialog.reviewing {
+        let (edit, apply) = if kind.edits_endpoint() {
+            ("connection-endpoint-edit", "connection-endpoint-apply")
+        } else {
+            ("project-relink-edit", "project-relink-apply")
+        };
+        let mut sheet = cancel(sheet).button(
+            "edit",
+            app.i18n.text(edit),
+            Role::Normal,
             Action::Manage(Command::Edit),
-            focus == 1,
+            app.enabled(&Action::Manage(Command::Edit)),
         );
+        if app.enabled(&Action::Manage(Command::Edit)) {
+            sheet = sheet.back(Action::Manage(Command::Edit));
+        }
+        // Confirming a bulk change defaults to Cancel.
+        return Some(save(sheet, apply).focus("cancel"));
     }
     if kind == Kind::Register {
-        crate::view::button(
-            frame,
-            app,
-            Rect::new(inner.x, save.y, cancel.x.saturating_sub(inner.x + 1), 1),
-            &app.i18n.text("directory-browse"),
+        sheet = sheet.button(
+            "browse",
+            app.i18n.text("directory-browse"),
+            Role::Normal,
             Action::Manage(Command::Browse),
-            focus == 1,
+            app.enabled(&Action::Manage(Command::Browse)),
         );
+    }
+    let label = match kind {
+        _ if kind.edits_endpoint() => "connection-endpoint-review",
+        Kind::Relink => "project-relink-review",
+        Kind::Register => "project-register-apply",
+        Kind::Workspace => "session-workspace-apply",
+        Kind::Rename => "session-save",
+        _ => label,
+    };
+    let sheet = save(cancel(sheet), label);
+    Some(if kind.edits_text() {
+        sheet
+    } else {
+        sheet.focus("cancel")
+    })
+}
+
+/// Paints the sheet's text field, or forgets its geometry when none is shown.
+pub(crate) fn draw_field(frame: &mut Frame<'_>, app: &mut App) {
+    let editable = app.management.pending.is_none();
+    let rect = app.layer.slot("field").filter(|rect| !rect.is_empty());
+    let focused = app.layer.focused("field");
+    let colors = app.theme.colors();
+    let Some(dialog) = app.management.dialog.as_mut() else {
+        return;
+    };
+    let Some(rect) = rect.filter(|_| dialog.plain()) else {
+        dialog.editor.invalidate_geometry();
+        return;
+    };
+    let focused = focused && editable && !dialog.blocked;
+    if dialog.credentials.is_some() {
+        // Mask before any cell exists; a secret is never painted and covered.
+        dialog.editor.draw_masked(frame, rect, focused, colors);
+    } else {
+        dialog.editor.draw(frame, rect, focused, colors);
+    }
+}
+
+/// Sub-views that are not sheets yet.
+pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
+    let Some(dialog) = app.management.dialog.as_ref() else {
+        return;
+    };
+    app.hits.clear();
+    if dialog.kind == Kind::Remove {
+        super::removal::draw(frame, app, area, base);
+    } else if dialog.kind == Kind::Oauth {
+        super::oauth::draw(frame, app, area, base);
+    } else if dialog.sandbox.is_some() {
+        super::sandbox::draw(frame, app, area, base);
+    } else if dialog.enabled_models.is_some() {
+        super::enabled_models::draw(frame, app, area, base);
+    } else if dialog.models.is_some() {
+        super::models::draw(frame, app, area, base);
+    } else if dialog.locations.is_some() {
+        super::locations::draw(frame, app, area, base);
+    } else if dialog.chooser.is_some() {
+        super::choose_project::draw(frame, app, area, base);
+    } else if dialog.browser.is_some() {
+        super::directory::draw(frame, app, area, base);
     }
 }
 

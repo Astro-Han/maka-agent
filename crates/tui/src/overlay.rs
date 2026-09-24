@@ -108,7 +108,7 @@ impl App {
         match overlay {
             Overlay::Shutdown => crate::shutdown::sheet(self),
             Overlay::Consent => crate::pages::extensions::consent_sheet(self),
-            Overlay::Management => crate::pages::manage::confirm_sheet(self),
+            Overlay::Management => crate::pages::manage::sheet(self),
             _ => None,
         }
     }
@@ -130,8 +130,8 @@ impl App {
         overlay: Overlay,
         event: Event,
     ) -> (bool, Option<Action>) {
-        if self.overlay_sheet(overlay).is_some() {
-            return self.sheet_input(overlay, event);
+        if let Some(sheet) = self.overlay_sheet(overlay) {
+            return self.sheet_input(overlay, event, sheet.escape());
         }
         if overlay != Overlay::Shutdown
             && let Event::Mouse(mouse) = &event
@@ -171,11 +171,21 @@ impl App {
         }
     }
 
-    fn sheet_input(&mut self, overlay: Overlay, event: Event) -> (bool, Option<Action>) {
+    fn sheet_input(
+        &mut self,
+        overlay: Overlay,
+        event: Event,
+        back: Option<Action>,
+    ) -> (bool, Option<Action>) {
         let Some(dismiss) = overlay.dismiss() else {
             return (false, None);
         };
-        let outcome = self.layer.input(&event, dismiss);
+        if overlay == Overlay::Management
+            && let Some(outcome) = self.management_sheet_input(&event)
+        {
+            return outcome;
+        }
+        let outcome = self.layer.input(&event, dismiss, back);
         if !outcome.consumed {
             // Of the shell's chords only quitting reaches through a sheet,
             // and the quit prompt itself absorbs it.
@@ -243,6 +253,9 @@ pub(crate) fn draw(
         };
         let shown = app.layer.render(frame, area, sheet, context);
         app.present(overlay, shown);
+        if overlay == Overlay::Management {
+            pages::manage::draw_field(frame, app);
+        }
         if !shown {
             crate::view::clear_overlay(frame, area);
             frame.render_widget(
@@ -255,7 +268,9 @@ pub(crate) fn draw(
         }
         return;
     }
-    app.layer.close();
+    // A sub-view (a directory browser opened from a sheet) suspends the
+    // sheet rather than closing it: returning focuses what opened it.
+    app.layer.invalidate();
     match overlay {
         Overlay::Shutdown | Overlay::Consent => unreachable!("presented as sheets"),
         Overlay::Theme => crate::theme::editor::draw(frame, app, area),

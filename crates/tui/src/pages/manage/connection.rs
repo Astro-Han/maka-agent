@@ -364,11 +364,7 @@ mod tests {
             app.i18n = I18n::new(LocalePreference::Explicit(locale), Locale::En);
             for (width, height) in [(80, 24), (45, 24), (25, 10)] {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal
-                    .draw(|f| {
-                        super::super::draw(f, &mut app, f.area(), ratatui::style::Style::default())
-                    })
-                    .unwrap();
+                terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
                 assert_eq!(app.management_enabled(&Command::Save), width >= 45);
                 if width >= 45 {
                     let compact = |s: &str| {

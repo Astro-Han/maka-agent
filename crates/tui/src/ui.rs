@@ -26,5 +26,5 @@ mod sheet;
 mod surface;
 
 pub use node::{Align, Choice, Node, On, Role, Size, Tone};
-pub use sheet::{Layer, Sheet};
+pub use sheet::{Layer, Sheet, content_width};
 pub use surface::{Context, Outcome, Surface};

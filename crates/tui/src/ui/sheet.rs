@@ -35,16 +35,26 @@ use ratatui::{
 };
 
 const ROOT: &str = "sheet";
+/// The owner-drawn part of a field, beneath its label.
+const INPUT: &str = "input";
 const WIDTH: u16 = 64;
 /// Narrower than this, prose wraps into a column nobody can read.
 const MIN_WIDTH: u16 = 28;
+
+/// Width of a sheet's content over a terminal this wide: what an owner
+/// lays out a field for before the sheet is drawn.
+pub fn content_width(width: u16) -> u16 {
+    WIDTH.min(width.saturating_sub(2)).saturating_sub(4)
+}
 
 pub struct Sheet<M> {
     key: String,
     title: String,
     body: Vec<Node<M>>,
     buttons: Vec<Node<M>>,
-    focus: Option<&'static str>,
+    /// Full id of the node focused on open.
+    focus: Option<String>,
+    back: Option<M>,
 }
 
 impl<M> Sheet<M> {
@@ -57,6 +67,7 @@ impl<M> Sheet<M> {
             body: vec![],
             buttons: vec![],
             focus: None,
+            back: None,
         }
     }
 
@@ -91,11 +102,49 @@ impl<M> Sheet<M> {
         self
     }
 
+    /// A text field its owner draws into `Layer::slot(key)` and feeds keys
+    /// while focused; Enter in it sends `submit`. A label sits directly
+    /// above it. An enabled field is where the sheet opens unless a button
+    /// is chosen afterwards.
+    pub fn field(
+        mut self,
+        key: &'static str,
+        label: Option<String>,
+        rows: u16,
+        submit: M,
+        enabled: bool,
+    ) -> Self {
+        if enabled && self.focus.is_none() {
+            self.focus = Some(format!("{ROOT}/{key}/{INPUT}"));
+        }
+        let mut children: Vec<_> = label
+            .map(|label| Node::text("label", vec![(label, Tone::Subtle)]))
+            .into_iter()
+            .collect();
+        children.push(
+            Node::slot(INPUT, rows)
+                .on(On::Activate(submit))
+                .enabled(enabled),
+        );
+        self.body(Node::column(key, children))
+    }
+
     /// The button focused on open. Confirmations of a change choose Cancel,
     /// so Enter alone never commits it.
     pub fn focus(mut self, key: &'static str) -> Self {
-        self.focus = Some(key);
+        self.focus = Some(format!("{ROOT}/footer/{key}"));
         self
+    }
+
+    /// A step inside a flow: Esc goes back here rather than dismissing.
+    pub fn back(mut self, message: M) -> Self {
+        self.back = Some(message);
+        self
+    }
+
+    /// Where Esc leads, read from a sheet built for the current state.
+    pub fn escape(self) -> Option<M> {
+        self.back
     }
 
     fn footer_width(&self) -> u16 {
@@ -138,15 +187,15 @@ impl<M: Clone> Layer<M> {
         &mut self,
         frame: &mut Frame<'_>,
         area: Rect,
-        sheet: Sheet<M>,
+        mut sheet: Sheet<M>,
         context: Context,
     ) -> bool {
         let width = WIDTH.min(area.width.saturating_sub(2));
         // Border and padding: two cells a side, one row above and below.
-        let inner = width.saturating_sub(4);
+        let inner = content_width(area.width);
         let fits_footer = inner >= sheet.footer_width().max(MIN_WIDTH);
         let key = sheet.key.clone();
-        let focus = sheet.focus.map(|button| format!("{ROOT}/footer/{button}"));
+        let focus = sheet.focus.take();
         let tree = sheet.tree();
         let height = layout::height(&tree, inner).saturating_add(4);
         if !fits_footer || height > area.height.saturating_sub(2) {
@@ -192,6 +241,22 @@ impl<M: Clone> Layer<M> {
         true
     }
 
+    /// Where the owner draws field `key`, as committed by the last frame.
+    pub fn slot(&self, key: &str) -> Option<Rect> {
+        self.area?;
+        self.surface.rect(&format!("{ROOT}/{key}/{INPUT}"))
+    }
+
+    /// Whether field `key` holds the keyboard focus.
+    pub fn focused(&self, key: &str) -> bool {
+        self.surface.focused() == Some(&format!("{ROOT}/{key}/{INPUT}"))
+    }
+
+    /// The owner took a pointer press into field `key`.
+    pub fn focus(&mut self, key: &str) {
+        self.surface.focus(format!("{ROOT}/{key}/{INPUT}"));
+    }
+
     /// Geometry changed: nothing is clickable until the next draw.
     pub fn invalidate(&mut self) {
         self.area = None;
@@ -207,8 +272,9 @@ impl<M: Clone> Layer<M> {
 
     /// Modal: every key, paste and pointer event is consumed except shell
     /// chords (Ctrl, Alt, Super), which stay reachable for quitting. `dismiss`
-    /// is what Esc and a click outside the box send.
-    pub fn input(&mut self, event: &Event, dismiss: M) -> Outcome<M> {
+    /// is what a click outside the box sends, and Esc unless `back` names
+    /// the previous step; both come from the current state, never a frame.
+    pub fn input(&mut self, event: &Event, dismiss: M, back: Option<M>) -> Outcome<M> {
         let consumed = |outcome: Outcome<M>| Outcome {
             consumed: true,
             ..outcome
@@ -224,7 +290,7 @@ impl<M: Clone> Layer<M> {
                     return Outcome::ignored();
                 }
                 if key.code == KeyCode::Esc && !self.surface.captures() {
-                    return Outcome::emit(dismiss);
+                    return Outcome::emit(back.unwrap_or(dismiss));
                 }
                 let outcome = self.surface.input(event);
                 if !outcome.consumed
@@ -348,7 +414,7 @@ mod tests {
         let mut layer = Layer::default();
         let (shown, terminal) = draw(&mut layer, sheet("a", true), 80, 24);
         assert!(shown);
-        let mut send = |event: Event| layer.input(&event, Message::Dismiss).message;
+        let mut send = |event: Event| layer.input(&event, Message::Dismiss, None).message;
         assert_eq!(
             send(key(KeyCode::Enter)),
             Some(Message::Cancel),
@@ -368,9 +434,9 @@ mod tests {
         assert_eq!(send(click(x, y)), Some(Message::Archive));
         assert_eq!(send(click(0, 0)), Some(Message::Dismiss));
         let quit = Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));
-        let outcome = layer.input(&quit, Message::Dismiss);
+        let outcome = layer.input(&quit, Message::Dismiss, None);
         assert!(!outcome.consumed, "shell chords stay reachable");
-        let paste = layer.input(&Event::Paste("text".into()), Message::Dismiss);
+        let paste = layer.input(&Event::Paste("text".into()), Message::Dismiss, None);
         assert!(
             paste.consumed && paste.message.is_none(),
             "nothing reaches the page"
@@ -378,24 +444,78 @@ mod tests {
     }
 
     #[test]
+    fn fields_open_focused_submit_on_enter_and_steps_go_back_on_esc() {
+        let form = || {
+            Sheet::new("rename", "Rename session")
+                .field("field", None, 1, Message::Archive, true)
+                .button(
+                    "cancel",
+                    "Cancel".into(),
+                    Role::Normal,
+                    Message::Cancel,
+                    true,
+                )
+        };
+        let mut layer = Layer::default();
+        let (_, terminal) = draw(&mut layer, form(), 80, 24);
+        assert!(layer.focused("field"), "a field is where a form opens");
+        let slot = layer.slot("field").expect("the owner learns where to draw");
+        assert_eq!(slot.height, 1);
+        assert_eq!(
+            layer
+                .input(&key(KeyCode::Enter), Message::Dismiss, None)
+                .message,
+            Some(Message::Archive)
+        );
+        layer.input(&key(KeyCode::Tab), Message::Dismiss, None);
+        assert!(!layer.focused("field"));
+        assert!(locate(&terminal, "Cancel").1 > slot.y);
+        assert_eq!(
+            layer
+                .input(&click(slot.x, slot.y), Message::Dismiss, None)
+                .message,
+            None,
+            "clicking into a field focuses it, never submits"
+        );
+        assert!(layer.focused("field"));
+        let back = Some(Message::Cancel);
+        assert_eq!(
+            layer
+                .input(&key(KeyCode::Esc), Message::Dismiss, back.clone())
+                .message,
+            Some(Message::Cancel),
+            "a step goes back"
+        );
+        assert_eq!(
+            layer.input(&click(0, 0), Message::Dismiss, back).message,
+            Some(Message::Dismiss),
+            "outside still dismisses"
+        );
+    }
+
+    #[test]
     fn a_sheet_that_does_not_fit_presents_nothing_to_activate() {
         let mut layer = Layer::default();
         draw(&mut layer, sheet("a", true), 80, 24);
-        layer.input(&key(KeyCode::Tab), Message::Dismiss);
+        layer.input(&key(KeyCode::Tab), Message::Dismiss, None);
         let (shown, _) = draw(&mut layer, sheet("a", true), 30, 8);
         assert!(!shown);
-        let outcome = layer.input(&key(KeyCode::Enter), Message::Dismiss);
+        let outcome = layer.input(&key(KeyCode::Enter), Message::Dismiss, None);
         assert!(outcome.consumed && outcome.message.is_none());
         assert_eq!(
-            layer.input(&key(KeyCode::Esc), Message::Dismiss).message,
+            layer
+                .input(&key(KeyCode::Esc), Message::Dismiss, None)
+                .message,
             Some(Message::Dismiss),
             "Esc still leaves"
         );
         // A new sheet starts from its default; a disabled button is skipped.
         draw(&mut layer, sheet("b", false), 80, 24);
-        layer.input(&key(KeyCode::Tab), Message::Dismiss);
+        layer.input(&key(KeyCode::Tab), Message::Dismiss, None);
         assert_eq!(
-            layer.input(&key(KeyCode::Enter), Message::Dismiss).message,
+            layer
+                .input(&key(KeyCode::Enter), Message::Dismiss, None)
+                .message,
             Some(Message::Cancel)
         );
     }

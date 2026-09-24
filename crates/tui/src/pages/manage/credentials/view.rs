@@ -20,175 +20,105 @@
 use super::{Change, Command, address};
 use crate::{
     app::{Action, App},
-    pages::manage::{Entity, Kind, view::note_lines},
-    view::{button, safe},
+    pages::manage::{Dialog, Entity, Kind},
+    ui::{Node, Role, Sheet, Tone},
+    view::safe,
 };
 use maka_protocol::configuration::CredentialState;
-use ratatui::{
-    Frame,
-    layout::{Margin, Rect},
-    style::Style,
-    widgets::{Block, Paragraph, Wrap},
-};
-use unicode_width::UnicodeWidthStr;
 
-pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
+/// A connection's API key: set opens in the masked field, removal on Cancel.
+pub(in crate::pages::manage) fn sheet(app: &App, dialog: &Dialog) -> Sheet<Action> {
     let busy = app.management.pending.is_some();
-    let dialog = app.management.dialog.as_mut().expect("credential dialog");
     let state = dialog.credentials.as_ref().expect("credential state");
     let set = dialog.kind == Kind::Credential(Change::Set);
     let Entity::Connection(row) = &dialog.target.entity else {
         unreachable!()
     };
-    let width = area.width.saturating_sub(2).min(72);
+    let label = dialog.kind.label(&dialog.target);
     let endpoint = address(row);
-    let address = note_lines(
-        &endpoint
-            .as_deref()
-            .map(safe)
-            .unwrap_or_else(|| app.i18n.text("credential-no-address")),
-        width.saturating_sub(4),
-    );
-    let key = if busy {
-        "session-saving"
-    } else if let Some(key) = dialog.editor.error.or(dialog.error) {
-        key
-    } else if state.status.is_none() {
-        "credential-loading"
-    } else if set && endpoint.is_none() {
-        "credential-no-address"
-    } else if set {
-        "credential-set-note"
-    } else {
-        "credential-clear-note"
-    };
-    let note = note_lines(&app.i18n.text(key), width.saturating_sub(4));
-    let height = 7 + address.len() as u16 + note.len() as u16 + if set { 3 } else { 0 };
-    if area.width < 44 || height > area.height.saturating_sub(2) {
-        dialog.visible = false;
-        dialog.editor.invalidate_geometry();
-        crate::view::clear_overlay(frame, area);
-        frame.render_widget(
-            Paragraph::new(app.i18n.text("terminal-small")).wrap(Wrap { trim: false }),
-            area.inner(Margin::new(1, 1)),
-        );
-        return;
-    }
-    dialog.visible = true;
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    let block = Block::bordered()
-        .title(app.i18n.text(dialog.kind.label(&dialog.target)))
-        .style(base)
-        .border_type(if app.chrome.ascii {
-            ratatui::widgets::BorderType::Plain
-        } else {
-            ratatui::widgets::BorderType::Rounded
-        })
-        .border_style(Style::default().fg(app.theme.colors().subtle));
-    let inner = block.inner(popup).inner(Margin::new(1, 0));
-    app.modal_area = Some(popup);
-    crate::view::clear_overlay(frame, popup);
-    frame.render_widget(block, popup);
-    frame.render_widget(
-        Paragraph::new(safe(&dialog.target.name)),
-        Rect::new(inner.x, inner.y, inner.width, 1),
-    );
-    let rows = address.len() as u16;
-    frame.render_widget(
-        Paragraph::new(address).style(Style::default().fg(app.theme.colors().subtle)),
-        Rect::new(inner.x, inner.y + 1, inner.width, rows),
-    );
-    let mut y = inner.y + 1 + rows;
+    // Which key: the connection, where it is used, and what is saved now.
+    let mut about = vec![
+        Node::text("name", vec![(safe(&dialog.target.name), Tone::Normal)]),
+        Node::text(
+            "address",
+            vec![(
+                endpoint
+                    .as_deref()
+                    .map(safe)
+                    .unwrap_or_else(|| app.i18n.text("credential-no-address")),
+                Tone::Subtle,
+            )],
+        ),
+    ];
     if let Some(status) = &state.status {
         let label = match status.state {
             CredentialState::Absent => "credential-absent",
             CredentialState::Configured { .. } => "credential-configured",
         };
-        frame.render_widget(
-            Paragraph::new(app.i18n.text(label))
-                .style(Style::default().fg(app.theme.colors().subtle)),
-            Rect::new(inner.x, y, inner.width, 1),
-        );
+        about.push(Node::text(
+            "status",
+            vec![(app.i18n.text(label), Tone::Subtle)],
+        ));
     }
-    y += 2;
+    let mut sheet = Sheet::new(
+        format!("{label}:{}", dialog.target.name),
+        app.i18n.text(label),
+    )
+    .body(Node::column("about", about));
     if set {
-        frame.render_widget(
-            Paragraph::new(app.i18n.text("credential-new-key"))
-                .style(Style::default().fg(app.theme.colors().subtle)),
-            Rect::new(inner.x, y, inner.width, 1),
+        sheet = sheet.field(
+            "field",
+            Some(app.i18n.text("credential-new-key")),
+            1,
+            Action::Manage(Command::Save),
+            !dialog.blocked,
         );
-        let rect = Rect::new(inner.x, y + 1, inner.width, 1);
-        frame.render_widget(
-            Block::default().style(Style::default().bg(app.theme.colors().surface)),
-            rect,
-        );
-        dialog.editor.draw_masked(
-            frame,
-            rect,
-            dialog.focus == 0 && !busy && !dialog.blocked,
-            app.theme.colors(),
-        );
-        y += 3;
     }
-    frame.render_widget(
-        Paragraph::new(note).style(Style::default().fg(
-            if dialog.error.is_some() || dialog.editor.error.is_some() {
-                app.theme.colors().warning
-            } else {
-                app.theme.colors().subtle
-            },
-        )),
-        Rect::new(
-            inner.x,
-            y,
-            inner.width,
-            inner.bottom().saturating_sub(y + 2),
-        ),
-    );
-    let retry = state.failed;
-    let focus = dialog.focus;
-    let save = if set {
-        "credential-save"
+    let (note, tone) = if busy {
+        ("session-saving", Tone::Subtle)
+    } else if let Some(key) = dialog.editor.error.or(dialog.error) {
+        (key, Tone::Warning)
+    } else if state.status.is_none() {
+        ("credential-loading", Tone::Subtle)
+    } else if set && endpoint.is_none() {
+        ("credential-no-address", Tone::Subtle)
+    } else if set {
+        ("credential-set-note", Tone::Subtle)
     } else {
-        "credential-remove"
+        ("credential-clear-note", Tone::Subtle)
     };
-    let mut right = inner.right();
-    for (label, command, index) in [
-        (save, Command::Save, if set { 2 } else { 1 }),
-        ("session-cancel", Command::Close, if set { 1 } else { 0 }),
-    ] {
-        let text = app.i18n.text(label);
-        let width = (text.width() as u16 + 2).min(inner.width / 3);
-        let rect = Rect::new(right.saturating_sub(width), inner.bottom() - 1, width, 1);
-        right = rect.x.saturating_sub(1);
-        button(
-            frame,
-            app,
-            rect,
-            &text,
-            Action::Manage(command),
-            focus == index,
-        );
-    }
-    if retry {
-        let text = app.i18n.text("credential-retry");
-        button(
-            frame,
-            app,
-            Rect::new(
-                inner.x,
-                inner.bottom() - 1,
-                right.saturating_sub(inner.x),
-                1,
-            ),
-            &text,
+    sheet = sheet.text("note", &app.i18n.text(note), tone);
+    if state.failed {
+        sheet = sheet.button(
+            "retry",
+            app.i18n.text("credential-retry"),
+            Role::Normal,
             Action::Manage(Command::CredentialRetry),
-            false,
+            app.enabled(&Action::Manage(Command::CredentialRetry)),
         );
     }
+    let sheet = sheet
+        .button(
+            "cancel",
+            app.i18n.text("session-cancel"),
+            Role::Normal,
+            Action::Manage(Command::Close),
+            true,
+        )
+        .button(
+            "save",
+            app.i18n.text(if set {
+                "credential-save"
+            } else {
+                "credential-remove"
+            }),
+            if set {
+                Role::Primary
+            } else {
+                Role::Destructive
+            },
+            Action::Manage(Command::Save),
+            app.enabled(&Action::Manage(Command::Save)),
+        );
+    if set { sheet } else { sheet.focus("cancel") }
 }

@@ -33,17 +33,15 @@ mod references;
 pub mod removal;
 pub mod sandbox;
 pub(crate) mod view;
-pub(crate) use view::confirm_sheet;
 pub use view::draw;
+pub(crate) use view::{draw_field, sheet};
 
 use crate::{
     app::{Action, App, ConnectionState},
     editor::Editor,
     navigation::Route,
 };
-use crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
-};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use maka_client::{Client, RequestFailure};
 use maka_protocol::session::*;
 
@@ -264,6 +262,20 @@ pub struct Dialog {
     enabled_models: Option<enabled_models::State>,
     credentials: Option<credentials::State>,
     removal: Option<removal::State>,
+}
+
+impl Dialog {
+    /// Dialogs without a sub-view of their own are kernel sheets:
+    /// confirmations, text fields and credentials.
+    pub(crate) fn plain(&self) -> bool {
+        !matches!(self.kind, Kind::Oauth | Kind::Remove)
+            && self.sandbox.is_none()
+            && self.enabled_models.is_none()
+            && self.models.is_none()
+            && self.locations.is_none()
+            && self.chooser.is_none()
+            && self.browser.is_none()
+    }
 }
 
 pub async fn execute(
@@ -1303,67 +1315,58 @@ impl App {
         {
             return self.directory_input(event);
         }
-        let Some(dialog) = &mut self.management.dialog else {
-            return (false, None);
-        };
-        let editing = dialog.kind.edits_text()
-            && !dialog.reviewing
-            && dialog.focus == 0
-            && self.management.pending.is_none()
-            && !dialog.blocked;
-        let browse = dialog.kind == Kind::Register;
-        let count = if browse {
-            4
-        } else if dialog.kind.edits_text() {
-            3 // Editor/cancel/save, or cancel/edit/confirm while reviewing.
-        } else {
-            2
-        };
-        let command = match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
-                KeyCode::Esc => Some(
-                    if dialog.reviewing && !dialog.blocked && self.management.pending.is_none() {
-                        Command::Edit
-                    } else {
-                        Command::Close
-                    },
-                ),
-                KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return (true, Some(Action::Quit));
+        // Everything else is a sheet; the overlay layer routes it.
+        (false, None)
+    }
+
+    /// Input the sheet's owner takes before the sheet: F5 retries a
+    /// credential read, and a focused text field gets every key but the
+    /// sheet's own (Esc, Tab, Enter, quitting), pastes, and its pointer.
+    pub(crate) fn management_sheet_input(
+        &mut self,
+        event: &Event,
+    ) -> Option<(bool, Option<Action>)> {
+        if let Event::Key(key) = event
+            && key.kind != KeyEventKind::Release
+            && key.code == KeyCode::F(5)
+            && self
+                .management
+                .dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.credentials.is_some())
+        {
+            return Some((true, self.apply(Action::Manage(Command::CredentialRetry))));
+        }
+        let busy = self.management.pending.is_some();
+        let dialog = self.management.dialog.as_mut()?;
+        if !dialog.kind.edits_text()
+            || dialog.reviewing
+            || busy
+            || dialog.blocked
+            || self.layer.slot("field").is_none()
+        {
+            return None;
+        }
+        let focused = self.layer.focused("field");
+        match event {
+            Event::Key(key) if key.kind != KeyEventKind::Release && focused => {
+                let quit =
+                    key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q');
+                if quit
+                    || matches!(
+                        key.code,
+                        KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab | KeyCode::Enter
+                    )
+                {
+                    return None;
                 }
-                _ if !dialog.visible => return (false, None),
-                KeyCode::F(5) if dialog.credentials.is_some() => Some(Command::CredentialRetry),
-                KeyCode::Tab => {
-                    dialog.focus = (dialog.focus + 1) % count;
-                    return (true, None);
+                let changed = dialog.editor.key(*key);
+                if changed && dialog.editor.error.is_none() {
+                    dialog.error = None;
                 }
-                KeyCode::BackTab => {
-                    dialog.focus = (dialog.focus + count - 1) % count;
-                    return (true, None);
-                }
-                KeyCode::Enter => Some(if dialog.reviewing {
-                    match dialog.focus {
-                        0 => Command::Close,
-                        1 => Command::Edit,
-                        _ => Command::Save,
-                    }
-                } else if browse && dialog.focus == 1 {
-                    Command::Browse
-                } else if dialog.focus == count - 2 {
-                    Command::Close
-                } else {
-                    Command::Save
-                }),
-                _ if editing => {
-                    let changed = dialog.editor.key(key);
-                    if changed && dialog.editor.error.is_none() {
-                        dialog.error = None;
-                    }
-                    return (changed, None);
-                }
-                _ => return (false, None),
-            },
-            Event::Paste(text) if dialog.visible && editing => {
+                Some((changed, None))
+            }
+            Event::Paste(text) if focused => {
                 dialog.error = None;
                 if (dialog.kind.edits_path() || dialog.kind.edits_endpoint())
                     && text.chars().any(char::is_control)
@@ -1373,46 +1376,21 @@ impl App {
                     } else {
                         "session-path-control"
                     });
-                    return (true, None);
+                    return Some((true, None));
                 }
-                return (dialog.editor.insert(&text.replace(['\n', '\r'], " ")), None);
+                Some((dialog.editor.insert(&text.replace(['\n', '\r'], " ")), None))
             }
-            Event::Mouse(mouse) if dialog.visible => {
-                let point = (mouse.column, mouse.row).into();
-                if dialog.kind.edits_text()
-                    && !dialog.reviewing
-                    && (dialog.editor.contains(point) || dialog.editor.dragging())
-                {
-                    if self.management.pending.is_none() && !dialog.blocked {
-                        dialog.focus = 0;
-                        return (dialog.editor.mouse(mouse), None);
-                    }
-                    return (false, None);
-                }
-                if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-                    return (false, None);
-                }
-                self.hits
-                    .iter()
-                    .rev()
-                    .find(|hit| hit.area.contains(point))
-                    .and_then(|hit| match &hit.action {
-                        Action::Manage(
-                            command @ (Command::Save
-                            | Command::Close
-                            | Command::Browse
-                            | Command::CredentialRetry
-                            | Command::Edit),
-                        ) => Some(command.clone()),
-                        _ => None,
-                    })
+            Event::Mouse(mouse)
+                if dialog
+                    .editor
+                    .contains(ratatui::layout::Position::new(mouse.column, mouse.row))
+                    || dialog.editor.dragging() =>
+            {
+                self.layer.focus("field");
+                Some((dialog.editor.mouse(*mouse) || !focused, None))
             }
-            _ => return (false, None),
-        };
-        (
-            true,
-            command.and_then(|command| self.apply(Action::Manage(command))),
-        )
+            _ => None,
+        }
     }
 }
 
@@ -1617,14 +1595,7 @@ mod tests {
                 crate::Locale::En,
             );
             let painted = screen
-                .draw(|frame| {
-                    draw(
-                        frame,
-                        &mut app,
-                        frame.area(),
-                        ratatui::style::Style::default(),
-                    )
-                })
+                .draw(|frame| crate::view::draw(frame, &mut app))
                 .unwrap()
                 .buffer
                 .content

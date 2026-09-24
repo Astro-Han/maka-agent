@@ -49,6 +49,8 @@ pub(super) struct Item<M> {
     pub follow_focus: bool,
     pub hint: Option<String>,
     pub role: Option<Role>,
+    /// Owner-drawn: the surface paints neither focus nor hover over it.
+    pub slot: bool,
 }
 
 pub(super) struct Scroller {
@@ -188,6 +190,7 @@ impl<'a, M> Pass<'a, M> {
                 follow_focus,
                 hint,
                 role,
+                slot: matches!(kind, Kind::Slot),
             });
         }
         match kind {
@@ -234,6 +237,11 @@ impl<'a, M> Pass<'a, M> {
             }
             Kind::Text { spans, align, clip } => {
                 self.text(&spans, align, clip, area, visible, scope.style)
+            }
+            Kind::Slot => {
+                // The field's well; its owner draws the content on top.
+                self.buffer
+                    .set_style(visible, Style::default().bg(self.colors.surface));
             }
             Kind::Rule => {
                 let symbol = match (scope.axis, self.ascii) {
@@ -426,7 +434,7 @@ pub(super) fn height<M>(node: &Node<M>, width: u16) -> u16 {
         }
         Kind::Text { clip: true, .. } => 1,
         Kind::Text { spans, .. } => wrap(spans, width).len() as u16,
-        Kind::Rule => 1,
+        Kind::Rule | Kind::Slot => 1,
         Kind::Scroll(child) => height(child, width.saturating_sub(1)),
     }
 }
@@ -439,7 +447,7 @@ pub(super) fn width<M>(node: &Node<M>) -> u16 {
             u16::saturating_add,
         ),
         Kind::Text { spans, .. } => spans.iter().map(|(text, _)| text.width() as u16).sum(),
-        Kind::Rule => 1,
+        Kind::Rule | Kind::Slot => 1,
         Kind::Scroll(child) => width(child).saturating_add(1),
     }
 }

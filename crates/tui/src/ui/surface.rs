@@ -163,7 +163,7 @@ impl<M: Clone> Surface<M> {
         let colors = context.colors;
         for item in items
             .iter()
-            .filter(|item| item.enabled && self.popover.is_none())
+            .filter(|item| item.enabled && !item.slot && self.popover.is_none())
         {
             // Keyboard focus and the pointer stay distinguishable: focus takes
             // the selection, hover only lifts the row.
@@ -316,6 +316,16 @@ impl<M: Clone> Surface<M> {
         self.focus.as_deref()
     }
 
+    /// Where a node was drawn in the committed frame; empty when scrolled out.
+    pub fn rect(&self, id: &str) -> Option<Rect> {
+        self.committed
+            .as_ref()?
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.rect)
+    }
+
     /// Focus a node by id; resolved against the next drawn frame.
     pub fn focus(&mut self, id: String) {
         self.set_focus(id);
@@ -443,6 +453,8 @@ impl<M: Clone> Surface<M> {
                 };
                 let id = item.id.clone();
                 let outcome = match &item.on {
+                    // Clicking into a field places focus; only Enter submits.
+                    On::Activate(_) if item.slot => Outcome::handled(true),
                     On::Activate(message) => Outcome::emit(message.clone()),
                     On::Choose { current, .. } => {
                         self.popover = Some(Popover {

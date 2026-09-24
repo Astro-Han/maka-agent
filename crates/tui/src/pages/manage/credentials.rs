@@ -22,7 +22,7 @@ use super::{Command, Entity, Kind, Target, Ticket, Updated};
 use crate::{app::App, editor::Editor, pages::connections::Row};
 use maka_client::{Client, ClientError, RequestFailure};
 use maka_protocol::configuration::*;
-pub(super) use view::draw;
+pub(super) use view::sheet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Change {
@@ -338,9 +338,7 @@ mod tests {
             app.i18n = I18n::new(LocalePreference::Explicit(locale), Locale::En);
             for (width, height) in [(80, 24), (44, 24), (25, 8)] {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal
-                    .draw(|f| super::draw(f, &mut app, f.area(), ratatui::style::Style::default()))
-                    .unwrap();
+                terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
                 let text: String = terminal
                     .backend()
                     .buffer()
