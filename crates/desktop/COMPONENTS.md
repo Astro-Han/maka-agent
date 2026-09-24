@@ -19,98 +19,62 @@
 
 # Desktop Components
 
-The component inventory and acceptance standard for the GPUI client. Visual values come from the root [DESIGN.md](../../DESIGN.md); this file decides which components exist, what gpui-kit already provides, and what each component must prove before it ships.
+Phase 1 of the GPUI client: chat, sessions and settings, with the fewest components that make them usable.
 
-Scope is the committed product: chat, sessions and settings over `maka-client`. Surfaces the Host does not serve (goal, plan, memory, usage, agent graph) get no component.
+## Direction
 
-## Layers
+- The reference is Waku's desktop client (look, density, behavior), not a port of the Electron app or Astryx. Waku is GPL: we study how it looks and behaves and implement it ourselves; no code is copied or translated.
+- Waku builds everything on raw GPUI, including its markdown renderer, text input, menus and scrollbar. We do not: those come from gpui-kit. We only write what gpui-kit lacks.
+- Colors are Maka's own: graphite neutrals and the Maka blue as the single accent.
 
-| Layer | Owner | Rule |
+## Theme
+
+One gpui-kit `ThemeConfig` for light and one for dark. No token system of our own.
+
+- Surfaces: sidebar and canvas share one neutral; menus and dialogs use `popover`; code wells use `muted`.
+- Text: `foreground` and `muted_foreground`.
+- One border color; hover and selected are the same faint neutral wash; hover changes are instant.
+- Radius: 8 for controls and rows, 12 for bubbles, composer, cards and dialogs, pill for round buttons.
+- Arrow cursor everywhere, as native macOS apps do.
+- Reading column: 720 px, centered, shared by transcript and composer.
+
+## What gpui-kit already covers
+
+| Need | gpui-kit |
+|---|---|
+| Transcript list that follows the tail, jump to latest | `MessageScroller` |
+| Markdown, code highlighting, selection, stream fade | `TextView` (fade needs the throttle fix below) |
+| User bubble | `Bubble` |
+| Copy button with check feedback | `Clipboard` |
+| Folding | `Collapsible` |
+| One-line status with spinner or shimmer | `Marker`, `ShimmerText` |
+| Composer text field that grows | `Textarea` with `appearance(false)` and `auto_grow` |
+| Question interaction | `Questionnaire` (on gpui-kit main, not in 0.6.6) |
+| Settings pages, forms, dialogs, toasts, menus, tooltips | `Settings`, `Form`, `Dialog`, `Notification`, `PopupMenu`, `Tooltip` |
+
+gpui-kit has no tool-call, diff or terminal component.
+
+## What we write
+
+| Component | Look and behavior | Built from |
 |---|---|---|
-| Behavior: input, IME, selection, focus, scrolling, overlays, markdown | gpui-kit (`gpui-base`, `gpui-component`) | Use as is. Defects are patched locally and sent upstream, never forked. |
-| Tokens: surfaces, ink, borders, radius, spacing, type, motion | `src/ui/theme.rs` | One Rust mapping of DESIGN.md. Values that gpui-kit's `ThemeColor` has no slot for live in our own `Global`. |
-| Product components | `src/ui/` | Plain-data inputs only. No `maka_protocol` type crosses a component boundary; the chat and settings views translate protocol rows into component props. |
+| Session row | two lines: name, then muted workspace and relative time; status dot for running or waiting; one wash for hover and selected | own `SidebarItem` |
+| Tool row | one line: icon, verb, target, status (running, waiting, done, failed); expands to plain monospace output. Consecutive rows fold to "N commands"; a finished turn folds to "Worked for Ns" | `Collapsible` |
+| Working line | three dots in a travelling wave plus elapsed time; also shows retry and failure with resume | own, timer-driven |
+| Permission card | reason, command in a monospace well, deny and allow choices; pinned above the composer | `Button` |
+| Composer card | 12 radius card with a hairline border, borderless textarea, toolbar row, round send button that becomes stop while a turn runs | `Textarea`, `Button` |
+| Message hover footer | copy and time, shown only while the message is hovered | `Clipboard`, GPUI `group_hover` |
 
-## Tokens
+Everything else in the window is layout: transparent titlebar, sidebar with a hairline divider, user bubbles right-aligned at most 540 wide, assistant text without bubble or avatar.
 
-- **Surface ladder** sunken / base / raised / overlay and **borders** soft / default / strong: our `Global`, because `ThemeColor` cannot be extended. `ThemeColor` fields are filled from the same values so kit components agree with ours.
-- **Ink**: two tiers, `foreground` and `muted_foreground`. No third grey.
-- **Radius**: 6 control, 10 surface, 12 modal, 28 chat (user bubble and composer), pill. Set gpui-kit `radius` / `radius_lg` to 10 / 12.
-- **Controls**: 20 / 24 / 28 / 32 / 36 / 40 px ruler, 32 default. Icon buttons are 28.
-- **Hover**: one wash token for rows and controls. Hover and press are instant; no color interpolation.
-- **Reading measure**: one token for the transcript column and the composer. Components never set their own max width.
-- **Status vocabulary**: success, active, attention, error, neutral. Every status dot resolves through it.
-- **Motion**: durations and easings from gpui-kit `MotionTokens`; every animation honours `cx.reduce_motion()`.
+Code blocks keep gpui-kit's corner copy button. The sidebar is a solid color: GPUI's macOS blur covers the whole window with one fixed material.
 
-## Inventory
+Later, not phase 1: diff coloring, session groups, queued messages, model chip, context meter, attachments, OAuth.
 
-Priority: **P0** is needed for the chat to be usable day to day, **P1** completes the committed scope, **P2** can wait.
+## Motion
 
-### Shell and sessions
+Animations redraw on a ~30 fps timer and stop when they finish; nothing redraws at display rate. gpui-kit's `request_animation_frame` drivers (stream fade, `Spinner`, `ShimmerText`) hold a ProMotion window at 120 Hz while visible, so the working line uses our own timer, and the stream fade runs with a local patch until the upstream fix lands.
 
-| Component | Content | gpui-kit base | Our work | P |
-|---|---|---|---|---|
-| Window shell | transparent titlebar, sidebar + main split | `TitleBar`, `h_resizable` | composition; per-region vibrancy is not available (macOS blur is whole-window only) | P0 |
-| Session row | name, one muted line (preview or workspace, relative time), status dot (running, waiting, blocked, unread), hover actions, context menu | `Sidebar` shell only; `SidebarMenuItem` has no body slot | own `SidebarItem` | P0 |
-| Session groups | by recency or project | `SidebarGroup` | grouping rules | P1 |
-| Rename / remove dialogs | | `Dialog`, `AlertDialog` | copy | P1 |
+## Acceptance
 
-### Transcript
-
-| Component | Content | gpui-kit base | Our work | P |
-|---|---|---|---|---|
-| Transcript column | tail-following list, jump to latest | `MessageScroller` | measure container, turn spacing | P0 |
-| User message | text, reference and attachment chips | `Bubble` | chips; 28 radius | P0 |
-| Assistant message | markdown, no bubble, no avatar; hover footer with copy and time | `TextView`, `Clipboard` | hover footer | P0 |
-| Reasoning block | collapsed "Thinking" summary, streams while open | `Collapsible` | summary line, live state | P0 |
-| Tool row | icon, verb, target, status, duration; expands to arguments and output | `Collapsible` | the row and its nine states: pending, waiting, running, returned, attention, failed, timed out, cancelled, missing | P0 |
-| Turn status | working dots with elapsed time, provider retry, compacting, failed or aborted notice with resume | none suitable (see Motion) | own | P0 |
-| Interaction card: permissions | reason, command in a mono well, deny + Once / Turn / Session | `Button` | card on the floating recipe, pinned above the composer | P0 |
-| Composer | card with borderless textarea, toolbar row, round send / stop | `Textarea` (`appearance(false)`, `auto_grow`) | card, toolbar, send state | P0 |
-| Code block header | language label, copy | `code_block_actions` overlay | decide overlay vs. own block via `markdown_block_parser` (loses built-in highlighting) | P1 |
-| Tool group | consecutive reads and searches folded to one line; finished turn folds to "Worked for Ns" | `Collapsible` | grouping rules | P1 |
-| Diff view | file header with +/− counts, line-level backgrounds | none (`Editor` decorations color ranges, not lines) | own | P1 |
-| Shell output | mono output, exit code, truncation with expand | none | own; ANSI later | P1 |
-| Interaction card: question, form, capability | options, form fields, allow / deny | `Form`, `Radio`, `Checkbox`, `Input` | card variants | P1 |
-| Queue | steering and follow-up items with edit, retract | `List` | rows; needs client wrappers for queue ops | P1 |
-| Model chip | model and thinking level per session | `Combobox` / `Popover` | trigger chip | P1 |
-| Empty states | three tiers from DESIGN.md §10 | `Empty` | tier presets | P1 |
-| Toast | | `Notification` | | P1 |
-| Context meter | | `ProgressCircle` | | P2 |
-| Composer attachments | | `Attachment` | upload flow | P2 |
-
-### Settings
-
-| Component | Content | gpui-kit base | Our work | P |
-|---|---|---|---|---|
-| Settings shell | pages with search | `Settings` / `SettingPage` / `SettingItem` | page layout | P1 |
-| Connection list and detail | status, last test, fetch, set default, remove | `List`, `Button`, `Badge` | rows | P1 |
-| Model inventory | enable toggles, overrides | `List`, `Switch` | rows | P1 |
-| Onboarding form | provider, configuration, model selection | `Form`, `Select`, `Input` | form-level error line (kit validates per input only) | P1 |
-| Credential field | masked secret, status | `Input` | | P1 |
-| OAuth login | URL and code presentation | `Dialog` | | P2 |
-
-### Shared primitives
-
-- **Icon button** (28, ghost) and **status dot**: thin wrappers so size and color come from tokens, not call sites.
-- **Hover reveal**: GPUI `group` / `group_hover`, one pattern for every hover-only action.
-- **Motion clock**: one app-wide low-frequency clock (~30 fps) that animated views lease while they animate and that stops when no lease remains. gpui-kit's `Spinner`, `ShimmerText` and stream fade redraw through `request_animation_frame`, which holds the window at display rate (120 Hz on ProMotion) for as long as they are visible. Every loader and the stream fade go through this clock; the stream-fade fix is also sent upstream.
-
-## Acceptance standard
-
-Every component, before it is used in a view:
-
-1. **Spec** (a short section in the PR, not this file): purpose, anatomy, sizes from the ruler, tokens used, keyboard behaviour, copy.
-2. **States** shown in the gallery, light and dark: default, hover, pressed, selected, focus-visible, disabled, loading, error, and each domain state (the nine tool states, the five status meanings). A state that cannot occur is listed as such.
-3. **Inputs** are plain data; a view test builds the component without a Host.
-4. **Motion** declares duration and easing, runs on the motion clock, and is still with reduce motion.
-5. **Idle cost**: zero redraws when nothing animates; streaming stays under 15% of one core in the release build.
-6. **Layout**: loading and ready occupy the same box (no shift); text lines sit on the 4 px grid.
-
-The gallery is a second window (`maka-desktop --gallery`) that renders every component in every state from fixtures. Visual review happens there, not in a live session.
-
-## Order
-
-1. Tokens, motion clock, gallery window.
-2. P0 components, then replace the spike's ad-hoc chat and sidebar rendering with them.
-3. P1 by surface: transcript, then settings.
+Each written component appears in a gallery window (`maka-desktop --gallery`) in every state, light and dark; takes plain data, never protocol types; and causes no redraws while idle.
