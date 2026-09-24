@@ -122,6 +122,41 @@ fn plugin_form_saves_in_place_and_preserves_a_stale_draft_without_model_executio
     assert_eq!(selected(&after)["enabled"], true);
     assert_eq!(selected(&after)["pinned"], false);
     assert_eq!(after["revision"], changed["revision"]);
+    tui.click_text("Resume draft");
+    tui.wait_for("Draft ready");
+    assert_eq!(
+        runtime.block_on(catalog(&client))["revision"],
+        changed["revision"],
+        "reloading only reads"
+    );
+    tui.click_text("Save");
+    tui.wait_for("✓ Save");
+    let merged = runtime.block_on(catalog(&client));
+    assert_eq!(selected(&merged)["enabled"], false);
+    assert_eq!(
+        selected(&merged)["pinned"],
+        false,
+        "unchanged local field must not overwrite another writer"
+    );
+    tui.click_text("Pinned");
+    tui.wait_for("━●");
+    tui.send(b"\x11");
+    tui.finish();
+    let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
+    tui.wait_for("Draft preserved");
+    tui.wait_until(|screen| {
+        !screen.contains("connecting")
+            && !screen.contains("not connected")
+            && !screen.contains("connection failed")
+    });
+    assert_eq!(
+        runtime.block_on(catalog(&client))["revision"],
+        merged["revision"],
+        "reopening a dirty form does not write"
+    );
+    tui.click_text("Resume draft");
+    tui.wait_for("Draft ready");
+    tui.wait_for("━●");
     tui.filter_command("Discard draft and reopen");
     tui.click_text("Discard draft and reopen");
     tui.wait_for("maka.skills");

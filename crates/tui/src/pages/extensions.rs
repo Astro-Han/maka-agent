@@ -18,6 +18,7 @@
  */
 
 mod consent;
+mod drafts;
 mod saved;
 pub use saved::Checkpoint;
 pub(crate) mod io;
@@ -49,6 +50,10 @@ pub enum Command {
     ApproveConsent,
     Reconcile,
     Retry,
+    ResumeDraft,
+    ApplyDraft,
+    CancelDraft,
+    DraftChoice(usize, bool),
     DismissConsent,
     Back,
     Refresh,
@@ -73,6 +78,11 @@ impl Command {
             Self::ApproveConsent => "extensions-authorize",
             Self::Reconcile => "extensions-reconcile",
             Self::Retry => "extensions-retry",
+            Self::ResumeDraft => "extensions-resume-draft",
+            Self::ApplyDraft => "extensions-continue-editing",
+            Self::CancelDraft => "session-cancel",
+            Self::DraftChoice(_, true) => "extensions-use-draft",
+            Self::DraftChoice(_, false) => "extensions-use-current",
             Self::DismissConsent => "session-cancel",
         }
     }
@@ -100,9 +110,9 @@ impl Request {
 }
 #[derive(Clone)]
 pub(super) enum Work {
-    Recover {
+    Rebind {
         view: Box<TerminalViewProjection>,
-        route: Value,
+        input: Input,
     },
     Directory(Option<String>),
     Page {
@@ -138,6 +148,7 @@ pub struct State {
     saving: bool,
     unrecorded: bool,
     confirm_discard: bool,
+    review: Option<drafts::Review>,
     consent: Option<consent::Consent>,
     pub(super) busy: bool,
     writing: bool,
@@ -178,6 +189,7 @@ impl State {
         self.saving = false;
         self.unrecorded = false;
         self.confirm_discard = false;
+        self.review = None;
         self.consent = None;
         self.generation += 1;
         self.pending = None;
@@ -190,6 +202,8 @@ impl State {
         self.message = self.blocked.then_some(Message::Local(
             if self.writing || self.unresolved.is_some() {
                 "extensions-unknown"
+            } else if self.page.is_some() {
+                "extensions-restored"
             } else {
                 "extensions-disconnected"
             },
@@ -233,11 +247,20 @@ impl State {
         self.blocked = false;
     }
     fn controls(&self) -> usize {
+        if let Some(review) = &self.review {
+            return review.conflicts.len() * 2;
+        }
         self.page.as_ref().map_or(self.directory.len(), |page| {
             page.rows.len() + page.fields.len() + page.actions.len()
         })
     }
     fn selected_command(&self) -> Option<Command> {
+        if self.review.is_some() {
+            return (self.selected < self.controls()).then_some(Command::DraftChoice(
+                self.selected / 2,
+                self.selected.is_multiple_of(2),
+            ));
+        }
         if let Some(page) = &self.page {
             let index = self.selected;
             if index < page.rows.len() {
@@ -256,6 +279,12 @@ impl State {
 impl App {
     pub fn extensions_actions(&self) -> Vec<Action> {
         let mut commands = Vec::new();
+        if self.extensions.review.is_some() {
+            return [Command::CancelDraft, Command::ApplyDraft]
+                .into_iter()
+                .map(Action::Extension)
+                .collect();
+        }
         if self.extensions.confirm_discard {
             return [Command::CancelDiscard, Command::ConfirmDiscard]
                 .into_iter()
@@ -275,6 +304,12 @@ impl App {
         }
         if self.extensions.view.is_some() {
             commands.push(Command::Back);
+        }
+        if self.extensions.blocked
+            && self.extensions.page.is_some()
+            && self.extensions.unresolved.is_none()
+        {
+            commands.push(Command::ResumeDraft);
         }
         if self.extensions.dirty() || self.extensions.blocked {
             commands.push(Command::Discard);
@@ -366,13 +401,35 @@ impl App {
         state.saving = false;
         state.writing = false;
         state.area = None;
-        let recovering = matches!(request.work, Work::Recover { .. });
+        let recovering = matches!(
+            request.work,
+            Work::Rebind {
+                input: Input::Recover { .. },
+                ..
+            }
+        );
+        let reloading = matches!(
+            request.work,
+            Work::Rebind {
+                input: Input::Read { .. },
+                ..
+            }
+        );
         let result = match result {
-            Ok(Output::Recovered { view, reply }) if recovering => {
+            Ok(Output::Rebound {
+                view,
+                reply: Reply::Page { page },
+            }) if reloading => {
+                state.reload_draft(*view, page);
+                self.hits.clear();
+                self.hover = None;
+                return;
+            }
+            Ok(Output::Rebound { view, reply }) if recovering || reloading => {
                 state.view = Some(*view);
                 Ok(Output::Page(reply))
             }
-            Ok(Output::Recovered { .. }) => Err(io::Failure { unknown: false }),
+            Ok(Output::Rebound { .. }) => Err(io::Failure { unknown: false }),
             result => result,
         };
         // A rejected recovery read says nothing about the original write.
@@ -389,7 +446,7 @@ impl App {
             state.unresolved = None;
         }
         match result {
-            Ok(Output::Recovered { .. }) => unreachable!(),
+            Ok(Output::Rebound { .. }) => unreachable!(),
             Ok(Output::Page(Reply::Unrecorded)) => {
                 state.blocked = true;
                 state.unrecorded = recovering;
@@ -463,7 +520,7 @@ impl App {
                 state.message = Some(Message::Local("extensions-conflict"));
             }
             Ok(Output::Page(Reply::Rejected { message })) => {
-                state.blocked = recovering || request.replaying;
+                state.blocked = recovering || reloading || request.replaying;
                 state.message = Some(Message::Remote(message));
             }
             Err(failure) => {
@@ -504,6 +561,24 @@ impl App {
             return false;
         }
         match command {
+            Command::ResumeDraft => {
+                state.blocked
+                    && state.page.is_some()
+                    && state.unresolved.is_none()
+                    && state.review.is_none()
+            }
+            Command::ApplyDraft => {
+                state
+                    .review
+                    .as_ref()
+                    .is_some_and(|review| review.resolved())
+                    && state.unresolved.is_none()
+            }
+            Command::CancelDraft => state.review.is_some(),
+            Command::DraftChoice(index, _) => state
+                .review
+                .as_ref()
+                .is_some_and(|review| *index < review.conflicts.len()),
             Command::Reconcile => {
                 !state.confirm_discard
                     && state
@@ -591,11 +666,32 @@ impl App {
         let state = &mut self.extensions;
         state.applied = None;
         match command {
+            Command::ResumeDraft => {
+                state.pending = Some(Work::Rebind {
+                    view: Box::new(state.view.clone().unwrap()),
+                    input: Input::Read {
+                        route: state.route.clone(),
+                    },
+                });
+            }
+            Command::ApplyDraft => state.accept_draft(),
+            Command::CancelDraft => {
+                state.review = None;
+                state.selected = 0;
+                state.top = 0;
+                state.message = Some(Message::Local("extensions-restored"));
+            }
+            Command::DraftChoice(index, mine) => {
+                state.review.as_mut().unwrap().conflicts[index].mine = Some(mine);
+                state.selected = index * 2 + usize::from(!mine);
+            }
             Command::Reconcile => {
                 state.unrecorded = false;
-                state.pending = Some(Work::Recover {
+                state.pending = Some(Work::Rebind {
                     view: Box::new(state.view.clone().unwrap()),
-                    route: state.unresolved.as_ref().unwrap().recovery.clone().unwrap(),
+                    input: Input::Recover {
+                        route: state.unresolved.as_ref().unwrap().recovery.clone().unwrap(),
+                    },
                 });
             }
             Command::Retry => {
@@ -695,6 +791,7 @@ impl App {
                 }
             }
             Command::Discard | Command::ConfirmDiscard => {
+                state.review = None;
                 state.unresolved = None;
                 state.unrecorded = false;
                 state.confirm_discard = false;
@@ -729,6 +826,12 @@ impl App {
         use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
         if self.palette.is_some() || self.navigation.current() != Route::Extensions {
             return false;
+        }
+        if self.extensions.review.is_some()
+            && matches!(event, Event::Key(key) if key.kind != KeyEventKind::Release && key.code == KeyCode::Esc)
+        {
+            self.extensions_action(Command::CancelDraft);
+            return true;
         }
         if let Event::Mouse(mouse) = event
             && self
@@ -835,7 +938,11 @@ impl App {
                     return true;
                 }
                 KeyCode::Esc => {
-                    self.extensions_action(Command::Back);
+                    self.extensions_action(if self.extensions.review.is_some() {
+                        Command::CancelDraft
+                    } else {
+                        Command::Back
+                    });
                     return true;
                 }
                 KeyCode::Enter => {
@@ -1276,7 +1383,9 @@ pub(crate) mod tests {
         assert_eq!(app.navigation.current(), Route::Extensions);
         app.extensions_action(Command::Reconcile);
         let query = app.extensions_request().unwrap();
-        assert!(matches!(&query.work, Work::Recover { route, .. } if route == &recovery));
+        assert!(
+            matches!(&query.work, Work::Rebind { input: Input::Recover { route }, .. } if route == &recovery)
+        );
         assert!(!query.needs_checkpoint());
         app.extensions_complete(query, Err(io::Failure { unknown: false }));
         assert!(app.extensions.unresolved.is_some());
@@ -1287,7 +1396,7 @@ pub(crate) mod tests {
         view.target.registration = uuid::Uuid::new_v4();
         app.extensions_complete(
             query,
-            Ok(Output::Recovered {
+            Ok(Output::Rebound {
                 view: Box::new(view.clone()),
                 reply: Reply::Unrecorded,
             }),
@@ -1315,7 +1424,7 @@ pub(crate) mod tests {
         let query = app.extensions_request().unwrap();
         app.extensions_complete(
             query,
-            Ok(Output::Recovered {
+            Ok(Output::Rebound {
                 view: Box::new(view),
                 reply: Reply::Applied {
                     route: json!({"task":"original"}),

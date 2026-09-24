@@ -28,7 +28,7 @@ use maka_protocol::plugin::{
 pub enum Output {
     Directory(Page<TerminalViewProjection>),
     Page(Reply),
-    Recovered {
+    Rebound {
         view: Box<TerminalViewProjection>,
         reply: Reply,
     },
@@ -47,7 +47,10 @@ fn failure(error: RequestFailure, writing: bool) -> Failure {
 }
 pub async fn execute(client: &Client, request: &Request) -> Result<Output, Failure> {
     match &request.work {
-        Work::Recover { view, route } => {
+        Work::Rebind { view, input } => {
+            if !matches!(input, Input::Read { .. } | Input::Recover { .. }) {
+                return Err(Failure { unknown: false });
+            }
             let RemoteResult::Bound {
                 target,
                 handler: RemoteKind::Method,
@@ -66,19 +69,12 @@ pub async fn execute(client: &Client, request: &Request) -> Result<Output, Failu
             }
             let mut view = view.clone();
             view.target = target;
-            let Output::Page(reply) = call_page(
-                client,
-                &view,
-                &Input::Recover {
-                    route: route.clone(),
-                },
-                session(&view, request),
-            )
-            .await?
+            let Output::Page(reply) =
+                call_page(client, &view, input, session(&view, request)).await?
             else {
                 return Err(Failure { unknown: false });
             };
-            Ok(Output::Recovered { view, reply })
+            Ok(Output::Rebound { view, reply })
         }
         Work::Directory(cursor) => {
             let result = client

@@ -38,21 +38,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
         return;
     }
     let colors = app.theme.colors();
-    if app.extensions.unresolved.is_some() && !app.extensions.busy && area.height >= 5 {
-        let commands = if app.extensions.confirm_discard {
-            vec![Command::CancelDiscard, Command::ConfirmDiscard]
-        } else {
-            [Command::Reconcile, Command::Retry]
-                .into_iter()
-                .filter(|command| *command != Command::Retry || app.extensions.unrecorded)
-                .filter(|_| {
-                    app.extensions
-                        .unresolved
-                        .as_ref()
-                        .is_some_and(|pending| pending.recovery.is_some())
-                })
-                .collect()
-        };
+    if !app.extensions.busy && area.height >= 5 {
+        let commands = app.extensions.contextual_actions();
         // Keep contextual recovery actions on one line whenever they fit.
         let buttons: Vec<_> = commands
             .into_iter()
@@ -96,6 +83,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
         area.y += rows;
         area.height = area.height.saturating_sub(rows);
     }
+    if app.extensions.review.is_some() {
+        super::drafts::draw(frame, app, area);
+        return;
+    }
     let consent = app.extensions.consent_visible();
     let locale = app.i18n.locale().id();
     let form_width = area.width.saturating_sub(1).min(52);
@@ -103,6 +94,11 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     let mut controls = Vec::new();
     let state = &app.extensions;
     if let Some(message) = &state.message {
+        let color = if matches!(message, super::Message::Local("extensions-draft-ready")) {
+            colors.muted
+        } else {
+            colors.warning
+        };
         let message = match message {
             super::Message::Local(key) => app.i18n.text(key),
             super::Message::Remote(text) => text.resolve(locale).into(),
@@ -111,7 +107,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
             .unwrap()
             .lines
         {
-            lines.push(line.line.style(Style::default().fg(colors.warning)));
+            lines.push(line.line.style(Style::default().fg(color)));
         }
         lines.push(Line::default());
     }

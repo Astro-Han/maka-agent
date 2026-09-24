@@ -131,7 +131,7 @@ fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_mode
         &client,
         "request",
         json!({"kind":"mutate","mutation":{
-            "kind":"update","taskId":id,"patch":{"title":"Changed elsewhere"}
+            "kind":"update","taskId":id,"patch":{"title":"Changed elsewhere","intentBody":"Changed remote note"}
         }}),
     ));
     tui.click_text("First line");
@@ -142,8 +142,39 @@ fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_mode
     tui.send(b"\r");
     let actual = runtime.block_on(remote(&client, "request", query()));
     assert_eq!(actual["task"]["title"], "Changed elsewhere");
-    assert_eq!(actual["task"]["intent"]["body"], "First line\nSecond line");
+    assert_eq!(actual["task"]["intent"]["body"], "Changed remote note");
     assert_eq!(actual["task"]["fireCount"], 0);
+    tui.send(b"\x11");
+    tui.finish();
+    let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
+    tui.wait_for("Draft preserved");
+    tui.wait_until(|screen| {
+        !screen.contains("connecting")
+            && !screen.contains("not connected")
+            && !screen.contains("connection failed")
+    });
+    tui.click_text("Resume draft");
+    tui.wait_for("Review changes");
+    tui.wait_for("Changed remote note");
+    tui.wait_for("Keep this draft");
+    tui.click_text("Cancel");
+    tui.wait_for("Draft preserved");
+    tui.click_text("Resume draft");
+    tui.wait_for("Review changes");
+    tui.click_text("Keep this draft"); // The value row is a complete selection target.
+    tui.click_text("Continue editing");
+    tui.wait_for("Draft ready");
+    tui.wait_for("Changed elsewhere");
+    assert_eq!(
+        runtime.block_on(remote(&client, "request", query()))["task"]["intent"]["body"],
+        "Changed remote note",
+        "choice only restores editing"
+    );
+    tui.click_text("Save");
+    tui.wait_for("✓ Save");
+    let merged = runtime.block_on(remote(&client, "request", query()));
+    assert_eq!(merged["task"]["intent"]["body"], "Keep this draft");
+    assert_eq!(merged["task"]["title"], "Changed elsewhere");
     tui.send(b"\x11");
     tui.finish();
     runtime.block_on(async {
@@ -223,8 +254,37 @@ fn scheduler_creation_requires_consent_then_reuses_only_a_live_grant() {
     tui.send(b"\x1b[200~Consent fixture\x1b[201~");
     tui.click_text("Content");
     tui.send(b"\x1b[200~First reminder\x1b[201~");
+    tui.send(b"\x11");
+    tui.finish();
+    let checkpoint = directory
+        .path()
+        .join("tui-state")
+        .join(&client.identity.root_id)
+        .join("default/state.json");
+    let saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    let draft_revision = saved["extension"]["page"]["revision"].clone();
+    assert!(
+        saved["extension"]["pending"].is_null(),
+        "editing has not submitted anything"
+    );
+    let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
+    tui.wait_for("Draft preserved");
+    tui.wait_until(|screen| {
+        !screen.contains("connecting")
+            && !screen.contains("not connected")
+            && !screen.contains("connection failed")
+    });
+    tui.click_text("Resume draft");
+    tui.wait_for("Draft ready");
+    tui.wait_for("First reminder");
+    assert!(list()["tasks"].as_array().unwrap().is_empty());
     tui.click_text("Create reminder");
     tui.wait_for("Allow plugin access?");
+    let resumed: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    assert_ne!(
+        resumed["extension"]["page"]["revision"], draft_revision,
+        "an unsubmitted creation uses the fresh form identity; uncertain submissions cannot enter this path"
+    );
     tui.send(b"\r"); // Default focus cancels; no authorization or task mutation.
     tui.wait_until(|screen| {
         !screen.contains("Allow plugin access?") && screen.contains("First reminder")
