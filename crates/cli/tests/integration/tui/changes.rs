@@ -103,11 +103,12 @@ fn real_edits_show_request_diff_without_claiming_a_file_snapshot_and_copy_withou
     let encoded = base64::engine::general_purpose::STANDARD.encode(full_path.to_str().unwrap());
     tui.wait_output(format!("\x1b]52;c;{encoded}\x07").as_bytes());
     tui.wait_for("Copy request sent to terminal");
+    let screen = tui.screen.snapshot().unwrap().screen;
     assert!(
-        tui.screen.snapshot().unwrap().screen.contains("▸ Edit"),
+        screen.contains("◆ Edit") && !screen.contains("− let   label"),
         "copying the path must not unfold the tool"
     );
-    tui.click_text("▸ Edit");
+    tui.click_text("◆ Edit");
     tui.wait_for("− let   label");
     tui.wait_for("+ let label");
     assert!(
@@ -124,7 +125,7 @@ fn real_edits_show_request_diff_without_claiming_a_file_snapshot_and_copy_withou
     tui.wait_for("Copy request sent to terminal");
     tui.send(b"\x1b");
     tui.wait_for("Esc Controls"); // Wait for selection/clipboard feedback to settle before using its geometry.
-    tui.click_text("▸ Write");
+    tui.click_text("◆ Write");
     tui.wait_for("+ replacement file");
     tui.wait_for("− previous file");
     tui.resize(55, 28);
@@ -254,9 +255,9 @@ fn code_mode_patch_stops_after_failure_and_keeps_real_tools_visible() {
     tui.wait_for("Copy request sent to terminal");
     tui.send(b"\x1b");
     tui.wait_for("Esc Controls");
-    tui.click_text("▾ Patch");
+    tui.click_text("Patch · created.txt"); // The whole header row folds, not just its glyph.
     tui.wait_until(|screen| !screen.contains("+ +literal 中文🦀"));
-    tui.click_last_text("▸ Patch");
+    tui.click_last_text("◆ Patch");
     tui.wait_for("− absent");
     tui.wait_for("+ not applied");
     tui.wait_for("Failed to find expected lines in snapshot: absent");

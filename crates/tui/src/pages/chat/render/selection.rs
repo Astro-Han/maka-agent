@@ -630,6 +630,7 @@ mod tests {
                         language: None,
                     }],
                     file: None,
+                    emphasis: None,
                 },
             );
         };

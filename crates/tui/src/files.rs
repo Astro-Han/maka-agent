@@ -23,7 +23,10 @@ use crate::{
     pages::sessions::Detail,
     theme::Palette,
 };
-use ratatui::text::{Line, Span};
+use ratatui::{
+    style::Style,
+    text::{Line, Span},
+};
 use std::{ops::Range, path::Path};
 use unicode_width::UnicodeWidthStr;
 
@@ -81,6 +84,11 @@ pub fn resolve_hits(app: &mut App) {
 
 /// Color only the filename, preserving source bytes and unrelated span styles.
 pub fn paint(line: &mut Line<'static>, bytes: Range<usize>, colors: Palette) -> Range<usize> {
+    restyle(line, bytes, Style::default().fg(colors.accent))
+}
+
+/// Patch one display byte range of a rendered line; returns its cell columns.
+pub fn restyle(line: &mut Line<'static>, bytes: Range<usize>, patch: Style) -> Range<usize> {
     let text: String = line
         .spans
         .iter()
@@ -101,7 +109,7 @@ pub fn paint(line: &mut Line<'static>, bytes: Range<usize>, colors: Palette) -> 
         }
         for (range, style) in [
             (0..start, span.style),
-            (start..end, span.style.fg(colors.accent)),
+            (start..end, span.style.patch(patch)),
             (end..span.content.len(), span.style),
         ] {
             if !range.is_empty() {

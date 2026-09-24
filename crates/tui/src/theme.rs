@@ -266,6 +266,17 @@ impl Palette {
     pub fn base(self) -> Style {
         Style::default().fg(self.foreground).bg(self.background)
     }
+    /// Code and tool-output background: recessed below `surface`, which stays
+    /// reserved for the user band. Derived so custom files need no extra role.
+    pub fn panel(self) -> Color {
+        match (self.background, self.surface) {
+            (Color::Rgb(r, g, b), Color::Rgb(sr, sg, sb)) => {
+                let mix = |low: u8, high: u8| ((u16::from(low) + u16::from(high)) / 2) as u8;
+                Color::Rgb(mix(r, sr), mix(g, sg), mix(b, sb))
+            }
+            _ => self.background,
+        }
+    }
     pub fn selected(self) -> Style {
         Style::default().fg(self.selection_text).bg(self.selection)
     }
@@ -345,7 +356,14 @@ mod tests {
                     contrast(color, c.surface) >= 4.5,
                     "{expected:?} code {color:?}"
                 );
+                assert!(
+                    contrast(color, c.panel()) >= 4.5,
+                    "{expected:?} panel code {color:?}"
+                );
             }
+            assert!(contrast(c.foreground, c.panel()) >= 4.5);
+            assert_ne!(c.panel(), c.background, "panels must stay visible");
+            assert_ne!(c.panel(), c.surface, "code must not read as a user band");
             assert!(contrast(c.selection_text, c.selection) >= 4.5);
             assert!(contrast(c.search_text, c.search_active) >= 4.5);
         }

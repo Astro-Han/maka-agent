@@ -479,11 +479,11 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.wait_for("Read × 2 · Search × 1");
     tui.click_text("Read × 2 · Search × 1");
     tui.wait_for("reference.txt");
-    tui.click_text("▸ Read"); // Individual call inside the expanded group.
+    tui.click_text("◆ Read"); // Individual call inside the expanded group.
     tui.wait_for("Lines 1–1 of 1");
     tui.click_text("Read × 2 · Search × 1");
     tui.wait_until(|screen| screen.contains("Lines 1–1 of 1") && !screen.contains("reference.txt"));
-    tui.click_text("▾ Read");
+    tui.click_text("◆ Read");
     tui.wait_until(|screen| !screen.contains("Lines 1–1 of 1"));
     // Keyboard reaches the same nested card in a short, unscrolled conversation.
     tui.send(b"\r");
@@ -511,7 +511,7 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.send(b"\x1b"); // Clear selection, without folding or leaving the session.
     tui.wait_for("↑↓ Select"); // Wait for the cleared selection before sending a mouse escape sequence.
     // A real Host result replaces its owning call card, not a second raw JSON row.
-    tui.click_text("▸ Run");
+    tui.click_text("◆ Run");
     tui.wait_for("Completed");
     tui.wait_for("Arguments");
     tui.wait_for("additional_permissions:");
@@ -536,8 +536,8 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
             .nth(49)
             .is_some_and(|line| line.contains("Esc Controls"))
     });
-    tui.wait_for("▾ Run");
-    tui.click_text("▾ Run");
+    tui.wait_for("◆ Run");
+    tui.click_text("◆ Run");
     tui.wait_until(|screen| !screen.contains("additional_permissions:"));
     tui.send(b"\x06"); // Ctrl+F searches locally, including the folded real tool result.
     tui.wait_for("Loaded");
@@ -553,10 +553,10 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.wait_for("additional_permissions:");
     tui.send(b"\x1b");
     tui.wait_until(|screen| !screen.contains("∞ History"));
-    tui.wait_for("▾ Run"); // The removed search header can arrive before the new body's PTY bytes.
-    tui.click_text("▾ Run");
+    tui.wait_for("◆ Run"); // The removed search header can arrive before the new body's PTY bytes.
+    tui.click_text("◆ Run");
     tui.wait_until(|screen| !screen.contains("additional_permissions:"));
-    tui.click_text("  Streamed"); // Assistant gutter reveals disclosure on hover, not at rest.
+    tui.click_text("  Streamed"); // At rest an answer has no gutter glyph; folding it shows one.
     tui.wait_for("▸ Streamed");
     assert!(
         !tui.screen
@@ -568,7 +568,7 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.click_text("▸ Streamed");
     tui.wait_for("Foldable detail");
     tui.send(b"\x1b[H "); // A complete short user line has nothing to disclose.
-    tui.wait_for("› 草稿");
+    tui.wait_for("❯ 草稿");
     assert!(!tui.screen.snapshot().unwrap().screen.contains("▸ 草稿"));
     tui.send(b"\x1b[F"); // End outside the composer restores tail following.
     runtime.block_on(async {

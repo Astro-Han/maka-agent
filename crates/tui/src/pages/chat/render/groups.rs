@@ -103,15 +103,18 @@ impl Transcript {
                             }
                         }
                         let summary = parts.join(" · ");
-                        (if pending == 0 {
+                        let summary = if pending == 0 {
                             summary
                         } else {
                             i18n.format(
                                 "tool-group-pending",
                                 &[("summary", &summary), ("count", &pending.to_string())],
                             )
-                        })
-                        .into()
+                        };
+                        tools::Content {
+                            emphasis: Some(0..summary.len()),
+                            ..summary.into()
+                        }
                     },
                 );
                 for member in &members {
@@ -268,7 +271,7 @@ mod tests {
             "unchanged groups reuse their cached layout"
         );
         view.toggle(&group);
-        assert!(draw(&mut view, 80, false).contains("  ▸ Read · a.rs"));
+        assert!(draw(&mut view, 80, false).contains("  ◆ Read · a.rs"));
         assert!(view.order.contains(&first));
         view.toggle(&first);
         assert!(draw(&mut view, 80, false).contains("Arguments"));
