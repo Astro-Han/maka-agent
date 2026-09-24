@@ -36,7 +36,7 @@ fn visual_custom_theme_saves_reopens_and_rejects_external_changes_without_losing
     host.wait_for_registration();
     let path = directory.path().join("tui-state/theme.json");
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    tui.wait_for("No sessions yet.");
+    tui.wait_for("No sessions yet");
     tui.click_text("Settings");
     tui.wait_for("Customize theme");
     tui.click_text("Customize theme");
@@ -45,15 +45,15 @@ fn visual_custom_theme_saves_reopens_and_rejects_external_changes_without_losing
     tui.send(b"\t\t\x01#89ABCD");
     tui.wait_for("#89ABCD");
     tui.click_text("Save & apply");
-    tui.wait_for("Palette: My theme");
+    tui.wait_for("My theme ▾");
     let saved = std::fs::read(&path).unwrap();
     let json: serde_json::Value = serde_json::from_slice(&saved).unwrap();
     assert_eq!(json["colors"]["accent"], "#89abcd");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
 
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    reopened.wait_for("Palette: My theme");
+    reopened.wait_for("My theme ▾");
     reopened.click_text("Customize theme");
     reopened.wait_for("Preset colors");
     reopened.wait_for("#89ABCD");
@@ -65,17 +65,19 @@ fn visual_custom_theme_saves_reopens_and_rejects_external_changes_without_losing
     reopened.click_text("Load custom theme");
     reopened.wait_for("#123456");
     reopened.click_text("Save & apply");
-    reopened.wait_for("Palette: External");
-    reopened.send(b"\x11");
+    reopened.wait_for("External ▾");
+    reopened.close_terminal();
     reopened.finish();
 
     std::fs::write(&path, b"not-json").unwrap();
     let mut invalid = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    invalid.wait_for("custom unavailable");
+    invalid.wait_for("Custom unavailable");
     invalid.wait_for("Invalid theme");
-    invalid.click_text("◐");
-    invalid.wait_for("Palette: Maka dark");
-    invalid.send(b"\x11");
+    invalid.click_text("◐"); // The palette row opens its chooser.
+    invalid.wait_for("○ Maka dark"); // No choice claims the unavailable custom value.
+    invalid.click_text("○ Maka dark");
+    invalid.wait_for("Maka dark ▾");
+    invalid.close_terminal();
     invalid.finish();
     assert_eq!(std::fs::read(&path).unwrap(), b"not-json");
     host.retire_registered();

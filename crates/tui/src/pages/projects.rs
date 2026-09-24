@@ -23,7 +23,7 @@ pub use view::draw;
 use crate::app::{Action, App, ConnectionState, Focus};
 use crate::navigation::Route;
 use maka_protocol::project::{PageItem, Query, QueryResult, View};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -70,8 +70,17 @@ pub struct Projects {
     cursor: Option<String>,
     next: Option<String>,
     previous: VecDeque<Option<String>>,
+    /// Canonical id and display name by project id or alias, kept across
+    /// pages so session groups elsewhere stay labelled whichever page this
+    /// list shows, and an absorbed project reads as the one that absorbed it.
+    known: BTreeMap<String, (String, String)>,
 }
 impl Projects {
+    pub fn resolve(&self, id: &str) -> Option<(&str, &str)> {
+        self.known
+            .get(id)
+            .map(|(id, name)| (id.as_str(), name.as_str()))
+    }
     pub(super) fn ready(&self) -> bool {
         self.loaded && !self.loading && !self.requested && !self.error
     }
@@ -130,6 +139,7 @@ impl Projects {
                 next_cursor,
                 ..
             }) => {
+                self.learn(&items);
                 self.items = items
                     .into_iter()
                     .filter_map(|item| match item {
@@ -166,6 +176,33 @@ impl Projects {
             _ => unreachable!("client enforces project list reply"),
         }
     }
+    fn learn(&mut self, items: &[PageItem]) {
+        let mut projects = BTreeMap::new();
+        for item in items {
+            match item {
+                PageItem::Project {
+                    project_index,
+                    id,
+                    name,
+                    ..
+                } => {
+                    let known = (id.clone(), name.clone());
+                    projects.insert(*project_index, known.clone());
+                    self.known.insert(id.clone(), known);
+                }
+                PageItem::Alias {
+                    project_index,
+                    alias,
+                    ..
+                } => {
+                    if let Some(known) = projects.get(project_index) {
+                        self.known.insert(alias.clone(), known.clone());
+                    }
+                }
+                PageItem::Location { .. } => {}
+            }
+        }
+    }
     pub(super) fn restart(&mut self) {
         self.cursor = None;
         self.previous.clear();
@@ -200,6 +237,10 @@ impl Projects {
         }
         self.items
             .retain(|item| item.id == project.id || !project.aliases.contains(&item.id));
+        for id in std::iter::once(&project.id).chain(&project.aliases) {
+            self.known
+                .insert(id.clone(), (project.id.clone(), project.name.clone()));
+        }
         self.superseded |= self.loading;
         self.refresh();
     }
@@ -421,6 +462,9 @@ mod tests {
             ["a", "c"]
         );
         assert_eq!(app.projects.selected.as_deref(), Some("a"));
+        // Names outlive the page they came from; an absorbed id reads as its canonical project.
+        assert_eq!(app.projects.resolve("b"), Some(("a", "Canonical")));
+        assert_eq!(app.projects.resolve("c"), Some(("c", "c")));
         assert!(
             !app.project_enabled(&Command::Create("b".into())),
             "absorbed rows cannot remain actionable before the catalog refresh"

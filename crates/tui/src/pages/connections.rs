@@ -350,10 +350,10 @@ mod tests {
         app.apply(Action::Visit(Route::Settings));
         app.apply(Action::Visit(Route::Connections));
         assert_eq!(app.focus, Focus::List);
-        assert_eq!(app.nav_routes()[app.selected_nav], Route::Settings);
-        assert!(
-            !app.nav_routes().contains(&Route::Connections),
-            "nested page is not another sidebar entry"
+        assert_eq!(
+            app.navigation.current().section(),
+            Route::Settings,
+            "a nested page highlights its sidebar entry, not another one"
         );
         assert_eq!(app.connections.query(), Some(Query::Start));
         assert!(app.connections.query().is_none(), "one read at a time");
@@ -498,7 +498,7 @@ mod tests {
         assert_eq!(app.navigation.current(), Route::Settings);
         app.apply(Action::Forward);
         assert_eq!(app.navigation.current(), Route::Connections);
-        assert_eq!(app.nav_routes()[app.selected_nav], Route::Settings);
+        assert_eq!(app.navigation.current().section(), Route::Settings);
         assert_eq!(
             app.connections.query(),
             Some(Query::Start),

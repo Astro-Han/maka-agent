@@ -62,6 +62,10 @@ pub enum Action {
     CopyFile(String),
     Branch(crate::pages::branch::Command),
     Recap(crate::pages::recap::Command),
+    Resume(crate::pages::resume::Command),
+    Settings(crate::pages::settings::Message),
+    Sidebar(crate::pages::sidebar::Message),
+    Home(crate::pages::home::Message),
     Attachment(crate::pages::attachments::Command),
     References,
     Extension(crate::pages::extensions::Command),
@@ -91,6 +95,9 @@ pub enum Action {
     OpenInteraction,
     Interaction(crate::pages::interactions::Command),
     Quit,
+    Detach,
+    ConfirmQuit,
+    CancelQuit,
     NextTab,
     PreviousTab,
     CloseTab(String),
@@ -124,7 +131,6 @@ pub struct App {
     pub navigation: Navigation,
     pub tabs: crate::navigation::tabs::Tabs,
     pub focus: Focus,
-    pub selected_nav: usize,
     pub selected_control: usize,
     pub i18n: I18n,
     pub chrome: crate::chrome::Chrome,
@@ -133,8 +139,14 @@ pub struct App {
     pub management: crate::pages::manage::Management,
     pub branch: crate::pages::branch::State,
     pub recap: crate::pages::recap::State,
+    pub resume: crate::pages::resume::State,
     pub attachments: crate::pages::attachments::State,
     pub skills: crate::pages::skills::State,
+    pub settings: crate::pages::settings::State,
+    pub sidebar: crate::pages::sidebar::State,
+    /// The modal layer presenting whichever overlay is a kernel sheet.
+    pub layer: crate::ui::Layer<Action>,
+    pub home: crate::pages::home::State,
     pub extensions: crate::pages::extensions::State,
     pub directories:
         std::collections::BTreeMap<String, Vec<maka_protocol::turn::DirectoryReference>>,
@@ -155,17 +167,18 @@ pub struct App {
     pub modal_area: Option<Rect>,
     pub hover: Option<Action>,
     pub hover_area: Option<Rect>,
-    hover_since: Option<Instant>,
+    pub(crate) hover_since: Option<Instant>,
     pub root: PathBuf,
     pub connection: ConnectionState,
     pub status: Option<Value>,
     pub notice: Option<Notice>,
     pub state_error: Option<String>,
     pub closing: bool,
+    pub shutdown: crate::shutdown::State,
     pub theme: crate::theme::Theme,
     pub refreshing: bool,
     pub creating: bool,
-    frame_size: Option<(u16, u16)>,
+    pub(crate) frame_size: Option<(u16, u16)>,
 }
 
 impl App {
@@ -176,7 +189,6 @@ impl App {
             navigation: Navigation::default(),
             tabs: Default::default(),
             focus: Focus::Navigation,
-            selected_nav: 0,
             selected_control: 0,
             i18n,
             chrome: Default::default(),
@@ -185,8 +197,13 @@ impl App {
             management: Default::default(),
             branch: Default::default(),
             recap: Default::default(),
+            resume: Default::default(),
             attachments: Default::default(),
             skills: Default::default(),
+            settings: Default::default(),
+            sidebar: Default::default(),
+            layer: Default::default(),
+            home: Default::default(),
             extensions: Default::default(),
             directories: Default::default(),
             revision: Default::default(),
@@ -212,6 +229,7 @@ impl App {
             notice: None,
             state_error: None,
             closing: false,
+            shutdown: Default::default(),
             theme: crate::theme::Theme::default(),
             refreshing: false,
             creating: false,
@@ -242,6 +260,7 @@ impl App {
             (Action::Connect, "command-connect"),
             (Action::ToggleSidebar, "command-sidebar"),
             (Action::Quit, "command-quit"),
+            (Action::Detach, "command-detach"),
         ];
         if self.navigation.current() == Route::Extensions {
             commands.extend(self.page_actions().into_iter().filter_map(|action| {
@@ -257,6 +276,7 @@ impl App {
         commands.extend(self.management_commands());
         commands.extend(self.branch_commands());
         commands.extend(self.recap_commands());
+        commands.extend(self.resume_commands());
         commands.extend(self.revision_commands());
         commands.extend(self.oauth_commands());
         if let Some(action) = self.default_model_action() {
@@ -401,21 +421,8 @@ impl App {
                     vec![]
                 }
             }
-            Route::Workspace => {
-                if matches!(self.connection, ConnectionState::Connected { .. }) {
-                    if self.sessions.can_previous() || self.sessions.can_next() {
-                        vec![
-                            Action::CreateSession,
-                            Action::PreviousSessions,
-                            Action::NextSessions,
-                        ]
-                    } else {
-                        vec![Action::CreateSession]
-                    }
-                } else {
-                    vec![Action::Visit(Route::Host)]
-                }
-            }
+            // Home controls live in its kernel surface.
+            Route::Workspace => vec![],
             Route::Session(_) => {
                 let mut actions = vec![
                     self.send_action(),
@@ -449,15 +456,8 @@ impl App {
                     Action::Connect
                 },
             ],
-            Route::Settings => vec![
-                Action::ToggleTheme,
-                Action::CycleLocale,
-                Action::ToggleSymbols,
-                Action::ToggleMotion,
-                Action::Visit(Route::Connections),
-                Action::Theme(crate::theme::editor::Command::Open),
-            ],
-            Route::Help => vec![],
+            // Settings controls live in its kernel surface, not page actions.
+            Route::Settings | Route::Help => vec![],
         };
         if self.fullscreen() && self.inbox_attention() {
             actions.push(Action::Visit(Route::Inbox));
@@ -474,6 +474,7 @@ impl App {
         self.attachments.begin_frame();
         self.branch.invalidate_geometry();
         self.recap.invalidate_geometry();
+        self.resume.invalidate_geometry();
         self.revision.begin_frame();
         for item in &self.sessions.items {
             self.tabs.rename(&item.id, &item.name);
@@ -485,7 +486,6 @@ impl App {
             reader.text_selection.begin_frame();
         }
         self.hits.clear();
-        self.tabs.area = None;
         self.modal_area = None;
         self.queue.area = None;
         self.queue.edit_area = None;
@@ -496,39 +496,16 @@ impl App {
         self.chrome.session_fullscreen && matches!(self.navigation.current(), Route::Session(_))
     }
     pub fn tooltip_wait(&self) -> Option<Duration> {
-        if self.extensions.consent_visible()
-            || self.theme.editor.is_some()
-            || self.branch.visible
-            || self.recap.visible
-            || self.revision.visible
-            || self.attachments.dialog.is_some()
-            || self.skills.dialog.is_some()
-            || !self.has_tooltip()
-            || self.palette.is_some()
-            || self.interactions.visible
-            || self.management.dialog.is_some()
-            || self.onboarding.dialog.is_some()
-        {
+        if self.overlay().is_some() || !self.has_tooltip() {
             return None;
         }
         let remaining = Duration::from_millis(450).checked_sub(self.hover_since?.elapsed())?;
         (!remaining.is_zero()).then_some(remaining)
     }
     pub fn selection_wait(&self, now: Instant) -> Option<Duration> {
-        if self.extensions.consent_visible()
-            || self.theme.editor.is_some()
-            || self.branch.visible
-            || self.recap.visible
-            || self.revision.visible
-            || self.attachments.dialog.is_some()
-            || self.skills.dialog.is_some()
+        if self.overlay().is_some()
             || !matches!(self.navigation.current(), Route::Session(_))
-            || self.palette.is_some()
             || self.chrome.details
-            || self.interactions.visible
-            || self.queue.edit.is_some()
-            || self.management.dialog.is_some()
-            || self.onboarding.dialog.is_some()
         {
             return None;
         }
@@ -542,17 +519,7 @@ impl App {
                 .is_some_and(|reader| reader.selection_scroll(now))
     }
     pub fn tooltip_visible(&self) -> bool {
-        !self.extensions.consent_visible()
-            && self.theme.editor.is_none()
-            && !self.branch.visible
-            && !self.recap.visible
-            && !self.revision.visible
-            && self.attachments.dialog.is_none()
-            && self.skills.dialog.is_none()
-            && self.palette.is_none()
-            && self.management.dialog.is_none()
-            && self.onboarding.dialog.is_none()
-            && !self.interactions.visible
+        self.overlay().is_none()
             && self.has_tooltip()
             && self
                 .hover_since
@@ -603,7 +570,6 @@ impl App {
             Action::CloseTab(id) => {
                 self.leave_page();
                 let current = self.navigation.current();
-                let selected = self.nav_routes().get(self.selected_nav).cloned();
                 let fallback = self
                     .tabs
                     .close(&id)
@@ -612,11 +578,6 @@ impl App {
                 if current != self.navigation.current() {
                     self.sync_route();
                     self.enter_page();
-                } else {
-                    let routes = self.nav_routes();
-                    self.selected_nav = selected
-                        .and_then(|route| routes.iter().position(|candidate| *candidate == route))
-                        .unwrap_or_else(|| self.selected_nav.min(routes.len() - 1));
                 }
                 self.hits.clear();
                 self.hover = None;
@@ -628,6 +589,10 @@ impl App {
             Action::Extension(command) => self.extensions_action(command),
             Action::Branch(command) => return self.branch_action(command),
             Action::Recap(command) => return self.recap_action(command),
+            Action::Resume(command) => return self.resume_action(command),
+            Action::Settings(message) => return self.settings_action(message),
+            Action::Sidebar(message) => return self.sidebar_action(message),
+            Action::Home(message) => return self.home_action(message),
             Action::Revision(command) => return self.revision_action(command),
             Action::Onboard(command) => return self.onboarding_action(command),
             Action::Project(command) => return self.project_action(command),
@@ -652,7 +617,6 @@ impl App {
                 self.leave_page();
                 self.invalidate_editor_geometry();
                 self.hover = None;
-                self.selected_nav = self.nav_index(&route);
                 if let Route::Session(id) = &route {
                     self.sessions.open(id);
                 }
@@ -745,20 +709,11 @@ impl App {
                 self.hover = None;
             }
             Action::ToggleTrace => self.chat.toggle_trace(),
-            Action::ToggleSymbols => {
-                self.chrome.ascii = !self.chrome.ascii;
-                self.chat.invalidate_layout();
-            }
-            Action::ToggleMotion => {
-                self.chrome.motion = !self.chrome.motion;
-                self.chrome.stop_animation();
-            }
+            Action::ToggleSymbols => self.set_ascii(!self.chrome.ascii),
+            Action::ToggleMotion => self.set_motion(!self.chrome.motion),
             Action::CycleLocale => {
                 self.i18n.cycle();
-                self.chat.invalidate_layout();
-                // Text widths change. Do not accept clicks against old geometry.
-                self.hits.clear();
-                self.hover = None;
+                self.set_locale(self.i18n.preference);
             }
             Action::RefreshSessions => self.catalog_mut().restart(),
             Action::NextSessions => self.catalog_mut().next(),
@@ -805,12 +760,21 @@ impl App {
                 self.refreshing = true;
                 return Some(action);
             }
-            Action::Quit => return Some(action),
+            Action::Quit | Action::Detach | Action::ConfirmQuit => return Some(action),
+            Action::CancelQuit => {
+                self.shutdown = Default::default();
+                self.hits.clear();
+                self.hover = None;
+            }
             _ => {}
         }
         None
     }
     pub fn enabled(&self, action: &Action) -> bool {
+        if *action == Action::ConfirmQuit {
+            return matches!(self.shutdown.prompt, Some(crate::shutdown::Prompt::Busy))
+                && !self.shutdown.stopping;
+        }
         if let Action::Extension(command) = action {
             return self.extensions_enabled(command);
         }
@@ -831,6 +795,22 @@ impl App {
         }
         if let Action::Recap(command) = action {
             return self.recap_enabled(command);
+        }
+        if let Action::Resume(command) = action {
+            return self.resume_enabled(command);
+        }
+        if let Action::Sidebar(crate::pages::sidebar::Message::New)
+        | Action::Home(crate::pages::home::Message::New) = action
+        {
+            return self.enabled(&Action::CreateSession);
+        }
+        if let Action::Settings(message) = action {
+            use crate::pages::settings::Message;
+            return match message {
+                Message::Palette(_) | Message::CustomTheme => !self.theme.busy(),
+                Message::SandboxDefaults => self.sandbox_defaults_action().is_some(),
+                _ => true,
+            };
         }
         if let Action::Branch(command) = action {
             return self.branch_enabled(command);
@@ -986,18 +966,9 @@ impl App {
         };
         self.chat.stop_target(root_id, epoch)
     }
-    fn nav_index(&self, route: &Route) -> usize {
-        let routes = self.nav_routes();
-        routes
-            .iter()
-            .position(|r| r == route)
-            .or_else(|| routes.iter().position(|r| *r == route.section()))
-            .expect("every route has a navigation section")
-    }
     fn sync_route(&mut self) {
         self.invalidate_editor_geometry();
         let route = self.navigation.current();
-        self.selected_nav = self.nav_index(&route);
         if let Route::Session(id) = route {
             self.sessions.open(&id);
         }
@@ -1016,18 +987,6 @@ impl App {
         {
             self.drafts.entry(id).or_default();
         }
-    }
-
-    pub fn nav_routes(&self) -> Vec<Route> {
-        Route::ALL
-            .into_iter()
-            .chain(
-                self.tabs
-                    .entries
-                    .iter()
-                    .map(|tab| Route::Session(tab.id.clone())),
-            )
-            .collect()
     }
 
     pub(crate) fn catalog(&self) -> &crate::pages::sessions::Sessions {
@@ -1091,6 +1050,7 @@ impl App {
     }
 
     pub fn invalidate_editor_geometry(&mut self) {
+        self.layer.invalidate();
         self.extensions.invalidate_geometry();
         self.modal_area = None;
         if let Some(editor) = &mut self.theme.editor {
@@ -1102,9 +1062,9 @@ impl App {
         self.management.oauth.invalidate_identity_geometry();
         self.branch.invalidate_geometry();
         self.recap.invalidate_geometry();
+        self.resume.invalidate_geometry();
         self.revision.invalidate_geometry();
         self.onboarding.invalidate_geometry();
-        self.tabs.invalidate_geometry();
         if let Some(reader) = self.chat.reader_mut() {
             reader.text_selection.invalidate_geometry();
             reader.invalidate_scrollbar();
@@ -1136,6 +1096,14 @@ impl App {
     /// Only the displayed frame contributes hit regions. Overlay rendering
     /// replaces that list, so a mouse event cannot reach a covered page.
     pub fn input(&mut self, event: Event) -> (bool, Option<Action>) {
+        if self.shutdown.stopping
+            && !matches!(
+                event,
+                Event::Resize(_, _) | Event::FocusLost | Event::FocusGained
+            )
+        {
+            return (false, None);
+        }
         if self.closing {
             match &event {
                 Event::Key(key)
@@ -1166,7 +1134,30 @@ impl App {
         if keyboard && let Some(reader) = self.chat.reader_mut() {
             reader.text_selection.end_drag();
         }
-        let outcome = self.dispatch_input(event);
+        // Modal handlers own activation/focus, but all shared controls need the
+        // same hover feedback. Only the top overlay's rendered hits are eligible.
+        let mut hover_changed = false;
+        if self.modal_area.is_some()
+            && let Event::Mouse(mouse) = &event
+            && mouse.kind == MouseEventKind::Moved
+        {
+            let point = Position::new(mouse.column, mouse.row);
+            let hit = self.hits.iter().rev().find(|hit| {
+                self.modal_area.is_some_and(|area| area.contains(point))
+                    && hit.area.contains(point)
+                    && self.enabled(&hit.action)
+            });
+            let target = hit.map(|hit| hit.action.clone());
+            let area = hit.map(|hit| hit.area);
+            hover_changed = self.hover != target || self.hover_area != area;
+            if hover_changed {
+                self.hover = target;
+                self.hover_area = area;
+                self.hover_since = None; // Feedback, not an unsolicited tooltip.
+            }
+        }
+        let mut outcome = self.dispatch_input(event);
+        outcome.0 |= hover_changed;
         if mouse
             && outcome.0
             && self.focus == Focus::Transcript
@@ -1184,139 +1175,61 @@ impl App {
         outcome
     }
 
-    fn dispatch_input(&mut self, event: Event) -> (bool, Option<Action>) {
-        if let Event::Mouse(mouse) = &event
-            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
-            && (self.extensions.consent_visible()
-                || self.theme.editor.is_some()
-                || self.branch.visible
-                || self.recap.visible
-                || self.revision.visible
-                || self.attachments.dialog.is_some()
-                || self.skills.dialog.is_some()
-                || self.palette.is_some()
-                || self.onboarding.dialog.is_some()
-                || self.management.dialog.is_some()
-                || self.interactions.visible
-                || self.queue.edit.is_some())
-            && self
-                .modal_area
-                .is_some_and(|area| !area.contains(Position::new(mouse.column, mouse.row)))
-        {
-            // Dismiss only the displayed overlay. Never forward this press to the page.
-            let action = if self.extensions.consent_visible() {
-                Some(Action::Extension(
-                    crate::pages::extensions::Command::DismissConsent,
-                ))
-            } else if self.theme.editor.is_some() {
-                Some(Action::Theme(crate::theme::editor::Command::Close))
-            } else if self.skills.dialog.is_some() {
-                Some(Action::Skills(crate::pages::skills::Command::Close))
-            } else if self.attachments.dialog.is_some() {
-                Some(Action::Attachment(
-                    crate::pages::attachments::Command::Close,
-                ))
-            } else if self.directory_reference_active() {
-                Some(Action::Manage(crate::pages::manage::Command::Close))
-            } else if self.revision.visible {
-                Some(Action::Revision(crate::pages::revision::Command::Close))
-            } else if self.recap.visible {
-                Some(Action::Recap(crate::pages::recap::Command::Close))
-            } else if self.branch.visible {
-                Some(Action::Branch(crate::pages::branch::Command::Close))
-            } else if self.onboarding.dialog.is_some() {
-                Some(Action::Onboard(crate::pages::onboarding::Command::Close))
-            } else if self.management.dialog.is_some() {
-                Some(Action::Manage(crate::pages::manage::Command::Close))
-            } else if self.interactions.visible {
-                Some(Action::Interaction(
-                    crate::pages::interactions::Command::Close,
-                ))
-            } else if self.queue.edit.is_some() {
-                Some(Action::Queue(crate::pages::queue::Command::Close))
-            } else {
-                self.palette = None;
-                None
-            };
-            self.hover = None;
+    /// Kernel surfaces take their input first: the sidebar, then a page
+    /// presented by the kernel. Unconsumed events continue to the shell.
+    fn surface_input(&mut self, event: &Event) -> Option<(bool, Option<Action>)> {
+        let (mouse, key) = (
+            matches!(event, Event::Mouse(_)),
+            matches!(event, Event::Key(_)),
+        );
+        if mouse || (key && (self.focus == Focus::Navigation || self.sidebar.surface.captures())) {
+            let outcome = self.sidebar.surface.input(event).map(Action::Sidebar);
+            if outcome.consumed {
+                return Some(self.surface_outcome(event, Focus::Navigation, outcome));
+            }
+        }
+        let captures = match self.navigation.current() {
+            Route::Settings => self.settings.surface.captures(),
+            Route::Workspace => self.home.surface.captures(),
+            _ => return None,
+        };
+        if !(mouse || (key && (self.focus == Focus::Page || captures))) {
+            return None;
+        }
+        let outcome = if self.navigation.current() == Route::Settings {
+            self.settings.surface.input(event).map(Action::Settings)
+        } else {
+            self.home.surface.input(event).map(Action::Home)
+        };
+        outcome
+            .consumed
+            .then(|| self.surface_outcome(event, Focus::Page, outcome))
+    }
+
+    fn surface_outcome(
+        &mut self,
+        event: &Event,
+        focus: Focus,
+        outcome: crate::ui::Outcome<Action>,
+    ) -> (bool, Option<Action>) {
+        let mut redraw = outcome.redraw;
+        if let Event::Mouse(mouse) = event {
+            // A surface owns hover over its area; drop the shell's.
+            redraw |= self.hover.take().is_some();
             self.hover_area = None;
-            self.hover_since = None;
-            self.modal_area = None;
-            self.hits.clear();
-            return (true, action.and_then(|action| self.apply(action)));
+            if matches!(mouse.kind, MouseEventKind::Down(_)) {
+                self.focus = focus;
+            }
         }
-        if self.extensions.consent_visible() && !matches!(event, Event::Resize(_, _)) {
-            return self.extensions_consent_input(event);
-        }
-        if self.theme.editor.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.theme_input(event);
-        }
-        if self.skills.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.skills_input(event);
-        }
-        if self.attachments.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.attachment_input(event);
-        }
-        if self.directory_reference_active() && !matches!(event, Event::Resize(_, _)) {
-            return self.management_input(event);
-        }
-        if self.revision.visible && !matches!(event, Event::Resize(_, _)) {
-            return self.revision_input(event);
-        }
-        if self.recap.visible && !matches!(event, Event::Resize(_, _)) {
-            return self.recap_input(event);
-        }
-        if self.branch.visible && !matches!(event, Event::Resize(_, _)) {
-            return self.branch_input(event);
-        }
-        if self.onboarding.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.onboarding_input(event);
-        }
-        if self.management.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.management_input(event);
-        }
-        if self.queue.edit.is_some()
-            && !self.interactions.visible
+        let action = outcome.message.and_then(|action| self.apply(action));
+        (redraw || action.is_some(), action)
+    }
+
+    fn dispatch_input(&mut self, event: Event) -> (bool, Option<Action>) {
+        if let Some(overlay) = self.overlay()
             && !matches!(event, Event::Resize(_, _))
         {
-            return self.queue_edit_input(event);
-        }
-        if self.interactions.visible && !matches!(event, Event::Resize(_, _)) {
-            if let Event::Key(key) = &event
-                && key.kind != KeyEventKind::Release
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-                && key.code == KeyCode::Char('q')
-            {
-                return (true, Some(Action::Quit));
-            }
-            // A minimized/too-small terminal shows only a size warning, not the
-            // choices. Never activate an invisible approval with a retained focus.
-            if !self
-                .frame_size
-                .is_some_and(|(width, height)| width >= 30 && height >= 10)
-            {
-                if let Event::Key(key) = &event
-                    && key.kind != KeyEventKind::Release
-                    && key.code == KeyCode::Esc
-                {
-                    return (
-                        true,
-                        Some(Action::Interaction(
-                            crate::pages::interactions::Command::Close,
-                        )),
-                    );
-                }
-                return (false, None);
-            }
-            return self.interaction_input(event);
-        }
-        if self.palette.is_some()
-            && !matches!(
-                event,
-                Event::Resize(_, _) | Event::FocusGained | Event::FocusLost
-            )
-        {
-            return self.palette_input(event);
+            return self.overlay_input(overlay, event);
         }
         if self.palette.is_none()
             && let Event::Key(key) = &event
@@ -1335,6 +1248,9 @@ impl App {
             if let Some(action) = action {
                 return (true, self.apply(action));
             }
+        }
+        if let Some(outcome) = self.surface_input(&event) {
+            return outcome;
         }
         if self.palette.is_none()
             && !self.chrome.details
@@ -1445,6 +1361,9 @@ impl App {
         let action = match event {
             Event::Resize(_, _) => {
                 self.chat.area = None;
+                self.settings.surface.invalidate();
+                self.sidebar.surface.invalidate();
+                self.home.surface.invalidate();
                 self.invalidate_editor_geometry();
                 self.hits.clear();
                 self.frame_size = None;
@@ -1469,11 +1388,8 @@ impl App {
                     Some(Action::OpenInteraction)
                 } else if key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.code == KeyCode::Char('n')
-                    && matches!(
-                        self.navigation.current(),
-                        Route::Workspace | Route::Projects
-                    )
                 {
+                    // New session from anywhere; Projects creates in its selection.
                     if self.navigation.current() == Route::Projects {
                         self.projects
                             .selected
@@ -1562,8 +1478,7 @@ impl App {
                                     self.focus = if !backwards
                                         && matches!(
                                             self.navigation.current(),
-                                            Route::Workspace
-                                                | Route::Inbox
+                                            Route::Inbox
                                                 | Route::Projects
                                                 | Route::Connections
                                                 | Route::Extensions
@@ -1608,8 +1523,7 @@ impl App {
                                     self.focus = if backwards
                                         && matches!(
                                             self.navigation.current(),
-                                            Route::Workspace
-                                                | Route::Inbox
+                                            Route::Inbox
                                                 | Route::Projects
                                                 | Route::Connections
                                                 | Route::Extensions
@@ -1636,6 +1550,16 @@ impl App {
                                     Focus::Composer
                                 };
                                 self.selected_control = count - 1;
+                            }
+                            match (self.focus, self.navigation.current()) {
+                                (Focus::Navigation, _) => self.sidebar.surface.enter(backwards),
+                                (Focus::Page, Route::Settings) => {
+                                    self.settings.surface.enter(backwards)
+                                }
+                                (Focus::Page, Route::Workspace) => {
+                                    self.home.surface.enter(backwards)
+                                }
+                                _ => {}
                             }
                             None
                         }
@@ -1665,26 +1589,6 @@ impl App {
                         }
                         _ if self.focus == Focus::Composer => {
                             return (self.editor().is_some_and(|editor| editor.key(key)), None);
-                        }
-                        KeyCode::Up if self.focus == Focus::Navigation => {
-                            self.selected_nav = self.selected_nav.saturating_sub(1);
-                            None
-                        }
-                        KeyCode::Down if self.focus == Focus::Navigation => {
-                            self.selected_nav =
-                                (self.selected_nav + 1).min(self.nav_routes().len() - 1);
-                            None
-                        }
-                        KeyCode::Enter if self.focus == Focus::Navigation => self
-                            .nav_routes()
-                            .get(self.selected_nav)
-                            .cloned()
-                            .map(Action::Visit),
-                        KeyCode::Delete if self.focus == Focus::Navigation => {
-                            match self.nav_routes().get(self.selected_nav) {
-                                Some(Route::Session(id)) => Some(Action::CloseTab(id.clone())),
-                                _ => None,
-                            }
                         }
                         KeyCode::Up if self.focus == Focus::Page => {
                             self.selected_control = self.selected_control.saturating_sub(1);
@@ -1753,20 +1657,6 @@ impl App {
                     .rev()
                     .find(|hit| hit.area.contains(Position::new(mouse.column, mouse.row)))
                     .cloned();
-                if self.palette.is_none() && self.tabs.mouse(mouse) {
-                    if self.focus == Focus::Navigation && self.selected_nav >= Route::ALL.len() {
-                        let capacity = self
-                            .tabs
-                            .area
-                            .map_or(1, crate::navigation::tabs::Tabs::capacity)
-                            .max(1);
-                        let index = self.selected_nav - Route::ALL.len();
-                        self.selected_nav = Route::ALL.len()
-                            + index.clamp(self.tabs.top, self.tabs.top + capacity - 1);
-                    }
-                    self.hover = None;
-                    return (true, None);
-                }
                 if self.palette.is_none()
                     && self
                         .queue
@@ -1868,7 +1758,7 @@ impl App {
                         None
                     }
                     MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
-                        if matches!(self.navigation.current(), Route::Workspace | Route::Inbox)
+                        if self.navigation.current() == Route::Inbox
                             && target
                                 .as_ref()
                                 .is_some_and(|a| matches!(a, Action::Visit(Route::Session(_)))) =>
@@ -1996,18 +1886,10 @@ mod tests {
             terminal
                 .draw(|frame| crate::view::draw(frame, &mut app))
                 .unwrap();
-            let hit = app
-                .hits
-                .iter()
-                .find(|hit| hit.action == Action::CloseTab("a".into()))
-                .unwrap()
-                .clone();
-            app.input(Event::Mouse(crossterm::event::MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: hit.area.x,
-                row: hit.area.y,
-                modifiers: KeyModifiers::NONE,
-            }));
+            app.input(Event::Key(KeyEvent::new(
+                KeyCode::Char('w'),
+                KeyModifiers::CONTROL,
+            )));
             assert_eq!(app.navigation.current(), Route::Session("b".into()));
             assert_eq!(app.drafts["a"].text(), "未发送🦀");
             assert_eq!(app.sending["a"].request.id, submission.id);
@@ -2019,22 +1901,10 @@ mod tests {
                 .view
                 .search_command(crate::pages::chat::render::search::Command::Open);
             app.chat.view.search.as_mut().unwrap().editor.insert("find");
-            app.hover = Some(Action::Visit(Route::Session("b".into())));
             terminal
                 .draw(|frame| crate::view::draw(frame, &mut app))
                 .unwrap();
-            let hit = app
-                .hits
-                .iter()
-                .find(|hit| hit.action == Action::CloseTab("b".into()))
-                .unwrap()
-                .clone();
-            app.input(Event::Mouse(crossterm::event::MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: hit.area.x,
-                row: hit.area.y,
-                modifiers: KeyModifiers::NONE,
-            }));
+            app.apply(Action::CloseTab("b".into()));
             assert_eq!(
                 app.chat.view.search.as_ref().unwrap().editor.text(),
                 "find",
@@ -2072,14 +1942,7 @@ mod tests {
                 terminal
                     .draw(|frame| crate::view::draw(frame, &mut app))
                     .unwrap();
-                assert!(
-                    app.hits
-                        .iter()
-                        .any(|hit| hit.action == Action::Visit(Route::Session("overflow".into())))
-                );
-                assert!(app.tabs.area.is_some());
                 app.input(Event::Resize(width, 10));
-                assert!(app.tabs.area.is_none());
             }
             assert!(app.i18n.diagnostics().is_empty());
         }

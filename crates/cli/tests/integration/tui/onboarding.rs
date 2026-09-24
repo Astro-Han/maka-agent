@@ -48,7 +48,9 @@ fn anonymous_setup_verifies_without_writes_and_creates_first_chat() {
         Some(directory.path()),
     );
     tui.wait_for("Workspace");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("No model connections yet.");
@@ -108,7 +110,7 @@ fn anonymous_setup_verifies_without_writes_and_creates_first_chat() {
         assert_eq!(catalog["items"][0]["enabledModelIdCount"], 1);
         assert_eq!(catalog["items"][0]["modelCount"], 2);
     });
-    tui.click_text("▤ Workspace");
+    tui.command("Open workspace");
     tui.wait_until(|s| s.lines().next().is_some_and(|l| l.contains("Workspace")));
     tui.send(b"\x0e");
     tui.wait_for("Message…");
@@ -116,7 +118,7 @@ fn anonymous_setup_verifies_without_writes_and_creates_first_chat() {
     tui.send(b"hello after onboarding\x13");
     tui.wait_for("Onboarded model replied");
     runtime.block_on(provider).unwrap();
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

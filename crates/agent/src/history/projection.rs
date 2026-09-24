@@ -33,6 +33,7 @@ pub(super) fn build<'a>(
     images: &mut Vec<images::Target<'a>>,
     vision: bool,
     replay: Option<super::Replay<'a>>,
+    prior_unknown: bool,
 ) -> Result<Vec<Message>, RunError> {
     let cuts = replay.map(|policy| super::replay::Cuts::new(events.clone(), policy));
     let mut messages = Vec::new();
@@ -41,6 +42,32 @@ pub(super) fn build<'a>(
     let mut has_user = false;
     let mut calls = HashMap::new();
     let mut dispatched = HashSet::new();
+    let pending: HashSet<_> = if prior_unknown {
+        let settled: HashSet<_> = events
+            .clone()
+            .filter_map(EventRef::canonical)
+            .filter_map(|stored| {
+                if let Fact::ToolSettled { operation_id, .. } = &stored.event.fact {
+                    Some(operation_id.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        events
+            .clone()
+            .filter_map(EventRef::canonical)
+            .filter_map(|stored| {
+                if let Fact::ToolDispatched { operation_id, .. } = &stored.event.fact {
+                    (!settled.contains(operation_id.as_str())).then_some(operation_id.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        HashSet::new()
+    };
     let openings: HashMap<_, _> = events
         .clone()
         .filter_map(EventRef::canonical)
@@ -268,6 +295,17 @@ pub(super) fn build<'a>(
                         return Err(RunError::ReconciliationRequired(
                             "provider tool dispatch identity mismatch".into(),
                         ));
+                    }
+                    if pending.contains(operation.as_str()) {
+                        let (id, name) = calls.remove(operation).ok_or_else(|| {
+                            RunError::ReconciliationRequired(
+                                "unknown tool call lacks accepted model output".into(),
+                            )
+                        })?;
+                        dispatched.remove(operation);
+                        messages.push(Message::tool(id, name, ToolOutput::ErrorText(
+                            "outcome_unknown: The tool was dispatched, but no durable result was recorded. Its effect may have happened. Inspect current state before repeating it.".into(),
+                        )));
                     }
                 }
                 ToolOrigin::CodeMode { .. }

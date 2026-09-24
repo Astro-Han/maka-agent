@@ -101,15 +101,16 @@ impl Theme {
             self.choice.colors()
         }
     }
-    pub fn title(&self, i18n: &I18n) -> String {
-        if self.choice == Choice::Custom {
-            match &self.custom {
-                Some(custom) => i18n.format("palette-custom", &[("name", &custom.name)]),
-                None => i18n.text("palette-custom-fallback"),
-            }
-        } else {
-            i18n.text(self.choice.label())
+    /// Choose a palette directly; Custom only while a custom file is loaded.
+    pub fn select(&mut self, choice: Choice) {
+        if choice == self.choice || (choice == Choice::Custom && self.custom.is_none()) {
+            return;
         }
+        self.generation = self.generation.wrapping_add(1);
+        self.choice = choice;
+    }
+    pub fn custom_name(&self) -> Option<&str> {
+        self.custom.as_ref().map(|custom| custom.name.as_str())
     }
     pub fn cycle(&mut self) {
         self.generation = self.generation.wrapping_add(1);

@@ -47,8 +47,11 @@ mod recovery;
 mod references;
 mod removal;
 mod revision;
+mod sandbox;
 mod scheduler;
+mod shutdown;
 mod skills;
+mod startup;
 mod stopping;
 mod support;
 mod themes;
@@ -69,11 +72,25 @@ use unicode_width::UnicodeWidthStr;
 
 #[test]
 fn default_entry_rejects_pipes_without_control_sequences() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("unused-root");
     for (args, message) in [
-        (vec![], "requires a terminal"),
-        (vec!["tui"], "requires a terminal"),
-        (vec!["--locale", "zh-CN"], "需要终端输入和输出"),
-        (vec!["tui", "--locale", "zh-TW"], "需要終端機輸入和輸出"),
+        (
+            vec!["--root", root.to_str().unwrap()],
+            "requires a terminal",
+        ),
+        (
+            vec!["tui", "--root", root.to_str().unwrap()],
+            "requires a terminal",
+        ),
+        (
+            vec!["--root", root.to_str().unwrap(), "--locale", "zh-CN"],
+            "需要终端输入和输出",
+        ),
+        (
+            vec!["tui", "--root", root.to_str().unwrap(), "--locale", "zh-TW"],
+            "需要終端機輸入和輸出",
+        ),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_maka"))
             .args(args)
@@ -84,57 +101,81 @@ fn default_entry_rejects_pipes_without_control_sequences() {
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains(message));
         assert!(!output.stdout.contains(&0x1b));
+        assert!(
+            !root.exists(),
+            "noninteractive invocations must not initialize a Host"
+        );
     }
 }
 
 #[test]
 fn real_pty_default_entry_routes_mouse_modal_resize_and_restores_terminal() {
     let directory = tempfile::tempdir().unwrap();
-    let missing_root = directory.path().join("not-created");
-    let mut tui = Pty::spawn(&["--root", missing_root.to_str().unwrap()]);
+    let root = directory.path().join("occupied");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("keep.txt"), "not a Maka root").unwrap();
+    let mut tui = Pty::spawn(&["--root", root.to_str().unwrap()]);
     tui.wait_for("connection failed");
-    assert!(!missing_root.exists(), "TUI must not create a Host root");
+    assert!(!root.join(maka_event_log::root::ROOT_MARKER).exists());
+    assert_eq!(
+        std::fs::read_to_string(root.join("keep.txt")).unwrap(),
+        "not a Maka root"
+    );
 
     tui.click_text("Settings");
-    tui.wait_for("Palette: Maka dark");
+    tui.wait_for("Maka dark ▾");
     tui.send(b"\x10"); // Ctrl+P
     tui.wait_for("Commands · Esc closes");
     // Outside click closes only the modal, without activating the workspace.
     tui.send(b"\x1b[<0;3;5M\x1b[<0;3;5m");
-    tui.wait_until(|screen| {
-        !screen.contains("Open workspace") && screen.contains("Palette: Maka dark")
-    });
+    tui.wait_until(|screen| !screen.contains("Open workspace") && screen.contains("Maka dark ▾"));
+    // Real SGR clicks open the palette chooser and pick each value in turn.
     for palette in [
-        "Palette: Dusk",
-        "Palette: Paper",
-        "Palette: terminal default",
-        "Palette: Maka dark",
-        "Palette: Dusk",
-        "Palette: Paper",
-        "Palette: terminal default",
+        "Dusk",
+        "Paper",
+        "Terminal default",
+        "Maka dark",
+        "Terminal default",
     ] {
         tui.click_text("◐");
-        tui.wait_for(palette);
+        tui.wait_for(&format!("○ {palette}"));
+        tui.click_text(&format!("○ {palette}"));
+        tui.wait_for(&format!("{palette} ▾"));
     }
 
-    // Keyboard reaches the language control, then real SGR mouse clicks cycle
-    // through CJK labels. The page, colors and connection survive every change.
-    tui.send(b"\t\r");
-    tui.wait_for("Language: Automatic");
-    tui.click_text("文");
-    tui.wait_for("语言：简体中文");
-    tui.wait_for("配色：终端默认");
-    tui.click_text("文");
-    tui.wait_for("語言：繁體中文");
-    tui.wait_for("配色：終端機預設");
+    // Keyboard reaches the language control, then real SGR clicks choose CJK
+    // labels. The page, colors and connection survive every change. Left
+    // returns from the clicked row to the categories, at the current one.
+    tui.send(b"\x1b[D");
+    tui.wait_until(|screen| !screen.contains("Choose Palette"));
+    tui.send(b"\x1b[B");
+    tui.wait_for("English ▾"); // MAKA_LOCALE=en is an explicit preference.
+    tui.send(b"\x1b[C");
+    tui.wait_for("Choose Language");
     tui.send(b"\r");
-    tui.wait_for("Language: English");
+    tui.wait_for("○ 简体中文");
+    tui.click_text("○ 简体中文");
+    tui.wait_for("简体中文 ▾");
+    tui.click_text("外观");
+    tui.wait_for("终端默认 ▾");
+    tui.click_text("界面");
+    tui.wait_for("简体中文 ▾");
+    tui.click_text("文");
+    tui.wait_for("○ 繁體中文");
+    tui.click_text("○ 繁體中文");
+    tui.wait_for("繁體中文 ▾");
+    tui.wait_for("外觀");
+    tui.send(b"\r"); // The clicked row keeps keyboard focus.
+    tui.wait_for("○ English");
+    tui.send(b"\x1b[A\x1b[A\r");
+    tui.wait_for("English ▾");
 
     tui.resize(80, 24);
-    tui.wait_until(|screen| !screen.contains("▤ Workspace") && screen.contains("⛭"));
-    tui.click_text("◉");
-    tui.wait_for("Start or activate this native Host");
-    tui.send(b"\x11"); // Ctrl+Q
+    // Narrow windows hide the session sidebar; Host details stay one command away.
+    tui.wait_until(|screen| !screen.contains("+  New session"));
+    tui.command("Open Host connection");
+    tui.wait_for("refusing to initialize a nonempty State Root");
+    tui.close_terminal();
     tui.finish();
     let mut termios = unsafe { std::mem::zeroed::<libc::termios>() };
     assert_eq!(
@@ -288,13 +329,15 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
         Some(directory.path()),
     );
     tui.wait_for(&first[0].name);
-    tui.click_text("›");
+    // The sidebar keeps loading older sessions at the end of its list.
+    tui.wheel_at(&first[0].name, true, 12);
+    tui.wait_for("Load more…");
+    tui.click_text("Load more…");
     tui.wait_for(&second[0].name);
-    tui.resize(80, 24);
-    tui.wait_until(|screen| !screen.contains("▤ Workspace") && screen.contains("⛭"));
-    tui.wait_for(&second[0].name); // PTY output can arrive before the resized frame is complete.
     tui.click_text(&second[0].name);
     tui.wait_for("Message…");
+    tui.resize(80, 24);
+    tui.wait_until(|screen| !screen.contains("+  New session") && screen.contains("Message…"));
     tui.click_text("ⓘ");
     tui.wait_for(&format!("Session ID: {}", second[0].id));
     tui.click_text("Message…");
@@ -306,10 +349,10 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.send(b"\x1a"); // Ctrl+Z must undo inside the editor, not suspend the client.
     tui.wait_for("草稿 e\u{301}");
     tui.send(b"\x1b[23~"); // F11 expands the same session, without replacing its draft.
-    tui.wait_until(|screen| screen.contains("⊡") && !screen.contains("▤"));
+    tui.wait_until(|screen| screen.contains("⊡"));
     tui.wait_for("草稿 e\u{301}");
     tui.send(b"\x1b[23~\x02"); // Restore, then expand navigation with Ctrl+B.
-    tui.wait_for("▤ Workspace");
+    tui.wait_for("+  New session");
     tui.send(b"\x1b"); // Escape leaves the composer without leaving the session.
     runtime.block_on(async {
         client
@@ -360,11 +403,10 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.wait_for("Message…");
     tui.send("\x1b[200~另一份草稿🦀\x1b[201~".as_bytes());
     tui.wait_for("另一份草稿🦀");
-    tui.click_text("▤ Workspace");
-    tui.wait_for(&first[0].name);
-    tui.click_text("›");
-    tui.wait_for("Renamed from another client");
-    tui.click_last_text("Renamed from another client");
+    // Straight from the sidebar, where the older page sits below the fold.
+    tui.wheel_at(&first[2].name, true, 12);
+    tui.wait_for("Renamed from another"); // Long names end in an ellipsis there.
+    tui.click_last_text("Renamed from another");
     tui.wait_for("Streamed 中文🦀");
     tui.send(b"\x1b[5;5~"); // Ctrl+PgUp
     tui.wait_for("另一份草稿🦀");
@@ -452,11 +494,11 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.wait_for("Read × 2 · Search × 1");
     tui.click_text("Read × 2 · Search × 1");
     tui.wait_for("reference.txt");
-    tui.click_text("▸ Read"); // Individual call inside the expanded group.
+    tui.click_text("◆ Read"); // Individual call inside the expanded group.
     tui.wait_for("Lines 1–1 of 1");
     tui.click_text("Read × 2 · Search × 1");
     tui.wait_until(|screen| screen.contains("Lines 1–1 of 1") && !screen.contains("reference.txt"));
-    tui.click_text("▾ Read");
+    tui.click_text("◆ Read");
     tui.wait_until(|screen| !screen.contains("Lines 1–1 of 1"));
     // Keyboard reaches the same nested card in a short, unscrolled conversation.
     tui.send(b"\r");
@@ -484,7 +526,7 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.send(b"\x1b"); // Clear selection, without folding or leaving the session.
     tui.wait_for("↑↓ Select"); // Wait for the cleared selection before sending a mouse escape sequence.
     // A real Host result replaces its owning call card, not a second raw JSON row.
-    tui.click_text("▸ Run");
+    tui.click_text("◆ Run");
     tui.wait_for("Completed");
     tui.wait_for("Arguments");
     tui.wait_for("additional_permissions:");
@@ -509,8 +551,8 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
             .nth(49)
             .is_some_and(|line| line.contains("Esc Controls"))
     });
-    tui.wait_for("▾ Run");
-    tui.click_text("▾ Run");
+    tui.wait_for("◆ Run");
+    tui.click_text("◆ Run");
     tui.wait_until(|screen| !screen.contains("additional_permissions:"));
     tui.send(b"\x06"); // Ctrl+F searches locally, including the folded real tool result.
     tui.wait_for("Loaded");
@@ -526,10 +568,10 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.wait_for("additional_permissions:");
     tui.send(b"\x1b");
     tui.wait_until(|screen| !screen.contains("∞ History"));
-    tui.wait_for("▾ Run"); // The removed search header can arrive before the new body's PTY bytes.
-    tui.click_text("▾ Run");
+    tui.wait_for("◆ Run"); // The removed search header can arrive before the new body's PTY bytes.
+    tui.click_text("◆ Run");
     tui.wait_until(|screen| !screen.contains("additional_permissions:"));
-    tui.click_text("  Streamed"); // Assistant gutter reveals disclosure on hover, not at rest.
+    tui.click_text("  Streamed"); // At rest an answer has no gutter glyph; folding it shows one.
     tui.wait_for("▸ Streamed");
     assert!(
         !tui.screen
@@ -541,7 +583,7 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.click_text("▸ Streamed");
     tui.wait_for("Foldable detail");
     tui.send(b"\x1b[H "); // A complete short user line has nothing to disclose.
-    tui.wait_for("› 草稿");
+    tui.wait_for("❯ 草稿");
     assert!(!tui.screen.snapshot().unwrap().screen.contains("▸ 草稿"));
     tui.send(b"\x1b[F"); // End outside the composer restores tail following.
     runtime.block_on(async {
@@ -600,32 +642,22 @@ fn real_host_catalog_subscription_and_remote_updates_reach_clients() {
     tui.wait_for("Show / hide session details"); // The last selected page control was Details.
     tui.send(b"\x1b"); // Separate Esc events, not the terminal's Alt+Esc encoding.
     tui.wait_for("另一份草稿🦀"); // Back follows the actual most recent tab visit.
-    tui.click_text("▤ Workspace");
-    tui.wait_for(&first[0].name);
-    tui.click_text("›");
-    tui.wait_for("Renamed from another client");
-    tui.click_text("Renamed from another client");
+    tui.wait_for("Renamed from another");
+    tui.click_text("Renamed from another");
     tui.wait_for("Streamed 中文🦀 · finished"); // Reopened from durable transcript.
     let text = tui.screen.snapshot().unwrap().screen;
     assert_eq!(text.matches("Streamed 中文🦀 · finished").count(), 1);
-    tui.send(b"\x1b"); // Restored page focus: Escape returns directly to the catalog.
-    tui.wait_until(|screen| {
-        screen
-            .lines()
-            .next()
-            .is_some_and(|line| line.contains("Workspace"))
-    });
-    tui.send(b"\x0e"); // Ctrl+N: create using this process's workspace.
+    tui.send(b"\x0e"); // Ctrl+N from any page creates in this process's workspace.
     tui.wait_for("New conversation");
     tui.wait_for("No messages yet.");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     assert!(
         runtime
             .block_on(client.session(&second[0].id))
             .unwrap()
             .is_some(),
-        "quitting the TUI must leave the Host running"
+        "closing a terminal must leave its separately owned Host running"
     );
     client.disconnect();
     host.retire_registered();
@@ -908,6 +940,15 @@ impl Pty {
     fn send(&mut self, bytes: &[u8]) {
         self.master.as_mut().unwrap().write_all(bytes).unwrap();
     }
+    fn close_terminal(&mut self) {
+        // These fixtures own their Host separately. Terminal termination saves
+        // local state without requesting whole-Host exit; startup/shutdown tests
+        // exercise the interactive Ctrl+Q and command-palette choices explicitly.
+        assert_eq!(
+            unsafe { libc::kill(self.child.id() as libc::pid_t, libc::SIGTERM) },
+            0
+        );
+    }
     fn filter_command(&mut self, label: &str) {
         self.send(b"\x10");
         self.wait_for("Search commands…");
@@ -915,8 +956,43 @@ impl Pty {
         // Lowercase query differs from the command's title: await the filtered row.
         self.wait_until(|screen| !screen.contains("Search commands…") && screen.contains(label));
     }
+    /// Open a destination the sidebar no longer lists, via the command palette.
+    fn command(&mut self, label: &str) {
+        self.filter_command(label);
+        self.click_text(label);
+    }
+    /// SGR wheel events over the first occurrence of `text`.
+    fn wheel_at(&mut self, text: &str, down: bool, times: usize) {
+        let snapshot = self.screen.snapshot().unwrap();
+        let (row, col) = snapshot
+            .screen
+            .lines()
+            .enumerate()
+            .find_map(|(row, line)| line.find(text).map(|byte| (row, line[..byte].width())))
+            .unwrap_or_else(|| panic!("No scrollable text {text:?}\n{}", snapshot.screen));
+        let button = if down { 65 } else { 64 };
+        for _ in 0..times {
+            self.send(format!("\x1b[<{button};{};{}M", col + 1, row + 1).as_bytes());
+        }
+    }
     fn click_text(&mut self, text: &str) {
         self.click_matching_text(text, false);
+    }
+    /// A label the sidebar may also show: the first copy right of its border.
+    fn click_page_text(&mut self, text: &str) {
+        let snapshot = self.screen.snapshot().unwrap();
+        let (row, col) = snapshot
+            .screen
+            .lines()
+            .enumerate()
+            .find_map(|(row, line)| {
+                let border = line.find('│').map_or(0, |byte| byte + '│'.len_utf8());
+                line[border..]
+                    .find(text)
+                    .map(|byte| (row, line[..border + byte].width()))
+            })
+            .unwrap_or_else(|| panic!("No page text {text:?}\n{}", snapshot.screen));
+        self.click_at(row, col);
     }
     fn click_last_text(&mut self, text: &str) {
         self.click_matching_text(text, true);
@@ -930,6 +1006,9 @@ impl Pty {
             .filter_map(|(row, line)| line.find(text).map(|byte| (row, line[..byte].width())));
         let (row, col) = if last { matches.last() } else { matches.next() }
             .unwrap_or_else(|| panic!("No clickable text {text:?}\n{}", snapshot.screen));
+        self.click_at(row, col);
+    }
+    fn click_at(&mut self, row: usize, col: usize) {
         self.send(
             format!(
                 "\x1b[<0;{};{}M\x1b[<0;{};{}m",

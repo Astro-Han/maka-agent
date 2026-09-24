@@ -50,7 +50,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
     if app.chrome.details {
         let mut lines = crate::pages::sessions::detail_lines(app);
         if let Detail::Ready(item) = &app.sessions.detail {
-            lines.push(Line::raw(app.i18n.text(sandbox_key(item.sandbox_mode))));
+            lines.push(Line::raw(app.i18n.text(sandbox_key(item))));
         }
         if let Some(context) = app.chat.context.label(&app.i18n) {
             lines.push(Line::raw(context));
@@ -63,10 +63,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
             && !app.chat.view.mouse_selected
             && !app.chat.view.text_selection.active()
             && !app.chat.view.text_selection.dragging()
-            && app.palette.is_none()
-            && app.attachments.dialog.is_none()
-            && !app.interactions.visible
-            && app.management.dialog.is_none()
+            && app.overlay().is_none()
             && app.chat.view.search.is_none();
         app.chat.view.hovered = match &app.hover {
             Some(Action::ToggleMessage(key)) => Some(key.clone()),
@@ -164,19 +161,8 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
         );
     }
 
-    let focused = app.focus == Focus::Composer
-        && app.chat.view.search.is_none()
-        && app.palette.is_none()
-        && app.theme.editor.is_none()
-        && app.attachments.dialog.is_none()
-        && app.skills.dialog.is_none()
-        && !app.branch.visible
-        && !app.revision.visible
-        && !app.recap.visible
-        && !app.interactions.visible
-        && app.management.dialog.is_none()
-        && app.onboarding.dialog.is_none()
-        && app.queue.edit.is_none();
+    let focused =
+        app.focus == Focus::Composer && app.chat.view.search.is_none() && app.overlay().is_none();
     let (mut metadata, model_width) = metadata(app, parts[3].width.saturating_sub(4));
     let model_action = app.model_action();
     if model_width > 0
@@ -187,6 +173,21 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
         metadata.spans[1].style = Style::default().fg(app.theme.colors().accent);
     }
     let metadata_width = metadata.width() as u16;
+    let sandbox_width = metadata
+        .spans
+        .iter()
+        .rev()
+        .nth(1)
+        .map_or(0, |span| span.width() as u16);
+    let sandbox_action = app.sandbox_action();
+    if sandbox_width > 0
+        && sandbox_action
+            .as_ref()
+            .is_some_and(|action| app.hover.as_ref() == Some(action))
+    {
+        let index = metadata.spans.len().saturating_sub(2);
+        metadata.spans[index].style = Style::default().fg(app.theme.colors().accent);
+    }
     let metadata_area = Rect::new(
         parts[3].right().saturating_sub(metadata_width + 4),
         parts[3].bottom().saturating_sub(1),
@@ -213,6 +214,20 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
     {
         app.hits.push(Hit {
             area: Rect::new(metadata_area.x + 1, metadata_area.y, model_width, 1),
+            action,
+        });
+    }
+    if sandbox_width > 0
+        && let Some(action) = sandbox_action
+        && app.enabled(&action)
+    {
+        app.hits.push(Hit {
+            area: Rect::new(
+                metadata_area.right().saturating_sub(sandbox_width + 1),
+                metadata_area.y,
+                sandbox_width,
+                1,
+            ),
             action,
         });
     }
@@ -323,19 +338,15 @@ fn activity(app: &App) -> String {
     key.map_or_else(String::new, |key| app.i18n.text(key))
 }
 
-fn sandbox_key(mode: maka_sandbox::Mode) -> &'static str {
-    match mode {
-        maka_sandbox::Mode::ReadOnly => "chat-sandbox-read",
-        maka_sandbox::Mode::WorkspaceWrite => "chat-sandbox-workspace",
-        maka_sandbox::Mode::DangerFullAccess => "chat-sandbox-none",
-    }
+fn sandbox_key(item: &maka_protocol::session::SessionCatalogProjection) -> &'static str {
+    crate::pages::manage::sandbox::current_label(item.sandbox_mode, item.approval_policy)
 }
 
 fn metadata(app: &App, width: u16) -> (Line<'static>, u16) {
     let Detail::Ready(item) = &app.sessions.detail else {
         return (Line::default(), 0);
     };
-    let sandbox = app.i18n.text(sandbox_key(item.sandbox_mode));
+    let sandbox = app.i18n.text(sandbox_key(item));
     let context = app
         .chat
         .context
@@ -674,6 +685,25 @@ mod tests {
                             ))
                         )
                     });
+                    let sandbox_hit = app
+                        .hits
+                        .iter()
+                        .find(|hit| {
+                            matches!(
+                                &hit.action,
+                                Action::Manage(crate::pages::manage::Command::Open(
+                                    _,
+                                    crate::pages::manage::Kind::Sandbox
+                                ))
+                            )
+                        })
+                        .expect("sandbox label opens mode selection");
+                    assert_eq!(
+                        sandbox_hit.area.width as usize,
+                        app.i18n.text("chat-sandbox-none").width()
+                    );
+                    assert!(sandbox_hit.area.right() <= width);
+                    assert!(model_hit.is_none_or(|model| !model.area.intersects(sandbox_hit.area)));
                     if width >= 80 {
                         let hit = model_hit.expect("model label opens model selection");
                         assert!(text.contains(&format!(" · {}", app.i18n.text("thinking-high"))));

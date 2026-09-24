@@ -284,7 +284,10 @@ pub(super) async fn connect_or_launch(
     }
 }
 
-async fn stop_failed_candidate(child: &mut Child, grace: Duration) -> Result<(), HostError> {
+pub(super) async fn stop_failed_candidate(
+    child: &mut Child,
+    grace: Duration,
+) -> Result<(), HostError> {
     // EOF asks for normal drain; it does not prove rollback or safe termination.
     drop(child.stdin.take());
     crate::operation::progress(crate::operation::Phase::Cleanup, None, None);

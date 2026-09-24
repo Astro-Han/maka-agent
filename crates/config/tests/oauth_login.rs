@@ -295,3 +295,6 @@ async fn repeated_authentication_retains_only_the_latest_256_receipts() {
 mod discovery;
 #[path = "oauth_login/recovery.rs"]
 mod recovery;
+
+#[path = "oauth_login/inventory.rs"]
+mod inventory;

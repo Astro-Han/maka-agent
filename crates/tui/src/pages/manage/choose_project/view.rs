@@ -17,198 +17,140 @@
  * under the License.
  */
 
-use super::{Command, Manage, focused};
+use super::{Command, Manage};
 use crate::{
-    app::{Action, App, Hit},
-    view::{button, safe},
+    app::{Action, App},
+    pages::manage::Dialog,
+    ui::{Node, On, Role, Sheet, Size, Tone},
+    view::safe,
 };
-use ratatui::{
-    Frame,
-    layout::{Margin, Rect},
-    style::Style,
-    widgets::{Block, Paragraph, Wrap},
-};
-use unicode_width::UnicodeWidthStr;
 
-pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
+/// Moving a session into a project. Arrows or a click choose a row, Enter
+/// applies it; opening chooses nothing, so Enter alone commits nothing.
+pub(in crate::pages::manage) fn sheet(app: &App, dialog: &Dialog) -> Sheet<Action> {
     let busy = app.management.pending.is_some();
-    let dialog = app
-        .management
-        .dialog
-        .as_mut()
-        .expect("project chooser dialog");
-    let chooser = dialog.chooser.as_mut().expect("project chooser");
-    if area.width < 42 || area.height < 17 {
-        dialog.visible = false;
-        crate::view::clear_overlay(frame, area);
-        frame.render_widget(
-            Paragraph::new(app.i18n.text("terminal-small")).wrap(Wrap { trim: false }),
-            area.inner(Margin::new(1, 1)),
-        );
-        return;
-    }
-    let width = area.width.saturating_sub(2).min(72);
-    let height = area
-        .height
-        .saturating_sub(2)
-        .min((chooser.catalog.items.len() as u16 + 10).clamp(15, 25));
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    let block = Block::bordered()
-        .border_type(if app.chrome.ascii {
-            ratatui::widgets::BorderType::Plain
-        } else {
-            ratatui::widgets::BorderType::Rounded
-        })
-        .title(app.i18n.text("session-project-change"))
-        .style(base)
-        .border_style(Style::default().fg(app.theme.colors().subtle));
-    let inner = block.inner(popup).inner(Margin::new(1, 0));
-    app.modal_area = Some(popup);
-    crate::view::clear_overlay(frame, popup);
-    frame.render_widget(block, popup);
-    dialog.visible = true;
-    frame.render_widget(
-        Paragraph::new(safe(&dialog.target.name)),
-        Rect::new(inner.x, inner.y, inner.width, 1),
-    );
-    let list = Rect::new(
-        inner.x,
-        inner.y + 3,
-        inner.width,
-        inner.height.saturating_sub(8),
-    );
-    let selected = chooser
-        .catalog
-        .items
-        .iter()
-        .position(|item| Some(&item.id) == chooser.catalog.selected.as_ref());
-    let offset = selected.map_or(0, |index| (index + 1).saturating_sub(list.height as usize));
-    // Selection is local intent; only submission requires a fresh catalog.
+    let chooser = dialog.chooser.as_ref().expect("project chooser");
+    let catalog = &chooser.catalog;
     let enabled = !dialog.blocked && !busy;
-    for (index, item) in chooser
-        .catalog
-        .items
-        .iter()
-        .enumerate()
-        .skip(offset)
-        .take(list.height as usize)
-    {
-        let rect = Rect::new(list.x, list.y + (index - offset) as u16, list.width, 1);
-        let command = Manage::ChooseProject(Command::Select(item.id.clone()));
-        let active = selected == Some(index) || chooser.hovered.as_ref() == Some(&command);
-        let marker = if selected == Some(index) {
-            if app.chrome.ascii { ">" } else { "›" }
-        } else {
-            " "
-        };
-        let mut label = format!("{marker} {}", safe(&item.name));
-        if item.archived {
-            label.push_str(&format!(" · {}", app.i18n.text("session-archived")));
-        } else if !item.available {
-            label.push_str(&format!(" · {}", app.i18n.text("project-unavailable")));
-        }
-        frame.render_widget(
-            Paragraph::new(label).style(if !enabled {
-                Style::default().fg(app.theme.colors().subtle)
-            } else if active {
-                app.theme.colors().selected()
-            } else if !item.usable() {
-                Style::default().fg(app.theme.colors().subtle)
+    // The first page arriving is a new step: focus moves into the list.
+    let step = if catalog.loaded { "list" } else { "loading" };
+    let mut sheet = Sheet::new(
+        format!("project:{}:{step}", dialog.target.name),
+        app.i18n.text("session-project-change"),
+    )
+    .text("name", &safe(&dialog.target.name), Tone::Normal);
+    if catalog.items.is_empty() {
+        if !catalog.error {
+            let key = if !catalog.ready() {
+                "projects-loading"
+            } else if catalog.can_next() || catalog.can_previous() {
+                "projects-page-empty"
             } else {
-                Style::default()
-            }),
-            rect,
-        );
-        if enabled {
-            app.hits.push(Hit {
-                area: rect,
-                action: Action::Manage(command),
-            });
+                "projects-empty"
+            };
+            sheet = sheet.text("empty", &app.i18n.text(key), Tone::Subtle);
         }
-    }
-    if chooser.catalog.items.is_empty() && !chooser.catalog.error {
-        let key = if !chooser.catalog.ready() {
-            "projects-loading"
-        } else if chooser.catalog.can_next() || chooser.catalog.can_previous() {
-            "projects-page-empty"
-        } else {
-            "projects-empty"
-        };
-        frame.render_widget(
-            Paragraph::new(app.i18n.text(key))
-                .wrap(Wrap { trim: false })
-                .style(Style::default().fg(app.theme.colors().subtle)),
-            list,
-        );
-    }
-    let key = if busy {
-        "session-saving"
-    } else if let Some(error) = dialog.error {
-        error
-    } else if chooser.catalog.error {
-        "projects-failed"
     } else {
-        let command = chooser.hovered.clone().unwrap_or_else(|| focused(chooser));
-        match command {
-            Manage::ChooseProject(Command::Refresh | Command::Previous | Command::Next) => {
-                command.label()
-            }
-            _ => "session-project-note",
-        }
-    };
-    frame.render_widget(
-        Paragraph::new(super::super::view::note_lines(
-            &app.i18n.text(key),
-            inner.width,
-        ))
-        .style(
-            Style::default().fg(if dialog.error.is_some() || chooser.catalog.error {
-                app.theme.colors().warning
-            } else {
-                app.theme.colors().subtle
-            }),
-        ),
-        Rect::new(inner.x, inner.bottom() - 5, inner.width, 3),
-    );
-    let focus = chooser.focus;
-    let hovered = chooser.hovered.clone();
-    let save = app.i18n.text("session-project-apply");
-    let cancel = app.i18n.text("session-cancel");
-    let save_width = (save.width() as u16 + 2).min(inner.width / 2);
-    let cancel_width = (cancel.width() as u16 + 2).min(inner.width / 2);
-    let save_rect = Rect::new(
-        inner.right() - save_width,
-        inner.bottom() - 1,
-        save_width,
-        1,
-    );
-    let cancel_rect = Rect::new(save_rect.x - cancel_width - 1, save_rect.y, cancel_width, 1);
-    for (rect, text, command, index) in [
-        (cancel_rect, cancel, Manage::Close, 4),
-        (save_rect, save, Manage::Save, 5),
-    ] {
-        let active = focus == index || hovered.as_ref() == Some(&command);
-        button(frame, app, rect, &text, Action::Manage(command), active);
+        let rows = catalog
+            .items
+            .iter()
+            .map(|item| {
+                let selected = catalog.selected.as_ref() == Some(&item.id);
+                let marker = match (selected, app.chrome.ascii) {
+                    (true, false) => "›",
+                    (true, true) => ">",
+                    _ => " ",
+                };
+                let mut label = format!("{marker} {}", safe(&item.name));
+                if item.archived {
+                    label.push_str(&format!(" · {}", app.i18n.text("session-archived")));
+                } else if !item.available {
+                    label.push_str(&format!(" · {}", app.i18n.text("project-unavailable")));
+                }
+                let tone = if item.usable() {
+                    Tone::Normal
+                } else {
+                    Tone::Subtle
+                };
+                Node::text(item.id.clone(), vec![(label, tone)])
+                    .clip()
+                    .on(On::Activate(Action::Manage(Manage::ChooseProject(
+                        Command::Select(item.id.clone()),
+                    ))))
+                    .follow_focus()
+                    .submit(Action::Manage(Manage::Save))
+                    .current(selected)
+                    .enabled(enabled)
+            })
+            .collect();
+        let height = app.frame_size.map_or(24, |(_, height)| height);
+        let visible = (catalog.items.len() as u16).min(height.saturating_sub(16).max(3));
+        sheet =
+            sheet.body(Node::scroll("list", Node::column("rows", rows)).size(Size::Fixed(visible)));
     }
-    for (index, command, icon, ascii) in [
-        (1, Command::Refresh, "⟳", "R"),
-        (2, Command::Previous, "‹", "<"),
-        (3, Command::Next, "›", ">"),
-    ] {
-        let command = Manage::ChooseProject(command);
-        let active = focus == index || hovered.as_ref() == Some(&command);
-        button(
-            frame,
-            app,
-            Rect::new(inner.x + ((index - 1) * 4) as u16, inner.y + 1, 3, 1),
-            if app.chrome.ascii { ascii } else { icon },
-            Action::Manage(command),
-            active,
+    let (note, tone) = if busy {
+        ("session-saving", Tone::Subtle)
+    } else if let Some(error) = dialog.error {
+        (error, Tone::Warning)
+    } else if catalog.error {
+        ("projects-failed", Tone::Warning)
+    } else {
+        ("session-project-note", Tone::Subtle)
+    };
+    sheet = sheet.text("note", &app.i18n.text(note), tone);
+    let command = |command: Command| {
+        let action = Action::Manage(Manage::ChooseProject(command));
+        let enabled = app.enabled(&action);
+        (action, enabled)
+    };
+    if catalog.can_previous() || catalog.can_next() {
+        let (previous, can_previous) = command(Command::Previous);
+        let (next, can_next) = command(Command::Next);
+        sheet = sheet
+            .aside(
+                "previous",
+                format!(
+                    "{} {}",
+                    app.chrome.symbol("‹", "<"),
+                    app.i18n.text("sessions-previous")
+                ),
+                previous,
+                can_previous,
+            )
+            .aside(
+                "next",
+                format!(
+                    "{} {}",
+                    app.i18n.text("sessions-next"),
+                    app.chrome.symbol("›", ">")
+                ),
+                next,
+                can_next,
+            );
+    }
+    if catalog.error {
+        let (refresh, can_refresh) = command(Command::Refresh);
+        sheet = sheet.aside("refresh", app.i18n.text("list-retry"), refresh, can_refresh);
+    }
+    let sheet = sheet
+        .button(
+            "cancel",
+            app.i18n.text("session-cancel"),
+            Role::Normal,
+            Action::Manage(Manage::Close),
+            true,
+        )
+        .button(
+            "apply",
+            app.i18n.text("session-project-apply"),
+            Role::Primary,
+            Action::Manage(Manage::Save),
+            app.enabled(&Action::Manage(Manage::Save)),
         );
+    match &catalog.selected {
+        Some(id) if catalog.items.iter().any(|item| item.id == *id) => {
+            sheet.focus_node(format!("list/rows/{id}"))
+        }
+        _ => sheet,
     }
 }

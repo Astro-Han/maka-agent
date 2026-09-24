@@ -52,6 +52,12 @@ pub struct Sessions {
     detail_requested: bool,
     detail_inflight: bool,
     discard_page: bool,
+    /// Pages the reader asked to keep loaded ("load more") in the listed
+    /// catalog. Revision changes refetch the same depth from the start.
+    depth: usize,
+    /// Pages of the current load cycle. They replace `items` only once the
+    /// depth is reached, so a refresh never shrinks the list meanwhile.
+    staged: Option<(Vec<SessionCatalogProjection>, usize)>,
 }
 
 #[derive(Default)]
@@ -145,6 +151,21 @@ impl Sessions {
             self.detail = Detail::Ready(item);
         }
     }
+    /// Keep one more page of the listed catalog.
+    pub fn more(&mut self) {
+        if self.loading || self.pending_only {
+            return;
+        }
+        if let Some(cursor) = self.next_cursor.clone() {
+            self.depth = self.depth.max(1) + 1;
+            self.staged = Some((self.items.clone(), self.depth - 1));
+            self.cursor = Some(cursor);
+            self.requested = true;
+        }
+    }
+    pub fn can_more(&self) -> bool {
+        !self.pending_only && !self.loading && self.next_cursor.is_some()
+    }
     pub fn next(&mut self) {
         if self.loading {
             return;
@@ -201,6 +222,40 @@ impl Sessions {
                 revision,
                 sessions,
                 next_cursor,
+            }) if !self.pending_only => {
+                let (mut items, pages) = self.staged.take().unwrap_or_default();
+                for session in sessions {
+                    if !items.iter().any(|item| item.id == session.id) {
+                        items.push(session);
+                    }
+                }
+                self.revision = Some(revision);
+                if pages + 1 < self.depth.max(1)
+                    && let Some(cursor) = next_cursor
+                {
+                    self.staged = Some((items, pages + 1));
+                    self.cursor = Some(cursor);
+                    self.requested = true;
+                    return;
+                }
+                if !self.loaded {
+                    self.selected = items.first().map(|item| item.id.clone());
+                } else if !items
+                    .iter()
+                    .any(|item| Some(&item.id) == self.selected.as_ref())
+                {
+                    self.selected = None;
+                }
+                self.items = items;
+                self.next_cursor = next_cursor;
+                // The next refresh starts over and refetches this depth.
+                self.cursor = None;
+                self.loaded = true;
+            }
+            Ok(SessionCatalogQueryResult::Page {
+                revision,
+                sessions,
+                next_cursor,
             }) => {
                 if !self.loaded {
                     self.selected = sessions.first().map(|item| item.id.clone());
@@ -218,6 +273,7 @@ impl Sessions {
             }
             Ok(SessionCatalogQueryResult::RevisionChanged { .. }) => {
                 self.cursor = None;
+                self.staged = None;
                 self.previous.clear();
                 self.changed = true;
                 self.requested = true; // One fresh list_start; the client rejects revision_changed for it.

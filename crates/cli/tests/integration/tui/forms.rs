@@ -60,8 +60,9 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
     tui.wait_for("Message…");
     tui.send(b"Collect a form\x13");
     tui.click_text("Settings");
-    tui.wait_for("Palette: Maka dark");
-    tui.wait_for("◆"); // Global discovery while this session has no transcript subscription.
+    tui.wait_for("Maka dark ▾");
+    // Global discovery while this session has no transcript subscription.
+    tui.wait_for("◇ Form keyboard fixture");
     assert!(
         !tui.screen
             .snapshot()
@@ -69,16 +70,19 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
             .screen
             .contains("Fill the isolated form")
     );
-    tui.send(b"\t\t\r"); // A background request must not steal the Settings focus.
-    tui.wait_for("Icons: ASCII");
-    tui.send(b"\r");
-    tui.wait_for("Icons: Unicode");
-    tui.click_text("Inbox");
-    tui.wait_until(|screen| {
-        !screen.contains("Palette: Maka dark") && screen.contains("Form keyboard fixture")
-    });
-    tui.send(b"\r"); // List focus opens the selected Session, not an answer.
-    tui.wait_for("Message…");
+    // A background request must not steal the Settings focus: Interface
+    // category, Icons row, its chooser, then ASCII.
+    tui.send(b"\x1b[B");
+    tui.wait_for("Unicode ▾");
+    tui.send(b"\x1b[C\x1b[B\r");
+    tui.wait_for("○ ASCII");
+    tui.send(b"\x1b[B\r");
+    tui.wait_for("ASCII v");
+    tui.send(b"\r\x1b[A\r");
+    tui.wait_for("Unicode ▾");
+    // The waiting session is marked in the sidebar; opening it is not an answer.
+    tui.click_text("Form keyboard fixture");
+    tui.wait_until(|screen| !screen.contains("Maka dark ▾") && screen.contains("Message…"));
     tui.wait_for("!");
     tui.click_text("!");
     tui.wait_for("Fill the isolated form");
@@ -119,14 +123,12 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
     tui.wait_for("中文🦀");
     tui.resize(80, 24);
     // The value also exists in the old frame; wait for the narrow layout before clicking.
-    tui.wait_until(|screen| screen.contains("中文🦀") && !screen.contains("▤ Workspace"));
+    tui.wait_until(|screen| screen.contains("中文🦀") && !screen.contains("+  New session"));
     tui.click_text("Submit form");
     tui.wait_for("Decision recorded by Host.");
     tui.send(b"\x1b");
     tui.wait_for("Form received exactly once");
-    tui.send(b"\x02"); // Expand the narrow sidebar before choosing the named destination.
-    tui.wait_for("▤ Workspace");
-    tui.click_text("Inbox");
+    tui.command("Open pending requests");
     tui.wait_for("No requests waiting for you.");
     tui.send(b"\x1b[1;3D");
     tui.wait_for("Form received exactly once");
@@ -168,7 +170,7 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
         .block_on(fixture.client.close_subscription(&settled.subscription_id))
         .unwrap();
     fixture.client.disconnect();
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     runtime.block_on(reader.close()).unwrap();
     host.retire_registered();

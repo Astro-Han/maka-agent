@@ -131,6 +131,15 @@ npm run cli:dev -- --help
 The native `maka` executable opens the TUI by default in an interactive terminal;
 `maka tui` is the explicit entry. It uses its own native Host state root, not the
 Desktop development profile. This branch no longer contains the TypeScript TUI.
+On first launch, Maka initializes an empty state root and starts a local Host
+automatically; later terminals reuse it. Existing managed deployments retain
+their launch settings. No system service is installed automatically. In a chat,
+click the composer's sandbox label to change isolation for that session;
+disabling the sandbox requires confirmation and does not disable approvals.
+The same menu manages on-request, never-ask, and category-specific approvals;
+explicit full bypass disables both isolation and approvals in one change.
+Settings → New session sandbox changes only future sessions. The initial default
+is workspace-write with on-request approvals.
 The npm CLI retains automation and Host management commands. Evaluation specs and
 adapters live in [`packages/eval`](./packages/eval).
 

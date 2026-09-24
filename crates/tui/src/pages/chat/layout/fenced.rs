@@ -39,10 +39,11 @@ pub(super) fn render<'a>(
     };
     let width = writer.width;
     let indent = writer.indent.min(width.saturating_sub(1));
+    // A flat recessed band, without a border or language label: code reads as
+    // content, not as a nested window. Terminal-owned colors keep a left rule.
     let panel = width.saturating_sub(indent) >= 8;
     if panel {
-        edge(writer, &info, start, width - indent, indent, ascii, true)?;
-        writer.width = width - indent - 4;
+        writer.width = width - indent - 2;
         writer.indent = 0;
     } else if !info.is_empty() {
         writer.style = Style::default().fg(cache.colors.subtle);
@@ -96,36 +97,34 @@ pub(super) fn render<'a>(
     if panel {
         writer.boundary()?;
         if writer.lines.len() == first_line {
+            // An empty (or still-open) fence anchors its band at the fence, so
+            // streamed prefixes and the full render agree.
+            writer.source = Some(start);
             writer.flush()?;
         }
+        let colors = cache.colors;
+        let base = colors.base().bg(colors.panel());
+        let (bar, bar_style) = if colors.terminal {
+            (if ascii { "| " } else { "│ " }, base.fg(colors.border))
+        } else {
+            (" ", base)
+        };
+        let prefix_bytes = indent + bar.len();
         for line in &mut writer.lines[first_line..] {
-            let padding = writer.width.saturating_sub(line.line.width());
-            let base = cache.colors.base().bg(cache.colors.surface);
-            let border = base.fg(cache.colors.border);
-            let prefix = format!(
-                "{}{bar} ",
-                " ".repeat(indent),
-                bar = if ascii { "|" } else { "│" }
-            );
-            let prefix_bytes = prefix.len();
-            let suffix = format!(
-                "{} {bar}",
-                " ".repeat(padding),
-                bar = if ascii { "|" } else { "│" }
-            );
-            writer.bytes += prefix.len() + suffix.len() + 3 * std::mem::size_of::<Span<'static>>();
-            // Style only the panel spans: Line.style also colors the chat's
+            let padding = writer.width.saturating_sub(line.line.width()) + 2 - bar.width();
+            writer.bytes += prefix_bytes + padding + 3 * std::mem::size_of::<Span<'static>>();
+            // Style only the band spans: Line.style also colors the chat's
             // disclosure gutter, which sits outside this layout.
             for span in &mut line.line.spans {
                 span.style = base.patch(span.style);
             }
-            line.line
-                .spans
-                .insert(0, Span::styled(if ascii { "| " } else { "│ " }, border));
+            line.line.spans.insert(0, Span::styled(bar, bar_style));
             if indent > 0 {
                 line.line.spans.insert(0, Span::raw(" ".repeat(indent)));
             }
-            line.line.spans.push(Span::styled(suffix, border));
+            line.line
+                .spans
+                .push(Span::styled(" ".repeat(padding), base));
             for span in &mut line.mapping {
                 span.display.start += prefix_bytes;
                 span.display.end += prefix_bytes;
@@ -133,59 +132,9 @@ pub(super) fn render<'a>(
         }
         writer.width = width;
         writer.indent = indent;
-        edge(writer, "", start, width - indent, indent, ascii, false)?;
     }
     writer.style = style;
     writer.gap()
-}
-
-fn edge(
-    writer: &mut Writer,
-    label: &str,
-    source: usize,
-    width: usize,
-    indent: usize,
-    ascii: bool,
-    top: bool,
-) -> Result<(), &'static str> {
-    let mut title = String::new();
-    for grapheme in label.graphemes(true) {
-        let safe = crate::view::safe(grapheme);
-        if title.width() + safe.width() > width.saturating_sub(6) {
-            break;
-        }
-        title.push_str(&safe);
-    }
-    let title = if title.is_empty() {
-        String::new()
-    } else {
-        format!(" {title} ")
-    };
-    let (left, horizontal, right) = if ascii {
-        ("+", "-", "+")
-    } else if top {
-        ("╭", "─", "╮")
-    } else {
-        ("╰", "─", "╯")
-    };
-    let saved_indent = writer.indent;
-    writer.indent = 0;
-    writer.style = Style::default();
-    writer.decoration(&" ".repeat(indent), source)?;
-    writer.style = Style::default()
-        .fg(writer.colors.border)
-        .bg(writer.colors.surface);
-    writer.decoration(&format!("{left}{horizontal}"), source)?;
-    writer.style = writer.style.fg(writer.colors.muted);
-    writer.decoration(&title, source)?;
-    writer.style = writer.style.fg(writer.colors.border);
-    writer.decoration(
-        &format!("{}{right}", horizontal.repeat(width - 3 - title.width())),
-        source,
-    )?;
-    writer.flush()?;
-    writer.indent = saved_indent;
-    Ok(())
 }
 
 #[cfg(test)]

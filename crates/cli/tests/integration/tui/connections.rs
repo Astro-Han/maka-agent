@@ -57,7 +57,9 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Workspace");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("Directory 00");
@@ -95,7 +97,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
     tui.wait_until(|s| s.lines().next().is_some_and(|l| l.contains("Settings")));
     tui.send(b"\x1b[1;3C"); // Alt+Right restores nested route.
     tui.wait_for("Directory 00");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     reopened.wait_for("Directory 00");
@@ -355,7 +357,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
         );
     });
     assert!(!String::from_utf8_lossy(&reopened.output).contains("directory-test-secret"));
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     client.disconnect();
     host.retire_registered();

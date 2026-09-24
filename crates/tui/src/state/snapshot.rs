@@ -50,6 +50,8 @@ pub struct Snapshot {
     oauth: Option<crate::pages::manage::oauth::saved::Checkpoint>,
     branch: Option<crate::pages::branch::Checkpoint>,
     recap: Option<crate::pages::recap::Checkpoint>,
+    #[serde(default)]
+    resume: Option<crate::pages::resume::Checkpoint>,
     revision: Option<crate::pages::revision::Checkpoint>,
     extension: Option<crate::pages::extensions::Checkpoint>,
 }
@@ -88,6 +90,7 @@ impl Snapshot {
             oauth: app.management.oauth.checkpoint(),
             branch: app.branch.checkpoint(),
             recap: app.recap.checkpoint(),
+            resume: app.resume.checkpoint(),
             revision: app.revision.checkpoint(),
             extension: app.extensions.checkpoint(root),
         }
@@ -208,6 +211,9 @@ impl Snapshot {
         if let Some(recap) = &self.recap {
             recap.validate(root)?;
         }
+        if let Some(resume) = &self.resume {
+            resume.validate(root)?;
+        }
         if let Some(branch) = &self.branch {
             branch.validate(root)?;
         }
@@ -230,6 +236,9 @@ impl Snapshot {
         }
         if let Some(recap) = self.recap {
             app.recap.restore(recap);
+        }
+        if let Some(resume) = self.resume {
+            app.resume.restore(resume);
         }
         if let Some(branch) = self.branch {
             app.branch.restore(branch);
@@ -507,7 +516,7 @@ mod tests {
         original.apply(Action::Visit(Route::Session("a".into())));
         original.focus = Focus::Transcript;
         original.apply(Action::Visit(Route::Settings));
-        original.selected_control = 2;
+        original.settings.focus_setting(&Action::ToggleSymbols);
         original.apply(Action::Visit(Route::Help));
         original.apply(Action::Back);
         let encoded = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
@@ -519,8 +528,13 @@ mod tests {
         assert_eq!(restored.navigation.current(), Route::Settings);
         assert_eq!(restored.focus, Focus::Page);
         assert_eq!(
-            restored.page_actions()[restored.selected_control],
-            Action::ToggleSymbols
+            restored.settings.focused_setting(),
+            Some(Action::ToggleSymbols),
+            "the focused setting survives a restart"
+        );
+        assert_eq!(
+            restored.settings.category,
+            crate::pages::settings::Category::Interface
         );
         restored.apply(Action::Back);
         assert_eq!(restored.navigation.current(), Route::Session("a".into()));
@@ -536,14 +550,14 @@ mod tests {
 
         // Sidebar cursor is a destination, not an index into possibly changed tabs.
         restored.focus = Focus::Navigation;
-        restored.selected_nav = Route::ALL.len();
+        restored.sidebar.focus_route(&Route::Session("a".into()));
         let saved = Snapshot::capture(&restored, "root");
         let mut sidebar = app();
         saved.restore(&mut sidebar, false).unwrap();
         assert_eq!(sidebar.focus, Focus::Navigation);
         assert_eq!(
-            sidebar.nav_routes()[sidebar.selected_nav],
-            Route::Session("a".into())
+            sidebar.sidebar.focused_route(),
+            Some(Route::Session("a".into()))
         );
         sidebar.apply(Action::CloseTab("a".into()));
         Snapshot::capture(&sidebar, "root")
@@ -569,11 +583,16 @@ mod tests {
         Snapshot::capture(&tabs, "root")
             .restore(&mut reopened, false)
             .unwrap();
-        assert_eq!(reopened.tabs.reveal, Some(0));
         assert_eq!(
-            reopened.nav_routes()[reopened.selected_nav],
-            Route::Session("a".into())
+            reopened
+                .tabs
+                .entries
+                .iter()
+                .map(|tab| tab.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
         );
+        assert_eq!(reopened.navigation.current(), Route::Session("a".into()));
 
         for (pointer, value) in [
             ("/navigation/entries", serde_json::json!([])),

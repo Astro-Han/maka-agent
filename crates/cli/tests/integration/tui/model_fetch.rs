@@ -57,7 +57,9 @@ fn model_fetch_confirms_network_writes_rechecks_effects_and_preserves_user_confi
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Workspace");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("Discovery");
@@ -199,7 +201,7 @@ fn model_fetch_confirms_network_writes_rechecks_effects_and_preserves_user_confi
             .unwrap();
         assert_eq!(credential, rotated_credential);
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     assert!(!String::from_utf8_lossy(&tui.output).contains("discovery-secret"));
     client.disconnect();

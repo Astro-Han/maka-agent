@@ -107,7 +107,7 @@ fn composer_stop_cancels_the_observed_run_and_keeps_unsent_text() {
         .unwrap();
     model_task.abort();
     assert!(runtime.block_on(model_task).unwrap_err().is_cancelled());
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

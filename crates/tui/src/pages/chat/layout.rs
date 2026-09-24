@@ -22,7 +22,7 @@ pub(super) mod diff;
 mod fenced;
 pub(super) mod syntax;
 mod table;
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -82,6 +82,8 @@ struct Writer {
     display: usize,
     mapping: Vec<SourceSpan>,
     text: String,
+    /// The line ends in a break opportunity (a space or a wide grapheme).
+    word_break: bool,
 }
 impl Writer {
     fn new(width: u16) -> Self {
@@ -98,6 +100,7 @@ impl Writer {
             display: 0,
             mapping: vec![],
             text: String::new(),
+            word_break: false,
         }
     }
     fn flush(&mut self) -> Result<(), &'static str> {
@@ -113,6 +116,7 @@ impl Writer {
         });
         self.cells = 0;
         self.display = 0;
+        self.word_break = false;
         Ok(())
     }
     fn boundary(&mut self) -> Result<(), &'static str> {
@@ -224,6 +228,30 @@ impl Writer {
                 crate::view::safe(grapheme)
             };
             let width = safe.width();
+            let space = matches!(grapheme, " " | "\t");
+            if semantic && space && self.cells + width > self.width && self.cells > 0 {
+                // A space that ends a visual line is kept in copied text but
+                // never carried over as indentation of the next line.
+                self.flush()?;
+                self.logical(grapheme);
+                continue;
+            }
+            if semantic && self.word_break && !space && width == 1 {
+                // Start an overflowing word on a fresh line; words longer than a
+                // line then break between graphemes there, like wide (CJK) text.
+                let word: usize = text[offset..]
+                    .graphemes(true)
+                    .map(|grapheme| crate::view::safe(grapheme).width())
+                    .zip(text[offset..].graphemes(true))
+                    .take_while(|(width, grapheme)| {
+                        *width == 1 && !matches!(*grapheme, " " | "\t" | "\n" | "\r" | "\r\n")
+                    })
+                    .map(|(width, _)| width)
+                    .sum();
+                if self.cells + word > self.width {
+                    self.flush()?;
+                }
+            }
             if self.cells + width > self.width && self.cells > 0 {
                 self.flush()?;
             }
@@ -250,6 +278,7 @@ impl Writer {
                 self.mapped_span(&safe, mapped, exact && safe == grapheme, logical);
                 self.cells += width;
             }
+            self.word_break = semantic && (space || width > 1);
         }
         Ok(())
     }
@@ -356,12 +385,9 @@ fn render_events<'a>(
             Event::Start(tag) => {
                 styles.push(writer.style);
                 match tag {
-                    Tag::Heading { .. } => {
+                    Tag::Heading { level, .. } => {
                         writer.boundary()?;
-                        writer.style = writer
-                            .style
-                            .fg(writer.colors.accent)
-                            .add_modifier(Modifier::BOLD);
+                        writer.style = heading(writer.style, level, writer.colors);
                     }
                     Tag::HtmlBlock => writer.boundary()?,
                     Tag::Emphasis => writer.style = writer.style.add_modifier(Modifier::ITALIC),
@@ -387,9 +413,12 @@ fn render_events<'a>(
                                 *number = number.saturating_add(1);
                                 marker
                             }
-                            _ => "- ".into(),
+                            _ => if ascii { "- " } else { "• " }.into(),
                         };
+                        let style = writer.style;
+                        writer.style = style.fg(writer.colors.subtle);
                         writer.decoration(&marker, range.start)?;
+                        writer.style = style;
                         writer.indent = lists.len().min(16) * 2;
                     }
                     Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. } => {
@@ -461,7 +490,10 @@ fn render_events<'a>(
             }
             Event::Rule => {
                 writer.boundary()?;
+                let style = writer.style;
+                writer.style = style.fg(writer.colors.subtle);
                 writer.decoration(if ascii { "---" } else { "───" }, range.start)?;
+                writer.style = style;
                 writer.gap()?;
             }
             Event::TaskListMarker(done) => {
@@ -471,6 +503,18 @@ fn render_events<'a>(
         }
     }
     writer.finish(trim)
+}
+
+/// Top-level headings take distinct accents; deeper levels recede to text grays.
+fn heading(style: Style, level: HeadingLevel, colors: crate::theme::Palette) -> Style {
+    let color = match level {
+        HeadingLevel::H1 => colors.syntax[5],
+        HeadingLevel::H2 => colors.accent,
+        HeadingLevel::H3 => colors.syntax[0],
+        HeadingLevel::H4 | HeadingLevel::H5 => colors.muted,
+        HeadingLevel::H6 => return style.fg(colors.subtle),
+    };
+    style.fg(color).add_modifier(Modifier::BOLD)
 }
 
 fn mapped(
@@ -544,6 +588,46 @@ fn code(
 mod tests {
     use super::*;
     #[test]
+    fn words_wrap_whole_while_long_words_and_wide_text_still_break() {
+        let text =
+            "- **Vast** about 93 billion light-years across\n\n中文中文中文 supercalifragilistic";
+        let layout = markdown(text, 16, false).unwrap();
+        let rows: Vec<String> = layout
+            .lines
+            .iter()
+            .map(|line| line.line.to_string().trim_end().to_owned())
+            .collect();
+        assert_eq!(rows[0], "• Vast about 93");
+        assert_eq!(
+            rows[1], "  billion",
+            "continuations keep list indent, not a carried space"
+        );
+        assert_eq!(rows[2], "  light-years");
+        assert_eq!(rows[3], "  across");
+        assert!(rows.iter().all(|row| row.width() <= 16));
+        // Wide text breaks between graphemes; a word longer than the line still splits.
+        assert_eq!(rows[5], "中文中文中文");
+        assert_eq!(rows[6], "supercalifragili");
+        assert_eq!(rows[7], "stic");
+        assert!(
+            layout.text.contains("about 93 billion light-years across"),
+            "copied text keeps every space, including wrapped ones"
+        );
+        let plain = plain("one two three", 7).unwrap();
+        let rows: Vec<String> = plain
+            .lines
+            .iter()
+            .map(|line| line.line.to_string())
+            .collect();
+        assert_eq!(
+            rows,
+            ["one two", "three"],
+            "an overflowing space is dropped, not carried"
+        );
+        assert_eq!(plain.text, "one two three");
+    }
+
+    #[test]
     fn source_ranges_track_wrapping_normalized_code_entities_and_exclude_decoration() {
         let text = "- **中文🦀** then `` `x\ny` `` &amp; &#x1F980;\n\n| A | B |\n|---|---:|\n| x | 中文🦀 value |\n\n    indented\n    code\n";
         for width in [1, 5, 24, 80] {
@@ -604,10 +688,22 @@ mod tests {
                 "indented code does not inherit another line's source"
             );
         }
-        let wide = markdown(text, 80, false).unwrap();
-        let first = &wide.lines[0];
-        assert!(first.line.to_string().starts_with("- "));
-        assert!(first.mapping.iter().all(|span| span.display.start >= 2));
+        for (ascii, marker) in [(false, "• "), (true, "- ")] {
+            let wide = markdown(text, 80, ascii).unwrap();
+            let first = &wide.lines[0];
+            assert!(first.line.to_string().starts_with(marker));
+            assert_eq!(
+                first.line.spans[0].style.fg,
+                Some(crate::theme::Palette::default().subtle),
+                "list markers recede behind item text"
+            );
+            assert!(
+                first
+                    .mapping
+                    .iter()
+                    .all(|span| span.display.start >= marker.len())
+            );
+        }
         let plain = plain("e\u{301}\t中文\nnext", 4).unwrap();
         assert!(
             plain

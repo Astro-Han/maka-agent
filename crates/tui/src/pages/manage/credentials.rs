@@ -21,7 +21,7 @@ use super::{Command, Entity, Kind, Target, Ticket, Updated};
 use crate::{app::App, pages::connections::Row};
 use maka_client::{Client, ClientError, RequestFailure};
 use maka_protocol::configuration::*;
-pub(super) use view::draw;
+pub(super) use view::sheet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Change {

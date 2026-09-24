@@ -22,7 +22,7 @@ use futures_util::future::BoxFuture;
 use maka_client_capability::{Registration, broker::ServiceCall};
 use maka_config::oauth::enrollment::{LoginCompletion, PreparedLogin};
 use maka_plugins::provider::{
-    AuthenticationCall, Error,
+    AuthenticationCall, Binding, Connection, Context, Discovery, Error,
     authentication::{Credential, Interaction},
 };
 use serde_json::json;
@@ -31,8 +31,9 @@ use std::{sync::atomic::Ordering, time::Duration};
 pub(super) async fn run(
     host: &Host,
     attempt: &Attempt,
-    ticket: PreparedLogin,
+    mut ticket: PreparedLogin,
     call: AuthenticationCall,
+    discovery: Option<(Binding, Context)>,
 ) -> Phase {
     let exchange = call.run();
     tokio::pin!(exchange);
@@ -44,7 +45,44 @@ pub(super) async fn run(
                 .unwrap_or(Err(Error::OutcomeUnknown))
         }
     };
+    if let (Ok(credential), Some((provider, context))) = (&result, discovery) {
+        tokio::select! {
+            biased;
+            _ = attempt.cancellation.cancelled() => {}
+            _ = host.draining.cancelled() => {}
+            _ = discover(&mut ticket, credential, provider, context) => {}
+        }
+    }
     settle(host, attempt, ticket, result).await
+}
+
+async fn discover(
+    ticket: &mut PreparedLogin,
+    credential: &Credential,
+    provider: Binding,
+    mut context: Context,
+) {
+    context.cancellation = context.cancellation.child_token();
+    let _cancel = context.cancellation.clone().drop_guard();
+    let row = ticket.connection();
+    let request = Discovery {
+        connection: Connection {
+            id: row.connection_id.clone(),
+            revision: row.revision,
+            configuration: row.configuration.clone(),
+        },
+        credential: Some(credential.clone()),
+        request_headers: Default::default(),
+    };
+    // Optional enrichment never discards a grant that already succeeded.
+    let Ok(Ok(models)) =
+        tokio::time::timeout(Duration::from_secs(15), provider.discover(request, context)).await
+    else {
+        return;
+    };
+    if let Ok(now) = super::super::configuration::now() {
+        let _ = ticket.discovered_models(models, now);
+    }
 }
 
 async fn settle(

@@ -58,7 +58,19 @@ enum Part {
     Thinking,
     Tool,
     Activity,
+    /// A run of reasoning summaries folded under one row.
+    Reasoning,
     Timing,
+}
+impl Part {
+    /// The member part a folding summary row gathers, if this is one.
+    fn members(self) -> Option<Self> {
+        match self {
+            Self::Activity => Some(Self::Tool),
+            Self::Reasoning => Some(Self::Thinking),
+            _ => None,
+        }
+    }
 }
 impl MessageKey {
     fn durable(row: &Value) -> Self {
@@ -93,6 +105,10 @@ enum Revision {
         searches: usize,
         pending: usize,
     },
+    Steps {
+        count: usize,
+        latest: Option<u64>,
+    },
     Tool {
         call: Option<u64>,
         result: Option<u64>,
@@ -106,6 +122,8 @@ enum Kind {
     Thinking,
     Tool(super::tools::State),
     Activity,
+    /// Summary row of consecutive reasoning parts.
+    Steps,
     Failure,
     Other,
     Meta,
@@ -119,9 +137,14 @@ impl Kind {
                 | Self::Thinking
                 | Self::Tool(_)
                 | Self::Activity
+                | Self::Steps
                 | Self::Failure
                 | Self::Other
         )
+    }
+    /// Folding summary rows always disclose their members.
+    fn group(self) -> bool {
+        matches!(self, Self::Activity | Self::Steps)
     }
     fn foldable(self) -> bool {
         !matches!(self, Self::Meta | Self::Timing)
@@ -139,9 +162,12 @@ struct Block {
     text: String,
     changes: Vec<layout::diff::Row>,
     file: Option<crate::files::Link>,
+    emphasis: Option<std::ops::Range<usize>>,
     folded: bool,
     expandable: bool,
     layout: Option<Layout>,
+    /// Layout row carrying the glyph, hits and timestamp; padding rows precede it.
+    header: usize,
     dirty: bool,
     markdown: super::streaming::Markdown,
     activity: Option<tools::Activity>,
@@ -181,6 +207,8 @@ pub struct Transcript {
     pub trace: bool,
     pub colors: crate::theme::Palette,
     layout_colors: crate::theme::Palette,
+    /// User bands get a padding row above and below when there is room.
+    layout_padded: bool,
     pub hovered: Option<MessageKey>,
     selected: Option<MessageKey>,
     /// A body click targets a message without asking to reveal its header.
@@ -303,17 +331,26 @@ impl Transcript {
             .get_mut(key)
             .filter(|block| block.kind.foldable() && block.expandable)
         {
+            // The header keeps its text across folding; anchor that, not the
+            // block start, which may be a padding row without source text.
+            let source = block
+                .layout
+                .as_ref()
+                .and_then(|layout| layout.lines.get(block.header))
+                .and_then(|line| line.mapping.first())
+                .map_or(0, |span| span.source.start);
+            let header = block.header;
             block.folded = !block.folded;
             block.layout = None;
             self.anchor = Some(Anchor {
                 key: key.clone(),
-                source: 0,
+                source,
                 screen_row: self
                     .order
                     .iter()
                     .position(|candidate| candidate == key)
                     .and_then(|index| self.starts.get(index))
-                    .map_or(0, |start| start.saturating_sub(self.top)),
+                    .map_or(0, |start| (start + header).saturating_sub(self.top)),
             });
         }
         self.arrange_groups();
@@ -332,11 +369,32 @@ impl Transcript {
             self.anchor = self.position(self.top);
         }
     }
+    /// Anchor a screen row to the first source-bearing line at or below it.
+    /// Blank, padding and gap rows have no identity of their own; snapping
+    /// them to the text above made line-by-line scrolling skip or stall.
     fn position(&self, row: usize) -> Option<Anchor> {
         let index = self
             .starts
             .partition_point(|start| *start <= row)
             .saturating_sub(1);
+        let below = (index..self.order.len()).find_map(|index| {
+            let key = &self.order[index];
+            let start = self.starts[index];
+            let lines = &self.blocks.get(key)?.layout.as_ref()?.lines;
+            let (line, span) = lines
+                .iter()
+                .enumerate()
+                .skip(row.saturating_sub(start))
+                .find_map(|(line, visual)| Some((line, visual.mapping.first()?)))?;
+            Some(Anchor {
+                key: key.clone(),
+                source: span.source.start,
+                screen_row: start + line - row,
+            })
+        });
+        if below.is_some() {
+            return below;
+        }
         let key = self.order.get(index)?;
         let block = self.blocks.get(key)?;
         let layout = block.layout.as_ref()?;
@@ -364,8 +422,10 @@ impl Transcript {
                     text,
                     changes,
                     file,
+                    emphasis,
                 } = text();
                 block.file = file;
+                block.emphasis = emphasis;
                 if block.kind != kind || block.text != text || block.changes != changes {
                     if block.kind != kind || !text.starts_with(&block.text) {
                         // Keep the old logical text until selection has been rebased.
@@ -382,6 +442,7 @@ impl Transcript {
                     text,
                     changes,
                     file,
+                    emphasis,
                 } = text();
                 self.blocks.insert(
                     key.clone(),
@@ -393,9 +454,11 @@ impl Transcript {
                         text,
                         changes,
                         file,
+                        emphasis,
                         folded: kind.folded(),
                         expandable: true,
                         layout: None,
+                        header: 0,
                         dirty: false,
                         markdown: Default::default(),
                         activity: None,
@@ -575,11 +638,13 @@ impl Transcript {
             self.top = 0;
         }
     }
-    fn layout(&mut self, width: u16, ascii: bool) -> Result<(), &'static str> {
-        if self.width != width || self.layout_colors != self.colors {
+    fn layout(&mut self, width: u16, ascii: bool, padded: bool) -> Result<(), &'static str> {
+        if self.width != width || self.layout_colors != self.colors || self.layout_padded != padded
+        {
             self.invalidate();
             self.width = width;
             self.layout_colors = self.colors;
+            self.layout_padded = padded;
         }
         self.starts.clear();
         self.total = 0;
@@ -621,7 +686,7 @@ impl Transcript {
                     } else {
                         layout::plain(&preview, preview_width)?
                     };
-                    block.expandable = block.kind == Kind::Activity
+                    block.expandable = block.kind.group()
                         || more_lines
                         || preview.len() < first_len
                         || layout
@@ -629,7 +694,14 @@ impl Transcript {
                             .iter()
                             .skip(1)
                             .any(|line| !line.line.to_string().trim().is_empty());
+                    let clipped = layout.lines.len() > 1;
                     layout.lines.truncate(1);
+                    // Whole-word wrapping can drop a word from a one-row preview;
+                    // mark it rather than end on a silently shortened sentence.
+                    let line = &mut layout.lines[0].line;
+                    if clipped && line.width() < usize::from(preview_width) {
+                        line.spans.push(Span::raw(if ascii { "." } else { "…" }));
+                    }
                     let end = layout.lines[0]
                         .mapping
                         .iter()
@@ -663,7 +735,7 @@ impl Transcript {
                     )?
                 });
                 if !block.folded {
-                    block.expandable = block.kind == Kind::Activity
+                    block.expandable = block.kind.group()
                         || block
                             .layout
                             .as_ref()
@@ -679,6 +751,21 @@ impl Transcript {
                     for line in &mut layout.lines {
                         line.mapping.clear();
                     }
+                }
+                block.header = 0;
+                if block.kind == Kind::User && padded {
+                    // Band padding rows carry no source text, so selection,
+                    // search and copy skip them like any other decoration.
+                    let lines = &mut block.layout.as_mut().unwrap().lines;
+                    let pad = |source| layout::VisualLine {
+                        line: Line::default(),
+                        source,
+                        mapping: vec![],
+                    };
+                    let (first, last) = (lines[0].source, lines[lines.len() - 1].source);
+                    lines.insert(0, pad(first));
+                    lines.push(pad(last));
+                    block.header = 1;
                 }
                 if let Some(previous) = selected_text {
                     self.text_selection.rebase(
@@ -717,7 +804,12 @@ impl Transcript {
             ..area
         };
         self.update_timings(ascii, chrono::Utc::now().timestamp_millis());
-        self.layout(area.width, ascii)?;
+        // Short viewports spend rows on content rather than band padding.
+        self.layout(
+            area.width,
+            ascii,
+            !self.colors.terminal && area.height >= 12,
+        )?;
         self.validate_text_selection();
         self.text_selection.begin_frame();
         self.height = usize::from(area.height);
@@ -788,126 +880,74 @@ impl Transcript {
             let offset = self.top.saturating_sub(self.starts[index]);
             let next = self.order.get(index + 1).map(|key| self.blocks[key].kind);
             let height = layout.lines.len() + usize::from(gap_after(block, next));
+            let focused = selected.as_ref() == Some(key);
+            let gutter = 2 + block.indent;
             for row in offset..height {
                 if lines.len() >= self.height {
                     break;
                 }
-                let mut line = layout
-                    .lines
-                    .get(row)
-                    .map_or_else(Line::default, |line| line.line.clone());
-                if row < layout.lines.len() {
-                    if block.kind == Kind::User && !self.colors.terminal {
-                        frame.render_widget(
-                            ratatui::widgets::Block::default()
-                                .style(Style::default().bg(self.colors.surface)),
-                            Rect::new(area.x, area.y + lines.len() as u16, area.width, 1),
-                        );
-                    }
-                    line = match block.kind {
-                        Kind::Tool(state) if row == 0 && state.problem() => {
-                            line.style(Style::default().fg(state.color(self.colors)))
-                        }
-                        Kind::Thinking => {
-                            for span in &mut line.spans {
-                                span.style.fg = Some(crate::view::tone::thinking(self.colors));
-                                span.style = span.style.remove_modifier(Modifier::BOLD);
-                            }
-                            line
-                        }
-                        Kind::User if self.colors.terminal => {
-                            line.style(Style::default().add_modifier(Modifier::BOLD))
-                        }
-                        Kind::User => line.style(Style::default().bg(self.colors.surface)),
-                        Kind::Failure if row == 0 => {
-                            line.style(Style::default().fg(self.colors.error))
-                        }
-                        Kind::Tool(_) | Kind::Activity | Kind::Meta if block.folded || row == 0 => {
-                            line.style(Style::default().fg(self.colors.muted))
-                        }
-                        _ => line,
-                    };
-                    if key.part == Part::Timing {
-                        line = line.style(Style::default().fg(self.timing_color(&key.turn)));
-                    }
+                let y = area.y + lines.len() as u16;
+                let visual = layout.lines.get(row);
+                if let Some((x, color)) = visual.and(self.fill(block, row)) {
+                    let x = area.x + x.min(area.width);
+                    frame.render_widget(
+                        ratatui::widgets::Block::default().style(Style::default().bg(color)),
+                        Rect::new(x, y, area.right() - x, 1),
+                    );
                 }
+                let mut line = visual.map_or_else(Line::default, |visual| {
+                    self.styled(block, key, row, visual.line.clone())
+                });
                 if let Some(search) = &self.search
-                    && let Some(visual) = layout.lines.get(row)
+                    && let Some(visual) = visual
                 {
                     search.highlight(key, visual, &mut line, self.colors);
                 }
-                if let Some(visual) = layout.lines.get(row) {
+                if let Some(visual) = visual {
                     self.text_selection
                         .paint(key, visual, &mut line, self.colors);
                 }
-                if row == 0 {
-                    let focused = selected.as_ref() == Some(key);
+                if row == block.header {
                     if focused {
                         line =
                             line.patch_style(Style::default().add_modifier(Modifier::UNDERLINED));
                     }
-                    let disclosure = if block.kind == Kind::User && !block.expandable {
-                        if ascii { ">" } else { "›" }
-                    } else if !block.kind.foldable() || !block.expandable {
-                        " "
-                    } else if block.folded {
-                        if ascii { ">" } else { "▸" }
-                    } else if block.kind == Kind::User {
-                        if ascii { ">" } else { "›" }
-                    } else if block.kind == Kind::Assistant
-                        && self.hovered.as_ref() != Some(key)
-                        && !focused
+                    if let Some(bytes) =
+                        visual
+                            .zip(block.emphasis.as_ref())
+                            .and_then(|(visual, emphasis)| {
+                                visual
+                                    .mapping
+                                    .iter()
+                                    .filter_map(|span| span.intersection(emphasis))
+                                    .reduce(|a, b| a.start.min(b.start)..a.end.max(b.end))
+                            })
                     {
-                        " "
-                    } else if ascii {
-                        "v"
-                    } else {
-                        "▾"
-                    };
-                    line.spans.insert(
-                        0,
-                        Span::styled(
-                            format!("{}{disclosure} ", " ".repeat(usize::from(block.indent))),
-                            Style::default().fg(if focused {
-                                self.colors.accent
-                            } else {
-                                match block.kind {
-                                    Kind::Tool(state) => state.color(self.colors),
-                                    Kind::User => self.colors.accent,
-                                    _ => self.colors.subtle,
-                                }
-                            }),
-                        ),
-                    );
+                        crate::files::restyle(
+                            &mut line,
+                            bytes,
+                            Style::default().add_modifier(Modifier::BOLD),
+                        );
+                    }
                     if block.kind.foldable() && block.expandable && area.width > block.indent {
                         hits.push(Hit {
-                            area: Rect::new(
-                                area.x + block.indent,
-                                area.y + lines.len() as u16,
-                                area.width - block.indent,
-                                1,
-                            ),
+                            area: Rect::new(area.x + block.indent, y, area.width - block.indent, 1),
                             action: Action::ToggleMessage(key.clone()),
                         });
                     }
                     if let Some(file) = &block.file
-                        && let Some(visual) = layout.lines.get(row)
+                        && let Some(visual) = visual
                         && let Some(bytes) = visual
                             .mapping
                             .iter()
                             .filter_map(|span| span.intersection(&file.source))
                             .reduce(|a, b| a.start.min(b.start)..a.end.max(b.end))
                     {
-                        let prefix = line.spans[0].content.len();
-                        let columns = crate::files::paint(
-                            &mut line,
-                            bytes.start + prefix..bytes.end + prefix,
-                            self.colors,
-                        );
+                        let columns = crate::files::paint(&mut line, bytes, self.colors);
                         hits.push(Hit {
                             area: Rect::new(
-                                area.x + columns.start as u16,
-                                area.y + lines.len() as u16,
+                                area.x + gutter + columns.start as u16,
+                                y,
                                 (columns.end - columns.start) as u16,
                                 1,
                             )
@@ -915,14 +955,26 @@ impl Transcript {
                             action: Action::CopyFile(file.path.clone()),
                         });
                     }
-                } else {
-                    line.spans
-                        .insert(0, Span::raw(" ".repeat(usize::from(2 + block.indent))));
                 }
-                if row == 0
-                    && area.width >= 60
-                    && let Some(time) = &block.time
+                line.spans
+                    .insert(0, self.gutter(key, block, row, focused, ascii));
+                let time = block
+                    .time
+                    .as_ref()
+                    .filter(|_| row == block.header && area.width >= 60);
+                // Code bands continue under the timestamp column, like tool panels.
+                if let Some(style) =
+                    line.spans.last().map(|span| span.style).filter(|style| {
+                        style.bg == Some(self.colors.panel()) && !self.colors.terminal
+                    })
                 {
+                    let end = usize::from(area.width)
+                        .saturating_sub(time.map_or(0, |time| time.len() + 1));
+                    let width = line.width();
+                    line.spans
+                        .push(Span::styled(" ".repeat(end.saturating_sub(width)), style));
+                }
+                if let Some(time) = time {
                     let gap = usize::from(area.width).saturating_sub(line.width() + time.len() + 1);
                     line.spans.push(Span::raw(" ".repeat(gap)));
                     line.spans.push(Span::styled(
@@ -940,18 +992,132 @@ impl Transcript {
         self.draw_scrollbar(frame, outer, ascii);
         Ok(hits)
     }
+    /// Role styling of one laid-out row, before search, selection and gutter.
+    fn styled(
+        &self,
+        block: &Block,
+        key: &MessageKey,
+        row: usize,
+        line: Line<'static>,
+    ) -> Line<'static> {
+        let header = row == block.header;
+        let line = match block.kind {
+            Kind::Tool(state) if header && state.problem() => {
+                line.style(Style::default().fg(state.color(self.colors)))
+            }
+            Kind::Thinking | Kind::Steps => {
+                let mut line = line;
+                for span in &mut line.spans {
+                    span.style.fg = Some(crate::view::tone::thinking(self.colors));
+                    span.style = span.style.remove_modifier(Modifier::BOLD);
+                }
+                line
+            }
+            Kind::User if self.colors.terminal => {
+                line.style(Style::default().add_modifier(Modifier::BOLD))
+            }
+            Kind::User => line.style(Style::default().bg(self.colors.surface)),
+            Kind::Failure if header => line.style(Style::default().fg(self.colors.error)),
+            // Collapsed activity recedes like grok's summary rows; an open
+            // header is what the reader is inspecting, so it stays brighter.
+            Kind::Tool(_) | Kind::Activity | Kind::Meta if block.folded => {
+                line.style(Style::default().fg(self.colors.subtle))
+            }
+            Kind::Tool(_) | Kind::Activity | Kind::Meta if header => {
+                line.style(Style::default().fg(self.colors.muted))
+            }
+            _ => line,
+        };
+        if key.part == Part::Timing {
+            line.style(Style::default().fg(self.timing_color(&key.turn)))
+        } else {
+            line
+        }
+    }
+    /// Background band for a row, as (first column, color). User bands span the
+    /// gutter; recessed detail panels start at the content column.
+    fn fill(&self, block: &Block, row: usize) -> Option<(u16, Color)> {
+        if self.colors.terminal {
+            return None;
+        }
+        match block.kind {
+            Kind::User => Some((0, self.colors.surface)),
+            Kind::Tool(_) | Kind::Failure | Kind::Other if !block.folded && row > block.header => {
+                Some((2 + block.indent, self.colors.panel()))
+            }
+            _ => None,
+        }
+    }
+    /// Header rows carry a role glyph, replaced by a disclosure while the
+    /// pointer or keyboard is on an expandable block. Expanded details keep a
+    /// rail in the same column, so folding never shifts content horizontally.
+    fn gutter(
+        &self,
+        key: &MessageKey,
+        block: &Block,
+        row: usize,
+        focused: bool,
+        ascii: bool,
+    ) -> Span<'static> {
+        let indent = " ".repeat(usize::from(block.indent));
+        let lines = block.layout.as_ref().map_or(0, |layout| layout.lines.len());
+        let problem = match block.kind {
+            Kind::Tool(state) if state.problem() => Some(state.color(self.colors)),
+            Kind::Failure => Some(self.colors.error),
+            _ => None,
+        };
+        let (glyph, color) = if row == block.header {
+            // A block folded against its kind's default (a hidden answer) must
+            // say so at rest; summaries folded by default keep their bullet.
+            let disclosure = block.kind.foldable()
+                && block.expandable
+                && (focused
+                    || self.hovered.as_ref() == Some(key)
+                    || (block.folded && !block.kind.folded()));
+            let glyph = match (disclosure, block.folded, block.kind, ascii) {
+                (true, true, _, false) => "▸",
+                (true, false, _, false) => "▾",
+                (true, true, _, true) => ">",
+                (true, false, _, true) => "v",
+                (false, _, Kind::User, false) => "❯",
+                (false, _, Kind::User, true) => ">",
+                (false, _, Kind::Assistant | Kind::Timing | Kind::Meta, _) => " ",
+                (false, _, Kind::Activity, false) => "◈",
+                (false, _, _, false) => "◆",
+                (false, _, _, true) => "*",
+            };
+            let color = match block.kind {
+                _ if focused => self.colors.accent,
+                Kind::Tool(state) => state.color(self.colors),
+                Kind::User => self.colors.accent,
+                _ => problem.unwrap_or(self.colors.subtle),
+            };
+            (glyph, color)
+        } else if row < lines
+            && !block.folded
+            && block.kind.foldable()
+            && !matches!(block.kind, Kind::User | Kind::Assistant)
+        {
+            (
+                if ascii { "|" } else { "│" },
+                problem.unwrap_or(self.colors.border),
+            )
+        } else {
+            (" ", self.colors.subtle)
+        };
+        Span::styled(format!("{indent}{glyph} "), Style::default().fg(color))
+    }
 }
 
 fn gap_after(block: &Block, next: Option<Kind>) -> bool {
     matches!(
         block.kind,
         Kind::User | Kind::Assistant | Kind::Failure | Kind::Timing
-    ) || (block.kind.foldable()
-        && block.expandable
-        && !block.folded
-        && block.kind != Kind::Activity)
-        || (matches!(block.kind, Kind::Tool(_) | Kind::Activity | Kind::Thinking)
-            && matches!(next, Some(Kind::User | Kind::Assistant)))
+    ) || (block.kind.foldable() && block.expandable && !block.folded && !block.kind.group())
+        || (matches!(
+            block.kind,
+            Kind::Tool(_) | Kind::Activity | Kind::Steps | Kind::Thinking
+        ) && matches!(next, Some(Kind::User | Kind::Assistant)))
 }
 
 fn project(row: &Value, i18n: &I18n, ascii: bool) -> String {
@@ -1068,7 +1234,7 @@ mod tests {
                     .contains(Modifier::CROSSED_OUT)
             );
             assert_eq!(cell_for("fn").fg, view.colors.syntax[0]);
-            assert_eq!(cell_for("fn").bg, view.colors.surface);
+            assert_eq!(cell_for("fn").bg, view.colors.panel());
             let code_row = cells
                 .content
                 .chunks(80)
@@ -1634,5 +1800,180 @@ mod tests {
             }
             assert!(i18n.diagnostics().is_empty());
         }
+    }
+    #[test]
+    fn line_scrolling_is_monotonic_across_padding_blank_and_gap_rows() {
+        let rows: BTreeMap<_, _> = (0..12)
+            .map(|n| {
+                let turn = format!("t{n}");
+                (
+                    n,
+                    if n % 2 == 0 {
+                        json!({"turnId":turn,"id":format!("u{n}"),"type":"user","text":format!("question {n}")})
+                    } else {
+                        json!({"turnId":turn,"id":format!("a{n}"),"type":"assistant","text":"one\n\ntwo\n\nthree"})
+                    },
+                )
+            })
+            .collect();
+        for colors in [
+            crate::theme::Choice::Maka.colors(),
+            crate::theme::Choice::Terminal.colors(),
+        ] {
+            let mut view = Transcript {
+                colors,
+                ..Default::default()
+            };
+            view.sync(&rows, &[], 0, &locale(), false);
+            draw(&mut view, 40, 14);
+            let bottom = view.top;
+            for step in 1..=bottom {
+                view.scroll(true, 1);
+                draw(&mut view, 40, 14);
+                assert_eq!(view.top, bottom - step, "blank rows must not snap upwards");
+            }
+            for step in 1..=bottom {
+                view.scroll(false, 1);
+                draw(&mut view, 40, 14);
+                assert_eq!(view.top, step, "blank rows must not stall scrolling");
+            }
+            // Folding a padded user band keeps its header on the same row.
+            view.scroll(true, bottom);
+            let user = view.order[2].clone();
+            view.blocks.get_mut(&user).unwrap().expandable = true;
+            let header = |view: &Transcript| {
+                let index = view.order.iter().position(|key| *key == user).unwrap();
+                view.starts[index] + view.blocks[&user].header - view.top
+            };
+            draw(&mut view, 40, 14);
+            let before = header(&view);
+            view.toggle(&user);
+            draw(&mut view, 40, 14);
+            assert_eq!(header(&view), before);
+        }
+    }
+
+    #[test]
+    fn blocks_use_role_glyphs_rails_and_recessed_panels_outside_the_gutter() {
+        let rows = BTreeMap::from([
+            (
+                1,
+                json!({"turnId":"t","id":"u","type":"user","text":"Hello","ts":1790087176603_u64}),
+            ),
+            (
+                2,
+                json!({"turnId":"t","id":"c","type":"tool_call","toolName":"Shell","origin":"provider","args":{"command":"pwd"}}),
+            ),
+            (
+                3,
+                json!({"turnId":"t","id":"r","type":"tool_result","toolUseId":"c","origin":"provider","isError":false,"content":{"kind":"text","text":"/work"}}),
+            ),
+            (
+                4,
+                json!({"turnId":"t","id":"a","type":"assistant","text":"```rust\nfn main() {}\n```"}),
+            ),
+        ]);
+        let cell_row = |terminal: &Terminal<TestBackend>, text: &str| {
+            let buffer = terminal.backend().buffer();
+            (0..buffer.area.height)
+                .find(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer[(x, *y)].symbol())
+                        .collect::<String>()
+                        .contains(text)
+                })
+                .unwrap()
+        };
+        for ascii in [false, true] {
+            let mut view = Transcript::default();
+            view.sync(&rows, &[], 0, &locale(), ascii);
+            let tool = view.order[1].clone();
+            view.toggle(&tool);
+            view.latest();
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|frame| {
+                    view.draw(frame, frame.area(), ascii).unwrap();
+                })
+                .unwrap();
+            let colors = view.colors;
+            let buffer = terminal.backend().buffer();
+            let user = cell_row(&terminal, "Hello");
+            assert_eq!(buffer[(0, user)].symbol(), if ascii { ">" } else { "❯" });
+            assert_eq!(buffer[(0, user)].fg, colors.accent);
+            for y in [user - 1, user + 1] {
+                assert_eq!(buffer[(0, y)].bg, colors.surface, "band padding rows");
+                assert_eq!(buffer[(77, y)].bg, colors.surface);
+            }
+            assert!(
+                (0..80)
+                    .map(|x| buffer[(x, user)].symbol())
+                    .collect::<String>()
+                    .contains(&time::label(Some(1790087176603)).unwrap()),
+                "timestamps stay on the text row, not a padding row"
+            );
+            let header = cell_row(&terminal, "pwd");
+            assert_eq!(buffer[(0, header)].symbol(), if ascii { "*" } else { "◆" });
+            assert!(
+                buffer[(2, header)].modifier.contains(Modifier::BOLD),
+                "verb"
+            );
+            let detail = cell_row(&terminal, "/work");
+            assert_eq!(buffer[(0, detail)].symbol(), if ascii { "|" } else { "│" });
+            assert_eq!(buffer[(0, detail)].fg, colors.border);
+            for x in [0, 1] {
+                assert_eq!(buffer[(x, detail)].bg, Color::Reset, "gutter stays clear");
+            }
+            assert_eq!(buffer[(2, detail)].bg, colors.panel());
+            assert_eq!(buffer[(77, detail)].bg, colors.panel());
+            let code = cell_row(&terminal, "fn main");
+            assert_eq!(buffer[(1, code)].bg, Color::Reset);
+            assert_eq!(buffer[(2, code)].bg, colors.panel());
+            assert_eq!(
+                buffer[(77, code)].bg,
+                colors.panel(),
+                "band reaches the edge"
+            );
+            assert!(
+                !(0..80)
+                    .map(|x| buffer[(x, code)].symbol())
+                    .collect::<String>()
+                    .contains(['│', '|', '╭']),
+                "code is a band, not a bordered window"
+            );
+            view.hovered = Some(tool.clone());
+            terminal
+                .draw(|frame| {
+                    view.draw(frame, frame.area(), ascii).unwrap();
+                })
+                .unwrap();
+            let header = cell_row(&terminal, "pwd");
+            assert_eq!(
+                terminal.backend().buffer()[(0, header)].symbol(),
+                if ascii { "v" } else { "▾" },
+                "the pointer reveals the disclosure"
+            );
+        }
+        let mut view = Transcript {
+            colors: crate::theme::Choice::Terminal.colors(),
+            ..Default::default()
+        };
+        view.sync(&rows, &[], 0, &locale(), false);
+        let screen = draw(&mut view, 80, 24);
+        assert!(
+            screen.starts_with("❯ Hello"),
+            "terminal-owned colors spend no rows on invisible bands"
+        );
+        let long = BTreeMap::from([(
+            1,
+            json!({"turnId":"t","id":"c","type":"tool_call","toolName":"Shell","origin":"provider","args":{"command":"printf one two three four five six"}}),
+        )]);
+        view.sync(&long, &[], 0, &locale(), false);
+        // `draw` concatenates rows without the two scrollbar columns.
+        let header: String = draw(&mut view, 32, 4).chars().take(30).collect();
+        assert!(
+            header.trim_end().ends_with('…') && !header.contains("five"),
+            "a one-row preview shows that words were dropped: {header:?}"
+        );
     }
 }

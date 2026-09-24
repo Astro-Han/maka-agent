@@ -79,7 +79,9 @@ fn model_profiles_preserve_full_table_validate_inherited_limits_and_reject_concu
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Workspace");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("Profile fixture");
@@ -145,7 +147,7 @@ fn model_profiles_preserve_full_table_validate_inherited_limits_and_reject_concu
     runtime.block_on(async {client.request(Operation::ConnectionCatalogUpdate,json!({"expected":{"connectionId":saved["connectionId"],"revision":saved["revision"]},"changes":{"name":"External profile edit","configuration":{"baseUrl":"http://127.0.0.1:9/v1"},"enabled":true,"enabledModelIds":["fixture-model"]}})).await.unwrap();});
     tui.click_last_text("Save");
     tui.wait_for("This connection changed");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("External profile edit"));
     runtime.block_on(async {
         let (_, items) = catalog(&client).await;
@@ -155,7 +157,7 @@ fn model_profiles_preserve_full_table_validate_inherited_limits_and_reject_concu
             1
         );
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

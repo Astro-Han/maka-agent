@@ -57,6 +57,39 @@ pub(crate) async fn require_safe_through(
     current: Option<&str>,
     through: u64,
 ) -> Result<(), StoreError> {
+    require_safe_through_policy(connection, session, current, through, false).await
+}
+
+/// An explicit new message may observe a sealed prior tool dispatch with no
+/// result. This never authorizes replay, continuation, or a terminal outcome.
+pub(crate) async fn require_manual_message_safe(
+    connection: &mut SqliteConnection,
+    session: &str,
+    current: Option<&str>,
+) -> Result<bool, StoreError> {
+    require_safe_through_policy(connection, session, current, i64::MAX as u64, true).await?;
+    let pending: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM runtime_events d JOIN runtime_events end
+         ON end.invocation_id=d.invocation_id AND end.kind='invocation_ended'
+         WHERE d.kind='tool_dispatched'
+         AND json_extract(d.event_json, '$.invocation.session_id')=?
+         AND json_extract(end.event_json, '$.fact.outcome.class')='outcome_unknown'
+         AND NOT EXISTS(SELECT 1 FROM runtime_events t WHERE t.invocation_id=d.invocation_id
+           AND t.operation_id=d.operation_id AND t.kind='tool_settled'))",
+    )
+    .bind(session)
+    .fetch_one(connection)
+    .await?;
+    Ok(pending)
+}
+
+async fn require_safe_through_policy(
+    connection: &mut SqliteConnection,
+    session: &str,
+    current: Option<&str>,
+    through: u64,
+    allow_sealed_unknown: bool,
+) -> Result<(), StoreError> {
     let unsafe_history: bool = sqlx::query_scalar(
         "WITH runtime_events AS NOT MATERIALIZED (SELECT * FROM main.runtime_events WHERE sequence <= ?3)
          SELECT EXISTS(SELECT 1 FROM runtime_events e
@@ -65,7 +98,10 @@ pub(crate) async fn require_safe_through(
            (e.kind = 'invocation_opened' AND NOT EXISTS(SELECT 1 FROM runtime_events t
               WHERE t.invocation_id = e.invocation_id AND t.kind = 'invocation_ended'))
            OR (e.kind = 'tool_dispatched' AND NOT EXISTS(SELECT 1 FROM runtime_events t
-              WHERE t.invocation_id = e.invocation_id AND t.operation_id = e.operation_id AND t.kind = 'tool_settled'))
+              WHERE t.invocation_id = e.invocation_id AND t.operation_id = e.operation_id AND t.kind = 'tool_settled')
+              AND (?4 = 0 OR NOT EXISTS(SELECT 1 FROM runtime_events terminal
+                WHERE terminal.invocation_id = e.invocation_id AND terminal.kind = 'invocation_ended'
+                AND json_extract(terminal.event_json, '$.fact.outcome.class') = 'outcome_unknown')))
            OR (e.kind = 'model_requested' AND NOT EXISTS(SELECT 1 FROM runtime_events t
               WHERE t.invocation_id = e.invocation_id AND t.operation_id = e.operation_id AND t.kind IN ('model_completed','model_interrupted')))
            OR (e.kind = 'model_completed' AND EXISTS(SELECT 1 FROM json_each(e.event_json, '$.fact.output.parts') p
@@ -79,7 +115,7 @@ pub(crate) async fn require_safe_through(
                 WHERE json_extract(result.value, '$.kind') = 'tool_result'
                   AND json_extract(result.value, '$.id') = json_extract(p.value, '$.call.id')
                   AND json_extract(result.value, '$.name') = json_extract(p.value, '$.call.name'))))))",
-    ).bind(session).bind(current).bind(through as i64).fetch_one(&mut *connection).await?;
+    ).bind(session).bind(current).bind(through as i64).bind(allow_sealed_unknown).fetch_one(&mut *connection).await?;
     if unsafe_history {
         return Err(invalid(
             "Session contains unsealed or unresolved prior execution",

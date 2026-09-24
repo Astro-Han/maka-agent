@@ -30,11 +30,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-mod activity;
-mod queue;
+pub(crate) mod activity;
+pub(crate) mod queue;
 mod session;
-mod settings;
-mod tabs;
 pub(crate) mod tone;
 
 pub fn safe(text: &str) -> String {
@@ -61,20 +59,8 @@ pub(crate) fn clear_overlay(frame: &mut Frame<'_>, area: Rect) {
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
     app.begin_frame(area);
-    let animated = app.chrome.motion
-        && app.chrome.window_focused
-        && !app.closing
-        && app.palette.is_none()
-        && !app.interactions.visible
-        && app.management.dialog.is_none()
-        && !app.branch.visible
-        && !app.extensions.consent_visible()
-        && !app.recap.visible
-        && !app.revision.visible
-        && app.attachments.dialog.is_none()
-        && app.skills.dialog.is_none()
-        && app.onboarding.dialog.is_none()
-        && app.queue.edit.is_none();
+    let animated =
+        app.chrome.motion && app.chrome.window_focused && !app.closing && app.overlay().is_none();
     app.chrome
         .animation
         .begin(std::time::Instant::now(), animated);
@@ -221,51 +207,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if nav_width > 0 {
         let nav = Block::default()
             .borders(Borders::RIGHT)
-            .border_style(Style::default().fg(app.theme.colors().subtle));
-        let inner = nav.inner(columns[0]);
+            .border_style(Style::default().fg(app.theme.colors().border));
+        let inner = nav.inner(columns[0]).inner(Margin::new(1, 1));
         frame.render_widget(nav, columns[0]);
-        let spacing = if inner.height >= 12 { 2 } else { 1 };
-        for (index, route) in Route::ALL.into_iter().enumerate() {
-            let rect = Rect::new(
-                inner.x,
-                inner.y + index as u16 * spacing + 1,
-                inner.width,
-                1,
-            )
-            .intersection(inner);
-            let action = Action::Visit(route.clone());
-            let symbol = icon(app, &action);
-            let title = if nav_width >= 12 {
-                format!("{symbol} {}", app.i18n.text(route.title()))
-            } else {
-                symbol.to_owned()
-            };
-            list_item(
-                frame,
-                app,
-                rect,
-                &title,
-                action,
-                app.focus == Focus::Navigation && app.selected_nav == index,
-            );
-            // Active route remains discoverable without relying only on color.
-            if route == app.navigation.current().section() && !rect.is_empty() {
-                frame.buffer_mut()[(rect.right() - 1, rect.y)]
-                    .set_symbol(app.chrome.symbol("▏", ">"));
-            }
-        }
-        tabs::draw(
-            frame,
-            app,
-            Rect::new(
-                inner.x,
-                inner.y + Route::ALL.len() as u16 * spacing + 1,
-                inner.width,
-                inner
-                    .height
-                    .saturating_sub(Route::ALL.len() as u16 * spacing + 1),
-            ),
-        );
+        crate::pages::sidebar::draw(frame, app, inner);
+    } else {
+        app.sidebar.surface.invalidate();
     }
 
     let page = columns[1].inner(Margin::new(1, 0));
@@ -274,9 +221,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         Route::Extensions => crate::pages::extensions::draw(frame, app, page),
         Route::Connections => crate::pages::connections::draw(frame, app, page),
         Route::Projects => crate::pages::projects::draw(frame, app, page),
-        Route::Workspace | Route::Inbox => crate::pages::sessions::draw_catalog(frame, app, page),
+        Route::Workspace => crate::pages::home::draw(frame, app, page, nav_width > 0),
+        Route::Inbox => crate::pages::sessions::draw_catalog(frame, app, page),
         Route::Session(id) => session::draw(frame, app, page, &id),
-        Route::Settings => settings::draw(frame, app, page),
+        Route::Settings => crate::pages::settings::draw(frame, app, page),
         _ => frame.render_widget(
             Paragraph::new(page_lines(app)).wrap(Wrap { trim: false }),
             page,
@@ -284,29 +232,14 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     }
     crate::files::resolve_hits(app);
     let focused = match app.focus {
-        Focus::Navigation => app
-            .nav_routes()
-            .get(app.selected_nav)
-            .cloned()
-            .map(Action::Visit),
         Focus::Page => app.page_actions().get(app.selected_control).cloned(),
         _ => None,
     };
-    let hint = if app.closing {
+    let hint = if app.shutdown.stopping {
+        app.i18n.text("shutdown-working")
+    } else if app.closing {
         app.i18n.text("state-closing")
-    } else if app.extensions.consent_visible()
-        || app.theme.editor.is_some()
-        || app.branch.visible
-        || app.recap.visible
-        || app.revision.visible
-        || app.attachments.dialog.is_some()
-        || app.skills.dialog.is_some()
-        || app.onboarding.dialog.is_some()
-        || app.management.dialog.is_some()
-        || app.interactions.visible
-        || app.palette.is_some()
-        || app.queue.edit.is_some()
-    {
+    } else if app.overlay().is_some() {
         String::new()
     } else if app.state_error.is_some() {
         if matches!(app.navigation.current(), Route::Session(_)) {
@@ -325,7 +258,20 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         && !app.chrome.details
     {
         app.i18n.text("chat-selection-help")
-    } else if let Some(action) = app.hover.as_ref().or(focused.as_ref()) {
+    } else if let Some(action) = app.hover.as_ref() {
+        action_label(app, action)
+    } else if let Some(hint) = app
+        .sidebar
+        .surface
+        .hint(app.focus == Focus::Navigation)
+        .or_else(|| match app.navigation.current() {
+            Route::Settings => app.settings.surface.hint(app.focus == Focus::Page),
+            Route::Workspace => app.home.surface.hint(app.focus == Focus::Page),
+            _ => None,
+        })
+    {
+        hint.to_owned()
+    } else if let Some(action) = focused.as_ref() {
         action_label(app, action)
     } else if app.chat.view.search.is_some()
         && !app.chrome.details
@@ -377,7 +323,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
             app.i18n.text("sessions-help")
         }
     } else {
-        app.i18n.text("shell-shortcuts")
+        // No standing tutorial: shortcuts live in Help and the command palette.
+        String::new()
     };
     frame.render_widget(
         Paragraph::new(hint).centered().style(Style::default().fg(
@@ -395,34 +342,13 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
             action: Action::Visit(Route::Host),
         });
     }
-    if app.extensions.consent_visible() {
-        crate::pages::extensions::draw_consent(frame, app, area, base);
-    } else if app.theme.editor.is_some() {
-        crate::theme::editor::draw(frame, app, area);
-    } else if app.skills.dialog.is_some() {
-        crate::pages::skills::draw(frame, app, area, base);
-    } else if app.attachments.dialog.is_some() {
-        crate::pages::attachments::draw(frame, app, area, base);
-    } else if app.directory_reference_active() {
-        crate::pages::manage::draw(frame, app, area, base);
-    } else if app.revision.visible {
-        crate::pages::revision::draw(frame, app, area, base);
-    } else if app.recap.visible {
-        crate::pages::recap::draw(frame, app, area, base);
-    } else if app.branch.visible {
-        crate::pages::branch::draw(frame, app, area, base);
-    } else if app.onboarding.dialog.is_some() {
-        crate::pages::onboarding::draw(frame, app, area, base);
-    } else if app.management.dialog.is_some() {
-        crate::pages::manage::draw(frame, app, area, base);
-    } else if app.interactions.visible {
-        crate::pages::interactions::draw(frame, app, area, base);
-    } else if app.queue.edit.is_some() {
-        queue::edit(frame, app, area, base);
-    } else if app.palette.is_some() {
-        crate::pages::commands::draw(frame, app, area, base);
-    } else if app.tooltip_visible() {
-        draw_tooltip(frame, app, area, base);
+    if let Some(overlay) = app.overlay() {
+        crate::overlay::draw(frame, app, overlay, area, base);
+    } else {
+        app.layer.close();
+        if app.tooltip_visible() {
+            draw_tooltip(frame, app, area, base);
+        }
     }
 }
 
@@ -467,6 +393,10 @@ fn draw_tooltip(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     }
     app.hits
         .retain(|hit| hit.area.intersection(popup).is_empty());
+    // Kernel surfaces drawn underneath lose pointer targets the tooltip covers.
+    app.sidebar.surface.occlude(popup);
+    app.settings.surface.occlude(popup);
+    app.home.surface.occlude(popup);
     clear_overlay(frame, popup);
     frame.render_widget(
         Paragraph::new(label)
@@ -486,7 +416,7 @@ fn composer_action(action: &Action) -> bool {
             | Action::StopTurn(_)
     )
 }
-fn icon(app: &App, action: &Action) -> &'static str {
+pub(crate) fn icon(app: &App, action: &Action) -> &'static str {
     let (unicode, ascii) = match action {
         Action::NextTab => ("›", ">"),
         Action::PreviousTab => ("‹", "<"),
@@ -585,6 +515,7 @@ fn icon(app: &App, action: &Action) -> &'static str {
         Action::References => ("▱", "/"),
         Action::Skills(_) => ("✧", "*"),
         Action::Recap(_) => ("≡", "="),
+        Action::Resume(_) => ("↻", "R"),
         Action::Branch(_) => ("↳", "+"),
         Action::Revision(_) => ("↶", "<"),
         Action::Onboard(_) => ("⊕", "+"),
@@ -613,12 +544,14 @@ fn icon(app: &App, action: &Action) -> &'static str {
         Action::CycleLocale => ("文", "L"),
         Action::ToggleSymbols => ("◇", "A"),
         Action::ToggleMotion => ("≈", "M"),
-        Action::Quit => ("×", "X"),
+        Action::Settings(_) => ("⛭", "S"),
+        Action::Sidebar(_) | Action::Home(_) => ("≡", "="),
+        Action::Quit | Action::Detach | Action::ConfirmQuit | Action::CancelQuit => ("×", "X"),
     };
     app.chrome.symbol(unicode, ascii)
 }
 
-fn action_label(app: &App, action: &Action) -> String {
+pub(crate) fn action_label(app: &App, action: &Action) -> String {
     if matches!(
         action,
         Action::Manage(crate::pages::manage::Command::Open(
@@ -657,7 +590,20 @@ fn action_label(app: &App, action: &Action) -> String {
         return safe(path);
     }
     if let Action::Visit(Route::Session(id)) = action {
-        return tabs::label(app, id);
+        return app
+            .tabs
+            .entries
+            .iter()
+            .find(|tab| tab.id == *id)
+            .and_then(|tab| tab.name.as_deref())
+            .or_else(|| {
+                app.sessions
+                    .items
+                    .iter()
+                    .find(|item| item.id == *id)
+                    .map(|item| item.name.as_str())
+            })
+            .map_or_else(|| app.i18n.text("route-session"), safe);
     }
     if let Action::ToggleMessage(message) = action
         && let Some(state) = app.chat.view.tool_status(message)
@@ -711,6 +657,7 @@ fn action_label(app: &App, action: &Action) -> String {
         Action::Manage(command) => command.label(),
         Action::Branch(command) => command.label(),
         Action::Recap(command) => command.label(),
+        Action::Resume(command) => command.label(),
         Action::Revision(command) => command.label(),
         Action::Onboard(command) => command.label(),
         Action::Project(command) => command.label(),
@@ -751,7 +698,12 @@ fn action_label(app: &App, action: &Action) -> String {
         },
         Action::ToggleSymbols => "command-symbols",
         Action::ToggleMotion => "command-motion",
+        Action::Settings(_) => "route-settings",
+        Action::Sidebar(_) | Action::Home(_) => "route-workspace",
         Action::Quit => "footer-quit",
+        Action::Detach => "command-detach",
+        Action::ConfirmQuit => "shutdown-force",
+        Action::CancelQuit => "shutdown-cancel",
     };
     app.i18n.text(key)
 }
@@ -812,7 +764,6 @@ fn page_lines(app: &App) -> Vec<Line<'static>> {
                     ));
                     lines.push(Line::raw(""));
                     lines.push(Line::raw(i18n.text("host-start")));
-                    lines.push(Line::raw(i18n.text("host-setup")));
                 }
                 ConnectionState::Disconnected => {
                     lines.push(Line::raw(i18n.text("connection-disconnected")))
@@ -887,8 +838,11 @@ fn control(
         return;
     }
     let enabled = app.enabled(&action);
-    let destructive = matches!(action, Action::Manage(crate::pages::manage::Command::Save))
-        && app.management.is_removal();
+    let destructive = action == Action::ConfirmQuit
+        || (matches!(action, Action::Manage(crate::pages::manage::Command::Save))
+            && app.management.destructive());
+    let caution = matches!(action, Action::Manage(crate::pages::manage::Command::Save))
+        && app.sandbox_disabling();
     let style = if !enabled {
         Style::default()
             .fg(app.theme.colors().subtle)
@@ -896,11 +850,15 @@ fn control(
     } else if focused || app.hover.as_ref() == Some(&action) {
         tone::selection(app.theme.colors()).fg(if destructive {
             app.theme.colors().error
+        } else if caution {
+            app.theme.colors().warning
         } else {
             tone::accent(app.theme.colors())
         })
     } else if destructive {
         Style::default().fg(app.theme.colors().error)
+    } else if caution {
+        Style::default().fg(app.theme.colors().warning)
     } else if matches!(
         action,
         Action::SendMessage | Action::SteerMessage | Action::StopTurn(_)
@@ -969,6 +927,26 @@ mod tests {
         assert_eq!(app.palette, None);
     }
 
+    /// Cell position of the first occurrence of `text` on screen.
+    fn locate(terminal: &Terminal<TestBackend>, text: &str) -> (u16, u16) {
+        use unicode_width::UnicodeWidthStr;
+        let buffer = terminal.backend().buffer();
+        for y in 0..buffer.area.height {
+            let (mut row, mut starts, mut x) = (String::new(), vec![], 0);
+            while x < buffer.area.width {
+                let symbol = buffer[(x, y)].symbol();
+                starts.push((row.len(), x));
+                row.push_str(symbol);
+                x += (symbol.width() as u16).max(1);
+            }
+            if let Some(byte) = row.find(text) {
+                let (_, x) = starts.iter().rev().find(|(at, _)| *at <= byte).unwrap();
+                return (*x, y);
+            }
+        }
+        panic!("{text:?} is not on screen");
+    }
+
     #[test]
     fn resized_screen_invalidates_old_mouse_regions() {
         let mut app = App::new(
@@ -979,54 +957,46 @@ mod tests {
             ),
         );
         app.apply(Action::Visit(Route::Settings));
-        render(&mut app, 120, 40);
-        let button = app
-            .hits
-            .iter()
-            .find(|hit| hit.action == Action::ToggleTheme)
-            .unwrap()
-            .area;
+        let terminal = render(&mut app, 120, 40);
+        let (x, y) = locate(&terminal, "Maka dark");
         app.input(Event::Resize(80, 24));
-        app.input(click(button.x, button.y));
-        assert!((app.theme.choice != crate::theme::Choice::Terminal));
-        render(&mut app, 80, 24);
-        let new_button = app
-            .hits
-            .iter()
-            .find(|hit| hit.action == Action::ToggleTheme)
-            .unwrap()
-            .area;
-        app.input(click(new_button.x, new_button.y));
+        app.input(click(x, y));
+        assert!(
+            !app.settings.surface.captures(),
+            "a click against the previous frame's geometry is ignored"
+        );
+        let terminal = render(&mut app, 80, 24);
+        let (x, y) = locate(&terminal, "Maka dark");
+        app.input(click(x, y));
+        assert!(app.settings.surface.captures());
+        let terminal = render(&mut app, 80, 24);
+        let (x, y) = locate(&terminal, "○ Dusk");
+        app.input(click(x, y));
         assert_eq!(app.theme.choice, crate::theme::Choice::Dusk);
+        assert!(!app.settings.surface.captures());
     }
 
     #[test]
     fn keyboard_and_mouse_share_primary_action() {
-        let mut keyboard = App::new(
-            "/unconfigured".into(),
-            crate::i18n::I18n::new(
-                crate::LocalePreference::Explicit(crate::Locale::En),
-                crate::Locale::En,
-            ),
-        );
+        let app = || {
+            App::new(
+                "/unconfigured".into(),
+                crate::i18n::I18n::new(
+                    crate::LocalePreference::Explicit(crate::Locale::En),
+                    crate::Locale::En,
+                ),
+            )
+        };
+        let mut keyboard = app();
         keyboard.focus = Focus::Page;
-        keyboard.input(key(KeyCode::Enter));
-        let mut mouse = App::new(
-            "/unconfigured".into(),
-            crate::i18n::I18n::new(
-                crate::LocalePreference::Explicit(crate::Locale::En),
-                crate::Locale::En,
-            ),
-        );
-        render(&mut mouse, 120, 40);
-        let button = mouse
-            .hits
-            .iter()
-            .rev()
-            .find(|hit| hit.action == Action::Visit(Route::Host))
-            .unwrap()
-            .area;
-        mouse.input(click(button.x, button.y));
+        render(&mut keyboard, 120, 40);
+        let by_key = keyboard.input(key(KeyCode::Enter)).1;
+        let mut mouse = app();
+        let terminal = render(&mut mouse, 120, 40);
+        let (x, y) = locate(&terminal, "Connect");
+        let by_mouse = mouse.input(click(x, y)).1;
+        assert_eq!(by_key, Some(Action::Connect), "home's primary action");
+        assert_eq!(by_key, by_mouse);
         assert_eq!(keyboard.navigation.current(), mouse.navigation.current());
         assert_eq!(keyboard.focus, mouse.focus);
     }
@@ -1112,6 +1082,10 @@ mod tests {
                 crate::Locale::En,
             ),
         );
+        app.connection = ConnectionState::Connected {
+            root_id: "root".into(),
+            epoch: "epoch".into(),
+        };
         let mut terminal = render(&mut app, 120, 40);
         let anchor = app
             .hits
@@ -1119,12 +1093,7 @@ mod tests {
             .find(|hit| hit.action == Action::ToggleSidebar)
             .unwrap()
             .area;
-        let covered = app
-            .hits
-            .iter()
-            .find(|hit| hit.action == Action::Visit(Route::Workspace))
-            .unwrap()
-            .area;
+        let covered = locate(&terminal, "New session");
         app.hover = Some(Action::ToggleSidebar);
         app.hover_area = Some(anchor);
         terminal
@@ -1133,12 +1102,9 @@ mod tests {
                 draw_tooltip(frame, &mut app, frame.area(), Style::default());
             })
             .unwrap();
-        assert!(
-            !app.hits
-                .iter()
-                .any(|hit| hit.action == Action::Visit(Route::Workspace))
-        );
-        assert_eq!(app.input(click(covered.x, covered.y)), (true, None));
+        // The sidebar row under the tooltip is not clickable through it.
+        assert_eq!(app.input(click(covered.0, covered.1)), (true, None));
+        assert!(!app.creating);
         assert_eq!(app.focus, Focus::Navigation);
         let screen = terminal
             .backend()
@@ -1207,9 +1173,17 @@ mod tests {
             epoch: "epoch".into(),
         };
         app.status = Some(serde_json::json!({"state": "ready", "hostEpoch": "epoch"}));
-        app.input(key(KeyCode::Tab));
-        assert_eq!(app.selected_control, 1);
         render(&mut app, 80, 24);
+        // Category selection follows the keyboard; Right enters its rows.
+        for code in [KeyCode::Down, KeyCode::Right, KeyCode::Enter] {
+            app.input(key(code));
+            render(&mut app, 80, 24);
+        }
+        assert!(
+            app.settings.surface.captures(),
+            "Enter opens the language chooser"
+        );
+        app.input(key(KeyCode::Down));
         app.input(key(KeyCode::Enter));
         assert!(
             app.hits.is_empty(),
@@ -1217,23 +1191,32 @@ mod tests {
         );
         assert_eq!(app.i18n.locale(), crate::Locale::ZhTw);
         assert_eq!(app.focus, Focus::Page);
-        assert_eq!(app.selected_control, 1);
         assert!(matches!(app.connection, ConnectionState::Connected { .. }));
         assert_eq!(app.status.as_ref().unwrap()["hostEpoch"], "epoch");
         let terminal = render(&mut app, 80, 24);
-        assert!(format!("{:?}", terminal.backend().buffer()).contains("繁體中文"));
-        let language = app
-            .hits
-            .iter()
-            .find(|hit| hit.action == Action::CycleLocale)
-            .unwrap()
-            .area;
-        app.input(click(language.x, language.y));
+        assert_eq!(
+            app.settings.surface.hint(true),
+            Some("選擇語言 · Enter"),
+            "keyboard focus stays on the relabeled row"
+        );
+        let (x, y) = locate(&terminal, "繁體中文");
+        app.input(click(x, y));
+        let terminal = render(&mut app, 80, 24);
+        let (x, y) = locate(&terminal, "○ English");
+        app.input(click(x, y));
         assert_eq!(app.i18n.locale(), crate::Locale::En);
-        app.input(key(KeyCode::BackTab));
-        assert_eq!(app.selected_control, 0);
-        app.input(key(KeyCode::BackTab));
-        assert_eq!(app.focus, Focus::Navigation);
+        render(&mut app, 80, 24);
+        for _ in 0..8 {
+            if app.focus == Focus::Navigation {
+                break;
+            }
+            app.input(key(KeyCode::BackTab));
+        }
+        assert_eq!(
+            app.focus,
+            Focus::Navigation,
+            "Tab past the first control leaves the page"
+        );
         app.apply(Action::Back);
         assert_eq!(app.navigation.current(), Route::Host);
     }

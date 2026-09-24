@@ -101,7 +101,7 @@ fn reauthentication_uses_the_new_credential_and_stale_removal_cannot_delete_it()
         rotated["status"]["credentialId"]
     );
 
-    tui.click_text("Workspace");
+    tui.command("Open workspace");
     tui.wait_for("Key verification");
     tui.click_text("Key verification");
     tui.wait_for("Message…");
@@ -127,7 +127,7 @@ fn reauthentication_uses_the_new_credential_and_stale_removal_cannot_delete_it()
         .block_on(client.request(Operation::CredentialVaultQuery, json!({"locator":locator})))
         .unwrap();
     assert_eq!(absent["status"]["configured"], false);
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let checkpoint = directory
         .path()
@@ -145,7 +145,9 @@ fn reauthentication_uses_the_new_credential_and_stale_removal_cannot_delete_it()
 }
 
 fn connections(tui: &mut Pty) {
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
+    tui.wait_for("Models");
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("› TUI fixture");

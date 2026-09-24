@@ -27,6 +27,12 @@ use tokio::{io::AsyncReadExt, time::Instant};
 
 tokio::task_local! {
     static DEADLINE: Instant;
+    static QUIET_PROGRESS: ();
+}
+
+/// An interactive renderer owns its output; operator progress must not corrupt it.
+pub(crate) async fn without_progress<T>(work: impl Future<Output = T>) -> T {
+    QUIET_PROGRESS.scope((), work).await
 }
 
 pub(crate) async fn scope<T>(duration: Duration, work: impl Future<Output = T>) -> T {
@@ -63,6 +69,9 @@ pub(crate) enum Phase {
 }
 
 pub(crate) fn progress(phase: Phase, completed: Option<u64>, total: Option<u64>) {
+    if QUIET_PROGRESS.try_with(|()| ()).is_ok() {
+        return;
+    }
     #[derive(Serialize)]
     struct Progress {
         phase: Phase,

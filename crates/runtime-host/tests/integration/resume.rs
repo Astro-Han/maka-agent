@@ -122,6 +122,7 @@ async fn public_resume() {
                 .serve(host.clone(), stop.clone()),
         );
         let mut peer = Peer::new(host.clone(), "public-resume").await;
+        peer.wait_for_plugins().await;
         if !reopened {
             let response = peer.rpc("session.create", json!({
                 "sessionId":"public-resume", "workspace":{"kind":"host_path","path":fixture.workspace},
@@ -159,6 +160,11 @@ async fn public_resume() {
                         .as_ref()
                         .is_some_and(|run| matches!(run.progress, Progress::Ended { .. }))
                 {
+                    assert_eq!(
+                        provider.requests.lock().unwrap().len(),
+                        1,
+                        "source must reach the model before resume: {current:?}"
+                    );
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;

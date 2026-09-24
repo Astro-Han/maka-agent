@@ -161,7 +161,7 @@ fn imported_observations_remain_readable_without_offering_executable_turn_action
         tui.send(b"\x1b");
         tui.wait_until(|screen| !screen.contains("Commands · Esc closes"));
     }
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     host.retire_registered();
 }

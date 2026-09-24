@@ -45,9 +45,9 @@ fn oauth_entry_uses_host_enrollment_mouse_keyboard_and_never_starts_on_dismiss()
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.read_size = 128; // Split frames and escape sequences across PTY reads.
     tui.wait_for("Workspace");
-    tui.click_text("◉ Host");
+    tui.command("Open Host connection");
     tui.wait_for("Host epoch:");
-    tui.click_text("▤ Workspace");
+    tui.command("Open workspace");
     tui.filter_command("Sign in to a provider");
     tui.click_text("Sign in to a provider");
     let providers = runtime
@@ -61,23 +61,24 @@ fn oauth_entry_uses_host_enrollment_mouse_keyboard_and_never_starts_on_dismiss()
     // remains on Close after it settles, even when this provider is enabled.
     tui.send(b"\r");
     tui.wait_until(|screen| {
-        !screen.contains("Sign in to a provider") && screen.contains("No sessions yet.")
+        // Home's own button: the sidebar is hidden this narrow.
+        !screen.contains("Sign in to a provider") && screen.contains("+ New session")
     });
     tui.resize(100, 30);
-    tui.wait_for("▤ Workspace");
+    tui.wait_for("+  New session");
     tui.filter_command("Sign in to a provider");
     tui.click_text("Sign in to a provider");
     tui.wait_for("Continue");
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
     tui.wait_until(|screen| {
-        !screen.contains("Sign in to a provider") && screen.contains("No sessions yet.")
+        !screen.contains("Sign in to a provider") && screen.contains("No sessions yet")
     });
     assert_eq!(
         runtime.block_on(catalog(&client)),
         before,
         "enrollment and dismissal do not save credentials or connections"
     );
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.child.as_mut().unwrap().kill().unwrap();
@@ -108,9 +109,9 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
         let relay = super::recovery::LostReply::oauth_start(&host.root, directory.path()).await;
         let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
         tui.wait_for("Workspace");
-        tui.click_text("◉ Host");
+        tui.command("Open Host connection");
         tui.wait_for("Host epoch:");
-        tui.click_text("▤ Workspace");
+        tui.command("Open workspace");
         tui.filter_command("Sign in to a provider");
         tui.click_text("Sign in to a provider");
         let providers = client
@@ -160,7 +161,7 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
         assert!(!tui.terminate().unwrap().success());
         let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
         reopened.wait_for("Workspace");
-        reopened.click_text("◉ Host");
+        reopened.command("Open Host connection");
         reopened.wait_for("Host epoch:");
         reopened.filter_command("View sign-in");
         reopened.click_text("View sign-in");
@@ -178,7 +179,7 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
             requests,
             "NotFound is not permission to restart"
         );
-        reopened.send(b"\x11");
+        reopened.close_terminal();
         reopened.finish();
         assert_eq!(catalog(&client).await, before);
         drop(relay);

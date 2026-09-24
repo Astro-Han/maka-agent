@@ -210,6 +210,8 @@ pub(super) async fn start(
         interaction: registration
             .map(|registration| login::interaction(host.clone(), attempt.clone(), registration)),
     };
+    let discovery = (method.interactive && provider.definition().descriptor().discovery)
+        .then(|| (provider.clone(), context.clone()));
     let call = provider
         .prepare_authenticate(
             Authenticate {
@@ -244,7 +246,7 @@ pub(super) async fn start(
         .active = Some(attempt.clone());
     let owner = host.clone();
     host.requests.spawn(async move {
-        let phase = match AssertUnwindSafe(login::run(&owner, &attempt, *prepared, call))
+        let phase = match AssertUnwindSafe(login::run(&owner, &attempt, *prepared, call, discovery))
             .catch_unwind()
             .await
         {

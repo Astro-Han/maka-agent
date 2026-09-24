@@ -206,6 +206,7 @@ async fn plugin_step_surface_survives_retry_changes_only_between_steps_and_reope
         }));
         let session = input.invocation.session_id.clone();
         input.work = RunWork::Message {
+            allow_prior_unknown: false,
             source_messages: Vec::new(), message: "Use echo".into(),
             tools: ToolCatalog::default()
                 .with_workspace(maka_plugins::filesystem::ReadRoot::open(directory.path()).await.unwrap())

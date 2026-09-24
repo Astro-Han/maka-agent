@@ -25,11 +25,14 @@ mod files;
 mod i18n;
 mod motion;
 mod navigation;
+mod overlay;
 mod pages;
 mod providers;
+mod shutdown;
 mod state;
 mod terminal;
 mod theme;
+mod ui;
 mod view;
 
 use app::{Action, App, ConnectionState, Notice};
@@ -39,6 +42,7 @@ pub use i18n::{Locale, LocalePreference};
 use maka_client::{Client, Error, Notification};
 use maka_protocol::Operation;
 use serde_json::{Value, json};
+pub use shutdown::{ShutdownOutcome, ShutdownRequest};
 use std::{path::PathBuf, time::Duration};
 use tokio::{sync::mpsc, task::JoinSet};
 
@@ -50,6 +54,10 @@ pub struct Options {
 
 enum Completed {
     Providers(u64, Result<maka_client::ProviderDirectory, String>),
+    SandboxDefaults(
+        pages::manage::sandbox::defaults::Request,
+        Result<maka_protocol::configuration::policy::RuntimePolicySnapshot, String>,
+    ),
     Extension(
         pages::extensions::Request,
         Result<pages::extensions::Output, pages::extensions::io::Failure>,
@@ -67,6 +75,10 @@ enum Completed {
     Recap(
         pages::recap::Request,
         Result<Option<pages::recap::Receipt>, maka_client::RequestFailure>,
+    ),
+    Resumed(
+        pages::resume::Request,
+        Result<pages::resume::Output, maka_client::RequestFailure>,
     ),
     Revised(
         pages::revision::Request,
@@ -172,7 +184,15 @@ enum Completed {
     ),
 }
 
-pub async fn run(options: Options) -> Result<(), Error> {
+pub async fn run<F, C, S, D>(options: Options, connect: F, shutdown: S) -> Result<(), Error>
+where
+    F: Fn(PathBuf) -> C,
+    C: std::future::Future<Output = Result<(Client, mpsc::Receiver<Notification>), Error>>
+        + Send
+        + 'static,
+    S: Fn(ShutdownRequest) -> D,
+    D: std::future::Future<Output = Result<ShutdownOutcome, Error>> + Send + 'static,
+{
     let i18n = i18n::I18n::from_environment(options.locale)?;
     let (_guard, mut screen) = terminal::Guard::enter(&i18n)?;
     let previous = std::panic::take_hook();
@@ -210,9 +230,25 @@ pub async fn run(options: Options) -> Result<(), Error> {
     let mut effect = app.apply(Action::Connect);
     let mut dirty = true;
     let mut flushed = false;
+    let mut shutdown_target: Option<ShutdownRequest> = None;
+    // Host disconnection is expected during shutdown; this task must outlive
+    // the connection-scoped jobs and wait for actual storage/root release.
+    let mut shutdown_job = None;
     #[cfg(unix)]
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
+        if !app.closing && app.shutdown.prompt.is_none() {
+            shutdown_target = None;
+        }
+        if app.closing && flushed && shutdown_job.is_none() {
+            if let Some(target) = shutdown_target.clone() {
+                app.shutdown.stopping = true;
+                shutdown_job = Some(tokio::spawn(shutdown(target)));
+                dirty = true;
+            } else {
+                break;
+            }
+        }
         app.advance_revision_uploads();
         if !app.closing
             && let Some(request) = app.attachment_browse_request()
@@ -228,13 +264,17 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 (request, result)
             });
         }
-        if let Some(state) = &mut state {
+        if let Some(state) = &mut state
+            && !(app.closing && flushed)
+        {
             if app.closing && state.wait().is_some() {
                 state.force();
             }
             state.start(&app);
         }
-        if let Some(client) = &client {
+        if let Some(client) = &client
+            && !app.closing
+        {
             if let Some((ticket, saved, transfer)) = app.attachment_read_request() {
                 let client = client.clone();
                 attachment_jobs.spawn(async move {
@@ -278,6 +318,25 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     jobs.spawn(async move {
                         let result = pages::recap::execute(&client, &request).await;
                         Completed::Recap(request, result)
+                    });
+                }
+                dirty = true;
+            }
+            if let Some(request) = app.resume_request() {
+                if request.needs_checkpoint() {
+                    if let Some(state) = &mut state {
+                        state.submit_resume(request);
+                    } else {
+                        app.resume_after_checkpoint(
+                            &request,
+                            &Err("TUI checkpoint unavailable".into()),
+                        );
+                    }
+                } else {
+                    let client = client.clone();
+                    jobs.spawn(async move {
+                        let result = pages::resume::execute(&client, &request).await;
+                        Completed::Resumed(request, result)
                     });
                 }
                 dirty = true;
@@ -405,9 +464,8 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     )
                 });
             }
-            if app.navigation.current() == navigation::Route::Projects
-                && let Some(input) = app.projects.query()
-            {
+            // Always loaded: the sidebar labels project workspaces by name.
+            if let Some(input) = app.projects.query() {
                 let client = client.clone();
                 jobs.spawn(async move {
                     Completed::Projects(
@@ -521,6 +579,13 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     Completed::Credential(request, result)
                 });
             }
+            if let Some(request) = app.sandbox_defaults_request() {
+                let client = client.clone();
+                jobs.spawn(async move {
+                    let result = pages::manage::sandbox::defaults::read(&client).await;
+                    Completed::SandboxDefaults(request, result)
+                });
+            }
             if let Some(request) = app.removal_request() {
                 let client = client.clone();
                 jobs.spawn(async move {
@@ -538,6 +603,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
         // Paging can depend on the just-measured viewport. Dispatch before
         // waiting for input, including when motion is disabled and the app is idle.
         if let Some(client) = &client
+            && !app.closing
             && let Some(request) = app.chat.page_query()
         {
             let client = client.clone();
@@ -635,11 +701,33 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     dirty = true;
                     continue;
                 }
-                Action::Quit => {
+                Action::Quit | Action::Detach | Action::ConfirmQuit => {
+                    match action {
+                        Action::Quit => {
+                            shutdown_target = client.as_ref().map(|client| ShutdownRequest {
+                                root: app.root.clone(),
+                                identity: client.identity.clone(),
+                                interrupt: false,
+                            });
+                        }
+                        Action::ConfirmQuit => {
+                            if !matches!(app.shutdown.prompt, Some(shutdown::Prompt::Busy)) {
+                                continue;
+                            }
+                            if let Some(target) = &mut shutdown_target {
+                                target.interrupt = true;
+                            }
+                        }
+                        Action::Detach => shutdown_target = None,
+                        _ => unreachable!(),
+                    }
+                    app.shutdown = shutdown::State::default();
+                    flushed = false;
                     app.attachments.disconnect();
                     app.skills.disconnect();
                     app.extensions.disconnect();
                     app.recap.disconnect();
+                    app.resume.disconnect();
                     app.branch.disconnect();
                     app.revision.disconnect();
                     if let Some(state) = &mut state {
@@ -652,10 +740,13 @@ pub async fn run(options: Options) -> Result<(), Error> {
                         dirty = true;
                         continue;
                     }
-                    break;
+                    app.closing = true;
+                    flushed = true;
+                    continue;
                 }
                 Action::Connect => {
                     app.branch.disconnect();
+                    app.resume.disconnect();
                     app.revision.disconnect();
                     if let Some(state) = &mut state {
                         state.cancel_requests();
@@ -670,6 +761,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     app.skills.disconnect();
                     app.extensions.disconnect();
                     app.recap.disconnect();
+                    app.resume.disconnect();
                     app.creating = false;
                     jobs = JoinSet::new();
                     history_job = None;
@@ -680,8 +772,8 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     notifications = None;
                     oauth_service = None;
                     app.refreshing = false;
-                    let root = app.root.clone();
-                    jobs.spawn(async move { Completed::Connected(connect(root).await) });
+                    let connection = connect(app.root.clone());
+                    jobs.spawn(async move { Completed::Connected(connection.await) });
                 }
                 Action::StopTurn(target) => {
                     if let Some(client) = client.clone()
@@ -802,6 +894,22 @@ pub async fn run(options: Options) -> Result<(), Error> {
         let state_wait = state.as_ref().and_then(state::State::wait);
         let oauth_wait = app.oauth_wait();
         tokio::select! {
+            result = async {
+                match &mut shutdown_job {
+                    Some(job) => job.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                shutdown_job = None;
+                app.closing = false;
+                match result {
+                    Ok(Ok(ShutdownOutcome::Stopped)) => break,
+                    Ok(Ok(ShutdownOutcome::Busy)) => app.shutdown.show(shutdown::Prompt::Busy),
+                    Ok(Err(error)) => app.shutdown.show(shutdown::Prompt::Failed(error.to_string())),
+                    Err(error) => app.shutdown.show(shutdown::Prompt::Failed(error.to_string())),
+                }
+                dirty = true;
+            }
             _ = async {
                 match oauth_wait {
                     Some(wait) => tokio::time::sleep(wait).await,
@@ -836,6 +944,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     jobs.spawn(async move {
                         let result=pages::recap::execute(&client,&request).await;
                         Completed::Recap(request,result)
+                    });
+                }
+                if let Some(request) = written.resume
+                    && app.resume_after_checkpoint(&request, &written.result)
+                    && let Some(client) = client.clone() {
+                    jobs.spawn(async move {
+                        let result = pages::resume::execute(&client, &request).await;
+                        Completed::Resumed(request, result)
                     });
                 }
                 if let Some(request) = written.extension
@@ -891,7 +1007,6 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 if app.state_error.is_some() { app.closing = false; }
                 if app.closing && state.as_ref().is_some_and(state::State::idle) {
                     flushed = true;
-                    break;
                 }
                 dirty = true;
             }
@@ -991,6 +1106,10 @@ pub async fn run(options: Options) -> Result<(), Error> {
                         app.recap_completed(request,result);
                         if let Some(state) = &mut state { state.changed(); }
                     }
+                    Some(Ok(Completed::Resumed(request, result))) => {
+                        app.resume_completed(request, result);
+                        if let Some(state) = &mut state { state.changed(); }
+                    }
                     Some(Ok(Completed::Managed(ticket, result))) => {
                         app.management_completed(*ticket, result);
                         if let Some(state) = &mut state { state.changed(); }
@@ -1007,6 +1126,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     Some(Ok(Completed::Models(request,result)))=>app.models_completed(request,result),
                     Some(Ok(Completed::EnabledModels(request,result)))=>app.enabled_models_completed(request,result),
                     Some(Ok(Completed::Credential(request,result)))=>app.credential_completed(request,result),
+                    Some(Ok(Completed::SandboxDefaults(request,result)))=>app.sandbox_defaults_completed(request,result),
                     Some(Ok(Completed::Onboard(ticket,result)))=>app.onboarding_completed(ticket,result),
                     Some(Ok(Completed::History(request, result))) => {
                         history_job = None;
@@ -1189,6 +1309,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 app.skills.disconnect();
                 app.extensions.disconnect();
                 app.recap.disconnect();
+                app.resume.disconnect();
                 app.abandon_management();
                 app.branch.disconnect();
                     app.revision.disconnect();
@@ -1214,6 +1335,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
     app.skills.disconnect();
     app.extensions.disconnect();
     app.recap.disconnect();
+    app.resume.disconnect();
     attachment_jobs.abort_all();
     jobs.abort_all();
     // Once Save was pressed, finish the bounded local write and checkpoint the
@@ -1239,23 +1361,6 @@ fn close_observation(jobs: &mut JoinSet<Completed>, client: Client, id: String) 
         }
         Completed::ObservationClosed
     });
-}
-
-async fn connect(root: PathBuf) -> Result<(Client, mpsc::Receiver<Notification>), Error> {
-    tokio::time::timeout(Duration::from_secs(6), async {
-        let discovery =
-            tokio::task::spawn_blocking(move || maka_client::local::read_discovery(&root))
-                .await??;
-        let stream = maka_client::local::open_stream(&discovery.endpoint).await?;
-        Ok(Client::connect(
-            stream,
-            &discovery.root_id,
-            &discovery.host_epoch,
-            maka_client::Operations,
-        )
-        .await?)
-    })
-    .await?
 }
 
 async fn termination_signal(#[cfg(unix)] signal: &mut tokio::signal::unix::Signal) {

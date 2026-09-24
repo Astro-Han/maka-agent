@@ -140,7 +140,7 @@ fn plugin_form_saves_in_place_and_preserves_a_stale_draft_without_model_executio
     );
     tui.click_text("Pinned");
     tui.wait_for("━●");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Draft preserved");
@@ -160,7 +160,7 @@ fn plugin_form_saves_in_place_and_preserves_a_stale_draft_without_model_executio
     tui.filter_command("Discard draft and reopen");
     tui.click_text("Discard draft and reopen");
     tui.wait_for("maka.skills");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     reopened.wait_for("maka.skills");
@@ -174,7 +174,7 @@ fn plugin_form_saves_in_place_and_preserves_a_stale_draft_without_model_executio
     );
     reopened.click_text("Skills");
     reopened.wait_for("Next");
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     runtime.block_on(async {
         assert!(

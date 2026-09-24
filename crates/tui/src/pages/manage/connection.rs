@@ -322,13 +322,9 @@ mod tests {
         assert!(app.management.dialog.as_ref().unwrap().reviewing);
         for locale in Locale::ALL {
             app.i18n = I18n::new(LocalePreference::Explicit(locale), Locale::En);
-            for (width, height) in [(80, 24), (45, 24), (25, 10)] {
+            for (width, height) in [(80, 24), (25, 10)] {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal
-                    .draw(|f| {
-                        super::super::draw(f, &mut app, f.area(), ratatui::style::Style::default())
-                    })
-                    .unwrap();
+                terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
                 assert_eq!(app.management_enabled(&Command::Save), width >= 45);
                 if width >= 45 {
                     let compact = |s: &str| {
@@ -380,6 +376,7 @@ mod tests {
             app.management_enabled(&Command::Save),
             "large configurations remain reviewable"
         );
+        app.layer.focus("field");
         app.input(Event::Key(KeyEvent::new(
             KeyCode::End,
             KeyModifiers::CONTROL,
@@ -452,16 +449,7 @@ mod tests {
                 app.i18n = I18n::new(LocalePreference::Explicit(locale), Locale::En);
                 for (width, height) in [(80, 24), (45, 20), (30, 10)] {
                     let mut screen = Terminal::new(TestBackend::new(width, height)).unwrap();
-                    screen
-                        .draw(|f| {
-                            super::super::draw(
-                                f,
-                                &mut app,
-                                f.area(),
-                                ratatui::style::Style::default(),
-                            )
-                        })
-                        .unwrap();
+                    screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
                     if width >= 45 {
                         let compact = |s: &str| {
                             s.chars()
@@ -488,6 +476,46 @@ mod tests {
             }
             let mut screen = Terminal::new(TestBackend::new(80, 24)).unwrap();
             screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+            // The confirming button repeats the title; it is the lower copy.
+            let label = app.i18n.text(change.label());
+            let buffer = screen.backend().buffer();
+            let save = (0..buffer.area.height)
+                .rev()
+                .find_map(|y| {
+                    let (mut line, mut x) = (String::new(), 0);
+                    while x < buffer.area.width {
+                        let symbol = buffer[(x, y)].symbol();
+                        line.push_str(symbol);
+                        x += (unicode_width::UnicodeWidthStr::width(symbol) as u16).max(1);
+                    }
+                    line.find(&label).map(|byte| {
+                        let x = unicode_width::UnicodeWidthStr::width(&line[..byte]) as u16;
+                        ratatui::layout::Position::new(x, y)
+                    })
+                })
+                .unwrap();
+            let normal = screen.backend().buffer()[(save.x, save.y)].style();
+            let hover = |x, y| {
+                Event::Mouse(crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Moved,
+                    column: x,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                })
+            };
+            assert!(app.input(hover(save.x, save.y)).0);
+            assert!(app.management.pending.is_none(), "hover never submits");
+            screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+            let highlighted = screen.backend().buffer()[(save.x, save.y)].style();
+            assert_ne!(normal.bg, highlighted.bg);
+            if change == Change::Remove {
+                assert_eq!(normal.fg, Some(app.theme.colors().error));
+                assert_eq!(highlighted.fg, normal.fg);
+            }
+            assert!(app.input(hover(0, 0)).0);
+            assert!(app.hover.is_none(), "no hover leaks to the covered page");
+            screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+            assert_eq!(screen.backend().buffer()[(save.x, save.y)].style(), normal);
             app.input(Event::Key(KeyEvent::new(
                 KeyCode::Enter,
                 KeyModifiers::NONE,

@@ -32,6 +32,8 @@ pub(super) struct Content {
     pub text: String,
     pub changes: Vec<super::layout::diff::Row>,
     pub file: Option<crate::files::Link>,
+    /// Source bytes of the header's verb, emphasized like a label.
+    pub emphasis: Option<std::ops::Range<usize>>,
 }
 impl From<String> for Content {
     fn from(text: String) -> Self {
@@ -39,6 +41,7 @@ impl From<String> for Content {
             text,
             changes: vec![],
             file: None,
+            emphasis: None,
         }
     }
 }
@@ -334,6 +337,7 @@ impl Card<'_> {
             }
         }
         Content {
+            emphasis: Some(0..label.len()),
             text,
             changes: changes.unwrap_or_default(),
             file,

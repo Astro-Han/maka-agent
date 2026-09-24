@@ -38,17 +38,32 @@ pub async fn run(
     if cancellation.is_cancelled() {
         return Err(RunError::Cancelled);
     }
-    match inner
-        .log
-        .prepare_prune_candidates(&input.invocation.session_id, None, 0, 0, None)
-        .await
-    {
-        Ok(_) => {}
+    let manual_message = matches!(
+        &input.work,
+        RunWork::Message {
+            allow_prior_unknown: true,
+            ..
+        }
+    );
+    let prior_unknown = if manual_message {
+        inner
+            .log
+            .check_manual_message_history(&input.invocation.session_id)
+            .await
+    } else {
+        inner
+            .log
+            .prepare_prune_candidates(&input.invocation.session_id, None, 0, 0, None)
+            .await
+            .map(|_| false)
+    };
+    let prior_unknown = match prior_unknown {
+        Ok(value) => value,
         Err(StoreError::InvalidTransition(reason)) => {
             return Err(RunError::ReconciliationRequired(reason));
         }
         Err(error) => return Err(error.into()),
-    }
+    };
     let claim = match (prepared_claim, &input.work) {
         (Some(claim), _) => Some(claim),
         (
@@ -102,7 +117,9 @@ pub async fn run(
     .await?;
     let _ = admitted.send(());
     let result = async {
-        prune::run(&inner, &input, &cancellation).await?;
+        if !prior_unknown {
+            prune::run(&inner, &input, &cancellation).await?;
+        }
         let model_work = match &input.work {
             RunWork::Message {
                 tools, max_steps, ..
@@ -124,6 +141,7 @@ pub async fn run(
                 &cancellation,
                 continuation_base,
                 handoff.as_ref().expect("model Runs own a handoff gate"),
+                prior_unknown,
             )
             .await
             .map(|outcome| (outcome, None))

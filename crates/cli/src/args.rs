@@ -63,7 +63,7 @@ enum Command {
 
 #[derive(Args, Default)]
 struct Tui {
-    /// Existing native State Root. Defaults to the native Host installation root.
+    /// Native State Root, initialized automatically when empty. Defaults to the account root.
     #[arg(long, value_name = "DIRECTORY")]
     root: Option<PathBuf>,
     /// UI language: auto, zh-CN, zh-TW, en. Overrides MAKA_LOCALE.
@@ -84,11 +84,15 @@ impl Tui {
                 .ok_or("missing account data directory")?
                 .join("runtime-host-rust"),
         };
-        maka_tui::run(maka_tui::Options {
-            root,
-            locale: self.locale,
-            profile: self.profile.unwrap_or_else(|| "default".into()),
-        })
+        maka_tui::run(
+            maka_tui::Options {
+                root,
+                locale: self.locale,
+                profile: self.profile.unwrap_or_else(|| "default".into()),
+            },
+            crate::deployment::connect_local,
+            crate::deployment::shutdown_local,
+        )
         .await
     }
 }

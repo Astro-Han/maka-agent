@@ -88,8 +88,7 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
     tui.wait_for("vision.png");
     tui.click_text("vision.png");
     tui.wait_for("+1 · Ready");
-    tui.click_text("Workspace");
-    tui.wait_for("Other session");
+    tui.wait_for("Other session"); // Sessions are listed in the sidebar.
     tui.click_text("Other session");
     tui.wait_until(|screen| {
         screen
@@ -104,7 +103,6 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
             .screen
             .contains("attachment 中文.txt")
     );
-    tui.click_text("Workspace");
     tui.wait_for("Attachment session");
     tui.click_text("Attachment session");
     tui.wait_for("Ready");
@@ -114,7 +112,7 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
     tui.wait_for("attachment 中文.txt");
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
     tui.wait_until(|s| !s.contains("Remove"));
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let checkpoint = directory
         .path()
@@ -175,7 +173,7 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
     let screen = reopened.screen.snapshot().unwrap().screen;
     assert!(screen.contains("attachment 中文.txt"));
     assert!(screen.contains("vision.png"));
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     let body = runtime.block_on(model).unwrap();
     assert!(body.to_string().contains("attachment 中文.txt"));

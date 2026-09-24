@@ -83,7 +83,9 @@ fn enabled_models_searches_full_catalog_keeps_manual_ids_and_applies_only_confir
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Workspace");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("Enabled fixture");
@@ -135,7 +137,7 @@ fn enabled_models_searches_full_catalog_keeps_manual_ids_and_applies_only_confir
     tui.wait_for("[✓] fixture-model");
     tui.click_last_text("fixture-model");
     tui.wait_for("clears the Host default");
-    tui.click_text("⛭ Settings"); // Outside closes only the modal, no write or navigation.
+    tui.click_text("⛭  Settings"); // Outside closes only the modal, no write or navigation.
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("Renamed elsewhere"));
     runtime.block_on(async {
         assert_eq!(catalog(&client).await.0["modelId"], "fixture-model");
@@ -163,7 +165,7 @@ fn enabled_models_searches_full_catalog_keeps_manual_ids_and_applies_only_confir
         );
         assert_eq!(items[0]["requestBodyOverlay"]["temperature"], 0.2);
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

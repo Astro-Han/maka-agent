@@ -57,7 +57,9 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.read_size = 128; // Never click a partially received command palette.
     tui.wait_for("Workspace");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     // Settings also names the default connection; wait for the actual catalog row.
@@ -150,7 +152,7 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
         assert!(headers.contains("Bearer rotated-probe-secret"));
         stream
     });
-    tui.click_text("⛭ Settings"); // Outside closes, but does not cancel or navigate through.
+    tui.click_text("⛭  Settings"); // Outside closes, but does not cancel or navigate through.
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("Verified fixture"));
     runtime.block_on(support::json_response(stream, "200 OK", json!({})));
     runtime.block_on(async {
@@ -191,7 +193,7 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
     tui.send(b"\x1b");
     tui.wait_until(|s| !s.contains("incur usage"));
     assert_eq!(runtime.block_on(catalog(&client)), updated);
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

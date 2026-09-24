@@ -146,7 +146,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     tui.wait_for("edited second original");
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
     tui.wait_until(|s| !s.contains("Revise this turn"));
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
     assert_eq!(saved["version"], 15);
@@ -187,7 +187,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
     reopened.wait_for("revised second original");
     reopened.click_text("Run revision");
     reopened.wait_for("Revision accepted.");
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     runtime.block_on(wait_completed(&client, &request.target_session_id, &turn));
     let bodies = runtime.block_on(model).unwrap();
@@ -292,7 +292,7 @@ fn revision_edits_ordered_inputs_preserves_attachments_and_reopens_without_resub
             .screen
             .contains("Composer stays here")
     );
-    recovered.send(b"\x11");
+    recovered.close_terminal();
     recovered.finish();
     let saved: Value = serde_json::from_slice(&std::fs::read(checkpoint).unwrap()).unwrap();
     assert!(saved["revision"].is_null());

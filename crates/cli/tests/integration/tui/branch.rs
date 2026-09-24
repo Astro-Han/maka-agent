@@ -92,7 +92,7 @@ fn branch_preserves_selected_history_and_draft_and_reopens_by_original_receipt()
     tui.wait_for("same working directory.");
     tui.click_text("Create branch");
     tui.wait_for("Branch is ready.");
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     let checkpoint = directory
         .path()
@@ -157,7 +157,7 @@ fn branch_preserves_selected_history_and_draft_and_reopens_by_original_receipt()
         !screen.contains("Preserved branch draft"),
         "branch does not adopt original draft"
     );
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(checkpoint).unwrap()).unwrap();

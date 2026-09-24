@@ -35,37 +35,46 @@ fn restart_keeps_forward_history_and_keyboard_control_without_replaying_actions(
     );
     host.wait_for_registration();
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    tui.wait_for("No sessions yet.");
+    tui.wait_for("No sessions yet");
     tui.click_text("Settings");
-    tui.wait_for("Icons: Unicode");
-    tui.send(b"\t\t\x1bOP"); // Focus Symbols, then F1 Help.
+    tui.wait_for("Maka dark ▾");
+    // Interface category, its first row, then Icons; the footer names the focus.
+    tui.send(b"\x1b[B");
+    tui.wait_for("Unicode ▾");
+    tui.send(b"\x1b[C");
+    tui.wait_for("Choose Language");
+    tui.send(b"\x1b[B");
+    tui.wait_for("Choose Icons");
+    tui.send(b"\x1bOP"); // F1 Help.
     tui.wait_for("Move focus between controls");
     tui.send(b"\x1b[1;3D"); // Alt+Left.
-    tui.wait_for("Icons: Unicode");
-    tui.send(b"\x11");
+    tui.wait_for("Unicode ▾");
+    tui.close_terminal();
     tui.finish();
 
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    reopened.wait_for("Icons: Unicode"); // Restoring must not toggle the focused control.
+    reopened.wait_for("Unicode ▾"); // Restoring must not change the focused control.
     reopened.send(b"\r");
-    reopened.wait_for("Icons: ASCII"); // Same control, not the first Palette button.
+    reopened.wait_for("○ ASCII"); // Same control's chooser, not the first Palette row.
+    reopened.send(b"\x1b[B\r");
+    reopened.wait_for("ASCII v");
     reopened.send(b"\x1b[1;3C");
     reopened.wait_for("Move focus between controls");
     reopened.send(b"\x1b[1;3D");
-    reopened.wait_for("Icons: ASCII");
+    reopened.wait_for("ASCII v");
     reopened.send(b"\x1b[1;3D");
-    reopened.wait_for("No sessions yet.");
-    reopened.click_text("Host");
+    reopened.wait_for("No sessions yet");
+    reopened.command("Open Host connection");
     reopened.wait_for("Host epoch:");
     reopened.send(b"\x1b[1;3C"); // New destination replaces the previous forward branch.
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
 
     let mut branched = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     branched.wait_for("Host epoch:");
     branched.send(b"\x1b[1;3D");
-    branched.wait_for("No sessions yet.");
-    branched.send(b"\x11");
+    branched.wait_for("No sessions yet");
+    branched.close_terminal();
     branched.finish();
     host.retire_registered();
 }

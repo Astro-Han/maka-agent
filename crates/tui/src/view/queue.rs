@@ -122,7 +122,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     }
 }
 
-pub(super) fn edit(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
+pub(crate) fn edit(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     if app.queue.edit.is_none() {
         return;
     }

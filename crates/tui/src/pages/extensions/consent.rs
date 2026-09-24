@@ -18,64 +18,21 @@
  */
 
 use super::{Action, App, Command, Input};
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use crate::ui::{Role, Sheet, Tone};
 use maka_plugins::authorization::{Capability, Request, Target};
 use maka_protocol::plugin::TerminalViewProjection;
-use ratatui::{
-    Frame,
-    layout::{Alignment, Margin, Rect},
-    style::Style,
-    widgets::{Block, BorderType, Paragraph},
-};
-use unicode_width::UnicodeWidthStr;
 
 pub(super) struct Consent {
     pub view: Box<TerminalViewProjection>,
     pub input: Input,
     pub proposal: Request,
-    pub focus: usize,
+    /// Set only while the terms are on screen: approval needs them seen.
     pub rendered: bool,
 }
-impl App {
-    pub fn extensions_consent_input(&mut self, event: Event) -> (bool, Option<Action>) {
-        let command = match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
-                KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return (true, Some(Action::Quit));
-                }
-                KeyCode::Esc => Some(Command::DismissConsent),
-                KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => {
-                    self.extensions.consent.as_mut().unwrap().focus ^= 1;
-                    None
-                }
-                KeyCode::Enter => Some(if self.extensions.consent.as_ref().unwrap().focus == 0 {
-                    Command::DismissConsent
-                } else {
-                    Command::ApproveConsent
-                }),
-                _ => None,
-            },
-            Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
-                self.hits.iter().find_map(|hit| match &hit.action {
-                    Action::Extension(
-                        command @ (Command::ApproveConsent | Command::DismissConsent),
-                    ) if hit.area.contains((mouse.column, mouse.row).into()) => {
-                        Some(command.clone())
-                    }
-                    _ => None,
-                })
-            }
-            _ => None,
-        };
-        (
-            true,
-            command.and_then(|command| self.apply(Action::Extension(command))),
-        )
-    }
-}
-pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
-    let state = app.extensions.consent.as_ref().unwrap();
-    let width = area.width.saturating_sub(4).min(68);
+
+/// Cancel is the default; authorizing always takes a deliberate move.
+pub(crate) fn sheet(app: &App) -> Option<Sheet<Action>> {
+    let state = app.extensions.consent.as_ref()?;
     let mut body = format!(
         "{}\n\n{}\n\n",
         visible(&state.view.package_id),
@@ -88,70 +45,30 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     }
     body.push('\n');
     body.push_str(&app.i18n.text("extensions-consent-duration"));
-    let cancel = app.i18n.text("session-cancel");
-    let allow = app.i18n.text("extensions-authorize");
-    let cancel_width = cancel.width() as u16 + 4;
-    let allow_width = allow.width() as u16 + 4;
-    let lines = crate::pages::manage::view::note_lines(&body, width.saturating_sub(6));
-    let height = lines.len() as u16 + 6;
-    app.hits.clear();
-    if width < (cancel_width + allow_width + 8).max(34) || height > area.height.saturating_sub(2) {
-        app.extensions.consent.as_mut().unwrap().rendered = false;
-        app.modal_area = Some(area);
-        crate::view::clear_overlay(frame, area);
-        frame.render_widget(
-            Paragraph::new(app.i18n.text("terminal-small")).style(base),
-            area.inner(Margin::new(2, 1)),
-        );
-        return;
-    }
-    let focus = state.focus;
-    app.extensions.consent.as_mut().unwrap().rendered = true;
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    let block = Block::bordered()
-        .title(app.i18n.text("extensions-consent-title"))
-        .title_alignment(Alignment::Center)
-        .style(base)
-        .border_style(Style::default().fg(app.theme.colors().accent))
-        .border_type(if app.chrome.ascii {
-            BorderType::Plain
-        } else {
-            BorderType::Rounded
-        });
-    let inner = block.inner(popup).inner(Margin::new(2, 0));
-    app.modal_area = Some(popup);
-    crate::view::clear_overlay(frame, popup);
-    frame.render_widget(block, popup);
-    frame.render_widget(
-        Paragraph::new(lines).style(base),
-        Rect::new(inner.x, inner.y + 1, inner.width, height - 5),
-    );
-    let x = inner.x + inner.width.saturating_sub(cancel_width + allow_width + 2) / 2;
-    for (x, width, label, command, selected) in [
-        (x, cancel_width, cancel, Command::DismissConsent, focus == 0),
-        (
-            x + cancel_width + 2,
-            allow_width,
-            allow,
-            Command::ApproveConsent,
-            focus == 1,
-        ),
-    ] {
-        crate::view::button(
-            frame,
-            app,
-            Rect::new(x, inner.bottom() - 1, width, 1),
-            &label,
-            Action::Extension(command),
-            selected,
-        );
-    }
+    Some(
+        Sheet::new(
+            state.proposal.operation_id.to_string(),
+            app.i18n.text("extensions-consent-title"),
+        )
+        .text("terms", &body, Tone::Normal)
+        .button(
+            "cancel",
+            app.i18n.text("session-cancel"),
+            Role::Normal,
+            Action::Extension(Command::DismissConsent),
+            true,
+        )
+        .button(
+            "authorize",
+            app.i18n.text("extensions-authorize"),
+            Role::Primary,
+            Action::Extension(Command::ApproveConsent),
+            app.enabled(&Action::Extension(Command::ApproveConsent)),
+        )
+        .focus("cancel"),
+    )
 }
+
 fn visible(value: &str) -> String {
     value
         .chars()

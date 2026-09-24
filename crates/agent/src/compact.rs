@@ -93,6 +93,7 @@ pub(super) async fn run(
             cancellation,
             continuation_base,
             &input.invocation.invocation_id,
+            false,
         )
         .await?;
         request.push(maka_model::prompt::Message::user(format!("{instruction}\n\nNow write the structured summary of the conversation above. Output only the summary.")));

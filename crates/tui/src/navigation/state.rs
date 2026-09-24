@@ -75,7 +75,10 @@ impl Saved {
                     | Route::Extensions
             ),
             Focus::Composer | Focus::Transcript => matches!(route, Route::Session(_)),
-            Focus::Page => matches!(route, Route::Settings | Route::Host | Route::Help),
+            Focus::Page => matches!(
+                route,
+                Route::Workspace | Route::Settings | Route::Host | Route::Help
+            ),
             Focus::Queue => false,
         };
         focus
@@ -100,10 +103,14 @@ impl State {
     fn capture(app: &App) -> Self {
         Self {
             focus: app.focus,
-            control: app.page_actions().get(app.selected_control).cloned(),
+            control: if app.navigation.current() == Route::Settings {
+                app.settings.focused_setting()
+            } else {
+                app.page_actions().get(app.selected_control).cloned()
+            },
             details: app.chrome.details,
             navigation: (app.focus == Focus::Navigation)
-                .then(|| app.nav_routes().get(app.selected_nav).cloned())
+                .then(|| app.sidebar.focused_route())
                 .flatten(),
         }
     }
@@ -168,6 +175,11 @@ impl App {
 
     pub(crate) fn leave_page(&mut self) {
         let route = self.navigation.current();
+        match route {
+            Route::Settings => self.settings.surface.leave(),
+            Route::Workspace => self.home.surface.leave(),
+            _ => {}
+        }
         let state = State::capture(self);
         self.page_states.retain(|(key, _)| *key != route);
         self.page_states.push_back((route, state));
@@ -187,11 +199,7 @@ impl App {
             self.inbox.selected = self.inbox.items.first().map(|item| item.id.clone());
         }
         self.focus = match route {
-            Route::Workspace
-            | Route::Inbox
-            | Route::Projects
-            | Route::Connections
-            | Route::Extensions => Focus::List,
+            Route::Inbox | Route::Projects | Route::Connections | Route::Extensions => Focus::List,
             Route::Session(_) => Focus::Composer,
             _ => Focus::Page,
         };
@@ -201,10 +209,17 @@ impl App {
             let (_, state) = self.page_states.remove(index).unwrap();
             self.focus = state.focus;
             self.chrome.details = state.details;
-            if let Some(route) = state.navigation
-                && let Some(index) = self.nav_routes().iter().position(|item| *item == route)
+            if let Some(route) = &state.navigation {
+                self.sidebar.focus_route(route);
+            }
+            // Home was a list before the sidebar became the session directory.
+            if route == Route::Workspace && self.focus == Focus::List {
+                self.focus = Focus::Page;
+            }
+            if route == Route::Settings
+                && let Some(action) = &state.control
             {
-                self.selected_nav = index;
+                self.settings.focus_setting(action);
             }
             self.selected_control = state
                 .control
@@ -238,8 +253,8 @@ mod tests {
         assert!(!app.bind_root("different-root-at-the-same-path"));
         assert_eq!(app.drafts["a"].text(), "draft A");
         app.focus = Focus::Transcript;
-        app.apply(Action::Visit(Route::Settings));
-        app.selected_control = 2;
+        app.apply(Action::Visit(Route::Host));
+        app.selected_control = 1;
         app.apply(Action::Visit(Route::Session("b".into())));
         app.drafts.get_mut("b").unwrap().insert("draft B");
         app.apply(Action::ToggleDetails);
@@ -250,9 +265,9 @@ mod tests {
         app.apply(Action::Back);
         assert!(app.chrome.details);
         assert_eq!(app.drafts["b"].text(), "draft B");
-        app.apply(Action::Visit(Route::Settings));
+        app.apply(Action::Visit(Route::Host));
         assert_eq!(app.focus, Focus::Page);
-        assert_eq!(app.selected_control, 2);
-        assert_eq!(app.page_actions()[2], Action::ToggleSymbols);
+        assert_eq!(app.selected_control, 1);
+        assert_eq!(app.page_actions()[1], Action::Connect);
     }
 }

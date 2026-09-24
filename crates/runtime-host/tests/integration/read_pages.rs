@@ -66,6 +66,7 @@ async fn scenario() {
                 .serve(host.clone(), cancel),
         );
         let mut peer = Peer::new(host.clone(), "read-client").await;
+        peer.wait_for_plugins().await;
         if !reopened {
             for session in ["reader", "foreign"] {
                 let created = peer.rpc(Operation::SessionCreate.as_str(), json!({"sessionId":session,

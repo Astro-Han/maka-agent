@@ -96,6 +96,7 @@ pub fn project(prefix: &LogPrefix, session: &str) -> Result<Vec<Message>, RunErr
         &mut Vec::new(),
         false,
         None,
+        false,
     )
 }
 

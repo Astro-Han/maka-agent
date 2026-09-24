@@ -23,6 +23,7 @@ use super::*;
 fn simultaneous_resize_and_input_do_not_wait_for_another_key() {
     let directory = tempfile::tempdir().unwrap();
     let missing = directory.path().join("not-created");
+    std::fs::write(&missing, "not a directory").unwrap();
     let mut tui = Pty::spawn(&["--root", missing.to_str().unwrap()]);
     tui.wait_for("connection failed");
     for size in [(55, 28), (120, 40), (80, 24), (100, 32)] {

@@ -31,17 +31,17 @@ pub mod oauth;
 mod project;
 mod references;
 pub mod removal;
+pub mod sandbox;
 pub(crate) mod view;
 pub use view::draw;
+pub(crate) use view::{draw_field, sheet};
 
 use crate::{
     app::{Action, App, ConnectionState},
     editor::Editor,
     navigation::Route,
 };
-use crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
-};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use maka_client::{Client, RequestFailure};
 use maka_protocol::session::*;
 
@@ -61,6 +61,7 @@ impl Target {
 enum Entity {
     Oauth,
     Defaults,
+    SandboxDefaults,
     Session {
         id: String,
         revision: u64,
@@ -86,6 +87,7 @@ pub enum Kind {
     Project,
     Locations,
     Model,
+    Sandbox,
     Archive,
     Restore,
     Remove,
@@ -105,6 +107,8 @@ impl Kind {
             (Self::Locations, _) => "project-locations",
             (Self::Model, Entity::Defaults) => "default-model-title",
             (Self::Model, _) => "session-model-change",
+            (Self::Sandbox, Entity::SandboxDefaults) => "sandbox-default-title",
+            (Self::Sandbox, _) => "session-sandbox-change",
             (Self::Rename, Entity::Project { .. }) => "project-rename",
             (Self::Archive, Entity::Project { .. }) => "project-archive",
             (Self::Restore, Entity::Project { .. }) => "project-restore",
@@ -115,6 +119,7 @@ impl Kind {
                 | Self::Relink
                 | Self::Locations
                 | Self::Model
+                | Self::Sandbox
                 | Self::Connection(_)
                 | Self::Credential(_) => unreachable!(),
                 Self::Rename => "session-rename",
@@ -161,6 +166,7 @@ pub enum Command {
     ChooseProject(choose_project::Command),
     Locations(locations::Command),
     Models(models::Command),
+    Sandbox(sandbox::Command),
     EnabledModels(enabled_models::Command),
     Save,
     Edit,
@@ -178,6 +184,7 @@ impl Command {
             Self::ChooseProject(command) => command.label(),
             Self::Locations(command) => command.label(),
             Self::Models(command) => command.label(),
+            Self::Sandbox(mode) => mode.label(),
             Self::EnabledModels(command) => command.label(),
             Self::Save => "session-save",
             Self::Edit => "project-relink-edit",
@@ -195,6 +202,9 @@ pub struct Ticket {
     project_id: Option<String>,
     model: Option<models::Choice>,
     thinking_level: Option<ThinkingLevel>,
+    sandbox_mode: Option<SandboxMode>,
+    approval_policy: Option<ApprovalPolicy>,
+    policy_revision: Option<u64>,
     enabled_model_ids: Option<Vec<String>>,
     model_overrides:
         Option<std::collections::BTreeMap<String, maka_protocol::configuration::ModelOverride>>,
@@ -202,6 +212,7 @@ pub struct Ticket {
     credential: Option<Box<maka_protocol::configuration::CredentialStatus>>,
 }
 pub enum Updated {
+    Policy(maka_protocol::configuration::policy::RuntimePolicyMutationResult),
     ConnectionTest(maka_protocol::connection_effects::ConnectionTestRunResult),
     ModelFetch(maka_protocol::connection_effects::ConnectionModelFetchResult),
     Credential(maka_protocol::configuration::CredentialMutationResult),
@@ -213,6 +224,7 @@ pub enum Updated {
 
 #[derive(Default)]
 pub struct Management {
+    sandbox_sequence: u64,
     pub oauth: oauth::State,
     pub dialog: Option<Dialog>,
     pending: Option<Ticket>,
@@ -245,12 +257,29 @@ pub struct Dialog {
     chooser: Option<choose_project::Chooser>,
     locations: Option<locations::Locations>,
     models: Option<models::Models>,
+    sandbox: Option<sandbox::State>,
     enabled_models: Option<enabled_models::State>,
     credentials: Option<credentials::State>,
     removal: Option<removal::State>,
 }
 
+impl Dialog {
+    /// Presented as a kernel sheet. OAuth, enabled models, locations and
+    /// the directory browser still draw their own sub-view.
+    pub(crate) fn in_sheet(&self) -> bool {
+        self.kind != Kind::Oauth
+            && self.enabled_models.is_none()
+            && self.locations.is_none()
+            && self.browser.is_none()
+    }
+}
+
 pub async fn execute(client: &Client, ticket: &Ticket) -> Result<Updated, RequestFailure> {
+    if matches!(ticket.target.entity, Entity::SandboxDefaults) {
+        return sandbox::defaults::write(client, ticket)
+            .await
+            .map(Updated::Policy);
+    }
     if matches!(ticket.kind, Kind::Credential(_)) {
         return credentials::execute(client, ticket).await;
     }
@@ -307,6 +336,27 @@ pub async fn execute(client: &Client, ticket: &Ticket) -> Result<Updated, Reques
                 })
                 .await
                 .map(Updated::Removal);
+        }
+        Kind::Sandbox => {
+            let mut patch = serde_json::json!({});
+            if let Some(mode) = ticket.sandbox_mode {
+                patch["sandboxMode"] = serde_json::to_value(mode).unwrap();
+            }
+            if let Some(approval) = ticket.approval_policy {
+                patch["approvalPolicy"] = serde_json::to_value(approval).unwrap();
+            }
+            client
+                .update_session_configuration(
+                    decode_session_configuration_update_input(&serde_json::json!({
+                        "sessionId":id,"expectedRevision":revision,"patch":patch
+                    }))
+                    .map_err(|e| {
+                        RequestFailure::NotDispatched(maka_client::ClientError::Protocol(
+                            e.to_string(),
+                        ))
+                    })?,
+                )
+                .await
         }
         Kind::Model => {
             let choice = ticket.model.as_ref().ok_or_else(|| {
@@ -398,6 +448,13 @@ impl App {
         if self.navigation.current() == Route::Connections {
             return self.connection_management_commands(root_id, epoch);
         }
+        if self.navigation.current() == Route::Settings {
+            return self
+                .sandbox_defaults_action()
+                .into_iter()
+                .map(|action| (action, "sandbox-default-title"))
+                .collect();
+        }
         let item = match self.navigation.current() {
             Route::Session(id) => match &self.sessions.detail {
                 super::sessions::Detail::Ready(item) if item.id == id => item.as_ref(),
@@ -450,6 +507,7 @@ impl App {
             },
         ];
         if !item.is_archived {
+            kinds.push(Kind::Sandbox);
             kinds.push(Kind::Workspace);
             kinds.push(Kind::Project);
             if item.backend == Backend::AiSdk {
@@ -471,6 +529,13 @@ impl App {
             Command::CredentialRetry => self.credential_retry_enabled(),
             Command::RemovalQuery => self.removal_query_enabled(),
             Command::Models(command) => self.models_enabled(command),
+            Command::Sandbox(_) => self.management.dialog.as_ref().is_some_and(|d| {
+                d.sandbox.as_ref().is_some_and(sandbox::State::loaded)
+                    && d.visible
+                    && !d.blocked
+                    && self.management.pending.is_none()
+                    && self.management_identity(&d.target)
+            }),
             Command::EnabledModels(command) => self.enabled_models_enabled(command),
             Command::Locations(command) => self.locations_enabled(command),
             Command::Browse => self.management.dialog.as_ref().is_some_and(|d| {
@@ -492,6 +557,7 @@ impl App {
                             | (Entity::Registration, Kind::Register)
                             | (Entity::Input(_), Kind::Reference)
                             | (Entity::Defaults, Kind::Model)
+                            | (Entity::SandboxDefaults, Kind::Sandbox)
                             | (
                                 Entity::Connection(_),
                                 Kind::Oauth
@@ -505,6 +571,7 @@ impl App {
                                     | Kind::Workspace
                                     | Kind::Project
                                     | Kind::Model
+                                    | Kind::Sandbox
                                     | Kind::Archive
                                     | Kind::Restore
                                     | Kind::Remove
@@ -531,6 +598,7 @@ impl App {
             Command::Save if self.directory_reference_active() => self.reference_can_select(),
             Command::Save => self.management.dialog.as_ref().is_some_and(|dialog| {
                 dialog.kind != Kind::Oauth
+                    && dialog.sandbox.as_ref().is_none_or(sandbox::State::changed)
                     && dialog.visible
                     && self.credential_can_save()
                     && dialog.removal.as_ref().is_none_or(|state| state.can_save())
@@ -570,6 +638,9 @@ impl App {
                 return None;
             }
             Command::Models(command) => return self.models_action(command),
+            Command::Sandbox(mode) => {
+                self.sandbox_update(mode);
+            }
             Command::RemovalQuery => {
                 self.request_removal_query();
             }
@@ -606,6 +677,32 @@ impl App {
                         .find(|item| item.id == row.id)?;
                     target.name = current.name.clone();
                     target.entity = Entity::Connection(current.clone());
+                } else if let Entity::Session { id, revision, .. } = &target.entity {
+                    let detail = match &self.sessions.detail {
+                        super::sessions::Detail::Ready(item) => Some(item.as_ref()),
+                        _ => None,
+                    };
+                    // Catalog and detail reads can finish in either order.
+                    // Freeze the newest observed revision when opening, never
+                    // rebase an already reviewed dialog on a later refresh.
+                    if let Some(current) = detail
+                        .into_iter()
+                        .chain(self.sessions.items.iter())
+                        .chain(self.inbox.items.iter())
+                        .filter(|item| item.id == *id && item.revision >= *revision)
+                        .max_by_key(|item| item.revision)
+                    {
+                        target.name = current.name.clone();
+                        target.entity = Entity::Session {
+                            id: current.id.clone(),
+                            revision: current.revision,
+                            workspace: current.workspace.host_cwd.clone(),
+                            project_bound: matches!(
+                                current.workspace.target,
+                                WorkspaceTarget::Project { .. }
+                            ),
+                        };
+                    }
                 }
                 if kind == Kind::Oauth {
                     self.oauth_open(&target);
@@ -613,6 +710,16 @@ impl App {
                 self.invalidate_editor_geometry();
                 self.palette = None;
                 self.hover = None;
+                let sandbox = if kind == Kind::Sandbox {
+                    self.management.sandbox_sequence += 1;
+                    Some(if matches!(target.entity, Entity::SandboxDefaults) {
+                        sandbox::State::defaults(self.management.sandbox_sequence)
+                    } else {
+                        sandbox::State::for_target(self, &target)?
+                    })
+                } else {
+                    None
+                };
                 let models = if kind == Kind::Model {
                     self.management.models_sequence += 1;
                     let mut models = models::Models::new(
@@ -749,6 +856,7 @@ impl App {
                     chooser,
                     locations,
                     models,
+                    sandbox,
                     enabled_models,
                     credentials,
                 });
@@ -830,6 +938,16 @@ impl App {
                 .as_ref()
                 .and_then(|m| m.selection().map(|row| row.choice.clone())),
             thinking_level: dialog.models.as_ref().and_then(|m| m.thinking_level()),
+            sandbox_mode: dialog.sandbox.as_ref().and_then(sandbox::State::mode_patch),
+            approval_policy: dialog
+                .sandbox
+                .as_ref()
+                .and_then(sandbox::State::approval_patch),
+            policy_revision: dialog
+                .sandbox
+                .as_ref()
+                .and_then(|state| state.defaults.as_ref())
+                .and_then(|state| state.revision),
             enabled_model_ids: dialog
                 .enabled_models
                 .as_ref()
@@ -960,7 +1078,12 @@ impl App {
                 }
             }
             Ok(
-                Updated::Session(SessionUpdateResult::Committed { .. })
+                Updated::Policy(
+                    maka_protocol::configuration::policy::RuntimePolicyMutationResult::Committed {
+                        ..
+                    },
+                )
+                | Updated::Session(SessionUpdateResult::Committed { .. })
                 | Updated::Project(_)
                 | Updated::Catalog(maka_protocol::configuration::CatalogMutationResult::Committed {
                     ..
@@ -974,6 +1097,10 @@ impl App {
                     },
                 ),
             ) => self.management.dialog = None,
+            Ok(Updated::Policy(_)) => {
+                dialog.blocked = true;
+                dialog.error = Some("sandbox-default-conflict");
+            }
             Ok(Updated::ModelFetch(result)) => {
                 let (error, blocked) = model_fetch::failure(&result);
                 dialog.error = Some(error);
@@ -1060,6 +1187,10 @@ impl App {
                     },
                 );
             }
+            Err(_) if matches!(dialog.target.entity, Entity::SandboxDefaults) => {
+                dialog.blocked = true;
+                dialog.error = Some("sandbox-default-failed");
+            }
             Err(RequestFailure::Rejected(maka_client::ClientError::Rejected(error)))
                 if !matches!(dialog.target.entity, Entity::Session { .. }) =>
             {
@@ -1137,14 +1268,6 @@ impl App {
             .management
             .dialog
             .as_ref()
-            .is_some_and(|d| d.kind == Kind::Remove)
-        {
-            return self.removal_input(event);
-        }
-        if self
-            .management
-            .dialog
-            .as_ref()
             .is_some_and(|dialog| dialog.kind == Kind::Oauth)
         {
             return self.oauth_input(event);
@@ -1161,25 +1284,9 @@ impl App {
             .management
             .dialog
             .as_ref()
-            .is_some_and(|d| d.models.is_some())
-        {
-            return self.models_input(event);
-        }
-        if self
-            .management
-            .dialog
-            .as_ref()
             .is_some_and(|d| d.locations.is_some())
         {
             return self.locations_input(event);
-        }
-        if self
-            .management
-            .dialog
-            .as_ref()
-            .is_some_and(|d| d.chooser.is_some())
-        {
-            return self.choose_project_input(event);
         }
         if self
             .management
@@ -1189,139 +1296,145 @@ impl App {
         {
             return self.directory_input(event);
         }
-        let Some(dialog) = &mut self.management.dialog else {
-            return (false, None);
-        };
-        let editing = dialog.kind.edits_text()
-            && !dialog.reviewing
-            && dialog.focus == 0
-            && self.management.pending.is_none()
-            && !dialog.blocked;
-        let browse = dialog.kind == Kind::Register;
-        let configuration_review = dialog.kind.edits_configuration() && dialog.reviewing;
-        let count = if dialog.connection_test.is_some() {
-            1
-        } else if browse {
-            4
-        } else if dialog.kind.edits_text() {
-            3 // Editor/cancel/save, or cancel/edit/confirm while reviewing.
-        } else {
-            2
-        };
-        let command = match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
-                KeyCode::Esc => Some(
-                    if dialog.reviewing && !dialog.blocked && self.management.pending.is_none() {
-                        Command::Edit
-                    } else {
-                        Command::Close
-                    },
-                ),
-                KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return (true, Some(Action::Quit));
+        // Everything else is a sheet; the overlay layer routes it.
+        (false, None)
+    }
+
+    /// Input the sheet's owner takes before the sheet: shortcuts of its
+    /// sub-states (F5 retries a read, PgUp/PgDn page the project chooser,
+    /// Ctrl+Enter applies it), and a focused text field gets every key but
+    /// the sheet's own (Esc, Tab, Enter, quitting), pastes, and its pointer.
+    pub(crate) fn management_sheet_input(
+        &mut self,
+        event: &Event,
+    ) -> Option<(bool, Option<Action>)> {
+        if let Event::Key(key) = event
+            && key.kind != KeyEventKind::Release
+            && let Some(command) = self.management.dialog.as_ref().and_then(|dialog| {
+                let chooser = dialog.chooser.is_some();
+                let models = dialog.models.is_some();
+                match key.code {
+                    KeyCode::F(5) if models => Some(Command::Models(models::Command::Refresh)),
+                    KeyCode::PageUp if models => Some(Command::Models(models::Command::Previous)),
+                    KeyCode::PageDown if models => Some(Command::Models(models::Command::Next)),
+                    KeyCode::Enter if models && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        Some(Command::Save)
+                    }
+                    KeyCode::F(5) if dialog.credentials.is_some() => Some(Command::CredentialRetry),
+                    KeyCode::F(5) if dialog.removal.is_some() => Some(Command::RemovalQuery),
+                    KeyCode::F(5) if chooser => {
+                        Some(Command::ChooseProject(choose_project::Command::Refresh))
+                    }
+                    KeyCode::PageUp if chooser => {
+                        Some(Command::ChooseProject(choose_project::Command::Previous))
+                    }
+                    KeyCode::PageDown if chooser => {
+                        Some(Command::ChooseProject(choose_project::Command::Next))
+                    }
+                    KeyCode::Enter if chooser && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        Some(Command::Save)
+                    }
+                    _ => None,
                 }
-                _ if !dialog.visible => return (false, None),
-                KeyCode::Up
-                | KeyCode::Down
-                | KeyCode::Left
-                | KeyCode::Right
-                | KeyCode::Home
-                | KeyCode::End
-                    if configuration_review =>
+            })
+        {
+            return Some((true, self.apply(Action::Manage(command))));
+        }
+        let busy = self.management.pending.is_some();
+        let dialog = self.management.dialog.as_mut()?;
+        if dialog.kind.edits_configuration() && dialog.reviewing && dialog.visible {
+            return match event {
+                Event::Key(key)
+                    if key.kind != KeyEventKind::Release
+                        && self.layer.focused("field")
+                        && matches!(
+                            key.code,
+                            KeyCode::Up
+                                | KeyCode::Down
+                                | KeyCode::Left
+                                | KeyCode::Right
+                                | KeyCode::Home
+                                | KeyCode::End
+                        ) =>
                 {
-                    return (dialog.editor.key(key), None);
+                    Some((dialog.editor.key(*key), None))
                 }
-                KeyCode::F(5) if dialog.credentials.is_some() => Some(Command::CredentialRetry),
-                KeyCode::Tab => {
-                    dialog.focus = (dialog.focus + 1) % count;
-                    return (true, None);
+                Event::Mouse(mouse)
+                    if dialog.editor.contains((mouse.column, mouse.row).into())
+                        || dialog.editor.dragging() =>
+                {
+                    self.layer.focus("field");
+                    Some((dialog.editor.mouse(*mouse), None))
                 }
-                KeyCode::BackTab => {
-                    dialog.focus = (dialog.focus + count - 1) % count;
-                    return (true, None);
+                _ => None,
+            };
+        }
+        if !dialog.kind.edits_text()
+            || dialog.reviewing
+            || busy
+            || dialog.blocked
+            || self.layer.slot("field").is_none()
+        {
+            return None;
+        }
+        let focused = self.layer.focused("field");
+        match event {
+            Event::Key(key) if key.kind != KeyEventKind::Release && focused => {
+                let quit =
+                    key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q');
+                if quit
+                    || matches!(
+                        key.code,
+                        KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab | KeyCode::Enter
+                    )
+                {
+                    return None;
                 }
-                KeyCode::Enter => Some(if dialog.connection_test.is_some() {
-                    Command::Close
-                } else if dialog.reviewing {
-                    match dialog.focus {
-                        0 => Command::Close,
-                        1 => Command::Edit,
-                        _ => Command::Save,
-                    }
-                } else if browse && dialog.focus == 1 {
-                    Command::Browse
-                } else if dialog.focus == count - 2 {
-                    Command::Close
-                } else {
-                    Command::Save
-                }),
-                _ if editing => {
-                    let changed = dialog.editor.key(key);
-                    if changed && dialog.editor.error.is_none() {
-                        dialog.error = None;
-                    }
-                    return (changed, None);
+                let changed = dialog.editor.key(*key);
+                if changed && dialog.editor.error.is_none() {
+                    dialog.error = None;
                 }
-                _ => return (false, None),
-            },
-            Event::Paste(text) if dialog.visible && editing => {
+                Some((changed, None))
+            }
+            Event::Paste(text) if focused => {
                 dialog.error = None;
                 if dialog.kind.edits_configuration() {
-                    return (dialog.editor.insert(&text), None);
+                    return Some((dialog.editor.insert(text), None));
                 }
                 if dialog.kind.edits_path() && text.chars().any(char::is_control) {
                     dialog.editor.error = Some("session-path-control");
-                    return (true, None);
+                    return Some((true, None));
                 }
-                return (dialog.editor.insert(&text.replace(['\n', '\r'], " ")), None);
+                Some((dialog.editor.insert(&text.replace(['\n', '\r'], " ")), None))
             }
-            Event::Mouse(mouse) if dialog.visible => {
-                let point = (mouse.column, mouse.row).into();
-                if configuration_review
-                    && (dialog.editor.contains(point) || dialog.editor.dragging())
-                {
-                    return (dialog.editor.mouse(mouse), None);
-                }
-                if dialog.kind.edits_text()
-                    && !dialog.reviewing
-                    && (dialog.editor.contains(point) || dialog.editor.dragging())
-                {
-                    if self.management.pending.is_none() && !dialog.blocked {
-                        dialog.focus = 0;
-                        return (dialog.editor.mouse(mouse), None);
-                    }
-                    return (false, None);
-                }
-                if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-                    return (false, None);
-                }
-                self.hits
-                    .iter()
-                    .rev()
-                    .find(|hit| hit.area.contains(point))
-                    .and_then(|hit| match &hit.action {
-                        Action::Manage(
-                            command @ (Command::Save
-                            | Command::Close
-                            | Command::Browse
-                            | Command::CredentialRetry
-                            | Command::Edit),
-                        ) => Some(command.clone()),
-                        _ => None,
-                    })
+            Event::Mouse(mouse)
+                if dialog
+                    .editor
+                    .contains(ratatui::layout::Position::new(mouse.column, mouse.row))
+                    || dialog.editor.dragging() =>
+            {
+                self.layer.focus("field");
+                Some((dialog.editor.mouse(*mouse) || !focused, None))
             }
-            _ => return (false, None),
-        };
-        (
-            true,
-            command.and_then(|command| self.apply(Action::Manage(command))),
-        )
+            _ => None,
+        }
     }
 }
 
 impl Management {
-    pub(crate) fn is_removal(&self) -> bool {
-        self.dialog.as_ref().is_some_and(|d| d.kind == Kind::Remove)
+    /// The confirmation sheet reports whether it is on screen; Save needs it.
+    pub(crate) fn presented(&mut self, shown: bool) {
+        if let Some(dialog) = &mut self.dialog {
+            dialog.visible = shown;
+        }
+    }
+    pub(crate) fn destructive(&self) -> bool {
+        self.dialog.as_ref().is_some_and(|dialog| {
+            matches!(
+                dialog.kind,
+                Kind::Remove | Kind::Connection(connection::Change::Remove)
+            )
+        })
     }
     pub fn invalidate_geometry(&mut self) {
         if let Some(dialog) = &mut self.dialog {
@@ -1330,14 +1443,8 @@ impl Management {
             if let Some(browser) = &mut dialog.browser {
                 browser.invalidate_geometry();
             }
-            if let Some(chooser) = &mut dialog.chooser {
-                chooser.invalidate_geometry();
-            }
             if let Some(locations) = &mut dialog.locations {
                 locations.invalidate_geometry();
-            }
-            if let Some(models) = &mut dialog.models {
-                models.invalidate_geometry();
             }
             if let Some(models) = &mut dialog.enabled_models {
                 models.invalidate_geometry();
@@ -1509,14 +1616,7 @@ mod tests {
                 crate::Locale::En,
             );
             let painted = screen
-                .draw(|frame| {
-                    draw(
-                        frame,
-                        &mut app,
-                        frame.area(),
-                        ratatui::style::Style::default(),
-                    )
-                })
+                .draw(|frame| crate::view::draw(frame, &mut app))
                 .unwrap()
                 .buffer
                 .content

@@ -90,7 +90,7 @@ fn skills_candidates_page_without_execution_and_restore_exact_selection_before_s
     tui.wait_for("Selected · 1");
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
     tui.wait_until(|s| !s.contains("Selected · 1") && s.contains("Candidate 128"));
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -114,7 +114,7 @@ fn skills_candidates_page_without_execution_and_restore_exact_selection_before_s
     reopened.wait_for("fixture-model");
     reopened.send(b"\x13");
     reopened.wait_for("Skill accepted.");
-    reopened.send(b"\x11");
+    reopened.close_terminal();
     reopened.finish();
     let body = runtime.block_on(model).unwrap();
     assert!(body.to_string().contains("chosen-instructions-128"));

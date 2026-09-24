@@ -207,7 +207,7 @@ fn real_host_queue_edits_retracts_promotes_and_steers_at_the_model_boundary() {
             turns.push(turn_id);
         }
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

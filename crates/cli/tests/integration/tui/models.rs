@@ -144,10 +144,10 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
     tui.wait_for("Alternate model");
     tui.click_text("Alternate model");
     tui.wait_for("› Alternate model");
-    tui.click_text("Thinking level");
-    tui.wait_for("‹ Low ›");
-    tui.send(b"\x1b[C"); // Right cycles only the focused thinking control.
-    tui.wait_for("‹ High ›");
+    tui.click_text("Thinking level"); // A chooser of the levels this model supports.
+    tui.wait_for("○ High");
+    tui.click_text("○ High");
+    tui.wait_for("High ▾");
     tui.click_last_text("Use model");
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("switch-keeps-draft"));
     runtime.block_on(async {
@@ -179,9 +179,11 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
     tui.click_last_text("fixture-model");
     tui.wait_for("Alternate model");
     tui.click_text("Alternate model");
-    tui.wait_for("‹ High ›");
+    tui.wait_for("High ▾");
     tui.click_text("Thinking level");
-    tui.wait_for("‹ Default ›");
+    tui.wait_for("○ Default");
+    tui.click_text("○ Default");
+    tui.wait_for("Default ▾");
     tui.click_last_text("Use model");
     tui.wait_until(|s| !s.contains("Cancel") && !s.contains("fixture-model · High"));
     runtime.block_on(async {
@@ -198,11 +200,11 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
     tui.click_last_text("fixture-model");
     tui.wait_for("Alternate model");
     tui.click_text("Alternate model");
-    tui.wait_for("‹ Default ›");
+    tui.wait_for("Default ▾");
     tui.click_text("Thinking level");
-    tui.wait_for("‹ Low ›");
-    tui.send(b"\x1b[C");
-    tui.wait_for("‹ High ›");
+    tui.wait_for("○ High");
+    tui.click_text("○ High");
+    tui.wait_for("High ▾");
     tui.click_last_text("Use model");
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("fixture-model · High"));
     tui.click_text("switch-keeps-draft");
@@ -278,7 +280,7 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
         }).await.unwrap();
         assert!(matches!(result,maka_protocol::configuration::CatalogMutationResult::RevisionConflict { .. }));
     });
-    tui.send(b"\x11");
+    tui.close_terminal();
     tui.finish();
     client.disconnect();
     host.retire_registered();

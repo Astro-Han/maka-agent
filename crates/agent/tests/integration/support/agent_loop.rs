@@ -101,6 +101,7 @@ pub(crate) fn input(base: &str, suffix: &str, effect: Arc<Effect>) -> RunInput {
         supports_vision: false,
         configuration: invocation::configuration(ToolMode::Direct),
         work: maka_agent::RunWork::Message {
+            allow_prior_unknown: false,
             source_messages: Vec::new(),
             message: format!("question {suffix}").into(),
             tools: ToolCatalog::new([ToolRegistration {

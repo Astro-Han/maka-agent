@@ -28,6 +28,7 @@ use maka_plugins::{
 use serde_json::Value;
 use std::sync::Arc;
 mod remote;
+mod terminal;
 mod tools;
 pub const ID: &str = "maka.goal";
 pub struct Builtin {
@@ -92,7 +93,8 @@ impl Plugin for Builtin {
                 staged
                     .insert("GoalStatus", tools::register(backend.clone())?)
                     .map_err(message)?;
-                remote::publish(backend, client.as_deref(), &mut staged)?;
+                remote::publish(backend.clone(), client.as_deref(), &mut staged)?;
+                terminal::publish(backend.clone(), &mut staged)?;
                 if let Some(client) = client {
                     context
                         .services
