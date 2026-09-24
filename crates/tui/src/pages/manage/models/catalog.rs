@@ -221,20 +221,6 @@ impl Catalog {
             .iter()
             .find(|row| Some(&row.choice) == self.selected.as_ref())
     }
-    pub fn move_selection(&mut self, down: bool) {
-        let index = self
-            .rows
-            .iter()
-            .position(|r| Some(&r.choice) == self.selected.as_ref())
-            .map_or(0, |index| {
-                if down {
-                    (index + 1).min(self.rows.len().saturating_sub(1))
-                } else {
-                    index.saturating_sub(1)
-                }
-            });
-        self.selected = self.rows.get(index).map(|r| r.choice.clone());
-    }
 }
 
 #[cfg(test)]
@@ -308,7 +294,7 @@ mod tests {
             "both enabled model IDs and chat capability are required"
         );
         assert!(catalog.selection().is_none());
-        catalog.move_selection(true);
+        catalog.selected = catalog.rows.first().map(|row| row.choice.clone());
         let selected = catalog.selection().unwrap().choice.clone();
         assert_eq!(selected.connection_id, "id-0");
         catalog.change_page(true);

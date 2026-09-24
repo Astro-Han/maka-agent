@@ -732,7 +732,14 @@ impl<M: Clone> Surface<M> {
             return Outcome::handled(false);
         };
         if Some(&item.id) == self.focus.as_ref() {
-            return Outcome::handled(false);
+            // An arrow at a list's edge still chooses the focused row when
+            // it is not the choice yet (it lost its choice to a refresh).
+            return match &item.on {
+                On::Activate(message) if item.follow_focus && !item.current => {
+                    Outcome::emit(message.clone())
+                }
+                _ => Outcome::handled(false),
+            };
         }
         let message = match &item.on {
             On::Activate(message) if item.follow_focus => Some(message.clone()),

@@ -17,303 +17,238 @@
  * under the License.
  */
 
-use super::{Command, Manage, focused};
+use super::{Command, Manage, thinking_key};
 use crate::{
-    app::{Action, App, Hit},
-    view::{button, safe, tone},
+    app::{Action, App},
+    pages::manage::Dialog,
+    ui::{Choice, Node, On, Role, Sheet, Size, Tone},
+    view::safe,
 };
-use ratatui::{
-    Frame,
-    layout::{Margin, Rect},
-    style::Style,
-    widgets::{Block, Paragraph, Wrap},
-};
-use unicode_width::UnicodeWidthStr;
+use std::iter;
 
-pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
+/// Choosing a model: arrows or a click choose a row, Enter applies it.
+/// For the default model the first row clears the default. Thinking is a
+/// chooser of the levels the chosen model supports.
+pub(in crate::pages::manage) fn sheet(app: &App, dialog: &Dialog) -> Sheet<Action> {
     let busy = app.management.pending.is_some();
-    let dialog = app.management.dialog.as_mut().expect("models dialog");
-    let models = dialog.models.as_mut().expect("model chooser");
-    if area.width < 42 || area.height < 17 {
-        dialog.visible = false;
-        crate::view::clear_overlay(frame, area);
-        frame.render_widget(
-            Paragraph::new(app.i18n.text("terminal-small")).wrap(Wrap { trim: false }),
-            area.inner(Margin::new(1, 1)),
-        );
-        return;
-    }
-    let width = area.width.saturating_sub(2).min(80);
-    let height = area
-        .height
-        .saturating_sub(2)
-        .min((models.catalog.rows.len().min(9) as u16 * 2 + 10).clamp(15, 28));
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-    let block = Block::bordered()
-        .border_type(if app.chrome.ascii {
-            ratatui::widgets::BorderType::Plain
-        } else {
-            ratatui::widgets::BorderType::Rounded
-        })
-        .title(app.i18n.text(dialog.kind.label(&dialog.target)))
-        .style(base)
-        .border_style(Style::default().fg(app.theme.colors().subtle));
-    let inner = block.inner(popup).inner(Margin::new(1, 0));
-    app.modal_area = Some(popup);
-    crate::view::clear_overlay(frame, popup);
-    frame.render_widget(block, popup);
-    dialog.visible = true;
-    if models.for_default {
-        let command = Manage::Models(Command::ClearDefault);
-        let marker = if models.clear_default {
-            app.chrome.symbol("›", ">")
-        } else {
-            " "
-        };
-        let current = if models.catalog.revision().is_some() && !models.catalog.has_default {
-            format!(" · {}", app.i18n.text("default-model-current"))
-        } else {
-            String::new()
-        };
-        let rect = Rect::new(inner.x, inner.y, inner.width, 1);
-        frame.render_widget(
-            Paragraph::new(format!(
-                "{marker} {}{current}",
-                app.i18n.text("default-model-none")
-            ))
-            .style(
-                if models.clear_default || models.hovered.as_ref() == Some(&command) {
-                    tone::selection(app.theme.colors()).fg(tone::accent(app.theme.colors()))
-                } else {
-                    Style::default()
-                },
-            ),
-            rect,
-        );
-        if !dialog.blocked && !busy {
-            app.hits.push(Hit {
-                area: rect,
-                action: Action::Manage(command),
-            });
-        }
-    } else {
-        frame.render_widget(
-            Paragraph::new(safe(&dialog.target.name)),
-            Rect::new(inner.x, inner.y, inner.width, 1),
-        );
-    }
-    let list = Rect::new(
-        inner.x,
-        inner.y + 3,
-        inner.width,
-        inner.height.saturating_sub(9),
-    );
-    let visible = list.height as usize / 2;
-    let selected = models
-        .catalog
-        .rows
-        .iter()
-        .position(|r| Some(&r.choice) == models.catalog.selected.as_ref());
-    let offset = selected.map_or(0, |i| (i + 1).saturating_sub(visible));
+    let models = dialog.models.as_ref().expect("model chooser");
+    let catalog = &models.catalog;
     let enabled = !dialog.blocked && !busy;
-    for (index, row) in models
-        .catalog
-        .rows
-        .iter()
-        .enumerate()
-        .skip(offset)
-        .take(visible)
-    {
-        let rect = Rect::new(
-            list.x,
-            list.y + ((index - offset) * 2) as u16,
-            list.width,
-            2,
+    // Rows arriving are a new step: focus moves into the list.
+    let step = if catalog.rows.is_empty() {
+        "empty"
+    } else {
+        "list"
+    };
+    let mut sheet = Sheet::new(
+        format!("model:{}:{step}", dialog.target.name),
+        app.i18n.text(dialog.kind.label(&dialog.target)),
+    );
+    if !models.for_default {
+        sheet = sheet.text("name", &safe(&dialog.target.name), Tone::Normal);
+    }
+    let marker = |selected: bool| match (selected, app.chrome.ascii) {
+        (true, false) => "›",
+        (true, true) => ">",
+        _ => " ",
+    };
+    let current = format!(" · {}", app.i18n.text("default-model-current"));
+    let choose = |node: Node<Action>, command: Command| {
+        node.on(On::Activate(Action::Manage(Manage::Models(command))))
+            .follow_focus()
+            .submit(Action::Manage(Manage::Save))
+            .enabled(enabled)
+    };
+    let mut rows = vec![];
+    let mut lines = 0;
+    if models.for_default {
+        let label = format!(
+            "{} {}{}",
+            marker(models.clear_default),
+            app.i18n.text("default-model-none"),
+            if catalog.revision().is_some() && !catalog.has_default {
+                current.as_str()
+            } else {
+                ""
+            }
         );
-        let command = Manage::Models(Command::Select(row.choice.clone()));
-        let active = selected == Some(index) || models.hovered.as_ref() == Some(&command);
-        let marker = if selected == Some(index) {
-            if app.chrome.ascii { ">" } else { "›" }
-        } else {
-            " "
-        };
-        let subtitle = if row.name == row.choice.model {
+        rows.push(choose(
+            Node::text("none", vec![(label, Tone::Normal)]).clip(),
+            Command::ClearDefault,
+        ));
+        lines += 1;
+    }
+    for row in &catalog.rows {
+        let selected = catalog.selected.as_ref() == Some(&row.choice);
+        let title = format!(
+            "{} {}{}",
+            marker(selected),
+            safe(&row.name),
+            if models.for_default && row.is_default {
+                current.as_str()
+            } else {
+                ""
+            }
+        );
+        let detail = if row.name == row.choice.model {
             safe(&row.connection)
         } else {
             format!("{} · {}", safe(&row.connection), safe(&row.choice.model))
         };
-        frame.render_widget(
-            Paragraph::new(format!(
-                "{marker} {}{}",
-                safe(&row.name),
-                if models.for_default && row.is_default {
-                    format!(" · {}", app.i18n.text("default-model-current"))
-                } else {
-                    String::new()
-                }
-            ))
-            .style(if !enabled {
-                Style::default().fg(app.theme.colors().subtle)
-            } else if active {
-                tone::selection(app.theme.colors()).fg(tone::accent(app.theme.colors()))
-            } else {
-                Style::default()
-            }),
-            Rect::new(rect.x, rect.y, rect.width, 1),
-        );
-        frame.render_widget(
-            Paragraph::new(format!("  {subtitle}"))
-                .style(Style::default().fg(app.theme.colors().subtle)),
-            Rect::new(rect.x, rect.y + 1, rect.width, 1),
-        );
-        if enabled {
-            app.hits.push(Hit {
-                area: rect,
-                action: Action::Manage(command),
-            });
-        }
+        rows.push(choose(
+            Node::column(
+                key(row),
+                vec![
+                    Node::text("name", vec![(title, Tone::Normal)]).clip(),
+                    Node::text("detail", vec![(format!("  {detail}"), Tone::Subtle)]).clip(),
+                ],
+            ),
+            Command::Select(row.choice.clone()),
+        ));
+        lines += 2;
     }
-    if models.catalog.rows.is_empty() && !models.catalog.error {
-        frame.render_widget(
-            Paragraph::new(app.i18n.text(if models.catalog.ready() {
-                if models.catalog.can_previous() {
-                    "session-model-page-empty"
-                } else {
-                    "session-model-empty"
-                }
-            } else {
-                "session-model-loading"
-            }))
-            .wrap(Wrap { trim: false })
-            .style(Style::default().fg(app.theme.colors().subtle)),
-            list,
+    if !rows.is_empty() {
+        let height = app.frame_size.map_or(24, |(_, height)| height);
+        let visible = lines.min(height.saturating_sub(18).max(4));
+        sheet =
+            sheet.body(Node::scroll("list", Node::column("rows", rows)).size(Size::Fixed(visible)));
+    }
+    if catalog.rows.is_empty() && !catalog.error {
+        let key = match (catalog.ready(), catalog.can_previous()) {
+            (true, true) => "session-model-page-empty",
+            (true, false) => "session-model-empty",
+            _ => "session-model-loading",
+        };
+        sheet = sheet.text("empty", &app.i18n.text(key), Tone::Subtle);
+    }
+    if let Some(row) = models.selection().filter(|_| models.has_thinking()) {
+        let level = models.thinking_level();
+        let levels: Vec<_> = iter::once(None)
+            .chain(row.thinking_levels.iter().copied().map(Some))
+            .collect();
+        let choices = levels
+            .iter()
+            .map(|level| Choice {
+                label: app.i18n.text(thinking_key(*level)),
+                action: Action::Manage(Manage::Models(Command::Thinking(*level))),
+            })
+            .collect();
+        sheet = sheet.body(
+            Node::row(
+                "thinking",
+                vec![
+                    Node::text(
+                        "label",
+                        vec![(app.i18n.text("session-thinking"), Tone::Normal)],
+                    )
+                    .size(Size::Fill),
+                    Node::text(
+                        "value",
+                        vec![(
+                            format!(
+                                "{} {}",
+                                app.i18n.text(thinking_key(level)),
+                                app.chrome.symbol("▾", "v")
+                            ),
+                            Tone::Muted,
+                        )],
+                    ),
+                ],
+            )
+            .on(On::Choose {
+                choices,
+                current: levels.iter().position(|candidate| *candidate == level),
+            })
+            .enabled(enabled),
         );
     }
-    let key = if busy {
-        "session-saving"
+    let (note, tone) = if busy {
+        ("session-saving", Tone::Subtle)
     } else if let Some(error) = dialog.error {
-        error
-    } else if models.catalog.error {
-        "session-model-load-failed"
+        (error, Tone::Warning)
+    } else if catalog.error {
+        ("session-model-load-failed", Tone::Warning)
+    } else if models.for_default && models.clear_default {
+        ("default-model-clear-note", Tone::Subtle)
+    } else if models.for_default {
+        ("default-model-note", Tone::Subtle)
+    } else if models.selection().is_some()
+        && models.thinking.is_some()
+        && models.thinking_level().is_none()
+    {
+        ("session-thinking-fallback", Tone::Subtle)
     } else {
-        let command = models.hovered.clone().unwrap_or_else(|| focused(models));
-        match command {
-            Manage::Models(Command::Refresh | Command::Previous | Command::Next) => command.label(),
-            _ if models.for_default && models.clear_default => "default-model-clear-note",
-            _ if models.for_default => "default-model-note",
-            _ if models.selection().is_some()
-                && models.thinking.is_some()
-                && models.thinking_level().is_none() =>
-            {
-                "session-thinking-fallback"
-            }
-            _ => "session-model-note",
-        }
+        ("session-model-note", Tone::Subtle)
     };
-    frame.render_widget(
-        Paragraph::new(super::super::view::note_lines(
-            &app.i18n.text(key),
-            inner.width,
-        ))
-        .style(
-            Style::default().fg(if dialog.error.is_some() || models.catalog.error {
-                app.theme.colors().warning
-            } else {
-                app.theme.colors().subtle
-            }),
-        ),
-        Rect::new(inner.x, inner.bottom() - 5, inner.width, 3),
-    );
-    let focus = models.focus;
-    let hovered = models.hovered.clone();
-    let thinking = models.has_thinking().then(|| {
-        format!(
-            "{}  {} {} {}",
-            app.i18n.text("session-thinking"),
-            app.chrome.symbol("‹", "<"),
-            app.i18n.text(super::thinking_key(models.thinking_level())),
-            app.chrome.symbol("›", ">")
-        )
-    });
-    let save = app.i18n.text(if models.for_default {
-        if models.clear_default {
-            "default-model-clear"
-        } else {
-            "default-model-apply"
-        }
-    } else {
-        "session-model-apply"
-    });
-    let cancel = app.i18n.text("session-cancel");
-    let save_width = (save.width() as u16 + 2).min(inner.width / 2);
-    let cancel_width = (cancel.width() as u16 + 2).min(inner.width / 2);
-    let save_rect = Rect::new(
-        inner.right() - save_width,
-        inner.bottom() - 1,
-        save_width,
-        1,
-    );
-    if let Some(text) = thinking {
-        let command = Manage::Models(Command::Thinking(true));
-        let previous = Manage::Models(Command::Thinking(false));
-        let rect = Rect::new(
-            inner.x,
-            inner.bottom() - 6,
-            (text.width() as u16).min(inner.width),
-            1,
-        );
-        crate::view::list_item(
-            frame,
-            app,
-            rect,
-            &text,
-            Action::Manage(command.clone()),
-            focus == 6 || hovered.as_ref() == Some(&command) || hovered.as_ref() == Some(&previous),
-        );
-        if app.enabled(&Action::Manage(previous.clone())) {
-            // The left chevron reverses; the value/right chevron advances.
-            app.hits.push(Hit {
-                area: Rect::new(
-                    rect.x + app.i18n.text("session-thinking").width() as u16 + 1,
-                    rect.y,
-                    3,
-                    1,
+    sheet = sheet.text("note", &app.i18n.text(note), tone);
+    let command = |command: Command| {
+        let action = Action::Manage(Manage::Models(command));
+        let enabled = app.enabled(&action);
+        (action, enabled)
+    };
+    if catalog.can_previous() || catalog.can_next() {
+        let (previous, can_previous) = command(Command::Previous);
+        let (next, can_next) = command(Command::Next);
+        sheet = sheet
+            .aside(
+                "previous",
+                format!(
+                    "{} {}",
+                    app.chrome.symbol("‹", "<"),
+                    app.i18n.text("sessions-previous")
                 ),
-                action: Action::Manage(previous),
-            });
-        }
+                previous,
+                can_previous,
+            )
+            .aside(
+                "next",
+                format!(
+                    "{} {}",
+                    app.i18n.text("sessions-next"),
+                    app.chrome.symbol("›", ">")
+                ),
+                next,
+                can_next,
+            );
     }
-    for (rect, text, command, index) in [
-        (
-            Rect::new(save_rect.x - cancel_width - 1, save_rect.y, cancel_width, 1),
-            cancel,
-            Manage::Close,
-            4,
-        ),
-        (save_rect, save, Manage::Save, 5),
-    ] {
-        let active = focus == index || hovered.as_ref() == Some(&command);
-        button(frame, app, rect, &text, Action::Manage(command), active);
+    if catalog.error {
+        let (refresh, can_refresh) = command(Command::Refresh);
+        sheet = sheet.aside("refresh", app.i18n.text("list-retry"), refresh, can_refresh);
     }
-    for (index, command, icon, ascii) in [
-        (1, Command::Refresh, "⟳", "R"),
-        (2, Command::Previous, "‹", "<"),
-        (3, Command::Next, "›", ">"),
-    ] {
-        let command = Manage::Models(command);
-        let active = focus == index || hovered.as_ref() == Some(&command);
-        button(
-            frame,
-            app,
-            Rect::new(inner.x + ((index - 1) * 4) as u16, inner.y + 1, 3, 1),
-            if app.chrome.ascii { ascii } else { icon },
-            Action::Manage(command),
-            active,
+    let save = match (models.for_default, models.clear_default) {
+        (true, true) => "default-model-clear",
+        (true, false) => "default-model-apply",
+        _ => "session-model-apply",
+    };
+    let sheet = sheet
+        .button(
+            "cancel",
+            app.i18n.text("session-cancel"),
+            Role::Normal,
+            Action::Manage(Manage::Close),
+            true,
+        )
+        .button(
+            "save",
+            app.i18n.text(save),
+            Role::Primary,
+            Action::Manage(Manage::Save),
+            app.enabled(&Action::Manage(Manage::Save)),
         );
+    if models.for_default && models.clear_default {
+        return sheet.focus_node("list/rows/none");
     }
+    match catalog
+        .rows
+        .iter()
+        .find(|row| catalog.selected.as_ref() == Some(&row.choice))
+    {
+        Some(row) => sheet.focus_node(format!("list/rows/{}", key(row))),
+        None => sheet,
+    }
+}
+
+/// A model's identity across pages: its connection and model id.
+fn key(row: &super::catalog::Row) -> String {
+    format!("{}:{}", row.choice.connection_id, row.choice.model)
 }

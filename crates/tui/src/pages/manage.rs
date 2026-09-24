@@ -265,12 +265,11 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    /// Presented as a kernel sheet. OAuth, models, enabled models,
-    /// locations and the directory browser still draw their own sub-view.
+    /// Presented as a kernel sheet. OAuth, enabled models, locations and
+    /// the directory browser still draw their own sub-view.
     pub(crate) fn in_sheet(&self) -> bool {
         self.kind != Kind::Oauth
             && self.enabled_models.is_none()
-            && self.models.is_none()
             && self.locations.is_none()
             && self.browser.is_none()
     }
@@ -1267,14 +1266,6 @@ impl App {
             .management
             .dialog
             .as_ref()
-            .is_some_and(|d| d.models.is_some())
-        {
-            return self.models_input(event);
-        }
-        if self
-            .management
-            .dialog
-            .as_ref()
             .is_some_and(|d| d.locations.is_some())
         {
             return self.locations_input(event);
@@ -1303,7 +1294,14 @@ impl App {
             && key.kind != KeyEventKind::Release
             && let Some(command) = self.management.dialog.as_ref().and_then(|dialog| {
                 let chooser = dialog.chooser.is_some();
+                let models = dialog.models.is_some();
                 match key.code {
+                    KeyCode::F(5) if models => Some(Command::Models(models::Command::Refresh)),
+                    KeyCode::PageUp if models => Some(Command::Models(models::Command::Previous)),
+                    KeyCode::PageDown if models => Some(Command::Models(models::Command::Next)),
+                    KeyCode::Enter if models && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        Some(Command::Save)
+                    }
                     KeyCode::F(5) if dialog.credentials.is_some() => Some(Command::CredentialRetry),
                     KeyCode::F(5) if dialog.removal.is_some() => Some(Command::RemovalQuery),
                     KeyCode::F(5) if chooser => {
@@ -1405,9 +1403,6 @@ impl Management {
             }
             if let Some(locations) = &mut dialog.locations {
                 locations.invalidate_geometry();
-            }
-            if let Some(models) = &mut dialog.models {
-                models.invalidate_geometry();
             }
             if let Some(models) = &mut dialog.enabled_models {
                 models.invalidate_geometry();
