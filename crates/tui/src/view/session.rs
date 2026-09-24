@@ -63,10 +63,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
             && !app.chat.view.mouse_selected
             && !app.chat.view.text_selection.active()
             && !app.chat.view.text_selection.dragging()
-            && app.palette.is_none()
-            && app.attachments.dialog.is_none()
-            && !app.interactions.visible
-            && app.management.dialog.is_none()
+            && app.overlay().is_none()
             && app.chat.view.search.is_none();
         app.chat.view.hovered = match &app.hover {
             Some(Action::ToggleMessage(key)) => Some(key.clone()),
@@ -164,20 +161,8 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
         );
     }
 
-    let focused = app.focus == Focus::Composer
-        && app.chat.view.search.is_none()
-        && app.palette.is_none()
-        && app.theme.editor.is_none()
-        && app.attachments.dialog.is_none()
-        && app.skills.dialog.is_none()
-        && !app.branch.visible
-        && !app.revision.visible
-        && !app.recap.visible
-        && !app.resume.visible
-        && !app.interactions.visible
-        && app.management.dialog.is_none()
-        && app.onboarding.dialog.is_none()
-        && app.queue.edit.is_none();
+    let focused =
+        app.focus == Focus::Composer && app.chat.view.search.is_none() && app.overlay().is_none();
     let (mut metadata, model_width) = metadata(app, parts[3].width.saturating_sub(4));
     let model_action = app.model_action();
     if model_width > 0

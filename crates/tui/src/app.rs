@@ -144,6 +144,8 @@ pub struct App {
     pub skills: crate::pages::skills::State,
     pub settings: crate::pages::settings::State,
     pub sidebar: crate::pages::sidebar::State,
+    /// The modal layer presenting whichever overlay is a kernel sheet.
+    pub layer: crate::ui::Layer<Action>,
     pub home: crate::pages::home::State,
     pub extensions: crate::pages::extensions::State,
     pub directories:
@@ -164,7 +166,7 @@ pub struct App {
     pub modal_area: Option<Rect>,
     pub hover: Option<Action>,
     pub hover_area: Option<Rect>,
-    hover_since: Option<Instant>,
+    pub(crate) hover_since: Option<Instant>,
     pub root: PathBuf,
     pub connection: ConnectionState,
     pub status: Option<Value>,
@@ -175,7 +177,7 @@ pub struct App {
     pub theme: crate::theme::Theme,
     pub refreshing: bool,
     pub creating: bool,
-    frame_size: Option<(u16, u16)>,
+    pub(crate) frame_size: Option<(u16, u16)>,
 }
 
 impl App {
@@ -199,6 +201,7 @@ impl App {
             skills: Default::default(),
             settings: Default::default(),
             sidebar: Default::default(),
+            layer: Default::default(),
             home: Default::default(),
             extensions: Default::default(),
             directories: Default::default(),
@@ -466,7 +469,6 @@ impl App {
                 || self.inbox.error.is_some())
     }
     pub fn begin_frame(&mut self, area: Rect) {
-        self.shutdown.visible = false;
         self.attachments.begin_frame();
         self.branch.invalidate_geometry();
         self.recap.invalidate_geometry();
@@ -492,41 +494,16 @@ impl App {
         self.chrome.session_fullscreen && matches!(self.navigation.current(), Route::Session(_))
     }
     pub fn tooltip_wait(&self) -> Option<Duration> {
-        if self.extensions.consent_visible()
-            || self.theme.editor.is_some()
-            || self.branch.visible
-            || self.recap.visible
-            || self.resume.visible
-            || self.revision.visible
-            || self.attachments.dialog.is_some()
-            || self.skills.dialog.is_some()
-            || !self.has_tooltip()
-            || self.palette.is_some()
-            || self.interactions.visible
-            || self.management.dialog.is_some()
-            || self.onboarding.dialog.is_some()
-        {
+        if self.overlay().is_some() || !self.has_tooltip() {
             return None;
         }
         let remaining = Duration::from_millis(450).checked_sub(self.hover_since?.elapsed())?;
         (!remaining.is_zero()).then_some(remaining)
     }
     pub fn selection_wait(&self, now: Instant) -> Option<Duration> {
-        if self.extensions.consent_visible()
-            || self.theme.editor.is_some()
-            || self.branch.visible
-            || self.recap.visible
-            || self.resume.visible
-            || self.revision.visible
-            || self.attachments.dialog.is_some()
-            || self.skills.dialog.is_some()
+        if self.overlay().is_some()
             || !matches!(self.navigation.current(), Route::Session(_))
-            || self.palette.is_some()
             || self.chrome.details
-            || self.interactions.visible
-            || self.queue.edit.is_some()
-            || self.management.dialog.is_some()
-            || self.onboarding.dialog.is_some()
         {
             return None;
         }
@@ -540,18 +517,7 @@ impl App {
                 .is_some_and(|reader| reader.selection_scroll(now))
     }
     pub fn tooltip_visible(&self) -> bool {
-        !self.extensions.consent_visible()
-            && self.theme.editor.is_none()
-            && !self.branch.visible
-            && !self.recap.visible
-            && !self.resume.visible
-            && !self.revision.visible
-            && self.attachments.dialog.is_none()
-            && self.skills.dialog.is_none()
-            && self.palette.is_none()
-            && self.management.dialog.is_none()
-            && self.onboarding.dialog.is_none()
-            && !self.interactions.visible
+        self.overlay().is_none()
             && self.has_tooltip()
             && self
                 .hover_since
@@ -1082,7 +1048,7 @@ impl App {
     }
 
     pub fn invalidate_editor_geometry(&mut self) {
-        self.shutdown.visible = false;
+        self.layer.invalidate();
         self.extensions.invalidate_geometry();
         self.modal_area = None;
         if let Some(editor) = &mut self.theme.editor {
@@ -1258,147 +1224,10 @@ impl App {
     }
 
     fn dispatch_input(&mut self, event: Event) -> (bool, Option<Action>) {
-        if self.shutdown.prompt.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.shutdown_input(event);
-        }
-        if let Event::Mouse(mouse) = &event
-            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
-            && (self.extensions.consent_visible()
-                || self.theme.editor.is_some()
-                || self.branch.visible
-                || self.recap.visible
-                || self.resume.visible
-                || self.revision.visible
-                || self.attachments.dialog.is_some()
-                || self.skills.dialog.is_some()
-                || self.palette.is_some()
-                || self.onboarding.dialog.is_some()
-                || self.management.dialog.is_some()
-                || self.interactions.visible
-                || self.queue.edit.is_some())
-            && self
-                .modal_area
-                .is_some_and(|area| !area.contains(Position::new(mouse.column, mouse.row)))
-        {
-            // Dismiss only the displayed overlay. Never forward this press to the page.
-            let action = if self.extensions.consent_visible() {
-                Some(Action::Extension(
-                    crate::pages::extensions::Command::DismissConsent,
-                ))
-            } else if self.theme.editor.is_some() {
-                Some(Action::Theme(crate::theme::editor::Command::Close))
-            } else if self.skills.dialog.is_some() {
-                Some(Action::Skills(crate::pages::skills::Command::Close))
-            } else if self.attachments.dialog.is_some() {
-                Some(Action::Attachment(
-                    crate::pages::attachments::Command::Close,
-                ))
-            } else if self.directory_reference_active() {
-                Some(Action::Manage(crate::pages::manage::Command::Close))
-            } else if self.revision.visible {
-                Some(Action::Revision(crate::pages::revision::Command::Close))
-            } else if self.recap.visible {
-                Some(Action::Recap(crate::pages::recap::Command::Close))
-            } else if self.resume.visible {
-                Some(Action::Resume(crate::pages::resume::Command::Close))
-            } else if self.branch.visible {
-                Some(Action::Branch(crate::pages::branch::Command::Close))
-            } else if self.onboarding.dialog.is_some() {
-                Some(Action::Onboard(crate::pages::onboarding::Command::Close))
-            } else if self.management.dialog.is_some() {
-                Some(Action::Manage(crate::pages::manage::Command::Close))
-            } else if self.interactions.visible {
-                Some(Action::Interaction(
-                    crate::pages::interactions::Command::Close,
-                ))
-            } else if self.queue.edit.is_some() {
-                Some(Action::Queue(crate::pages::queue::Command::Close))
-            } else {
-                self.palette = None;
-                None
-            };
-            self.hover = None;
-            self.hover_area = None;
-            self.hover_since = None;
-            self.modal_area = None;
-            self.hits.clear();
-            return (true, action.and_then(|action| self.apply(action)));
-        }
-        if self.extensions.consent_visible() && !matches!(event, Event::Resize(_, _)) {
-            return self.extensions_consent_input(event);
-        }
-        if self.theme.editor.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.theme_input(event);
-        }
-        if self.skills.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.skills_input(event);
-        }
-        if self.attachments.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.attachment_input(event);
-        }
-        if self.directory_reference_active() && !matches!(event, Event::Resize(_, _)) {
-            return self.management_input(event);
-        }
-        if self.revision.visible && !matches!(event, Event::Resize(_, _)) {
-            return self.revision_input(event);
-        }
-        if self.recap.visible && !matches!(event, Event::Resize(_, _)) {
-            return self.recap_input(event);
-        }
-        if self.resume.visible && !matches!(event, Event::Resize(_, _)) {
-            return self.resume_input(event);
-        }
-        if self.branch.visible && !matches!(event, Event::Resize(_, _)) {
-            return self.branch_input(event);
-        }
-        if self.onboarding.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.onboarding_input(event);
-        }
-        if self.management.dialog.is_some() && !matches!(event, Event::Resize(_, _)) {
-            return self.management_input(event);
-        }
-        if self.queue.edit.is_some()
-            && !self.interactions.visible
+        if let Some(overlay) = self.overlay()
             && !matches!(event, Event::Resize(_, _))
         {
-            return self.queue_edit_input(event);
-        }
-        if self.interactions.visible && !matches!(event, Event::Resize(_, _)) {
-            if let Event::Key(key) = &event
-                && key.kind != KeyEventKind::Release
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-                && key.code == KeyCode::Char('q')
-            {
-                return (true, Some(Action::Quit));
-            }
-            // A minimized/too-small terminal shows only a size warning, not the
-            // choices. Never activate an invisible approval with a retained focus.
-            if !self
-                .frame_size
-                .is_some_and(|(width, height)| width >= 30 && height >= 10)
-            {
-                if let Event::Key(key) = &event
-                    && key.kind != KeyEventKind::Release
-                    && key.code == KeyCode::Esc
-                {
-                    return (
-                        true,
-                        Some(Action::Interaction(
-                            crate::pages::interactions::Command::Close,
-                        )),
-                    );
-                }
-                return (false, None);
-            }
-            return self.interaction_input(event);
-        }
-        if self.palette.is_some()
-            && !matches!(
-                event,
-                Event::Resize(_, _) | Event::FocusGained | Event::FocusLost
-            )
-        {
-            return self.palette_input(event);
+            return self.overlay_input(overlay, event);
         }
         if self.palette.is_none()
             && let Event::Key(key) = &event

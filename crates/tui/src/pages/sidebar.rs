@@ -86,7 +86,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     let context = ui::Context {
         colors: app.theme.colors(),
         ascii: app.chrome.ascii,
-        focused: app.focus == Focus::Navigation && app.palette.is_none(),
+        focused: app.focus == Focus::Navigation && app.overlay().is_none(),
     };
     app.sidebar.surface.render(frame, area, tree, context);
 }

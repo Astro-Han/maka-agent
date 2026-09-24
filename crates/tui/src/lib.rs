@@ -25,6 +25,7 @@ mod files;
 mod i18n;
 mod motion;
 mod navigation;
+mod overlay;
 mod pages;
 mod shutdown;
 mod state;

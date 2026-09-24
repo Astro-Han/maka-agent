@@ -19,7 +19,7 @@
 
 //! One pass over a tree: measure, place, paint, and record what the committed
 //! frame can hit. Nothing here keeps state between frames.
-use super::node::{Align, Kind, Node, On, Size, Tone};
+use super::node::{Align, Kind, Node, On, Role, Size, Tone};
 use crate::theme::Palette;
 use ratatui::{
     buffer::Buffer,
@@ -48,6 +48,7 @@ pub(super) struct Item<M> {
     pub current: bool,
     pub follow_focus: bool,
     pub hint: Option<String>,
+    pub role: Option<Role>,
 }
 
 pub(super) struct Scroller {
@@ -147,6 +148,7 @@ impl<'a, M> Pass<'a, M> {
             current,
             follow_focus,
             hint,
+            role,
             ..
         } = node;
         // Scrolled-out items stay registered with an empty visible rectangle:
@@ -167,6 +169,11 @@ impl<'a, M> Pass<'a, M> {
             } else {
                 Style::default()
             });
+            // A button's whole hit area reads as one filled control.
+            if role.is_some() && enabled && !self.colors.terminal {
+                self.buffer
+                    .set_style(visible, Style::default().bg(self.colors.surface));
+            }
             self.items.push(Item {
                 id: id.clone(),
                 rect: visible,
@@ -180,6 +187,7 @@ impl<'a, M> Pass<'a, M> {
                 current,
                 follow_focus,
                 hint,
+                role,
             });
         }
         match kind {
@@ -329,7 +337,11 @@ impl<'a, M> Pass<'a, M> {
             Tone::Muted => Style::default().fg(colors.muted),
             Tone::Subtle => Style::default().fg(colors.subtle),
             Tone::Accent => Style::default().fg(colors.accent),
+            Tone::Primary => Style::default()
+                .fg(colors.accent)
+                .add_modifier(Modifier::BOLD),
             Tone::Warning => Style::default().fg(colors.warning),
+            Tone::Error => Style::default().fg(colors.error),
             Tone::Hue(index) => Style::default().fg(crate::view::tone::hue(index, colors)),
         }
     }
@@ -473,8 +485,8 @@ fn wrap(spans: &[(String, Tone)], width: u16) -> Vec<Vec<(String, Tone)>> {
     let mut lines = vec![vec![]];
     let mut used = 0;
     for (text, tone) in spans {
-        for word in text.split_word_bounds() {
-            let safe = crate::view::safe(word);
+        for word in words(text) {
+            let safe = crate::view::safe(&word);
             let cells = safe.width();
             let space = safe.trim().is_empty();
             if used + cells > width && used > 0 {
@@ -502,6 +514,22 @@ fn wrap(spans: &[(String, Tone)], width: u16) -> Vec<Vec<(String, Tone)>> {
         }
     }
     lines
+}
+
+/// Word boundaries, with closing punctuation kept on its preceding word
+/// (including a single CJK character) so no line starts with it.
+fn words(text: &str) -> Vec<String> {
+    let closing = |c: char| ",.!?:;%)]}、。，．！？：；％）］｝〉》」』】〕〗〙〛’”»".contains(c);
+    let mut words: Vec<String> = vec![];
+    for word in text.split_word_bounds() {
+        match words.last_mut() {
+            Some(previous) if word.chars().all(closing) && !previous.trim().is_empty() => {
+                previous.push_str(word)
+            }
+            _ => words.push(word.to_owned()),
+        }
+    }
+    words
 }
 
 #[cfg(test)]
@@ -556,6 +584,14 @@ mod tests {
         assert_eq!(
             text(wrap(&[("中文主题配置".into(), Tone::Normal)], 5)),
             ["中文", "主题", "配置"]
+        );
+        let prose = text(wrap(
+            &[("历史会保留。你可以恢复。".into(), Tone::Normal)],
+            5,
+        ));
+        assert!(
+            prose.iter().all(|line| !line.starts_with('。')),
+            "closing punctuation stays with its word: {prose:?}"
         );
         assert_eq!(
             text(wrap(&[("a \x1b[31m".into(), Tone::Normal)], 20)),

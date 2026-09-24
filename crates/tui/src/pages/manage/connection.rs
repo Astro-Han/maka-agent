@@ -469,16 +469,7 @@ mod tests {
                 app.i18n = I18n::new(LocalePreference::Explicit(locale), Locale::En);
                 for (width, height) in [(80, 24), (45, 20), (30, 10)] {
                     let mut screen = Terminal::new(TestBackend::new(width, height)).unwrap();
-                    screen
-                        .draw(|f| {
-                            super::super::draw(
-                                f,
-                                &mut app,
-                                f.area(),
-                                ratatui::style::Style::default(),
-                            )
-                        })
-                        .unwrap();
+                    screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
                     if width >= 45 {
                         let compact = |s: &str| {
                             s.chars()
@@ -505,12 +496,24 @@ mod tests {
             }
             let mut screen = Terminal::new(TestBackend::new(80, 24)).unwrap();
             screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
-            let save = app
-                .hits
-                .iter()
-                .find(|hit| hit.action == Action::Manage(Command::Save))
-                .unwrap()
-                .area;
+            // The confirming button repeats the title; it is the lower copy.
+            let label = app.i18n.text(change.label());
+            let buffer = screen.backend().buffer();
+            let save = (0..buffer.area.height)
+                .rev()
+                .find_map(|y| {
+                    let (mut line, mut x) = (String::new(), 0);
+                    while x < buffer.area.width {
+                        let symbol = buffer[(x, y)].symbol();
+                        line.push_str(symbol);
+                        x += (unicode_width::UnicodeWidthStr::width(symbol) as u16).max(1);
+                    }
+                    line.find(&label).map(|byte| {
+                        let x = unicode_width::UnicodeWidthStr::width(&line[..byte]) as u16;
+                        ratatui::layout::Position::new(x, y)
+                    })
+                })
+                .unwrap();
             let normal = screen.backend().buffer()[(save.x, save.y)].style();
             let hover = |x, y| {
                 Event::Mouse(crossterm::event::MouseEvent {
@@ -522,11 +525,6 @@ mod tests {
             };
             assert!(app.input(hover(save.x, save.y)).0);
             assert!(app.management.pending.is_none(), "hover never submits");
-            assert_eq!(
-                app.management.dialog.as_ref().unwrap().focus,
-                0,
-                "hover does not move keyboard focus"
-            );
             screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
             let highlighted = screen.backend().buffer()[(save.x, save.y)].style();
             assert_ne!(normal.bg, highlighted.bg);

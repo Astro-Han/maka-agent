@@ -18,7 +18,10 @@
  */
 
 use super::{Command, Entity, Kind};
-use crate::app::{Action, App};
+use crate::{
+    app::{Action, App},
+    ui::{Role, Sheet, Tone},
+};
 use ratatui::{
     Frame,
     layout::{Margin, Rect},
@@ -84,6 +87,112 @@ pub(crate) fn note_lines(text: &str, width: u16) -> Vec<Line<'static>> {
         lines.push(Line::from(line));
     }
     lines
+}
+
+/// Confirmations without a text field: archiving and restoring, and testing,
+/// fetching models for, enabling, disabling or removing a connection. Cancel
+/// is the default, so Enter alone never changes anything.
+pub(crate) fn confirm_sheet(app: &App) -> Option<Sheet<Action>> {
+    use super::connection::Change;
+    let dialog = app.management.dialog.as_ref().filter(|dialog| {
+        matches!(
+            dialog.kind,
+            Kind::Archive
+                | Kind::Restore
+                | Kind::Connection(
+                    Change::FetchModels
+                        | Change::Test
+                        | Change::Enable
+                        | Change::Disable
+                        | Change::Remove
+                )
+        )
+    })?;
+    let label = dialog.kind.label(&dialog.target);
+    let busy = app.management.pending.is_some();
+    let key = format!("{label}:{}", dialog.target.name);
+    let sheet = |key: String| {
+        Sheet::new(key, app.i18n.text(label)).text(
+            "name",
+            &crate::view::safe(&dialog.target.name),
+            Tone::Normal,
+        )
+    };
+    if let Some(test) = dialog.connection_test.as_ref()
+        && !busy
+        && dialog.error.is_none()
+    {
+        let tone = if matches!(
+            test,
+            maka_protocol::connection_effects::ConnectionTestProjection::Failed { .. }
+        ) {
+            Tone::Warning
+        } else {
+            Tone::Accent
+        };
+        return Some(
+            sheet(format!("{key}:result"))
+                .text(
+                    "result",
+                    &super::connection_test::text(test, &app.i18n),
+                    tone,
+                )
+                .button(
+                    "close",
+                    app.i18n.text("connection-test-close"),
+                    Role::Normal,
+                    Action::Manage(Command::Close),
+                    true,
+                )
+                .focus("close"),
+        );
+    }
+    let (note, tone) = if busy {
+        (
+            if dialog.kind == Kind::Connection(Change::Test) {
+                "connection-test-working"
+            } else {
+                "session-saving"
+            },
+            Tone::Subtle,
+        )
+    } else if let Some(error) = dialog.error {
+        (error, Tone::Warning)
+    } else {
+        (
+            match dialog.kind {
+                Kind::Connection(change) => change.note(),
+                _ if matches!(dialog.target.entity, Entity::Project { .. }) => {
+                    "project-archive-note"
+                }
+                _ => "session-archive-note",
+            },
+            Tone::Subtle,
+        )
+    };
+    Some(
+        sheet(key)
+            .text("note", &app.i18n.text(note), tone)
+            .button(
+                "cancel",
+                app.i18n.text("session-cancel"),
+                Role::Normal,
+                Action::Manage(Command::Close),
+                app.enabled(&Action::Manage(Command::Close)),
+            )
+            .button(
+                "save",
+                app.i18n.text(label),
+                if app.management.destructive() {
+                    Role::Destructive
+                } else {
+                    Role::Primary
+                },
+                Action::Manage(Command::Save),
+                app.enabled(&Action::Manage(Command::Save)),
+            )
+            .focus("cancel"),
+    )
 }
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
@@ -239,25 +348,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 Some("session-workspace-project-note")
             }
             Kind::Workspace => Some("session-workspace-note"),
-            Kind::Archive | Kind::Restore => {
-                Some(if matches!(dialog.target.entity, Entity::Project { .. }) {
-                    "project-archive-note"
-                } else {
-                    "session-archive-note"
-                })
-            }
+            Kind::Archive | Kind::Restore => unreachable!("confirmations are sheets"),
         })
     }
     .map(|key| app.i18n.text(key));
-    let text = if !busy && dialog.error.is_none() {
-        dialog
-            .connection_test
-            .as_ref()
-            .map(|test| super::connection_test::text(test, &app.i18n))
-            .or(text)
-    } else {
-        text
-    };
     let content = text
         .as_ref()
         .map(|text| note_lines(text, width.saturating_sub(4)));
@@ -330,10 +424,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     if let Some(content) = content {
         frame.render_widget(
             Paragraph::new(content).style(Style::default().fg(
-                if dialog.error.is_some() || dialog.editor.error.is_some() || matches!(dialog.connection_test, Some(maka_protocol::connection_effects::ConnectionTestProjection::Failed {..})) {
+                if dialog.error.is_some() || dialog.editor.error.is_some() {
                     app.theme.colors().warning
-                } else if dialog.connection_test.is_some() {
-                    crate::view::tone::accent(app.theme.colors())
                 } else {
                     app.theme.colors().subtle
                 },
@@ -347,19 +439,6 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         );
     }
     let focus = dialog.focus;
-    if dialog.connection_test.is_some() {
-        let text = app.i18n.text("connection-test-close");
-        let width = (text.width() as u16 + 2).min(inner.width);
-        crate::view::button(
-            frame,
-            app,
-            Rect::new(inner.right() - width, inner.bottom() - 1, width, 1),
-            &text,
-            Action::Manage(Command::Close),
-            true,
-        );
-        return;
-    }
     let kind = dialog.kind;
     let reviewing = dialog.reviewing;
     let buttons_start = usize::from(editing) + usize::from(kind == Kind::Register);

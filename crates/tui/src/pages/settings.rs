@@ -137,10 +137,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     let context = ui::Context {
         colors: app.theme.colors(),
         ascii: app.chrome.ascii,
-        focused: app.focus == Focus::Page
-            && app.palette.is_none()
-            && app.theme.editor.is_none()
-            && app.management.dialog.is_none(),
+        focused: app.focus == Focus::Page && app.overlay().is_none(),
     };
     app.settings.surface.render(frame, area, tree, context);
 }

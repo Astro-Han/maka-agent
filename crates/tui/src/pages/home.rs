@@ -58,7 +58,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, directory: bool) {
     let context = ui::Context {
         colors: app.theme.colors(),
         ascii: app.chrome.ascii,
-        focused: app.focus == Focus::Page && app.palette.is_none(),
+        focused: app.focus == Focus::Page && app.overlay().is_none(),
     };
     app.home.surface.render(frame, area, tree, context);
 }

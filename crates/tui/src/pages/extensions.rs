@@ -23,7 +23,7 @@ mod saved;
 pub use saved::Checkpoint;
 pub(crate) mod io;
 mod view;
-pub use consent::draw as draw_consent;
+pub(crate) use consent::sheet as consent_sheet;
 pub use io::{Output, execute};
 pub use view::draw;
 
@@ -482,7 +482,6 @@ impl App {
                         view,
                         input,
                         proposal,
-                        focus: 0,
                         rendered: false,
                     });
                 } else {
@@ -534,6 +533,12 @@ impl App {
         }
         self.hits.clear();
         self.hover = None;
+    }
+    /// Approval needs the terms on screen; the sheet layer reports that.
+    pub(crate) fn consent_presented(&mut self, shown: bool) {
+        if let Some(consent) = &mut self.extensions.consent {
+            consent.rendered = shown;
+        }
     }
     pub fn extensions_enabled(&self, command: &Command) -> bool {
         let state = &self.extensions;

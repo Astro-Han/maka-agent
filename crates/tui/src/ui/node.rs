@@ -35,9 +35,21 @@ pub enum Tone {
     Muted,
     Subtle,
     Accent,
+    /// The default action: accent, bold.
+    Primary,
     Warning,
+    Error,
     /// One of the palette's stable identity hues (session titles).
     Hue(u8),
+}
+
+/// What a button does, which decides its color at rest and under focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Normal,
+    Primary,
+    /// Loses or discards something; red even while focused.
+    Destructive,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -100,6 +112,8 @@ pub struct Node<M> {
     /// selection follows the focus.
     pub follow_focus: bool,
     pub hint: Option<String>,
+    /// Set on buttons: a filled hit area whose label keeps its role color.
+    pub role: Option<Role>,
 }
 
 impl<M> Node<M> {
@@ -113,6 +127,7 @@ impl<M> Node<M> {
             current: false,
             follow_focus: false,
             hint: None,
+            role: None,
         }
     }
     pub fn column(key: impl Into<Cow<'static, str>>, children: Vec<Node<M>>) -> Self {
@@ -130,6 +145,22 @@ impl<M> Node<M> {
                 clip: false,
             },
         )
+    }
+    /// A command whose label is centered in its whole hit area; pair it
+    /// with `on` to make it do something.
+    pub fn button(key: impl Into<Cow<'static, str>>, label: String, role: Role) -> Self {
+        let tone = match role {
+            Role::Normal => Tone::Normal,
+            Role::Primary => Tone::Primary,
+            Role::Destructive => Tone::Error,
+        };
+        let width = unicode_width::UnicodeWidthStr::width(label.as_str()) as u16 + 4;
+        let mut node = Self::text(key, vec![(label, tone)])
+            .align(Align::Center)
+            .clip()
+            .size(Size::Fixed(width));
+        node.role = Some(role);
+        node
     }
     pub fn rule(key: impl Into<Cow<'static, str>>) -> Self {
         Self::new(key, Kind::Rule).size(Size::Fixed(1))

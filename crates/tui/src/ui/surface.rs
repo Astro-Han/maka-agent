@@ -19,7 +19,7 @@
 
 use super::{
     layout::{Axis, Item, Pass, Scroller},
-    node::{Node, On},
+    node::{Node, On, Role},
 };
 use crate::theme::Palette;
 use crossterm::event::{
@@ -49,21 +49,21 @@ pub struct Outcome<M> {
     pub message: Option<M>,
 }
 impl<M> Outcome<M> {
-    fn ignored() -> Self {
+    pub(super) fn ignored() -> Self {
         Self {
             redraw: false,
             consumed: false,
             message: None,
         }
     }
-    fn handled(redraw: bool) -> Self {
+    pub(super) fn handled(redraw: bool) -> Self {
         Self {
             redraw,
             consumed: true,
             message: None,
         }
     }
-    fn emit(message: M) -> Self {
+    pub(super) fn emit(message: M) -> Self {
         Self {
             redraw: true,
             consumed: true,
@@ -168,10 +168,19 @@ impl<M: Clone> Surface<M> {
             // Keyboard focus and the pointer stay distinguishable: focus takes
             // the selection, hover only lifts the row.
             let style = if context.focused && Some(&item.id) == self.focus.as_ref() {
-                colors.focused().fg(colors.accent)
+                colors
+                    .focused()
+                    .fg(if item.role == Some(Role::Destructive) {
+                        colors.error
+                    } else {
+                        colors.accent
+                    })
             } else if Some(&item.id) == self.hover.as_ref() {
                 if colors.terminal {
                     Style::default().add_modifier(Modifier::UNDERLINED)
+                } else if item.role.is_some() {
+                    // Buttons are already filled at rest; hover lifts the fill.
+                    Style::default().bg(colors.border)
                 } else {
                     Style::default().bg(colors.surface)
                 }

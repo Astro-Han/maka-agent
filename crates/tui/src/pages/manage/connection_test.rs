@@ -121,7 +121,6 @@ mod tests {
                 app.apply(open.clone());
                 let mut screen = Terminal::new(TestBackend::new(80, 24)).unwrap();
                 screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
-                assert_eq!(app.management.dialog.as_ref().unwrap().focus, 0);
                 app.input(Event::Key(KeyEvent::new(
                     KeyCode::Enter,
                     KeyModifiers::NONE,
@@ -158,12 +157,19 @@ mod tests {
                     screen = Terminal::new(TestBackend::new(width, height)).unwrap();
                     screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
                     assert!(app.management.dialog.as_ref().unwrap().visible);
+                    let text: String = screen
+                        .backend()
+                        .buffer()
+                        .content
+                        .iter()
+                        .map(|cell| cell.symbol())
+                        .collect();
+                    let compact = |s: &str| s.split_whitespace().collect::<String>();
                     assert!(
-                        app.hits
-                            .iter()
-                            .all(|hit| hit.action == Action::Manage(Command::Close))
+                        compact(&text).contains(&compact(&app.i18n.text("connection-test-close")))
+                            && !compact(&text).contains(&compact(&app.i18n.text("session-cancel"))),
+                        "a finished test offers only Close: {text}"
                     );
-                    assert_eq!(app.hits.len(), 1);
                 }
                 assert!(app.i18n.diagnostics().is_empty());
                 app.input(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));

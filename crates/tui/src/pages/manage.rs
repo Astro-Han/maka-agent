@@ -33,6 +33,7 @@ mod references;
 pub mod removal;
 pub mod sandbox;
 pub(crate) mod view;
+pub(crate) use view::confirm_sheet;
 pub use view::draw;
 
 use crate::{
@@ -1311,9 +1312,7 @@ impl App {
             && self.management.pending.is_none()
             && !dialog.blocked;
         let browse = dialog.kind == Kind::Register;
-        let count = if dialog.connection_test.is_some() {
-            1
-        } else if browse {
+        let count = if browse {
             4
         } else if dialog.kind.edits_text() {
             3 // Editor/cancel/save, or cancel/edit/confirm while reviewing.
@@ -1342,9 +1341,7 @@ impl App {
                     dialog.focus = (dialog.focus + count - 1) % count;
                     return (true, None);
                 }
-                KeyCode::Enter => Some(if dialog.connection_test.is_some() {
-                    Command::Close
-                } else if dialog.reviewing {
+                KeyCode::Enter => Some(if dialog.reviewing {
                     match dialog.focus {
                         0 => Command::Close,
                         1 => Command::Edit,
@@ -1420,6 +1417,12 @@ impl App {
 }
 
 impl Management {
+    /// The confirmation sheet reports whether it is on screen; Save needs it.
+    pub(crate) fn presented(&mut self, shown: bool) {
+        if let Some(dialog) = &mut self.dialog {
+            dialog.visible = shown;
+        }
+    }
     pub(crate) fn destructive(&self) -> bool {
         self.dialog.as_ref().is_some_and(|dialog| {
             matches!(

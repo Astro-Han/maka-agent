@@ -31,7 +31,7 @@ use ratatui::{
 };
 
 pub(crate) mod activity;
-mod queue;
+pub(crate) mod queue;
 mod session;
 pub(crate) mod tone;
 
@@ -59,22 +59,8 @@ pub(crate) fn clear_overlay(frame: &mut Frame<'_>, area: Rect) {
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
     app.begin_frame(area);
-    let animated = app.chrome.motion
-        && app.chrome.window_focused
-        && !app.closing
-        && app.shutdown.prompt.is_none()
-        && app.palette.is_none()
-        && !app.interactions.visible
-        && app.management.dialog.is_none()
-        && !app.branch.visible
-        && !app.extensions.consent_visible()
-        && !app.recap.visible
-        && !app.resume.visible
-        && !app.revision.visible
-        && app.attachments.dialog.is_none()
-        && app.skills.dialog.is_none()
-        && app.onboarding.dialog.is_none()
-        && app.queue.edit.is_none();
+    let animated =
+        app.chrome.motion && app.chrome.window_focused && !app.closing && app.overlay().is_none();
     app.chrome
         .animation
         .begin(std::time::Instant::now(), animated);
@@ -251,24 +237,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     };
     let hint = if app.shutdown.stopping {
         app.i18n.text("shutdown-working")
-    } else if app.shutdown.prompt.is_some() {
-        String::new()
     } else if app.closing {
         app.i18n.text("state-closing")
-    } else if app.extensions.consent_visible()
-        || app.theme.editor.is_some()
-        || app.branch.visible
-        || app.recap.visible
-        || app.resume.visible
-        || app.revision.visible
-        || app.attachments.dialog.is_some()
-        || app.skills.dialog.is_some()
-        || app.onboarding.dialog.is_some()
-        || app.management.dialog.is_some()
-        || app.interactions.visible
-        || app.palette.is_some()
-        || app.queue.edit.is_some()
-    {
+    } else if app.overlay().is_some() {
         String::new()
     } else if app.state_error.is_some() {
         if matches!(app.navigation.current(), Route::Session(_)) {
@@ -371,38 +342,13 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
             action: Action::Visit(Route::Host),
         });
     }
-    if app.shutdown.prompt.is_some() {
-        crate::shutdown::draw(frame, app, area, base);
-    } else if app.extensions.consent_visible() {
-        crate::pages::extensions::draw_consent(frame, app, area, base);
-    } else if app.theme.editor.is_some() {
-        crate::theme::editor::draw(frame, app, area);
-    } else if app.skills.dialog.is_some() {
-        crate::pages::skills::draw(frame, app, area, base);
-    } else if app.attachments.dialog.is_some() {
-        crate::pages::attachments::draw(frame, app, area, base);
-    } else if app.directory_reference_active() {
-        crate::pages::manage::draw(frame, app, area, base);
-    } else if app.revision.visible {
-        crate::pages::revision::draw(frame, app, area, base);
-    } else if app.recap.visible {
-        crate::pages::recap::draw(frame, app, area, base);
-    } else if app.resume.visible {
-        crate::pages::resume::draw(frame, app, area, base);
-    } else if app.branch.visible {
-        crate::pages::branch::draw(frame, app, area, base);
-    } else if app.onboarding.dialog.is_some() {
-        crate::pages::onboarding::draw(frame, app, area, base);
-    } else if app.management.dialog.is_some() {
-        crate::pages::manage::draw(frame, app, area, base);
-    } else if app.interactions.visible {
-        crate::pages::interactions::draw(frame, app, area, base);
-    } else if app.queue.edit.is_some() {
-        queue::edit(frame, app, area, base);
-    } else if app.palette.is_some() {
-        crate::pages::commands::draw(frame, app, area, base);
-    } else if app.tooltip_visible() {
-        draw_tooltip(frame, app, area, base);
+    if let Some(overlay) = app.overlay() {
+        crate::overlay::draw(frame, app, overlay, area, base);
+    } else {
+        app.layer.close();
+        if app.tooltip_visible() {
+            draw_tooltip(frame, app, area, base);
+        }
     }
 }
 

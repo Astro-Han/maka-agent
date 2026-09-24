@@ -22,7 +22,9 @@
 //! and popovers, so pages neither draw cells nor route raw input themselves.
 mod layout;
 mod node;
+mod sheet;
 mod surface;
 
-pub use node::{Align, Choice, Node, On, Size, Tone};
+pub use node::{Align, Choice, Node, On, Role, Size, Tone};
+pub use sheet::{Layer, Sheet};
 pub use surface::{Context, Outcome, Surface};
