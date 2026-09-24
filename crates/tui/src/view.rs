@@ -812,7 +812,6 @@ fn page_lines(app: &App) -> Vec<Line<'static>> {
                     ));
                     lines.push(Line::raw(""));
                     lines.push(Line::raw(i18n.text("host-start")));
-                    lines.push(Line::raw(i18n.text("host-setup")));
                 }
                 ConnectionState::Disconnected => {
                     lines.push(Line::raw(i18n.text("connection-disconnected")))
@@ -889,6 +888,8 @@ fn control(
     let enabled = app.enabled(&action);
     let destructive = matches!(action, Action::Manage(crate::pages::manage::Command::Save))
         && app.management.is_removal();
+    let caution = matches!(action, Action::Manage(crate::pages::manage::Command::Save))
+        && app.sandbox_disabling();
     let style = if !enabled {
         Style::default()
             .fg(app.theme.colors().subtle)
@@ -896,11 +897,15 @@ fn control(
     } else if focused || app.hover.as_ref() == Some(&action) {
         tone::selection(app.theme.colors()).fg(if destructive {
             app.theme.colors().error
+        } else if caution {
+            app.theme.colors().warning
         } else {
             tone::accent(app.theme.colors())
         })
     } else if destructive {
         Style::default().fg(app.theme.colors().error)
+    } else if caution {
+        Style::default().fg(app.theme.colors().warning)
     } else if matches!(
         action,
         Action::SendMessage | Action::SteerMessage | Action::StopTurn(_)

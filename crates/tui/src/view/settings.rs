@@ -42,6 +42,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
         } else {
             "theme-customize"
         }),
+        app.i18n.text("sandbox-default-title"),
     ];
     for (index, (action, value)) in app.page_actions().into_iter().zip(values).enumerate() {
         let rect =
@@ -89,9 +90,9 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     }
     let footer = Rect::new(
         area.x,
-        area.y + 12,
+        area.y + 14,
         area.width.min(64),
-        area.height.saturating_sub(12),
+        area.height.saturating_sub(14),
     )
     .intersection(area);
     frame.render_widget(
@@ -110,9 +111,15 @@ mod tests {
     #[test]
     fn settings_labels_share_a_column_for_cjk_unicode_and_ascii_icons() {
         for (locale, initials) in [
-            (crate::Locale::En, ["P", "L", "I", "M", "M", "C"]),
-            (crate::Locale::ZhCn, ["配", "语", "图", "动", "模", "自"]),
-            (crate::Locale::ZhTw, ["配", "語", "圖", "動", "模", "自"]),
+            (crate::Locale::En, ["P", "L", "I", "M", "M", "C", "N"]),
+            (
+                crate::Locale::ZhCn,
+                ["配", "语", "图", "动", "模", "自", "新"],
+            ),
+            (
+                crate::Locale::ZhTw,
+                ["配", "語", "圖", "動", "模", "自", "新"],
+            ),
         ] {
             for ascii in [false, true] {
                 let mut app = App::new(
@@ -120,6 +127,10 @@ mod tests {
                     crate::i18n::I18n::new(crate::LocalePreference::Explicit(locale), locale),
                 );
                 app.apply(Action::Visit(Route::Settings));
+                app.connection = ConnectionState::Connected {
+                    root_id: "root".into(),
+                    epoch: "epoch".into(),
+                };
                 app.chrome.ascii = ascii;
                 let mut screen = Terminal::new(TestBackend::new(40, 15)).unwrap();
                 screen

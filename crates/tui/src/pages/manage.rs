@@ -31,6 +31,7 @@ pub mod oauth;
 mod project;
 mod references;
 pub mod removal;
+pub mod sandbox;
 pub(crate) mod view;
 pub use view::draw;
 
@@ -61,6 +62,7 @@ impl Target {
 enum Entity {
     Oauth,
     Defaults,
+    SandboxDefaults,
     Session {
         id: String,
         revision: u64,
@@ -86,6 +88,7 @@ pub enum Kind {
     Project,
     Locations,
     Model,
+    Sandbox,
     Archive,
     Restore,
     Remove,
@@ -105,6 +108,8 @@ impl Kind {
             (Self::Locations, _) => "project-locations",
             (Self::Model, Entity::Defaults) => "default-model-title",
             (Self::Model, _) => "session-model-change",
+            (Self::Sandbox, Entity::SandboxDefaults) => "sandbox-default-title",
+            (Self::Sandbox, _) => "session-sandbox-change",
             (Self::Rename, Entity::Project { .. }) => "project-rename",
             (Self::Archive, Entity::Project { .. }) => "project-archive",
             (Self::Restore, Entity::Project { .. }) => "project-restore",
@@ -115,6 +120,7 @@ impl Kind {
                 | Self::Relink
                 | Self::Locations
                 | Self::Model
+                | Self::Sandbox
                 | Self::Connection(_)
                 | Self::Credential(_) => unreachable!(),
                 Self::Rename => "session-rename",
@@ -162,6 +168,7 @@ pub enum Command {
     ChooseProject(choose_project::Command),
     Locations(locations::Command),
     Models(models::Command),
+    Sandbox(sandbox::Command),
     EnabledModels(enabled_models::Command),
     Save,
     Edit,
@@ -179,6 +186,7 @@ impl Command {
             Self::ChooseProject(command) => command.label(),
             Self::Locations(command) => command.label(),
             Self::Models(command) => command.label(),
+            Self::Sandbox(mode) => mode.label(),
             Self::EnabledModels(command) => command.label(),
             Self::Save => "session-save",
             Self::Edit => "project-relink-edit",
@@ -196,6 +204,9 @@ pub struct Ticket {
     project_id: Option<String>,
     model: Option<models::Choice>,
     thinking_level: Option<ThinkingLevel>,
+    sandbox_mode: Option<SandboxMode>,
+    approval_policy: Option<ApprovalPolicy>,
+    policy_revision: Option<u64>,
     enabled_model_ids: Option<Vec<String>>,
     model_overrides:
         Option<std::collections::BTreeMap<String, maka_protocol::configuration::ModelOverride>>,
@@ -203,6 +214,7 @@ pub struct Ticket {
     credential: Option<Box<maka_protocol::configuration::CredentialStatus>>,
 }
 pub enum Updated {
+    Policy(maka_protocol::configuration::policy::RuntimePolicyMutationResult),
     ConnectionTest(maka_protocol::connection_effects::ConnectionTestRunResult),
     ModelFetch(maka_protocol::connection_effects::ConnectionModelFetchResult),
     Credential(maka_protocol::configuration::CredentialMutationResult),
@@ -214,6 +226,7 @@ pub enum Updated {
 
 #[derive(Default)]
 pub struct Management {
+    sandbox_sequence: u64,
     pub oauth: oauth::State,
     pub dialog: Option<Dialog>,
     pending: Option<Ticket>,
@@ -246,6 +259,7 @@ pub struct Dialog {
     chooser: Option<choose_project::Chooser>,
     locations: Option<locations::Locations>,
     models: Option<models::Models>,
+    sandbox: Option<sandbox::State>,
     enabled_models: Option<enabled_models::State>,
     credentials: Option<credentials::State>,
     removal: Option<removal::State>,
@@ -256,6 +270,11 @@ pub async fn execute(
     ticket: &Ticket,
     secret: Option<String>,
 ) -> Result<Updated, RequestFailure> {
+    if matches!(ticket.target.entity, Entity::SandboxDefaults) {
+        return sandbox::defaults::write(client, ticket)
+            .await
+            .map(Updated::Policy);
+    }
     if matches!(ticket.kind, Kind::Credential(_)) {
         return credentials::execute(client, ticket, secret).await;
     }
@@ -312,6 +331,27 @@ pub async fn execute(
                 })
                 .await
                 .map(Updated::Removal);
+        }
+        Kind::Sandbox => {
+            let mut patch = serde_json::json!({});
+            if let Some(mode) = ticket.sandbox_mode {
+                patch["sandboxMode"] = serde_json::to_value(mode).unwrap();
+            }
+            if let Some(approval) = ticket.approval_policy {
+                patch["approvalPolicy"] = serde_json::to_value(approval).unwrap();
+            }
+            client
+                .update_session_configuration(
+                    decode_session_configuration_update_input(&serde_json::json!({
+                        "sessionId":id,"expectedRevision":revision,"patch":patch
+                    }))
+                    .map_err(|e| {
+                        RequestFailure::NotDispatched(maka_client::ClientError::Protocol(
+                            e.to_string(),
+                        ))
+                    })?,
+                )
+                .await
         }
         Kind::Model => {
             let choice = ticket.model.as_ref().ok_or_else(|| {
@@ -403,6 +443,13 @@ impl App {
         if self.navigation.current() == Route::Connections {
             return self.connection_management_commands(root_id, epoch);
         }
+        if self.navigation.current() == Route::Settings {
+            return self
+                .sandbox_defaults_action()
+                .into_iter()
+                .map(|action| (action, "sandbox-default-title"))
+                .collect();
+        }
         let item = match self.navigation.current() {
             Route::Session(id) => match &self.sessions.detail {
                 super::sessions::Detail::Ready(item) if item.id == id => item.as_ref(),
@@ -455,6 +502,7 @@ impl App {
             },
         ];
         if !item.is_archived {
+            kinds.push(Kind::Sandbox);
             kinds.push(Kind::Workspace);
             kinds.push(Kind::Project);
             if item.backend == Backend::AiSdk {
@@ -476,6 +524,13 @@ impl App {
             Command::CredentialRetry => self.credential_retry_enabled(),
             Command::RemovalQuery => self.removal_query_enabled(),
             Command::Models(command) => self.models_enabled(command),
+            Command::Sandbox(_) => self.management.dialog.as_ref().is_some_and(|d| {
+                d.sandbox.as_ref().is_some_and(sandbox::State::loaded)
+                    && d.visible
+                    && !d.blocked
+                    && self.management.pending.is_none()
+                    && self.management_identity(&d.target)
+            }),
             Command::EnabledModels(command) => self.enabled_models_enabled(command),
             Command::Locations(command) => self.locations_enabled(command),
             Command::Browse => self.management.dialog.as_ref().is_some_and(|d| {
@@ -497,6 +552,7 @@ impl App {
                             | (Entity::Registration, Kind::Register)
                             | (Entity::Input(_), Kind::Reference)
                             | (Entity::Defaults, Kind::Model)
+                            | (Entity::SandboxDefaults, Kind::Sandbox)
                             | (
                                 Entity::Connection(_),
                                 Kind::Oauth
@@ -510,6 +566,7 @@ impl App {
                                     | Kind::Workspace
                                     | Kind::Project
                                     | Kind::Model
+                                    | Kind::Sandbox
                                     | Kind::Archive
                                     | Kind::Restore
                                     | Kind::Remove
@@ -536,6 +593,7 @@ impl App {
             Command::Save if self.directory_reference_active() => self.reference_can_select(),
             Command::Save => self.management.dialog.as_ref().is_some_and(|dialog| {
                 dialog.kind != Kind::Oauth
+                    && dialog.sandbox.as_ref().is_none_or(sandbox::State::changed)
                     && dialog.visible
                     && self.credential_can_save()
                     && dialog.removal.as_ref().is_none_or(|state| state.can_save())
@@ -575,6 +633,9 @@ impl App {
                 return None;
             }
             Command::Models(command) => return self.models_action(command),
+            Command::Sandbox(mode) => {
+                self.sandbox_update(mode);
+            }
             Command::RemovalQuery => {
                 self.request_removal_query();
             }
@@ -618,6 +679,16 @@ impl App {
                 self.invalidate_editor_geometry();
                 self.palette = None;
                 self.hover = None;
+                let sandbox = if kind == Kind::Sandbox {
+                    self.management.sandbox_sequence += 1;
+                    Some(if matches!(target.entity, Entity::SandboxDefaults) {
+                        sandbox::State::defaults(self.management.sandbox_sequence)
+                    } else {
+                        sandbox::State::for_target(self, &target)?
+                    })
+                } else {
+                    None
+                };
                 let models = if kind == Kind::Model {
                     self.management.models_sequence += 1;
                     let mut models = models::Models::new(
@@ -746,6 +817,8 @@ impl App {
                             .iter()
                             .position(|control| *control == Command::Close)
                             .unwrap_or(0)
+                    } else if let Some(state) = &sandbox {
+                        state.initial_focus()
                     } else {
                         0
                     },
@@ -758,6 +831,7 @@ impl App {
                     chooser,
                     locations,
                     models,
+                    sandbox,
                     enabled_models,
                     credentials,
                 });
@@ -834,6 +908,16 @@ impl App {
                 .as_ref()
                 .and_then(|m| m.selection().map(|row| row.choice.clone())),
             thinking_level: dialog.models.as_ref().and_then(|m| m.thinking_level()),
+            sandbox_mode: dialog.sandbox.as_ref().and_then(sandbox::State::mode_patch),
+            approval_policy: dialog
+                .sandbox
+                .as_ref()
+                .and_then(sandbox::State::approval_patch),
+            policy_revision: dialog
+                .sandbox
+                .as_ref()
+                .and_then(|state| state.defaults.as_ref())
+                .and_then(|state| state.revision),
             enabled_model_ids: dialog
                 .enabled_models
                 .as_ref()
@@ -964,7 +1048,12 @@ impl App {
                 }
             }
             Ok(
-                Updated::Session(SessionUpdateResult::Committed { .. })
+                Updated::Policy(
+                    maka_protocol::configuration::policy::RuntimePolicyMutationResult::Committed {
+                        ..
+                    },
+                )
+                | Updated::Session(SessionUpdateResult::Committed { .. })
                 | Updated::Project(_)
                 | Updated::Catalog(maka_protocol::configuration::CatalogMutationResult::Committed {
                     ..
@@ -978,6 +1067,10 @@ impl App {
                     },
                 ),
             ) => self.management.dialog = None,
+            Ok(Updated::Policy(_)) => {
+                dialog.blocked = true;
+                dialog.error = Some("sandbox-default-conflict");
+            }
             Ok(Updated::ModelFetch(result)) => {
                 let (error, blocked) = model_fetch::failure(&result);
                 dialog.error = Some(error);
@@ -1065,6 +1158,10 @@ impl App {
                     },
                 );
             }
+            Err(_) if matches!(dialog.target.entity, Entity::SandboxDefaults) => {
+                dialog.blocked = true;
+                dialog.error = Some("sandbox-default-failed");
+            }
             Err(RequestFailure::Rejected(maka_client::ClientError::Rejected(error)))
                 if !matches!(dialog.target.entity, Entity::Session { .. }) =>
             {
@@ -1141,6 +1238,14 @@ impl App {
         }
     }
     pub fn management_input(&mut self, event: Event) -> (bool, Option<Action>) {
+        if self
+            .management
+            .dialog
+            .as_ref()
+            .is_some_and(|d| d.sandbox.is_some())
+        {
+            return self.sandbox_input(event);
+        }
         if self
             .management
             .dialog

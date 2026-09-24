@@ -83,7 +83,9 @@ fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_mode
         (client, listener, id)
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    tui.wait_for("Workspace");
+    // The shell renders before the asynchronous Host handshake; plugin
+    // commands become actionable only after the catalog is loaded.
+    tui.wait_for("No sessions yet");
     tui.filter_command("Plugin pages");
     tui.click_text("Plugin pages");
     tui.wait_for("Scheduled tasks");

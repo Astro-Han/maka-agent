@@ -27,6 +27,16 @@ use serde_json::Value;
 pub struct Operations;
 impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if operation == Operation::RuntimePolicyQuery {
+            maka_protocol::runtime_policy::decode_query_input(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::RuntimePolicyMutate {
+            return serde_json::to_value(maka_protocol::runtime_policy::decode_mutation_input(
+                value,
+            )?)
+            .map_err(|error| maka_protocol::ProtocolError::invalid(error.to_string()));
+        }
         if matches!(
             operation,
             Operation::PluginRemote
@@ -141,6 +151,18 @@ impl OperationRegistry for Operations {
         }
     }
     fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if operation == Operation::RuntimePolicyQuery {
+            return serde_json::to_value(maka_protocol::runtime_policy::decode_query_result(
+                value,
+            )?)
+            .map_err(|error| maka_protocol::ProtocolError::invalid(error.to_string()));
+        }
+        if operation == Operation::RuntimePolicyMutate {
+            return serde_json::to_value(maka_protocol::runtime_policy::decode_mutation_result(
+                value,
+            )?)
+            .map_err(|error| maka_protocol::ProtocolError::invalid(error.to_string()));
+        }
         if matches!(
             operation,
             Operation::PluginRemote
@@ -231,6 +253,12 @@ impl OperationRegistry for Operations {
         }
     }
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
+        if operation == Operation::RuntimePolicyQuery {
+            return Some(maka_protocol::runtime_policy::QUERY_ERRORS);
+        }
+        if operation == Operation::RuntimePolicyMutate {
+            return Some(maka_protocol::runtime_policy::MUTATION_ERRORS);
+        }
         if matches!(
             operation,
             Operation::PluginRemote

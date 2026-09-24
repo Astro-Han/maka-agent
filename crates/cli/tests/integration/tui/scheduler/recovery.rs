@@ -48,7 +48,7 @@ fn terminal_creation_reopens_queries_and_retries_without_duplicating_or_resurrec
             remote(&client, "request", json!({"kind":"remember_grant","id":grant["grant"]["id"]})).await;
             let proxy = super::super::recovery::LostReply::terminal_submit(&host.root, directory.path(), accepted).await;
             let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-            tui.wait_for("Workspace");
+            tui.wait_for("No sessions yet"); // Plugin commands require the live Host.
             tui.filter_command("Plugin pages");
             tui.click_text("Plugin pages");
             tui.wait_for("Scheduled tasks");

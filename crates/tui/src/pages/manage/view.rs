@@ -111,6 +111,15 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         .management
         .dialog
         .as_ref()
+        .is_some_and(|d| d.sandbox.is_some())
+    {
+        super::sandbox::draw(frame, app, area, base);
+        return;
+    }
+    if app
+        .management
+        .dialog
+        .as_ref()
         .is_some_and(|d| d.enabled_models.is_some())
     {
         super::enabled_models::draw(frame, app, area, base);
@@ -207,6 +216,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
             | Kind::Project
             | Kind::Locations
             | Kind::Model
+            | Kind::Sandbox
             | Kind::Remove
             | Kind::Credential(_) => {
                 unreachable!("readers drawn separately")

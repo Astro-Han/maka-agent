@@ -460,6 +460,11 @@ impl App {
         if self.fullscreen() && self.inbox_attention() {
             actions.push(Action::Visit(Route::Inbox));
         }
+        if self.navigation.current() == Route::Settings
+            && let Some(action) = self.sandbox_defaults_action()
+        {
+            actions.push(action);
+        }
         actions
     }
     pub fn inbox_attention(&self) -> bool {

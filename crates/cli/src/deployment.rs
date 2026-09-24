@@ -23,6 +23,7 @@ mod connect;
 mod control;
 mod diagnostics;
 mod entry;
+mod local;
 mod logs;
 mod package;
 mod policy;
@@ -36,6 +37,7 @@ pub(super) use activation::Activate;
 pub(super) use connect::Connect;
 pub(super) use control::{Control, ControlAction};
 pub(super) use entry::ServiceRun;
+pub(super) use local::connect as connect_local;
 pub(super) use logs::Logs;
 pub(super) use policy::{
     Configure as UpdatePolicy,

@@ -129,8 +129,14 @@ npm run cli:dev -- --help
 ```
 
 原生 `maka` 在交互终端默认进入 TUI，也可以显式执行 `maka tui`。
-它使用独立的原生 Host 状态目录，不复用 Desktop 开发 profile。本分支已移除 TypeScript TUI；
-npm CLI 保留自动化、ACP 与 Host 管理命令。评测 spec 和 adapter 位于 [`packages/eval`](./packages/eval)。
+它使用独立的原生 Host 状态目录，不复用 Desktop 开发 profile。
+首次启动会自动初始化空的状态目录并启动本机 Host，后续终端复用同一 Host；
+已有托管部署沿用原启动设置，不会自动安装系统服务。在聊天中点击 composer 的沙箱标签，
+即可调整当前会话的隔离模式；关闭沙箱需要明确确认，且不会同时关闭审批。
+同一菜单还可设置按需询问、不询问或按类别审批；明确确认“完全绕过”才会同时关闭隔离与审批。
+“设置 → 新会话默认沙箱”仅影响之后创建的会话，初始默认为工作区可写、需要时询问。
+本分支已移除 TypeScript TUI；npm CLI 保留自动化、ACP 与 Host 管理命令。
+评测 spec 和 adapter 位于 [`packages/eval`](./packages/eval)。
 
 ## 架构
 

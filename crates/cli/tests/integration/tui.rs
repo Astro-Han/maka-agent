@@ -47,8 +47,10 @@ mod recovery;
 mod references;
 mod removal;
 mod revision;
+mod sandbox;
 mod scheduler;
 mod skills;
+mod startup;
 mod stopping;
 mod support;
 mod themes;
@@ -69,11 +71,25 @@ use unicode_width::UnicodeWidthStr;
 
 #[test]
 fn default_entry_rejects_pipes_without_control_sequences() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("unused-root");
     for (args, message) in [
-        (vec![], "requires a terminal"),
-        (vec!["tui"], "requires a terminal"),
-        (vec!["--locale", "zh-CN"], "需要终端输入和输出"),
-        (vec!["tui", "--locale", "zh-TW"], "需要終端機輸入和輸出"),
+        (
+            vec!["--root", root.to_str().unwrap()],
+            "requires a terminal",
+        ),
+        (
+            vec!["tui", "--root", root.to_str().unwrap()],
+            "requires a terminal",
+        ),
+        (
+            vec!["--root", root.to_str().unwrap(), "--locale", "zh-CN"],
+            "需要终端输入和输出",
+        ),
+        (
+            vec!["tui", "--root", root.to_str().unwrap(), "--locale", "zh-TW"],
+            "需要終端機輸入和輸出",
+        ),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_maka"))
             .args(args)
@@ -84,16 +100,26 @@ fn default_entry_rejects_pipes_without_control_sequences() {
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains(message));
         assert!(!output.stdout.contains(&0x1b));
+        assert!(
+            !root.exists(),
+            "noninteractive invocations must not initialize a Host"
+        );
     }
 }
 
 #[test]
 fn real_pty_default_entry_routes_mouse_modal_resize_and_restores_terminal() {
     let directory = tempfile::tempdir().unwrap();
-    let missing_root = directory.path().join("not-created");
-    let mut tui = Pty::spawn(&["--root", missing_root.to_str().unwrap()]);
+    let root = directory.path().join("occupied");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("keep.txt"), "not a Maka root").unwrap();
+    let mut tui = Pty::spawn(&["--root", root.to_str().unwrap()]);
     tui.wait_for("connection failed");
-    assert!(!missing_root.exists(), "TUI must not create a Host root");
+    assert!(!root.join(maka_event_log::root::ROOT_MARKER).exists());
+    assert_eq!(
+        std::fs::read_to_string(root.join("keep.txt")).unwrap(),
+        "not a Maka root"
+    );
 
     tui.click_text("Settings");
     tui.wait_for("Palette: Maka dark");
@@ -133,7 +159,7 @@ fn real_pty_default_entry_routes_mouse_modal_resize_and_restores_terminal() {
     tui.resize(80, 24);
     tui.wait_until(|screen| !screen.contains("▤ Workspace") && screen.contains("⛭"));
     tui.click_text("◉");
-    tui.wait_for("Start or activate this native Host");
+    tui.wait_for("refusing to initialize a nonempty State Root");
     tui.send(b"\x11"); // Ctrl+Q
     tui.finish();
     let mut termios = unsafe { std::mem::zeroed::<libc::termios>() };

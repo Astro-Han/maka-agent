@@ -48,6 +48,10 @@ pub struct Options {
 }
 
 enum Completed {
+    SandboxDefaults(
+        pages::manage::sandbox::defaults::Request,
+        Result<maka_protocol::configuration::policy::RuntimePolicySnapshot, String>,
+    ),
     Extension(
         pages::extensions::Request,
         Result<pages::extensions::Output, pages::extensions::io::Failure>,
@@ -170,7 +174,13 @@ enum Completed {
     ),
 }
 
-pub async fn run(options: Options) -> Result<(), Error> {
+pub async fn run<F, C>(options: Options, connect: F) -> Result<(), Error>
+where
+    F: Fn(PathBuf) -> C,
+    C: std::future::Future<Output = Result<(Client, mpsc::Receiver<Notification>), Error>>
+        + Send
+        + 'static,
+{
     let i18n = i18n::I18n::from_environment(options.locale)?;
     let (_guard, mut screen) = terminal::Guard::enter(&i18n)?;
     let previous = std::panic::take_hook();
@@ -505,6 +515,13 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     Completed::Credential(request, result)
                 });
             }
+            if let Some(request) = app.sandbox_defaults_request() {
+                let client = client.clone();
+                jobs.spawn(async move {
+                    let result = pages::manage::sandbox::defaults::read(&client).await;
+                    Completed::SandboxDefaults(request, result)
+                });
+            }
             if let Some(request) = app.removal_request() {
                 let client = client.clone();
                 jobs.spawn(async move {
@@ -665,8 +682,8 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     notifications = None;
                     oauth_service = None;
                     app.refreshing = false;
-                    let root = app.root.clone();
-                    jobs.spawn(async move { Completed::Connected(connect(root).await) });
+                    let connection = connect(app.root.clone());
+                    jobs.spawn(async move { Completed::Connected(connection.await) });
                 }
                 Action::StopTurn(target) => {
                     if let Some(client) = client.clone()
@@ -992,6 +1009,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     Some(Ok(Completed::Models(request,result)))=>app.models_completed(request,result),
                     Some(Ok(Completed::EnabledModels(request,result)))=>app.enabled_models_completed(request,result),
                     Some(Ok(Completed::Credential(request,result)))=>app.credential_completed(request,result),
+                    Some(Ok(Completed::SandboxDefaults(request,result)))=>app.sandbox_defaults_completed(request,result),
                     Some(Ok(Completed::Onboard(ticket,result)))=>app.onboarding_completed(ticket,result),
                     Some(Ok(Completed::History(request, result))) => {
                         history_job = None;
@@ -1212,23 +1230,6 @@ fn close_observation(jobs: &mut JoinSet<Completed>, client: Client, id: String) 
         }
         Completed::ObservationClosed
     });
-}
-
-async fn connect(root: PathBuf) -> Result<(Client, mpsc::Receiver<Notification>), Error> {
-    tokio::time::timeout(Duration::from_secs(6), async {
-        let discovery =
-            tokio::task::spawn_blocking(move || maka_client::local::read_discovery(&root))
-                .await??;
-        let stream = maka_client::local::open_stream(&discovery.endpoint).await?;
-        Ok(Client::connect(
-            stream,
-            &discovery.root_id,
-            &discovery.host_epoch,
-            maka_client::Operations,
-        )
-        .await?)
-    })
-    .await?
 }
 
 async fn termination_signal(#[cfg(unix)] signal: &mut tokio::signal::unix::Signal) {
