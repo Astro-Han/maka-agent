@@ -33,7 +33,6 @@ use ratatui::{
 mod activity;
 mod queue;
 mod session;
-mod settings;
 mod tabs;
 pub(crate) mod tone;
 
@@ -278,7 +277,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         Route::Projects => crate::pages::projects::draw(frame, app, page),
         Route::Workspace | Route::Inbox => crate::pages::sessions::draw_catalog(frame, app, page),
         Route::Session(id) => session::draw(frame, app, page, &id),
-        Route::Settings => settings::draw(frame, app, page),
+        Route::Settings => crate::pages::settings::draw(frame, app, page),
         _ => frame.render_widget(
             Paragraph::new(page_lines(app)).wrap(Wrap { trim: false }),
             page,
@@ -332,7 +331,14 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         && !app.chrome.details
     {
         app.i18n.text("chat-selection-help")
-    } else if let Some(action) = app.hover.as_ref().or(focused.as_ref()) {
+    } else if let Some(action) = app.hover.as_ref() {
+        action_label(app, action)
+    } else if let Some(hint) = settings
+        .then(|| app.settings.surface.hint(app.focus == Focus::Page))
+        .flatten()
+    {
+        hint.to_owned()
+    } else if let Some(action) = focused.as_ref() {
         action_label(app, action)
     } else if app.chat.view.search.is_some()
         && !app.chrome.details
@@ -497,7 +503,7 @@ fn composer_action(action: &Action) -> bool {
             | Action::StopTurn(_)
     )
 }
-fn icon(app: &App, action: &Action) -> &'static str {
+pub(crate) fn icon(app: &App, action: &Action) -> &'static str {
     let (unicode, ascii) = match action {
         Action::NextTab => ("›", ">"),
         Action::PreviousTab => ("‹", "<"),
@@ -625,12 +631,13 @@ fn icon(app: &App, action: &Action) -> &'static str {
         Action::CycleLocale => ("文", "L"),
         Action::ToggleSymbols => ("◇", "A"),
         Action::ToggleMotion => ("≈", "M"),
+        Action::Settings(_) => ("⛭", "S"),
         Action::Quit | Action::Detach | Action::ConfirmQuit | Action::CancelQuit => ("×", "X"),
     };
     app.chrome.symbol(unicode, ascii)
 }
 
-fn action_label(app: &App, action: &Action) -> String {
+pub(crate) fn action_label(app: &App, action: &Action) -> String {
     if matches!(
         action,
         Action::Manage(crate::pages::manage::Command::Open(
@@ -764,6 +771,7 @@ fn action_label(app: &App, action: &Action) -> String {
         },
         Action::ToggleSymbols => "command-symbols",
         Action::ToggleMotion => "command-motion",
+        Action::Settings(_) => "route-settings",
         Action::Quit => "footer-quit",
         Action::Detach => "command-detach",
         Action::ConfirmQuit => "shutdown-force",
@@ -991,6 +999,26 @@ mod tests {
         assert_eq!(app.palette, None);
     }
 
+    /// Cell position of the first occurrence of `text` on screen.
+    fn locate(terminal: &Terminal<TestBackend>, text: &str) -> (u16, u16) {
+        use unicode_width::UnicodeWidthStr;
+        let buffer = terminal.backend().buffer();
+        for y in 0..buffer.area.height {
+            let (mut row, mut starts, mut x) = (String::new(), vec![], 0);
+            while x < buffer.area.width {
+                let symbol = buffer[(x, y)].symbol();
+                starts.push((row.len(), x));
+                row.push_str(symbol);
+                x += (symbol.width() as u16).max(1);
+            }
+            if let Some(byte) = row.find(text) {
+                let (_, x) = starts.iter().rev().find(|(at, _)| *at <= byte).unwrap();
+                return (*x, y);
+            }
+        }
+        panic!("{text:?} is not on screen");
+    }
+
     #[test]
     fn resized_screen_invalidates_old_mouse_regions() {
         let mut app = App::new(
@@ -1001,25 +1029,23 @@ mod tests {
             ),
         );
         app.apply(Action::Visit(Route::Settings));
-        render(&mut app, 120, 40);
-        let button = app
-            .hits
-            .iter()
-            .find(|hit| hit.action == Action::ToggleTheme)
-            .unwrap()
-            .area;
+        let terminal = render(&mut app, 120, 40);
+        let (x, y) = locate(&terminal, "Maka dark");
         app.input(Event::Resize(80, 24));
-        app.input(click(button.x, button.y));
-        assert!((app.theme.choice != crate::theme::Choice::Terminal));
-        render(&mut app, 80, 24);
-        let new_button = app
-            .hits
-            .iter()
-            .find(|hit| hit.action == Action::ToggleTheme)
-            .unwrap()
-            .area;
-        app.input(click(new_button.x, new_button.y));
+        app.input(click(x, y));
+        assert!(
+            !app.settings.surface.captures(),
+            "a click against the previous frame's geometry is ignored"
+        );
+        let terminal = render(&mut app, 80, 24);
+        let (x, y) = locate(&terminal, "Maka dark");
+        app.input(click(x, y));
+        assert!(app.settings.surface.captures());
+        let terminal = render(&mut app, 80, 24);
+        let (x, y) = locate(&terminal, "○ Dusk");
+        app.input(click(x, y));
         assert_eq!(app.theme.choice, crate::theme::Choice::Dusk);
+        assert!(!app.settings.surface.captures());
     }
 
     #[test]
@@ -1229,9 +1255,17 @@ mod tests {
             epoch: "epoch".into(),
         };
         app.status = Some(serde_json::json!({"state": "ready", "hostEpoch": "epoch"}));
-        app.input(key(KeyCode::Tab));
-        assert_eq!(app.selected_control, 1);
         render(&mut app, 80, 24);
+        // Category selection follows the keyboard; Right enters its rows.
+        for code in [KeyCode::Down, KeyCode::Right, KeyCode::Enter] {
+            app.input(key(code));
+            render(&mut app, 80, 24);
+        }
+        assert!(
+            app.settings.surface.captures(),
+            "Enter opens the language chooser"
+        );
+        app.input(key(KeyCode::Down));
         app.input(key(KeyCode::Enter));
         assert!(
             app.hits.is_empty(),
@@ -1239,23 +1273,32 @@ mod tests {
         );
         assert_eq!(app.i18n.locale(), crate::Locale::ZhTw);
         assert_eq!(app.focus, Focus::Page);
-        assert_eq!(app.selected_control, 1);
         assert!(matches!(app.connection, ConnectionState::Connected { .. }));
         assert_eq!(app.status.as_ref().unwrap()["hostEpoch"], "epoch");
         let terminal = render(&mut app, 80, 24);
-        assert!(format!("{:?}", terminal.backend().buffer()).contains("繁體中文"));
-        let language = app
-            .hits
-            .iter()
-            .find(|hit| hit.action == Action::CycleLocale)
-            .unwrap()
-            .area;
-        app.input(click(language.x, language.y));
+        assert_eq!(
+            app.settings.surface.hint(true),
+            Some("選擇語言 · Enter"),
+            "keyboard focus stays on the relabeled row"
+        );
+        let (x, y) = locate(&terminal, "繁體中文");
+        app.input(click(x, y));
+        let terminal = render(&mut app, 80, 24);
+        let (x, y) = locate(&terminal, "○ English");
+        app.input(click(x, y));
         assert_eq!(app.i18n.locale(), crate::Locale::En);
-        app.input(key(KeyCode::BackTab));
-        assert_eq!(app.selected_control, 0);
-        app.input(key(KeyCode::BackTab));
-        assert_eq!(app.focus, Focus::Navigation);
+        render(&mut app, 80, 24);
+        for _ in 0..8 {
+            if app.focus == Focus::Navigation {
+                break;
+            }
+            app.input(key(KeyCode::BackTab));
+        }
+        assert_eq!(
+            app.focus,
+            Focus::Navigation,
+            "Tab past the first control leaves the page"
+        );
         app.apply(Action::Back);
         assert_eq!(app.navigation.current(), Route::Host);
     }

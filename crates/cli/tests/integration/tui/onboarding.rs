@@ -49,6 +49,8 @@ fn connection_setup_verifies_without_writes_masks_keys_and_creates_first_chat() 
     );
     tui.wait_for("Workspace");
     tui.click_text("⛭ Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("No model connections yet.");

@@ -172,6 +172,10 @@ impl I18n {
             LocalePreference::Explicit(locale) => locale,
         }
     }
+    /// The environment's locale, which `Auto` follows.
+    pub fn system(&self) -> Locale {
+        self.system
+    }
     pub fn cycle(&mut self) {
         self.preference = match self.preference {
             LocalePreference::Auto => LocalePreference::Explicit(Locale::ZhCn),
@@ -308,6 +312,7 @@ mod tests {
             ("level", "High"),
             ("line", "2"),
             ("column", "5"),
+            ("setting", "Palette"),
         ];
         for locale in Locale::ALL {
             assert_eq!(messages(SOURCES[locale.index()]), keys);

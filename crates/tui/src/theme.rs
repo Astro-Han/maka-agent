@@ -44,15 +44,6 @@ impl Choice {
             Self::Terminal | Self::Custom => Self::Maka,
         }
     }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Maka => "palette-dark",
-            Self::Dusk => "palette-dusk",
-            Self::Paper => "palette-paper",
-            Self::Terminal => "palette-default",
-            Self::Custom => "palette-custom",
-        }
-    }
     pub fn colors(self) -> Palette {
         match self {
             Self::Maka | Self::Custom => Palette::default(),

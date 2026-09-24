@@ -84,6 +84,8 @@ fn enabled_models_searches_full_catalog_keeps_manual_ids_and_applies_only_confir
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Workspace");
     tui.click_text("⛭ Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("Enabled fixture");

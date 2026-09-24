@@ -17,22 +17,12 @@
  * under the License.
  */
 
-pub mod attachments;
-pub mod branch;
-pub mod chat;
-pub mod commands;
-pub mod connections;
-pub mod extensions;
-pub mod interactions;
-pub mod manage;
-pub mod onboarding;
-pub mod projects;
-pub mod queue;
-pub mod recap;
-pub mod references;
-pub mod resume;
-pub mod revision;
-pub mod sending;
-pub mod sessions;
-pub mod settings;
-pub mod skills;
+//! Component kernel. A presenter describes a keyed tree of semantic nodes each
+//! frame; the kernel owns layout, hit testing, hover, keyboard focus, scroll
+//! and popovers, so pages neither draw cells nor route raw input themselves.
+mod layout;
+mod node;
+mod surface;
+
+pub use node::{Align, Choice, Node, On, Size, Tone};
+pub use surface::{Context, Surface};

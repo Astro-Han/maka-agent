@@ -37,22 +37,31 @@ fn restart_keeps_forward_history_and_keyboard_control_without_replaying_actions(
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("No sessions yet.");
     tui.click_text("Settings");
-    tui.wait_for("Icons: Unicode");
-    tui.send(b"\t\t\x1bOP"); // Focus Symbols, then F1 Help.
+    tui.wait_for("Maka dark ▾");
+    // Interface category, its first row, then Icons; the footer names the focus.
+    tui.send(b"\x1b[B");
+    tui.wait_for("Unicode ▾");
+    tui.send(b"\x1b[C");
+    tui.wait_for("Choose Language");
+    tui.send(b"\x1b[B");
+    tui.wait_for("Choose Icons");
+    tui.send(b"\x1bOP"); // F1 Help.
     tui.wait_for("Move focus between controls");
     tui.send(b"\x1b[1;3D"); // Alt+Left.
-    tui.wait_for("Icons: Unicode");
+    tui.wait_for("Unicode ▾");
     tui.close_terminal();
     tui.finish();
 
     let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    reopened.wait_for("Icons: Unicode"); // Restoring must not toggle the focused control.
+    reopened.wait_for("Unicode ▾"); // Restoring must not change the focused control.
     reopened.send(b"\r");
-    reopened.wait_for("Icons: ASCII"); // Same control, not the first Palette button.
+    reopened.wait_for("○ ASCII"); // Same control's chooser, not the first Palette row.
+    reopened.send(b"\x1b[B\r");
+    reopened.wait_for("ASCII v");
     reopened.send(b"\x1b[1;3C");
     reopened.wait_for("Move focus between controls");
     reopened.send(b"\x1b[1;3D");
-    reopened.wait_for("Icons: ASCII");
+    reopened.wait_for("ASCII v");
     reopened.send(b"\x1b[1;3D");
     reopened.wait_for("No sessions yet.");
     reopened.click_text("Host");

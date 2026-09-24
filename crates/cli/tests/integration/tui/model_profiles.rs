@@ -80,6 +80,8 @@ fn model_profiles_preserve_full_table_validate_inherited_limits_and_reject_concu
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Workspace");
     tui.click_text("⛭ Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("Profile fixture");

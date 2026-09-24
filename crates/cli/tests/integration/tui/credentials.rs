@@ -62,6 +62,8 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Key verification");
     tui.click_text("⛭ Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("TUI fixture");
@@ -143,6 +145,8 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
     tui.wait_for("New key accepted");
     runtime.block_on(provider).unwrap();
     tui.click_text("⛭ Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     tui.wait_for("TUI fixture");

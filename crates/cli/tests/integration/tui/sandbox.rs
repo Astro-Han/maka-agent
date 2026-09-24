@@ -191,6 +191,8 @@ fn composer_sandbox_choice_requires_confirmation_and_preserves_approval_and_conc
         "workspace-write"
     );
     tui.click_text("⛭ Settings");
+    tui.wait_for("Sessions");
+    tui.click_text("Sessions");
     tui.wait_for("New session sandbox");
     tui.click_text("New session sandbox");
     tui.wait_for("Applies only to future sessions");
@@ -226,6 +228,8 @@ fn composer_sandbox_choice_requires_confirmation_and_preserves_approval_and_conc
     assert_eq!(created.sandbox_mode, SandboxMode::ReadOnly);
     assert_eq!(created.approval_policy, ApprovalPolicy::OnRequest);
     tui.click_text("⛭ Settings");
+    tui.wait_for("Sessions");
+    tui.click_text("Sessions");
     tui.wait_for("New session sandbox");
     tui.click_text("New session sandbox");
     tui.wait_for("Applies only to future sessions");

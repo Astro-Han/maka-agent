@@ -60,7 +60,7 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
     tui.wait_for("Message…");
     tui.send(b"Collect a form\x13");
     tui.click_text("Settings");
-    tui.wait_for("Palette: Maka dark");
+    tui.wait_for("Maka dark ▾");
     tui.wait_for("◆"); // Global discovery while this session has no transcript subscription.
     assert!(
         !tui.screen
@@ -69,13 +69,19 @@ fn real_host_code_mode_form_waits_without_model_progress_and_submits_from_tui() 
             .screen
             .contains("Fill the isolated form")
     );
-    tui.send(b"\t\t\r"); // A background request must not steal the Settings focus.
-    tui.wait_for("Icons: ASCII");
-    tui.send(b"\r");
-    tui.wait_for("Icons: Unicode");
+    // A background request must not steal the Settings focus: Interface
+    // category, Icons row, its chooser, then ASCII.
+    tui.send(b"\x1b[B");
+    tui.wait_for("Unicode ▾");
+    tui.send(b"\x1b[C\x1b[B\r");
+    tui.wait_for("○ ASCII");
+    tui.send(b"\x1b[B\r");
+    tui.wait_for("ASCII v");
+    tui.send(b"\r\x1b[A\r");
+    tui.wait_for("Unicode ▾");
     tui.click_text("Inbox");
     tui.wait_until(|screen| {
-        !screen.contains("Palette: Maka dark") && screen.contains("Form keyboard fixture")
+        !screen.contains("Maka dark ▾") && screen.contains("Form keyboard fixture")
     });
     tui.send(b"\r"); // List focus opens the selected Session, not an answer.
     tui.wait_for("Message…");

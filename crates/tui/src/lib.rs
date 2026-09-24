@@ -30,6 +30,7 @@ mod shutdown;
 mod state;
 mod terminal;
 mod theme;
+mod ui;
 mod view;
 
 use app::{Action, App, ConnectionState, Notice};

@@ -100,7 +100,11 @@ impl State {
     fn capture(app: &App) -> Self {
         Self {
             focus: app.focus,
-            control: app.page_actions().get(app.selected_control).cloned(),
+            control: if app.navigation.current() == Route::Settings {
+                app.settings.focused_setting()
+            } else {
+                app.page_actions().get(app.selected_control).cloned()
+            },
             details: app.chrome.details,
             navigation: (app.focus == Focus::Navigation)
                 .then(|| app.nav_routes().get(app.selected_nav).cloned())
@@ -168,6 +172,9 @@ impl App {
 
     pub(crate) fn leave_page(&mut self) {
         let route = self.navigation.current();
+        if route == Route::Settings {
+            self.settings.surface.leave();
+        }
         let state = State::capture(self);
         self.page_states.retain(|(key, _)| *key != route);
         self.page_states.push_back((route, state));
@@ -206,6 +213,11 @@ impl App {
             {
                 self.selected_nav = index;
             }
+            if route == Route::Settings
+                && let Some(action) = &state.control
+            {
+                self.settings.focus_setting(action);
+            }
             self.selected_control = state
                 .control
                 .and_then(|action| {
@@ -238,8 +250,8 @@ mod tests {
         assert!(!app.bind_root("different-root-at-the-same-path"));
         assert_eq!(app.drafts["a"].text(), "draft A");
         app.focus = Focus::Transcript;
-        app.apply(Action::Visit(Route::Settings));
-        app.selected_control = 2;
+        app.apply(Action::Visit(Route::Host));
+        app.selected_control = 1;
         app.apply(Action::Visit(Route::Session("b".into())));
         app.drafts.get_mut("b").unwrap().insert("draft B");
         app.apply(Action::ToggleDetails);
@@ -250,9 +262,9 @@ mod tests {
         app.apply(Action::Back);
         assert!(app.chrome.details);
         assert_eq!(app.drafts["b"].text(), "draft B");
-        app.apply(Action::Visit(Route::Settings));
+        app.apply(Action::Visit(Route::Host));
         assert_eq!(app.focus, Focus::Page);
-        assert_eq!(app.selected_control, 2);
-        assert_eq!(app.page_actions()[2], Action::ToggleSymbols);
+        assert_eq!(app.selected_control, 1);
+        assert_eq!(app.page_actions()[1], Action::Connect);
     }
 }

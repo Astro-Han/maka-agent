@@ -516,7 +516,7 @@ mod tests {
         original.apply(Action::Visit(Route::Session("a".into())));
         original.focus = Focus::Transcript;
         original.apply(Action::Visit(Route::Settings));
-        original.selected_control = 2;
+        original.settings.focus_setting(&Action::ToggleSymbols);
         original.apply(Action::Visit(Route::Help));
         original.apply(Action::Back);
         let encoded = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
@@ -528,8 +528,13 @@ mod tests {
         assert_eq!(restored.navigation.current(), Route::Settings);
         assert_eq!(restored.focus, Focus::Page);
         assert_eq!(
-            restored.page_actions()[restored.selected_control],
-            Action::ToggleSymbols
+            restored.settings.focused_setting(),
+            Some(Action::ToggleSymbols),
+            "the focused setting survives a restart"
+        );
+        assert_eq!(
+            restored.settings.category,
+            crate::pages::settings::Category::Interface
         );
         restored.apply(Action::Back);
         assert_eq!(restored.navigation.current(), Route::Session("a".into()));

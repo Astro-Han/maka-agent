@@ -59,6 +59,8 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
     tui.read_size = 128; // Never click a partially received command palette.
     tui.wait_for("Workspace");
     tui.click_text("⛭ Settings");
+    tui.wait_for("Models"); // Connections live in the Models category.
+    tui.click_text("Models");
     tui.wait_for("Model connections");
     tui.click_text("Model connections");
     // Settings also names the default connection; wait for the actual catalog row.

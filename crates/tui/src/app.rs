@@ -63,6 +63,7 @@ pub enum Action {
     Branch(crate::pages::branch::Command),
     Recap(crate::pages::recap::Command),
     Resume(crate::pages::resume::Command),
+    Settings(crate::pages::settings::Message),
     Attachment(crate::pages::attachments::Command),
     References,
     Extension(crate::pages::extensions::Command),
@@ -140,6 +141,7 @@ pub struct App {
     pub resume: crate::pages::resume::State,
     pub attachments: crate::pages::attachments::State,
     pub skills: crate::pages::skills::State,
+    pub settings: crate::pages::settings::State,
     pub extensions: crate::pages::extensions::State,
     pub directories:
         std::collections::BTreeMap<String, Vec<maka_protocol::turn::DirectoryReference>>,
@@ -193,6 +195,7 @@ impl App {
             resume: Default::default(),
             attachments: Default::default(),
             skills: Default::default(),
+            settings: Default::default(),
             extensions: Default::default(),
             directories: Default::default(),
             revision: Default::default(),
@@ -457,23 +460,11 @@ impl App {
                     Action::Connect
                 },
             ],
-            Route::Settings => vec![
-                Action::ToggleTheme,
-                Action::CycleLocale,
-                Action::ToggleSymbols,
-                Action::ToggleMotion,
-                Action::Visit(Route::Connections),
-                Action::Theme(crate::theme::editor::Command::Open),
-            ],
-            Route::Help => vec![],
+            // Settings controls live in its kernel surface, not page actions.
+            Route::Settings | Route::Help => vec![],
         };
         if self.fullscreen() && self.inbox_attention() {
             actions.push(Action::Visit(Route::Inbox));
-        }
-        if self.navigation.current() == Route::Settings
-            && let Some(action) = self.sandbox_defaults_action()
-        {
-            actions.push(action);
         }
         actions
     }
@@ -647,6 +638,7 @@ impl App {
             Action::Branch(command) => return self.branch_action(command),
             Action::Recap(command) => return self.recap_action(command),
             Action::Resume(command) => return self.resume_action(command),
+            Action::Settings(message) => return self.settings_action(message),
             Action::Revision(command) => return self.revision_action(command),
             Action::Onboard(command) => return self.onboarding_action(command),
             Action::Project(command) => return self.project_action(command),
@@ -764,20 +756,11 @@ impl App {
                 self.hover = None;
             }
             Action::ToggleTrace => self.chat.toggle_trace(),
-            Action::ToggleSymbols => {
-                self.chrome.ascii = !self.chrome.ascii;
-                self.chat.invalidate_layout();
-            }
-            Action::ToggleMotion => {
-                self.chrome.motion = !self.chrome.motion;
-                self.chrome.stop_animation();
-            }
+            Action::ToggleSymbols => self.set_ascii(!self.chrome.ascii),
+            Action::ToggleMotion => self.set_motion(!self.chrome.motion),
             Action::CycleLocale => {
                 self.i18n.cycle();
-                self.chat.invalidate_layout();
-                // Text widths change. Do not accept clicks against old geometry.
-                self.hits.clear();
-                self.hover = None;
+                self.set_locale(self.i18n.preference);
             }
             Action::RefreshSessions => self.catalog_mut().restart(),
             Action::NextSessions => self.catalog_mut().next(),
@@ -862,6 +845,14 @@ impl App {
         }
         if let Action::Resume(command) = action {
             return self.resume_enabled(command);
+        }
+        if let Action::Settings(message) = action {
+            use crate::pages::settings::Message;
+            return match message {
+                Message::Palette(_) | Message::CustomTheme => !self.theme.busy(),
+                Message::SandboxDefaults => self.sandbox_defaults_action().is_some(),
+                _ => true,
+            };
         }
         if let Action::Branch(command) = action {
             return self.branch_enabled(command);
@@ -1409,6 +1400,28 @@ impl App {
                 return (true, self.apply(action));
             }
         }
+        if self.navigation.current() == Route::Settings
+            && (matches!(event, Event::Mouse(_))
+                || (matches!(event, Event::Key(_))
+                    && (self.focus == Focus::Page || self.settings.surface.captures())))
+        {
+            let outcome = self.settings.surface.input(&event);
+            if outcome.consumed {
+                let mut redraw = outcome.redraw;
+                if let Event::Mouse(mouse) = &event {
+                    // The surface owns hover over its page; drop shell hover.
+                    redraw |= self.hover.take().is_some();
+                    self.hover_area = None;
+                    if matches!(mouse.kind, MouseEventKind::Down(_)) {
+                        self.focus = Focus::Page;
+                    }
+                }
+                let action = outcome
+                    .message
+                    .and_then(|message| self.apply(Action::Settings(message)));
+                return (redraw || action.is_some(), action);
+            }
+        }
         if self.palette.is_none()
             && !self.chrome.details
             && matches!(self.navigation.current(), Route::Session(_))
@@ -1518,6 +1531,7 @@ impl App {
         let action = match event {
             Event::Resize(_, _) => {
                 self.chat.area = None;
+                self.settings.surface.invalidate();
                 self.invalidate_editor_geometry();
                 self.hits.clear();
                 self.frame_size = None;
@@ -1709,6 +1723,11 @@ impl App {
                                     Focus::Composer
                                 };
                                 self.selected_control = count - 1;
+                            }
+                            if self.focus == Focus::Page
+                                && self.navigation.current() == Route::Settings
+                            {
+                                self.settings.surface.enter(backwards);
                             }
                             None
                         }

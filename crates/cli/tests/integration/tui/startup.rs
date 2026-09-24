@@ -134,7 +134,7 @@ fn busy_root_keeps_navigation_responsive_and_quit_does_not_take_over() {
     tui.click_text("◉ Host");
     tui.wait_for("Connecting");
     tui.click_text("Settings");
-    tui.wait_for("Palette: Maka dark");
+    tui.wait_for("Maka dark ▾");
     tui.send(b"\x11");
     tui.finish();
     owner.validate_current().unwrap();

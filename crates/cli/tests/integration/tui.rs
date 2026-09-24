@@ -123,39 +123,52 @@ fn real_pty_default_entry_routes_mouse_modal_resize_and_restores_terminal() {
     );
 
     tui.click_text("Settings");
-    tui.wait_for("Palette: Maka dark");
+    tui.wait_for("Maka dark ▾");
     tui.send(b"\x10"); // Ctrl+P
     tui.wait_for("Commands · Esc closes");
     // Outside click closes only the modal, without activating the workspace.
     tui.send(b"\x1b[<0;3;5M\x1b[<0;3;5m");
-    tui.wait_until(|screen| {
-        !screen.contains("Open workspace") && screen.contains("Palette: Maka dark")
-    });
+    tui.wait_until(|screen| !screen.contains("Open workspace") && screen.contains("Maka dark ▾"));
+    // Real SGR clicks open the palette chooser and pick each value in turn.
     for palette in [
-        "Palette: Dusk",
-        "Palette: Paper",
-        "Palette: terminal default",
-        "Palette: Maka dark",
-        "Palette: Dusk",
-        "Palette: Paper",
-        "Palette: terminal default",
+        "Dusk",
+        "Paper",
+        "Terminal default",
+        "Maka dark",
+        "Terminal default",
     ] {
         tui.click_text("◐");
-        tui.wait_for(palette);
+        tui.wait_for(&format!("○ {palette}"));
+        tui.click_text(&format!("○ {palette}"));
+        tui.wait_for(&format!("{palette} ▾"));
     }
 
-    // Keyboard reaches the language control, then real SGR mouse clicks cycle
-    // through CJK labels. The page, colors and connection survive every change.
-    tui.send(b"\t\r");
-    tui.wait_for("Language: Automatic");
-    tui.click_text("文");
-    tui.wait_for("语言：简体中文");
-    tui.wait_for("配色：终端默认");
-    tui.click_text("文");
-    tui.wait_for("語言：繁體中文");
-    tui.wait_for("配色：終端機預設");
+    // Keyboard reaches the language control, then real SGR clicks choose CJK
+    // labels. The page, colors and connection survive every change. Left
+    // returns from the clicked row to the categories, at the current one.
+    tui.send(b"\x1b[D");
+    tui.wait_for("Ctrl+B Navigation");
+    tui.send(b"\x1b[B");
+    tui.wait_for("English ▾"); // MAKA_LOCALE=en is an explicit preference.
+    tui.send(b"\x1b[C");
+    tui.wait_for("Choose Language");
     tui.send(b"\r");
-    tui.wait_for("Language: English");
+    tui.wait_for("○ 简体中文");
+    tui.click_text("○ 简体中文");
+    tui.wait_for("简体中文 ▾");
+    tui.click_text("外观");
+    tui.wait_for("终端默认 ▾");
+    tui.click_text("界面");
+    tui.wait_for("简体中文 ▾");
+    tui.click_text("文");
+    tui.wait_for("○ 繁體中文");
+    tui.click_text("○ 繁體中文");
+    tui.wait_for("繁體中文 ▾");
+    tui.wait_for("外觀");
+    tui.send(b"\r"); // The clicked row keeps keyboard focus.
+    tui.wait_for("○ English");
+    tui.send(b"\x1b[A\x1b[A\r");
+    tui.wait_for("English ▾");
 
     tui.resize(80, 24);
     tui.wait_until(|screen| !screen.contains("▤ Workspace") && screen.contains("⛭"));

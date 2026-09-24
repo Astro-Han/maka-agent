@@ -98,7 +98,7 @@ fn old_window_selection_and_search_resume_across_pages_and_disk_restart() {
     tui.send(b"\x03");
     tui.wait_output(b"\x1b]52;c;5Lit5paH8J+mgA==\x07");
     tui.click_text("Settings");
-    tui.wait_for("Palette: Maka dark");
+    tui.wait_for("Maka dark ▾");
     tui.click_text("Reading resume");
     tui.wait_for("Bookmark target 中文🦀");
     tui.wait_for("Ctrl+C Copy");
@@ -122,7 +122,7 @@ fn old_window_selection_and_search_resume_across_pages_and_disk_restart() {
     tui.send(b"\x06Bookmark target");
     tui.wait_for("1/1");
     tui.click_text("Settings");
-    tui.wait_for("Palette: Maka dark");
+    tui.wait_for("Maka dark ▾");
     tui.click_text("Reading resume");
     tui.wait_for("1/1");
     tui.wait_for("Bookmark target 中文🦀");
