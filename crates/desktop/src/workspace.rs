@@ -17,28 +17,31 @@
  * under the License.
  */
 
+//! The window: sidebar, header and the open session. The root holds only
+//! the connection; the sidebar and the chat are their own views, drawn from
+//! cache unless they changed, so a streaming reply redraws the chat alone.
+
 use crate::{
     chat::Chat,
     host::{self, Host},
+    sidebar::{self, Sidebar, SidebarEvent},
+    theme::theme,
+    ui::{self, Copied},
 };
-use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable, StyledExt,
-    button::{Button, ButtonVariants},
-    h_flex,
-    sidebar::{Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
-    v_flex,
+use gpui_kit::{
+    AnyElement, AppContext, AsyncApp, Context, Div, Entity, FontWeight, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Render, Role, SharedString, Stateful,
+    StatefulInteractiveElement, StyleRefinement, Styled, Task, WeakEntity, Window, div, px,
 };
-use gpui_kit::{prelude::FluentBuilder, *};
 use maka_client::{Client, Notification};
-use maka_protocol::session::{
-    SessionCatalogProjection, SessionCatalogQueryInput, SessionCatalogQueryResult,
-};
+use maka_protocol::session::{SessionCatalogQueryInput, SessionCatalogQueryResult};
 use serde_json::json;
-use std::{path::PathBuf, time::Duration};
+use std::{cell::Cell, path::PathBuf, rc::Rc, time::Duration};
 use tokio::sync::mpsc;
 
-/// Deltas arrive at the provider's chunk rate; one repaint per window is enough.
-const STREAM_FRAME: Duration = Duration::from_millis(100);
+/// Provider chunks queue this long and land as one update: one parse and
+/// one redraw per update, whatever the chunk rate.
+const STREAM_FRAME: Duration = Duration::from_millis(120);
 
 enum Connection {
     Connecting,
@@ -49,20 +52,26 @@ enum Connection {
 pub struct Workspace {
     root: PathBuf,
     connection: Connection,
-    sessions: Vec<SessionCatalogProjection>,
-    sessions_error: Option<SharedString>,
+    sidebar: Entity<Sidebar>,
     chat: Option<Entity<Chat>>,
+    copied: Entity<Copied>,
     _tasks: Vec<Task<()>>,
 }
 
 impl Workspace {
-    pub fn new(root: PathBuf, cx: &mut Context<Self>) -> Self {
+    pub fn new(root: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let sidebar = cx.new(|_| Sidebar::new());
+        cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| match event {
+            SidebarEvent::Open(id) => this.open(id.clone(), window, cx),
+            SidebarEvent::Create => this.create_session(window, cx),
+        })
+        .detach();
         let mut this = Self {
             root,
             connection: Connection::Connecting,
-            sessions: Vec::new(),
-            sessions_error: None,
+            sidebar,
             chat: None,
+            copied: cx.new(|_| Copied::default()),
             _tasks: Vec::new(),
         };
         this.connect(cx);
@@ -77,6 +86,8 @@ impl Workspace {
             let Ok(notifications) = this.update(cx, |this, cx| match result {
                 Ok((client, notifications)) => {
                     this.connection = Connection::Ready(client);
+                    this.sidebar
+                        .update(cx, |sidebar, cx| sidebar.set_can_create(true, cx));
                     this.load_sessions(cx);
                     cx.notify();
                     Some(notifications)
@@ -101,6 +112,9 @@ impl Workspace {
         cx: &mut AsyncApp,
     ) {
         while let Some(first) = notifications.recv().await {
+            // Sleep the whole frame before draining, rather than waking per
+            // chunk: racing the channel would redraw at the chunk rate.
+            cx.background_executor().timer(STREAM_FRAME).await;
             let mut batch = vec![first];
             while let Ok(next) = notifications.try_recv() {
                 batch.push(next);
@@ -108,10 +122,11 @@ impl Workspace {
             if this.update(cx, |this, cx| this.apply(batch, cx)).is_err() {
                 return;
             }
-            cx.background_executor().timer(STREAM_FRAME).await;
         }
         let _ = this.update(cx, |this, cx| {
             this.connection = Connection::Failed("Host connection closed".into());
+            this.sidebar
+                .update(cx, |sidebar, cx| sidebar.set_can_create(false, cx));
             cx.notify();
         });
     }
@@ -153,23 +168,19 @@ impl Workspace {
                 .session_catalog(SessionCatalogQueryInput::ListStart)
                 .await
         });
+        let sidebar = self.sidebar.clone();
         cx.spawn(async move |this, cx| {
             let result = loading.await;
-            let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(Ok(SessionCatalogQueryResult::Page { sessions, .. })) => {
-                        this.sessions = sessions
-                            .into_iter()
-                            .filter(|session| !session.is_archived)
-                            .collect();
-                        this.sessions_error = None;
-                    }
-                    Ok(Ok(_)) => {}
-                    Ok(Err(error)) => this.sessions_error = Some(error.to_string().into()),
-                    Err(error) => this.sessions_error = Some(error.into()),
+            sidebar.update(cx, |sidebar, cx| match result {
+                Ok(Ok(SessionCatalogQueryResult::Page { sessions, .. })) => {
+                    sidebar.set_sessions(sessions, cx)
                 }
-                cx.notify();
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => sidebar.set_error(Some(error.to_string().into()), cx),
+                Err(error) => sidebar.set_error(Some(error.into()), cx),
             });
+            // The header shows the session's name.
+            let _ = this.update(cx, |_, cx| cx.notify());
         })
         .detach();
     }
@@ -197,13 +208,13 @@ impl Workspace {
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(session) => {
                     let id = session.id.clone();
-                    this.sessions.insert(0, session);
+                    this.sidebar
+                        .update(cx, |sidebar, cx| sidebar.insert(session, cx));
                     this.open(id, window, cx);
                 }
-                Err(error) => {
-                    this.sessions_error = Some(error.into());
-                    cx.notify();
-                }
+                Err(error) => this
+                    .sidebar
+                    .update(cx, |sidebar, cx| sidebar.set_error(Some(error.into()), cx)),
             });
         })
         .detach();
@@ -213,6 +224,8 @@ impl Workspace {
         let Some(client) = self.client() else {
             return;
         };
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.select(Some(session.clone()), cx));
         if self
             .chat
             .as_ref()
@@ -223,100 +236,144 @@ impl Workspace {
         if let Some(chat) = self.chat.take() {
             chat.update(cx, |chat, cx| chat.close(cx));
         }
-        self.chat = Some(cx.new(|cx| Chat::new(client, session, window, cx)));
+        let copied = self.copied.clone();
+        let chat = cx.new(|cx| Chat::new(client, session, copied, window, cx));
+        chat.update(cx, |chat, cx| chat.focus_composer(window, cx));
+        self.chat = Some(chat);
         cx.notify();
     }
 
-    fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let selected = self
+    fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = theme(cx);
+        let title = self
             .chat
             .as_ref()
-            .map(|chat| chat.read(cx).session().to_owned());
-        let items = self.sessions.iter().map(|session| {
-            let id = session.id.clone();
-            let label = if session.name.is_empty() {
-                "未命名会话".to_string()
-            } else {
-                session.name.clone()
-            };
-            SidebarMenuItem::new(label)
-                .active(selected.as_deref() == Some(id.as_str()))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open(id.clone(), window, cx);
-                }))
-        });
-        Sidebar::new("sessions")
-            .w(px(260.))
-            .header(
-                SidebarHeader::new().child(
-                    h_flex()
-                        .w_full()
-                        .justify_between()
-                        .child(div().font_semibold().child("Maka"))
-                        .child(
-                            Button::new("new-session")
-                                .ghost()
-                                .small()
-                                .icon(IconName::Plus)
-                                .tooltip("新建会话")
-                                .disabled(self.client().is_none())
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.create_session(window, cx);
-                                })),
-                        ),
-                ),
+            .and_then(|chat| self.sidebar.read(cx).name(chat.read(cx).session()))
+            .unwrap_or_default();
+        drag_region()
+            .h(px(sidebar::TITLEBAR))
+            .flex_none()
+            .px(px(14.))
+            .flex()
+            .items_center()
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(title),
             )
-            .child(SidebarGroup::new("会话").child(SidebarMenu::new().children(items)))
     }
 
-    fn render_main(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_main(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         if let Some(chat) = &self.chat {
-            return chat.clone().into_any_element();
+            return embed(chat, window);
         }
+        let theme = theme(cx);
         let message: SharedString = match &self.connection {
             Connection::Connecting => "正在连接 Host…".into(),
             Connection::Failed(error) => format!("无法连接 Host：{error}").into(),
-            Connection::Ready(_) => match &self.sessions_error {
-                Some(error) => format!("无法读取会话：{error}").into(),
-                None if self.sessions.is_empty() => "还没有会话".into(),
-                None => "选择一个会话".into(),
-            },
+            Connection::Ready(_) => "选择或新建一个会话".into(),
         };
-        v_flex()
+        let reconnect = matches!(self.connection, Connection::Failed(_)).then(|| {
+            let this = cx.weak_entity();
+            ui::button(
+                "reconnect",
+                "重新连接",
+                ui::Tone::Outline,
+                false,
+                move |_, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        this.connect(cx);
+                        cx.notify();
+                    });
+                },
+                cx,
+            )
+        });
+        div()
             .size_full()
+            .flex()
+            .flex_col()
             .items_center()
             .justify_center()
-            .gap_3()
-            .text_color(cx.theme().muted_foreground)
+            .gap(px(12.))
+            .text_size(px(13.))
+            .text_color(theme.muted)
             .child(message)
-            .when(matches!(self.connection, Connection::Failed(_)), |this| {
-                this.child(
-                    Button::new("reconnect")
-                        .label("重新连接")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.connect(cx);
-                            cx.notify();
-                        })),
-                )
-            })
+            .children(reconnect)
             .into_any_element()
     }
 }
 
+/// Draws `view` from cache unless it changed. While assistive technology is
+/// listening it is drawn fresh: GPUI drops a cached view's accessibility
+/// nodes when it reuses the view's last frame.
+fn embed<V: Render>(view: &Entity<V>, window: &Window) -> AnyElement {
+    if window.is_a11y_active() {
+        div().size_full().child(view.clone()).into_any_element()
+    } else {
+        view.clone()
+            .cached(StyleRefinement::default().size_full())
+            .into_any_element()
+    }
+}
+
+/// Drags the window from the first move after a press, so clicks and
+/// double-clicks on it still reach the window.
+pub fn drag_region() -> Stateful<Div> {
+    let armed = Rc::new(Cell::new(false));
+    let on_move = armed.clone();
+    div()
+        .id("drag-region")
+        .on_mouse_down(MouseButton::Left, move |event, window, _| {
+            if event.click_count >= 2 {
+                window.titlebar_double_click();
+            } else {
+                armed.set(true);
+            }
+        })
+        .on_mouse_move(move |_, window, _| {
+            if on_move.replace(false) {
+                window.start_window_move();
+            }
+        })
+}
+
 impl Render for Workspace {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = theme(cx);
+        div()
             .size_full()
-            .items_stretch()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child(self.render_sidebar(cx))
+            .flex()
+            .bg(theme.base)
+            .text_color(theme.text)
+            .font_family(theme.ui_font.clone())
             .child(
                 div()
+                    .id("sidebar")
+                    .role(Role::Navigation)
+                    .aria_label("会话")
+                    .w(px(sidebar::WIDTH))
+                    .h_full()
+                    .flex_none()
+                    .child(embed(&self.sidebar, window)),
+            )
+            .child(
+                div()
+                    .id("main")
+                    .role(Role::Main)
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(self.render_main(cx)),
+                    .flex()
+                    .flex_col()
+                    .border_l_1()
+                    .border_color(theme.border)
+                    .child(self.render_header(cx))
+                    .child(div().flex_1().min_h_0().child(self.render_main(window, cx))),
             )
     }
 }

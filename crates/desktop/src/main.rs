@@ -19,11 +19,19 @@
 
 mod chat;
 mod host;
+mod md;
+mod sidebar;
+mod theme;
+mod ui;
 mod workspace;
 
-use gpui_kit::{component::Root, *};
+use gpui_kit::{
+    component::{Root, Theme as KitTheme, ThemeMode},
+    *,
+};
 use maka_event_log::root::RootNamespaces;
 use std::path::PathBuf;
+use theme::Theme;
 
 fn default_root() -> Result<PathBuf, String> {
     let namespaces = RootNamespaces::for_current_account().map_err(|error| error.to_string())?;
@@ -43,20 +51,72 @@ fn main() -> Result<(), String> {
     };
     let host = host::Host::new().map_err(|error| error.to_string())?;
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(ui::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
             cx.set_global(host);
+            cx.bind_keys([
+                KeyBinding::new("cmd-c", chat::CopySelection, Some("Transcript")),
+                // Every Enter chord but plain Enter starts a new line.
+                KeyBinding::new(
+                    "ctrl-enter",
+                    component::input::Enter {
+                        secondary: false,
+                        shift: true,
+                    },
+                    Some("Input"),
+                ),
+                KeyBinding::new(
+                    "alt-enter",
+                    component::input::Enter {
+                        secondary: false,
+                        shift: true,
+                    },
+                    Some("Input"),
+                ),
+            ]);
             let options = WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size(px(1080.), px(760.)), cx)),
+                window_bounds: Some(WindowBounds::centered(size(px(1280.), px(840.)), cx)),
+                window_min_size: Some(size(px(860.), px(560.))),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Maka".into()),
+                    appears_transparent: true,
+                    traffic_light_position: Some(point(px(16.), px(17.))),
+                }),
                 ..Default::default()
             };
             cx.open_window(options, |window, cx| {
-                let view = cx.new(|cx| workspace::Workspace::new(root, cx));
+                apply_theme(window, cx);
+                window
+                    .observe_window_appearance(|window, cx| {
+                        apply_theme(window, cx);
+                        window.refresh();
+                    })
+                    .detach();
+                let view = cx.new(|cx| workspace::Workspace::new(root, window, cx));
                 cx.new(|cx| Root::new(view, window, cx))
             })
             .expect("failed to open window");
             cx.activate(true);
         });
     Ok(())
+}
+
+/// Our palette, and gpui-kit's text field drawn in it.
+fn apply_theme(window: &mut Window, cx: &mut App) {
+    let theme = Theme::for_appearance(window.appearance());
+    let mode = if theme.dark {
+        ThemeMode::Dark
+    } else {
+        ThemeMode::Light
+    };
+    KitTheme::change(mode, Some(window), cx);
+    let kit = KitTheme::global_mut(cx);
+    kit.colors.foreground = theme.text;
+    kit.colors.muted_foreground = theme.muted;
+    kit.colors.caret = theme.accent;
+    kit.colors.selection = theme.selection;
+    kit.colors.background = theme.raised;
+    kit.font_family = theme.ui_font.clone();
+    cx.set_global(theme);
 }
