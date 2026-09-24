@@ -21,6 +21,49 @@ use crate::{Client, ClientError, RequestFailure};
 use maka_protocol::{Operation, turn::*};
 
 impl Client {
+    pub async fn query_resume(
+        &self,
+        input: TurnResumeQueryInput,
+    ) -> Result<TurnResumePlan, RequestFailure> {
+        let value = self
+            .request(
+                Operation::TurnResumeQuery,
+                serde_json::to_value(&input).expect("wire input"),
+            )
+            .await?;
+        if let Ok(plan) = decode_turn_resume_plan(&value)
+            && assert_resume_query_output_for_input(&input, &plan).is_ok()
+        {
+            return Ok(plan);
+        }
+        self.disconnect();
+        Err(RequestFailure::Unknown(ClientError::Protocol(
+            "Resume query changed source identity".into(),
+        )))
+    }
+
+    /// Start with a caller-persisted Turn identity; an unknown reply is never retried here.
+    pub async fn start_resume(
+        &self,
+        input: TurnResumeStartInput,
+    ) -> Result<TurnResumeStartResult, RequestFailure> {
+        let value = self
+            .request(
+                Operation::TurnResumeStart,
+                serde_json::to_value(&input).expect("wire input"),
+            )
+            .await?;
+        if let Ok(result) = decode_turn_resume_start_result(&value)
+            && assert_resume_start_output_for_input(&input, &result).is_ok()
+        {
+            return Ok(result);
+        }
+        self.disconnect();
+        Err(RequestFailure::Unknown(ClientError::Protocol(
+            "Resume start changed Turn identity".into(),
+        )))
+    }
+
     /// Start once with the caller's stable identity; unknown outcomes are not retried.
     pub async fn start_turn(
         &self,

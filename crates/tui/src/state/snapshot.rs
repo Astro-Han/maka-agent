@@ -50,6 +50,8 @@ pub struct Snapshot {
     oauth: Option<crate::pages::manage::oauth::saved::Checkpoint>,
     branch: Option<crate::pages::branch::Checkpoint>,
     recap: Option<crate::pages::recap::Checkpoint>,
+    #[serde(default)]
+    resume: Option<crate::pages::resume::Checkpoint>,
     revision: Option<crate::pages::revision::Checkpoint>,
     extension: Option<crate::pages::extensions::Checkpoint>,
 }
@@ -88,6 +90,7 @@ impl Snapshot {
             oauth: app.management.oauth.checkpoint(),
             branch: app.branch.checkpoint(),
             recap: app.recap.checkpoint(),
+            resume: app.resume.checkpoint(),
             revision: app.revision.checkpoint(),
             extension: app.extensions.checkpoint(root),
         }
@@ -208,6 +211,9 @@ impl Snapshot {
         if let Some(recap) = &self.recap {
             recap.validate(root)?;
         }
+        if let Some(resume) = &self.resume {
+            resume.validate(root)?;
+        }
         if let Some(branch) = &self.branch {
             branch.validate(root)?;
         }
@@ -230,6 +236,9 @@ impl Snapshot {
         }
         if let Some(recap) = self.recap {
             app.recap.restore(recap);
+        }
+        if let Some(resume) = self.resume {
+            app.resume.restore(resume);
         }
         if let Some(branch) = self.branch {
             app.branch.restore(branch);

@@ -30,6 +30,7 @@ pub mod projects;
 pub mod queue;
 pub mod recap;
 pub mod references;
+pub mod resume;
 pub mod revision;
 pub mod sending;
 pub mod sessions;

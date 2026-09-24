@@ -173,6 +173,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, id: &str) {
         && !app.branch.visible
         && !app.revision.visible
         && !app.recap.visible
+        && !app.resume.visible
         && !app.interactions.visible
         && app.management.dialog.is_none()
         && app.onboarding.dialog.is_none()
