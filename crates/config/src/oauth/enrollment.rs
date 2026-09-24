@@ -21,12 +21,13 @@ mod commit;
 mod receipt;
 
 use super::*;
-use maka_runtime::oauth::{ConnectionIdentity, LoginStart, Provider, Target};
+use maka_runtime::oauth::{ConnectionIdentity, LoginStart, Phase, Target};
 pub use receipt::LoginReceipt;
 
 pub enum LoginPreparation {
     Ready(Box<PreparedLogin>),
-    Authenticated(LoginReceipt),
+    Finished(Box<LoginReceipt>),
+    OutcomeUnknown(Box<LoginReceipt>),
     Rejected(LoginRejection),
 }
 
@@ -34,21 +35,24 @@ pub enum LoginPreparation {
 pub enum LoginRejection {
     AttemptConflict,
     ConnectionNotFound,
-    ProviderUnavailable,
+    ConnectionChanged,
     CatalogFull,
     SlugTaken,
+    AttemptsFull,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum LoginCompletion {
-    Committed(LoginReceipt),
-    Superseded { connection: bool, credential: bool },
+    Committed(Box<LoginReceipt>),
+    ConnectionChanged,
+    CredentialChanged,
     AttemptConflict,
     SlugTaken,
 }
 
-/// Only the originating store can issue this ticket. Consuming it commits at most
-/// once. Provider authorization and entitlement must finish before completion.
+/// Store-issued ticket. Persistence may be retried with the received replacement;
+/// neither a lost reply nor an uncertain commit authorizes a second exchange.
+#[derive(Clone)]
 pub struct PreparedLogin {
     store: Arc<ConfigurationStore>,
     input: LoginStart,
@@ -64,69 +68,92 @@ impl ConfigurationStore {
         self: &Arc<Self>,
         input: LoginStart,
     ) -> Result<LoginPreparation> {
-        receipt::validate_attempt(&input.attempt_id)?;
-        input
-            .target
-            .validate_create_identity()
-            .map_err(ConfigError::Invalid)?;
-        if let Target::Existing { connection_id } = &input.target {
-            validation::entity_id(connection_id).map_err(ConfigError::Invalid)?;
-        }
+        input.validate().map_err(ConfigError::Invalid)?;
         let store = Arc::clone(self);
         self.transaction(TransactionMode::Deferred, move |tx| {
             Box::pin(async move {
                 use LoginPreparation as P;
                 use LoginRejection as R;
                 if let Some(saved) = receipt::read(tx, &input.attempt_id).await? {
-                    return Ok(if saved.target == input.target {
-                        P::Authenticated(saved)
+                    return Ok(if saved.matches(&input) {
+                        match saved.phase {
+                            Phase::Exchanging => P::OutcomeUnknown(Box::new(saved)),
+                            _ => P::Finished(Box::new(saved)),
+                        }
                     } else {
                         P::Rejected(R::AttemptConflict)
                     });
                 }
+                if receipt::pending_count(tx).await? >= 256 {
+                    return Ok(P::Rejected(R::AttemptsFull));
+                }
                 let catalog = catalog::read(tx).await?;
-                let (before, mut after, provider) = match &input.target {
+                let (before, mut after) = match &input.target {
                     Target::Create {
-                        provider_type,
+                        provider,
+                        configuration,
                         slug,
                         name,
                     } => {
-                        if slug.as_ref().is_some_and(|slug| {
-                            catalog.connections.iter().any(|row| row.slug == *slug)
-                        }) {
+                        if catalog.connections.iter().any(|row| row.slug == *slug) {
                             return Ok(P::Rejected(R::SlugTaken));
                         }
                         if catalog.connections.len() >= 1024 {
                             return Ok(P::Rejected(R::CatalogFull));
                         }
-                        let mut row = new_connection(*provider_type, &catalog.connections)?;
-                        if let Some(slug) = slug {
-                            row.slug = slug.clone();
-                        }
-                        if let Some(name) = name {
-                            row.name = name.clone();
-                        }
-                        (None, row, *provider_type)
+                        (
+                            None,
+                            ConnectionCatalogEntry {
+                                connection_id: uuid::Uuid::new_v4().to_string(),
+                                revision: 1,
+                                slug: slug.clone(),
+                                name: name.clone(),
+                                provider: provider.clone(),
+                                configuration: configuration.clone(),
+                                enabled: true,
+                                enabled_model_ids: vec![],
+                                model_overrides: None,
+                                request_body_overlay: None,
+                                models: vec![],
+                                model_source: None,
+                                models_fetched_at: None,
+                                last_test: None,
+                            },
+                        )
                     }
-                    Target::Existing { connection_id } => {
+                    Target::Existing {
+                        expected,
+                        configuration,
+                    } => {
                         let Some(row) = catalog
                             .connections
                             .iter()
-                            .find(|row| &row.connection_id == connection_id)
+                            .find(|row| row.connection_id == expected.connection_id)
                             .cloned()
                         else {
                             return Ok(P::Rejected(R::ConnectionNotFound));
                         };
-                        let provider = match row.provider_type.as_str() {
-                            "openai-codex" => Provider::OpenaiCodex,
-                            "github-copilot" => Provider::GithubCopilot,
-                            "xai-oauth" => Provider::XaiOauth,
-                            _ => return Ok(P::Rejected(R::ProviderUnavailable)),
-                        };
-                        (Some(row.clone()), row, provider)
+                        if vault::connection_conflict(tx, &locator(&row), Some(expected))
+                            .await?
+                            .is_some()
+                        {
+                            return Ok(P::Rejected(R::ConnectionChanged));
+                        }
+                        let before = row.clone();
+                        let mut row = row;
+                        if row.configuration != *configuration {
+                            row.configuration = configuration.clone();
+                            row.models.clear();
+                            row.model_source = None;
+                            row.models_fetched_at = None;
+                            row.model_overrides = None;
+                        }
+                        (Some(before), row)
                     }
                 };
-                if !after.enabled || after.last_test.is_some() {
+                if before.is_some() {
+                    // Every reauthentication invalidates verification, even if
+                    // the provider returns the same secret bytes.
                     after.revision = catalog::next_revision(after.revision)?;
                     after.enabled = true;
                     after.last_test = None;
@@ -134,7 +161,7 @@ impl ConfigurationStore {
                 let identity = ConnectionIdentity {
                     connection_id: after.connection_id.clone(),
                     slug: after.slug.clone(),
-                    provider_type: provider,
+                    provider: after.provider.clone(),
                 };
                 let credential = vault::status_basis(&vault::status(tx, &locator(&after)).await?);
                 let network = NetworkSnapshot::read(tx).await?.configuration;
@@ -162,6 +189,19 @@ impl ConfigurationStore {
 }
 
 impl PreparedLogin {
+    /// Defaults are materialized by the pinned provider exactly once. Keep the
+    /// caller's original request unchanged so retries still match its receipt.
+    pub fn configure_creation(&mut self, configuration: serde_json::Value) -> Result<()> {
+        if self.before.is_some() {
+            return Err(ConfigError::Invalid(
+                "existing connections do not acquire new defaults".into(),
+            ));
+        }
+        validation::provider_configuration(&configuration).map_err(ConfigError::Invalid)?;
+        self.after.configuration = configuration;
+        Ok(())
+    }
+
     pub fn identity(&self) -> &ConnectionIdentity {
         &self.identity
     }
@@ -176,44 +216,6 @@ impl PreparedLogin {
 fn locator(row: &ConnectionCatalogEntry) -> CredentialLocator {
     CredentialLocator::Connection {
         connection_id: row.connection_id.clone(),
-        kind: ConnectionCredentialKind::OauthToken,
+        kind: ConnectionCredentialKind::Provider,
     }
-}
-
-fn new_connection(
-    provider: Provider,
-    rows: &[ConnectionCatalogEntry],
-) -> Result<ConnectionCatalogEntry> {
-    let facts = model_catalog::provider_facts(provider.as_str())?;
-    let base = match provider {
-        Provider::OpenaiCodex => "codex-subscription",
-        Provider::GithubCopilot => "github-copilot",
-        Provider::XaiOauth => "xai-oauth",
-    };
-    let slug = (1..)
-        .map(|n| {
-            if n == 1 {
-                base.into()
-            } else {
-                format!("{base}-{n}")
-            }
-        })
-        .find(|slug| rows.iter().all(|row| row.slug != *slug))
-        .expect("bounded catalog");
-    Ok(ConnectionCatalogEntry {
-        connection_id: uuid::Uuid::new_v4().to_string(),
-        revision: 1,
-        slug,
-        name: facts.label.clone(),
-        provider_type: provider.as_str().into(),
-        base_url: None,
-        enabled: true,
-        enabled_model_ids: facts.fallback_models.clone(),
-        model_overrides: None,
-        request_body_overlay: None,
-        models: vec![],
-        model_source: None,
-        models_fetched_at: None,
-        last_test: None,
-    })
 }

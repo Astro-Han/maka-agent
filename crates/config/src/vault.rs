@@ -62,18 +62,6 @@ impl ConfigurationStore {
                     return Ok(conflict);
                 }
                 let previous = status(tx, &input.locator).await?;
-                if let CredentialLocator::Connection {
-                    connection_id,
-                    kind: ConnectionCredentialKind::OauthToken,
-                } = &input.locator
-                    && catalog::find(tx, connection_id)
-                        .await?
-                        .is_some_and(|row| row.provider_type != "github-copilot")
-                {
-                    return Err(ConfigError::Invalid(
-                        "client OAuth credentials are only accepted for GitHub Copilot".into(),
-                    ));
-                }
                 let actual = status_basis(&previous);
                 let expected = input.expected.as_ref().map(|basis| CredentialVersionBasis {
                     locator: input.locator.clone(),
@@ -83,17 +71,7 @@ impl ConfigurationStore {
                 if expected != actual {
                     return Ok(CredentialMutationResult::CredentialStale { expected, actual });
                 }
-                if matches!(
-                    input.locator,
-                    CredentialLocator::Connection {
-                        kind: ConnectionCredentialKind::OauthToken,
-                        ..
-                    }
-                ) {
-                    replace_secret(tx, &input.locator, &input.secret, now).await?;
-                } else {
-                    write_secret(tx, &input.locator, &input.secret, now).await?;
-                }
+                write_secret(tx, &input.locator, &input.secret, now).await?;
                 invalidate_test(tx, &input.locator).await?;
                 Ok(CredentialMutationResult::Committed {
                     vault_revision: advance(tx).await?,
@@ -173,52 +151,26 @@ pub(crate) async fn connection_conflict(
     locator: &CredentialLocator,
     expected: Option<&ConnectionCredentialTarget>,
 ) -> Result<Option<CredentialMutationResult>> {
-    let CredentialLocator::Connection {
-        connection_id,
-        kind,
-    } = locator
-    else {
+    let CredentialLocator::Connection { connection_id, .. } = locator else {
         return Ok(None);
     };
     let Some(row) = catalog::find(tx, connection_id).await? else {
         return Ok(Some(CredentialMutationResult::ConnectionNotFound));
     };
-    if let Some(expected) = expected {
-        let endpoint = row
-            .base_url
-            .as_deref()
-            .or_else(|| validation::provider_default_base_url(&row.provider_type).ok())
-            .unwrap_or("");
-        let endpoint = validation::normalize_base_url(Some(endpoint), None)
-            .map_err(ConfigError::Invalid)?
-            .unwrap_or_default();
-        let expected_endpoint =
-            validation::normalize_base_url(Some(&expected.effective_base_url), None)
-                .map_err(ConfigError::Invalid)?
-                .unwrap_or_default();
-        if expected.connection_id != row.connection_id
+    if let Some(expected) = expected
+        && (expected.connection_id != row.connection_id
             || expected.revision != row.revision
             || expected.slug != row.slug
-            || expected.provider_type != row.provider_type
-            || expected_endpoint != endpoint
-        {
-            return Ok(Some(CredentialMutationResult::ConnectionStale {
-                expected: ConnectionVersionBasis {
-                    connection_id: expected.connection_id.clone(),
-                    revision: expected.revision,
-                },
-                actual: Some(catalog::basis(&row)),
-            }));
-        }
-    }
-    let auth = validation::provider_auth_kind(&row.provider_type).map_err(ConfigError::Invalid)?;
-    if (matches!(kind, ConnectionCredentialKind::ApiKey) && auth != ProviderAuthKind::ApiKey)
-        || (matches!(kind, ConnectionCredentialKind::OauthToken)
-            && auth != ProviderAuthKind::OauthToken)
+            || expected.provider != row.provider
+            || expected.configuration != row.configuration)
     {
-        return Err(ConfigError::Invalid(
-            "credential kind does not match provider authentication".into(),
-        ));
+        return Ok(Some(CredentialMutationResult::ConnectionStale {
+            expected: ConnectionVersionBasis {
+                connection_id: expected.connection_id.clone(),
+                revision: expected.revision,
+            },
+            actual: Some(catalog::basis(&row)),
+        }));
     }
     Ok(None)
 }

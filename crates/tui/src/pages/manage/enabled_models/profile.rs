@@ -108,7 +108,6 @@ pub(super) struct Draft {
     default_input: Option<u64>,
     focus: usize, // field identities, Back, Cancel, Save
     offset: usize,
-    relay: bool,
 }
 const LEVELS: [ThinkingLevel; 7] = [
     ThinkingLevel::Off,
@@ -120,7 +119,7 @@ const LEVELS: [ThinkingLevel; 7] = [
     ThinkingLevel::Max,
 ];
 impl Draft {
-    pub fn new(model: &Model, profile: ModelOverride, provider: &str) -> Self {
+    pub fn new(model: &Model, profile: ModelOverride) -> Self {
         use Field::*;
         let mut fields = vec![
             Text("displayName"),
@@ -133,13 +132,7 @@ impl Draft {
             Boolean("applyPatch"),
             Protocol,
         ];
-        let relay = matches!(
-            provider,
-            "openai-compatible" | "openai-responses-compatible"
-        );
-        if relay {
-            fields.extend(LEVELS.map(Level));
-        }
+        fields.extend(LEVELS.map(Level));
         fields.extend([Text("description"), Text("knowledgeCutoff")]);
         fields.push(Advanced);
         let values = serde_json::to_value(profile).expect("model override");
@@ -170,7 +163,6 @@ impl Draft {
             default_input: model.default_input,
             focus: 0,
             offset: 0,
-            relay,
         }
     }
     pub fn invalidate_geometry(&mut self) {
@@ -222,9 +214,7 @@ impl Draft {
                                 .map(|kind| Field::Modality(direction, kind)),
                         );
                     }
-                    if self.relay {
-                        self.fields.push(Field::ServiceTier);
-                    }
+                    self.fields.push(Field::ServiceTier);
                 }
                 self.invalidate_geometry();
             }
@@ -369,10 +359,10 @@ impl Draft {
         if matches!((context,input),(Some(context),Some(input)) if input>context) {
             return Err("model-profile-limits-conflict");
         }
-        maka_protocol::configuration::validation::profiles(
-            &std::collections::BTreeMap::from([(self.id.clone(), profile.clone())]),
-            None,
-        )
+        maka_protocol::configuration::validation::profiles(&std::collections::BTreeMap::from([(
+            self.id.clone(),
+            profile.clone(),
+        )]))
         .map_err(|_| "model-profile-invalid")?;
         Ok(profile)
     }
@@ -434,7 +424,7 @@ mod tests {
             app.apply(Action::Visit(Route::Connections));
             app.connections.query().unwrap();
             let page = json!({"kind":"page","revision":9,"connectionCount":1,"defaultTarget":null,"nextCursor":null,"items":[
-                {"kind":"connection","connectionIndex":0,"connectionId":"c","revision":3,"slug":"fixture","name":"Fixture","providerType":"openai-compatible","enabled":true,"enabledModelIdCount":1,"catalogEntryCount":2},
+                {"kind":"connection","connectionIndex":0,"connectionId":"c","revision":3,"slug":"fixture","name":"Fixture","provider":crate::providers::fixtures::entry("openai-compatible", false).identity,"configuration":{"baseUrl":"http://127.0.0.1/v1"},"enabled":true,"enabledModelIdCount":1,"catalogEntryCount":2},
                 {"kind":"enabled_model_id","connectionIndex":0,"itemIndex":0,"modelId":"m"},
                 {"kind":"catalog_entry","connectionIndex":0,"itemIndex":0,"entry":{"id":"m","defaultContextWindow":128000,"defaultInputLimit":64000},"modelOverride":{"contextWindow":256000,"modalities":{"input":["text"],"output":["text"]}}},
                 {"kind":"catalog_entry","connectionIndex":0,"itemIndex":1,"entry":{"id":"neighbor"},"modelOverride":{"vision":false,"codeMode":false}}
@@ -649,7 +639,7 @@ mod tests {
             default_input: Some(100000),
         };
         let original: ModelOverride = serde_json::from_value(json!({"vision":false,"contextWindow":256000,"capabilities":{"parallelToolCalls":false},"modalities":{"input":["text","image"],"output":["text"]},"serviceTier":"fast"})).unwrap();
-        let mut draft = Draft::new(&model, original.clone(), "openai-responses-compatible");
+        let mut draft = Draft::new(&model, original.clone());
         assert_eq!(draft.value().unwrap(), original);
         let index = draft
             .fields
@@ -777,19 +767,6 @@ mod tests {
         assert!(
             !draft.accepts(&Command::Adjust(tier, true)),
             "collapsed controls are not actionable"
-        );
-        let mut native = Draft::new(&model, ModelOverride::default(), "anthropic");
-        let advanced = native
-            .fields
-            .iter()
-            .position(|field| *field == Field::Advanced)
-            .unwrap();
-        native.apply(Command::Adjust(advanced, true));
-        assert!(
-            !native
-                .fields
-                .iter()
-                .any(|field| matches!(field, Field::Level(_) | Field::ServiceTier))
         );
     }
 }

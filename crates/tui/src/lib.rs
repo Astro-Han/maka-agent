@@ -26,6 +26,7 @@ mod i18n;
 mod motion;
 mod navigation;
 mod pages;
+mod providers;
 mod state;
 mod terminal;
 mod theme;
@@ -48,6 +49,7 @@ pub struct Options {
 }
 
 enum Completed {
+    Providers(u64, Result<maka_client::ProviderDirectory, String>),
     Extension(
         pages::extensions::Request,
         Result<pages::extensions::Output, pages::extensions::io::Failure>,
@@ -316,6 +318,20 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     });
                 }
             }
+            if !app.closing
+                && let Some(generation) = app.providers.query()
+            {
+                let client = client.clone();
+                jobs.spawn(async move {
+                    Completed::Providers(
+                        generation,
+                        client
+                            .provider_directory(maka_protocol::model_provider::Scope::Profile)
+                            .await
+                            .map_err(|error| error.to_string()),
+                    )
+                });
+            }
             if let Some(id) = app.chat.select(&app.navigation.current()) {
                 close_observation(&mut jobs, client.clone(), id);
             }
@@ -565,9 +581,8 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     if let Some(client) = client.clone()
                         && let Some(ticket) = app.management_request()
                     {
-                        let secret = app.take_credential_secret(&ticket);
                         jobs.spawn(async move {
-                            let result = pages::manage::execute(&client, &ticket, secret).await;
+                            let result = pages::manage::execute(&client, &ticket).await;
                             Completed::Managed(Box::new(ticket), result)
                         });
                     }
@@ -1073,6 +1088,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
                         app.inbox.refresh();
                         app.projects.refresh();
                         app.connections.refresh();
+                        app.providers.refresh();
                         if let navigation::Route::Session(id) = app.navigation.current() { app.sessions.open(&id); }
                         effect = app.apply(Action::Refresh);
                     }
@@ -1081,6 +1097,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     Some(Ok(Completed::Inbox(result))) => app.inbox.complete(result),
                     Some(Ok(Completed::Projects(result))) => app.projects.complete(result),
                     Some(Ok(Completed::Connections(result))) => app.connections.complete(result),
+                    Some(Ok(Completed::Providers(generation, result))) => {
+                        app.providers.complete(generation, result);
+                        app.oauth_catalog_loaded();
+                        app.onboarding_catalog_loaded();
+                        if app.providers.failed() {
+                            app.notice = Some(Notice::Local("providers-failed"));
+                        }
+                    },
                     Some(Ok(Completed::Session(request, result))) => {
                         app.sessions.complete_detail(request, result);
                         if let pages::sessions::Detail::Missing { id } = &app.sessions.detail {
@@ -1119,6 +1143,9 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 match notice {
                     Some(Notification::Catalog(notice)) => {
                         if notice.kind == "project.catalog.changed" { app.project_catalog_changed(); }
+                        if notice.kind == "model.provider.catalog.changed" {
+                            app.providers.refresh();
+                        }
                         if matches!(notice.kind.as_str(), "connection.catalog.changed" | "configuration.changed") {
                             app.models_catalog_changed();
                             app.connections.refresh();

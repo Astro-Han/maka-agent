@@ -142,6 +142,7 @@ export {
   RuntimeHostCatalogReadError,
   RuntimeHostSessionCatalogRevisionChangedError,
   readRuntimeHostConnectionCatalog,
+  readRuntimeHostModelProviders,
   readRuntimeHostProjectDetails,
   readRuntimeHostResources,
   readRuntimeHostProjects,
@@ -151,6 +152,7 @@ export {
   type RuntimeHostSessionCatalogPageCursor,
   type RuntimeHostConnectionCatalogEntry,
   type RuntimeHostConnectionCatalogSnapshot,
+  type RuntimeHostModelProviderCatalogSnapshot,
 } from './catalog-reader.js';
 export {
   IDLE_GRACE_MS_ENV_VAR,
@@ -170,6 +172,7 @@ export {
   type RuntimeHostCandidateLaunchBarrier,
 } from './candidate-launch-barrier.js';
 export { runHostedExecution, type RunHostedExecutionInput } from './hosted-execution.js';
+export { launchNativeRuntimeHostCandidate } from './native-launcher.js';
 export {
   type ClientCapabilityProvider,
   type ClientCapabilityRegistrationOptions,

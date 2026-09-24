@@ -18,6 +18,7 @@
  */
 
 import type { Json, ProviderDescriptor, ProviderIdentity } from '@maka-agent/plugin-sdk/host';
+import { decodeProviderIdentity, RuntimePolicyDomainDecodeError } from '@maka/core/runtime-policy';
 import {
   requireCount,
   requireEncodedByteLimit,
@@ -34,6 +35,23 @@ export interface ModelProviderCatalogQuery {
   after?: string | null;
   revision?: number | null;
 }
+
+export interface ModelProviderCatalogChangedFrame {
+  readonly kind: 'model.provider.catalog.changed';
+  readonly revision: number;
+}
+
+export function decodeModelProviderCatalogChangedFrame(
+  value: unknown,
+): ModelProviderCatalogChangedFrame {
+  const row = requireExactRecord(value, 'provider catalog change', ['kind', 'revision']);
+  if (row.kind !== 'model.provider.catalog.changed')
+    throw invalidProtocolFrame('Invalid provider catalog change');
+  return {
+    kind: 'model.provider.catalog.changed',
+    revision: requireCount(row.revision, 'provider catalog revision'),
+  };
+}
 export type ModelProviderCatalogResult =
   | { kind: 'revision_changed'; revision: number }
   | {
@@ -48,6 +66,15 @@ function identifier(value: unknown, max = 256): string {
   if (!text || /[\p{White_Space}\p{Cc}]/u.test(text))
     throw invalidProtocolFrame('Invalid provider identifier');
   return text;
+}
+// Rust orders provider names by UTF-8 bytes, not JavaScript's UTF-16 code units.
+function compareNames(left: string, right: string): number {
+  const a = new TextEncoder().encode(left);
+  const b = new TextEncoder().encode(right);
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    if (a[index] !== b[index]) return a[index]! - b[index]!;
+  }
+  return a.length - b.length;
 }
 function scope(value: unknown): NonNullable<ModelProviderCatalogQuery['scope']> {
   if (value === 'profile' || value === 'desktop-ui') return value;
@@ -76,6 +103,7 @@ function descriptor(value: unknown): ProviderDescriptor {
     'configurationSchema',
     'configurationDefaults',
     'authentication',
+    'anonymous',
     'discovery',
   ]);
   if (!Array.isArray(row.authentication) || row.authentication.length > 16) {
@@ -104,30 +132,17 @@ function descriptor(value: unknown): ProviderDescriptor {
     configurationSchema: jsonObject(row.configurationSchema),
     configurationDefaults: jsonObject(row.configurationDefaults),
     authentication,
+    anonymous: flag(row.anonymous),
     discovery: flag(row.discovery),
   };
 }
 function identity(value: unknown): ProviderIdentity {
-  const row = requireExactRecord(value, 'provider identity', [
-    'packageId',
-    'entryId',
-    'scope',
-    'name',
-  ]);
-  const owner = (value: unknown) => {
-    const name = identifier(value, 128);
-    if (!/^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$/.test(name))
-      throw invalidProtocolFrame('Invalid provider owner');
-    return name;
-  };
-  const selected = scope(row.scope);
-  if (selected === 'desktop-ui') throw invalidProtocolFrame('Client scope cannot provide models');
-  return {
-    packageId: owner(row.packageId),
-    entryId: owner(row.entryId),
-    scope: selected,
-    name: identifier(row.name),
-  };
+  try {
+    return decodeProviderIdentity(value);
+  } catch (error) {
+    if (error instanceof RuntimePolicyDomainDecodeError) throw invalidProtocolFrame(error.message);
+    throw error;
+  }
 }
 
 export const MODEL_PROVIDER_OPERATION_SPECS = {
@@ -158,6 +173,8 @@ export const MODEL_PROVIDER_OPERATION_SPECS = {
         [],
         ['scope', 'after', 'revision'],
       );
+      if (row.after != null && row.revision == null)
+        throw invalidProtocolFrame('Provider cursor requires a revision');
       return {
         ...(row.scope === undefined ? {} : { scope: scope(row.scope) }),
         ...(row.after === undefined
@@ -182,18 +199,33 @@ export const MODEL_PROVIDER_OPERATION_SPECS = {
       requireExactRecord(row, 'provider page', ['kind', 'revision', 'entries', 'next']);
       if (row.kind !== 'page' || !Array.isArray(row.entries) || row.entries.length > 32)
         throw invalidProtocolFrame('Invalid provider page');
-      const names = new Set<string>();
+      let previous: string | undefined;
       const entries = row.entries.map((value) => {
         const entry = requireExactRecord(value, 'provider entry', ['identity', 'descriptor']);
         const selected = identity(entry.identity);
-        if (names.has(selected.name)) throw invalidProtocolFrame('Duplicate provider name');
-        names.add(selected.name);
+        if (previous !== undefined && compareNames(previous, selected.name) >= 0)
+          throw invalidProtocolFrame('Provider page changed cursor order');
+        previous = selected.name;
         return { identity: selected, descriptor: descriptor(entry.descriptor) };
       });
       const next = row.next === null ? null : identifier(row.next);
       if (next !== null && next !== entries.at(-1)?.identity.name)
         throw invalidProtocolFrame('Invalid provider cursor');
       return { kind: 'page', revision, entries, next };
+    },
+    assertOutputForInput(input, output) {
+      const requestedScope = input.scope ?? 'profile';
+      const valid =
+        output.kind === 'revision_changed'
+          ? input.revision != null && input.revision !== output.revision
+          : (input.revision == null || input.revision === output.revision) &&
+            output.entries.every(
+              ({ identity }) =>
+                (input.after == null || compareNames(identity.name, input.after) > 0) &&
+                (identity.scope === requestedScope ||
+                  (requestedScope.startsWith('session:') && identity.scope === 'profile')),
+            );
+      if (!valid) throw invalidProtocolFrame('Provider page does not match its query');
     },
   }),
 } as const;

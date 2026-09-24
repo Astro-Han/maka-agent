@@ -48,7 +48,9 @@ pub(super) async fn inject(root: &Path, fault: Fault) -> (&'static str, Value, &
              BEGIN INSERT INTO drain_child VALUES (1); END;",
             "connection.catalog.create",
             json!({"expectedCatalogRevision":0,"connection":{
-                "slug":"fixture","name":"Fixture","providerType":"openai",
+                "slug":"fixture","name":"Fixture",
+                "provider":{"packageId":"maka.providers","entryId":"maka.providers","scope":"profile","name":"openai"},
+                "configuration":{},
                 "enabled":true,"enabledModelIds":["gpt-5"]
             }}),
             "commit_outcome_unknown",

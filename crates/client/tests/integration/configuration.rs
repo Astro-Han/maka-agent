@@ -25,6 +25,15 @@ use maka_protocol::configuration::{
 use serde_json::json;
 use std::time::Duration;
 
+fn provider(name: &str) -> maka_protocol::oauth::Identity {
+    maka_protocol::oauth::Identity {
+        package_id: "example.providers".into(),
+        entry_id: "example.providers".into(),
+        scope: maka_protocol::model_provider::Scope::Profile,
+        name: name.into(),
+    }
+}
+
 #[tokio::test]
 async fn connection_test_binds_target_and_model_but_distinguishes_committed_failure() {
     use maka_protocol::connection_effects::ConnectionTestRunInput;
@@ -241,7 +250,7 @@ async fn default_model_mutations_bind_catalog_revision_and_explicit_null_target(
 #[tokio::test]
 async fn connection_catalog_binds_pages_to_requested_revision_and_exact_cursor() {
     let header = json!({"kind":"connection","connectionIndex":0,"connectionId":"b746eb13-287c-4f3a-8590-dac93c0a1253",
-        "revision":1,"slug":"fixture","name":"Fixture","providerType":"openai-compatible",
+        "revision":1,"slug":"fixture","name":"Fixture","provider":provider("api"),"configuration":{},
         "enabled":true,"enabledModelIdCount":1,"modelCount":0,"catalogEntryCount":1});
     let item = json!({"kind":"catalog_entry","connectionIndex":0,"itemIndex":0,
         "entry":{"id":"model","canUseAsChatDefault":true,"isDefault":false,"supportsVision":false,"thinkingLevels":[]}});
@@ -315,13 +324,12 @@ async fn onboarding_rejects_ambiguous_inventory_and_foreign_saved_connection() {
             let client = client.clone();
             async move {
                 let input = OnboardingInput {
-                    target: OnboardingTarget::Create {
-                        provider_type: "openai-compatible".into(),
-                        slug: Some("wanted".into()),
-                        name: None,
+                    target: maka_protocol::oauth::Target::Create {
+                        provider: provider("api"),
+                        configuration: json!({"baseUrl":"http://127.0.0.1/v1"}),
+                        slug: "wanted".into(),
+                        name: "Wanted".into(),
                     },
-                    api_key: Some("synthetic-secret".into()),
-                    base_url: Some("http://127.0.0.1/v1".into()),
                 };
                 if case == 0 {
                     client.verify_connection(input).await.map(|_| ())
@@ -342,7 +350,7 @@ async fn onboarding_rejects_ambiguous_inventory_and_foreign_saved_connection() {
             json!({"kind":"verified","models":[{"id":"duplicate"},{"id":"duplicate"}]})
         } else {
             json!({"kind":"saved","connection":{"connectionId":"b746eb13-287c-4f3a-8590-dac93c0a1253",
-                "revision":1,"slug":if case==1{"other"}else{"wanted"},"providerType":if case==1{"openai-compatible"}else{"anthropic"}}})
+                "revision":1,"slug":if case==1{"other"}else{"wanted"},"provider":provider(if case==1{"api"}else{"other"})}})
         };
         writer.write(&json!({"requestId":frame["requestId"],"operation":frame["operation"],"ok":true,"result":result})).await.unwrap();
         assert!(matches!(
@@ -428,7 +436,7 @@ async fn connection_mutations_bind_cas_and_acknowledgements_to_the_requested_ide
                             expected,
                             changes: ConnectionCatalogEntryUpdate {
                                 name: "Connection".into(),
-                                base_url: None,
+                                configuration: json!({}),
                                 enabled: true,
                                 enabled_model_ids: vec!["model".into()],
                                 model_overrides: Patch::Keep,

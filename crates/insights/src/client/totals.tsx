@@ -17,40 +17,44 @@
  * under the License.
  */
 
+import type { ClientLocale } from '@maka-agent/plugin-sdk/client';
+import { copy } from './totals-copy.js';
+
 import type { UsageSummary, UsageTokens } from '@maka-agent/plugin-sdk/host';
 import type { Tab } from './model.js';
 
-export const number = (value: number) =>
-  value.toLocaleString('en-US', { maximumFractionDigits: 6 });
-export const dollars = (value: number) => '$' + number(value);
-export function Tokens({ value, zh }: { value: UsageTokens; zh: boolean }) {
+export const number = (value: number, locale: ClientLocale) =>
+  value.toLocaleString(locale, { maximumFractionDigits: 6 });
+export const dollars = (value: number, locale: ClientLocale) => '$' + number(value, locale);
+export function Tokens({ value, locale }: { value: UsageTokens; locale: ClientLocale }) {
+  const t = copy[locale];
   return (
-    <span
-      title={
-        zh ? `${value.missing} 次调用缺少此计数` : `${value.missing} calls omitted this counter`
-      }
-    >
-      {number(value.known)}
+    <span title={t.missingCounter(value.missing)}>
+      {number(value.known, locale)}
       {value.missing ? ' + ?' : ''}
     </span>
   );
 }
-function Cost({ value, zh }: { value: UsageSummary['models']['cost']; zh: boolean }) {
+function Cost({ value, locale }: { value: UsageSummary['models']['cost']; locale: ClientLocale }) {
+  const t = copy[locale];
   return (
-    <span
-      title={
-        zh
-          ? `${value.unvalued} 次未估价，其中 ${value.unpriced} 次没有报价`
-          : `${value.unvalued} unvalued calls; ${value.unpriced} without rates`
-      }
-    >
-      {dollars(value.knownUsd)}
+    <span title={t.unvaluedCalls(value.unvalued, value.unpriced)}>
+      {dollars(value.knownUsd, locale)}
       {value.unvalued ? ' + ?' : ''}
     </span>
   );
 }
 
-export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; zh: boolean }) {
+export function Totals({
+  summary,
+  tab,
+  locale,
+}: {
+  summary: UsageSummary;
+  tab: Tab;
+  locale: ClientLocale;
+}) {
+  const t = copy[locale];
   const model = summary.models;
   const cacheRatio =
     model.input.missing === 0 &&
@@ -64,73 +68,71 @@ export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; 
       <>
         <div className="insights-cards">
           <div>
-            <small>{zh ? '模型调用' : 'Model calls'}</small>
-            <strong>{number(model.calls)}</strong>
+            <small>{t.modelCalls}</small>
+            <strong>{number(model.calls, locale)}</strong>
           </div>
           <div>
-            <small>{zh ? '已估价费用' : 'Valued cost'}</small>
+            <small>{t.valuedCost}</small>
             <strong>
-              <Cost value={model.cost} zh={zh} />
+              <Cost value={model.cost} locale={locale} />
             </strong>
           </div>
           <div>
-            <small>{zh ? '输入 token' : 'Input tokens'}</small>
+            <small>{t.inputTokens}</small>
             <strong>
-              <Tokens value={model.input} zh={zh} />
+              <Tokens value={model.input} locale={locale} />
             </strong>
           </div>
           <div>
-            <small>{zh ? '输出 token' : 'Output tokens'}</small>
+            <small>{t.outputTokens}</small>
             <strong>
-              <Tokens value={model.output} zh={zh} />
+              <Tokens value={model.output} locale={locale} />
             </strong>
           </div>
           <div>
-            <small>{zh ? '工具尝试' : 'Tool attempts'}</small>
-            <strong>{number(summary.tools.calls)}</strong>
+            <small>{t.toolAttempts}</small>
+            <strong>{number(summary.tools.calls, locale)}</strong>
           </div>
         </div>
         <p>
-          {zh ? '成功 / 失败 / 取消 / 未知：' : 'Success / error / cancelled / unknown: '}
-          {[model.success, model.error, model.aborted, model.unknown].map(number).join(' / ')}
+          {t.outcomes}
+          {[model.success, model.error, model.aborted, model.unknown]
+            .map((value) => number(value, locale))
+            .join(' / ')}
         </p>
         <dl className="insights-facts">
-          <dt>{zh ? '缓存命中率' : 'Cache hit rate'}</dt>
-          <dd>{cacheRatio === undefined ? '?' : number(cacheRatio * 100) + '%'}</dd>
-          <dt>{zh ? '模型累计耗时' : 'Cumulative model time'}</dt>
+          <dt>{t.cacheHit}</dt>
+          <dd>{cacheRatio === undefined ? '?' : number(cacheRatio * 100, locale) + '%'}</dd>
+          <dt>{t.modelTime}</dt>
           <dd>
-            {number(model.durationMs)} ms{model.unknown ? ' + ?' : ''}
+            {number(model.durationMs, locale)} ms{model.unknown ? ' + ?' : ''}
           </dd>
-          <dt>{zh ? '工具累计耗时' : 'Cumulative tool time'}</dt>
+          <dt>{t.toolTime}</dt>
           <dd>
-            {number(summary.tools.durationMs)} ms{summary.tools.unknown ? ' + ?' : ''}
+            {number(summary.tools.durationMs, locale)} ms{summary.tools.unknown ? ' + ?' : ''}
           </dd>
-          <dt>{zh ? '缓存读取' : 'Cache read'}</dt>
+          <dt>{t.cacheRead}</dt>
           <dd>
-            <Tokens value={model.cacheRead} zh={zh} />
+            <Tokens value={model.cacheRead} locale={locale} />
           </dd>
-          <dt>{zh ? '缓存写入' : 'Cache write'}</dt>
+          <dt>{t.cacheWrite}</dt>
           <dd>
-            <Tokens value={model.cacheWrite} zh={zh} />
+            <Tokens value={model.cacheWrite} locale={locale} />
           </dd>
-          <dt>{zh ? '推理 token' : 'Reasoning tokens'}</dt>
+          <dt>{t.reasoningTokens}</dt>
           <dd>
-            <Tokens value={model.reasoning} zh={zh} />
+            <Tokens value={model.reasoning} locale={locale} />
           </dd>
-          <dt>{zh ? '待结算模型 / 工具' : 'Pending models / tools'}</dt>
+          <dt>{t.pending}</dt>
           <dd>
             {summary.pending.models} / {summary.pending.tools}
           </dd>
-          <dt>{zh ? '未估价 / 无报价' : 'Unvalued / unpriced'}</dt>
+          <dt>{t.unvalued}</dt>
           <dd>
             {model.cost.unvalued} / {model.cost.unpriced}
           </dd>
         </dl>
-        <p className="insights-note">
-          {zh
-            ? '“+ ?” 表示部分数据未知，不等于零。累计耗时可能因并行调用而重叠，不是会话经过时间。已完成统计按结算时间，待结算数按准入时间。修改报价不改变历史费用。'
-            : '“+ ?” means some data is unknown, not zero. Cumulative durations may overlap; they are not elapsed session time. Completed totals use settlement time; pending counts use admission time. Rate edits do not change historical costs.'}
-        </p>
+        <p className="insights-note">{t.uncertainty}</p>
       </>
     );
   if (tab === 'tools')
@@ -139,17 +141,11 @@ export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; 
         <table>
           <thead>
             <tr>
-              {[
-                zh ? '工具' : 'Tool',
-                zh ? '尝试' : 'Attempts',
-                zh ? '成功' : 'Success',
-                zh ? '失败' : 'Error',
-                zh ? '拒绝' : 'Rejected',
-                zh ? '未知' : 'Unknown',
-                zh ? '平均耗时' : 'Mean duration',
-              ].map((label) => (
-                <th key={label}>{label}</th>
-              ))}
+              {[t.tool, t.attempts, t.success, t.error, t.rejected, t.unknown, t.meanDuration].map(
+                (label) => (
+                  <th key={label}>{label}</th>
+                ),
+              )}
             </tr>
           </thead>
           <tbody>
@@ -164,7 +160,7 @@ export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; 
                 <td>
                   {row.totals.meanLatencyMs === null
                     ? '—'
-                    : number(row.totals.meanLatencyMs) + ' ms'}
+                    : number(row.totals.meanLatencyMs, locale) + ' ms'}
                 </td>
               </tr>
             ))}
@@ -176,7 +172,7 @@ export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; 
     tab === 'providers'
       ? summary.byProvider.map((row) => ({
           key: JSON.stringify(row.providerId),
-          name: row.providerId ?? (zh ? '未知提供商' : 'Unknown provider'),
+          name: row.providerId ?? t.unknownProvider,
           totals: row.totals,
         }))
       : summary.byModel.map((row) => ({ key: row.modelId, name: row.modelId, totals: row.totals }));
@@ -186,11 +182,11 @@ export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; 
         <thead>
           <tr>
             {[
-              tab === 'providers' ? (zh ? '提供商' : 'Provider') : zh ? '模型' : 'Model',
-              zh ? '调用' : 'Calls',
-              zh ? '输入 token' : 'Input tokens',
-              zh ? '输出 token' : 'Output tokens',
-              zh ? '费用' : 'Cost',
+              tab === 'providers' ? t.provider : t.model,
+              t.calls,
+              t.inputTokens,
+              t.outputTokens,
+              t.cost,
             ].map((label) => (
               <th key={label}>{label}</th>
             ))}
@@ -202,13 +198,13 @@ export function Totals({ summary, tab, zh }: { summary: UsageSummary; tab: Tab; 
               <td>{row.name}</td>
               <td>{row.totals.calls}</td>
               <td>
-                <Tokens value={row.totals.input} zh={zh} />
+                <Tokens value={row.totals.input} locale={locale} />
               </td>
               <td>
-                <Tokens value={row.totals.output} zh={zh} />
+                <Tokens value={row.totals.output} locale={locale} />
               </td>
               <td>
-                <Cost value={row.totals.cost} zh={zh} />
+                <Cost value={row.totals.cost} locale={locale} />
               </td>
             </tr>
           ))}

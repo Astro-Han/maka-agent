@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { once } from 'node:events';
 import { access, readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -132,36 +133,16 @@ export async function verifyQuestions(connection, workspace, reopened, sandboxMo
   await once(server, 'listening');
   try {
     const baseUrl = 'http://127.0.0.1:' + server.address().port + '/v1';
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: 0,
-      connection: {
-        slug: 'questions',
-        name: 'Questions',
-        providerType: 'openai',
-        baseUrl,
-        enabled: true,
-        enabledModelIds: ['gpt-5.2'],
-        modelOverrides: { 'gpt-5.2': { codeMode: false } },
-      },
+    const created = await createModelConnection(request, {
+      providerName: 'openai',
+      slug: 'questions',
+      name: 'Questions',
+      baseUrl: baseUrl,
+      apiKey: 'dummy-question-fixture',
+      enabledModelIds: ['gpt-5.2'],
+      modelOverrides: { 'gpt-5.2': { codeMode: false } },
     });
-    assert.equal(created.kind, 'committed');
     const basis = created.connection;
-    assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-          expected: null,
-          expectedConnection: {
-            ...basis,
-            slug: 'questions',
-            providerType: 'openai',
-            effectiveBaseUrl: baseUrl,
-          },
-          secret: 'dummy-question-fixture',
-        })
-      ).kind,
-      'committed',
-    );
     await request('connection.catalog.set-default-target', {
       expectedCatalogRevision: created.catalogRevision,
       target: { connectionId: basis.connectionId, modelId: 'gpt-5.2' },

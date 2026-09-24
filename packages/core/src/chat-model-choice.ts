@@ -18,18 +18,13 @@
  */
 
 import { type ThinkingLevel } from './model-thinking.js';
-import {
-  offerableCatalogEntries,
-  providerDefaultsOf,
-  providerMenuLabel,
-  type ProjectedLlmConnection,
-  type ProviderType,
-} from './llm-connections.js';
+import { offerableCatalogEntries, type ProjectedLlmConnection } from './llm-connections.js';
+import type { ProviderIdentity } from './runtime-policy.js';
 
 export interface ChatModelChoice {
   connectionId: string;
   connectionSlug: string;
-  providerType: ProviderType;
+  provider: ProviderIdentity;
   providerLabel: string;
   model: string;
   label: string;
@@ -52,20 +47,18 @@ export function buildChatModelChoices(
 ): ChatModelChoice[] {
   const choices: ChatModelChoice[] = [];
   for (const connection of connections) {
-    const provider = providerDefaultsOf(connection.providerType);
-    if (!provider) continue;
     for (const entry of offerableCatalogEntries(connection)) {
       const declaredWindow = entry.compactionThreshold;
       choices.push({
         connectionId: connection.connectionId,
         connectionSlug: connection.slug,
-        providerType: connection.providerType,
-        providerLabel: providerMenuLabel(connection.providerType) ?? connection.providerType,
+        provider: connection.provider,
+        providerLabel: connection.provider.name,
         model: entry.id,
         label: entry.displayName?.trim() || entry.id,
         ...(entry.description !== undefined ? { description: entry.description } : {}),
         ...(entry.knowledgeCutoff !== undefined ? { knowledgeCutoff: entry.knowledgeCutoff } : {}),
-        ...(provider.authKind === 'oauth_token' ? {} : { connectionName: connection.name }),
+        connectionName: connection.name,
         isDefault: entry.isDefault,
         thinkingLevels: entry.thinkingLevels,
         ...(entry.defaultThinkingLevel === undefined

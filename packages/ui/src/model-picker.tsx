@@ -27,7 +27,7 @@
 
 import { useMemo, type ReactNode } from 'react';
 import { Selector } from '@astryxdesign/core/Selector';
-import type { ProviderType } from '@maka/core/llm-connections';
+import type { ProviderIdentity } from '@maka/core/runtime-policy';
 import type { ModelMenuGroup } from './chat-model-helpers.js';
 import {
   buildModelPickerOptions,
@@ -44,7 +44,7 @@ export interface ModelPickerProps {
   groups: readonly ModelMenuGroup[];
   value: string;
   onValueChange(value: string): void | Promise<void>;
-  renderProviderMark?(type: ProviderType): ReactNode;
+  renderProviderMark?(provider: ProviderIdentity): ReactNode;
   disabled?: boolean;
   /**
    * An ordinary option placed before the catalog for product values such as

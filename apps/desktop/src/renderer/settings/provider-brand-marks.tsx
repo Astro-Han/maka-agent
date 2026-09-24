@@ -30,7 +30,6 @@
 // so they inherit the containing product slot's foreground color and stay
 // legible in both light and dark themes; viewBox is the upstream 24×24.
 
-import type { ProviderType } from '@maka/core/llm-connections';
 import { GenericProviderMark } from '../features/connection-settings';
 import type { ReactElement } from 'react';
 import { siMinimax } from 'simple-icons';
@@ -359,7 +358,7 @@ function Ollama(): ReactElement {
  * Official brand mark for a provider type. Aliases (subscription / CLI /
  * OpenAI-compatible variants) reuse the parent brand's mark.
  */
-export function ProviderBrandMark({ type }: { type: ProviderType }): ReactElement {
+export function ProviderBrandMark({ type }: { type: string }): ReactElement {
   switch (type) {
     case 'nvidia':
       return <img src={nvidiaMarkUrl} alt="" />;

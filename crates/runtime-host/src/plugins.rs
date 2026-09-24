@@ -20,6 +20,7 @@
 pub(crate) mod assistant;
 mod authority;
 pub(crate) mod background_health;
+mod changes;
 mod client;
 mod effects;
 mod entrypoint;
@@ -300,6 +301,34 @@ impl Platform {
 
     pub fn subscribe(&self) -> watch::Receiver<Arc<Snapshot>> {
         self.snapshot.clone()
+    }
+
+    /// Wait for in-flight initial activation, not for eventual convergence.
+    /// Failed plugins and unmet services remain observable failures; they do not
+    /// hold recovery indefinitely. Loading deadlines belong to the kernel.
+    pub(crate) async fn wait_for_activation(&self, shutdown: &CancellationToken) -> bool {
+        use maka_plugins::fiber::Phase;
+        let mut updates = self.subscribe();
+        loop {
+            let pending = updates
+                .borrow_and_update()
+                .runtime
+                .entries
+                .iter()
+                .any(|entry| {
+                    !entry.disabled
+                        && (entry.phase == Phase::Loading
+                            || (entry.phase == Phase::Pending && entry.waiting_for.is_empty()))
+                });
+            if !pending {
+                return !shutdown.is_cancelled();
+            }
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => return false,
+                changed = updates.changed() => if changed.is_err() { return false; },
+            }
+        }
     }
 
     /// Once queued, the owner completes the mutation even if its caller goes away.

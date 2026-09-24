@@ -172,7 +172,8 @@ async fn seed_catalog(owner: RootOwner, root: &Path) {
         let id = format!("00000000-0000-4000-8000-00000000000{index}");
         let document = serde_json::json!({
             "connectionId": id, "revision": 1, "slug": wire, "name": wire,
-            "providerType": "openai", "baseUrl": base_url, "enabled": true,
+            "provider":{"packageId":"maka.providers","entryId":"maka.providers","scope":"profile","name":"openai"},
+            "configuration":{"baseUrl":base_url}, "enabled": true,
             "enabledModelIds": ["gpt-5.2"], "modelSource": "fetched", "modelsFetchedAt": 1,
             "models": [{"id": "gpt-5.2", "apiProtocol": wire, "capabilities": {"parallelToolCalls": false}}]
         });

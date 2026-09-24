@@ -18,11 +18,8 @@
  */
 
 mod adapters;
-mod connection_probe;
 mod context_overflow;
-mod discovery;
 mod live_search;
-mod oauth;
 mod provider_compatible;
 mod provider_errors;
 mod provider_ingress;

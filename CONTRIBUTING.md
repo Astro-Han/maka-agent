@@ -78,6 +78,22 @@ npx knip --workspace packages/ui
 
 Architecture is documented in [ARCHITECTURE.md](./ARCHITECTURE.md); evaluation commands and contracts live in [`packages/eval`](./packages/eval).
 
+## Rust workspace
+
+- Use `name.rs` with `name/` for children, not `mod.rs`. Keep unit tests at the end
+  of their implementation file; integration tests belong in `tests/`.
+- Test durable behavior and meaningful failure boundaries. Prefer extending an
+  existing test over duplicate fixtures, source-text assertions or real-time sleeps.
+- Keep business plugins on public plugin capabilities. Host owns admission,
+  canonical facts and resource settlement; plugins own domain policy and data.
+- Model closed operations and states with types; generate schemas with `schemars`.
+  Database schema changes belong in SQLx migrations, not startup DDL.
+- Keep protocol codes and diagnostics separate from localized UI copy. Plugin
+  clients use typed `en`, `zh-CN`, `zh-TW` catalogs and preserve the full locale.
+  New crate documentation should include concise English and Chinese versions.
+- Run `cargo fmt --all -- --check`, strict Clippy, relevant `cargo nextest` tests
+  and plugin SDK type checks. Use Biome for TypeScript, including plugin clients.
+
 ## Pull requests
 
 Opening a pull request pre-fills [`pull_request_template.md`](./.github/pull_request_template.md); fill it in rather than replacing it.

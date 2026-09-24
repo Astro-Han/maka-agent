@@ -94,7 +94,7 @@ test('tool renderers select exact names, retain native boundaries and recover on
     onError: (_identity, error) => errors.push(error),
   });
   const render = () => act(() => {
-    const detail = createElement(ToolCallDetail, { item, onSwitchToBypassAndRetry() {} });
+    const detail = createElement(ToolCallDetail, { item });
     root.render(createElement(LocaleProvider, { locale: 'en' },
       createElement(ToolDetailScope, { turnId: 'turn', Extension },
         nested ? createElement(ToolDetailScope, { turnId: 'nested' }, detail) : detail)));
@@ -113,11 +113,12 @@ test('tool renderers select exact names, retain native boundaries and recover on
     await render();
     assert.equal(document.querySelector('[data-tool-renderer]'), null, 'matching is exact');
     item = { ...item, toolName: 'Shell', status: 'errored', result: { kind: 'text', text: '',
-      sandboxFailure: { reason: 'requires_bypass', source: 'client_capability' } } };
+      sandboxDenial: { likely: true } } };
     await render();
     assert.ok(document.querySelector('[data-tool-renderer]'));
-    assert.match(document.body.textContent, /Bypass mode required/);
-    assert.match(document.body.textContent, /Switch and retry/);
+    assert.ok(document.querySelector('.maka-sandbox-blocked-banner'),
+      'a plugin renderer cannot hide the native sandbox denial');
+    assert.doesNotMatch(document.body.textContent, /Switch and retry/);
     item = { ...item, status: 'completed', result: { kind: 'text', text: 'native evidence' } };
     fixture.fail = true;
     await render();

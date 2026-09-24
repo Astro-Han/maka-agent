@@ -50,18 +50,36 @@ pub async fn fixture() -> (
     provider.set_nonblocking(true).unwrap();
     let base_url = format!("http://{}/v1", provider.local_addr().unwrap());
     let owner = Arc::new(RootOwner::create(&root, &ns).unwrap());
-    let configuration = ConfigurationStore::for_root(owner.clone()).await.unwrap();
-    let created = configuration
-        .create_connection(
-            serde_json::from_value(json!({
-                "expectedCatalogRevision":0,
-                "connection":{"slug":"fixture","name":"Fixture","providerType":"openai-compatible",
-                    "baseUrl":base_url,"enabled":true,"enabledModelIds":["fixture-model"]}
-            }))
+    let configuration = Arc::new(ConfigurationStore::for_root(owner.clone()).await.unwrap());
+    let login = configuration.prepare_oauth_login(serde_json::from_value(json!({
+        "attemptId":"fixture-login",
+        "target":{"kind":"create","slug":"fixture","name":"Fixture",
+            "provider":{"packageId":"maka.providers","entryId":"maka.providers","scope":"profile","name":"openai-compatible"},
+            "configuration":{"baseUrl":base_url}},
+        "authentication":{"method":"api-key","input":{"apiKey":"fixture-secret"}}
+    })).unwrap()).await.unwrap();
+    let maka_config::oauth::enrollment::LoginPreparation::Ready(login) = login else {
+        panic!("fixture login");
+    };
+    assert!(login.claim().await.unwrap());
+    assert!(matches!(
+        login
+            .complete(
+                maka_runtime::provider::Credential {
+                    secret: "fixture-secret".into(),
+                    refresh_at: None,
+                },
+                1
+            )
+            .await
             .unwrap(),
-        )
-        .await
-        .unwrap();
+        maka_config::oauth::enrollment::LoginCompletion::Committed(_)
+    ));
+    let row = login.connection();
+    let created = configuration.update_connection(serde_json::from_value(json!({
+        "expected":{"connectionId":row.connection_id,"revision":row.revision},
+        "changes":{"name":row.name,"configuration":row.configuration,"enabled":true,"enabledModelIds":["fixture-model"]}
+    })).unwrap()).await.unwrap();
     let CatalogMutationResult::Committed {
         connection: Some(connection),
         ..
@@ -69,30 +87,6 @@ pub async fn fixture() -> (
     else {
         panic!("connection must be committed");
     };
-    assert!(matches!(
-        configuration
-            .set_credential(
-                SetCredentialInput {
-                    locator: CredentialLocator::Connection {
-                        connection_id: connection.connection_id.clone(),
-                        kind: ConnectionCredentialKind::ApiKey,
-                    },
-                    expected: None,
-                    expected_connection: Some(ConnectionCredentialTarget {
-                        connection_id: connection.connection_id.clone(),
-                        revision: 1,
-                        slug: "fixture".into(),
-                        provider_type: "openai-compatible".into(),
-                        effective_base_url: base_url,
-                    }),
-                    secret: "fixture-secret".into(),
-                },
-                1
-            )
-            .await
-            .unwrap(),
-        CredentialMutationResult::Committed { .. }
-    ));
     let log = EventLog::for_root(owner.clone()).await.unwrap();
     let prepared = PreparedSession::new(
         serde_json::from_value(json!({
@@ -120,12 +114,17 @@ pub async fn fixture() -> (
         .await
         .unwrap();
     log.shutdown().await.unwrap();
-    configuration.close().await.unwrap();
+    configuration.shutdown().await.unwrap();
+    drop(login);
+    drop(configuration);
     drop(log);
     drop(owner);
     let host = Host::open(RootOwner::open(&root, &ns).unwrap())
         .await
         .unwrap();
+    let mut peer = super::peer::Peer::new(host.clone(), "fixture-startup").await;
+    peer.wait_for_plugins().await;
+    peer.close().await;
 
     (directory, ns, root, provider, host)
 }

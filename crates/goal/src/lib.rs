@@ -20,5 +20,3 @@
 mod goal;
 mod owner;
 pub mod plugin;
-#[cfg(test)]
-mod tests;

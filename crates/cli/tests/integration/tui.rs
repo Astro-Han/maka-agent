@@ -138,7 +138,7 @@ fn real_pty_default_entry_routes_mouse_modal_resize_and_restores_terminal() {
     tui.finish();
     let mut termios = unsafe { std::mem::zeroed::<libc::termios>() };
     assert_eq!(
-        unsafe { libc::tcgetattr(tui.master.as_raw_fd(), &mut termios) },
+        unsafe { libc::tcgetattr(tui.master.as_ref().unwrap().as_raw_fd(), &mut termios) },
         0
     );
     assert_ne!(
@@ -162,9 +162,9 @@ fn real_pty_default_entry_routes_mouse_modal_resize_and_restores_terminal() {
 
 struct Pty {
     child: Child,
-    master: File,
+    master: Option<File>,
     // Keep one slave descriptor to read the final termios and avoid EIO while draining.
-    _slave: File,
+    slave: Option<File>,
     screen: Screen,
     pending: Vec<u8>,
     output: Vec<u8>,
@@ -896,8 +896,8 @@ impl Pty {
         let child = command.spawn().unwrap();
         Self {
             child,
-            master,
-            _slave: slave,
+            master: Some(master),
+            slave: Some(slave),
             screen: Screen::new(TerminalSize::new(120, 40).unwrap()),
             pending: Vec::new(),
             output: Vec::new(),
@@ -906,7 +906,7 @@ impl Pty {
         }
     }
     fn send(&mut self, bytes: &[u8]) {
-        self.master.write_all(bytes).unwrap();
+        self.master.as_mut().unwrap().write_all(bytes).unwrap();
     }
     fn filter_command(&mut self, label: &str) {
         self.send(b"\x10");
@@ -958,7 +958,13 @@ impl Pty {
             .resize(TerminalSize::new(cols, rows).unwrap())
             .unwrap();
         assert_eq!(
-            unsafe { libc::ioctl(self.master.as_raw_fd(), libc::TIOCSWINSZ, &size) },
+            unsafe {
+                libc::ioctl(
+                    self.master.as_ref().unwrap().as_raw_fd(),
+                    libc::TIOCSWINSZ,
+                    &size,
+                )
+            },
             0
         );
     }
@@ -1005,7 +1011,7 @@ impl Pty {
     }
     fn read(&mut self) {
         let mut poll = libc::pollfd {
-            fd: self.master.as_raw_fd(),
+            fd: self.master.as_ref().unwrap().as_raw_fd(),
             events: libc::POLLIN,
             revents: 0,
         };
@@ -1015,7 +1021,12 @@ impl Pty {
             return;
         }
         let mut buffer = [0; 8192];
-        let length = self.master.read(&mut buffer[..self.read_size]).unwrap();
+        let length = self
+            .master
+            .as_mut()
+            .unwrap()
+            .read(&mut buffer[..self.read_size])
+            .unwrap();
         self.frames.feed(&buffer[..length]);
         self.output.extend_from_slice(&buffer[..length]);
         if self.output.len() > 1024 * 1024 {
@@ -1073,7 +1084,11 @@ impl Pty {
                     let mut pending = 0;
                     assert_eq!(
                         unsafe {
-                            libc::ioctl(self._slave.as_raw_fd(), libc::FIONREAD, &mut pending)
+                            libc::ioctl(
+                                self.slave.as_ref().unwrap().as_raw_fd(),
+                                libc::FIONREAD,
+                                &mut pending,
+                            )
                         },
                         0
                     );
@@ -1100,12 +1115,23 @@ impl Pty {
             assert!(Instant::now() < deadline, "TUI did not exit");
         }
     }
+    fn terminate(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.child.kill()?;
+        // Session teardown may need the last parent-held PTY handles released.
+        self.master.take();
+        self.slave.take();
+        self.child.wait()
+    }
 }
 impl Drop for Pty {
     fn drop(&mut self) {
+        if std::thread::panicking()
+            && let Ok(snapshot) = self.screen.snapshot()
+        {
+            eprintln!("Final terminal frame:\n{}", snapshot.screen);
+        }
         if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
+            let _ = self.terminate();
         }
     }
 }

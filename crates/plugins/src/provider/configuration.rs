@@ -42,6 +42,9 @@ pub struct Descriptor {
     pub configuration_schema: Value,
     pub configuration_defaults: Value,
     pub authentication: Vec<Method>,
+    /// Whether the provider supports a connection without a stored credential.
+    /// Presentation metadata; authorization remains the provider's decision.
+    pub anonymous: bool,
     pub discovery: bool,
 }
 
@@ -92,15 +95,27 @@ pub struct Model {
     pub info: ModelInfo,
     pub thinking_levels: Vec<ThinkingLevel>,
     pub provider_options: Value,
+    /// Resolved reply budget, distinct from the model's advertised capacity.
+    pub main_output_limit: Option<u64>,
 }
 
 impl Model {
     pub fn validate(&self) -> Result<(), Error> {
         crate::name(&self.adapter).map_err(|e| Error::Invalid(e.to_string()))?;
-        maka_runtime::configuration::validation::normalize_base_url(Some(&self.base_url), None)
-            .map_err(Error::Invalid)?
-            .ok_or_else(|| Error::Invalid("provider endpoint is empty".into()))?;
+        maka_runtime::configuration::validation::normalize_base_url(&self.base_url)
+            .map_err(Error::Invalid)?;
         self.info.validate().map_err(Error::Invalid)?;
+        if let Some(limit) = self.main_output_limit {
+            maka_runtime::configuration::validation::revision(limit, true)
+                .map_err(Error::Invalid)?;
+            if self
+                .info
+                .max_output_tokens
+                .is_some_and(|capacity| limit > capacity)
+            {
+                return Err(Error::Invalid("reply budget exceeds model capacity".into()));
+            }
+        }
         if !self.provider_options.is_object() && !self.provider_options.is_null() {
             return Err(Error::Invalid("provider options must be an object".into()));
         }

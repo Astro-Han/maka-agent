@@ -45,8 +45,8 @@ import {
 } from '@maka/ui/icons';
 import type { ChatDefaultSandboxMode, SettingsSection, ThemePreference } from '@maka/core/settings';
 import { CHAT_DEFAULT_SANDBOX_MODES } from '@maka/core/settings';
-import type { LlmConnection } from '@maka/core/llm-connections';
-import { isRetiredProvider } from '@maka/core/provider-registry';
+import type { ProjectedLlmConnection } from '@maka/core/llm-connections';
+import type { DesktopConnectionIdentity } from '../shared/desktop-connection-snapshot.js';
 import type { SandboxMode } from '@maka/core/permission';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type { NavSelection } from '@maka/ui';
@@ -64,7 +64,7 @@ export function buildCommandList(args: {
   locale: UiLocale;
   activeSessionId: string | undefined;
   themePref: ThemePreference;
-  connections: LlmConnection[];
+  connections: ProjectedLlmConnection[];
   defaultSlug: string | null;
   onNewChat(): Promise<void> | void;
   onOpenSideChat?(): Promise<void> | void;
@@ -77,8 +77,8 @@ export function buildCommandList(args: {
    * palette can trigger actions without taking a dependency on
    * `window.maka.*` directly from this file.
    */
-  onTestConnection?(slug: string): Promise<void> | void;
-  onSetDefaultConnection?(slug: string): Promise<void> | void;
+  onTestConnection?(connection: DesktopConnectionIdentity): Promise<void> | void;
+  onSetDefaultConnection?(connection: DesktopConnectionIdentity): Promise<void> | void;
   onOpenWorkspace?(): Promise<void> | void;
   onOpenProjectFolder?(): Promise<void> | void;
   /** Copy the active conversation as Markdown to the clipboard. */
@@ -390,18 +390,16 @@ export function buildCommandList(args: {
   }
   if (args.onTestConnection && args.defaultSlug) {
     const defaultConnection = args.connections.find((c) => c.slug === args.defaultSlug);
-    // Loading the catalog releases a default that points at a retired
-    // connection, so this is belt-and-braces for a stale in-memory default.
-    if (defaultConnection && !isRetiredProvider(defaultConnection.providerType)) {
+    if (defaultConnection?.enabled) {
       cmds.push({
         id: 'diag:test-default',
         kind: 'action',
         label: copy.testDefaultConnection(defaultConnection.name),
-        hint: defaultConnection.providerType,
+        hint: defaultConnection.provider.name,
         group: copy.commands['diag:test-network-proxy'].group,
         Icon: Plug,
-        keywords: copy.connectionKeywords('test', defaultConnection.name, defaultConnection.providerType),
-        run: () => args.onTestConnection!(defaultConnection.slug),
+        keywords: copy.connectionKeywords('test', defaultConnection.name, defaultConnection.provider.name),
+        run: () => args.onTestConnection!({ connectionId: defaultConnection.connectionId, slug: defaultConnection.slug }),
       });
     }
   }
@@ -411,25 +409,18 @@ export function buildCommandList(args: {
   // 账号 just to swap.
   if (args.onSetDefaultConnection || args.onTestConnection) {
     for (const connection of args.connections) {
-      // A retained retired connection can still be enabled — the row exists so
-      // the credential stays visible and deletable — but both commands below
-      // are refused downstream (the storage default-target gate, the hidden
-      // auth actions), so offering them is a dead entry point.
-      if (!connection.enabled || isRetiredProvider(connection.providerType)) continue;
+      if (!connection.enabled) continue;
       const isDefault = connection.slug === args.defaultSlug;
-      // The workspace default is the pair {connection, model}. A connection
-      // with no default model cannot supply half of it, so offering the command
-      // could only produce a failure toast that reads like a transient one.
-      if (args.onSetDefaultConnection && !isDefault && connection.defaultModel) {
+      if (args.onSetDefaultConnection && !isDefault && connection.enabledModelIds.length > 0) {
         cmds.push({
           id: `connection:set-default:${connection.slug}`,
           kind: 'action',
           label: copy.setDefaultConnection(connection.name),
-          hint: connection.providerType,
+          hint: connection.provider.name,
           group: copy.groups.connections,
           Icon: Wifi,
-          keywords: copy.connectionKeywords('default', connection.name, connection.providerType),
-          run: () => args.onSetDefaultConnection!(connection.slug),
+          keywords: copy.connectionKeywords('default', connection.name, connection.provider.name),
+          run: () => args.onSetDefaultConnection!({ connectionId: connection.connectionId, slug: connection.slug }),
         });
       }
       if (args.onTestConnection && !isDefault) {
@@ -437,11 +428,11 @@ export function buildCommandList(args: {
           id: `connection:test:${connection.slug}`,
           kind: 'action',
           label: copy.testConnection(connection.name),
-          hint: connection.providerType,
+          hint: connection.provider.name,
           group: copy.groups.connections,
           Icon: Plug,
-          keywords: copy.connectionKeywords('test', connection.name, connection.providerType),
-          run: () => args.onTestConnection!(connection.slug),
+          keywords: copy.connectionKeywords('test', connection.name, connection.provider.name),
+          run: () => args.onTestConnection!({ connectionId: connection.connectionId, slug: connection.slug }),
         });
       }
     }

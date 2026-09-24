@@ -18,10 +18,7 @@
  */
 
 use clap::{Args, Parser, Subcommand};
-use maka_event_log::{
-    EventLog,
-    root::{RootNamespaces, initialize},
-};
+use maka_event_log::{EventLog, root::RootNamespaces};
 use maka_runtime_host::server::HostError;
 use std::{net::SocketAddr, path::PathBuf};
 
@@ -104,7 +101,7 @@ enum HostCommand {
     #[command(subcommand)]
     Access(crate::access::Access),
     /// Initialize an empty native State Root, or verify its existing identity.
-    Init(Root),
+    Init(crate::initialize::Init),
     /// Install this native executable as the root's managed Host.
     Install(crate::deployment::Install),
     /// Install or reuse native code, activate it, and optionally prepare Desktop pairing.
@@ -260,11 +257,7 @@ impl Cli {
             Command::Host(HostCommand::Uninstall(args)) => {
                 args.run(crate::deployment::ControlAction::Uninstall).await
             }
-            Command::Host(HostCommand::Init(args)) => {
-                let root_id = initialize(&args.root, &RootNamespaces::for_current_account()?)?;
-                println!("{}", serde_json::json!({"rootId": root_id}));
-                Ok(())
-            }
+            Command::Host(HostCommand::Init(args)) => args.run().await,
             Command::Host(HostCommand::Serve { root, websocket }) => {
                 #[cfg(windows)]
                 crate::windows::own_process_tree()?;

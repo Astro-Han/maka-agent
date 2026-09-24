@@ -52,8 +52,8 @@ export async function captureMakaRuntimeArtifacts(input: {
   await rm(stagingRoot, { recursive: true, force: true });
   try {
     await mkdir(stagingRoot, { recursive: true, mode: 0o700 });
-    const sourcePath = join(stateRoot, 'runtime.sqlite');
-    const destinationPath = join(stagingRoot, 'runtime.sqlite');
+    const sourcePath = join(stateRoot, 'runtime-rust.sqlite');
+    const destinationPath = join(stagingRoot, 'runtime-rust.sqlite');
     try {
       await stat(sourcePath);
       const source = new DatabaseSync(sourcePath, { readOnly: true });
@@ -79,7 +79,8 @@ export async function captureMakaRuntimeArtifacts(input: {
     await rm(`${destinationPath}-wal`, { force: true });
     await rm(`${destinationPath}-shm`, { force: true });
 
-    for (const name of ['runtime-host-candidate.log', 'runtime-policy.json']) {
+    // Configuration owns credentials. Only execution evidence is exportable.
+    for (const name of ['runtime-host-candidate.log']) {
       const source = join(stateRoot, name);
       try {
         const metadata = await stat(source);
@@ -93,12 +94,9 @@ export async function captureMakaRuntimeArtifacts(input: {
     }
 
     const files = await Promise.all(
-      [
-        'runtime.sqlite',
-        'runtime-host-candidate.log',
-        'runtime-policy.json',
-        'collection-error.json',
-      ].map((name) => describeFile(join(stagingRoot, name), name)),
+      ['runtime-rust.sqlite', 'runtime-host-candidate.log', 'collection-error.json'].map((name) =>
+        describeFile(join(stagingRoot, name), name),
+      ),
     );
     const manifest: MakaRuntimeArtifactManifest = {
       schemaVersion: 'maka.eval.runtime_artifacts.v1',

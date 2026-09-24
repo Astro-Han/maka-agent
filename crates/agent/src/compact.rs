@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(super) async fn run(
     inner: &Arc<Inner>,
-    input: &RunInput,
+    input: &mut RunInput,
     mode: &CheckpointMode,
     cancellation: &CancellationToken,
     continuation_base: Option<u64>,
@@ -77,16 +77,6 @@ pub(super) async fn run(
             None,
         ));
     }
-    let prompt = model_attempt::prompt(
-        inner,
-        input,
-        &source,
-        ModelPurpose::Summary,
-        cancellation,
-        continuation_base,
-        &input.invocation.invocation_id,
-    )
-    .await?;
     let base = format!(
         "You are a context summarization assistant.\nRead the conversation between a user and an AI assistant, then produce a structured summary another LLM will use to continue the same task.\nDo NOT continue the conversation. Do NOT answer questions in it. ONLY output the structured summary.\n\nUse this exact format:\n\n{SUMMARY_FORMAT_TEMPLATE}\n\nKeep each section concise. Preserve exact file paths, function names, commands, and error messages."
     );
@@ -94,7 +84,17 @@ pub(super) async fn run(
     let mut shortened = false;
     let mut repair = None;
     loop {
-        let mut request = prompt.clone();
+        input.refresh_model(cancellation).await?;
+        let mut request = model_attempt::prompt(
+            inner,
+            input,
+            &source,
+            ModelPurpose::Summary,
+            cancellation,
+            continuation_base,
+            &input.invocation.invocation_id,
+        )
+        .await?;
         request.push(maka_model::prompt::Message::user(format!("{instruction}\n\nNow write the structured summary of the conversation above. Output only the summary.")));
         let (step_id, output) = model_attempt::execute(
             inner,

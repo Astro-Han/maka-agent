@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 
 export const modelId = 'fixture-model';
 export const inputOnlyId = 'facts-input-only';
@@ -101,7 +102,7 @@ export async function updateDeclaration(request, row, pin) {
     expected: { connectionId: current.connectionId, revision: current.revision },
     changes: {
       name: current.name,
-      baseUrl: current.baseUrl,
+      configuration: current.configuration,
       enabled: true,
       enabledModelIds: enabled,
       modelOverrides: { [modelId]: pin, [inputOnlyId]: inputPin, 'manual-disabled': {} },
@@ -112,44 +113,21 @@ export async function updateDeclaration(request, row, pin) {
 export async function configure(request, baseUrl) {
   const rows = [];
   for (const [index, slug] of ['facts-a', 'facts-b'].entries()) {
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: (await catalog(request)).revision,
-      connection: {
-        slug,
-        name: slug,
-        providerType: 'openai',
-        baseUrl,
-        enabled: true,
-        enabledModelIds: enabled,
-        modelOverrides: {
-          [modelId]: fullPin({ vision: index === 1, contextWindow: index === 0 ? 64000 : 32000 }),
-          [inputOnlyId]: inputPin,
-          'manual-disabled': {},
-        },
+    const created = await createModelConnection(request, {
+      slug,
+      name: slug,
+      providerName: 'openai',
+      apiKey: secret,
+      baseUrl,
+      enabledModelIds: enabled,
+      modelOverrides: {
+        [modelId]: fullPin({ vision: index === 1, contextWindow: index === 0 ? 64000 : 32000 }),
+        [inputOnlyId]: inputPin,
+        'manual-disabled': {},
       },
     });
     assert.equal(created.kind, 'committed');
     rows.push({ ...created.connection, slug });
-    assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: {
-            scope: 'connection',
-            connectionId: created.connection.connectionId,
-            kind: 'api_key',
-          },
-          expected: null,
-          expectedConnection: {
-            ...created.connection,
-            slug,
-            providerType: 'openai',
-            effectiveBaseUrl: baseUrl,
-          },
-          secret,
-        })
-      ).kind,
-      'committed',
-    );
   }
   return rows;
 }

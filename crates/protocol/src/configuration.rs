@@ -66,15 +66,14 @@ fn nonnull_optional(value: &Value, fields: &[&str]) -> Result<()> {
 pub fn decode_create_connection_input(value: &Value) -> Result<CreateCatalogConnectionInput> {
     nonnull_optional(
         &value["connection"],
-        &["baseUrl", "modelOverrides", "requestBodyOverlay"],
+        &["modelOverrides", "requestBodyOverlay"],
     )?;
     validated(v::normalize_create(decode(value)?))
 }
 pub fn decode_update_connection_input(value: &Value) -> Result<UpdateCatalogConnectionInput> {
-    nonnull_optional(&value["changes"], &["baseUrl"])?;
     let mut input: UpdateCatalogConnectionInput = decode(value)?;
     validated(v::basis(&input.expected))?;
-    validated(v::normalize_update(&mut input.changes, None))?;
+    validated(v::normalize_update(&mut input.changes))?;
     Ok(input)
 }
 pub fn decode_remove_connection_input(value: &Value) -> Result<RemoveCatalogConnectionInput> {

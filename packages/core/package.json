@@ -169,6 +169,7 @@
     "test:dist": "node --test \"dist/**/*.test.js\""
   },
   "dependencies": {
+    "@maka-agent/plugin-sdk": "1.0.0",
     "intl-messageformat": "11.2.15"
   }
 }

@@ -25,6 +25,8 @@ import type { ChatModelChoice } from '@maka/core/chat-model-choice';
 import type { SessionSummary } from '@maka/core/session';
 import { ChatModelSwitcher } from '../chat-model-switcher.js';
 import { LocaleProvider } from '../locale-context.js';
+import { modelMenuGroups } from '../chat-model-helpers.js';
+import { buildModelPickerOptions } from '../model-picker-internals.js';
 
 const WARNING = 'Switching may rebuild the provider prompt cache';
 
@@ -33,7 +35,7 @@ function choice(connectionSlug: string, model: string, label: string): ChatModel
     connectionId: `connection-${connectionSlug}`,
     connectionSlug,
     connectionName: connectionSlug,
-    providerType: 'openrouter',
+    provider: { packageId: 'external.models', entryId: 'models', scope: 'profile', name: 'custom' },
     providerLabel: 'OpenRouter',
     model,
     label,
@@ -41,6 +43,22 @@ function choice(connectionSlug: string, model: string, label: string): ChatModel
     thinkingLevels: [],
   };
 }
+
+test('model groups and marks retain external provider and connection identities', () => {
+  const first = choice('first', 'model-a', 'Model A');
+  const second = choice('second', 'model-b', 'Model B');
+  first.connectionName = second.connectionName = 'Account';
+  second.provider = { ...first.provider, packageId: 'another.models' };
+  const groups = modelMenuGroups([first, { ...first, model: 'model-c' }, second]);
+  assert.deepEqual(groups.map(({ heading }) => heading), ['Account · first', 'Account · second']);
+  assert.deepEqual(groups.map(({ choices }) => choices.length), [2, 1]);
+  const observed: unknown[] = [];
+  buildModelPickerOptions(groups, undefined, (choice) => choice.model, (provider) => {
+    observed.push(provider);
+    return null;
+  });
+  assert.deepEqual(observed, [first.provider, first.provider, second.provider]);
+});
 
 test('the prompt-cache notice is acknowledged per Session without closing the list', async () => {
   const original = {

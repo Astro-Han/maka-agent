@@ -27,6 +27,8 @@ pub use handoff::{HandoffGate, HandoffReservation, HeldHandoff, PendingSeal};
 mod history;
 mod interactions;
 mod model_attempt;
+mod model_source;
+pub use model_source::{ModelSource, PreparedModel};
 pub mod pricing;
 mod request_composition;
 pub use history::project as project_model_history;
@@ -77,6 +79,9 @@ pub enum RunError {
 }
 
 pub struct RunInput {
+    /// Optional for standalone adapters; Host executions supply a public provider source.
+    pub model_source: Option<Arc<dyn ModelSource>>,
+    pub model_revision: Option<maka_runtime::composition::SourceRevision>,
     /// Public access-path identity; not the transport protocol or adapter name.
     pub provider_id: String,
     pub invocation: Invocation,
@@ -86,9 +91,9 @@ pub struct RunInput {
     pub request_fingerprint: Option<String>,
     pub provider: ProviderConfig,
     pub provider_options: Value,
-    /// Frozen Main-only SDK output limit. Summary retains its own fixed limit.
+    /// Main-only output limit for the current logical step. Summary has its own limit.
     pub main_output_limit: Option<u64>,
-    /// Frozen selected-model capability; image bytes are projected per request.
+    /// Current selected-model capability; image bytes are projected per request.
     pub supports_vision: bool,
     pub configuration: InvocationConfiguration,
 }

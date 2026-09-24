@@ -385,7 +385,7 @@ export function ChatComposerRegion({
         <LiveContextUsageProbe
           sessionId={contextUsageSessionId}
           model={composerRest.activeModel}
-          providerType={composerRest.activeProviderType}
+          providerType={composerRest.activeProvider?.name}
         >
           {renderComposer}
         </LiveContextUsageProbe>

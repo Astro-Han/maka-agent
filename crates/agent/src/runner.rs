@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 pub async fn run(
     inner: Arc<Inner>,
-    input: RunInput,
+    mut input: RunInput,
     cancellation_owner: tokio_util::sync::CancellationToken,
     admitted: tokio::sync::oneshot::Sender<()>,
     handoff: Option<crate::HandoffGate>,
@@ -103,37 +103,34 @@ pub async fn run(
     let _ = admitted.send(());
     let result = async {
         prune::run(&inner, &input, &cancellation).await?;
-        match &input.work {
+        let model_work = match &input.work {
             RunWork::Message {
                 tools, max_steps, ..
             }
             | RunWork::Continuation {
                 tools, max_steps, ..
-            } => steps::run(
+            } => Some((tools.clone(), *max_steps)),
+            RunWork::Handoff { tools, pause, .. } => {
+                Some((tools.clone(), usize::from(pause.remaining_steps.get())))
+            }
+            RunWork::ContextCompact => None,
+        };
+        if let Some((tools, max_steps)) = model_work {
+            steps::run(
                 &inner,
-                &input,
-                tools,
-                *max_steps,
+                &mut input,
+                &tools,
+                max_steps,
                 &cancellation,
                 continuation_base,
                 handoff.as_ref().expect("model Runs own a handoff gate"),
             )
             .await
-            .map(|outcome| (outcome, None)),
-            RunWork::Handoff { tools, pause, .. } => steps::run(
+            .map(|outcome| (outcome, None))
+        } else {
+            compact::run(
                 &inner,
-                &input,
-                tools,
-                usize::from(pause.remaining_steps.get()),
-                &cancellation,
-                continuation_base,
-                handoff.as_ref().expect("model Runs own a handoff gate"),
-            )
-            .await
-            .map(|outcome| (outcome, None)),
-            RunWork::ContextCompact => compact::run(
-                &inner,
-                &input,
+                &mut input,
                 &maka_runtime::context::CheckpointMode::Standalone,
                 &cancellation,
                 None,
@@ -144,7 +141,7 @@ pub async fn run(
                     InvocationOutcome::ContextCompactFinished { outcome },
                     checkpoint,
                 )
-            }),
+            })
         }
     }
     .await;

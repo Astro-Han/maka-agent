@@ -19,9 +19,10 @@
 
 use super::{Host, HostError, configuration};
 use maka_config::onboarding::OnboardingPreparation;
-use maka_model::connection::DiscoveryRequest;
+use maka_plugins::provider::Binding;
 use maka_protocol::{Operation, OperationError, OperationErrorCode, Outcome};
 use maka_runtime::configuration::{ConnectionEffectFailureClass, onboarding::*};
+use maka_runtime::oauth::Target;
 use serde_json::{Value, json};
 use std::sync::atomic::Ordering;
 
@@ -63,20 +64,32 @@ pub(super) async fn execute(
 }
 async fn perform(
     host: &Host,
-    input: OnboardingInput,
+    mut input: OnboardingInput,
     enabled: Vec<String>,
     save: bool,
 ) -> Result<Value, OperationError> {
     let lane = match &input.target {
-        OnboardingTarget::Existing { connection_id } => connection_id.clone(),
-        OnboardingTarget::Create { provider_type, .. } => {
-            format!("onboarding:create:{provider_type}")
-        }
+        Target::Existing { expected, .. } => expected.connection_id.clone(),
+        Target::Create { slug, .. } => format!("onboarding:create:{slug}"),
     };
     let _lane = host.connection_effects.lane(&lane).await;
-    let prepared = match host
+    let admission = host.executions.lock_admission().await;
+    if let Target::Create {
+        provider,
+        configuration: value,
+        ..
+    } = &mut input.target
+    {
+        let provider = Binding::resolve(provider, &host.executions.plugin_catalog)
+            .map_err(provider_failure)?;
+        *value = provider
+            .definition()
+            .configure(value.clone())
+            .map_err(provider_failure)?;
+    }
+    let mut prepared = match host
         .configuration
-        .prepare_onboarding(input)
+        .prepare_onboarding(input.target)
         .await
         .map_err(configuration::failure)?
     {
@@ -84,30 +97,24 @@ async fn perform(
         OnboardingPreparation::Rejected(reason) => {
             return output(OnboardingVerifyResult::Rejected { reason });
         }
-        OnboardingPreparation::Unsupported => {
-            return Err(OperationError {
-                code: OperationErrorCode::OperationUnavailable,
-                message: "Provider or configured proxy onboarding is not installed".into(),
-            });
-        }
     };
-    let kind = prepared.protocol();
-    let headers = prepared
-        .request_headers()
-        .map(serde_json::from_str)
-        .transpose()
-        .map_err(|_| OperationError {
-            code: OperationErrorCode::InternalFailure,
-            message: "Stored request headers are invalid".into(),
-        })?
-        .unwrap_or_default();
-    let models = match super::connection_effects::client(prepared.network_configuration())?
-        .discover(DiscoveryRequest {
-            kind,
-            base_url: prepared.endpoint(),
-            credential: prepared.api_key(),
-            headers: &headers,
-        })
+    let provider = super::connection_effects::ProviderOperation::prepare(
+        host,
+        prepared.connection(),
+        prepared
+            .provider_credential()
+            .map_err(configuration::failure)?,
+        prepared.network_configuration(),
+    )?;
+    drop(admission);
+    let credential = provider.credential().await?;
+    if let Some(credential) = &credential {
+        prepared
+            .accept_credential(credential.clone())
+            .map_err(configuration::failure)?;
+    }
+    let models = match provider
+        .discover(credential.as_ref(), prepared.request_headers())
         .await
     {
         Ok(models) => models,
@@ -137,6 +144,12 @@ async fn perform(
         })
     } else {
         output(OnboardingVerifyResult::Verified { models })
+    }
+}
+fn provider_failure(error: impl std::fmt::Display) -> OperationError {
+    OperationError {
+        code: OperationErrorCode::OperationUnavailable,
+        message: error.to_string().chars().take(1024).collect(),
     }
 }
 fn output(value: impl serde::Serialize) -> Result<Value, OperationError> {

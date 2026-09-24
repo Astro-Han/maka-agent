@@ -145,7 +145,7 @@ export function WorkHubRoot({
     inspector: contextUsage,
     sessionId: controller.sessionId,
     model: session?.model,
-    providerType: modelChoice?.providerType,
+    providerType: modelChoice?.provider.name,
   });
   const thinkingLevel =
     session?.thinkingLevel && thinkingLevels.includes(session.thinkingLevel)
@@ -584,7 +584,7 @@ export function WorkHubRoot({
                         activeSession={session}
                         activeModel={session?.model}
                         activeModelLabel={modelChoice?.label}
-                        activeProviderType={modelChoice?.providerType}
+                        activeProvider={modelChoice?.provider}
                         activeModelConnectionId={session?.llmConnectionId}
                         activeModelConnectionSlug={session?.llmConnectionSlug}
                         modelChoices={controller.choices}

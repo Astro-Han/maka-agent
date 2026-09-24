@@ -55,23 +55,15 @@ impl Endpoint {
     }
 }
 pub(super) async fn initialize(client: &Client, workspace: &std::path::Path) {
-    let created = client
-        .request(
-            Operation::ConnectionCatalogCreate,
-            json!({
-                "expectedCatalogRevision":0,"connection":{"slug":"unused","name":"Unused fixture",
-                    "providerType":"openai-compatible","baseUrl":"http://127.0.0.1:1/v1",
-                    "enabled":true,"enabledModelIds":["fixture-model"]}
-            }),
-        )
-        .await
-        .unwrap();
-    client.request(Operation::CredentialVaultSet,json!({
-        "locator":{"scope":"connection","connectionId":created["connection"]["connectionId"],"kind":"api_key"},
-        "expected":null,"secret":"unused-fixture",
-        "expectedConnection":{"connectionId":created["connection"]["connectionId"],"revision":1,
-            "slug":"unused","providerType":"openai-compatible","effectiveBaseUrl":"http://127.0.0.1:1/v1"}
-    })).await.unwrap();
+    let created = super::super::support::model_connection::create(
+        client,
+        "openai-compatible",
+        "unused",
+        "http://127.0.0.1:1/v1",
+        "unused-fixture",
+        json!({"fixture-model":{}}),
+    )
+    .await;
     client.request(Operation::ConnectionCatalogSetDefaultTarget,json!({
         "expectedCatalogRevision":created["catalogRevision"],"target":{"connectionId":created["connection"]["connectionId"],"modelId":"fixture-model"}
     })).await.unwrap();

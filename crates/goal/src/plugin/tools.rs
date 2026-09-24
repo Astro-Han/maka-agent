@@ -30,7 +30,23 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 pub(super) fn register(owner: Arc<Owner>) -> Result<PluginTool, String> {
-    PluginTool::new(ToolRegistration{definition:ToolDefinition{provider:None,name:"GoalStatus".into(),description:"Report progress, achieved (with evidence), waiting for user input, or impossible for the current Goal-owned execution. Reports apply only after this execution completes normally. Do not claim success without verification. This tool cannot create a Goal or grant background authority.".into(),input_schema:schemars::schema_for!(Report).into()},nesting:ToolNesting::Nestable,semantics:ToolSemantics::ExclusiveStep,handler:ToolHandler::Prepared(Arc::new(Tool(owner)))}).map(|t|t.always_visible()).map_err(|e|e.to_string())
+    PluginTool::new(ToolRegistration {
+        definition: ToolDefinition {
+            provider: None,
+            name: "GoalStatus".into(),
+            description: "Report progress, achieved (with evidence), waiting for user input, \
+                or impossible for the current Goal-owned execution. Reports apply only after \
+                this execution completes normally. Do not claim success without verification. \
+                This tool cannot create a Goal or grant background authority."
+                .into(),
+            input_schema: schemars::schema_for!(Report).into(),
+        },
+        nesting: ToolNesting::Nestable,
+        semantics: ToolSemantics::ExclusiveStep,
+        handler: ToolHandler::Prepared(Arc::new(Tool(owner))),
+    })
+    .map(|tool| tool.always_visible())
+    .map_err(|error| error.to_string())
 }
 struct Tool(Arc<Owner>);
 impl ToolPreparer for Tool {

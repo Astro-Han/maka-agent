@@ -23,14 +23,7 @@ use super::*;
 async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_success() {
     let temp = tempfile::tempdir().unwrap();
     let store = open(temp.path(), true).await;
-    let input = LoginStart {
-        attempt_id: "atomic".into(),
-        target: Target::Create {
-            provider_type: Provider::OpenaiCodex,
-            slug: None,
-            name: None,
-        },
-    };
+    let input = create("atomic");
     let before = store.catalog().await.unwrap();
     let mut sql = sql(temp.path()).await;
     sqlx::query("CREATE TRIGGER fail_receipt BEFORE INSERT ON oauth_login_receipts BEGIN SELECT RAISE(ABORT, 'injected'); END")
@@ -38,7 +31,7 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
     assert!(
         prepare(&store, input.clone())
             .await
-            .complete("grant".into(), 1)
+            .complete(credential("grant"), 1)
             .await
             .is_err()
     );
@@ -69,7 +62,7 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
     assert!(matches!(
         prepare(&store, input.clone())
             .await
-            .complete("grant".into(), 2)
+            .complete(credential("grant"), 2)
             .await,
         Err(ConfigError::CommitUnknown)
     ));
@@ -87,18 +80,19 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
         .unwrap();
     let LoginCompletion::Committed(receipt) = prepare(&store, input)
         .await
-        .complete("grant".into(), 3)
+        .complete(credential("grant"), 3)
         .await
         .unwrap()
     else {
         panic!("enrolled")
     };
     let id = &receipt.connection.connection_id;
-    let input = existing("credential-race", id);
+    let input = existing(&store, "credential-race", id).await;
     let stale = prepare(&store, input.clone()).await;
+    assert!(stale.claim().await.unwrap());
     let locator = CredentialLocator::Connection {
         connection_id: id.clone(),
-        kind: ConnectionCredentialKind::OauthToken,
+        kind: ConnectionCredentialKind::Provider,
     };
     let CredentialVaultQueryResult::Status { status } =
         store.credential_status(locator.clone()).await.unwrap()
@@ -116,9 +110,9 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
     sqlx::query("CREATE TRIGGER fail_relogin BEFORE INSERT ON oauth_login_receipts BEGIN SELECT RAISE(ABORT, 'injected replacement failure'); END")
         .execute(&mut sql).await.unwrap();
     assert!(
-        prepare(&store, existing("failed-relogin", id))
+        prepare(&store, existing(&store, "failed-relogin", id).await)
             .await
-            .complete("different-account".into(), 4)
+            .complete(credential("different-account"), 4)
             .await
             .is_err()
     );
@@ -130,7 +124,11 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
             .unwrap();
     assert_eq!(
         restored,
-        (credential_id.clone(), revision as i64, "grant".into()),
+        (
+            credential_id.clone(),
+            revision as i64,
+            serde_json::to_string(&credential("grant")).unwrap()
+        ),
         "failed enrollment must restore the old generation and grant"
     );
     assert!(
@@ -158,20 +156,22 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
         CredentialMutationResult::Committed { .. }
     ));
     assert!(matches!(
-        stale.complete("late".into(), 4).await.unwrap(),
-        LoginCompletion::Superseded {
-            connection: false,
-            credential: true
-        }
+        stale.complete(credential("late"), 4).await.unwrap(),
+        LoginCompletion::CredentialChanged
     ));
-    assert!(
+    assert_eq!(
         store
             .oauth_login_receipt(input.attempt_id)
             .await
             .unwrap()
-            .is_none()
+            .unwrap()
+            .phase,
+        maka_runtime::oauth::Phase::Failed {
+            failure: maka_runtime::oauth::Failure::CredentialChanged
+        }
     );
-    let stale = prepare(&store, existing("connection-race", id)).await;
+    let stale = prepare(&store, existing(&store, "connection-race", id).await).await;
+    assert!(stale.claim().await.unwrap());
     let row = store.catalog().await.unwrap().connections.remove(0);
     store
         .update_connection(UpdateCatalogConnectionInput {
@@ -182,7 +182,7 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
             changes: ConnectionCatalogEntryUpdate {
                 name: "User edit".into(),
                 enabled: false,
-                base_url: row.base_url,
+                configuration: row.configuration,
                 enabled_model_ids: row.enabled_model_ids,
                 model_overrides: Patch::Keep,
                 request_body_overlay: Patch::Keep,
@@ -191,16 +191,18 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
         .await
         .unwrap();
     assert!(matches!(
-        stale.complete("late".into(), 5).await.unwrap(),
-        LoginCompletion::Superseded {
-            connection: true,
-            credential: false
-        }
+        stale.complete(credential("late"), 5).await.unwrap(),
+        LoginCompletion::ConnectionChanged
     ));
-    let ticket = prepare(&store, existing("reenable", id)).await;
+    assert_eq!(
+        stale.complete(credential("late"), 5).await.unwrap(),
+        LoginCompletion::ConnectionChanged,
+        "lost conflict receipt must not become unknown or change its cause",
+    );
+    let ticket = prepare(&store, existing(&store, "reenable", id).await).await;
     assert!(ticket.connection().enabled);
     assert!(matches!(
-        ticket.complete("new-grant".into(), 6).await.unwrap(),
+        ticket.complete(credential("new-grant"), 6).await.unwrap(),
         LoginCompletion::Committed(_)
     ));
     assert!(store.catalog().await.unwrap().connections[0].enabled);
@@ -217,7 +219,7 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
     // A receipt is historical completion, not proof that the credential still exists.
     assert_eq!(
         store.oauth_login_receipt("atomic".into()).await.unwrap(),
-        Some(receipt)
+        Some(*receipt)
     );
     assert!(matches!(
         store.credential_status(locator).await.unwrap(),

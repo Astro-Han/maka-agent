@@ -28,6 +28,7 @@ function connection(overrides: Partial<LlmConnection> = {}): LlmConnection {
     name: 'OpenAI Live',
     providerType: 'openai',
     defaultModel: 'gpt-4.1',
+    enabledModelIds: [overrides.defaultModel ?? 'gpt-4.1'],
     enabled: true,
     models: [{ id: 'gpt-4.1', capabilities: { chat: true, functionCalling: true } }],
     modelSource: 'fetched',

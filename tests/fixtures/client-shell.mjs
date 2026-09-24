@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { readFile, writeFile, realpath } from 'node:fs/promises';
@@ -184,35 +185,15 @@ export async function verifyShellWorkflow(connection, workspace, reopened, openC
   const model = await fixture(terminal);
   const request = (operation, input) => connection.request(operation, input, 3000);
   try {
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: 0,
-      connection: {
-        slug: 'shell-fixture',
-        name: 'Shell fixture',
-        providerType: 'openai-compatible',
-        baseUrl: model.baseUrl,
-        enabled: true,
-        enabledModelIds: ['fixture-model'],
-      },
+    const created = await createModelConnection(request, {
+      providerName: 'openai-compatible',
+      slug: 'shell-fixture',
+      name: 'Shell fixture',
+      baseUrl: model.baseUrl,
+      apiKey: 'dummy-shell-fixture',
+      enabledModelIds: ['fixture-model'],
     });
-    assert.equal(created.kind, 'committed');
     const basis = created.connection;
-    assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-          expected: null,
-          expectedConnection: {
-            ...basis,
-            slug: 'shell-fixture',
-            providerType: 'openai-compatible',
-            effectiveBaseUrl: model.baseUrl,
-          },
-          secret: 'dummy-shell-fixture',
-        })
-      ).kind,
-      'committed',
-    );
     await request('connection.catalog.set-default-target', {
       expectedCatalogRevision: created.catalogRevision,
       target: { connectionId: basis.connectionId, modelId: 'fixture-model' },

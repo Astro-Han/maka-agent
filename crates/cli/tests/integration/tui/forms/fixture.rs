@@ -49,7 +49,7 @@ pub(super) async fn start(root: &std::path::Path, workspace: &std::path::Path) -
         .unwrap();
     let updated = client.request(Operation::ConnectionCatalogUpdate, json!({
         "expected":{"connectionId":connection["connectionId"],"revision":connection["revision"]},
-        "changes":{"name":"TUI fixture","baseUrl":url,"enabled":true,"enabledModelIds":["fixture-model"],
+        "changes":{"name":"TUI fixture","configuration":{"baseUrl":url},"enabled":true,"enabledModelIds":["fixture-model"],
             "modelOverrides":{"fixture-model":{"contextWindow":128000,"codeMode":true}}}
     })).await.unwrap();
     assert_eq!(updated["kind"], "committed");

@@ -73,12 +73,12 @@ fn enabled_models_searches_full_catalog_keeps_manual_ids_and_applies_only_confir
         let enabled:Vec<_> = std::iter::once("fixture-model".to_owned()).chain((0..129).map(|i| format!("manual-{i:03}"))).collect();
         let result = client.request(Operation::ConnectionCatalogUpdate,json!({
             "expected":{"connectionId":row["connectionId"],"revision":row["revision"]},
-            "changes":{"name":"Enabled fixture","baseUrl":"http://127.0.0.1:9/v1","enabled":true,"enabledModelIds":enabled,
+            "changes":{"name":"Enabled fixture","configuration":{"baseUrl":"http://127.0.0.1:9/v1"},"enabled":true,"enabledModelIds":enabled,
                 "modelOverrides":{"fixture-model":{"contextWindow":128000},"new-model":{"contextWindow":64000,"displayName":"New choice"}},"requestBodyOverlay":{"temperature":0.2}}
         })).await.unwrap();
         client.create_session(maka_protocol::session::decode_session_create_input(&json!({"sessionId":"history","name":"Existing history",
             "workspace":{"kind":"host_path","path":directory.path()},"modelTarget":{"kind":"default"}})).unwrap()).await.unwrap();
-        let credential = client.request(Operation::CredentialVaultQuery,json!({"locator":{"scope":"connection","connectionId":row["connectionId"],"kind":"api_key"}})).await.unwrap();
+        let credential = client.request(Operation::CredentialVaultQuery,json!({"locator":{"scope":"connection","connectionId":row["connectionId"],"kind":"provider"}})).await.unwrap();
         (client,result["connection"].clone(),credential)
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
@@ -110,7 +110,7 @@ fn enabled_models_searches_full_catalog_keeps_manual_ids_and_applies_only_confir
         assert_eq!(items[0]["revision"],original["revision"].as_u64().unwrap()+1);
         assert_eq!(items[0]["requestBodyOverlay"]["temperature"],0.2);
         assert!(items.iter().any(|item| item["entry"]["id"]=="new-model" && item["entry"]["contextWindow"]==64000));
-        assert_eq!(client.request(Operation::CredentialVaultQuery,json!({"locator":{"scope":"connection","connectionId":original["connectionId"],"kind":"api_key"}})).await.unwrap(),credential);
+        assert_eq!(client.request(Operation::CredentialVaultQuery,json!({"locator":{"scope":"connection","connectionId":original["connectionId"],"kind":"provider"}})).await.unwrap(),credential);
         assert_eq!(client.session("history").await.unwrap().unwrap().revision,1);
         items[0].clone()
     });
@@ -122,7 +122,7 @@ fn enabled_models_searches_full_catalog_keeps_manual_ids_and_applies_only_confir
     runtime.block_on(async {
         let (_,items)=catalog(&client).await;
         client.request(Operation::ConnectionCatalogUpdate,json!({"expected":{"connectionId":saved["connectionId"],"revision":saved["revision"]},
-            "changes":{"name":"Renamed elsewhere","baseUrl":"http://127.0.0.1:9/v1","enabled":true,"enabledModelIds":ids(&items)}})).await.unwrap();
+            "changes":{"name":"Renamed elsewhere","configuration":{"baseUrl":"http://127.0.0.1:9/v1"},"enabled":true,"enabledModelIds":ids(&items)}})).await.unwrap();
     });
     tui.click_last_text("Save");
     tui.wait_for("This connection changed");

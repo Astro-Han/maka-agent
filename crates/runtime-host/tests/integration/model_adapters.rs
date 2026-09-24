@@ -43,7 +43,7 @@ async fn external_model_adapters_use_host_io_confirm_settled_tools_and_retire_wi
             let row = configuration.catalog().await.unwrap().connections.remove(0);
             let changed = configuration.update_connection(serde_json::from_value(json!({
                 "expected":{"connectionId":row.connection_id, "revision":row.revision},
-                "changes":{"name":row.name, "baseUrl":row.base_url, "enabled":true,
+                "changes":{"name":row.name, "configuration":row.configuration, "enabled":true,
                     "enabledModelIds":row.enabled_model_ids, "modelOverrides":{"fixture-model":{"adapter":"example.protocol"}}}
             })).unwrap()).await.unwrap();
             assert!(matches!(changed, maka_runtime::configuration::CatalogMutationResult::Committed { .. }));
@@ -91,6 +91,11 @@ async fn external_model_adapters_use_host_io_confirm_settled_tools_and_retire_wi
                     ready(&mut peer).await;
                 }
                 let started = peer.rpc("turn.start", json!({"sessionId":"adapter","turnId":turn,"content":{"text":"exercise adapter"}})).await;
+                if turn == "retired" {
+                    assert_eq!(started["error"]["code"], "operation_unavailable", "{started}");
+                    assert_eq!(peer.rpc("turn.query", json!({"sessionId":"adapter","turnId":turn})).await["error"]["code"], "not_found");
+                    continue;
+                }
                 assert_eq!(started["ok"], true, "{started}");
                 loop {
                     let state = peer.rpc("turn.query", json!({"sessionId":"adapter","turnId":turn})).await;

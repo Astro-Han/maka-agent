@@ -21,8 +21,11 @@ use maka_config::{ConfigError, ConfigurationStore, oauth::enrollment::*};
 use maka_event_log::root::{RootNamespaces, RootOwner};
 use maka_runtime::{
     configuration::*,
-    oauth::{LoginStart, Provider, Target},
+    oauth::{LoginStart, Target},
+    provider::{AuthenticationInput, Credential, Identity},
+    scope::Scope,
 };
+use serde_json::json;
 use sqlx::Connection;
 use std::{path::Path, sync::Arc};
 
@@ -48,12 +51,54 @@ async fn prepare(store: &Arc<ConfigurationStore>, input: LoginStart) -> Prepared
     };
     *ticket
 }
-fn existing(attempt: &str, connection_id: &str) -> LoginStart {
+fn credential(secret: &str) -> Credential {
+    Credential {
+        secret: secret.into(),
+        refresh_at: Some(50_000),
+    }
+}
+fn create(attempt: &str) -> LoginStart {
+    LoginStart {
+        attempt_id: attempt.into(),
+        target: Target::Create {
+            provider: Identity {
+                package_id: "external.account".into(),
+                entry_id: "account-entry".into(),
+                scope: Scope::Profile,
+                name: "account".into(),
+            },
+            configuration: json!({"endpoint":"https://account.test/v1"}),
+            slug: "chosen-account".into(),
+            name: "My account".into(),
+        },
+        authentication: AuthenticationInput {
+            method: "account".into(),
+            input: json!({"key":"private-input-a"}),
+        },
+    }
+}
+async fn existing(store: &ConfigurationStore, attempt: &str, id: &str) -> LoginStart {
+    let row = store
+        .catalog()
+        .await
+        .unwrap()
+        .connections
+        .into_iter()
+        .find(|r| r.connection_id == id)
+        .unwrap();
     LoginStart {
         attempt_id: attempt.into(),
         target: Target::Existing {
-            connection_id: connection_id.into(),
+            expected: ConnectionCredentialTarget {
+                connection_id: row.connection_id,
+                revision: row.revision,
+                slug: row.slug,
+                provider: row.provider,
+                configuration: row.configuration.clone(),
+            },
+            configuration: row.configuration,
         },
+        authentication: create(attempt).authentication,
     }
 }
 async fn sql(path: &Path) -> sqlx::SqliteConnection {
@@ -66,147 +111,143 @@ async fn sql(path: &Path) -> sqlx::SqliteConnection {
 }
 
 #[tokio::test]
-async fn all_providers_publish_atomically_and_replay_bounded_receipts_after_reopen() {
+async fn authentication_receipts_bind_inputs_and_survive_reopen_without_publishing_drafts() {
     let temp = tempfile::tempdir().unwrap();
     let store = open(temp.path(), true).await;
-    let mut last = None;
-    for provider in [
-        Provider::OpenaiCodex,
-        Provider::GithubCopilot,
-        Provider::XaiOauth,
-    ] {
-        let input = LoginStart {
-            attempt_id: provider.as_str().into(),
-            target: Target::Create {
-                provider_type: provider,
-                slug: (provider == Provider::OpenaiCodex).then(|| "chosen-codex".into()),
-                name: (provider == Provider::OpenaiCodex).then(|| "My Codex".into()),
-            },
-        };
-        let before = store.catalog().await.unwrap();
-        let ticket = prepare(&store, input.clone()).await;
-        let duplicate = prepare(&store, input.clone()).await;
-        let collision = prepare(
-            &store,
-            LoginStart {
-                attempt_id: format!("collision-{}", provider.as_str()),
-                target: input.target.clone(),
-            },
-        )
-        .await;
-        let identity = ticket.identity().clone();
-        let after = ticket.connection().clone();
-        if provider == Provider::OpenaiCodex {
-            assert_eq!(identity.slug, "chosen-codex");
-            assert_eq!(after.name, "My Codex");
-        }
-        assert!(!after.enabled_model_ids.is_empty());
-        assert_eq!(
-            store.catalog().await.unwrap(),
-            before,
-            "no draft publication"
-        );
-        assert!(
-            store
-                .oauth_login_receipt(input.attempt_id.clone())
-                .await
-                .unwrap()
-                .is_none()
-        );
-        let LoginCompletion::Committed(receipt) =
-            ticket.complete("synthetic-grant".into(), 1).await.unwrap()
-        else {
-            panic!("atomic enrollment")
-        };
-        assert_eq!(receipt.connection, identity);
-        assert_eq!(
-            duplicate
-                .complete("duplicate-grant".into(), 1)
-                .await
-                .unwrap(),
-            LoginCompletion::AttemptConflict
-        );
-        assert_eq!(
-            collision
-                .complete("colliding-grant".into(), 1)
-                .await
-                .unwrap(),
-            if provider == Provider::OpenaiCodex {
-                LoginCompletion::SlugTaken
-            } else {
-                LoginCompletion::Superseded {
-                    connection: true,
-                    credential: false,
-                }
-            }
-        );
-        let snapshot = store.catalog().await.unwrap();
-        if provider == Provider::OpenaiCodex {
-            let taken = LoginStart {
-                attempt_id: "already-taken".into(),
-                target: input.target.clone(),
-            };
-            assert!(matches!(
-                store.prepare_oauth_login(taken).await.unwrap(),
-                LoginPreparation::Rejected(LoginRejection::SlugTaken)
-            ));
-            assert!(
-                store
-                    .oauth_login_receipt("collision-openai-codex".into())
-                    .await
-                    .unwrap()
-                    .is_none()
-            );
-        }
-        assert_eq!(snapshot.revision, before.revision + 1);
-        assert!(snapshot.connections.contains(&after));
-        let target = ConnectionCredentialTarget {
-            connection_id: identity.connection_id.clone(),
-            revision: after.revision,
-            slug: identity.slug.clone(),
-            provider_type: provider.as_str().into(),
-            effective_base_url: validation::normalize_base_url(
-                Some(validation::provider_default_base_url(provider.as_str()).unwrap()),
-                None,
-            )
+    let input = create("account-login");
+    let mut ticket = prepare(&store, input.clone()).await;
+    ticket
+        .configure_creation(json!({"endpoint":"https://account.test/v1", "oneTimeDefault":true}))
+        .unwrap();
+    let duplicate = prepare(&store, input.clone()).await;
+    let collision = prepare(&store, create("slug-collision")).await;
+    assert!(store.catalog().await.unwrap().connections.is_empty());
+    assert!(
+        store
+            .oauth_login_receipt(input.attempt_id.clone())
+            .await
             .unwrap()
+            .is_none()
+    );
+    assert!(ticket.claim().await.unwrap());
+    assert!(
+        !duplicate.claim().await.unwrap(),
+        "a claim never permits a second exchange"
+    );
+    assert!(matches!(
+        store.prepare_oauth_login(input.clone()).await.unwrap(),
+        LoginPreparation::OutcomeUnknown(_)
+    ));
+    let LoginCompletion::Committed(receipt) =
+        ticket.complete(credential("grant-a"), 1).await.unwrap()
+    else {
+        panic!("atomic enrollment");
+    };
+    // A lost commit reply retries persistence, never the grant exchange.
+    assert_eq!(
+        ticket.complete(credential("grant-a"), 1).await.unwrap(),
+        LoginCompletion::Committed(receipt.clone())
+    );
+    assert_eq!(
+        duplicate
+            .complete(credential("duplicate"), 1)
+            .await
             .unwrap(),
-        };
-        let credential = store.oauth_credential(target).await.unwrap().unwrap();
-        assert_eq!(credential.secret(), "synthetic-grant");
-        assert!(
-            matches!(store.prepare_oauth_login(input.clone()).await.unwrap(),
-            LoginPreparation::Authenticated(saved) if saved == receipt)
-        );
-        assert_eq!(
-            store.catalog().await.unwrap(),
-            snapshot,
-            "replay writes nothing"
-        );
+        LoginCompletion::AttemptConflict
+    );
+    assert_eq!(
+        collision
+            .complete(credential("collision"), 1)
+            .await
+            .unwrap(),
+        LoginCompletion::SlugTaken
+    );
+    let snapshot = store.catalog().await.unwrap();
+    assert_eq!(snapshot.connections[0], *ticket.connection());
+    assert_eq!(
+        snapshot.connections[0].provider,
+        receipt.connection.provider
+    );
+    assert_eq!(snapshot.connections[0].slug, "chosen-account");
+    assert_eq!(snapshot.connections[0].name, "My account");
+    assert_eq!(
+        snapshot.connections[0].configuration["oneTimeDefault"],
+        true
+    );
+    drop((ticket, duplicate, collision));
+    store.shutdown().await.unwrap();
+    drop(store);
+    let store = open(temp.path(), false).await;
+    assert!(
+        matches!(store.prepare_oauth_login(input.clone()).await.unwrap(),
+        LoginPreparation::Finished(saved) if saved == receipt)
+    );
+    let mut different = input.clone();
+    different.authentication.input = json!({"key":"private-input-b"});
+    assert!(matches!(
+        store.prepare_oauth_login(different).await.unwrap(),
+        LoginPreparation::Rejected(LoginRejection::AttemptConflict)
+    ));
+    let mut different = input;
+    different.authentication.method = "another-account".into();
+    assert!(matches!(
+        store.prepare_oauth_login(different).await.unwrap(),
+        LoginPreparation::Rejected(LoginRejection::AttemptConflict)
+    ));
+    assert_eq!(store.catalog().await.unwrap(), snapshot);
+    let mut db = sql(temp.path()).await;
+    let (target, method, digest): (String, String, String) =
+        sqlx::query_as("SELECT target, method, request_fingerprint FROM oauth_login_receipts WHERE attempt_id = 'account-login'")
+            .fetch_one(&mut db)
+            .await
+            .unwrap();
+    assert!(!format!("{target}{method}{digest}").contains("private-input"));
+    db.close().await.unwrap();
+    store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn repeated_authentication_retains_only_the_latest_256_receipts() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = open(temp.path(), true).await;
+    let ticket = prepare(&store, create("initial")).await;
+    ticket
+        .complete(credential("initial-grant"), 1)
+        .await
+        .unwrap();
+    let id = ticket.identity().connection_id.clone();
+    let uncertain = existing(&store, "uncertain-exchange", &id).await;
+    let pending = prepare(&store, uncertain.clone()).await;
+    assert!(pending.claim().await.unwrap());
+    drop(pending);
+    let cancelled = existing(&store, "cancelled-login", &id).await;
+    let pending = prepare(&store, cancelled.clone()).await;
+    assert!(pending.claim().await.unwrap());
+    assert_eq!(
+        pending
+            .finish_failure(maka_runtime::oauth::Phase::Cancelled)
+            .await
+            .unwrap(),
+        maka_runtime::oauth::Phase::Cancelled
+    );
+    assert!(
+        matches!(store.prepare_oauth_login(cancelled).await.unwrap(),
+        LoginPreparation::Finished(saved) if saved.phase == maka_runtime::oauth::Phase::Cancelled)
+    );
+    drop(pending);
+    let mut last = None;
+    for n in 0..257 {
+        let input = existing(&store, &format!("retained-{n}"), &id).await;
+        let ticket = prepare(&store, input.clone()).await;
         assert!(matches!(
-            store
-                .prepare_oauth_login(existing(&input.attempt_id, &identity.connection_id))
+            ticket
+                .complete(credential("replacement-grant"), n)
                 .await
                 .unwrap(),
-            LoginPreparation::Rejected(LoginRejection::AttemptConflict)
-        ));
-        last = Some(receipt);
-    }
-    let receipt = last.unwrap();
-    // Repeated re-login is a real supported path; no new connection rows are needed
-    // to exercise the bounded receipt log and its eviction order.
-    for n in 0..257 {
-        let ticket = prepare(
-            &store,
-            existing(&format!("retained-{n}"), &receipt.connection.connection_id),
-        )
-        .await;
-        assert!(matches!(
-            ticket.complete(format!("synthetic-{n}"), n).await.unwrap(),
             LoginCompletion::Committed(_)
         ));
+        last = Some(input);
     }
-    assert_eq!(store.catalog().await.unwrap().connections.len(), 3);
     assert!(
         store
             .oauth_login_receipt("retained-0".into())
@@ -221,34 +262,36 @@ async fn all_providers_publish_atomically_and_replay_bounded_receipts_after_reop
             .unwrap()
             .is_some()
     );
+    let mut db = sql(temp.path()).await;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM oauth_login_receipts")
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+    assert_eq!(
+        count, 257,
+        "bounded completed receipts never evict an unresolved grant"
+    );
+    db.close().await.unwrap();
+    drop(ticket);
     store.shutdown().await.unwrap();
     drop(store);
     let store = open(temp.path(), false).await;
-    let saved = store
-        .oauth_login_receipt("retained-256".into())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(saved.connection, receipt.connection);
+    assert!(
+        matches!(
+            store.prepare_oauth_login(uncertain).await.unwrap(),
+            LoginPreparation::OutcomeUnknown(_)
+        ),
+        "restart must not retry an uncertain authentication callback"
+    );
     assert!(matches!(
-        store
-            .prepare_oauth_login(existing("retained-256", &receipt.connection.connection_id))
-            .await
-            .unwrap(),
-        LoginPreparation::Authenticated(_)
+        store.prepare_oauth_login(last.unwrap()).await.unwrap(),
+        LoginPreparation::Finished(_)
     ));
-    let mut sql = sql(temp.path()).await;
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM oauth_login_receipts")
-        .fetch_one(&mut sql)
-        .await
-        .unwrap();
-    assert_eq!(count, 256);
-    sql.close().await.unwrap();
+    assert_eq!(store.catalog().await.unwrap().connections.len(), 1);
     store.shutdown().await.unwrap();
 }
 
-#[path = "oauth_login/recovery.rs"]
-mod recovery;
-
 #[path = "oauth_login/discovery.rs"]
 mod discovery;
+#[path = "oauth_login/recovery.rs"]
+mod recovery;

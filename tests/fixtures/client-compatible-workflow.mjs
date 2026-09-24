@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { readPage } from '../../packages/runtime/src/read-page.ts';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -80,36 +81,16 @@ export async function verifyCompatibleChat(connection, workspace, reopened) {
   const model = await compatibleFixture();
   try {
     await writeFile(join(workspace, 'evidence.txt'), 'compatible tool evidence\n');
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: 0,
-      connection: {
-        slug: 'custom-chat-relay',
-        name: 'Custom chat relay',
-        providerType: 'openai-compatible',
-        baseUrl: model.baseUrl,
-        enabled: true,
-        enabledModelIds: ['fixture-model'],
-        modelOverrides: { 'fixture-model': { thinkingLevels: ['high', 'max'] } },
-      },
+    const created = await createModelConnection(request, {
+      providerName: 'openai-compatible',
+      slug: 'custom-chat-relay',
+      name: 'Custom chat relay',
+      baseUrl: model.baseUrl,
+      apiKey: 'compatible-fixture',
+      enabledModelIds: ['fixture-model'],
+      modelOverrides: { 'fixture-model': { thinkingLevels: ['high', 'max'] } },
     });
-    assert.equal(created.kind, 'committed');
     const basis = created.connection;
-    assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-          expected: null,
-          expectedConnection: {
-            ...basis,
-            slug: 'custom-chat-relay',
-            providerType: 'openai-compatible',
-            effectiveBaseUrl: model.baseUrl,
-          },
-          secret: 'compatible-fixture',
-        })
-      ).kind,
-      'committed',
-    );
     const saved = [];
     for (const field of ['reasoning', 'reasoning_content']) {
       const sessionId = 'compatible-' + field;

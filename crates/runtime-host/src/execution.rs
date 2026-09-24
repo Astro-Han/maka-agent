@@ -72,7 +72,7 @@ pub(crate) struct Executions {
     log: Arc<EventLog>,
     configuration: Arc<ConfigurationStore>,
     // Control-plane discovery shares this owner; requests drain before workers.
-    pub(crate) oauth: crate::oauth::Authority,
+    pub(crate) oauth: Arc<crate::oauth::Authority>,
     paths: ExecutionPaths,
     writes: Arc<maka_fs_tools::WriteCoordinator>,
     capabilities: Arc<Capabilities>,
@@ -124,7 +124,10 @@ impl Executions {
             plugin_catalog,
             submissions: Default::default(),
             plugin_calls,
-            oauth: crate::oauth::Authority::new(workers.clone(), shutdown.clone()),
+            oauth: Arc::new(crate::oauth::Authority::new(
+                workers.clone(),
+                shutdown.clone(),
+            )),
             controllers: Default::default(),
             shells: Arc::new(crate::shell::ShellResources::new(
                 log.clone(),
@@ -155,6 +158,13 @@ impl Executions {
 
     pub(crate) fn active_count(&self) -> usize {
         self.active.lock().unwrap().len()
+    }
+
+    pub(crate) fn model_transport(
+        &self,
+        policy: &maka_network::Policy,
+    ) -> std::result::Result<Arc<dyn maka_plugins::model::Transport>, maka_model::ModelError> {
+        self.models.transport(policy)
     }
 
     /// Notification failure cannot discard an already accepted operation.

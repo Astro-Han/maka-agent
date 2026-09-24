@@ -17,176 +17,85 @@
  * under the License.
  */
 
-use maka_config::model_catalog::{provider_facts, resolve};
-use maka_runtime::configuration::{ConnectionCatalogEntry, validation::provider_auth_kind};
-use serde_json::{Value, json};
+use maka_config::model_catalog::resolve;
+use maka_runtime::configuration::{ConnectionCatalogEntry, ModelOverride};
+use maka_runtime::execution::ThinkingLevel::{High, Low};
+use serde_json::json;
 
-#[test]
-fn search_capability_uses_provider_defaults_not_model_name_guesses() {
-    for (provider, model, declared, overridden, expected) in [
-        ("openai", "future-model", None, None, Some(true)),
-        ("openai-codex", "future-model", None, None, Some(true)),
-        ("openai", "future-model", Some(false), None, Some(false)),
-        (
-            "openai",
-            "future-model",
-            Some(true),
-            Some(false),
-            Some(false),
-        ),
-        (
-            "openai-responses-compatible",
-            "gpt-5.6-luna",
-            None,
-            None,
-            None,
-        ),
-        (
-            "anthropic-compatible",
-            "claude-sonnet-4-6",
-            None,
-            None,
-            None,
-        ),
-        (
-            "openai-responses-compatible",
-            "local-model",
-            Some(true),
-            None,
-            Some(true),
-        ),
-        (
-            "anthropic-compatible",
-            "local-model",
-            None,
-            Some(true),
-            Some(true),
-        ),
-    ] {
-        let mut wire = json!({
-            "connectionId":"test", "revision":1, "slug":"test", "name":"Test",
-            "providerType":provider, "enabled":true, "enabledModelIds":[model],
-            "modelSource":"fetched", "models":[{"id":model}]
-        });
-        if let Some(value) = declared {
-            wire["models"][0]["capabilities"] = json!({"webSearch":value});
-        }
-        if let Some(value) = overridden {
-            wire["modelOverrides"] = json!({model:{"capabilities":{"webSearch":value}}});
-        }
-        let row = serde_json::from_value(wire).unwrap();
-        let catalog = resolve(&row, Some(model)).unwrap();
-        assert_eq!(
-            catalog[0].capabilities.web_search, expected,
-            "{provider}/{model}"
-        );
-    }
+fn connection() -> ConnectionCatalogEntry {
+    serde_json::from_value(json!({
+        "connectionId":"account","revision":1,"slug":"account","name":"Account",
+        "provider":{"packageId":"example.account","entryId":"provider","scope":"profile","name":"api"},
+        "configuration":{"baseUrl":"https://example.invalid/v1"},
+        "enabled":true,"enabledModelIds":["reported","manual"],"modelSource":"fetched",
+        "models":[{
+            "id":"reported","thinkingLevels":["low","high"],"contextWindow":16000,"inputLimit":12000,
+            "capabilities":{"chat":true,"vision":false,"webSearch":false}
+        }]
+    })).unwrap()
 }
 
 #[test]
-fn source_catalog_differential() {
-    let facts: Value = serde_json::from_str(include_str!(concat!(
-        env!("OUT_DIR"),
-        "/catalog-facts.json"
-    )))
-    .unwrap();
-    for (provider, source) in facts.as_object().unwrap() {
-        let typed = provider_facts(provider).unwrap();
-        let auth = typed.auth_kind;
-        assert_eq!(auth, provider_auth_kind(provider).unwrap(), "{provider}");
-        assert_eq!(serde_json::to_value(auth).unwrap(), source["authKind"]);
-        for (field, actual) in [
-            (
-                "runtimeAdapter",
-                serde_json::to_value(&typed.runtime_adapter).unwrap(),
-            ),
-            (
-                "protocolAdapters",
-                serde_json::to_value(&typed.protocol_adapters).unwrap(),
-            ),
-            (
-                "modelDiscovery",
-                serde_json::to_value(&typed.model_discovery).unwrap(),
-            ),
-        ] {
-            assert_eq!(actual, source[field], "{provider}.{field}");
-        }
-        for (model, facts) in &typed.models {
-            for (field, actual) in [
-                (
-                    "runtimeOverride",
-                    serde_json::to_value(&facts.runtime_override).unwrap(),
-                ),
-                ("metadata", serde_json::to_value(&facts.metadata).unwrap()),
-                ("entry", serde_json::to_value(&facts.entry).unwrap()),
-            ] {
-                assert_eq!(
-                    actual, source["models"][model][field],
-                    "{provider}.{model}.{field}"
-                );
-            }
-        }
-    }
-    let fixtures: Vec<Value> = serde_json::from_str(include_str!(concat!(
-        env!("OUT_DIR"),
-        "/catalog-oracle.json"
-    )))
-    .unwrap();
-    for fixture in fixtures {
-        let connection = &fixture["connection"];
-        let mut wire = json!({
-            "connectionId": "test-id", "revision": 1, "slug": "test", "name": "Test",
-            "providerType": connection["providerType"], "enabled": true,
-            "enabledModelIds": [], "models": []
-        });
-        for field in ["models", "enabledModelIds", "modelOverrides", "modelSource"] {
-            if let Some(value) = connection.get(field) {
-                wire[field] = value.clone();
-            }
-        }
-        let row: ConnectionCatalogEntry = serde_json::from_value(wire).unwrap();
-        if let Some(models) = connection.get("models") {
-            assert_eq!(serde_json::to_value(&row.models).unwrap(), *models);
-        }
-        let actual = resolve(&row, connection["defaultModel"].as_str()).unwrap();
-        let expected = fixture["expected"].as_array().unwrap();
-        assert_eq!(actual.len(), expected.len(), "connection: {connection}");
-        for (actual, expected) in actual.iter().zip(expected) {
-            assert_eq!(
-                serde_json::to_value(actual).unwrap(),
-                *expected,
-                "connection: {connection}"
-            );
-        }
-    }
+fn catalog_projects_account_facts_and_overrides_without_vendor_or_plugin_lookup() {
+    let mut row = connection();
+    let catalog = resolve(&row, Some("reported")).unwrap();
+    assert_eq!(
+        catalog
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        ["reported", "manual"]
+    );
+    assert_eq!(catalog[0].thinking_levels, [Low, High]);
+    assert_eq!(catalog[0].capabilities.web_search, Some(false));
+    assert_eq!(catalog[1].capabilities.web_search, None);
+    row.model_overrides = Some(
+        serde_json::from_value(json!({
+            "reported":{
+                "thinkingLevels":["high"],"defaultThinkingLevel":"high","vision":true,
+                "contextWindow":14000,"inputLimit":10000,"compactionThreshold":9000,
+                "capabilities":{"webSearch":true}
+            },
+            "disabled":{"displayName":"Remembered"}
+        }))
+        .unwrap(),
+    );
+    let catalog = resolve(&row, Some("reported")).unwrap();
+    let model = &catalog[0];
+    assert_eq!(model.thinking_levels, [High]);
+    assert_eq!(model.default_thinking_level, Some(High));
+    assert_eq!(model.context_window, Some(14000));
+    assert_eq!(model.default_context_window, Some(16000));
+    assert_eq!(model.input_limit, Some(10000));
+    assert_eq!(model.default_input_limit, Some(12000));
+    assert_eq!(model.compaction_threshold, Some(9000));
+    assert!(model.supports_vision);
+    assert_eq!(model.default_supports_vision, Some(false));
+    assert_eq!(model.capabilities.web_search, Some(true));
+    assert_eq!(catalog[2].id, "disabled");
+    assert_eq!(
+        row.models[0].context_window,
+        Some(16000),
+        "projection does not rewrite inventory"
+    );
 }
 
 #[test]
-fn account_thinking_choices_precede_static_facts_and_remain_overridable() {
-    use maka_runtime::execution::ThinkingLevel::{High, Low};
-    for model in ["future-codex", "gpt-5.6-luna"] {
-        let mut wire = json!({
-            "connectionId":"test", "revision":1, "slug":"test", "name":"Test",
-            "providerType":"openai-codex", "enabled":true, "enabledModelIds":[model],
-            "modelSource":"fetched", "models":[{"id":model,"thinkingLevels":["low","high"]}]
-        });
-        let row: ConnectionCatalogEntry = serde_json::from_value(wire.clone()).unwrap();
-        assert_eq!(
-            resolve(&row, Some(model)).unwrap()[0].thinking_levels,
-            [Low, High]
-        );
-        wire["models"][0]["thinkingLevels"] = json!([]);
-        let row: ConnectionCatalogEntry = serde_json::from_value(wire.clone()).unwrap();
-        assert!(
-            resolve(&row, Some(model)).unwrap()[0]
-                .thinking_levels
-                .is_empty()
-        );
-        wire["modelOverrides"] = json!({model:{"thinkingLevels":["high"]}});
-        let row: ConnectionCatalogEntry = serde_json::from_value(wire).unwrap();
-        assert_eq!(
-            resolve(&row, Some(model)).unwrap()[0].thinking_levels,
-            [High]
-        );
-    }
+fn empty_account_choices_and_nonchat_facts_are_not_replaced_by_name_heuristics() {
+    let mut row = connection();
+    row.models[0].id = "gpt-future".into();
+    row.models[0].thinking_levels = Some(vec![]);
+    row.enabled_model_ids = vec!["gpt-future".into()];
+    row.models[0].capabilities.as_mut().unwrap().chat = Some(false);
+    let model = resolve(&row, Some("gpt-future")).unwrap().remove(0);
+    assert!(model.thinking_levels.is_empty());
+    assert!(!model.can_use_as_chat_default);
+    row.model_overrides = Some(std::collections::BTreeMap::from([(
+        "gpt-future".into(),
+        ModelOverride {
+            thinking_levels: Some(vec![High]),
+            ..Default::default()
+        },
+    )]));
+    assert_eq!(resolve(&row, None).unwrap()[0].thinking_levels, [High]);
 }

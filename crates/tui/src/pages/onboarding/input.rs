@@ -29,7 +29,8 @@ impl App {
             .count()
             .max(1);
         let f = self.onboarding.dialog.as_mut().expect("onboarding form");
-        let editable = f.visible && !f.blocked && self.onboarding.pending.is_none();
+        let editable =
+            f.visible && !f.blocked && !f.providers.is_empty() && self.onboarding.pending.is_none();
         let command = match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
                 KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -97,7 +98,7 @@ impl App {
                 _ => None,
             },
             Event::Paste(text) if editable && f.models.is_none() && (1..=3).contains(&f.focus) => {
-                if text.chars().any(char::is_control) {
+                if f.focus != 2 && text.chars().any(char::is_control) {
                     f.error = Some("onboard-field-invalid");
                     return (true, None);
                 }

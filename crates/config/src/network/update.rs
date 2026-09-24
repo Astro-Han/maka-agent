@@ -112,9 +112,7 @@ pub(crate) async fn invalidate_tests(tx: &mut SqliteConnection) -> Result<()> {
     let catalog = catalog::read(tx).await?;
     let mut changed = false;
     for mut row in catalog.connections {
-        if row.last_test.is_none()
-            || crate::model_catalog::provider_facts(&row.provider_type)?.retired
-        {
+        if row.last_test.is_none() {
             continue;
         }
         row.last_test = None;

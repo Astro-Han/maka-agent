@@ -61,13 +61,20 @@ pub struct ModelInfo {
         deserialize_with = "present"
     )]
     pub max_output_tokens: Option<u64>,
-    /// Account-advertised choices, not a guess based on a model name.
+    /// Choices reported by the provider plugin.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present"
     )]
     pub thinking_levels: Option<Vec<crate::execution::ThinkingLevel>>,
+    /// Provider default, distinct from a user's execution override.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub default_thinking_level: Option<crate::execution::ThinkingLevel>,
     /// Whether the provider accepts a request for a visible reasoning summary.
     #[serde(
         default,
@@ -170,6 +177,14 @@ impl ModelInfo {
                     return Err("duplicate model thinking level".into());
                 }
             }
+        }
+        if self.default_thinking_level.is_some_and(|level| {
+            !self
+                .thinking_levels
+                .as_ref()
+                .is_some_and(|levels| levels.contains(&level))
+        }) {
+            return Err("model default thinking level is not advertised".into());
         }
         for (value, max) in [
             (self.display_name.as_deref(), 512),

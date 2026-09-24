@@ -45,7 +45,10 @@ struct Writer {
 }
 impl MessageWriter for Writer {
     async fn write(&mut self, value: &Value) -> Result<(), TransportError> {
-        if value["kind"] == "plugin.client.changed" {
+        if matches!(
+            value["kind"].as_str(),
+            Some("plugin.client.changed" | "model.provider.catalog.changed")
+        ) {
             return Ok(());
         }
         if value.get("requestId").is_some()
@@ -83,7 +86,10 @@ async fn receive_response(reader: &mut impl MessageReader) -> Value {
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let frame = reader.read().await.unwrap().unwrap();
-            if frame["kind"] != "plugin.client.changed" {
+            if !matches!(
+                frame["kind"].as_str(),
+                Some("plugin.client.changed" | "model.provider.catalog.changed")
+            ) {
                 return frame;
             }
         }

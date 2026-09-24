@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { copy } from './client/copy.js';
+
 import { useEffect, useRef, useState } from 'react';
 import type { ClientContext, ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
 
@@ -56,7 +58,7 @@ function Manage({
   context,
   locale,
 }: ClientSlots['application.manage'] & { context: ClientContext }) {
-  const zh = locale !== 'en';
+  const t = copy[locale];
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [secret, setSecret] = useState('');
   const [query, setQuery] = useState('');
@@ -99,10 +101,7 @@ function Manage({
         );
       }
       if (result.kind === 'credential' && request.kind === 'credential') {
-        if (result.receipt.kind === 'conflict')
-          throw new Error(
-            zh ? '密钥已被修改，请刷新后重试。' : 'Credential changed. Refresh before retrying.',
-          );
+        if (result.receipt.kind === 'conflict') throw new Error(t.credentialChanged);
         const revision = result.receipt.revision;
         setSnapshot(
           (current) =>
@@ -138,24 +137,20 @@ function Manage({
   }
   const status = snapshot?.credential.check?.outcome;
   const labels = {
-    valid: zh ? '验证成功' : 'Valid',
-    invalid_credentials: zh ? '密钥无效' : 'Invalid credentials',
-    rate_limited: zh ? '请求限流' : 'Rate limited',
-    network_error: zh ? '网络或服务响应错误' : 'Network or provider response error',
-    timeout: zh ? '请求超时' : 'Timed out',
+    valid: t.valid,
+    invalid_credentials: t.invalidCredentials,
+    rate_limited: t.rateLimited,
+    network_error: t.networkError,
+    timeout: t.timedOut,
   };
   return (
     <section data-maka-web-plugin>
       <header>
         <button type="button" disabled={busy} onClick={() => void run({ kind: 'read' })}>
-          {zh ? '刷新' : 'Refresh'}
+          {t.refresh}
         </button>
       </header>
-      <p>
-        {zh
-          ? '搜索来源由 Web 插件管理。隐私模式下不提供搜索和网页抓取。'
-          : 'The Web plugin manages search sources. Search and fetching are disabled in incognito mode.'}
-      </p>
+      <p>{t.description}</p>
       {error && <p role="alert">{error}</p>}
       {snapshot ? (
         <fieldset disabled={busy}>
@@ -171,10 +166,10 @@ function Manage({
                 })
               }
             />
-            {zh ? '启用联网搜索' : 'Enable web search'}
+            {t.enable}
           </label>
           <label>
-            {zh ? '搜索来源' : 'Search source'}
+            {t.source}
             <select
               value={snapshot.settings.source}
               onChange={(event) =>
@@ -188,33 +183,19 @@ function Manage({
                 })
               }
             >
-              <option value="model">{zh ? '模型内置搜索' : 'Model-native search'}</option>
+              <option value="model">{t.nativeSearch}</option>
               <option value="tavily">Tavily</option>
             </select>
           </label>
-          <p>
-            {snapshot.settings.source === 'model'
-              ? zh
-                ? '使用当前模型协议支持的原生搜索；不支持时不会偷偷改用其他来源。'
-                : 'Uses native search supported by the selected model protocol; never silently switches sources.'
-              : zh
-                ? '通过 Tavily 获取标题、来源链接和摘要。'
-                : 'Fetches titles, source links and snippets through Tavily.'}
-          </p>
+          <p>{snapshot.settings.source === 'model' ? t.nativeDescription : t.tavilyDescription}</p>
           <label>
-            {zh ? 'Tavily 密钥' : 'Tavily API key'}
+            {t.apiKey}
             <input
               type="password"
               autoComplete="new-password"
               value={secret}
               maxLength={4096}
-              placeholder={
-                snapshot.credential.configured
-                  ? zh
-                    ? '已保存；输入新密钥以替换'
-                    : 'Saved; enter a new key to replace'
-                  : ''
-              }
+              placeholder={snapshot.credential.configured ? t.savedKey : ''}
               onChange={(event) => setSecret(event.target.value)}
             />
           </label>
@@ -230,7 +211,7 @@ function Manage({
                 })
               }
             >
-              {zh ? '保存密钥' : 'Save key'}
+              {t.saveKey}
             </button>
             <button
               type="button"
@@ -243,29 +224,25 @@ function Manage({
                 })
               }
             >
-              {zh ? '删除密钥' : 'Remove key'}
+              {t.removeKey}
             </button>
             <button
               type="button"
               disabled={!snapshot.credential.configured}
               onClick={() => void run({ kind: 'test', operationId: crypto.randomUUID() })}
             >
-              {zh ? '测试已保存密钥' : 'Test saved key'}
+              {t.testKey}
             </button>
           </div>
           <p role="status">
             {status
               ? labels[status]
               : snapshot.credential.configured
-                ? zh
-                  ? '尚未验证'
-                  : 'Not tested'
-                : zh
-                  ? '未配置密钥'
-                  : 'No credential configured'}
+                ? t.notTested
+                : t.noCredential}
           </p>
           <label>
-            {zh ? '测试搜索' : 'Try a search'}
+            {t.trySearch}
             <input
               value={query}
               maxLength={200}
@@ -288,20 +265,18 @@ function Manage({
               })
             }
           >
-            {zh ? '搜索' : 'Search'}
+            {t.search}
           </button>
         </fieldset>
       ) : (
-        <p>{zh ? '正在读取 Web 插件配置…' : 'Loading Web configuration…'}</p>
+        <p>{t.loading}</p>
       )}
       {results && (
         <section>
           <h3>{results.query}</h3>
           {results.truncated && (
             <p role="status">
-              {zh
-                ? '部分结果或摘要已截断。省略结果数：'
-                : 'Some results or snippets were truncated. Omitted results: '}
+              {t.truncated}
               {results.omittedResults}
             </p>
           )}

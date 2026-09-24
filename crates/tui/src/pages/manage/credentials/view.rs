@@ -17,10 +17,10 @@
  * under the License.
  */
 
-use super::{Change, Command, address};
+use super::{Command, address};
 use crate::{
     app::{Action, App},
-    pages::manage::{Entity, Kind, view::note_lines},
+    pages::manage::{Entity, view::note_lines},
     view::{button, safe},
 };
 use maka_protocol::configuration::CredentialState;
@@ -36,34 +36,23 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     let busy = app.management.pending.is_some();
     let dialog = app.management.dialog.as_mut().expect("credential dialog");
     let state = dialog.credentials.as_ref().expect("credential state");
-    let set = dialog.kind == Kind::Credential(Change::Set);
     let Entity::Connection(row) = &dialog.target.entity else {
         unreachable!()
     };
     let width = area.width.saturating_sub(2).min(72);
-    let endpoint = address(row);
-    let address = note_lines(
-        &endpoint
-            .as_deref()
-            .map(safe)
-            .unwrap_or_else(|| app.i18n.text("credential-no-address")),
-        width.saturating_sub(4),
-    );
+    let identity = address(row);
+    let address = note_lines(&safe(&identity), width.saturating_sub(4));
     let key = if busy {
         "session-saving"
     } else if let Some(key) = dialog.editor.error.or(dialog.error) {
         key
     } else if state.status.is_none() {
         "credential-loading"
-    } else if set && endpoint.is_none() {
-        "credential-no-address"
-    } else if set {
-        "credential-set-note"
     } else {
         "credential-clear-note"
     };
     let note = note_lines(&app.i18n.text(key), width.saturating_sub(4));
-    let height = 7 + address.len() as u16 + note.len() as u16 + if set { 3 } else { 0 };
+    let height = 7 + address.len() as u16 + note.len() as u16;
     if area.width < 44 || height > area.height.saturating_sub(2) {
         dialog.visible = false;
         dialog.editor.invalidate_geometry();
@@ -116,25 +105,6 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         );
     }
     y += 2;
-    if set {
-        frame.render_widget(
-            Paragraph::new(app.i18n.text("credential-new-key"))
-                .style(Style::default().fg(app.theme.colors().subtle)),
-            Rect::new(inner.x, y, inner.width, 1),
-        );
-        let rect = Rect::new(inner.x, y + 1, inner.width, 1);
-        frame.render_widget(
-            Block::default().style(Style::default().bg(app.theme.colors().surface)),
-            rect,
-        );
-        dialog.editor.draw_masked(
-            frame,
-            rect,
-            dialog.focus == 0 && !busy && !dialog.blocked,
-            app.theme.colors(),
-        );
-        y += 3;
-    }
     frame.render_widget(
         Paragraph::new(note).style(Style::default().fg(
             if dialog.error.is_some() || dialog.editor.error.is_some() {
@@ -152,15 +122,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     );
     let retry = state.failed;
     let focus = dialog.focus;
-    let save = if set {
-        "credential-save"
-    } else {
-        "credential-remove"
-    };
     let mut right = inner.right();
     for (label, command, index) in [
-        (save, Command::Save, if set { 2 } else { 1 }),
-        ("session-cancel", Command::Close, if set { 1 } else { 0 }),
+        ("credential-remove", Command::Save, 1),
+        ("session-cancel", Command::Close, 0),
     ] {
         let text = app.i18n.text(label);
         let width = (text.width() as u16 + 2).min(inner.width / 3);

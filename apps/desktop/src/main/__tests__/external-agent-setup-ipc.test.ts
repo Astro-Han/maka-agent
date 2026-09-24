@@ -45,6 +45,18 @@ test('external setup shares browser presentation without accepting a stale attem
   );
   assert.deepEqual(await pending.presented, { stateHint: 'new-attempt' });
   assert.deepEqual(opened, ['https://accounts.google.com/new']);
+
+  const withoutCode = presentation.expect('plugin-attempt');
+  await presentation.openExternal(
+    'https://example.org/authorize',
+    undefined,
+    new AbortController().signal,
+  );
+  assert.deepEqual(await withoutCode.presented, {});
+  await assert.rejects(
+    presentation.openExternal('https://example.org/unsolicited', undefined, new AbortController().signal),
+  );
+  assert.deepEqual(opened, ['https://accounts.google.com/new', 'https://example.org/authorize']);
 });
 test('setup IPC registers an expectation before start and releases it on terminal result or cancel', async () => {
   type Handler = Parameters<

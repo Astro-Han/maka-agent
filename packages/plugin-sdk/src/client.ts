@@ -36,6 +36,8 @@ export type {
   AuthorizationGrant,
 } from './authorization.js';
 
+export type ClientLocale = 'en' | 'zh-CN' | 'zh-TW';
+
 /** Independent of the application release and Host protocol epoch. */
 export const CLIENT_SDK_VERSION = 1;
 
@@ -60,7 +62,7 @@ export interface ClientSlots {
   'tool.detail': {
     readonly sessionId: string;
     readonly turnId: string;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
     readonly toolUseId: string;
     readonly toolName: string;
     readonly status: 'running' | 'completed' | 'errored' | 'interrupted' | 'unknown';
@@ -74,59 +76,59 @@ export interface ClientSlots {
     readonly outputTruncated: boolean;
   };
   'settings.page': {
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
     readonly page: string;
     /** Opens a raw Session ID in this plugin's originating Host, never the default Host. */
     readonly onOpenSession?: (sessionId: string) => Promise<void>;
   };
-  'application.overlay': { readonly locale: 'en' | 'zh-CN' | 'zh-TW' };
+  'application.overlay': { readonly locale: ClientLocale };
   'session.header.actions': {
     readonly sessionId: string;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
   };
   'session.inspector.overview': {
     readonly sessionId: string;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
   };
   'turn.footer': {
     readonly sessionId: string;
     readonly turnId: string;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
   };
   'application.manage': {
     readonly section: string;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
     readonly action?: { readonly id: number; readonly name: string; readonly handled: () => void };
   };
   'navigation.status': {
     readonly section: string;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
   };
   /** Resolve a plugin-owned Session for an explicitly selected workspace provider. */
   'session.resolve': {
     readonly contextRevision?: number;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
     readonly onResolving: () => void;
     readonly onResolved: (sessionId: string, signal: AbortSignal) => void;
     readonly onError: (message: string) => void;
   };
   'workspace.composer.before': ClientWorkspace & {
     readonly contextRevision?: number;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
     readonly appendText?: (text: string) => void;
     readonly publishSuggestions?: (items: readonly ComposerSuggestion[]) => ComposerPublication;
   };
   'workspace.manage': ClientWorkspace & {
     readonly contextRevision?: number;
     readonly section: string;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
   };
   'session.composer.before': {
     /** Invalidation hint only; Host still resolves the authoritative Session. */
     readonly contextRevision?: number;
     /** Canonical Session ID on this plugin's Host, never a client projection key. */
     readonly sessionId: string;
-    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly locale: ClientLocale;
     /** Canonical Session ID from this plugin's Host, not a Desktop projection key. */
     readonly onOpenSession: (sessionId: string) => void;
     /** Edit the current draft only; never submits a message or changes Session. */
@@ -209,7 +211,7 @@ export interface ClientContext {
   style(css: string): () => void;
 }
 
-export type ClientLabel = string | Readonly<Record<'en' | 'zh-CN' | 'zh-TW', string>>;
+export type ClientLabel = string | Readonly<Record<ClientLocale, string>>;
 
 export interface ClientLocalFiles {
   pick(): Promise<string | null>;

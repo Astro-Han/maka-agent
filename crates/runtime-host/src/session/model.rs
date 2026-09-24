@@ -24,9 +24,6 @@ use maka_protocol::{
     OperationErrorCode,
     session::{SessionModelTarget, SessionThinkingPreference, ThinkingLevel},
 };
-use maka_runtime::configuration::{
-    ConnectionCredentialKind, ConnectionCredentialTarget, CredentialLocator, ProviderAuthKind,
-};
 
 pub(crate) async fn resolve(
     configuration: &ConfigurationStore,
@@ -88,8 +85,7 @@ pub(crate) async fn resolve_creation(
             "Bound model connection identity changed",
         ));
     }
-    let facts = model_catalog::provider_facts(&row.provider_type).map_err(configuration_error)?;
-    if !row.enabled || !row.enabled_model_ids.iter().any(|id| id == model) || facts.retired {
+    if !row.enabled || !row.enabled_model_ids.iter().any(|id| id == model) {
         return Err(failure(
             OperationErrorCode::InvalidRequest,
             "Model connection or model is not enabled",
@@ -111,7 +107,17 @@ pub(crate) async fn resolve_creation(
     } else {
         preference.explicit_level()
     };
+    let declared_thinking = row
+        .model_overrides
+        .as_ref()
+        .and_then(|models| models.get(model))
+        .is_some_and(|model| model.thinking_levels.is_some())
+        || row
+            .models
+            .iter()
+            .any(|reported| reported.id == model && reported.thinking_levels.is_some());
     if let Some(level) = thinking
+        && declared_thinking
         && !entry.thinking_levels.contains(&level)
     {
         return Err(failure(
@@ -119,39 +125,8 @@ pub(crate) async fn resolve_creation(
             "Selected model does not support requested thinking level",
         ));
     }
-    let kind = match facts.auth_kind {
-        ProviderAuthKind::ApiKey => Some(ConnectionCredentialKind::ApiKey),
-        ProviderAuthKind::OauthToken => Some(ConnectionCredentialKind::OauthToken),
-        ProviderAuthKind::None | ProviderAuthKind::OptionalApiKey => None,
-    };
-    if let Some(kind) = kind {
-        let target = ConnectionCredentialTarget {
-            connection_id: row.connection_id.clone(),
-            revision: row.revision,
-            slug: row.slug.clone(),
-            provider_type: row.provider_type.clone(),
-            effective_base_url: row
-                .base_url
-                .clone()
-                .unwrap_or_else(|| facts.base_url.clone()),
-        };
-        let secret = configuration
-            .credential_secret(
-                &CredentialLocator::Connection {
-                    connection_id: row.connection_id.clone(),
-                    kind,
-                },
-                Some(&target),
-            )
-            .await
-            .map_err(configuration_error)?;
-        if secret.is_none() {
-            return Err(failure(
-                OperationErrorCode::OperationUnavailable,
-                "Model connection has no credentials",
-            ));
-        }
-    }
+    // Missing inventory is unknown, not an empty capability declaration. Session
+    // selection records intent; execution validates the provider's current facts.
     Ok((
         SessionModel {
             connection_id: row.connection_id.clone(),

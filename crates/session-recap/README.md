@@ -19,6 +19,8 @@
 
 # Session recap
 
+[简体中文](./README.zh-CN.md)
+
 `maka.session-recap` is a statically linked Profile plugin with a separate
 Desktop Client. The Client adds a manual recap to Session Inspector.
 

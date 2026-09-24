@@ -287,6 +287,7 @@ export interface RuntimeHostConnection {
   ): Promise<ClientCapabilityUnregisterResult>;
   subscribeConfigurationChanges(listener: (revision: number) => void): () => void;
   subscribeConnectionCatalogChanges(listener: (revision: number) => void): () => void;
+  subscribeModelProviderCatalogChanges(listener: (revision: number) => void): () => void;
   subscribeProjectCatalogChanges(listener: (revision: number) => void): () => void;
   subscribePluginClientChanges?(listener: (revision: string) => void): () => void;
   subscribeSessionCatalogChanges(listener: (frame: SessionCatalogChangedFrame) => void): () => void;
@@ -390,6 +391,7 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
   readonly #clientCapabilities: ClientCapabilityChannel;
   readonly #configurationChangeListeners = new Set<(revision: number) => void>();
   readonly #connectionCatalogChangeListeners = new Set<(revision: number) => void>();
+  readonly #modelProviderCatalogChangeListeners = new Set<(revision: number) => void>();
   readonly #projectCatalogChangeListeners = new Set<(revision: number) => void>();
   readonly #pluginClientChangeListeners = new Set<(revision: string) => void>();
   readonly #sessionCatalogChangeListeners = new Set<(frame: SessionCatalogChangedFrame) => void>();
@@ -735,6 +737,11 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
     return () => this.#projectCatalogChangeListeners.delete(listener);
   }
 
+  subscribeModelProviderCatalogChanges(listener: (revision: number) => void): () => void {
+    this.#modelProviderCatalogChangeListeners.add(listener);
+    return () => this.#modelProviderCatalogChangeListeners.delete(listener);
+  }
+
   subscribePluginClientChanges(listener: (revision: string) => void): () => void {
     this.#pluginClientChangeListeners.add(listener);
     return () => this.#pluginClientChangeListeners.delete(listener);
@@ -774,6 +781,15 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
               continue;
             case 'plugin.client.changed':
               for (const listener of this.#pluginClientChangeListeners) {
+                try {
+                  listener(frame.revision);
+                } catch {
+                  /* Listener faults do not close transport. */
+                }
+              }
+              continue;
+            case 'model.provider.catalog.changed':
+              for (const listener of this.#modelProviderCatalogChangeListeners) {
                 try {
                   listener(frame.revision);
                 } catch {
@@ -1060,6 +1076,7 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
     this.#clientCapabilities.close(error);
     this.#configurationChangeListeners.clear();
     this.#pluginClientChangeListeners.clear();
+    this.#modelProviderCatalogChangeListeners.clear();
     this.#sessionCatalogChangeListeners.clear();
     this.#scheduledTaskChangeListeners.clear();
     if (gracefulPeerClose) this.#transport.closeAfterFlush();

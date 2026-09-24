@@ -28,12 +28,15 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 pub(super) struct Cache(Mutex<Option<(u64, Arc<View>)>>);
-struct View {
-    revision: String,
+pub(super) struct View {
+    pub(super) revision: String,
     entries: Vec<(ClientDescriptor, Contribution<Client>)>,
 }
 impl Cache {
-    fn capture(&self, platform: &Platform) -> Result<Arc<View>, OperationError> {
+    pub(super) fn clear(&self) {
+        self.0.lock().unwrap().take();
+    }
+    pub(super) fn capture(&self, platform: &Platform) -> Result<Arc<View>, OperationError> {
         let current = platform.catalog.snapshot::<Client>(&Scope::DesktopUi);
         let mut cache = self.0.lock().unwrap();
         if let Some((revision, view)) = &*cache
@@ -73,53 +76,6 @@ impl Cache {
     }
 }
 impl Platform {
-    pub(crate) async fn publish_client_changes(
-        self,
-        changes: tokio::sync::broadcast::Sender<serde_json::Value>,
-        shutdown: tokio_util::sync::CancellationToken,
-    ) {
-        let mut catalog = self.catalog.subscribe();
-        let mut platform = self.subscribe();
-        let mut previous = None;
-        loop {
-            if let Ok(view) = self.clients.capture(&self) {
-                let errors: Vec<_> = self
-                    .snapshot()
-                    .runtime
-                    .entries
-                    .iter()
-                    .filter(|entry| entry.scope == Scope::DesktopUi)
-                    .filter_map(|entry| {
-                        entry
-                            .error
-                            .as_ref()
-                            .map(|error| (entry.entry_id.clone(), error.clone()))
-                    })
-                    .collect();
-                let current = (view.revision.clone(), errors);
-                if previous
-                    .as_ref()
-                    .is_some_and(|previous| previous != &current)
-                {
-                    let _ = changes.send(serde_json::json!({"kind":"plugin.client.changed","revision":view.revision}));
-                }
-                previous = Some(current);
-            }
-            tokio::select! {
-                biased;
-                _ = shutdown.cancelled() => break,
-                result = catalog.changed() => { if result.is_err() { break; } },
-                result = platform.changed() => { if result.is_err() { break; } },
-            }
-            // Coalesce candidate publication/retirement, not every registration.
-            tokio::select! {
-                _ = shutdown.cancelled() => break,
-                _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {},
-            }
-        }
-        self.clients.0.lock().unwrap().take();
-    }
-
     /// Only published capabilities contribute to this revision. Diagnostics and
     /// durable intent remain separate platform queries.
     pub fn client_query(&self, query: ClientQuery) -> Result<ClientResult, OperationError> {

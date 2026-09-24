@@ -133,8 +133,8 @@ async fn catalog_and_vault_keep_independent_cas_and_private_material_across_reop
     let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
     let create: CreateCatalogConnectionInput = serde_json::from_value(json!({
         "expectedCatalogRevision":0,
-        "connection":{"slug":"local-fixture","name":"Local fixture","providerType":"openai-compatible",
-        "baseUrl":"http://127.0.0.1:18080/v1","enabled":true,"enabledModelIds":["fixture-model"]}
+        "connection":{"slug":"local-fixture","name":"Local fixture","provider":{"packageId":"external","entryId":"api","scope":"profile","name":"api"},
+        "configuration":{"baseUrl":"http://127.0.0.1:18080/v1"},"enabled":true,"enabledModelIds":["fixture-model"]}
     })).unwrap();
     let created = store.create_connection(create.clone()).await.unwrap();
     let CatalogMutationResult::Committed {
@@ -153,20 +153,23 @@ async fn catalog_and_vault_keep_independent_cas_and_private_material_across_reop
     ));
     let locator = CredentialLocator::Connection {
         connection_id: basis.connection_id.clone(),
-        kind: ConnectionCredentialKind::ApiKey,
+        kind: ConnectionCredentialKind::RequestHeaders,
     };
     let expected_connection = ConnectionCredentialTarget {
         connection_id: basis.connection_id.clone(),
         revision: 1,
         slug: "local-fixture".into(),
-        provider_type: "openai-compatible".into(),
-        effective_base_url: "http://127.0.0.1:18080/v1".into(),
+        provider: serde_json::from_value(
+            json!({"packageId":"external","entryId":"api","scope":"profile","name":"api"}),
+        )
+        .unwrap(),
+        configuration: json!({"baseUrl":"http://127.0.0.1:18080/v1"}),
     };
     let input = SetCredentialInput {
         locator: locator.clone(),
         expected: None,
         expected_connection: Some(expected_connection.clone()),
-        secret: "dummy-private-fixture".into(),
+        secret: r#"{"X-Fixture":"dummy-private-fixture"}"#.into(),
     };
     let saved = store.set_credential(input.clone(), 42).await.unwrap();
     let CredentialMutationResult::Committed {
@@ -196,7 +199,7 @@ async fn catalog_and_vault_keep_independent_cas_and_private_material_across_reop
         .expected_connection
         .as_mut()
         .unwrap()
-        .effective_base_url = "http://127.0.0.1:18081/v1".into();
+        .configuration = json!({"baseUrl":"http://127.0.0.1:18081/v1"});
     assert!(matches!(
         store.set_credential(stale_target, 44).await.unwrap(),
         CredentialMutationResult::ConnectionStale { .. }
@@ -240,7 +243,7 @@ async fn catalog_and_vault_keep_independent_cas_and_private_material_across_reop
             .await
             .unwrap()
             .as_deref(),
-        Some("dummy-private-fixture")
+        Some(r#"{"X-Fixture":"dummy-private-fixture"}"#)
     );
     #[cfg(unix)]
     {
@@ -275,7 +278,7 @@ async fn catalog_and_vault_keep_independent_cas_and_private_material_across_reop
             .await
             .unwrap()
             .as_deref(),
-        Some("dummy-private-fixture")
+        Some(r#"{"X-Fixture":"dummy-private-fixture"}"#)
     );
     let deleted = store
         .delete_credential(DeleteCredentialInput {

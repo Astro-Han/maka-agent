@@ -31,7 +31,7 @@ export async function verifyOAuthExecution(connection, workspace, reopened) {
   const request = (operation, input) => connection.request(operation, input, 5000);
   const catalog = await request('connection.catalog.query', { kind: 'start' });
   let row = catalog.items.find(
-    (item) => item.kind === 'connection' && item.providerType === 'openai-codex',
+    (item) => item.kind === 'connection' && item.provider.packageId === 'maka.codex',
   );
   assert(row, 'Host-owned subscription connection must exist');
   if (!reopened) {
@@ -52,7 +52,7 @@ export async function verifyOAuthExecution(connection, workspace, reopened) {
       expected: { connectionId: row.connectionId, revision: row.revision },
       changes: {
         name: row.name,
-        baseUrl: row.baseUrl,
+        configuration: row.configuration,
         enabled: true,
         enabledModelIds: [model],
       },

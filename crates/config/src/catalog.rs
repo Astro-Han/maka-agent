@@ -34,11 +34,6 @@ impl ConfigurationStore {
         input: CreateCatalogConnectionInput,
     ) -> Result<CreateCatalogConnectionResult> {
         let input = validation::normalize_create(input).map_err(ConfigError::Invalid)?;
-        if input.connection.provider_type == "gemini-cli" {
-            return Err(ConfigError::Invalid(
-                "retired provider cannot be added".into(),
-            ));
-        }
         self.transaction(TransactionMode::Immediate, move |tx| {
             Box::pin(async move {
                 let current = read(tx).await?;
@@ -68,8 +63,8 @@ impl ConfigurationStore {
                     revision: 1,
                     slug: draft.slug,
                     name: draft.name,
-                    provider_type: draft.provider_type,
-                    base_url: draft.base_url,
+                    provider: draft.provider,
+                    configuration: draft.configuration,
                     enabled: draft.enabled,
                     enabled_model_ids: draft.enabled_model_ids,
                     model_overrides: draft.model_overrides,
@@ -140,7 +135,7 @@ pub(crate) fn valid_target(target: &ConnectionTarget, rows: &[ConnectionCatalogE
         row.connection_id == target.connection_id
             && row.enabled
             && row.enabled_model_ids.contains(&target.model_id)
-            && row.provider_type != "gemini-cli"
+            && row.provider.scope == maka_runtime::scope::Scope::Profile
     })
 }
 

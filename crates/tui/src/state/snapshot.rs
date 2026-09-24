@@ -389,8 +389,8 @@ mod tests {
             );
         }
         let mut oauth = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
-        oauth["oauth"] = serde_json::json!({"provider":"xai-oauth", "start":{
-            "attemptId":"persisted-login", "target":{"kind":"create","providerType":"xai-oauth"}}, "connection":null});
+        oauth["oauth"] = serde_json::json!({"attempt":{
+            "attemptId":"persisted-login", "target":{"kind":"create","provider":crate::providers::fixtures::entry("xai-oauth", true).identity, "configuration":{}, "name":"Account", "slug":"account"}}, "connection":null});
         let mut reopened = app();
         serde_json::from_value::<Snapshot>(oauth.clone())
             .unwrap()

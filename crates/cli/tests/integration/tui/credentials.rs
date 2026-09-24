@@ -18,11 +18,11 @@
  */
 
 use super::*;
-use maka_protocol::{configuration::*, session::*};
+use maka_protocol::{Operation, configuration::ConnectionCatalogQueryInput, session::*};
 use serde_json::json;
 
 #[test]
-fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_leaking() {
+fn reauthentication_uses_the_new_credential_and_stale_removal_cannot_delete_it() {
     let directory = tempfile::tempdir().unwrap();
     let mut host = super::super::candidate::CandidateFixture::new(directory.path().join("root"));
     host.child = Some(
@@ -37,104 +37,70 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
     );
     host.wait_for_registration();
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let (client,locator,provider)=runtime.block_on(async {
+    let (client, id, locator, provider) = runtime.block_on(async {
         use tokio::io::AsyncWriteExt;
-        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url=format!("http://{}/v1",listener.local_addr().unwrap());
-        let client=support::model_client(&host.root,&url).await;
-        let catalog=client.connection_catalog(ConnectionCatalogQueryInput::Start).await.unwrap();
-        let locator:CredentialLocator=serde_json::from_value(json!({"scope":"connection","connectionId":catalog["items"][0]["connectionId"],"kind":"api_key"})).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let client = support::model_client(&host.root, &url).await;
+        let catalog = client.connection_catalog(ConnectionCatalogQueryInput::Start).await.unwrap();
+        let id = catalog["items"][0]["connectionId"].clone();
+        let locator = json!({"scope":"connection","connectionId":id,"kind":"provider"});
         client.create_session(decode_session_create_input(&json!({
             "sessionId":"credential-chat","name":"Key verification","workspace":{"kind":"host_path","path":directory.path()},
             "modelTarget":{"kind":"default"}
         })).unwrap()).await.unwrap();
-        let task=tokio::spawn(async move {
-            let (mut stream,_,headers)=model_request_with_headers(&listener).await;
-            assert!(headers.lines().any(|line|line.split_once(':').is_some_and(|(name,value)|
-                name.eq_ignore_ascii_case("authorization")&&value.trim()=="Bearer new-terminal-key")));
+        let task = tokio::spawn(async move {
+            let (mut stream, _, headers) = model_request_with_headers(&listener).await;
+            assert!(headers.lines().any(|line| line.split_once(':').is_some_and(|(name,value)|
+                name.eq_ignore_ascii_case("authorization") && value.trim() == "Bearer new-terminal-key")));
             stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").await.unwrap();
-            let chunk=json!({"id":"credential-test","object":"chat.completion.chunk","model":"fixture-model",
+            let chunk = json!({"id":"credential-test","object":"chat.completion.chunk","model":"fixture-model",
                 "choices":[{"index":0,"delta":{"content":"New key accepted"},"finish_reason":"stop"}]});
             stream.write_all(format!("data: {chunk}\n\ndata: [DONE]\n\n").as_bytes()).await.unwrap();
         });
-        (client,locator,task)
+        (client, id, locator, task)
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Key verification");
-    tui.click_text("⛭ Settings");
-    tui.wait_for("Model connections");
-    tui.click_text("Model connections");
-    tui.wait_for("TUI fixture");
-    tui.click_text("TUI fixture");
-    open(&mut tui, false);
-    tui.wait_for("Key configured");
-    tui.wait_for("New API key");
-    tui.send(b"discarded-conflicting-key");
-    runtime.block_on(async {
-        let CredentialVaultQueryResult::Status { status } =
-            client.credential_status(locator.clone()).await.unwrap()
-        else {
-            panic!()
-        };
-        let CredentialState::Configured {
-            credential_id,
-            revision,
-            ..
-        } = status.state
-        else {
-            panic!()
-        };
+    connections(&mut tui);
+    clear(&mut tui);
+    tui.wait_for("Credential configured");
+    let rotated = runtime.block_on(async {
+        support::authenticate(&client, &id, "external-rotation-key").await;
         client
-            .set_credential(SetCredentialInput {
-                locator: locator.clone(),
-                expected: Some(CredentialIdentityBasis {
-                    credential_id,
-                    revision,
-                }),
-                expected_connection: None,
-                secret: "external-rotation-key".into(),
-            })
+            .request(Operation::CredentialVaultQuery, json!({"locator":locator}))
             .await
-            .unwrap();
+            .unwrap()
     });
-    tui.click_last_text("Save key");
-    tui.wait_for("The connection or key changed elsewhere.");
+    tui.click_last_text("Clear credential");
+    tui.wait_for("changed elsewhere");
     tui.send(b"\x1b");
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("TUI fixture"));
-    open(&mut tui, false);
-    tui.wait_for("Key configured");
-    tui.wait_for("New API key");
+    assert_eq!(
+        runtime
+            .block_on(client.request(Operation::CredentialVaultQuery, json!({"locator":locator})))
+            .unwrap(),
+        rotated
+    );
+
+    tui.filter_command("Sign in again");
+    tui.click_text("Sign in again");
+    tui.wait_for("Authentication input");
+    tui.click_text("Authentication input");
     tui.send(b"new-terminal-key");
-    tui.click_last_text("Save key");
+    tui.wait_for("Choose a provider");
+    tui.click_text("Continue");
+    tui.wait_for("Authorization completed.");
+    tui.click_last_text("Close");
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("TUI fixture"));
-    runtime.block_on(async {
-        let CredentialVaultQueryResult::Status { status } =
-            client.credential_status(locator.clone()).await.unwrap()
-        else {
-            panic!()
-        };
-        assert!(matches!(
-            status.state,
-            CredentialState::Configured { revision: 3, .. }
-        ));
-        let catalog = client
-            .connection_catalog(ConnectionCatalogQueryInput::Start)
-            .await
-            .unwrap();
-        assert_eq!(
-            catalog["revision"], 2,
-            "key changes without prior test status do not rewrite the connection"
-        );
-        assert_eq!(
-            client
-                .session("credential-chat")
-                .await
-                .unwrap()
-                .unwrap()
-                .revision,
-            1
-        );
-    });
+    let authenticated = runtime
+        .block_on(client.request(Operation::CredentialVaultQuery, json!({"locator":locator})))
+        .unwrap();
+    assert_ne!(
+        authenticated["status"]["credentialId"],
+        rotated["status"]["credentialId"]
+    );
+
     tui.click_text("Workspace");
     tui.wait_for("Key verification");
     tui.click_text("Key verification");
@@ -142,51 +108,25 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
     tui.send(b"Verify saved key\x13");
     tui.wait_for("New key accepted");
     runtime.block_on(provider).unwrap();
-    tui.click_text("⛭ Settings");
-    tui.wait_for("Model connections");
-    tui.click_text("Model connections");
-    tui.wait_for("TUI fixture");
-    tui.click_text("TUI fixture");
-    open(&mut tui, true);
-    tui.wait_for("Key configured");
-    tui.wait_for("Clear key");
-    tui.send(b"\r");
+    connections(&mut tui);
+    clear(&mut tui);
+    tui.wait_for("Credential configured");
+    tui.send(b"\r"); // Cancellation is the default, even after a successful login.
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("TUI fixture"));
-    runtime.block_on(async {
-        assert!(matches!(
-            client.credential_status(locator.clone()).await.unwrap(),
-            CredentialVaultQueryResult::Status {
-                status: CredentialStatus {
-                    state: CredentialState::Configured { revision: 3, .. },
-                    ..
-                }
-            }
-        ));
-    });
-    open(&mut tui, true);
-    tui.wait_for("Key configured");
-    tui.wait_for("Clear key");
-    tui.click_last_text("Clear key");
+    assert_eq!(
+        runtime
+            .block_on(client.request(Operation::CredentialVaultQuery, json!({"locator":locator})))
+            .unwrap(),
+        authenticated
+    );
+    clear(&mut tui);
+    tui.wait_for("Credential configured");
+    tui.click_last_text("Clear credential");
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("TUI fixture"));
-    runtime.block_on(async {
-        assert!(matches!(
-            client.credential_status(locator.clone()).await.unwrap(),
-            CredentialVaultQueryResult::Status {
-                status: CredentialStatus {
-                    state: CredentialState::Absent,
-                    ..
-                }
-            }
-        ));
-    });
-    open(&mut tui, true);
-    tui.wait_for("No saved key");
-    tui.click_last_text("Clear key");
-    tui.send(b"\x1b");
-    tui.wait_until(|s| !s.contains("Cancel"));
-    open(&mut tui, false);
-    tui.wait_for("No saved key");
-    tui.send(b"never-persist-key-draft");
+    let absent = runtime
+        .block_on(client.request(Operation::CredentialVaultQuery, json!({"locator":locator})))
+        .unwrap();
+    assert_eq!(absent["status"]["configured"], false);
     tui.send(b"\x11");
     tui.finish();
     let checkpoint = directory
@@ -195,12 +135,7 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
         .join(&client.identity.root_id)
         .join("default/state.json");
     let saved = std::fs::read_to_string(checkpoint).unwrap();
-    for secret in [
-        "discarded-conflicting-key",
-        "external-rotation-key",
-        "new-terminal-key",
-        "never-persist-key-draft",
-    ] {
+    for secret in ["external-rotation-key", "new-terminal-key"] {
         assert!(!String::from_utf8_lossy(&tui.output).contains(secret));
         assert!(!saved.contains(secret));
     }
@@ -209,12 +144,14 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
     assert!(host.wait_for_exit().success());
 }
 
-fn open(tui: &mut Pty, clear: bool) {
-    tui.filter_command("API key");
-    if clear {
-        tui.click_text("Clear API key");
-    } else {
-        // Match the standalone command rather than its substring in Clear API key.
-        tui.click_text("API key");
-    }
+fn connections(tui: &mut Pty) {
+    tui.click_text("⛭ Settings");
+    tui.wait_for("Model connections");
+    tui.click_text("Model connections");
+    tui.wait_for("› TUI fixture");
+    tui.click_text("TUI fixture");
+}
+fn clear(tui: &mut Pty) {
+    tui.filter_command("Clear credential");
+    tui.click_text("Clear credential");
 }

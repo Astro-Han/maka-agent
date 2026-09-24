@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { copy } from './client/copy.js';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ClientPlugin, ClientContext, ClientSlots } from '@maka-agent/plugin-sdk/client';
 type Recap =
@@ -29,7 +31,7 @@ function RecapView({
   sessionId,
   locale,
 }: ClientSlots['session.inspector.overview'] & { context: ClientContext }) {
-  const zh = locale !== 'en';
+  const t = copy[locale];
   const call = useMemo(
     () => context.remote.method<Request, { recap: Recap | null }>('request', sessionId),
     [context, sessionId],
@@ -67,7 +69,7 @@ function RecapView({
     setBusy(true);
     setError('');
     setRetry(operationId);
-    const version = generation.current;
+    const version = ++generation.current;
     try {
       const r = await call({ kind: 'generate', operationId });
       if (version !== generation.current || context.signal.aborted) return;
@@ -84,41 +86,25 @@ function RecapView({
   }
   return (
     <section data-maka-recap>
-      <h3>{zh ? '任务回顾' : 'Session recap'}</h3>
-      <p>
-        {zh
-          ? '根据会话历史生成一句回顾，使用本会话选定的模型。'
-          : 'Summarize this conversation in one sentence using its selected model.'}
-      </p>
+      <h3>{t.title}</h3>
+      <p>{t.description}</p>
       {recap?.kind === 'ready' && (
         <>
           <p>{recap.text}</p>
           <small>{recap.modelId}</small>
         </>
       )}
-      {retry && !busy && (
-        <p role="status">
-          {zh
-            ? '结果尚未确认，请先查询原请求。生成新回顾可能产生额外模型费用。'
-            : 'The result is unconfirmed. Check the original request first; generating again may incur another model charge.'}
-        </p>
-      )}
-      {recap?.kind === 'failed' && (
-        <p role="status">
-          {zh
-            ? '未能生成完整回顾，请检查会话模型后重试。'
-            : 'A complete recap could not be generated. Check the session model and try again.'}
-        </p>
-      )}
+      {retry && !busy && <p role="status">{t.unconfirmed}</p>}
+      {recap?.kind === 'failed' && <p role="status">{t.failed}</p>}
       {error && <p role="alert">{error}</p>}
       <div>
         {retry && (
           <button disabled={busy} onClick={() => void generate(retry)}>
-            {zh ? '查询原请求' : 'Check original request'}
+            {t.checkOriginal}
           </button>
         )}
         <button disabled={busy} onClick={() => void generate(crypto.randomUUID())}>
-          {busy ? (zh ? '处理中…' : 'Working…') : zh ? '生成新回顾' : 'Generate new recap'}
+          {busy ? t.working : t.generate}
         </button>
       </div>
     </section>

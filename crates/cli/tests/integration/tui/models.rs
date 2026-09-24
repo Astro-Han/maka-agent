@@ -52,17 +52,15 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
         let default = catalog["defaultTarget"].clone();
         let created = client.request(Operation::ConnectionCatalogCreate,json!({
             "expectedCatalogRevision":catalog["revision"],"connection":{
-                "slug":"alternate","name":"Alternate connection","providerType":"openai-compatible",
-                "baseUrl":url,"enabled":true,"enabledModelIds":["fixture-model"],
+                "slug":"alternate","name":"Alternate connection","provider":support::provider(&client,"openai-compatible").await,
+                "configuration":{"baseUrl":url},"enabled":true,"enabledModelIds":["fixture-model"],
                 "modelOverrides":{"fixture-model":{"displayName":"Alternate model","contextWindow":64000,"thinkingLevels":["low","high"]}}
             }
         })).await.unwrap();
-        let alternate = created["connection"].clone();
-        client.request(Operation::CredentialVaultSet,json!({
-            "locator":{"scope":"connection","connectionId":alternate["connectionId"],"kind":"api_key"},"expected":null,
-            "expectedConnection":{"connectionId":alternate["connectionId"],"revision":alternate["revision"],
-                "slug":"alternate","providerType":"openai-compatible","effectiveBaseUrl":url},"secret":"dummy-alternate"
-        })).await.unwrap();
+        support::authenticate(&client, &created["connection"]["connectionId"], "dummy-alternate").await;
+        let (_, rows) = super::enabled_models::catalog(&client).await;
+        let alternate = rows.iter().find(|row| row["kind"] == "connection" && row["connectionId"] == created["connection"]["connectionId"]).unwrap();
+        let alternate = json!({"connectionId":alternate["connectionId"],"revision":alternate["revision"]});
         let task = tokio::spawn(async move {
             let (mut stream,body) = model_request(&listener).await;
             assert!(body.to_string().contains("switch-keeps-draft"));
@@ -91,7 +89,7 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
             .request(
                 Operation::ConnectionCatalogUpdate,
                 json!({
-                    "expected":alternate,"changes":{"name":"Alternate connection","baseUrl":url,"enabled":false,"enabledModelIds":["fixture-model"]}
+                    "expected":alternate,"changes":{"name":"Alternate connection","configuration":{"baseUrl":url},"enabled":false,"enabledModelIds":["fixture-model"]}
                 }),
             )
             .await
@@ -112,7 +110,7 @@ fn model_choice_preserves_session_draft_and_default_and_uses_selected_context_wi
             .request(
                 Operation::ConnectionCatalogUpdate,
                 json!({
-                    "expected":alternate,"changes":{"name":"Alternate connection","baseUrl":url,"enabled":true,"enabledModelIds":["fixture-model"]}
+                    "expected":alternate,"changes":{"name":"Alternate connection","configuration":{"baseUrl":url},"enabled":true,"enabledModelIds":["fixture-model"]}
                 }),
             )
             .await

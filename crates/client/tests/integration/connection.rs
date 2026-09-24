@@ -82,18 +82,23 @@ async fn unsolicited_frames_and_reversed_responses_reach_their_consumers() {
     });
     let a = reader.read().await.unwrap().unwrap();
     let b = reader.read().await.unwrap().unwrap();
-    writer
-        .write(&json!({"kind":"configuration.changed","revision":5}))
-        .await
-        .unwrap();
+    for kind in ["configuration.changed", "model.provider.catalog.changed"] {
+        writer
+            .write(&json!({"kind":kind,"revision":5}))
+            .await
+            .unwrap();
+    }
     writer.write(&reply(&b)).await.unwrap();
     writer.write(&reply(&a)).await.unwrap();
     assert_eq!(first.await.unwrap().unwrap(), json!({}));
     assert_eq!(second.await.unwrap().unwrap(), json!({}));
-    let maka_client::Notification::Catalog(notice) = notifications.recv().await.unwrap() else {
-        panic!("expected catalog invalidation");
-    };
-    assert_eq!(notice.revision, 5);
+    for kind in ["configuration.changed", "model.provider.catalog.changed"] {
+        let maka_client::Notification::Catalog(notice) = notifications.recv().await.unwrap() else {
+            panic!("expected catalog invalidation");
+        };
+        assert_eq!(notice.kind, kind);
+        assert_eq!(notice.revision, 5);
+    }
 }
 
 #[tokio::test]

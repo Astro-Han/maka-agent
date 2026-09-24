@@ -20,10 +20,34 @@
 use super::*;
 use sqlx::SqliteConnection;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LoginReceipt {
     pub target: Target,
+    pub method: String,
+    request_fingerprint: String,
     pub connection: ConnectionIdentity,
+    pub phase: Phase,
+}
+
+impl LoginReceipt {
+    pub fn matches(&self, input: &LoginStart) -> bool {
+        self.target == input.target
+            && self.method == input.authentication.method
+            && input
+                .fingerprint()
+                .is_ok_and(|digest| digest == self.request_fingerprint)
+    }
+
+    pub(super) fn new(input: LoginStart, connection: ConnectionIdentity) -> Result<Self> {
+        let request_fingerprint = input.fingerprint().map_err(ConfigError::Invalid)?;
+        Ok(Self {
+            target: input.target,
+            method: input.authentication.method,
+            request_fingerprint,
+            connection,
+            phase: Phase::Authenticated,
+        })
+    }
 }
 
 pub(super) fn validate_attempt(value: &str) -> Result<()> {
@@ -39,19 +63,27 @@ pub(super) fn validate_attempt(value: &str) -> Result<()> {
 }
 
 pub(super) async fn read(tx: &mut SqliteConnection, attempt: &str) -> Result<Option<LoginReceipt>> {
-    let saved: Option<(String, String)> =
-        sqlx::query_as("SELECT target, connection FROM oauth_login_receipts WHERE attempt_id = ?")
+    let saved: Option<(String, String, String, String, String)> =
+        sqlx::query_as("SELECT target, method, request_fingerprint, connection, phase FROM oauth_login_receipts WHERE attempt_id = ?")
             .bind(attempt)
             .fetch_optional(&mut *tx)
             .await?;
-    let Some((target, connection)) = saved else {
+    let Some((target, method, request_fingerprint, connection, phase)) = saved else {
         return Ok(None);
     };
     let saved = LoginReceipt {
         target: serde_json::from_str(&target)?,
+        method,
+        request_fingerprint,
         connection: serde_json::from_str(&connection)?,
+        phase: serde_json::from_str(&phase)?,
     };
-    if !saved.target.matches(&saved.connection) {
+    if !saved.target.matches(&saved.connection)
+        || matches!(
+            saved.phase,
+            Phase::AwaitingAuthorization | Phase::Committing
+        )
+    {
         return Err(ConfigError::Invalid(
             "inconsistent OAuth receipt identity".into(),
         ));
@@ -65,16 +97,25 @@ pub(super) async fn write(
     saved: &LoginReceipt,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT INTO oauth_login_receipts(attempt_id, target, connection) VALUES (?, ?, ?)",
+        "INSERT INTO oauth_login_receipts(attempt_id, target, method, request_fingerprint, connection, phase) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(attempt_id) DO UPDATE SET phase = excluded.phase",
     )
     .bind(attempt)
     .bind(serde_json::to_string(&saved.target)?)
+    .bind(&saved.method)
+    .bind(&saved.request_fingerprint)
     .bind(serde_json::to_string(&saved.connection)?)
+    .bind(serde_json::to_string(&saved.phase)?)
     .execute(&mut *tx)
     .await?;
     // Monotonic SQLite order is internal; no timestamp tie or public counter.
-    sqlx::query("DELETE FROM oauth_login_receipts WHERE completion_order NOT IN
-        (SELECT completion_order FROM oauth_login_receipts ORDER BY completion_order DESC LIMIT 256)")
+    sqlx::query("DELETE FROM oauth_login_receipts WHERE json_extract(phase, '$.phase') != 'exchanging' AND completion_order NOT IN
+        (SELECT completion_order FROM oauth_login_receipts WHERE json_extract(phase, '$.phase') != 'exchanging' ORDER BY completion_order DESC LIMIT 256)")
         .execute(&mut *tx).await?;
     Ok(())
+}
+
+pub(super) async fn pending_count(tx: &mut SqliteConnection) -> Result<i64> {
+    Ok(sqlx::query_scalar("SELECT count(*) FROM oauth_login_receipts WHERE json_extract(phase, '$.phase') = 'exchanging'")
+        .fetch_one(tx).await?)
 }

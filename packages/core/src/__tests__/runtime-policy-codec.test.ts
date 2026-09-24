@@ -26,7 +26,6 @@ import {
   decodeModelOverridesTable,
   normalizeCreateCatalogConnectionInput,
   normalizeConnectionCatalogEntryUpdate,
-  normalizeConnectionCatalogEntryUpdateForProvider,
   normalizeConnectionModelDiscoveryResult,
   normalizeRuntimePolicyMutation,
   normalizeSetCredentialInput,
@@ -133,326 +132,82 @@ test('normalizes only the bounded agent settings patch surface', () => {
   );
 });
 
-test('normalizes catalog inputs while canonical entries reject noncanonical endpoints', () => {
+test('catalog preserves opaque provider configuration and independent model policy', () => {
+  const provider = {
+    packageId: 'external.provider',
+    entryId: 'custom',
+    scope: 'profile',
+    name: 'account',
+  };
+  const configuration = { endpoint: 'https://proxy.example:443/v1', region: { name: 'custom' } };
   const input = normalizeCreateCatalogConnectionInput({
     expectedCatalogRevision: 0,
     connection: {
-      slug: 'openai-main',
-      name: 'OpenAI',
-      providerType: 'openai',
-      baseUrl: 'https://proxy.example:443/v1',
+      slug: 'external-account',
+      name: 'External',
+      provider,
+      configuration,
       enabled: true,
       enabledModelIds: [],
-    },
-  });
-  assert.equal(input.connection.baseUrl, 'https://proxy.example/v1');
-
-  assert.throws(
-    () =>
-      normalizeCreateCatalogConnectionInput({
-        expectedCatalogRevision: 0,
-        connection: {
-          slug: 'unicode-relay',
-          name: 'Unicode relay',
-          providerType: 'openai-compatible',
-          baseUrl: `https://example.test/${'界'.repeat(2_000)}`,
-          enabled: true,
-          enabledModelIds: [],
+      modelOverrides: {
+        future: {
+          thinkingLevels: ['high', 'max'],
+          defaultThinkingLevel: 'max',
+          codeMode: true,
+          applyPatch: false,
         },
-      }),
-    /must not exceed 2048 bytes/,
-  );
-
-  assert.throws(
-    () =>
-      decodeCanonicalConnectionCatalogEntry({
-        ...input.connection,
-        connectionId: '123e4567-e89b-42d3-a456-426614174000',
-        revision: 1,
-        baseUrl: 'https://proxy.example:443/v1',
-        models: [],
-      }),
-    RuntimePolicyDomainDecodeError,
-  );
-});
-
-for (const [slug, detail] of [
-  ['', 'Slug is required'],
-  ['Not A Slug', 'Slug must be lowercase letters, digits, and hyphens'],
-  ['a'.repeat(65), 'Slug must be 64 characters or fewer'],
-]) {
-  test(`catalog decoding preserves the diagnostic: ${detail}`, () => {
-    assert.throws(
-      () =>
-        decodeCanonicalConnectionCatalogEntry({
-          connectionId: '123e4567-e89b-42d3-a456-426614174000',
-          revision: 1,
-          slug,
-          name: 'OpenAI',
-          providerType: 'openai',
-          enabled: true,
-          enabledModelIds: [],
-          models: [],
-        }),
-      { name: 'RuntimePolicyDomainDecodeError', message: `connection slug: ${detail}` },
-    );
-  });
-}
-
-test('rejects new connections for the retired Gemini CLI account provider', () => {
-  assert.throws(
-    () =>
-      normalizeCreateCatalogConnectionInput({
-        expectedCatalogRevision: 0,
-        connection: {
-          slug: 'gemini-account',
-          name: 'Gemini account',
-          providerType: 'gemini-cli',
-          enabled: true,
-          enabledModelIds: [],
-        },
-      }),
-    /provider type is not registered/,
-  );
-});
-
-test('relay model profiles round-trip canonical entries and drafts, strictly', () => {
-  const table = {
-    'relay-reasoner': {
-      thinkingLevels: ['minimal', 'low'],
-      vision: true,
-      contextWindow: 128_000,
-      serviceTier: 'fast',
-    },
-  };
-  const draft = normalizeCreateCatalogConnectionInput({
-    expectedCatalogRevision: 0,
-    connection: {
-      slug: 'relay',
-      name: 'Relay',
-      providerType: 'openai-compatible',
-      baseUrl: 'https://relay.example/v1',
-      enabled: true,
-      enabledModelIds: ['relay-reasoner'],
-      modelOverrides: table,
+      },
     },
   });
-  assert.deepEqual(draft.connection.modelOverrides, table);
-  const responsesDraft = normalizeCreateCatalogConnectionInput({
-    expectedCatalogRevision: 0,
-    connection: {
-      slug: 'responses-relay',
-      name: 'Responses Relay',
-      providerType: 'openai-responses-compatible',
-      baseUrl: 'https://responses.example/v1',
-      enabled: true,
-      enabledModelIds: ['relay-reasoner'],
-      modelOverrides: table,
-    },
-  });
-  assert.deepEqual(responsesDraft.connection.modelOverrides, table);
-  // The canonical path re-decodes the same table (entry = draft + identity).
-  const entry = decodeCanonicalConnectionCatalogEntry({
-    ...draft.connection,
+  assert.deepEqual(input.connection.configuration, configuration);
+  const stored = {
+    ...input.connection,
     connectionId: '123e4567-e89b-42d3-a456-426614174000',
     revision: 1,
     models: [],
-  });
-  assert.deepEqual(entry.modelOverrides, table);
-
-  // An empty table is never a state: drafts omit the key, updates read it as
-  // the same clear-instruction `null` gives.
-  const emptyDraft = normalizeCreateCatalogConnectionInput({
-    expectedCatalogRevision: 0,
-    connection: {
-      slug: 'relay',
-      name: 'Relay',
-      providerType: 'openai-compatible',
-      enabled: true,
-      enabledModelIds: [],
-      modelOverrides: {},
-    },
-  });
-  assert.equal(emptyDraft.connection.modelOverrides, undefined);
-  const emptyUpdate = normalizeConnectionCatalogEntryUpdate({
-    name: 'Relay',
-    enabled: true,
-    enabledModelIds: [],
-    modelOverrides: {},
-  });
-  assert.equal(emptyUpdate.modelOverrides, null);
-
-  // The update input is tri-state: null (or the equivalent {}) clears, a
-  // table replaces, and an ABSENT key means untouched — absent must never
-  // materialize into a clear, which is what keeps profile-blind writers
-  // safe.
-  const update = normalizeConnectionCatalogEntryUpdate({
-    name: 'Relay',
-    enabled: true,
-    enabledModelIds: [],
+  };
+  assert.deepEqual(decodeCanonicalConnectionCatalogEntry(stored), stored);
+  for (const changes of [
+    { provider: { ...provider, packageId: 'Other Provider' } },
+    { provider: { ...provider, scope: 'desktop-ui' } },
+    { configuration: { data: 'x'.repeat(65536) } },
+    { baseUrl: 'https://old-shape.example' },
+  ])
+    assert.throws(
+      () => decodeCanonicalConnectionCatalogEntry({ ...stored, ...changes }),
+      RuntimePolicyDomainDecodeError,
+    );
+  const update = { name: 'Updated', configuration, enabled: false, enabledModelIds: [] };
+  assert.deepEqual(normalizeConnectionCatalogEntryUpdate(update), update);
+  assert.deepEqual(normalizeConnectionCatalogEntryUpdate({ ...update, modelOverrides: null }), {
+    ...update,
     modelOverrides: null,
   });
-  assert.equal(update.modelOverrides, null);
-  const absentUpdate = normalizeConnectionCatalogEntryUpdate({
-    name: 'Relay',
-    enabled: true,
-    enabledModelIds: [],
-  });
-  assert.deepEqual(absentUpdate, {
-    name: 'Relay',
-    enabled: true,
-    enabledModelIds: [],
-  });
-
-  // The write seam splits the table by FIELD, not by provider (#1584).
-  // `contextWindow` and `vision` state facts about a model, and a user has
-  // them when Maka does not — a model newer than the bundled snapshot, or any
-  // model on a provider with no model-list endpoint — so they are legal
-  // everywhere.
-  const facts = { 'relay-reasoner': { vision: true, contextWindow: 128_000 } };
-  assert.deepEqual(
-    normalizeCreateCatalogConnectionInput({
-      expectedCatalogRevision: 0,
-      connection: {
-        slug: 'not-a-relay',
-        name: 'Other',
-        providerType: 'openai',
-        enabled: true,
-        enabledModelIds: ['relay-reasoner'],
-        modelOverrides: facts,
-      },
-    }).connection.modelOverrides,
-    facts,
-  );
-  assert.deepEqual(
-    normalizeConnectionCatalogEntryUpdateForProvider(
-      {
-        name: 'Other',
-        enabled: true,
-        enabledModelIds: ['relay-reasoner'],
-        modelOverrides: facts,
-      },
-      'anthropic',
-    ).modelOverrides,
-    facts,
-  );
-
-  // `thinkingLevels` and `serviceTier` name a wire feature only the
-  // OpenAI-compatible relays accept, so they stay relay-only on both write
-  // paths: elsewhere they are a request Maka would never send.
-  for (const wireShaped of [
-    { 'relay-reasoner': { thinkingLevels: ['low'] } },
-    { 'relay-reasoner': { serviceTier: 'fast' } },
-  ]) {
-    assert.throws(
-      () =>
-        normalizeCreateCatalogConnectionInput({
-          expectedCatalogRevision: 0,
-          connection: {
-            slug: 'not-a-relay',
-            name: 'Other',
-            providerType: 'openai',
-            enabled: true,
-            enabledModelIds: ['relay-reasoner'],
-            modelOverrides: wireShaped,
-          },
-        }),
-      /require[s]? an OpenAI-compatible connection/,
-      JSON.stringify(wireShaped),
-    );
-    assert.throws(
-      () =>
-        normalizeConnectionCatalogEntryUpdateForProvider(
-          {
-            name: 'Other',
-            enabled: true,
-            enabledModelIds: ['relay-reasoner'],
-            modelOverrides: wireShaped,
-          },
-          'anthropic',
-        ),
-      /require[s]? an OpenAI-compatible connection/,
-      JSON.stringify(wireShaped),
-    );
-  }
-
-  assert.equal(
-    normalizeConnectionCatalogEntryUpdateForProvider(
-      { name: 'Other', enabled: true, enabledModelIds: [], modelOverrides: null },
-      'anthropic',
-    ).modelOverrides,
-    null,
-  );
-
   assert.deepEqual(
     normalizeConnectionCatalogEntryUpdate({
-      name: 'Relay',
-      enabled: true,
-      enabledModelIds: [],
-      modelOverrides: { 'disabled-model': { vision: true } },
-    }).modelOverrides,
-    { 'disabled-model': { vision: true } },
-  );
-
-  assert.deepEqual(
-    decodeModelOverridesTable({
-      custom: { adapter: 'example.responses' },
-      codeOnly: { codeMode: true, applyPatch: false },
-      patchOnly: { codeMode: false, applyPatch: true },
+      ...update,
+      modelOverrides: input.connection.modelOverrides,
     }),
     {
-      custom: { adapter: 'example.responses' },
-      codeOnly: { codeMode: true, applyPatch: false },
-      patchOnly: { codeMode: false, applyPatch: true },
+      ...update,
+      modelOverrides: input.connection.modelOverrides,
     },
   );
-
-  // Model ids are relay-supplied strings; __proto__/constructor/toString
-  // must survive the table as ordinary own keys — the decode builds the
-  // table with fromEntries precisely so '__proto__' cannot poison the result
-  // object's prototype and quietly drop the entry.
-  const hostileTable = decodeModelOverridesTable(
-    // An object literal could not even express `__proto__` as an own key —
-    // the deserialized document is the realistic carrier of a hostile id.
-    JSON.parse(
-      '{"__proto__":{"vision":true},"constructor":{"vision":false},"toString":{"contextWindow":8192}}',
-    ),
-  );
-  assert.deepEqual(Object.keys(hostileTable).sort(), ['__proto__', 'constructor', 'toString']);
-  assert.equal(JSON.stringify(hostileTable).includes('"__proto__"'), true);
-
-  // Strictness: writers emit normalized tables, so anything else is corrupt.
-  assert.deepEqual(
-    decodeModelOverridesTable({
-      m: { thinkingLevels: ['off', 'high', 'max'] },
-    }),
-    {
-      m: { thinkingLevels: ['off', 'high', 'max'] },
-    },
-  );
-  for (const bad of [
-    'nope',
-    [],
-    { m: { thinkingLevels: ['turbo'] } }, // unknown level
-    { m: { thinkingLevels: ['low', 'low'] } }, // duplicate
-    { m: { thinkingLevels: [] } }, // empty level list
-    { m: { vision: 'yes' } },
-    { m: { codeMode: 'true' } },
-    { m: { applyPatch: null } },
-    { m: { adapter: '' } },
-    { m: { adapter: 'example\nresponses' } },
-    { m: { adapter: 'x'.repeat(257) } },
-    { m: { contextWindow: 0 } },
-    { m: { contextWindow: 1.5 } },
-    { m: { contextWindow: 2 ** 60 } }, // not within 1..MAX_SAFE_INTEGER
-    { m: { vision: true, extra: 1 } }, // unknown key in the entry
-  ]) {
+  const hostile = JSON.parse('{"__proto__":{"vision":true},"constructor":{"vision":false}}');
+  assert.deepEqual(decodeModelOverridesTable(hostile), hostile);
+  for (const profile of [
+    { thinkingLevels: ['high', 'high'] },
+    { thinkingLevels: [] },
+    { adapter: '' },
+    { contextWindow: 0 },
+    { codeMode: 'true' },
+    { applyPatch: null },
+    { extra: true },
+  ])
     assert.throws(
-      () => decodeModelOverridesTable(bad),
+      () => decodeModelOverridesTable({ future: profile }),
       RuntimePolicyDomainDecodeError,
-      JSON.stringify(bad),
     );
-  }
 });
 
 test('normalizes exact bounded model discovery results', () => {
@@ -543,17 +298,21 @@ test('rejects sparse model modality arrays', () => {
   );
 });
 
-test('credential domain validation requires material but leaves capacity to callers', () => {
+test('provider envelopes cannot bypass login receipts through raw vault writes', () => {
   const input = normalizeSetCredentialInput({
     locator: {
       scope: 'connection',
       connectionId: '123e4567-e89b-42d3-a456-426614174000',
-      kind: 'api_key',
+      kind: 'request_headers',
     },
     expected: null,
-    secret: 's'.repeat(20 * 1024),
+    secret: JSON.stringify({ 'x-custom': 'value' }),
   });
-  assert.equal(input.secret.length, 20 * 1024);
+  assert.throws(
+    () =>
+      normalizeSetCredentialInput({ ...input, locator: { ...input.locator, kind: 'provider' } }),
+    /authentication receipt/,
+  );
   assert.throws(
     () => normalizeSetCredentialInput({ ...input, secret: '' }),
     RuntimePolicyDomainDecodeError,

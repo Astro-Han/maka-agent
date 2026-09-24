@@ -43,7 +43,7 @@
  * stays silent.
  */
 
-import { type IdentifiedLlmConnection } from '@maka/core/llm-connections';
+import type { ConnectionCatalogEntry } from '@maka/core/runtime-policy';
 
 import { type SessionSendProjection, type SessionSendProjectionSession } from '@maka/core/session-send-projection';
 
@@ -62,7 +62,7 @@ export interface SessionHealthNoticeInput {
   /** Main-process projection from the latest onboarding snapshot. */
   outcome: SessionSendProjection | undefined;
   /** Persisted connections are used only to name a blocked session's own connection. */
-  connections: readonly IdentifiedLlmConnection[];
+  connections: readonly Pick<ConnectionCatalogEntry, 'connectionId' | 'slug' | 'name'>[];
   /** Whether the current surface can offer an exact account-and-model choice. */
   hasModelChoices: boolean;
   /** False while the active Host's first connection snapshot is still loading. */

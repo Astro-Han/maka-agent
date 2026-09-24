@@ -47,7 +47,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
             let result = client.request(Operation::ConnectionCatalogCreate, json!({
                 "expectedCatalogRevision":revision,
                 "connection":{"name":format!("Directory {index:02}"),"slug":format!("directory-{index}"),
-                    "providerType":"openai-compatible","baseUrl":"http://127.0.0.1:9/v1",
+                    "provider":support::provider(&client,"openai-compatible").await,"configuration":{"baseUrl":"http://127.0.0.1:9/v1"},
                     "enabled":index != 1,"enabledModelIds":models}
             })).await.unwrap();
             revision = result["catalogRevision"].as_u64().unwrap();
@@ -71,7 +71,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
         assert_eq!(client.connection_catalog(Query::Start).await.unwrap()["revision"], revision,
             "navigation and overview reads must not write configuration");
         client.request(Operation::ConnectionCatalogUpdate, json!({
-            "expected":targets[17],"changes":{"name":"Updated elsewhere","baseUrl":"http://127.0.0.1:9/v1",
+            "expected":targets[17],"changes":{"name":"Updated elsewhere","configuration":{"baseUrl":"http://127.0.0.1:9/v1"},
             "enabled":false,"enabledModelIds":[]}
         })).await.unwrap();
     });
@@ -122,17 +122,14 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
         changes["requestBodyOverlay"] = json!({"temperature":0.3});
         let updated = client.request(Operation::ConnectionCatalogUpdate,
             json!({"expected":targets[0],"changes":changes})).await.unwrap();
-        let expected = updated["connection"].clone();
-        let locator = json!({"scope":"connection","connectionId":expected["connectionId"],"kind":"api_key"});
-        client.request(Operation::CredentialVaultSet,json!({
-            "locator":locator,"expected":null,
-            "expectedConnection":{"connectionId":expected["connectionId"],"revision":expected["revision"],
-                "slug":"directory-0","providerType":"openai-compatible","effectiveBaseUrl":"http://127.0.0.1:9/v1"},
-            "secret":"directory-test-secret"
-        })).await.unwrap();
+        support::authenticate(&client, &updated["connection"]["connectionId"], "directory-test-secret").await;
+        let current = client.connection_catalog(Query::Start).await.unwrap();
+        let row = &current["items"][0];
+        let expected = json!({"connectionId":row["connectionId"],"revision":row["revision"]});
+        let locator = json!({"scope":"connection","connectionId":expected["connectionId"],"kind":"provider"});
         let default = json!({"connectionId":expected["connectionId"],"modelId":"model-0"});
         client.request(Operation::ConnectionCatalogSetDefaultTarget,json!({
-            "expectedCatalogRevision":updated["catalogRevision"],"target":default
+            "expectedCatalogRevision":current["revision"],"target":default
         })).await.unwrap();
         client.create_session(maka_protocol::session::decode_session_create_input(&json!({
             "sessionId":"retained-history","name":"History stays","workspace":{"kind":"host_path","path":directory.path()},
@@ -177,7 +174,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
             "renaming preserves every enabled model across wire pages"
         );
         assert_eq!(row["requestBodyOverlay"], json!({"temperature":0.3}));
-        assert_eq!(row["baseUrl"], "http://127.0.0.1:9/v1");
+        assert_eq!(row["configuration"]["baseUrl"], "http://127.0.0.1:9/v1");
         assert_eq!(catalog["defaultTarget"], default);
         let model = client
             .connection_catalog(Query::Continue {
@@ -208,14 +205,14 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
         .block_on(client.connection_catalog(Query::Start))
         .unwrap()["revision"]
         .clone();
-    reopened.filter_command("Change service address");
-    reopened.click_text("Change service address");
+    reopened.filter_command("Edit provider configuration");
+    reopened.click_text("Edit provider configuration");
     reopened.wait_for("Review");
     reopened.send(b"not a URL\r");
-    reopened.wait_for("Enter an HTTP(S) address");
-    reopened.send(b"\x01http://127.0.0.1:9/v2\r");
-    reopened.wait_for("Use this service address?");
-    reopened.wait_for("Change address");
+    reopened.wait_for("Enter a valid provider configuration");
+    reopened.send(b"\x01{\"baseUrl\":\"http://127.0.0.1:9/v2\"}\r");
+    reopened.wait_for("Use this provider configuration?");
+    reopened.wait_for("Apply configuration");
     reopened.send(b"\r"); // Review defaults to Cancel; no mutation yet.
     reopened.wait_until(|s| !s.contains("Cancel") && s.contains("连接已改名"));
     assert_eq!(
@@ -224,17 +221,20 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
             .unwrap()["revision"],
         before_endpoint
     );
-    reopened.filter_command("Change service address");
-    reopened.click_text("Change service address");
+    reopened.filter_command("Edit provider configuration");
+    reopened.click_text("Edit provider configuration");
     reopened.wait_for("Review");
-    reopened.send(b"http://127.0.0.1:9/v2\r");
-    reopened.wait_for("Use this service address?");
-    reopened.wait_for("Change address");
-    reopened.click_last_text("Change address");
+    reopened.send(b"{\"baseUrl\":\"http://127.0.0.1:9/v2\"}\r");
+    reopened.wait_for("Use this provider configuration?");
+    reopened.wait_for("Apply configuration");
+    reopened.click_last_text("Apply configuration");
     reopened.wait_until(|s| !s.contains("Cancel") && s.contains("连接已改名"));
     runtime.block_on(async {
         let catalog = client.connection_catalog(Query::Start).await.unwrap();
-        assert_eq!(catalog["items"][0]["baseUrl"], "http://127.0.0.1:9/v2");
+        assert_eq!(
+            catalog["items"][0]["configuration"]["baseUrl"],
+            "http://127.0.0.1:9/v2"
+        );
         assert_eq!(catalog["items"][0]["enabledModelIdCount"], 128);
         assert_eq!(
             catalog["items"][0]["requestBodyOverlay"],
@@ -363,6 +363,6 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
 }
 
 fn changes(name: &str, enabled: bool) -> serde_json::Value {
-    json!({"name":name,"baseUrl":"http://127.0.0.1:9/v1","enabled":enabled,
+    json!({"name":name,"configuration":{"baseUrl":"http://127.0.0.1:9/v1"},"enabled":enabled,
         "enabledModelIds":(0..128).map(|i|format!("model-{i}")).collect::<Vec<_>>()})
 }

@@ -25,6 +25,7 @@ mod changes;
 pub mod connection_test;
 mod database;
 mod effect_snapshot;
+pub use effect_snapshot::ConnectionObservation;
 pub mod model_catalog;
 pub mod model_fetch;
 pub mod network;

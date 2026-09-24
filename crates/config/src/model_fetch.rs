@@ -20,7 +20,6 @@
 use crate::{
     ConfigError, ConfigurationStore, Result, TransactionMode, catalog,
     effect_snapshot::{EffectSnapshot, same_test_basis},
-    model_catalog,
 };
 use maka_runtime::configuration::*;
 use std::sync::Arc;
@@ -29,12 +28,9 @@ use std::sync::Arc;
 pub enum ModelFetchPreparation {
     Ready(Box<PreparedModelFetch>),
     Rejected(ConnectionEffectRejectionReason),
-    /// The provider may support discovery, but this implementation does not yet.
-    Unsupported,
 }
 
 pub struct PreparedModelFetch {
-    protocol: ModelListProtocol,
     store: Arc<ConfigurationStore>,
     material: EffectSnapshot,
 }
@@ -57,19 +53,8 @@ impl ConfigurationStore {
                 if !connection.enabled {
                     return Ok(Preparation::Rejected(Rejected::ConnectionDisabled));
                 }
-                let facts = model_catalog::provider_facts(&connection.provider_type)?;
-                if facts.retired || !facts.supports_model_discovery {
-                    return Ok(Preparation::Rejected(Rejected::ProviderActionUnavailable));
-                }
-                let Some(protocol) = facts.native_model_list() else {
-                    return Ok(Preparation::Unsupported);
-                };
                 let material = EffectSnapshot::read(tx, connection).await?;
-                if !material.has_credential() {
-                    return Ok(Preparation::Rejected(Rejected::CredentialNotConfigured));
-                }
                 Ok(Preparation::Ready(Box::new(PreparedModelFetch {
-                    protocol,
                     store,
                     material,
                 })))
@@ -80,30 +65,19 @@ impl ConfigurationStore {
 }
 
 impl PreparedModelFetch {
-    pub fn oauth_credential(&self) -> Option<crate::oauth::OAuthCredential> {
-        self.material.oauth_credential(&self.store)
+    pub fn provider_credential(&self) -> Result<Option<crate::oauth::ProviderCredential>> {
+        self.material.provider_credential(&self.store)
     }
 
-    pub fn accept_oauth(&mut self, resolved: crate::oauth::OAuthCredential) -> Result<()> {
-        self.material.accept_oauth(&self.store, resolved)
+    pub fn accept_credential(&mut self, resolved: crate::oauth::ProviderCredential) -> Result<()> {
+        self.material.accept_credential(&self.store, resolved)
     }
 
     pub fn network_configuration(&self) -> &crate::network::NetworkConfiguration {
         &self.material.network.configuration
     }
-    pub fn protocol(&self) -> ModelListProtocol {
-        self.protocol
-    }
     pub fn connection(&self) -> &ConnectionCatalogEntry {
         &self.material.connection
-    }
-
-    pub fn endpoint(&self) -> &str {
-        &self.material.endpoint
-    }
-
-    pub fn api_key(&self) -> &str {
-        self.material.api_key().expect("prepared API key")
     }
 
     pub fn request_headers(&self) -> Option<&str> {

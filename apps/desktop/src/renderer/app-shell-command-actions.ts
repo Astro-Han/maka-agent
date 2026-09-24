@@ -19,7 +19,7 @@
 
 import { useMemo, useRef } from "react";
 import type { SessionCatalogController } from './application/contracts/session-catalog/session-catalog-state.js';
-import type { LlmConnection } from '@maka/core/llm-connections';
+import type { ProjectedLlmConnection } from '@maka/core/llm-connections';
 import type { SandboxMode } from '@maka/core/permission';
 import type { StoredMessage } from '@maka/core/session';
 import type { SettingsSection, ThemePreference } from '@maka/core/settings';
@@ -66,7 +66,7 @@ export interface AppShellCommandListOptions {
   activeSandboxMode: SandboxMode | undefined;
   canSetSandboxMode: boolean;
   clientPathsAccessible: boolean;
-  connections: LlmConnection[];
+  connections: ProjectedLlmConnection[];
   defaultConnection: string | null;
   messages: StoredMessage[];
   newTaskProfileId: string | undefined;
@@ -145,14 +145,14 @@ export function buildAppShellCommandList(
     // text input would be swallowed by the global keydown listener.
     onOpenShortcuts: () => optionsRef.current.openHelp(),
     onSetTheme: (next) => optionsRef.current.setThemePref(next),
-    onTestConnection: async (slug) => {
+    onTestConnection: async (connection) => {
       const { connections, refreshConnections, toastApi } = optionsRef.current;
       try {
         const { value: result, diagnosticTarget } = await runOnDefaultRuntimeHost((host) =>
-          window.maka.connections.test(slug, undefined, host),
+          window.maka.connections.test(connection, undefined, host),
         );
-        const conn = connections.find((c) => c.slug === slug);
-        const name = conn?.name ?? slug;
+        const conn = connections.find((c) => c.connectionId === connection.connectionId && c.slug === connection.slug);
+        const name = conn?.name ?? connection.slug;
         if (result.ok) {
           toastApi.success(
             copy.connectionVerified(name),
@@ -183,15 +183,15 @@ export function buildAppShellCommandList(
         );
       }
     },
-    onSetDefaultConnection: async (slug) => {
+    onSetDefaultConnection: async (connection) => {
       const { connections, refreshConnections, toastApi } = optionsRef.current;
       try {
         await runOnDefaultRuntimeHost((host) =>
-          window.maka.connections.setDefault(slug, host),
+          window.maka.connections.setDefault(connection, host),
         );
         await refreshConnections();
-        const conn = connections.find((c) => c.slug === slug);
-        toastApi.success(copy.setDefaultSuccess(conn?.name ?? slug));
+        const conn = connections.find((c) => c.connectionId === connection.connectionId && c.slug === connection.slug);
+        toastApi.success(copy.setDefaultSuccess(conn?.name ?? connection.slug));
       } catch (err) {
         toastApi.error(
           copy.setDefaultFailedTitle,

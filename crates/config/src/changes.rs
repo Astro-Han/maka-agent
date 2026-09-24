@@ -41,15 +41,9 @@ impl ConfigurationStore {
                         actual: Some(catalog::basis(&row)),
                     });
                 }
-                if row.provider_type == "gemini-cli" {
-                    return Err(ConfigError::Invalid(
-                        "retired provider cannot be edited".into(),
-                    ));
-                }
-                let changes =
-                    validation::normalize_update_for_provider(input.changes, &row.provider_type)
-                        .map_err(ConfigError::Invalid)?;
-                let endpoint_changed = row.base_url != changes.base_url;
+                let mut changes = input.changes;
+                validation::normalize_update(&mut changes).map_err(ConfigError::Invalid)?;
+                let configuration_changed = row.configuration != changes.configuration;
                 let overlay_changed = match &changes.request_body_overlay {
                     Patch::Keep => false,
                     Patch::Clear => row.request_body_overlay.is_some(),
@@ -57,19 +51,19 @@ impl ConfigurationStore {
                 };
                 let previous = row.clone();
                 let validate_limits = matches!(changes.model_overrides, Patch::Set(_));
-                let mut test_changed = endpoint_changed
+                let mut test_changed = configuration_changed
                     || row.enabled != changes.enabled
                     || row.enabled_model_ids != changes.enabled_model_ids
                     || overlay_changed;
                 row.revision = catalog::next_revision(row.revision)?;
                 row.name = changes.name;
-                row.base_url = changes.base_url;
+                row.configuration = changes.configuration;
                 row.enabled = changes.enabled;
                 row.enabled_model_ids = changes.enabled_model_ids;
                 row.model_overrides = match changes.model_overrides {
                     Patch::Set(profiles) => Some(profiles),
                     Patch::Clear => None,
-                    Patch::Keep if endpoint_changed => None,
+                    Patch::Keep if configuration_changed => None,
                     Patch::Keep => row.model_overrides,
                 };
                 row.request_body_overlay = match changes.request_body_overlay {
@@ -77,7 +71,7 @@ impl ConfigurationStore {
                     Patch::Clear => None,
                     Patch::Set(value) => Some(value),
                 };
-                if endpoint_changed {
+                if configuration_changed {
                     row.models.clear();
                     row.model_source = None;
                     row.models_fetched_at = None;

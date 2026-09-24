@@ -129,7 +129,7 @@ test('the recovery handle opens the existing exact account-and-model picker', as
     connectionId: 'connection-openrouter',
     connectionSlug: 'openrouter',
     connectionName: 'OpenRouter',
-    providerType: 'openrouter',
+    provider: { packageId: 'external.models', entryId: 'models', scope: 'profile', name: 'custom' },
     providerLabel: 'OpenRouter',
     model: 'openai/gpt-5',
     label: 'GPT-5',

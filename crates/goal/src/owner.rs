@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use crate::goal::*;
+use crate::goal::{Arm, Control, Error, Goal, Meter, Report, Repository, Saved, Status, invalid};
 use maka_plugins::{
     authorization::{Capability, Id, Target},
     background::BackgroundWork,
@@ -33,9 +33,12 @@ use std::sync::{
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 pub struct Owner {
-    pub host: Services,
+    pub executions: Arc<dyn maka_plugins::execution::Access>,
+    authorizations: Arc<dyn maka_plugins::authorization::Access>,
+    preferences: Arc<dyn maka_plugins::preferences::Preferences>,
+    usage: Arc<dyn usage::Usage>,
     pub repo: Repository,
-    pub gate: Mutex<()>,
+    gate: Mutex<()>,
     pending: AtomicBool,
     wake: Notify,
 }
@@ -50,8 +53,11 @@ impl BackgroundWork for Owner {
 impl Owner {
     pub fn new(host: Services) -> Arc<Self> {
         Arc::new(Self {
-            repo: Repository(host.storage.clone()),
-            host,
+            repo: Repository(host.storage),
+            executions: host.executions,
+            authorizations: host.authorizations,
+            preferences: host.preferences,
+            usage: host.usage,
             gate: Mutex::new(()),
             pending: AtomicBool::new(true),
             wake: Notify::new(),
@@ -63,7 +69,6 @@ impl Owner {
     }
     pub async fn privacy(&self) -> Result<(), Error> {
         if self
-            .host
             .preferences
             .read()
             .await
@@ -77,7 +82,7 @@ impl Owner {
         }
     }
     pub async fn grant(&self, id: Id, session: &str) -> Result<(), Error> {
-        let owned = self.host.authorizations.open(id).await?;
+        let owned = self.authorizations.open(id).await?;
         let valid = owned.grant.request.target
             == Target::Session {
                 session_id: session.into(),
@@ -95,10 +100,9 @@ impl Owner {
         }
     }
     pub async fn meter(&self, id: Id, session: &str) -> Result<Meter, Error> {
-        let owned = self.host.authorizations.open(id).await?;
+        let owned = self.authorizations.open(id).await?;
         let result = async {
             let page = self
-                .host
                 .usage
                 .activity(
                     owned.call.scope(),
@@ -112,11 +116,7 @@ impl Owner {
                     },
                 )
                 .await?;
-            let summary = self
-                .host
-                .usage
-                .summary(owned.call.scope(), page.cursor)
-                .await?;
+            let summary = self.usage.summary(owned.call.scope(), page.cursor).await?;
             Ok::<_, Error>(Meter {
                 known: summary
                     .models
@@ -144,7 +144,7 @@ impl Owner {
             let _gate = self.gate.lock().await;
             return self.repo.arm(session, arm, saved.goal.baseline).await;
         }
-        let commands = self.host.executions.restore(arm.grant).await?;
+        let commands = self.executions.restore(arm.grant).await?;
         if commands.activity(session.into()).await?.busy {
             return Err(invalid(
                 "Wait for the current Session execution to settle before creating a Goal",
@@ -185,7 +185,7 @@ impl Owner {
         if action == Control::Resume {
             self.privacy().await?;
             self.grant(saved.goal.arm.grant, session).await?;
-            let commands = self.host.executions.restore(saved.goal.arm.grant).await?;
+            let commands = self.executions.restore(saved.goal.arm.grant).await?;
             if commands
                 .activity(session.into())
                 .await?
@@ -222,7 +222,7 @@ impl Owner {
             .pending
             .as_ref()
             .ok_or_else(|| invalid("No Goal-owned execution"))?;
-        let commands = self.host.executions.restore(saved.goal.arm.grant).await?;
+        let commands = self.executions.restore(saved.goal.arm.grant).await?;
         let observation = commands.query(pending.request.operation_id.clone()).await?;
         if observation.receipt.invocation != *invocation {
             return Err(invalid("This execution does not belong to the Goal"));
@@ -245,7 +245,7 @@ impl Owner {
                 let sessions = self.repo.sessions().await;
                 if let Ok(sessions) = &sessions {
                     self.pending.store(
-                        sessions.iter().any(|(_, keepalive)| *keepalive),
+                        sessions.iter().any(|saved| saved.goal.keeps_host_awake()),
                         Ordering::Release,
                     );
                 }
@@ -257,18 +257,21 @@ impl Owner {
                 Err(_) => {
                     // A transient storage failure must not silently kill the owner.
                     self.pending.store(true, Ordering::Release);
-                    tokio::select! { _ = stop.cancelled() => return Ok(()), _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {} }
+                    tokio::select! {
+                        _ = stop.cancelled() => return Ok(()),
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+                    }
                     continue;
                 }
             };
-            for (session, keepalive) in sessions {
-                if !keepalive && !sweep.is_multiple_of(60) {
+            for mut saved in sessions {
+                if saved.goal.status == Status::CancellationUnknown && !sweep.is_multiple_of(60) {
                     continue;
                 }
                 if stop.is_cancelled() {
                     return Ok(());
                 }
-                if let Err(error) = self.tick(&session).await {
+                if let Err(error) = self.tick(saved.clone()).await {
                     // No new operation identity on transient or uncertain outcomes.
                     if matches!(
                         error,
@@ -278,8 +281,9 @@ impl Owner {
                                 | CommandError::Invalid(_)
                                 | CommandError::Conflict
                         )
-                    ) && let Ok(Some(mut saved)) = self.repo.read(&session).await
-                    {
+                    ) {
+                        // Failure belongs to the observed revision. A concurrent control,
+                        // renewed grant or replacement Goal must not inherit it.
                         saved.goal.authority_blocked = true;
                         if saved.goal.status == Status::Active {
                             saved.goal.status = Status::Blocked;
@@ -290,13 +294,16 @@ impl Owner {
                 }
             }
             sweep = sweep.wrapping_add(1);
-            tokio::select! {_ = stop.cancelled()=>return Ok(()),_ = self.wake.notified()=>{},_ = tokio::time::sleep(std::time::Duration::from_millis(500))=>{}}
+            tokio::select! {
+                _ = stop.cancelled() => return Ok(()),
+                _ = self.wake.notified() => {},
+                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+            }
         }
     }
-    async fn tick(&self, session: &str) -> Result<(), Error> {
-        let Some(mut saved) = self.repo.read(session).await? else {
-            return Ok(());
-        };
+    async fn tick(&self, mut saved: Saved) -> Result<(), Error> {
+        let session_id = saved.goal.session_id.clone();
+        let session = session_id.as_str();
         let goal = &mut saved.goal;
         if goal.status == Status::Cancelled && goal.pending.as_ref().is_some_and(|p| !p.dispatched)
         {
@@ -304,7 +311,7 @@ impl Owner {
             self.repo.save(saved).await?;
             return Ok(());
         }
-        let commands = self.host.executions.restore(goal.arm.grant).await?;
+        let commands = self.executions.restore(goal.arm.grant).await?;
         if let Some(pending) = goal.pending.clone() {
             let observation = match commands.query(pending.request.operation_id.clone()).await {
                 Ok(o) => o,
@@ -377,7 +384,10 @@ impl Owner {
                             goal.pending = None;
                         } else {
                             goal.status = Status::CancellationUnknown;
-                            goal.note="Cancellation acceptance is unknown. Only the original receipt will be checked; no request is resubmitted. This does not keep Host awake.".into();
+                            goal.note = "Cancellation acceptance is unknown. Only the original \
+                                receipt will be checked; no request is resubmitted. \
+                                This does not keep Host awake."
+                                .into();
                         }
                         self.repo.save(saved).await?;
                     }

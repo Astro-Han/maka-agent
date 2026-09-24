@@ -73,6 +73,10 @@ import {
   type ResponseFrame,
 } from './operations.js';
 import { isCanonicalRuntimeHostWebSocketPath } from './websocket-path.js';
+import {
+  decodeModelProviderCatalogChangedFrame,
+  type ModelProviderCatalogChangedFrame,
+} from './model-provider.js';
 
 export * from './access-authority.js';
 export * from './agent-graph.js';
@@ -91,6 +95,7 @@ export * from './project-catalog-change.js';
 export * from './execution-inspect.js';
 export * from './external-session.js';
 export * from './message.js';
+export * from './model-provider.js';
 export * from './operations.js';
 export * from './runtime-resource.js';
 export * from './session-continuity.js';
@@ -181,6 +186,7 @@ export type HostFrame =
   | ClientCapabilityHostFrame
   | ConfigurationChangedFrame
   | ConnectionCatalogChangedFrame
+  | ModelProviderCatalogChangedFrame
   | ProjectCatalogChangedFrame
   | PluginClientChangedFrame
   | SessionCatalogChangedFrame
@@ -332,6 +338,8 @@ export function decodeHostFrame(value: unknown): HostFrame {
   }
   if (frame.kind === 'project.catalog.changed') return decodeProjectCatalogChangedFrame(frame);
   if (frame.kind === 'plugin.client.changed') return decodePluginClientChangedFrame(frame);
+  if (frame.kind === 'model.provider.catalog.changed')
+    return decodeModelProviderCatalogChangedFrame(frame);
   if (frame.kind === 'session.catalog.changed') return decodeSessionCatalogChangedFrame(frame);
   if (frame.kind === 'scheduled-task.changed') return decodeScheduledTaskChangedFrame(frame);
   return decodeResponseFrame(frame);

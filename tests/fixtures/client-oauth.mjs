@@ -21,11 +21,11 @@ import assert from 'node:assert/strict';
 
 export async function verifyOAuthReceipts(connection, receipts) {
   const request = (operation, input) => connection.request(operation, input, 3000);
-  assert.deepEqual(await request('oauth.enrollment.query', { provider: 'xai-oauth' }), {
-    provider: 'xai-oauth',
-    enabled: true,
-  });
   for (const [input, identity] of receipts) {
+    assert.deepEqual(await request('oauth.enrollment.query', { provider: identity.provider }), {
+      provider: identity.provider,
+      enabled: false,
+    });
     const expected = { attemptId: input.attemptId, connection: identity, phase: 'authenticated' };
     assert.deepEqual(await request('oauth.login.start', input), expected);
     for (const operation of ['oauth.login.query', 'oauth.login.cancel']) {
@@ -33,8 +33,8 @@ export async function verifyOAuthReceipts(connection, receipts) {
     }
     await assert.rejects(
       request('oauth.login.start', {
-        attemptId: input.attemptId,
-        target: { kind: 'existing', connectionId: identity.connectionId },
+        ...input,
+        target: { ...input.target, slug: `${input.target.slug}-changed` },
       }),
       (error) => error.code === 'invalid_request',
     );

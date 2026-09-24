@@ -46,6 +46,7 @@ impl Executions {
         };
         let failed = |error: maka_config::ConfigError| Error::Invalid(error.to_string());
         let catalog = self.configuration.catalog().await.map_err(failed)?;
+        let providers = self.plugin_catalog.clone();
         tokio::task::spawn_blocking(move || {
             let query = query.query.to_lowercase();
             let terms: Vec<_> = query.split_whitespace().collect();
@@ -56,9 +57,8 @@ impl Executions {
             };
             'connections: for row in &catalog.connections {
                 if !row.enabled
-                    || maka_config::model_catalog::provider_facts(&row.provider_type)
-                        .map_err(failed)?
-                        .retired
+                    || row.provider.scope != maka_runtime::scope::Scope::Profile
+                    || maka_plugins::provider::Binding::resolve(&row.provider, &providers).is_err()
                 {
                     continue;
                 }
@@ -151,9 +151,9 @@ impl Executions {
         };
         if !row.enabled
             || !row.enabled_model_ids.contains(&model)
-            || maka_config::model_catalog::provider_facts(&row.provider_type)
-                .map_err(|error| maka_plugins::Error::Invalid(error.to_string()))?
-                .retired
+            || row.provider.scope != maka_runtime::scope::Scope::Profile
+            || maka_plugins::provider::Binding::resolve(&row.provider, &self.plugin_catalog)
+                .is_err()
         {
             return Ok(None);
         }
@@ -207,16 +207,12 @@ impl Executions {
             .model
             .as_ref()
             .ok_or_else(|| Error::Invalid("invocation has no model binding".into()))?;
-        let prepared = provider::observe_binding(
-            &self.configuration,
-            &invocation.session_id,
-            model,
-            frozen.thinking_level,
-        )
-        .await
-        .map_err(|error| Error::Host(error.to_string()))?
-        .admit(&self.oauth)
-        .map_err(|error| Error::Host(error.to_string()))?;
+        let prepared =
+            provider::observe_binding(self, &invocation.session_id, model, frozen.thinking_level)
+                .await
+                .map_err(|error| Error::Host(error.to_string()))?
+                .admit(&self.oauth)
+                .map_err(|error| Error::Host(error.to_string()))?;
         let evidence =
             serde_json::to_value(&input).map_err(|error| Error::Invalid(error.to_string()))?;
         let provider_id = prepared.provider_id.clone();

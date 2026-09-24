@@ -128,11 +128,7 @@ impl State {
         } else {
             updated.insert(draft.id.clone(), value);
         }
-        maka_protocol::configuration::validation::profiles(
-            &updated,
-            Some(&self.catalog.basis.provider),
-        )
-        .ok()?;
+        maka_protocol::configuration::validation::profiles(&updated).ok()?;
         Some(updated)
     }
     pub fn selected_ids(&self) -> Vec<String> {
@@ -238,7 +234,6 @@ impl App {
                             .get(&id)
                             .cloned()
                             .unwrap_or_default(),
-                        &state.catalog.basis.provider,
                     ));
                     self.hits.clear();
                     dialog.error = None;
@@ -475,7 +470,7 @@ mod tests {
     fn first() -> Value {
         json!({"kind":"page","revision":9,"connectionCount":1,"defaultTarget":{"connectionId":"c","modelId":"kept"},
             "nextCursor":{"part":"catalog_entry","connectionIndex":0,"itemIndex":0},"items":[
-            {"kind":"connection","connectionIndex":0,"connectionId":"c","revision":3,"slug":"fixture","name":"Fixture","providerType":"openai-compatible","enabled":true,"enabledModelIdCount":2,"catalogEntryCount":2},
+            {"kind":"connection","connectionIndex":0,"connectionId":"c","revision":3,"slug":"fixture","name":"Fixture","provider":crate::providers::fixtures::entry("openai-compatible", false).identity,"configuration":{"baseUrl":"http://127.0.0.1/v1"},"enabled":true,"enabledModelIdCount":2,"catalogEntryCount":2},
             {"kind":"enabled_model_id","connectionIndex":0,"itemIndex":0,"modelId":"kept"},
             {"kind":"enabled_model_id","connectionIndex":0,"itemIndex":1,"modelId":"manual"}]})
     }

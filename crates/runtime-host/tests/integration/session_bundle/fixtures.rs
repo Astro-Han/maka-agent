@@ -120,30 +120,16 @@ pub(super) async fn seed(log: &EventLog, fixture: &ClientFixture) {
 }
 
 pub(super) async fn configure(client: &Client) {
-    let created = client
-        .request(
-            Operation::ConnectionCatalogCreate,
-            json!({
-                "expectedCatalogRevision":0,"connection":{"slug":"bundle","name":"Bundle fixture",
-                "providerType":"openai-compatible","baseUrl":"http://127.0.0.1:1/v1",
-                "enabled":true,"enabledModelIds":["fixture-model"]}
-            }),
-        )
-        .await
-        .unwrap();
+    let created = super::super::support::model_connection::create(
+        client,
+        "openai-compatible",
+        "bundle",
+        "http://127.0.0.1:1/v1",
+        "unused-fixture",
+        json!({"fixture-model":{}}),
+    )
+    .await;
     let id = &created["connection"]["connectionId"];
-    client
-        .request(
-            Operation::CredentialVaultSet,
-            json!({
-                "locator":{"scope":"connection","connectionId":id,"kind":"api_key"},
-                "expected":null,"secret":"unused-fixture",
-                "expectedConnection":{"connectionId":id,"revision":1,"slug":"bundle",
-                    "providerType":"openai-compatible","effectiveBaseUrl":"http://127.0.0.1:1/v1"}
-            }),
-        )
-        .await
-        .unwrap();
     client
         .request(
             Operation::ConnectionCatalogSetDefaultTarget,

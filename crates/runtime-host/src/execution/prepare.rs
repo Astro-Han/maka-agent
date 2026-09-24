@@ -187,13 +187,7 @@ impl Executions {
             }
             Backend::Model(model) => model,
         };
-        let provider = provider::resolve(
-            &self.configuration,
-            &self.oauth,
-            &input.session_id,
-            &session,
-        )
-        .await?;
+        let provider = provider::resolve(self, &input.session_id, &session).await?;
         configuration.tool_mode = provider.tool_mode;
         configuration
             .tool_composition
@@ -203,6 +197,8 @@ impl Executions {
         let tools = tools::select_editing(model.tools, provider.editing_tools);
         let max_steps = usize::try_from(input.max_steps.unwrap_or(64)).map_err(internal)?;
         Ok(PreparedRun::Model(Box::new(RunInput {
+            model_source: Some(provider.source.clone()),
+            model_revision: Some(provider.revision.clone()),
             provider_id: provider.provider_id,
             invocation: invocation.clone(),
             work: RunWork::Message {

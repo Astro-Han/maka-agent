@@ -17,23 +17,20 @@
  * under the License.
  */
 
-use crate::provider_route::{self, Wire};
 use crate::session::SessionConfiguration;
-use maka_config::{ConfigurationStore, model_catalog};
 use maka_model::ProviderConfig;
+use maka_plugins::provider::{Binding as ProviderBinding, Connection, Resolve};
 use maka_protocol::{OperationError, OperationErrorCode};
-use maka_runtime::configuration::*;
-use maka_runtime::context::ModelRequestContext;
+use maka_runtime::{configuration::*, context::ModelRequestContext, scope::Scope};
 use serde_json::Value;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 mod auth;
 mod context;
-mod options;
-mod output;
 
 pub(super) struct PreparedProvider {
+    pub source: Arc<Source>,
+    pub revision: maka_runtime::composition::SourceRevision,
     pub provider_id: String,
     pub tool_mode: maka_runtime::execution::ToolMode,
     pub editing_tools: maka_runtime::execution::EditingTools,
@@ -42,14 +39,12 @@ pub(super) struct PreparedProvider {
     pub supports_vision: bool,
     pub context: ModelRequestContext,
     pub main_output_limit: Option<u64>,
-    binding: Option<Arc<auth::Binding>>,
+    binding: Arc<auth::Binding>,
 }
 
 impl PreparedProvider {
     pub(super) fn admit(self, oauth: &crate::oauth::Authority) -> Result<Self, OperationError> {
-        if let Some(binding) = &self.binding {
-            binding.admit(oauth)?;
-        }
+        self.binding.admit(oauth)?;
         Ok(self)
     }
 }
@@ -62,17 +57,18 @@ fn unavailable(message: impl Into<String>) -> OperationError {
 }
 
 pub(super) async fn resolve(
-    config: &Arc<ConfigurationStore>,
-    oauth: &crate::oauth::Authority,
+    executions: &super::Executions,
     session_id: &str,
     session: &SessionConfiguration,
 ) -> Result<PreparedProvider, OperationError> {
-    observe(config, session_id, session).await?.admit(oauth)
+    observe(executions, session_id, session)
+        .await?
+        .admit(&executions.oauth)
 }
 
-/// Read-only configuration and credential identity, without execution authority.
+/// Observe configuration and credentials without granting execution authority.
 pub(super) async fn observe(
-    config: &Arc<ConfigurationStore>,
+    executions: &super::Executions,
     session_id: &str,
     session: &SessionConfiguration,
 ) -> Result<PreparedProvider, OperationError> {
@@ -80,152 +76,179 @@ pub(super) async fn observe(
         .target
         .model()
         .ok_or_else(|| unavailable("Executor Session has no model backend"))?;
-    observe_binding(config, session_id, model, session.thinking_level).await
+    observe_binding(executions, session_id, model, session.thinking_level).await
 }
 
 /// The caller supplies the admitted model identity, never a replacement Session.
 pub(super) async fn observe_binding(
-    config: &Arc<ConfigurationStore>,
+    executions: &super::Executions,
     session_id: &str,
     target: &maka_runtime::execution::ModelBinding,
     thinking_level: Option<maka_runtime::execution::ThinkingLevel>,
 ) -> Result<PreparedProvider, OperationError> {
-    let network = config
-        .network_configuration()
-        .await
-        .map_err(crate::server::configuration::failure)?;
-    let network =
-        maka_network::Policy::from_host_settings(&network.proxy, network.password.as_deref())
-            .map_err(|error| unavailable(error.to_string()))?;
-    let catalog = config.catalog().await.map_err(|error| OperationError {
-        code: if matches!(error, maka_config::ConfigError::CommitUnknown) {
-            OperationErrorCode::CommitOutcomeUnknown
-        } else {
-            OperationErrorCode::PersistenceFailed
-        },
-        message: error.to_string().chars().take(1024).collect(),
-    })?;
-    let row = catalog
-        .connections
-        .iter()
-        .find(|row| {
-            row.connection_id == target.connection_id
-                && row.slug == target.connection_slug
-                && row.enabled
-                && row.enabled_model_ids.contains(&target.model)
-        })
-        .ok_or_else(|| {
-            unavailable("Session model connection or enabled model is no longer available")
-        })?;
-    let facts = model_catalog::provider_facts(&row.provider_type)
-        .map_err(|_| unavailable("Provider facts are unavailable"))?;
-    if facts.retired {
-        return Err(unavailable("Provider or model is retired or unavailable"));
+    Source {
+        configuration: executions.configuration.clone(),
+        models: executions.models.clone(),
+        plugin_catalog: executions.plugin_catalog.clone(),
+        oauth: executions.oauth.clone(),
+        session_id: session_id.into(),
+        target: target.clone(),
+        thinking_level,
     }
-    let models = model_catalog::resolve(row, None)
-        .map_err(|_| unavailable("Cannot resolve model capabilities"))?;
-    let model = models
-        .iter()
-        .find(|model| model.id == target.model && model.can_use_as_chat_default)
-        .ok_or_else(|| unavailable("Session model is not available for chat"))?;
-    if let Some(level) = thinking_level
-        && !model.thinking_levels.contains(&level)
+    .observe()
+    .await
+}
+
+#[derive(Clone)]
+pub(super) struct Source {
+    configuration: Arc<maka_config::ConfigurationStore>,
+    models: maka_model::ModelExecutor,
+    plugin_catalog: maka_plugins::contributions::Catalog,
+    oauth: Arc<crate::oauth::Authority>,
+    session_id: String,
+    target: maka_runtime::execution::ModelBinding,
+    thinking_level: Option<maka_runtime::execution::ThinkingLevel>,
+}
+
+impl maka_agent::ModelSource for Source {
+    fn capture(
+        &self,
+    ) -> futures_util::future::BoxFuture<'_, Result<maka_agent::PreparedModel, maka_agent::RunError>>
     {
-        return Err(unavailable("Session thinking level is no longer supported"));
+        Box::pin(async move {
+            let prepared = self
+                .observe()
+                .await
+                .and_then(|prepared| prepared.admit(&self.oauth))
+                .map_err(|error| {
+                    maka_agent::RunError::Model(maka_model::ModelError::Adapter(error.message))
+                })?;
+            Ok(maka_agent::PreparedModel {
+                provider_id: prepared.provider_id,
+                provider: prepared.config,
+                options: prepared.options,
+                context: Some(prepared.context),
+                main_output_limit: prepared.main_output_limit,
+                supports_vision: prepared.supports_vision,
+                revision: prepared.revision,
+            })
+        })
     }
-    let route = provider_route::resolve(row, facts, &target.model)?;
-    let overrides = row
-        .model_overrides
-        .as_ref()
-        .and_then(|models| models.get(&target.model));
-    let tool_mode = maka_runtime::execution::ToolMode::for_model(
-        &target.model,
-        &route.base_url,
-        overrides.and_then(|value| value.code_mode),
-    );
-    let editing_tools = maka_runtime::execution::EditingTools::for_model(
-        &target.model,
-        &route.base_url,
-        overrides.and_then(|value| value.apply_patch),
-    );
-    route.check_execution()?;
-    let options = options::resolve(row, facts, &target.model, thinking_level, &route)?;
-    let main_output_limit = output::resolve(row, facts, &target.model, route.wire, &options)?;
-    let endpoint = row.base_url.as_deref().unwrap_or(&facts.base_url);
-    let expected = ConnectionCredentialTarget {
-        connection_id: row.connection_id.clone(),
-        revision: row.revision,
-        slug: row.slug.clone(),
-        provider_type: row.provider_type.clone(),
-        effective_base_url: endpoint.to_owned(),
-    };
-    let secret = async |kind| {
-        config
-            .credential_secret(
-                &CredentialLocator::Connection {
-                    connection_id: row.connection_id.clone(),
-                    kind,
-                },
-                Some(&expected),
-            )
+}
+
+impl Source {
+    async fn observe(&self) -> Result<PreparedProvider, OperationError> {
+        let session_id = self.session_id.as_str();
+        let target = &self.target;
+        let thinking_level = self.thinking_level;
+        // One targeted SQL snapshot supplies configuration, credentials, headers
+        // and proxy without scanning the catalog on every logical model step.
+        let material = self
+            .configuration
+            .observe_model(target.clone())
             .await
-            .map_err(|_| unavailable("Credential connection basis changed or vault is unavailable"))
-    };
-    let mut binding = None;
-    let auth = match facts.auth_kind {
-        ProviderAuthKind::ApiKey => maka_model::ProviderAuth::ApiKey(
-            secret(ConnectionCredentialKind::ApiKey)
-                .await?
-                .filter(|key| !key.trim().is_empty())
-                .ok_or_else(|| unavailable("Provider API key is not configured"))?,
-        ),
-        ProviderAuthKind::OauthToken => {
-            let observed = auth::observe(config, expected.clone(), session_id).await?;
-            let auth = observed.auth()?;
-            binding = Some(observed);
-            auth
+            .map_err(crate::server::configuration::failure)?
+            .ok_or_else(|| {
+                unavailable("Session model connection or enabled model is unavailable")
+            })?;
+        let row = &material.connection;
+        match &row.provider.scope {
+            Scope::Profile => {}
+            Scope::Session(owner) if owner == session_id => {}
+            _ => return Err(unavailable("Model provider is outside the execution scope")),
         }
-        ProviderAuthKind::None | ProviderAuthKind::OptionalApiKey => {
-            return Err(unavailable(
-                "Provider authentication profile is not installed",
-            ));
+        let provider = ProviderBinding::resolve(&row.provider, &self.plugin_catalog)
+            .map_err(|error| unavailable(error.to_string()))?;
+        let revision = provider
+            .source()
+            .map_err(|error| unavailable(error.to_string()))?;
+        let overrides = row
+            .model_overrides
+            .as_ref()
+            .and_then(|models| models.get(&target.model));
+        let reported = row
+            .models
+            .iter()
+            .find(|model| model.id == target.model)
+            .cloned()
+            .unwrap_or_else(|| ModelInfo::new(&target.model));
+        let model = provider
+            .prepare(Resolve {
+                connection: Connection {
+                    id: row.connection_id.clone(),
+                    revision: row.revision,
+                    configuration: row.configuration.clone(),
+                },
+                model: reported,
+                overrides: overrides.cloned(),
+                thinking_level,
+            })
+            .await
+            .map_err(|error| unavailable(error.to_string()))?;
+        let capabilities = model.info.capabilities.unwrap_or_default();
+        let no_text = model.info.modalities.as_ref().is_some_and(|modalities| {
+            !modalities.output.is_empty() && !modalities.output.contains(&ModelModality::Text)
+        });
+        if capabilities.chat == Some(false)
+            || (capabilities.chat != Some(true) && no_text)
+            || (capabilities.image_generation == Some(true)
+                && capabilities.chat != Some(true)
+                && capabilities.reasoning != Some(true)
+                && capabilities.function_calling != Some(true))
+        {
+            return Err(unavailable("Selected model does not support conversation"));
         }
-    };
-    let headers = secret(ConnectionCredentialKind::RequestHeaders)
-        .await?
-        .map(|value| serde_json::from_str::<BTreeMap<String, String>>(&value))
-        .transpose()
-        .map_err(|_| unavailable("Invalid provider request headers"))?
-        .unwrap_or_default();
-    let config = ProviderConfig {
-        adapter: overrides
-            .and_then(|value| value.adapter.clone())
-            .or_else(|| {
-                (row.provider_type == "openai-codex").then(|| maka_providers::codex::ADAPTER.into())
+        if thinking_level.is_some_and(|level| !model.thinking_levels.contains(&level)) {
+            return Err(unavailable("Session thinking level is no longer supported"));
+        }
+        let tool_mode = maka_runtime::execution::ToolMode::for_model(
+            &target.model,
+            &model.base_url,
+            overrides.and_then(|value| value.code_mode),
+        );
+        let editing_tools = maka_runtime::execution::EditingTools::for_model(
+            &target.model,
+            &model.base_url,
+            overrides.and_then(|value| value.apply_patch),
+        );
+        let context = context::resolve(row, &model.info)?;
+        let binding = auth::observe(&self.models, provider, &material, session_id)?;
+        let network = maka_network::Policy::from_host_settings(
+            &material.network.proxy,
+            material.network.password.as_deref(),
+        )
+        .map_err(|error| unavailable(error.to_string()))?;
+        let config = ProviderConfig {
+            adapter: Some(model.adapter),
+            capabilities,
+            kind: model.protocol,
+            model: target.model.clone(),
+            base_url: model.base_url,
+            auth: binding.auth()?,
+            headers: material.request_headers,
+            network,
+            body_overlay: row.request_body_overlay.as_ref().map(|value| {
+                value
+                    .as_object()
+                    .expect("validated request body overlay")
+                    .clone()
             }),
-        capabilities: model.capabilities,
-        kind: route.kind,
-        model: target.model.clone(),
-        base_url: route.base_url,
-        auth,
-        headers,
-        network,
-        body_overlay: row.request_body_overlay.as_ref().map(|value| {
-            value
-                .as_object()
-                .expect("validated request body overlay")
-                .clone()
-        }),
-    };
-    Ok(PreparedProvider {
-        provider_id: row.provider_type.clone(),
-        tool_mode,
-        editing_tools,
-        binding,
-        config,
-        options,
-        supports_vision: model.supports_vision,
-        context: context::resolve(row, facts, &target.model)?,
-        main_output_limit,
-    })
+        };
+        self.models
+            .binding_in_scope(&config, &Scope::Session(session_id.into()))
+            .map_err(|error| unavailable(error.to_string()))?;
+        Ok(PreparedProvider {
+            source: Arc::new(self.clone()),
+            revision,
+            provider_id: row.provider.name.clone(),
+            tool_mode,
+            editing_tools,
+            binding,
+            config,
+            options: model.provider_options,
+            supports_vision: capabilities.vision.unwrap_or(false),
+            context,
+            main_output_limit: model.main_output_limit,
+        })
+    }
 }

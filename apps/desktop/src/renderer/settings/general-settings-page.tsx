@@ -519,23 +519,16 @@ function GeneralDefaultsCard(props: {
     [props.connections],
   );
   const modelGroups = useMemo(
-    () => modelMenuGroups(modelChoices, locale),
-    [locale, modelChoices],
+    () => modelMenuGroups(modelChoices),
+    [modelChoices],
   );
   const selectedValue = useMemo(() => {
     if (!props.defaultSlug) return "";
-    const connection = props.connections.find(
-      (candidate) => candidate.slug === props.defaultSlug,
+    const choice = modelChoices.find(
+      (candidate) => candidate.connectionSlug === props.defaultSlug && candidate.isDefault,
     );
-    if (!connection?.defaultModel) return "";
-    const value = modelChoiceValue(connection.slug, connection.defaultModel);
-    return modelChoices.some(
-      (choice) =>
-        modelChoiceValue(choice.connectionSlug, choice.model) === value,
-    )
-      ? value
-      : "";
-  }, [modelChoices, props.connections, props.defaultSlug]);
+    return choice ? modelChoiceValue(choice.connectionSlug, choice.model) : "";
+  }, [modelChoices, props.defaultSlug]);
   async function persistDefault(nextValue: string) {
     if (!props.connectionsBridge || !props.connectionsInteractive) return;
     const releaseSave = persistGuard.begin("default-model");
@@ -633,7 +626,7 @@ function GeneralDefaultsCard(props: {
               groups={modelGroups}
               value={selectedValue}
               leadingOption={{ value: "", label: copy.notSet }}
-              renderProviderMark={(type) => <ProviderBrandMark type={type} />}
+              renderProviderMark={(provider) => <ProviderBrandMark type={provider.name} />}
               ariaLabel={copy.defaultModel}
               disabled={savingRows["default-model"] || !props.connectionsInteractive}
               triggerClassName="settingsModelPickerTrigger"

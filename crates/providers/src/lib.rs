@@ -18,4 +18,6 @@
  */
 
 //! Bundled model providers, implemented through the public plugin contracts.
+pub mod api;
 pub mod codex;
+mod facts;

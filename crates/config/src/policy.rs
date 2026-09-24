@@ -20,8 +20,9 @@
 use crate::{ConfigError, ConfigurationStore, Result, TransactionMode};
 use maka_runtime::configuration::{
     policy::{
-        ChatDefaults, EnabledPolicy, MAX_POLICY_SNAPSHOT_BYTES, Personalization, RuntimePolicy,
-        RuntimePolicyMutationResult, RuntimePolicySnapshot, decode_canonical_snapshot,
+        ChatDefaults, EnabledPolicy, MAX_POLICY_SNAPSHOT_BYTES, Personalization, PrivacyPolicy,
+        RuntimePolicy, RuntimePolicyMutationResult, RuntimePolicySnapshot,
+        decode_canonical_snapshot,
     },
     validation::{MAX_SAFE_INTEGER, revision},
 };
@@ -67,6 +68,15 @@ impl ConfigurationStore {
             policy.personalization = value
         })
         .await
+    }
+
+    pub async fn set_privacy(
+        &self,
+        expected_revision: u64,
+        value: PrivacyPolicy,
+    ) -> Result<RuntimePolicyMutationResult> {
+        self.update_policy(expected_revision, move |policy| policy.privacy = value)
+            .await
     }
 
     pub async fn set_workspace_instructions(

@@ -26,6 +26,8 @@ import {
   type ModelCatalogEntry,
   type ModelOverride,
   type ModelOverrides,
+  type ModelProviderCatalogQuery,
+  type ModelProviderCatalogResult,
   type SessionCatalogProjection,
   type SessionCatalogRevision,
   type OperationOutput,
@@ -59,9 +61,14 @@ export interface RuntimeHostConnectionCatalogSnapshot {
   readonly connections: readonly RuntimeHostConnectionCatalogEntry[];
 }
 
+export interface RuntimeHostModelProviderCatalogSnapshot {
+  readonly revision: number;
+  readonly entries: Extract<ModelProviderCatalogResult, { kind: 'page' }>['entries'];
+}
+
 export class RuntimeHostCatalogReadError extends Error {
   constructor(
-    readonly catalog: 'connection' | 'project' | 'session' | 'runtime_resource',
+    readonly catalog: 'connection' | 'model_provider' | 'project' | 'session' | 'runtime_resource',
     readonly reason: 'unstable' | 'invalid_projection' | 'repeated_cursor',
   ) {
     super(`Runtime Host ${catalog} catalog read failed: ${reason}`);
@@ -112,6 +119,22 @@ export async function readRuntimeHostConnectionCatalog(
     first,
     pages.flatMap((page) => page.items),
   );
+}
+
+export async function readRuntimeHostModelProviders(
+  connection: RuntimeHostCatalogConnection,
+  scope: NonNullable<ModelProviderCatalogQuery['scope']> = 'profile',
+): Promise<RuntimeHostModelProviderCatalogSnapshot> {
+  const read = async (revision: number | null, after: string | null) => {
+    const result = await connection.request('model.provider.catalog.query', {
+      scope,
+      revision,
+      after,
+    });
+    return result.kind === 'page' ? { ...result, nextCursor: result.next } : null;
+  };
+  const { first, pages } = await collectStablePages('model_provider', () => read(null, null), read);
+  return { revision: first.revision, entries: pages.flatMap((page) => page.entries) };
 }
 
 export async function readRuntimeHostSessions(

@@ -29,12 +29,10 @@ mod model_override;
 pub use model_info::{ModelCapabilities, ModelInfo};
 mod model_validation;
 pub mod policy;
-mod providers;
 pub use model_override::{
     ApiProtocol, ModelModalities, ModelModality, ModelOverride, ModelOverrideCapabilities,
     RelayServiceTier,
 };
-pub use providers::ProviderAuthKind;
 pub mod validation;
 mod vault;
 use serde::{Deserialize, Serialize};
@@ -98,8 +96,8 @@ pub struct ConnectionCredentialTarget {
     pub connection_id: String,
     pub revision: u64,
     pub slug: String,
-    pub provider_type: String,
-    pub effective_base_url: String,
+    pub provider: crate::provider::Identity,
+    pub configuration: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -145,13 +143,8 @@ pub enum ModelDiscoverySource {
 pub struct ConnectionCatalogEntryDraft {
     pub slug: String,
     pub name: String,
-    pub provider_type: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "present"
-    )]
-    pub base_url: Option<String>,
+    pub provider: crate::provider::Identity,
+    pub configuration: Value,
     pub enabled: bool,
     pub enabled_model_ids: Vec<String>,
     #[serde(
@@ -172,12 +165,7 @@ pub struct ConnectionCatalogEntryDraft {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConnectionCatalogEntryUpdate {
     pub name: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "present"
-    )]
-    pub base_url: Option<String>,
+    pub configuration: Value,
     pub enabled: bool,
     pub enabled_model_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Patch::is_keep")]
@@ -193,13 +181,8 @@ pub struct ConnectionCatalogEntry {
     pub revision: u64,
     pub slug: String,
     pub name: String,
-    pub provider_type: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "present"
-    )]
-    pub base_url: Option<String>,
+    pub provider: crate::provider::Identity,
+    pub configuration: Value,
     pub enabled: bool,
     pub enabled_model_ids: Vec<String>,
     pub models: Vec<ModelInfo>,

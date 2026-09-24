@@ -63,6 +63,7 @@ fn provider_pages() -> Vec<Value> {
         label: "模型账户".into(),
         configuration_schema: json!({"type":"object"}),
         configuration_defaults: json!({}),
+        anonymous: false,
         authentication: vec![Method {
             id: "key".into(),
             label: "API key".into(),

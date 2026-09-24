@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { decodeStoredMessage } from '../../packages/core/src/session.ts';
 import { watchSession } from './client-subscription.mjs';
+import { createModelConnection } from './client-model-connection.mjs';
 import {
   contextCompactFixture,
   original,
@@ -179,36 +180,17 @@ export async function verifyContextCompact(connection, workspace, reopened) {
       hidden(await rows(connection, saved.sessionId), [], '');
     } else {
       await writeFile(join(workspace, 'evidence.txt'), 'compact evidence read successfully\n');
-      const created = await request('connection.catalog.create', {
-        expectedCatalogRevision: 0,
-        connection: {
-          slug: 'context-compact',
-          name: 'Context compact fixture',
-          providerType: 'openai',
-          baseUrl: model.baseUrl,
-          enabled: true,
-          enabledModelIds: ['fixture-model'],
-          modelOverrides: { 'fixture-model': { vision: false } },
-        },
+      const created = await createModelConnection(request, {
+        slug: 'context-compact',
+        name: 'Context compact fixture',
+        providerName: 'openai',
+        apiKey: 'context-compact-fixture',
+        baseUrl: model.baseUrl,
+        enabledModelIds: ['fixture-model'],
+        modelOverrides: { 'fixture-model': { vision: false } },
       });
       assert.equal(created.kind, 'committed');
       const basis = created.connection;
-      assert.equal(
-        (
-          await request('credential.vault.set', {
-            locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-            expected: null,
-            expectedConnection: {
-              ...basis,
-              slug: 'context-compact',
-              providerType: 'openai',
-              effectiveBaseUrl: model.baseUrl,
-            },
-            secret: 'context-compact-fixture',
-          })
-        ).kind,
-        'committed',
-      );
       await request('session.create', {
         sessionId: saved.sessionId,
         workspace: { kind: 'host_path', path: workspace },

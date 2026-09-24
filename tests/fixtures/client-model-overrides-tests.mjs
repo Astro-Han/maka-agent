@@ -34,8 +34,11 @@ export async function verifyFactsConnectionTests(request, fixture, row, pin, obs
   await updateDeclaration(observe, row, finalPin);
   const duringWindow = await catalog(observe);
   windowGate.release();
-  const verified = await windowTest;
-  assert.equal(verified.kind, 'committed');
+  const supersededWindow = await windowTest;
+  assert.deepEqual(supersededWindow, { kind: 'superseded', changed: ['connection'] });
+  assert.deepEqual(await catalog(request), duringWindow);
+  fixture.expect({ path: '/v1/responses', model: modelId, probe: true });
+  const verified = await run();
   assert.equal(verified.test.kind, 'verified');
   assert.equal(verified.test.modelId, modelId);
   const tested = await catalog(request);
@@ -74,5 +77,14 @@ export async function verifyFactsConnectionTests(request, fixture, row, pin, obs
     'restoring an old protocol does not resurrect invalidated verification',
   );
   fixture.check();
-  return { pin: finalPin, duringWindow, verified, retained, hidden, superseded, restored };
+  return {
+    pin: finalPin,
+    duringWindow,
+    supersededWindow,
+    verified,
+    retained,
+    hidden,
+    superseded,
+    restored,
+  };
 }

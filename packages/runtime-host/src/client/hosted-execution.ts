@@ -32,11 +32,12 @@ import {
 } from './hosted-execution-target.js';
 
 export interface RunHostedExecutionInput {
+  /** Native CLI executable, resolved through PATH when omitted. */
+  readonly executable?: string;
   readonly initialization?: HostedRuntimeInitialization;
   readonly connection?: HostedExecutionTargetInput['connection'];
   readonly rootPath: string;
   readonly execution: HostedExecutionClientStartInput;
-  readonly baseUrl?: string;
   readonly signal?: AbortSignal;
   readonly hostSettlementTimeoutMs?: number;
 }
@@ -73,6 +74,7 @@ export async function runHostedExecutionWithDependencies(
     return indeterminate(input.execution.executionId, 'Hosted execution was cancelled');
   }
   const connected = await dependencies.connectOwnedRuntimeHost({
+    ...(input.executable === undefined ? {} : { candidateExecutable: input.executable }),
     ...(input.initialization ? { initialization: input.initialization } : {}),
     rootPath: input.rootPath,
     protocol: {
@@ -100,13 +102,11 @@ export async function runHostedExecutionWithDependencies(
     const target = input.execution.session.modelTarget;
     let exactTarget: HostedExecutionStartInput['session']['modelTarget'] = { kind: 'default' };
     if (target.kind === 'explicit') {
-      if (!input.baseUrl) throw new Error('Explicit model target requires baseUrl');
       const configured = await configureHostedExecutionTarget(
         connected.connection,
         {
           connectionSlug: target.connectionSlug,
           model: target.model,
-          baseUrl: input.baseUrl,
           ...(input.connection ? { connection: input.connection } : {}),
         },
         input.signal,

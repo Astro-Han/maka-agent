@@ -72,9 +72,9 @@ fn model_profiles_preserve_full_table_validate_inherited_limits_and_reject_concu
         let mut profiles:serde_json::Map<String,Value>=(0..130).map(|i|(format!("other-{i:03}"),json!({"contextWindow":32000,"codeMode":false,"capabilities":{"reasoning":true}}))).collect();
         let neighbors=profiles.clone();
         profiles.insert("fixture-model".into(),json!({"contextWindow":128000,"inputLimit":64000,"maxOutputTokens":512,"codeMode":false,"vision":false,"thinkingLevels":["high"],"capabilities":{"parallelToolCalls":false},"modalities":{"input":["text","image"],"output":["text"]}}));
-        let result=client.request(Operation::ConnectionCatalogUpdate,json!({"expected":{"connectionId":items[0]["connectionId"],"revision":items[0]["revision"]},"changes":{"name":"Profile fixture","baseUrl":"http://127.0.0.1:9/v1","enabled":true,"enabledModelIds":["fixture-model"],"modelOverrides":profiles,"requestBodyOverlay":{"temperature":0.3}}})).await.unwrap();
+        let result=client.request(Operation::ConnectionCatalogUpdate,json!({"expected":{"connectionId":items[0]["connectionId"],"revision":items[0]["revision"]},"changes":{"name":"Profile fixture","configuration":{"baseUrl":"http://127.0.0.1:9/v1"},"enabled":true,"enabledModelIds":["fixture-model"],"modelOverrides":profiles,"requestBodyOverlay":{"temperature":0.3}}})).await.unwrap();
         client.create_session(maka_protocol::session::decode_session_create_input(&json!({"sessionId":"history","name":"History","workspace":{"kind":"host_path","path":directory.path()},"modelTarget":{"kind":"default"}})).unwrap()).await.unwrap();
-        let key=client.request(Operation::CredentialVaultQuery,json!({"locator":{"scope":"connection","connectionId":items[0]["connectionId"],"kind":"api_key"}})).await.unwrap();
+        let key=client.request(Operation::CredentialVaultQuery,json!({"locator":{"scope":"connection","connectionId":items[0]["connectionId"],"kind":"provider"}})).await.unwrap();
         (client,result["connection"].clone(),key,neighbors)
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
@@ -106,7 +106,7 @@ fn model_profiles_preserve_full_table_validate_inherited_limits_and_reject_concu
         assert_eq!(current["capabilities"],json!({"parallelToolCalls":false}));assert_eq!(current["modalities"],json!({"input":["text","image"],"output":["text"]}));
         assert_eq!(items[0]["requestBodyOverlay"]["temperature"],0.3);assert_eq!(default["modelId"],"fixture-model");
         assert_eq!(items[0]["revision"],original["revision"].as_u64().unwrap()+1);
-        assert_eq!(client.request(Operation::CredentialVaultQuery,json!({"locator":{"scope":"connection","connectionId":original["connectionId"],"kind":"api_key"}})).await.unwrap(),key);
+        assert_eq!(client.request(Operation::CredentialVaultQuery,json!({"locator":{"scope":"connection","connectionId":original["connectionId"],"kind":"provider"}})).await.unwrap(),key);
         assert_eq!(client.session("history").await.unwrap().unwrap().revision,1);
         items[0].clone()
     });
@@ -142,7 +142,7 @@ fn model_profiles_preserve_full_table_validate_inherited_limits_and_reject_concu
     });
     open(&mut tui);
     set(&mut tui, "Context window", "512K");
-    runtime.block_on(async {client.request(Operation::ConnectionCatalogUpdate,json!({"expected":{"connectionId":saved["connectionId"],"revision":saved["revision"]},"changes":{"name":"External profile edit","baseUrl":"http://127.0.0.1:9/v1","enabled":true,"enabledModelIds":["fixture-model"]}})).await.unwrap();});
+    runtime.block_on(async {client.request(Operation::ConnectionCatalogUpdate,json!({"expected":{"connectionId":saved["connectionId"],"revision":saved["revision"]},"changes":{"name":"External profile edit","configuration":{"baseUrl":"http://127.0.0.1:9/v1"},"enabled":true,"enabledModelIds":["fixture-model"]}})).await.unwrap();});
     tui.click_last_text("Save");
     tui.wait_for("This connection changed");
     tui.click_text("⛭ Settings");

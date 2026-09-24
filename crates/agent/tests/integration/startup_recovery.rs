@@ -285,6 +285,8 @@ async fn unknown_dispatch_stays_unknown_and_blocks_next_admission_after_reopen()
     let result = engine
         .run(
             RunInput {
+                model_source: None,
+                model_revision: None,
                 provider_id: "fixture".into(),
                 main_output_limit: None,
                 context: None,

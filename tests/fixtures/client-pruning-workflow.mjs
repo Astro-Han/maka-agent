@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { decodeStoredMessage } from '../../packages/core/src/session.ts';
 import { watchSession } from './client-subscription.mjs';
+import { createModelConnection } from './client-model-connection.mjs';
 import { pruningFixture, text } from './client-pruning-fixture.mjs';
 
 async function rows(connection, sessionId) {
@@ -120,36 +121,17 @@ export async function verifyPruning(connection, workspace, reopened) {
       rawSource(await rows(connection, saved.sessionId));
     } else {
       await writeFile(source, text);
-      const created = await request('connection.catalog.create', {
-        expectedCatalogRevision: 0,
-        connection: {
-          slug: 'pruning',
-          name: 'Pruning fixture',
-          providerType: 'openai',
-          baseUrl: model.baseUrl,
-          enabled: true,
-          enabledModelIds: ['fixture-model'],
-          modelOverrides: { 'fixture-model': { vision: false } },
-        },
+      const created = await createModelConnection(request, {
+        slug: 'pruning',
+        name: 'Pruning fixture',
+        providerName: 'openai',
+        apiKey: 'pruning-fixture',
+        baseUrl: model.baseUrl,
+        enabledModelIds: ['fixture-model'],
+        modelOverrides: { 'fixture-model': { vision: false } },
       });
       assert.equal(created.kind, 'committed');
       const basis = created.connection;
-      assert.equal(
-        (
-          await request('credential.vault.set', {
-            locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-            expected: null,
-            expectedConnection: {
-              ...basis,
-              slug: 'pruning',
-              providerType: 'openai',
-              effectiveBaseUrl: model.baseUrl,
-            },
-            secret: 'pruning-fixture',
-          })
-        ).kind,
-        'committed',
-      );
       for (const sessionId of [saved.sessionId, saved.otherSessionId])
         await request('session.create', {
           sessionId,

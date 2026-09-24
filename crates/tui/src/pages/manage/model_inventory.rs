@@ -240,12 +240,12 @@ mod tests {
             id: "target".into(),
             name: "Target".into(),
             slug: "target".into(),
-            provider: "openai-compatible".into(),
+            provider: crate::providers::fixtures::entry("openai-compatible", false).identity,
+            configuration: json!({}),
             enabled: true,
             enabled_models: 0,
             model_ids: vec![],
             revision: 7,
-            base_url: None,
             default_model: None,
         });
         for (revision, count, ready) in [(7, 2, true), (8, 2, false), (7, 1, false)] {

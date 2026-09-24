@@ -23,7 +23,8 @@ use maka_plugins::{
     http,
     model::{Credentials, ProviderKind},
     provider::{
-        Connection, Context, Definition, Descriptor, Error, Model, Provider, Resolve,
+        Connection, Context, Definition, Descriptor, Discovery, Error, Model, Provider, Resolve,
+        Verification,
         authentication::{Authenticate, Credential, Method},
     },
 };
@@ -71,6 +72,7 @@ impl Codex {
                         .map_err(|e| maka_plugins::Error::Invalid(e.to_string()))?,
                     interactive: true,
                 }],
+                anonymous: false,
                 discovery: true,
             },
             Arc::new(Self::default()),
@@ -134,6 +136,14 @@ impl Provider for Codex {
                 options["openai"]["forceReasoning"] = json!(true);
             }
             let model = Model {
+                main_output_limit: request
+                    .overrides
+                    .as_ref()
+                    .and_then(|o| o.max_output_tokens)
+                    .map(|limit| {
+                        info.max_output_tokens
+                            .map_or(limit, |capacity| limit.min(capacity))
+                    }),
                 adapter: request
                     .overrides
                     .as_ref()
@@ -191,15 +201,31 @@ impl Provider for Codex {
 
     fn discover(
         &self,
-        connection: Connection,
-        credential: Option<Credential>,
+        request: Discovery,
         context: Context,
     ) -> BoxFuture<'_, Result<Vec<ModelInfo>, Error>> {
         Box::pin(async move {
+            let Discovery {
+                connection,
+                credential,
+                request_headers,
+            } = request;
             let base_url = configuration(&connection)?;
             let tokens = login::Tokens::read(&credential.ok_or(Error::AuthenticationRequired)?)?;
-            let headers = super::request_headers(&tokens.access_token, &connection.id)
+            let mut headers = super::request_headers(&tokens.access_token, &connection.id)
                 .map_err(|_| Error::Invalid("invalid connection identity".into()))?;
+            for (name, value) in request_headers {
+                if headers
+                    .iter()
+                    .any(|(key, existing)| key.eq_ignore_ascii_case(&name) && existing != &value)
+                {
+                    return Err(Error::Invalid(
+                        "request headers conflict with provider authentication".into(),
+                    ));
+                }
+                headers.retain(|key, _| !key.eq_ignore_ascii_case(&name));
+                headers.insert(name, value);
+            }
             let response = context
                 .transport
                 .request(http::Request {
@@ -215,7 +241,7 @@ impl Provider for Codex {
                 .map_err(|_| Error::Transport("model discovery failed".into()))?;
             let result = async {
                 if !(200..300).contains(&response.head.status) {
-                    return Err(Error::AuthenticationRequired);
+                    return Err(Error::Http(response.head.status));
                 }
                 let mut bytes = Vec::new();
                 while let Some(chunk) = response
@@ -239,6 +265,35 @@ impl Provider for Codex {
                 .await
                 .map_err(|_| Error::Transport("inventory cleanup failed".into()))?;
             result
+        })
+    }
+
+    fn verify(&self, request: Verification, context: Context) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.resolve(Resolve {
+                connection: request.connection.clone(),
+                model: request.model.clone(),
+                overrides: request.overrides,
+                thinking_level: None,
+            })
+            .await?;
+            let models = self
+                .discover(
+                    Discovery {
+                        connection: request.connection,
+                        credential: request.credential,
+                        request_headers: request.request_headers,
+                    },
+                    context,
+                )
+                .await?;
+            if models.iter().any(|model| model.id == request.model.id) {
+                Ok(())
+            } else {
+                Err(Error::Rejected(
+                    "model is absent from the account inventory".into(),
+                ))
+            }
         })
     }
 }

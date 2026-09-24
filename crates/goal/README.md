@@ -19,6 +19,8 @@
 
 # Goal
 
+[简体中文](./README.zh-CN.md)
+
 `maka.goal` is a statically linked Profile plugin with a separate Desktop Client
 in Session Inspector. Its business state uses public plugin Store/CAS; Host owns
 Session identity, authorization, execution admission, receipts and accounting.
@@ -38,7 +40,8 @@ Session identity, authorization, execution admission, receipts and accounting.
    terminal report, the plugin continues up to the configured iteration limit.
 
 Pause stops further dispatch decisions; already dispatching/accepted work may
-finish. The durable dispatch decision and Host admission are separate operations,
+finish. Paused intents do not keep Host awake; accepted executions retain their
+Host owner. The durable dispatch decision and Host admission are separate operations,
 so an in-flight submission can become visible after a pause reply. Cancel saves
 intent and cancels only the original operation, including Host-owned successors;
 it never targets the Session's latest arbitrary Turn. Undispatched intents can

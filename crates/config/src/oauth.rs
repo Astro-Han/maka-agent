@@ -18,46 +18,41 @@
  */
 
 use crate::{
-    ConfigError, ConfigurationStore, Result, TransactionMode, catalog, model_catalog,
+    ConfigError, ConfigurationStore, Result, TransactionMode, catalog,
     network::{NetworkConfiguration, NetworkSnapshot},
     vault,
 };
 use maka_runtime::configuration::*;
+use maka_runtime::provider::Credential;
 use std::sync::Arc;
 
 pub mod enrollment;
 
-/// An immutable, root-bound OAuth generation. Secret material never enters a
+/// An immutable, root-bound provider generation. Secret material never enters a
 /// public projection. Clones share ownership, not an independent credential cache.
 #[derive(Clone)]
-pub struct OAuthCredential {
+pub struct ProviderCredential {
     pub(crate) store: Arc<ConfigurationStore>,
     pub(crate) target: ConnectionCredentialTarget,
     pub(crate) basis: CredentialVersionBasis,
-    pub(crate) secret: Arc<str>,
+    pub(crate) credential: Arc<Credential>,
     pub(crate) network: NetworkConfiguration,
 }
 
 impl ConfigurationStore {
     /// Pin credential identity, raw material and refresh routing in one SQL
     /// snapshot. None means the requested execution binding is no longer usable.
-    pub async fn oauth_credential(
+    pub async fn provider_credential(
         self: &Arc<Self>,
         target: ConnectionCredentialTarget,
-    ) -> Result<Option<OAuthCredential>> {
+    ) -> Result<Option<ProviderCredential>> {
         validation::credential_target(&target).map_err(ConfigError::Invalid)?;
-        let facts = model_catalog::provider_facts(&target.provider_type)?;
-        if facts.retired || facts.auth_kind != ProviderAuthKind::OauthToken {
-            return Err(ConfigError::Invalid(
-                "provider does not support OAuth execution".into(),
-            ));
-        }
         let store = Arc::clone(self);
         self.transaction(TransactionMode::Deferred, move |tx| {
             Box::pin(async move {
                 let locator = CredentialLocator::Connection {
                     connection_id: target.connection_id.clone(),
-                    kind: ConnectionCredentialKind::OauthToken,
+                    kind: ConnectionCredentialKind::Provider,
                 };
                 if vault::connection_conflict(tx, &locator, Some(&target))
                     .await?
@@ -76,11 +71,11 @@ impl ConfigurationStore {
                         .bind(serde_json::to_string(&locator)?)
                         .fetch_one(&mut *tx)
                         .await?;
-                Ok(Some(OAuthCredential {
+                Ok(Some(ProviderCredential {
                     store,
                     target,
                     basis,
-                    secret: secret.into(),
+                    credential: Arc::new(decode(&secret)?),
                     network: NetworkSnapshot::read(tx).await?.configuration,
                 }))
             })
@@ -89,7 +84,30 @@ impl ConfigurationStore {
     }
 }
 
-impl OAuthCredential {
+impl ProviderCredential {
+    /// Durable single-flight boundary before sending a possibly single-use grant.
+    /// False means superseded or already claimed; neither permits another exchange.
+    pub async fn claim_refresh(&self) -> Result<bool> {
+        let expected = self.basis.clone();
+        let target = self.target.clone();
+        self.store.transaction(TransactionMode::Immediate, move |tx| {
+            Box::pin(async move {
+                let Some(row) = catalog::find(tx, &target.connection_id).await? else {
+                    return Ok(false);
+                };
+                if row.provider != target.provider || row.slug != target.slug
+                    || vault::status_basis(&vault::status(tx, &expected.locator).await?).as_ref()
+                        != Some(&expected)
+                {
+                    return Ok(false);
+                }
+                Ok(sqlx::query("INSERT INTO credential_refresh_claims VALUES (?, ?) ON CONFLICT DO NOTHING")
+                    .bind(&expected.credential_id).bind(expected.revision as i64)
+                    .execute(&mut *tx).await?.rows_affected() == 1)
+            })
+        }).await
+    }
+
     /// Reconcile this credential identity without treating metadata edits or a
     /// disabled connection as revocation of an already-spent refresh grant.
     /// A replacement login, logout or removed connection returns None.
@@ -106,7 +124,7 @@ impl OAuthCredential {
                     else {
                         return Ok(None);
                     };
-                    if row.provider_type != snapshot.target.provider_type
+                    if row.provider != snapshot.target.provider
                         || row.slug != snapshot.target.slug
                         || basis.credential_id != snapshot.basis.credential_id
                     {
@@ -119,7 +137,7 @@ impl OAuthCredential {
                             .await?;
                     Ok(Some(Self {
                         basis,
-                        secret: secret.into(),
+                        credential: Arc::new(decode(&secret)?),
                         ..snapshot
                     }))
                 })
@@ -135,8 +153,8 @@ impl OAuthCredential {
         &self.basis
     }
 
-    pub fn secret(&self) -> &str {
-        &self.secret
+    pub fn credential(&self) -> &Credential {
+        &self.credential
     }
 
     pub fn network_configuration(&self) -> &NetworkConfiguration {
@@ -155,19 +173,11 @@ impl OAuthCredential {
     /// do not refresh again with the old grant to resolve a persistence ambiguity.
     pub async fn commit_refresh(
         &self,
-        secret: String,
+        credential: Credential,
         now: u64,
     ) -> Result<Option<CredentialVersionBasis>> {
-        let input = SetCredentialInput {
-            locator: self.basis.locator.clone(),
-            expected: Some(CredentialIdentityBasis {
-                credential_id: self.basis.credential_id.clone(),
-                revision: self.basis.revision,
-            }),
-            expected_connection: Some(self.target.clone()),
-            secret,
-        };
-        validation::validate_set_credential(&input).map_err(ConfigError::Invalid)?;
+        credential.validate().map_err(ConfigError::Invalid)?;
+        let secret = serde_json::to_string(&credential)?;
         validation::revision(now, false).map_err(ConfigError::Invalid)?;
         let expected = self.basis.clone();
         let target = self.target.clone();
@@ -177,22 +187,32 @@ impl OAuthCredential {
                     let Some(row) = catalog::find(tx, &target.connection_id).await? else {
                         return Ok(None);
                     };
-                    if row.provider_type != target.provider_type
+                    if row.provider != target.provider
                         || row.slug != target.slug
-                        || vault::status_basis(&vault::status(tx, &input.locator).await?).as_ref()
+                        || vault::status_basis(&vault::status(tx, &expected.locator).await?)
+                            .as_ref()
                             != Some(&expected)
                     {
                         return Ok(None);
                     }
                     // Provider token rotation does not change the connection's user
                     // configuration or invalidate its verification, unlike re-login.
-                    vault::write_secret(tx, &input.locator, &input.secret, now).await?;
+                    vault::write_secret(tx, &expected.locator, &secret, now).await?;
+                    sqlx::query("DELETE FROM credential_refresh_claims WHERE credential_id = ? AND revision = ?")
+                        .bind(&expected.credential_id).bind(expected.revision as i64)
+                        .execute(&mut *tx).await?;
                     vault::advance(tx).await?;
                     Ok(vault::status_basis(
-                        &vault::status(tx, &input.locator).await?,
+                        &vault::status(tx, &expected.locator).await?,
                     ))
                 })
             })
             .await
     }
+}
+
+pub(crate) fn decode(secret: &str) -> Result<Credential> {
+    let credential: Credential = serde_json::from_str(secret)?;
+    credential.validate().map_err(ConfigError::Invalid)?;
+    Ok(credential)
 }

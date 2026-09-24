@@ -78,6 +78,19 @@ npx knip --workspace packages/ui
 
 架构说明见 [ARCHITECTURE.zh-CN.md](./ARCHITECTURE.zh-CN.md)；Eval 的命令与 contract 见 [`packages/eval`](./packages/eval)。
 
+## Rust workspace
+
+- 模块使用 `name.rs` 与 `name/` 子目录，不使用 `mod.rs`。单元测试放在对应实现文件末尾，
+  集成测试放在 `tests/`。
+- 测试持久行为与重要故障边界。优先扩充已有测试，避免重复 fixture、源码文本断言和真实时间睡眠。
+- 业务插件只消费公共插件能力。Host 拥有执行准入、规范事实与资源结算；插件拥有领域策略和数据。
+- 封闭操作和状态使用类型，schema 使用 `schemars` 生成。数据库结构通过 SQLx migration 修改，
+  不在启动路径中临时建表。
+- 协议码、诊断与 UI 文案分开。插件客户端使用类型化的 `en`、`zh-CN`、`zh-TW` 文案表，
+  传递完整 locale。新增 crate 文档提供简明的中英文版本。
+- 运行 `cargo fmt --all -- --check`、严格 Clippy、相关 `cargo nextest` 测试与插件 SDK 类型检查。
+  TypeScript（包括插件客户端）使用 Biome。
+
 ## Pull Request
 
 开 PR 时会自动填充 [`pull_request_template.md`](./.github/pull_request_template.md)；请在它的基础上填写，不要整段替换。

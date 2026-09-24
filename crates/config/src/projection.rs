@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 
 pub use crate::model_catalog::ModelCatalogEntry;
 
-/// Produces the existing 128-item / 48 KiB wire page; the cursor identifies
+/// Produces a 128-item / 128 KiB wire page; the cursor identifies
 /// the next item, and only belongs to the revision that produced it.
 pub fn project(
     snapshot: &ConnectionCatalogSnapshot,
@@ -51,11 +51,10 @@ pub fn project(
         }
         let mut header = json!({"kind":"connection", "connectionIndex":connection_index,
             "connectionId":row.connection_id,"revision":row.revision,"slug":row.slug,
-            "name":row.name,"providerType":row.provider_type,"enabled":row.enabled,
+            "name":row.name,"provider":row.provider,"configuration":row.configuration,"enabled":row.enabled,
             "enabledModelIdCount":row.enabled_model_ids.len(),"modelCount":row.models.len(),
             "catalogEntryCount":entries.len()});
         for (key, value) in [
-            ("baseUrl", serde_json::to_value(&row.base_url)?),
             ("modelSource", serde_json::to_value(row.model_source)?),
             ("lastTest", serde_json::to_value(&row.last_test)?),
             (
@@ -117,7 +116,7 @@ pub fn project(
     while end < items.len().min(offset + 128) {
         let next_item_bytes = serde_json::to_vec(&items[end])?.len() + usize::from(end > offset);
         let cursor_bytes = serde_json::to_vec(&items.get(end + 1).map(cursor_for))?.len();
-        if envelope_bytes + item_bytes + next_item_bytes + cursor_bytes > 48 * 1024 {
+        if envelope_bytes + item_bytes + next_item_bytes + cursor_bytes > 128 * 1024 {
             break;
         }
         item_bytes += next_item_bytes;

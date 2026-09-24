@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { readPage } from '../../packages/runtime/src/read-page.ts';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
@@ -158,35 +159,15 @@ export async function verifyWriteWorkflow(connection, workspace, reopened) {
   const model = await fixture(writeResult);
   const request = (operation, input) => connection.request(operation, input, 3000);
   try {
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: 0,
-      connection: {
-        slug: 'write-fixture',
-        name: 'Write fixture',
-        providerType: 'openai-compatible',
-        baseUrl: model.baseUrl,
-        enabled: true,
-        enabledModelIds: ['fixture-model'],
-      },
+    const created = await createModelConnection(request, {
+      providerName: 'openai-compatible',
+      slug: 'write-fixture',
+      name: 'Write fixture',
+      baseUrl: model.baseUrl,
+      apiKey: 'dummy-write-fixture',
+      enabledModelIds: ['fixture-model'],
     });
-    assert.equal(created.kind, 'committed');
     const basis = created.connection;
-    assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-          expected: null,
-          expectedConnection: {
-            ...basis,
-            slug: 'write-fixture',
-            providerType: 'openai-compatible',
-            effectiveBaseUrl: model.baseUrl,
-          },
-          secret: 'dummy-write-fixture',
-        })
-      ).kind,
-      'committed',
-    );
     await request('connection.catalog.set-default-target', {
       expectedCatalogRevision: created.catalogRevision,
       target: { connectionId: basis.connectionId, modelId: 'fixture-model' },

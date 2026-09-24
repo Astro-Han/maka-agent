@@ -96,8 +96,7 @@ fn recover(after_acceptance: bool) {
                 tui.read();
             }
             // SIGKILL cannot run the normal quit flush; only the prior checkpoint survives.
-            tui.child.kill().unwrap();
-            assert!(!tui.child.wait().unwrap().success());
+            assert!(!tui.terminate().unwrap().success());
         }
         let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
         tui.wait_for(if after_acceptance { "Delivered once." } else { "No messages yet." });
@@ -243,8 +242,10 @@ impl LostReply {
                                 let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
                                 if operation == "oauth.login.start" {
                                     assert_eq!(saved["root"], discovery.root_id);
-                                    assert_eq!(saved["oauth"]["start"], value["input"]);
-                                    assert_eq!(saved["oauth"]["provider"], value["input"]["target"]["providerType"]);
+                                    assert_eq!(saved["oauth"]["attempt"], json!({
+                                        "attemptId":value["input"]["attemptId"],
+                                        "target":value["input"]["target"]
+                                    }));
                                     captured.lock().unwrap().push(value["input"].clone());
                                     // Never forward an OAuth start to a real provider. Only
                                     // enrollment/query/cancel exercise the actual Host here.

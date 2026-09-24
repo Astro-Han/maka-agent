@@ -77,10 +77,13 @@ export async function modelOverridesFixture(port = 0) {
             'next route must replay the real committed Read result',
           );
         if (expected.toolResult) {
-          const result = input.messages.findLast((message) => message.role === 'tool');
-          assert.equal(result.tool_call_id, 'facts-read');
+          const responses = expected.path.endsWith('/responses');
+          const result = responses
+            ? input.input.findLast((message) => message.type === 'function_call_output')
+            : input.messages.findLast((message) => message.role === 'tool');
+          assert.equal(responses ? result.call_id : result.tool_call_id, 'facts-read');
           assert.deepEqual(
-            JSON.parse(result.content),
+            JSON.parse(responses ? result.output : result.content),
             readPage(evidence, { path: 'facts-evidence.txt' }),
           );
         }

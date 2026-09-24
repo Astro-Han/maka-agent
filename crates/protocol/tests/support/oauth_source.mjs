@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import { withSourceModule } from '../../../../tests/support/source.mjs';
 await withSourceModule('packages/runtime-host/src/protocol/oauth.ts', async (source) => {
   let input = '';
+  process.stdin.setEncoding('utf8');
   for await (const chunk of process.stdin) input += chunk;
   for (const test of JSON.parse(input)) {
     let actual = null;

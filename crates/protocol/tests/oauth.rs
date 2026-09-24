@@ -26,13 +26,11 @@ use std::{
 };
 
 #[test]
-fn oauth_contract_matches_original_client_for_all_providers_and_closed_phases() {
+fn authentication_contract_matches_client_for_arbitrary_provider_identity_and_receipts() {
     let mut cases = Vec::new();
-    for provider in [
-        Provider::OpenaiCodex,
-        Provider::GithubCopilot,
-        Provider::XaiOauth,
-    ] {
+    for name in ["api-key", "subscription"] {
+        let provider = json!({"packageId":"external.providers","entryId":"providers","scope":"profile","name":name});
+        let connection = json!({"connectionId":"123e4567-e89b-42d3-a456-426614174000","slug":"personal","provider":provider});
         for enabled in [true, false] {
             case(
                 &mut cases,
@@ -47,149 +45,74 @@ fn oauth_contract_matches_original_client_for_all_providers_and_closed_phases() 
                 json!({"provider":provider,"enabled":enabled}),
             );
         }
-        let start =
-            json!({"attemptId":"attempt_1","target":{"kind":"create","providerType":provider}});
-        case(&mut cases, Operation::OauthLoginStart, false, start.clone());
-        for (key, values) in [
-            (
-                "slug",
-                vec![
-                    json!("chosen-slug"),
-                    json!("Bad-slug"),
-                    json!(""),
-                    Value::Null,
-                ],
-            ),
-            (
-                "name",
-                vec![
-                    json!("My subscription"),
-                    json!(""),
-                    json!("😀".repeat(128)),
-                    json!("😀".repeat(129)),
-                    Value::Null,
-                ],
-            ),
+        for target in [
+            json!({"kind":"create","provider":provider,"configuration":{"endpoint":"opaque"},"slug":"personal","name":"Personal"}),
+            json!({"kind":"existing","expected":{"connectionId":connection["connectionId"],"revision":1,
+                "slug":"personal","provider":provider,"configuration":{"endpoint":"opaque"}},"configuration":{"endpoint":"updated"}}),
         ] {
-            for value in values {
-                let mut custom = start.clone();
-                custom["target"][key] = value;
-                case(&mut cases, Operation::OauthLoginStart, false, custom);
-            }
-        }
-        let connection =
-            json!({"connectionId":"connection_1","slug":"my-subscription","providerType":provider});
-        for phase in [
-            "awaiting_authorization",
-            "exchanging",
-            "committing",
-            "authenticated",
-            "cancelled",
-        ] {
-            let projection = json!({"attemptId":"attempt_1","connection":connection,"phase":phase});
-            for operation in [
-                Operation::OauthLoginStart,
-                Operation::OauthLoginQuery,
-                Operation::OauthLoginCancel,
+            let start = json!({"attemptId":"attempt_1","target":target,"authentication":{"method":name,"input":{"key":"transient-secret"}}});
+            case(&mut cases, Operation::OauthLoginStart, false, start.clone());
+            for phase in [
+                "awaiting_authorization",
+                "exchanging",
+                "committing",
+                "authenticated",
+                "cancelled",
             ] {
-                case(&mut cases, operation, true, projection.clone());
+                let projection =
+                    json!({"attemptId":"attempt_1","connection":connection,"phase":phase});
+                case(
+                    &mut cases,
+                    Operation::OauthLoginQuery,
+                    true,
+                    projection.clone(),
+                );
+                pairing(&mut cases, &start, &projection);
+                let mut failed = projection.clone();
+                failed["failure"] = json!("provider_rejected");
+                case(&mut cases, Operation::OauthLoginQuery, true, failed);
             }
-            pairing(&mut cases, &start, &projection);
-            let mut invalid = projection.clone();
-            invalid["failure"] = json!("authorization_failed");
-            case(&mut cases, Operation::OauthLoginStart, true, invalid);
-        }
-        for failure in [
-            "capability_unavailable",
-            "authorization_failed",
-            "provider_rejected",
-            "slug_taken",
-            "credential_changed",
-            "connection_changed",
-            "persistence_failed",
-            "internal_failure",
-        ] {
-            case(
-                &mut cases,
-                Operation::OauthLoginQuery,
-                true,
-                json!({"attemptId":"attempt_1","connection":connection,"phase":"failed","failure":failure}),
-            );
-        }
-        let mut wrong =
-            json!({"attemptId":"attempt_2","connection":connection,"phase":"authenticated"});
-        pairing(&mut cases, &start, &wrong);
-        wrong["attemptId"] = json!("attempt_1");
-        wrong["connection"]["providerType"] = json!(if provider == Provider::XaiOauth {
-            Provider::OpenaiCodex
-        } else {
-            Provider::XaiOauth
-        });
-        pairing(&mut cases, &start, &wrong);
-        let existing = json!({"attemptId":"attempt_1","target":{"kind":"existing","connectionId":"connection_1"}});
-        pairing(&mut cases, &existing, &wrong); // Existing targets bind identity, not an inferred provider.
-        wrong["connection"]["connectionId"] = json!("connection_2");
-        pairing(&mut cases, &existing, &wrong);
-        if provider == Provider::OpenaiCodex {
-            let mut custom = start.clone();
-            custom["target"]["slug"] = json!("chosen-slug");
-            wrong["connection"]["providerType"] = json!(provider);
-            pairing(&mut cases, &custom, &wrong);
-            wrong["connection"]["slug"] = json!("chosen-slug");
-            pairing(&mut cases, &custom, &wrong);
+            for field in ["packageId", "entryId", "scope", "name"] {
+                let mut wrong = json!({"attemptId":"attempt_1","connection":connection,"phase":"authenticated"});
+                wrong["connection"]["provider"][field] = json!(if field == "scope" {
+                    "session:other"
+                } else {
+                    "other"
+                });
+                pairing(&mut cases, &start, &wrong);
+            }
+            for failure in [
+                "capability_unavailable",
+                "authorization_failed",
+                "provider_rejected",
+                "slug_taken",
+                "credential_changed",
+                "connection_changed",
+                "persistence_failed",
+                "internal_failure",
+                "outcome_unknown",
+            ] {
+                case(
+                    &mut cases,
+                    Operation::OauthLoginQuery,
+                    true,
+                    json!({
+                        "attemptId":"attempt_1","connection":connection,"phase":"failed","failure":failure
+                    }),
+                );
+            }
+            for (pointer, value) in [
+                ("/attemptId", json!("../invalid")),
+                ("/authentication/method", json!("invalid method")),
+                ("/authentication/input", json!("x".repeat(65537))),
+                ("/target/configuration", json!(null)),
+            ] {
+                let mut invalid = start.clone();
+                *invalid.pointer_mut(pointer).unwrap() = value;
+                case(&mut cases, Operation::OauthLoginStart, false, invalid);
+            }
         }
     }
-    for value in [
-        json!(["ok", {"kind":"create","providerType":"openai-codex"}]),
-        json!({"attemptId":"","target":{"kind":"create","providerType":"openai-codex"}}),
-        json!({"attemptId":"../id","target":{"kind":"create","providerType":"openai-codex"}}),
-        json!({"attemptId":"a".repeat(129),"target":{"kind":"create","providerType":"openai-codex"}}),
-        json!({"attemptId":"ok","target":{"kind":"create","providerType":"future-oauth"}}),
-        json!({"attemptId":"ok","target":{"kind":"create","providerType":"openai-codex","connectionId":"wrong"}}),
-        json!({"attemptId":"ok","target":{"kind":"existing","connectionId":"short-id"}}),
-        json!({"attemptId":"ok","target":{"kind":"existing","connectionId":null}}),
-        json!({"attemptId":"ok","target":{"kind":"existing","connectionId":"id"},"extra":true}),
-    ] {
-        case(&mut cases, Operation::OauthLoginStart, false, value);
-    }
-    for value in [
-        json!(["ok"]),
-        json!({"attemptId":"a".repeat(128)}),
-        json!({"attemptId":"😀"}),
-        json!({"attemptId":"ok","extra":true}),
-        json!({"attemptId":null}),
-    ] {
-        case(&mut cases, Operation::OauthLoginQuery, false, value.clone());
-        case(&mut cases, Operation::OauthLoginCancel, false, value);
-    }
-    let base = json!({"attemptId":"ok","connection":{"connectionId":"id","slug":"ok","providerType":"xai-oauth"},"phase":"authenticated"});
-    for (pointer, replacement) in [
-        ("/connection", json!(["id", "ok", "xai-oauth"])),
-        ("/phase", json!("future")),
-        ("/phase", json!("failed")),
-        ("/connection/slug", json!("a")),
-        ("/connection/slug", json!("Bad-slug")),
-        ("/connection/providerType", json!("future-oauth")),
-        ("/connection/connectionId", json!("../id")),
-    ] {
-        let mut value = base.clone();
-        *value.pointer_mut(pointer).unwrap() = replacement;
-        case(&mut cases, Operation::OauthLoginQuery, true, value);
-    }
-    for value in [
-        json!(["openai-codex", true]),
-        json!({"provider":"openai-codex","enabled":null}),
-        json!({"provider":"xai-oauth","enabled":true,"extra":1}),
-        json!({"provider":"future","enabled":true}),
-    ] {
-        case(&mut cases, Operation::OauthEnrollmentQuery, true, value);
-    }
-    case(
-        &mut cases,
-        Operation::OauthEnrollmentQuery,
-        false,
-        json!(["openai-codex"]),
-    );
     for (method, value) in [
         (
             "open_external",

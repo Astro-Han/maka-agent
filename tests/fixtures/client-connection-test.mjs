@@ -18,6 +18,8 @@
  */
 
 import assert from 'node:assert/strict';
+import { readRuntimeHostModelProviders } from '../../packages/runtime-host/src/client/catalog-reader.ts';
+import { authenticateModelConnection } from './client-model-connection.mjs';
 import { once } from 'node:events';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -179,7 +181,7 @@ export async function verifyConnectionTest(connection, workspace, reopened, open
       expected: basis(header(page, id)),
       changes: {
         name: header(page, id).name,
-        baseUrl: provider.baseUrl,
+        configuration: { baseUrl: provider.baseUrl },
         enabled: true,
         enabledModelIds: [models['openai-compatible']],
         ...changes,
@@ -194,14 +196,16 @@ export async function verifyConnectionTest(connection, workspace, reopened, open
   };
   try {
     const ids = {};
+    const directory = await readRuntimeHostModelProviders(connection);
     for (const [providerType, model] of Object.entries(models)) {
       const created = await request('connection.catalog.create', {
         expectedCatalogRevision: (await catalog()).revision,
         connection: {
           slug: providerType,
           name: providerType,
-          providerType,
-          baseUrl: provider.baseUrl,
+          provider: directory.entries.find((entry) => entry.identity.name === providerType)
+            .identity,
+          configuration: { baseUrl: provider.baseUrl },
           enabled: true,
           enabledModelIds: [model],
         },
@@ -209,28 +213,14 @@ export async function verifyConnectionTest(connection, workspace, reopened, open
       assert.equal(created.kind, 'committed');
       const id = created.connection.connectionId;
       ids[providerType] = id;
-      const noKey = await catalog();
       const count = provider.count;
-      assert.deepEqual(await run(id), { kind: 'rejected', reason: 'credential_not_configured' });
+      const missing = await run(id);
+      assert.equal(missing.kind, 'committed');
+      assert.equal(missing.test.kind, 'failed');
+      assert.equal(missing.test.errorClass, 'auth');
       assert.equal(provider.count, count);
-      assert.deepEqual(await catalog(), noKey);
-      const row = header(noKey, id);
-      assert.equal(
-        (
-          await request('credential.vault.set', {
-            locator: { scope: 'connection', connectionId: id, kind: 'api_key' },
-            expected: null,
-            expectedConnection: {
-              ...basis(row),
-              slug: row.slug,
-              providerType,
-              effectiveBaseUrl: provider.baseUrl,
-            },
-            secret,
-          })
-        ).kind,
-        'committed',
-      );
+      assert.equal(header(await catalog(), id).lastTest.status, 'needs_reauth');
+      await authenticateModelConnection(request, id, secret);
       provider.expect(providerType, model);
       verified(await run(id, model), model);
       const after = await catalog();
@@ -309,7 +299,7 @@ export async function verifyConnectionTest(connection, workspace, reopened, open
     assert.equal(failed.kind, 'committed');
     assert.equal(failed.test.kind, 'failed');
     assert.equal(failed.test.errorClass, 'auth');
-    assert.equal(failed.test.modelId, null);
+    assert.equal(failed.test.modelId, model);
     assert.equal(failed.test.statusCode, 401);
     assert(failed.test.latencyMs >= 0);
     const saved = await catalog();

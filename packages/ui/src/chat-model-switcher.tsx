@@ -48,7 +48,7 @@ import {
   renderModelPickerOption,
   renderModelPickerValue,
 } from './model-picker-internals.js';
-import { type ProviderType } from '@maka/core/llm-connections';
+import { type ProviderIdentity } from '@maka/core/runtime-policy';
 import { type SessionSummary } from '@maka/core/session';
 import { type ThinkingLevel } from '@maka/core/model-thinking';
 import { useUiLocale } from './locale-context.js';
@@ -145,7 +145,7 @@ export function ChatModelSwitcher(props: {
   activeModelConnectionSlug?: string;
   activeModel?: string;
   activeModelLabel?: string;
-  currentProviderType?: ProviderType;
+  currentProvider?: ProviderIdentity;
   choices: ChatModelChoice[];
   hasConversationHistory?: boolean;
   availability?: ComposerModelSwitchAvailability;
@@ -162,7 +162,7 @@ export function ChatModelSwitcher(props: {
   isReadOnly?: boolean;
   /** Hide a stale display-only row while the Session requires identity recovery. */
   hideUnavailableCurrentOption?: boolean;
-  renderProviderMark?(type: ProviderType): ReactNode;
+  renderProviderMark?(type: ProviderIdentity): ReactNode;
   onChange?(input: {
     llmConnectionId: string;
     llmConnectionSlug: string;
@@ -188,7 +188,7 @@ export function ChatModelSwitcher(props: {
   const disabled =
     Boolean(props.disabledReason) ||
     !availability.available || !props.onChange || props.choices.length === 0;
-  const grouped = modelMenuGroups(props.choices, locale);
+  const grouped = modelMenuGroups(props.choices);
   const currentKnownChoice = props.choices.some(
     (choice) => exactChoiceValue(choice) === currentValue,
   );
@@ -207,7 +207,7 @@ export function ChatModelSwitcher(props: {
     const list = buildModelPickerOptions(
       grouped,
       !currentKnownChoice && currentValue && !props.hideUnavailableCurrentOption
-        ? { value: currentValue, label: displayLabel, providerType: props.currentProviderType, disabled: true }
+        ? { value: currentValue, label: displayLabel, provider: props.currentProvider, disabled: true }
         : undefined,
       exactChoiceValue,
       props.renderProviderMark,
@@ -223,7 +223,7 @@ export function ChatModelSwitcher(props: {
     }
     return list;
   }, [grouped, currentKnownChoice, currentValue, props.hideUnavailableCurrentOption,
-      noticeShown, displayLabel, props.currentProviderType, copy.switchWarning,
+      noticeShown, displayLabel, props.currentProvider, copy.switchWarning,
       copy.switchWarningDismiss, props.renderProviderMark]);
   const renderOption = useCallback((option: SelectorOptionData) => (
     option.value === SWITCH_WARNING_VALUE
@@ -298,7 +298,7 @@ export function ChatModelSwitcher(props: {
           value={selection.value}
           label={displayLabel}
           ariaLabel={`${copy.switchAriaLabel}: ${displayLabel}`}
-          icon={providerMarkIcon(props.currentProviderType, props.renderProviderMark)}
+          icon={providerMarkIcon(props.currentProvider, props.renderProviderMark)}
           tooltip={props.disabledReason ?? copy.switchAriaLabel}
           triggerClassName="maka-model-switcher-trigger"
           disabled={disabled}
@@ -359,8 +359,8 @@ export function NewChatModelPicker(props: {
   isReadOnly?: boolean;
   choices: ChatModelChoice[];
   currentValue?: string;
-  currentProviderType?: ProviderType;
-  renderProviderMark?(type: ProviderType): ReactNode;
+  currentProvider?: ProviderIdentity;
+  renderProviderMark?(type: ProviderIdentity): ReactNode;
   onPick(input: {
     llmConnectionId: string;
     llmConnectionSlug: string;
@@ -370,7 +370,7 @@ export function NewChatModelPicker(props: {
   const locale = useUiLocale();
   const copy = getConversationCopy(locale).model;
   const searchPlaceholder = getSharedUiCopy(locale).modelPicker.searchPlaceholder;
-  const grouped = modelMenuGroups(props.choices, locale);
+  const grouped = modelMenuGroups(props.choices);
   const currentValue = props.currentValue ?? '';
   const currentKnownChoice = props.choices.some(
     (choice) => exactChoiceValue(choice) === currentValue,
@@ -383,12 +383,12 @@ export function NewChatModelPicker(props: {
     () => buildModelPickerOptions(
       grouped,
       !currentKnownChoice && currentValue
-        ? { label: props.label, value: currentValue, providerType: props.currentProviderType, disabled: true }
+        ? { label: props.label, value: currentValue, provider: props.currentProvider, disabled: true }
         : undefined,
       exactChoiceValue,
       props.renderProviderMark,
     ),
-    [grouped, currentKnownChoice, currentValue, props.label, props.currentProviderType,
+    [grouped, currentKnownChoice, currentValue, props.label, props.currentProvider,
       props.renderProviderMark],
   );
   // The only producer is synchronous state (pending new-chat model), so the
@@ -414,7 +414,7 @@ export function NewChatModelPicker(props: {
         value={currentValue}
         label={props.label}
         ariaLabel={copy.newChatAriaLabel(props.label)}
-        icon={providerMarkIcon(props.currentProviderType, props.renderProviderMark)}
+        icon={providerMarkIcon(props.currentProvider, props.renderProviderMark)}
         tooltip={copy.newChatTitle(props.label)}
         triggerClassName="maka-new-chat-model-selector"
         onValueChange={pick}

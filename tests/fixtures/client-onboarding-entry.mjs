@@ -27,6 +27,7 @@ import { connectRuntimeHostMessageTransport } from '../../packages/runtime-host/
 import { FramedTransport } from '../../packages/runtime-host/src/transport/framed-transport.ts';
 import { createServer } from 'node:http';
 import { continuousModel, readCatalog, verifyCatalogStream } from './client-catalog-stream.mjs';
+import { createModelConnection } from './client-model-connection.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -102,17 +103,39 @@ async function workflow(connection, workspace, reopened) {
   const notices = [];
   connection.subscribeConfigurationChanges((revision) => notices.push(revision));
   try {
-    const input = {
-      target: { kind: 'create', providerType: 'openrouter' },
-      apiKey: 'test-onboarding-key',
-      baseUrl,
+    const authenticatedTarget = async (providerName) => {
+      const created = await createModelConnection(call, {
+        providerName,
+        slug: providerName,
+        name: providerName,
+        baseUrl,
+        apiKey: 'test-onboarding-key',
+        enabledModelIds: [],
+      });
+      const row = (await catalog()).items.find(
+        (item) =>
+          item.kind === 'connection' && item.connectionId === created.connection.connectionId,
+      );
+      return {
+        kind: 'existing',
+        expected: {
+          connectionId: row.connectionId,
+          revision: row.revision,
+          slug: row.slug,
+          provider: row.provider,
+          configuration: row.configuration,
+        },
+        configuration: row.configuration,
+      };
     };
+    const input = { target: await authenticatedTarget('openrouter') };
+    const initialNotices = notices.length;
     const before = await catalog();
     const verified = await call('connection.onboarding.verify', input);
     assert.equal(verified.kind, 'verified');
     assert.equal(verified.models.length, models.length);
     assert.deepEqual(await catalog(), before);
-    assert.equal(notices.length, 0);
+    assert.equal(notices.length, initialNotices);
     status = 401;
     assert.deepEqual(
       await call('connection.onboarding.save', { ...input, enabledModelIds: ['one'] }),
@@ -130,10 +153,10 @@ async function workflow(connection, workspace, reopened) {
     assert.equal(saved.connection.slug, 'openrouter');
     assert.equal(count, 4, 'save discovers again and cannot trust a prior verification');
     const existing = {
-      ...input,
-      target: { kind: 'existing', connectionId: saved.connection.connectionId },
-      apiKey: null,
-      baseUrl: null,
+      target: {
+        ...input.target,
+        expected: { ...input.target.expected, revision: saved.connection.revision },
+      },
     };
     assert.equal((await call('connection.onboarding.verify', existing)).kind, 'verified');
     await call('session.create', {
@@ -149,16 +172,18 @@ async function workflow(connection, workspace, reopened) {
       },
     });
     // Another registry-compatible provider follows exactly the same native driver.
+    assert.equal(notices.length, initialNotices + 1);
+    const otherTarget = await authenticatedTarget('deepseek');
+    const beforeSaveNotices = notices.length;
     const other = await call('connection.onboarding.save', {
-      ...input,
-      target: { kind: 'create', providerType: 'deepseek' },
+      target: otherTarget,
       enabledModelIds: [],
     });
     assert.equal(other.kind, 'saved');
     const page = await catalog();
     assert.equal(page.items.filter((item) => item.kind === 'connection').length, 2);
-    assert.equal(notices.length, 2);
-    assert(notices[1] > notices[0]);
+    assert.equal(notices.length, beforeSaveNotices + 1);
+    assert(notices.every((revision, index) => index === 0 || revision > notices[index - 1]));
     await writeFile(path, JSON.stringify(page));
     await verifyCatalogStream(connection, model, workspace, false);
   } finally {

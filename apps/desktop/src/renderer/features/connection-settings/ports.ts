@@ -86,6 +86,7 @@ export interface ConnectionOAuthBridge {
 export interface ConnectionsBridge {
   /** Host-bound account operations; every adapter and fixture must provide them. */
   readonly oauth: ConnectionOAuthBridge;
+  getProviders(): Promise<import('@maka/runtime-host/client').RuntimeHostModelProviderCatalogSnapshot>;
   getSnapshot(): Promise<DesktopConnectionSnapshot>;
   setDefault(connection: DesktopConnectionIdentity | null): Promise<void>;
   create(input: CreateConnectionInput): Promise<IdentifiedLlmConnection>;

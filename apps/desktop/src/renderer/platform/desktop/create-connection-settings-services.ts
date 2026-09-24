@@ -61,6 +61,7 @@ export function createDesktopConnectionSettingsServices(
             },
           },
           getSnapshot: () => bridge().connections.getSnapshot(undefined, host),
+          getProviders: () => bridge().connections.getProviders(host),
           setDefault: (connection) => bridge().connections.setDefault(connection, host),
           setDefaultModel: (input) => bridge().connections.setDefaultModel(input, host),
           create: (input) => bridge().connections.create(input, host),

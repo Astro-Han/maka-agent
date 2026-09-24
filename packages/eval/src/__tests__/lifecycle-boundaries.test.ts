@@ -522,11 +522,24 @@ test('Maka framework termination is authoritative before stdout decoding', async
 
 test('Maka forwards Host requirements and declared credential names', async () => {
   const { thinkingLevel: _thinkingLevel, ...defaultConfig } = makaConfig();
+  const { connection: _connection, ...missingConnection } = defaultConfig;
+  assert.throws(
+    () => createMakaSubjectAdapter().validate?.(cell('maka', missingConnection)),
+    /Maka config fields are invalid/,
+  );
   const config = {
     ...defaultConfig,
     hostSettlementTimeoutMs: 120_000,
-    providerType: 'moonshot-global',
-    apiKeyEnvironment: 'MOONSHOT_API_KEY',
+    connection: {
+      provider: {
+        packageId: 'external.models',
+        entryId: 'models',
+        scope: 'profile',
+        name: 'custom',
+      },
+      configuration: { deployment: 'account-model' },
+      authentication: { method: 'custom-auth', inputEnvironment: 'PROVIDER_AUTH_INPUT' },
+    },
   };
   const unbound = cell('maka', config);
   assert.throws(
@@ -535,7 +548,7 @@ test('Maka forwards Host requirements and declared credential names', async () =
   );
   const makaCell = {
     ...unbound,
-    subject: { ...unbound.subject, credentials: ['MOONSHOT_API_KEY'] },
+    subject: { ...unbound.subject, credentials: ['PROVIDER_AUTH_INPUT'] },
   };
   createMakaSubjectAdapter().validate?.(makaCell);
   let settlementBudget: unknown;
@@ -552,11 +565,10 @@ test('Maka forwards Host requirements and declared credential names', async () =
           execution: { executionId: string; session: Record<string, unknown> };
         };
         assert.equal(Object.hasOwn(payload.execution.session, 'thinkingLevel'), false);
-        assert.deepEqual(payload.connection, {
-          providerType: 'moonshot-global',
-          apiKeyEnvironment: 'MOONSHOT_API_KEY',
+        assert.deepEqual(payload.connection, config.connection);
+        assert.deepEqual(input.credentialEnvironment, {
+          PROVIDER_AUTH_INPUT: 'PROVIDER_AUTH_INPUT',
         });
-        assert.deepEqual(input.credentialEnvironment, { MOONSHOT_API_KEY: 'MOONSHOT_API_KEY' });
         settlementBudget = payload.hostSettlementTimeoutMs;
         return {
           termination: 'exited',
@@ -634,7 +646,6 @@ test('the Maka shim projects only a completed subject as a zero exit', async () 
             JSON.stringify({
               rootPath: join(root, 'state'),
               artifactRoot: join(root, 'artifacts'),
-              baseUrl: 'https://provider.test/v1',
               hostSettlementTimeoutMs: 1000,
               execution: { executionId },
             }),
@@ -820,7 +831,10 @@ test('eight-arm spec and wrappers freeze the working provider contracts', async 
       credentials: string[];
       config: {
         connectionSlug?: string;
-        baseUrl?: string;
+        connection?: {
+          configuration: { baseUrl?: string };
+          authentication: { inputEnvironment: string };
+        };
         toolProfile?: string;
         args?: string[];
         credentialEnvironment?: Record<string, string>;
@@ -830,17 +844,18 @@ test('eight-arm spec and wrappers freeze the working provider contracts', async 
   const maka = spec.subjects.find(({ id }) => id === 'maka')!;
   const codex = spec.subjects.find(({ id }) => id === 'codex')!;
   const claude = spec.subjects.find(({ id }) => id === 'claude-code')!;
-  assert.deepEqual(maka.credentials, ['DEEPSEEK_API_KEY']);
+  assert.deepEqual(maka.credentials, ['MAKA_AUTH_INPUT']);
   assert.equal(maka.config.connectionSlug, 'env-deepseek');
-  assert.equal(maka.config.baseUrl, 'https://api.deepseek.com');
+  assert.equal(maka.config.connection?.configuration.baseUrl, 'https://api.deepseek.com');
+  assert.equal(maka.config.connection?.authentication.inputEnvironment, 'MAKA_AUTH_INPUT');
   assert.equal(maka.config.toolProfile, 'headless-coding-v1');
   assert.equal(codex.config.args?.includes('--ephemeral'), true);
   assert.equal(codex.config.args?.includes('--skip-git-repo-check'), true);
   assert.equal(claude.config.args?.includes('--bare'), true);
   assert.equal(claude.config.args?.includes('--effort'), true);
   for (const subject of spec.subjects) {
-    assert.deepEqual(subject.credentials, ['DEEPSEEK_API_KEY']);
     if (subject.id === 'maka') continue;
+    assert.deepEqual(subject.credentials, ['DEEPSEEK_API_KEY']);
     assert.deepEqual(subject.config.credentialEnvironment, {
       [subject.id === 'claude-code' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY']: 'DEEPSEEK_API_KEY',
     });
@@ -1540,10 +1555,19 @@ function cell(kind: 'maka' | 'external', config: JsonObject): ExperimentCell {
 
 function makaConfig() {
   return {
+    connection: {
+      provider: {
+        packageId: 'maka.providers',
+        entryId: 'maka.providers',
+        scope: 'profile',
+        name: 'deepseek',
+      },
+      configuration: {},
+      authentication: { method: 'api-key', inputEnvironment: 'MAKA_AUTH_INPUT' },
+    },
     nodePath: '/opt/node/bin/node',
     shimPath: '/opt/maka/harbor-maka-subject.js',
     runtimeHostsPath: '/tmp/maka-runtime-hosts',
-    baseUrl: 'https://provider.test/v1',
     connectionSlug: 'provider',
     model: 'deepseek-v4-flash',
     thinkingLevel: 'max',

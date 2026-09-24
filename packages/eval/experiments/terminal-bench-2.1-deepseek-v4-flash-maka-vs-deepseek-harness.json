@@ -66,14 +66,23 @@
     {
       "id": "maka",
       "kind": "maka",
-      "credentials": ["DEEPSEEK_API_KEY"],
+      "credentials": ["MAKA_AUTH_INPUT"],
       "config": {
         "nodePath": "/opt/maka-node-toolchain/bin/node",
         "shimPath": "/opt/maka-agent/node_modules/@maka/eval/dist/harbor-maka-subject.js",
         "runtimeHostsPath": "/tmp/maka-runtime-hosts",
         "hostSettlementTimeoutMs": 120000,
         "connectionSlug": "env-deepseek",
-        "baseUrl": "https://api.deepseek.com",
+        "connection": {
+          "provider": {
+            "packageId": "maka.providers",
+            "entryId": "maka.providers",
+            "scope": "profile",
+            "name": "deepseek"
+          },
+          "configuration": { "baseUrl": "https://api.deepseek.com" },
+          "authentication": { "method": "api-key", "inputEnvironment": "MAKA_AUTH_INPUT" }
+        },
         "model": "deepseek-v4-flash",
         "thinkingLevel": "max",
         "sandboxMode": "danger-full-access",

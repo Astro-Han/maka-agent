@@ -20,6 +20,7 @@
 use crate::{Operation, OperationErrorCode, ProtocolError, Result, codec};
 use maka_runtime::configuration::validation;
 pub use maka_runtime::oauth::*;
+pub use maka_runtime::provider::{AuthenticationInput, Identity};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
@@ -56,19 +57,7 @@ fn encoded(value: impl Serialize) -> Result<Value> {
 }
 pub fn decode_start(value: &Value) -> Result<LoginStart> {
     let input: LoginStart = parsed(value)?;
-    id(&input.attempt_id)?;
-    for key in ["slug", "name"] {
-        if value["target"].get(key).is_some_and(Value::is_null) {
-            return Err(ProtocolError::invalid("Invalid OAuth identity"));
-        }
-    }
-    input
-        .target
-        .validate_create_identity()
-        .map_err(ProtocolError::invalid)?;
-    if let Target::Existing { connection_id } = &input.target {
-        id(connection_id)?;
-    }
+    input.validate().map_err(ProtocolError::invalid)?;
     Ok(input)
 }
 pub fn decode_attempt(value: &Value) -> Result<Attempt> {
@@ -77,10 +66,17 @@ pub fn decode_attempt(value: &Value) -> Result<Attempt> {
     Ok(input)
 }
 pub fn decode_enrollment(value: &Value) -> Result<EnrollmentQuery> {
-    parsed(value)
+    let query: EnrollmentQuery = parsed(value)?;
+    query.provider.validate().map_err(ProtocolError::invalid)?;
+    Ok(query)
 }
 pub fn decode_enrollment_result(value: &Value) -> Result<EnrollmentProjection> {
-    parsed(value)
+    let projection: EnrollmentProjection = parsed(value)?;
+    projection
+        .provider
+        .validate()
+        .map_err(ProtocolError::invalid)?;
+    Ok(projection)
 }
 pub fn decode_login(value: &Value) -> Result<LoginProjection> {
     let row = codec::record(value, "OAuth login projection")?;
@@ -97,10 +93,21 @@ pub fn decode_login(value: &Value) -> Result<LoginProjection> {
     id(&output.attempt_id)?;
     id(&output.connection.connection_id)?;
     validation::slug(&output.connection.slug).map_err(ProtocolError::invalid)?;
+    output
+        .connection
+        .provider
+        .validate()
+        .map_err(ProtocolError::invalid)?;
     Ok(output)
 }
 pub fn assert_start(input: &LoginStart, output: &LoginProjection) -> Result<()> {
-    if input.attempt_id != output.attempt_id || !input.target.matches(&output.connection) {
+    assert_identity(&input.attempt_id, &input.target, output)
+}
+pub fn assert_recovery(input: &LoginRecovery, output: &LoginProjection) -> Result<()> {
+    assert_identity(&input.attempt_id, &input.target, output)
+}
+fn assert_identity(attempt_id: &str, target: &Target, output: &LoginProjection) -> Result<()> {
+    if attempt_id != output.attempt_id || !target.matches(&output.connection) {
         return Err(ProtocolError::invalid(
             "OAuth login changed attempt or target identity",
         ));
@@ -176,6 +183,7 @@ pub fn errors(operation: Operation) -> Option<&'static [OperationErrorCode]> {
         CapabilityUnavailable,
         NotFound,
         PersistenceFailed,
+        CommitOutcomeUnknown,
     ];
     const ATTEMPT: &[OperationErrorCode] = &[
         HostNotReady,

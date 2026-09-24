@@ -17,13 +17,11 @@
  * under the License.
  */
 
-pub mod connection;
 mod delta;
 mod events;
 pub use maka_runtime::model::error::{ModelError, ProviderFailure, ProviderFailureReason};
-pub use maka_runtime::model::request::ProviderKind;
-pub mod oauth;
 pub use maka_runtime::model::prompt;
+pub use maka_runtime::model::request::ProviderKind;
 pub mod adapters;
 mod conversation;
 mod network;
@@ -237,6 +235,14 @@ pub struct ModelExecutor {
 }
 
 impl ModelExecutor {
+    /// Providers and adapters share Host proxy routing and connection pools.
+    pub fn transport(
+        &self,
+        policy: &maka_network::Policy,
+    ) -> Result<Arc<dyn maka_plugins::model::Transport>, ModelError> {
+        self.networks.get(policy)
+    }
+
     pub fn new(concurrency: usize, idle_timeout: Duration) -> Result<Self, ModelError> {
         Self::with_runtime(TrustedRuntime::default(), concurrency, idle_timeout)
     }

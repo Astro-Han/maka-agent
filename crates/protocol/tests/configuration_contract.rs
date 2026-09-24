@@ -21,19 +21,22 @@ use maka_protocol::configuration::*;
 use serde_json::{Value, json};
 const ID: &str = "11111111-1111-4111-8111-111111111111";
 fn create() -> Value {
-    json!({"expectedCatalogRevision":0,"connection":{"slug":"local-fixture","name":"Local fixture","providerType":"openai-compatible","baseUrl":" http://LOCALHOST:18080/v1 ","enabled":true,"enabledModelIds":["fixture-model"]}})
+    json!({"expectedCatalogRevision":0,"connection":{"slug":"local-fixture","name":"Local fixture",
+        "provider":{"packageId":"external.provider","entryId":"entry","scope":"profile","name":"custom"},
+        "configuration":{"endpoint":" provider-owned value ","deployment":{"region":"local"}},
+        "enabled":true,"enabledModelIds":["fixture-model"]}})
 }
 fn secret() -> Value {
-    json!({"locator":{"scope":"connection","connectionId":ID,"kind":"api_key"},"expected":null,"secret":"fixture-secret"})
+    json!({"locator":{"scope":"network_proxy","kind":"password"},"expected":null,"secret":"fixture-secret"})
 }
 #[test]
-fn connection_input_canonicalizes_endpoint_and_preserves_three_state_updates() {
+fn connection_input_preserves_opaque_configuration_and_three_state_updates() {
     let input = decode_create_connection_input(&create()).unwrap();
     assert_eq!(
-        input.connection.base_url.as_deref(),
-        Some("http://localhost:18080/v1")
+        input.connection.configuration,
+        create()["connection"]["configuration"]
     );
-    let mut input = json!({"expected":{"connectionId":ID,"revision":1},"changes":{"name":"","enabled":true,"enabledModelIds":["m"]}});
+    let mut input = json!({"expected":{"connectionId":ID,"revision":1},"changes":{"name":"","configuration":{},"enabled":true,"enabledModelIds":["m"]}});
     assert!(matches!(
         decode_update_connection_input(&input)
             .unwrap()
@@ -77,14 +80,11 @@ fn connection_input_canonicalizes_endpoint_and_preserves_three_state_updates() {
 #[test]
 fn connection_input_rejects_unknown_fields_and_semantic_boundaries() {
     for (key, value) in [
-        ("providerType", json!("invented-provider")),
+        ("provider", json!({"name":"missing-owner"})),
         ("slug", json!("x")),
         ("slug", json!("-invalid")),
-        ("baseUrl", json!("https://user:secret@example.com")),
-        ("baseUrl", json!("file:///tmp/model")),
-        ("baseUrl", json!("https://example.com?")),
-        ("baseUrl", json!("https://example.com#")),
-        ("baseUrl", Value::Null),
+        ("configuration", Value::Null),
+        ("configuration", json!({"value":"x".repeat(65536)})),
         ("enabledModelIds", json!(["x", "x"])),
         ("enabledModelIds", json!(vec!["m"; 513])),
         ("apiKey", json!("never-public")),
@@ -118,19 +118,6 @@ fn connection_input_rejects_unknown_fields_and_semantic_boundaries() {
         input["expectedCatalogRevision"] = rev;
         assert!(decode_create_connection_input(&input).is_err());
     }
-    let mut oauth = create();
-    oauth["connection"]["providerType"] = json!("openai-codex");
-    assert!(decode_create_connection_input(&oauth).is_err());
-    let mut def = create();
-    def["connection"]["providerType"] = json!("openai");
-    def["connection"]["baseUrl"] = json!("https://api.openai.com/v1");
-    assert!(
-        decode_create_connection_input(&def)
-            .unwrap()
-            .connection
-            .base_url
-            .is_none()
-    );
 }
 #[test]
 fn vault_requires_string_material_and_normalizes_valid_custom_headers() {
@@ -138,7 +125,7 @@ fn vault_requires_string_material_and_normalizes_valid_custom_headers() {
     input["secret"] = json!({"password":"CANARY-SECRET"});
     assert!(decode_set_credential_input(&input).is_err());
     input = secret();
-    input["locator"]["kind"] = json!("request_headers");
+    input["locator"] = json!({"scope":"connection","connectionId":ID,"kind":"request_headers"});
     input["secret"] = json!("{\" X-Fixture \":\"value\"}");
     assert_eq!(
         decode_set_credential_input(&input).unwrap().secret,
@@ -160,10 +147,11 @@ fn vault_rejects_missing_basis_invalid_locator_and_byte_overflow() {
     missing.as_object_mut().unwrap().remove("expected");
     assert!(decode_set_credential_input(&missing).is_err());
     for locator in [
-        json!({"scope":"connection","connectionId":"invalid","kind":"api_key"}),
+        json!({"scope":"connection","connectionId":"invalid","kind":"request_headers"}),
         json!({"scope":"web_search","provider":"google","kind":"api_key"}),
         json!({"scope":"network_proxy","kind":"api_key"}),
-        json!({"scope":"connection","connectionId":ID,"kind":"api_key","secret":"CANARY"}),
+        json!({"scope":"connection","connectionId":ID,"kind":"provider"}),
+        json!({"scope":"connection","connectionId":ID,"kind":"request_headers","secret":"CANARY"}),
     ] {
         let mut input = secret();
         input["locator"] = locator;
@@ -189,7 +177,7 @@ fn wire_results_require_metadata_and_operation_specific_shapes() {
         )
         .is_err()
     );
-    let absent = json!({"kind":"status","status":{"locator":{"scope":"connection","connectionId":ID,"kind":"api_key"},"configured":false,"credentialId":null,"revision":null,"updatedAt":null}});
+    let absent = json!({"kind":"status","status":{"locator":{"scope":"connection","connectionId":ID,"kind":"provider"},"configured":false,"credentialId":null,"revision":null,"updatedAt":null}});
     assert!(decode_credential_query_result(&absent).is_ok());
     let mut bad = absent.clone();
     bad["status"]["revision"] = json!(1);

@@ -126,6 +126,7 @@ class RuntimeHostReconnectingConnectionImpl implements RuntimeHostReconnectingCo
     (availability: RuntimeHostConnectionAvailability) => void
   >();
   readonly #connectionCatalogListeners = new Set<(revision: number) => void>();
+  readonly #modelProviderCatalogListeners = new Set<(revision: number) => void>();
   readonly #projectListeners = new Set<(revision: number) => void>();
   readonly #pluginClientListeners = new Set<(revision: string) => void>();
   readonly #sessionListeners = new Set<(frame: SessionCatalogChangedFrame) => void>();
@@ -264,6 +265,11 @@ class RuntimeHostReconnectingConnectionImpl implements RuntimeHostReconnectingCo
     return () => this.#connectionCatalogListeners.delete(listener);
   }
 
+  subscribeModelProviderCatalogChanges(listener: (revision: number) => void): () => void {
+    this.#modelProviderCatalogListeners.add(listener);
+    return () => this.#modelProviderCatalogListeners.delete(listener);
+  }
+
   subscribeProjectCatalogChanges(listener: (revision: number) => void): () => void {
     this.#projectListeners.add(listener);
     return () => this.#projectListeners.delete(listener);
@@ -289,6 +295,7 @@ class RuntimeHostReconnectingConnectionImpl implements RuntimeHostReconnectingCo
   close(): Promise<void> {
     this.#unbindListeners();
     this.#pluginClientListeners.clear();
+    this.#modelProviderCatalogListeners.clear();
     this.#connectionAvailabilityListeners.clear();
     return this.#lifecycle.close();
   }
@@ -371,6 +378,9 @@ class RuntimeHostReconnectingConnectionImpl implements RuntimeHostReconnectingCo
       }),
       connection.subscribeConnectionCatalogChanges((revision: number) => {
         notify(this.#connectionCatalogListeners, revision);
+      }),
+      connection.subscribeModelProviderCatalogChanges((revision: number) => {
+        notify(this.#modelProviderCatalogListeners, revision);
       }),
       connection.subscribeProjectCatalogChanges((revision: number) => {
         notify(this.#projectListeners, revision);

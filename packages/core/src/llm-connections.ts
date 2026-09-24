@@ -98,40 +98,7 @@ export function isModelModality(value: unknown): value is ModelModality {
   return MODEL_MODALITIES.includes(value as ModelModality);
 }
 
-export interface ModelInfo {
-  id: string;
-  displayName?: string;
-  /** Short upstream description, when the provider advertises one. */
-  description?: string;
-  /** Account-advertised request wire when one provider exposes multiple model protocols. */
-  apiProtocol?: 'openai-chat' | 'openai-responses' | 'anthropic-messages';
-  contextWindow?: number;
-  /** Maximum provider-visible input tokens, when narrower than contextWindow. */
-  inputLimit?: number;
-  maxOutputTokens?: number;
-  /** Knowledge cutoff reported by the provider or static catalog. */
-  knowledgeCutoff?: string;
-  /** Whether the model advertises structured JSON output separately from tools. */
-  structuredOutput?: boolean;
-  /** Date on which the upstream model facts were last refreshed. */
-  lastUpdated?: string;
-  capabilities?: {
-    chat?: boolean;
-    vision?: boolean;
-    reasoning?: boolean;
-    functionCalling?: boolean;
-    /** Whether one response may contain multiple independent tool calls. */
-    parallelToolCalls?: boolean;
-    imageGeneration?: boolean;
-    /** Provider-hosted live web search, using this exact model and connection. */
-    webSearch?: boolean;
-  };
-  /** Multimodal input/output support from provider catalog metadata. */
-  modalities?: {
-    input: ModelModality[];
-    output: ModelModality[];
-  };
-}
+export type ModelInfo = import('@maka-agent/plugin-sdk/host').ModelInfo;
 
 export type ModelDiscoverySource = 'fetched' | 'fallback';
 
@@ -192,26 +159,12 @@ export interface HostResolvedConnectionCatalog {
 }
 
 /** A connection as a client holds it: stored fields plus the Host's catalog. */
-export type ProjectedLlmConnection = IdentifiedLlmConnection & HostResolvedConnectionCatalog;
+export type ProjectedLlmConnection = import('./runtime-policy.js').ConnectionCatalogEntry &
+  HostResolvedConnectionCatalog;
 
-/**
- * Read-time normalizer: the model ids a stored connection exposes.
- *
- * A row written before `enabledModelIds` existed carries only `defaultModel`,
- * so reading one resolves to the default model alone — never the full
- * discovered catalog. This is a migration shim for reads, NOT the rule for
- * writes: merging the default into a selection the user just made would
- * re-assert a choice they withdrew. Explicit selections go through
- * `reconcileConnectionAfterEnabledModelsChange`.
- */
-export function connectionEnabledModelIds(connection: {
-  defaultModel?: unknown;
-  enabledModelIds?: unknown;
-}): string[] {
-  const candidates = [
-    connection.defaultModel,
-    ...(Array.isArray(connection.enabledModelIds) ? connection.enabledModelIds : []),
-  ];
+/** Only the explicit enabled set authorizes model selection. */
+export function connectionEnabledModelIds(connection: { enabledModelIds?: unknown }): string[] {
+  const candidates = Array.isArray(connection.enabledModelIds) ? connection.enabledModelIds : [];
   const seen = new Set<string>();
   for (const candidate of candidates) {
     if (typeof candidate !== 'string') continue;
@@ -229,7 +182,7 @@ export function connectionEnabledModelIds(connection: {
  * attached to one Host cannot disagree about what is selectable. Three facts
  * decide it and all three are the Host's:
  *
- *   1. the connection is enabled and its provider is one this build registers;
+ *   1. the connection is enabled;
  *   2. the user enabled this model on it;
  *   3. the Host's entry says the connection can hold a chat on it.
  *
@@ -243,19 +196,14 @@ export function connectionEnabledModelIds(connection: {
  * than filtered late: callers that must keep the current value visible append
  * it themselves with an "unavailable" label, which says the true thing.
  *
- * The Codex subscription's servable set needs no filter here either: the Host
- * resolved these entries through `normalizeOpenAiCodexConnection`, so an id
- * that subscription cannot serve never became an entry to intersect with.
  */
 export function offerableCatalogEntries(
   connection: {
-    readonly providerType: string;
     readonly enabled: boolean;
     readonly enabledModelIds?: readonly string[];
-    readonly defaultModel?: string;
   } & HostResolvedConnectionCatalog,
 ): readonly ModelCatalogEntry[] {
-  if (!connection.enabled || !providerDefaultsOf(connection.providerType)) return [];
+  if (!connection.enabled) return [];
   const enabled = new Set(connectionEnabledModelIds(connection));
   return connection.catalogEntries.filter(
     (entry) => entry.canUseAsChatDefault && enabled.has(entry.id),
@@ -320,7 +268,7 @@ export function connectionModelsEnumerateAccount(
  * not vetoing.
  */
 export function authorizeConnectionModel(
-  connection: ConnectionModelAuthorityInput,
+  connection: Pick<ConnectionModelAuthorityInput, 'enabledModelIds' | 'models'>,
   modelId: string,
 ): ModelInfo | undefined {
   const model = modelId.trim();
@@ -492,7 +440,6 @@ export function reconcileConnectionAfterModelFetch(
   return {
     defaultModel: previousDefault,
     enabledModelIds: connectionEnabledModelIds({
-      defaultModel: previousDefault,
       enabledModelIds: previousEnabled,
     }),
   };

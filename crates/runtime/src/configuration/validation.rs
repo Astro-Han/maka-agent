@@ -19,7 +19,6 @@
 //! Shared Rust domain validation used by protocol ingress and persistence.
 pub use super::credential_validation::*;
 pub use super::model_validation::*;
-pub use super::providers::{provider_auth_kind, provider_default_base_url};
 use super::*;
 pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub type ValidationResult<T = ()> = Result<T, String>;
@@ -28,13 +27,6 @@ pub fn normalize_create(
 ) -> ValidationResult<CreateCatalogConnectionInput> {
     revision(value.expected_catalog_revision, false)?;
     normalize_draft(&mut value.connection)?;
-    Ok(value)
-}
-pub fn normalize_update_for_provider(
-    mut value: ConnectionCatalogEntryUpdate,
-    provider: &str,
-) -> ValidationResult<ConnectionCatalogEntryUpdate> {
-    normalize_update(&mut value, Some(provider))?;
     Ok(value)
 }
 pub fn revision(value: u64, positive: bool) -> ValidationResult {
@@ -84,19 +76,9 @@ pub fn target(value: &ConnectionTarget) -> ValidationResult {
     entity_id(&value.connection_id)?;
     text(&value.model_id, 512, true)
 }
-pub fn normalize_base_url(
-    value: Option<&str>,
-    provider: Option<&str>,
-) -> ValidationResult<Option<String>> {
-    if let Some(p) = provider {
-        provider_default_base_url(p)?;
-    }
-    let Some(raw) = value else { return Ok(None) };
+pub fn normalize_base_url(raw: &str) -> ValidationResult<String> {
     text(raw, 2048, false)?;
     let raw = raw.trim();
-    if raw.is_empty() {
-        return Ok(None);
-    }
     let parsed = url::Url::parse(raw).map_err(|_| "invalid connection base URL")?;
     if !["http", "https"].contains(&parsed.scheme())
         || parsed.host_str().is_none()
@@ -110,18 +92,7 @@ pub fn normalize_base_url(
     if canonical.len() > 2048 {
         return Err("connection base URL exceeds byte limit".into());
     }
-    if let Some(p) = provider {
-        if url::Url::parse(provider_default_base_url(p)?)
-            .ok()
-            .is_some_and(|v| v.as_str() == canonical)
-        {
-            return Ok(None);
-        }
-        if provider_auth_kind(p)? == ProviderAuthKind::OauthToken {
-            return Err("OAuth provider endpoint cannot be overridden".into());
-        }
-    }
-    Ok(Some(canonical))
+    Ok(canonical)
 }
 pub fn model_ids(values: &[String]) -> ValidationResult {
     if values.len() > 512 {
@@ -136,10 +107,7 @@ pub fn model_ids(values: &[String]) -> ValidationResult {
     }
     Ok(())
 }
-pub fn profiles(
-    values: &BTreeMap<String, ModelOverride>,
-    provider: Option<&str>,
-) -> ValidationResult {
+pub fn profiles(values: &BTreeMap<String, ModelOverride>) -> ValidationResult {
     if values.len() > 2048 {
         return Err("too many model overrides".into());
     }
@@ -185,12 +153,6 @@ pub fn profiles(
             facts["modalities"] = serde_json::to_value(value).map_err(|e| e.to_string())?;
         }
         connection_model(&facts)?;
-        if provider
-            .is_some_and(|v| !["openai-compatible", "openai-responses-compatible"].contains(&v))
-            && (p.thinking_levels.is_some() || p.service_tier.is_some())
-        {
-            return Err("provider does not support relay wire declarations".into());
-        }
     }
     Ok(())
 }
@@ -234,9 +196,10 @@ pub fn normalize_draft(value: &mut ConnectionCatalogEntryDraft) -> ValidationRes
     slug(&value.slug)?;
     text(&value.name, 256, false)?;
     model_ids(&value.enabled_model_ids)?;
-    value.base_url = normalize_base_url(value.base_url.as_deref(), Some(&value.provider_type))?;
+    value.provider.validate()?;
+    provider_configuration(&value.configuration)?;
     if let Some(v) = &value.model_overrides {
-        profiles(v, Some(&value.provider_type))?;
+        profiles(v)?;
         if v.is_empty() {
             value.model_overrides = None;
         }
@@ -249,15 +212,12 @@ pub fn normalize_draft(value: &mut ConnectionCatalogEntryDraft) -> ValidationRes
     }
     Ok(())
 }
-pub fn normalize_update(
-    value: &mut ConnectionCatalogEntryUpdate,
-    provider: Option<&str>,
-) -> ValidationResult {
+pub fn normalize_update(value: &mut ConnectionCatalogEntryUpdate) -> ValidationResult {
     text(&value.name, 256, false)?;
     model_ids(&value.enabled_model_ids)?;
-    value.base_url = normalize_base_url(value.base_url.as_deref(), provider)?;
+    provider_configuration(&value.configuration)?;
     if let Patch::Set(v) = &value.model_overrides {
-        profiles(v, provider)?;
+        profiles(v)?;
         if v.is_empty() {
             value.model_overrides = Patch::Clear;
         }
@@ -267,6 +227,20 @@ pub fn normalize_update(
         if v.as_object().is_some_and(|o| o.is_empty()) {
             value.request_body_overlay = Patch::Clear;
         }
+    }
+    Ok(())
+}
+
+/// Stored structure is valid even while its provider is unavailable. Schema
+/// validation and one-time defaults belong to the admitted provider binding.
+pub fn provider_configuration(value: &Value) -> ValidationResult {
+    if !value.is_object()
+        || serde_json::to_vec(value)
+            .map_err(|_| "invalid provider configuration")?
+            .len()
+            > 64 * 1024
+    {
+        return Err("invalid provider configuration".into());
     }
     Ok(())
 }

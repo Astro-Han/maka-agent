@@ -20,15 +20,6 @@
 use super::{ConnectionVersionBasis, ModelDiscoverySource};
 use serde::{Deserialize, Serialize};
 
-/// Protocols implemented by the native unpaginated model-list driver.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelListProtocol {
-    Openai,
-    Anthropic,
-    Codex,
-    Copilot,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionEffectRejectionReason {

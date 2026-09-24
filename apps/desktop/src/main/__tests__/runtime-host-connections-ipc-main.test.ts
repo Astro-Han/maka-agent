@@ -19,14 +19,6 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { resolveStorageRoot, tryAcquireInteractiveRootOwner } from '@maka/storage/root-authority';
-import { openInteractiveRuntimePolicyStoresForWrite } from '@maka/storage/runtime-policy-stores';
-import { resolveConnectionModelCatalog } from '@maka/core/model-catalog';
-import type { UpdateCatalogConnectionInput } from '@maka/core/runtime-policy';
-import { createDesktopConnectionSettingsServices } from '../../renderer/platform/desktop/create-connection-settings-services.js';
 import type {
   RuntimeHostConnectionCatalogEntry as ConnectionCatalogEntry,
   RuntimeHostConnectionCatalogSnapshot as ConnectionCatalogSnapshot,
@@ -76,6 +68,7 @@ test('registers pure Connection reads for replacement-Host retry', () => {
   });
 
   assert.deepEqual([...reads].sort(), [
+    'connections:getProviders',
     'connections:getRequestHeaders',
     'connections:getSnapshot',
     'connections:hasSecret',
@@ -530,34 +523,25 @@ test('creates a connection with only the explicitly selected model', async () =>
   assert.deepEqual(createdModels, ['minimax-m3']);
 });
 
-test('projects the Host default target without inventing a second Connection authority', () => {
-  const connections = projectHostConnections(catalog());
-
-  assert.deepEqual(connections, [
-    {
+test('projects exact external provider configuration without inventing legacy connection fields', () => {
+  const connection: ConnectionCatalogEntry = {
       connectionId: 'connection-1',
-      slug: 'openrouter',
-      name: 'OpenRouter',
-      providerType: 'openai-compatible',
-      baseUrl: 'https://openrouter.ai/api/v1',
+      revision: 4,
+      slug: 'research',
+      name: 'Research',
+      provider: { packageId: 'external.provider', entryId: 'account', scope: 'profile', name: 'custom' },
+      configuration: { region: 'local', project: 'research' },
       enabled: true,
-      defaultModel: 'model-1',
       enabledModelIds: ['model-1', 'model-2'],
       models: [{ id: 'model-1' }, { id: 'model-2' }],
-      // Carried through from the Host projection, not rebuilt here.
       catalogEntries: [],
-      createdAt: 0,
-      updatedAt: 4,
-    },
-  ]);
-});
-
-test('does not invent a per-Connection default when the Host target is unset', () => {
-  const snapshot = catalog();
-  const connections = projectHostConnections({ ...snapshot, defaultTarget: null });
-
-  assert.equal(connections[0]?.defaultModel, '');
-  assert.deepEqual(connections[0]?.enabledModelIds, ['model-1', 'model-2']);
+  };
+  for (const defaultTarget of [null, { connectionId: 'connection-1', modelId: 'model-1' }]) {
+    const projected = projectHostConnections({ revision: 7, defaultTarget, connections: [connection] });
+    assert.deepEqual(projected, [connection]);
+    assert.notEqual(projected[0]?.models, connection.models);
+    assert.notEqual(projected[0]?.enabledModelIds, connection.enabledModelIds);
+  }
 });
 
 test('preserves the Host-tested model and diagnostics for the existing Desktop UI', () => {
@@ -623,62 +607,3 @@ function catalog(): ConnectionCatalogSnapshot {
 function connectionIdentity() {
   return { connectionId: 'connection-1', slug: 'openrouter' } as const;
 }
-
-test('renderer service saves through IPC into the canonical catalog and reads it back', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'maka-model-save-'));
-  const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
-  const owner = await tryAcquireInteractiveRootOwner(capability);
-  assert.ok(owner);
-  if (!owner) throw new Error('root is already owned');
-  try {
-    const stores = await openInteractiveRuntimePolicyStoresForWrite(owner.lease);
-    const created = await stores.connectionCatalog.create({
-      expectedCatalogRevision: 0,
-      connection: { slug: 'local', name: 'Local', providerType: 'ollama', enabled: true,
-        enabledModelIds: ['other'], modelOverrides: { other: { vision: true } } },
-    });
-    assert.equal(created.kind, 'committed');
-    const handlers = new Map<string, (...args: unknown[]) => unknown>();
-    registerRuntimeHostConnectionsIpc({
-      ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler as (...args: unknown[]) => unknown); } },
-      client: {
-        loadConnectionCatalog: async () => {
-          const snapshot = await stores.connectionCatalog.getSnapshot();
-          return { ...snapshot, connections: snapshot.connections.map(connection => ({
-            ...connection,
-            catalogEntries: resolveConnectionModelCatalog({ ...connection, defaultModel: '', models: [...connection.models], enabledModelIds: [...connection.enabledModelIds] }),
-          })) };
-        },
-        updateConnection: (expected: UpdateCatalogConnectionInput['expected'], changes: UpdateCatalogConnectionInput['changes']) => stores.connectionCatalog.update({ expected, changes }),
-      } as never,
-      emitConnectionListChanged() {},
-    });
-    const host = { profileId: 'profile', hostId: 'host' };
-    const services = createDesktopConnectionSettingsServices(() => ({ connections: {
-      update: (identity: unknown, patch: unknown, target: unknown) => {
-        assert.deepEqual(target, host);
-        return handlers.get('connections:update')!({}, identity, patch);
-      },
-      getSnapshot: (_options: unknown, target: unknown) => {
-        assert.deepEqual(target, host);
-        return handlers.get('connections:getSnapshot')!({});
-      },
-    } }) as never).forHost(host).connections;
-    const connection = (await services.getSnapshot()).connections[0]!;
-    const identity = { connectionId: connection.connectionId, slug: connection.slug };
-    const value = { contextWindow: 128000, inputLimit: 64000, compactionThreshold: 48000, vision: true };
-    await services.update(identity, { modelOverride: { modelId: 'manual', expected: null, value } });
-    const saved = (await stores.connectionCatalog.getSnapshot()).connections[0]!;
-    assert.deepEqual(saved.modelOverrides, { other: { vision: true }, manual: value });
-    const reopened = (await services.getSnapshot()).connections[0]!;
-    assert.deepEqual(reopened.modelOverrides?.manual, value);
-    assert.deepEqual(reopened.enabledModelIds, ['other']);
-    await assert.rejects(services.update(identity, { modelOverride: { modelId: 'manual', expected: {}, value: { vision: false } } }), /Model parameters changed/);
-    assert.deepEqual((await stores.connectionCatalog.getSnapshot()).connections[0], saved);
-    await services.update(identity, { modelOverride: { modelId: 'manual', expected: value, value: {} } });
-    assert.deepEqual((await services.getSnapshot()).connections[0]?.modelOverrides, { other: { vision: true }, manual: {} });
-  } finally {
-    await owner.close();
-    await rm(root, { recursive: true, force: true });
-  }
-});

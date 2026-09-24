@@ -20,6 +20,8 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { runHostedExecution, type RunHostedExecutionInput } from '@maka/runtime-host/client';
+import { HOST_OPERATION_SPECS } from '@maka/runtime-host/protocol';
+import type { MakaConnection } from './maka-subject.js';
 import { captureMakaRuntimeArtifacts, writeMakaArtifactCollectionError } from './maka-artifacts.js';
 import { takeRelayResultToken, writeRelayResult } from './relay-result-frame.js';
 
@@ -27,14 +29,11 @@ const resultToken = takeRelayResultToken();
 
 const payload = JSON.parse(Buffer.from(process.argv[2] ?? '', 'base64url').toString()) as {
   rootPath: string;
+  executable?: string;
   artifactRoot: string;
-  baseUrl: string;
   hostSettlementTimeoutMs: number;
   execution: RunHostedExecutionInput['execution'];
-  connection?: {
-    providerType: NonNullable<RunHostedExecutionInput['connection']>['providerType'];
-    apiKeyEnvironment: string;
-  };
+  connection?: MakaConnection;
 };
 const abort = new AbortController();
 let artifactCapture = Promise.resolve();
@@ -62,24 +61,36 @@ const runtimeHome = join(dirname(payload.rootPath), `${process.pid}-home`);
 await mkdir(payload.rootPath, { recursive: true });
 await mkdir(runtimeHome, { recursive: true, mode: 0o700 });
 process.env.HOME = runtimeHome;
-process.env.DEEPSEEK_BASE_URL = payload.baseUrl;
 let result: Awaited<ReturnType<typeof runHostedExecution>>;
 try {
   result = await runHostedExecution({
+    ...(payload.executable === undefined ? {} : { executable: payload.executable }),
     initialization: {
       incognito: true,
       ...(process.env.HTTPS_PROXY ? { proxyUrl: process.env.HTTPS_PROXY } : {}),
     },
     ...(payload.connection
       ? {
-          connection: {
-            providerType: payload.connection.providerType,
-            apiKey: process.env[payload.connection.apiKeyEnvironment] ?? '',
-          },
+          connection: HOST_OPERATION_SPECS['oauth.login.start'].decodeInput({
+            attemptId: payload.execution.executionId,
+            target: {
+              kind: 'create',
+              provider: payload.connection.provider,
+              configuration: payload.connection.configuration,
+              slug:
+                payload.execution.session.modelTarget.kind === 'explicit'
+                  ? payload.execution.session.modelTarget.connectionSlug
+                  : '',
+              name: 'Evaluation',
+            },
+            authentication: {
+              method: payload.connection.authentication.method,
+              input: authenticationInput(payload.connection.authentication.inputEnvironment),
+            },
+          }),
         }
       : {}),
     rootPath: payload.rootPath,
-    baseUrl: payload.baseUrl,
     execution: payload.execution,
     signal: abort.signal,
     hostSettlementTimeoutMs: payload.hostSettlementTimeoutMs,
@@ -103,3 +114,11 @@ writeRelayResult(resultToken, framedResult);
 // frame carries. Nothing decides the subject's fate from it while the frame is
 // readable, but the two must not be able to say different things.
 process.exitCode = result.kind === 'settled' && result.status === 'completed' ? 0 : 1;
+
+function authenticationInput(environment: string): unknown {
+  try {
+    return JSON.parse(process.env[environment] ?? '');
+  } catch {
+    throw new Error('Provider authentication input must be JSON');
+  }
+}

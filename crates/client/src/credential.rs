@@ -43,6 +43,8 @@ impl Client {
         &self,
         input: SetCredentialInput,
     ) -> Result<CredentialMutationResult, RequestFailure> {
+        validation::validate_set_credential(&input)
+            .map_err(|error| RequestFailure::NotDispatched(ClientError::Protocol(error)))?;
         let expected = input.expected.as_ref().map(|basis| CredentialVersionBasis {
             locator: input.locator.clone(),
             credential_id: basis.credential_id.clone(),
@@ -108,22 +110,15 @@ impl Client {
                         },
                         Operation::CredentialVaultSet,
                     ) => {
-                        if matches!(
+                        !matches!(
                             locator,
                             CredentialLocator::Connection {
-                                kind: ConnectionCredentialKind::OauthToken,
+                                kind: ConnectionCredentialKind::Provider,
                                 ..
                             }
-                        ) {
-                            *revision == 1
-                                && expected
-                                    .is_none_or(|basis| basis.credential_id != *credential_id)
-                        } else {
-                            expected.map_or(*revision == 1, |basis| {
-                                basis.credential_id == *credential_id
-                                    && basis.revision + 1 == *revision
-                            })
-                        }
+                        ) && expected.map_or(*revision == 1, |basis| {
+                            basis.credential_id == *credential_id && basis.revision + 1 == *revision
+                        })
                     }
                     _ => false,
                 }

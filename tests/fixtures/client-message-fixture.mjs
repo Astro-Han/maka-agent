@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 export async function createMessageSession(
@@ -28,30 +29,15 @@ export async function createMessageSession(
   sandboxMode = 'workspace-write',
 ) {
   const request = (op, input) => connection.request(op, input, 3000);
-  const created = await request('connection.catalog.create', {
-    expectedCatalogRevision: 0,
-    connection: {
-      slug: 'submit-fixture',
-      name: 'Submit fixture',
-      providerType: 'openai-compatible',
-      baseUrl,
-      enabled: true,
-      enabledModelIds: ['fixture-model'],
-    },
+  const created = await createModelConnection(request, {
+    providerName: 'openai-compatible',
+    slug: 'submit-fixture',
+    name: 'Submit fixture',
+    baseUrl: baseUrl,
+    apiKey: 'dummy-local-fixture',
+    enabledModelIds: ['fixture-model'],
   });
-  assert.equal(created.kind, 'committed');
   const basis = created.connection;
-  await request('credential.vault.set', {
-    locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-    expected: null,
-    expectedConnection: {
-      ...basis,
-      slug: 'submit-fixture',
-      providerType: 'openai-compatible',
-      effectiveBaseUrl: baseUrl,
-    },
-    secret: 'dummy-local-fixture',
-  });
   await request('connection.catalog.set-default-target', {
     expectedCatalogRevision: created.catalogRevision,
     target: { connectionId: basis.connectionId, modelId: 'fixture-model' },

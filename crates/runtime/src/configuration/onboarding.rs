@@ -20,31 +20,11 @@
 use super::{ConnectionEffectFailureClass, ConnectionVersionBasis, ModelInfo};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum OnboardingTarget {
-    Create {
-        provider_type: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        slug: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        name: Option<String>,
-    },
-    Existing {
-        connection_id: String,
-    },
-}
-
-/// Transient credentials must never enter Debug output or public projections.
+/// Authentication is settled through the login receipt before discovery.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OnboardingInput {
-    pub target: OnboardingTarget,
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
+    pub target: crate::oauth::Target,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,7 +65,7 @@ pub struct OnboardedConnection {
     pub connection_id: String,
     pub revision: u64,
     pub slug: String,
-    pub provider_type: String,
+    pub provider: crate::provider::Identity,
 }
 impl OnboardedConnection {
     pub fn basis(&self) -> ConnectionVersionBasis {

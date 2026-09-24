@@ -24,7 +24,7 @@ use maka_config::{
     ConfigurationStore,
     oauth::enrollment::{LoginCompletion, LoginPreparation},
 };
-use maka_runtime::oauth::{LoginStart, Provider, Target};
+use maka_runtime::{oauth::LoginStart, provider::Credential};
 use serde_json::json;
 use std::{sync::Arc, time::Duration};
 use support::*;
@@ -36,6 +36,7 @@ async fn initiating_client_admission_replay_disconnect_cancel_and_drain_own_auth
     let fixture = Fixture::new(Some(proxy.local_addr().unwrap().port())).await;
     let (host, _drain, server) = fixture.serve().await;
     let mut first = Peer::new(host.clone(), "oauth-first").await;
+    first.wait_for_plugins().await;
     let mut second = Peer::new(host.clone(), "oauth-second").await;
     first.publish("first-publication").await;
     let refused = second
@@ -46,11 +47,11 @@ async fn initiating_client_admission_replay_disconnect_cancel_and_drain_own_auth
         "{refused}"
     );
     let enabled = second
-        .rpc("oauth.enrollment.query", json!({"provider":"xai-oauth"}))
+        .rpc("oauth.enrollment.query", json!({"provider":codex()}))
         .await;
     assert_eq!(
         enabled["result"],
-        json!({"provider":"xai-oauth","enabled":true})
+        json!({"provider":codex(),"enabled":true})
     );
     let started = first.rpc("oauth.login.start", start("active")).await;
     assert_eq!(
@@ -62,13 +63,9 @@ async fn initiating_client_admission_replay_disconnect_cancel_and_drain_own_auth
     assert_eq!(repeated, started);
     let other = second.rpc("oauth.login.start", start("other")).await;
     assert_eq!(other["error"]["code"], "operation_conflict", "{other}");
-    let mismatch = second
-        .rpc(
-            "oauth.login.start",
-            json!({"attemptId":"active",
-        "target":{"kind":"create","providerType":"openai-codex"}}),
-        )
-        .await;
+    let mut different = start("active");
+    different["target"]["slug"] = json!("different");
+    let mismatch = second.rpc("oauth.login.start", different).await;
     assert_eq!(mismatch["error"]["code"], "invalid_request", "{mismatch}");
     first.close().await;
     let queried = second
@@ -168,20 +165,14 @@ async fn initiating_client_admission_replay_disconnect_cancel_and_drain_own_auth
         store.catalog().await.unwrap().connections.is_empty(),
         "cancelled logins publish no drafts"
     );
-    assert!(
-        store
-            .oauth_login_receipt("active".into())
+    for attempt in ["active", "draining"] {
+        let receipt = store
+            .oauth_login_receipt(attempt.into())
             .await
             .unwrap()
-            .is_none()
-    );
-    assert!(
-        store
-            .oauth_login_receipt("draining".into())
-            .await
-            .unwrap()
-            .is_none()
-    );
+            .unwrap();
+        assert_eq!(receipt.phase, maka_runtime::oauth::Phase::Cancelled);
+    }
     store.close().await.unwrap();
 }
 async fn pending_connect(proxy: &tokio::net::TcpListener) -> BufReader<tokio::net::TcpStream> {
@@ -192,7 +183,7 @@ async fn pending_connect(proxy: &tokio::net::TcpListener) -> BufReader<tokio::ne
     let mut socket = BufReader::new(socket);
     let mut line = String::new();
     socket.read_line(&mut line).await.unwrap();
-    assert_eq!(line, "CONNECT auth.x.ai:443 HTTP/1.1\r\n");
+    assert_eq!(line, "CONNECT auth.openai.com:443 HTTP/1.1\r\n");
     loop {
         line.clear();
         socket.read_line(&mut line).await.unwrap();
@@ -205,7 +196,7 @@ async fn pending_connect(proxy: &tokio::net::TcpListener) -> BufReader<tokio::ne
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn all_provider_durable_login_receipts_replay_without_presentation_after_reopen() {
+async fn durable_login_receipts_replay_without_provider_or_presentation_after_reopen() {
     let fixture = Fixture::new(None).await;
     let store = Arc::new(
         ConfigurationStore::for_root(Arc::new(fixture.owner()))
@@ -213,28 +204,27 @@ async fn all_provider_durable_login_receipts_replay_without_presentation_after_r
             .unwrap(),
     );
     let mut saved = Vec::new();
-    for provider in [
-        Provider::OpenaiCodex,
-        Provider::GithubCopilot,
-        Provider::XaiOauth,
-    ] {
-        let input = LoginStart {
-            attempt_id: provider.as_str().into(),
-            target: Target::Create {
-                provider_type: provider,
-                slug: None,
-                name: None,
-            },
-        };
+    for name in ["first", "second"] {
+        let mut value = start(name);
+        value["target"]["slug"] = json!(name);
+        value["target"]["provider"]["packageId"] = json!("external.removed");
+        let input: LoginStart = serde_json::from_value(value).unwrap();
         let LoginPreparation::Ready(ticket) =
             store.prepare_oauth_login(input.clone()).await.unwrap()
         else {
             panic!("expected unpublished ticket");
         };
         let identity = ticket.identity().clone();
+        assert!(ticket.claim().await.unwrap());
         assert!(matches!(
             ticket
-                .complete("synthetic-receipt-fixture".into(), 1)
+                .complete(
+                    Credential {
+                        secret: "synthetic-receipt-fixture".into(),
+                        refresh_at: None
+                    },
+                    1
+                )
                 .await
                 .unwrap(),
             LoginCompletion::Committed(_)

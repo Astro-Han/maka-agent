@@ -21,9 +21,10 @@ import {
   CONNECTION_CATALOG_MAX_MODELS_PER_CONNECTION,
   decodeConnectionModelId,
   decodeConnectionModel,
-  decodeConnectionName,
   decodeConnectionSlug,
-  decodeProviderType,
+  decodeProviderIdentity,
+  decodeConnectionOnboardingTarget,
+  type ProviderIdentity,
   decodeConnectionTestSummary,
   decodeConnectionVersionBasis,
   RuntimePolicyDomainDecodeError,
@@ -31,7 +32,7 @@ import {
   type ConnectionOnboardingTarget,
   type ModelDiscoverySource,
 } from '@maka/core/runtime-policy';
-import type { ModelInfo, ProviderType } from '@maka/core/llm-connections';
+import type { ModelInfo } from '@maka/core/llm-connections';
 import {
   requireCount,
   requireEntityId,
@@ -89,18 +90,6 @@ export interface ConnectionTestRunInput {
 
 export interface ConnectionOnboardingVerifyInput {
   readonly target: ConnectionOnboardingTarget;
-  /**
-   * Transient connection credential. API-key providers carry the raw key;
-   * OAuth adoption carries canonical serialized OAuth subscription material.
-   * The value is used by the Host and never projected back to the Client.
-   */
-  readonly apiKey: string | null;
-  /**
-   * Endpoint override for providers whose registry entry carries none (the
-   * custom relays). Always present on the wire, like `apiKey`: `null` means
-   * "use the registry default or the existing connection's persisted URL".
-   */
-  readonly baseUrl: string | null;
 }
 
 export interface ConnectionOnboardingSaveInput extends ConnectionOnboardingVerifyInput {
@@ -121,7 +110,9 @@ export type ConnectionOnboardingVerifyResult =
         // verify so the wizard can offer the identity step again before any
         // model discovery runs.
         | 'slug_taken'
-        | 'catalog_full';
+        | 'catalog_full'
+        | 'model_unavailable'
+        | 'superseded';
     }
   | { readonly kind: 'failed'; readonly errorClass: ConnectionEffectFailureClass };
 
@@ -132,7 +123,7 @@ export type ConnectionOnboardingSaveResult =
         readonly connectionId: string;
         readonly revision: number;
         readonly slug: string;
-        readonly providerType: ProviderType;
+        readonly provider: ProviderIdentity;
       };
     }
   | {
@@ -258,14 +249,10 @@ export const CONNECTION_EFFECT_OPERATION_SPECS = {
 export function decodeConnectionOnboardingSaveInput(value: unknown): ConnectionOnboardingSaveInput {
   const input = requireExactRecord(value, 'connection onboarding save input', [
     'target',
-    'apiKey',
-    'baseUrl',
     'enabledModelIds',
   ]);
   const verified = decodeConnectionOnboardingVerifyInput({
     target: input.target,
-    apiKey: input.apiKey,
-    baseUrl: input.baseUrl,
   });
   if (
     !Array.isArray(input.enabledModelIds) ||
@@ -294,7 +281,7 @@ export function decodeConnectionOnboardingSaveResult(
     const connection = requireExactRecord(
       saved.connection,
       'saved connection onboarding identity',
-      ['connectionId', 'revision', 'slug', 'providerType'],
+      ['connectionId', 'revision', 'slug', 'provider'],
     );
     const basis = decodeDomain(() =>
       decodeConnectionVersionBasis({
@@ -307,7 +294,7 @@ export function decodeConnectionOnboardingSaveResult(
       connection: {
         ...basis,
         slug: decodeDomain(() => decodeConnectionSlug(connection.slug)),
-        providerType: decodeDomain(() => decodeProviderType(connection.providerType)),
+        provider: decodeDomain(() => decodeProviderIdentity(connection.provider)),
       },
     };
   }
@@ -341,58 +328,8 @@ export function decodeConnectionOnboardingSaveResult(
 export function decodeConnectionOnboardingVerifyInput(
   value: unknown,
 ): ConnectionOnboardingVerifyInput {
-  const input = requireExactRecord(value, 'connection onboarding verification input', [
-    'target',
-    'apiKey',
-    'baseUrl',
-  ]);
-  return {
-    target: decodeConnectionOnboardingTarget(input.target),
-    apiKey:
-      input.apiKey === null
-        ? null
-        : requireString(input.apiKey, 'connection onboarding API key', 64 * 1024),
-    baseUrl:
-      input.baseUrl === null
-        ? null
-        : requireString(input.baseUrl, 'connection onboarding base URL', 2048),
-  };
-}
-
-function decodeConnectionOnboardingTarget(value: unknown): ConnectionOnboardingTarget {
-  const target = requireRecord(value, 'connection onboarding target');
-  if (target.kind === 'create') {
-    // slug/name are optional so a surface that accepts the derived identity
-    // can keep talking to any Host vintage; a surface that lets the user name
-    // the connection must tolerate an older Host rejecting the extra fields.
-    const exact = requireShapedRecord(
-      target,
-      'create connection onboarding target',
-      ['kind', 'providerType'],
-      ['slug', 'name'],
-    );
-    return {
-      kind: 'create',
-      providerType: decodeDomain(() => decodeProviderType(exact.providerType)),
-      ...(exact.slug === undefined
-        ? {}
-        : { slug: decodeDomain(() => decodeConnectionSlug(exact.slug)) }),
-      ...(exact.name === undefined
-        ? {}
-        : { name: decodeDomain(() => decodeConnectionName(exact.name)) }),
-    };
-  }
-  if (target.kind === 'existing') {
-    const exact = requireExactRecord(target, 'existing connection onboarding target', [
-      'kind',
-      'connectionId',
-    ]);
-    return {
-      kind: 'existing',
-      connectionId: requireEntityId(exact.connectionId, 'connectionId'),
-    };
-  }
-  throw invalidProtocolFrame('Invalid connection onboarding target');
+  const input = requireExactRecord(value, 'connection onboarding verify input', ['target']);
+  return { target: decodeDomain(() => decodeConnectionOnboardingTarget(input.target)) };
 }
 
 export function decodeConnectionOnboardingVerifyResult(
@@ -404,12 +341,20 @@ export function decodeConnectionOnboardingVerifyResult(
       'kind',
       'models',
     ]);
-    if (!Array.isArray(verified.models) || verified.models.length === 0) {
+    if (
+      !Array.isArray(verified.models) ||
+      verified.models.length === 0 ||
+      verified.models.length > 2048
+    ) {
       throw invalidProtocolFrame('Connection onboarding models must be a non-empty array');
+    }
+    const models = verified.models.map((model) => decodeDomain(() => decodeConnectionModel(model)));
+    if (new Set(models.map((model) => model.id)).size !== models.length) {
+      throw invalidProtocolFrame('Duplicate onboarding model');
     }
     return {
       kind: 'verified',
-      models: verified.models.map((model) => decodeDomain(() => decodeConnectionModel(model))),
+      models,
     };
   }
   if (result.kind === 'failed') {
@@ -430,7 +375,9 @@ export function decodeConnectionOnboardingVerifyResult(
       rejected.reason !== 'credential_not_configured' &&
       rejected.reason !== 'base_url_not_configured' &&
       rejected.reason !== 'slug_taken' &&
-      rejected.reason !== 'catalog_full')
+      rejected.reason !== 'catalog_full' &&
+      rejected.reason !== 'model_unavailable' &&
+      rejected.reason !== 'superseded')
   ) {
     throw invalidProtocolFrame('Invalid connection onboarding rejection');
   }

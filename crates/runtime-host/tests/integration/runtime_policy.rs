@@ -67,7 +67,7 @@ async fn model_tool_preferences_freeze_each_run_and_survive_reopen() {
                 &mut peer,
                 &model.connection_id,
                 &provider.base_url,
-                1,
+                2,
                 true,
                 false,
             )
@@ -101,7 +101,7 @@ async fn model_tool_preferences_freeze_each_run_and_survive_reopen() {
                     &mut peer,
                     &model.connection_id,
                     &provider.base_url,
-                    2,
+                    3,
                     false,
                     true,
                 )
@@ -196,7 +196,7 @@ async fn set_model_tools(
 ) {
     let updated = peer.rpc("connection.catalog.update",serde_json::json!({
         "expected":{"connectionId":connection,"revision":revision},
-        "changes":{"name":"Recovery fixture","baseUrl":endpoint,"enabled":true,"enabledModelIds":["fixture-model"],
+        "changes":{"name":"Recovery fixture","configuration":{"baseUrl":endpoint},"enabled":true,"enabledModelIds":["fixture-model"],
             "modelOverrides":{"fixture-model":{"codeMode":code,"applyPatch":patch}}}
     })).await;
     assert_eq!(updated["result"]["kind"], "committed", "{updated}");
@@ -228,16 +228,16 @@ async fn model_thinking_default_is_frozen_at_creation_not_replay() {
         );
         let mut peer = Peer::new(host.clone(), "thinking-default").await;
         for (revision, default) in if reopened {
-            vec![(3, "low")]
+            vec![(4, "low")]
         } else {
-            vec![(1, "high"), (2, "low")]
+            vec![(2, "high"), (3, "low")]
         } {
             let updated = peer
                 .rpc(
                     "connection.catalog.update",
                     json!({
                         "expected":{"connectionId":model.connection_id,"revision":revision},
-                        "changes":{"name":"Recovery fixture","baseUrl":endpoint,"enabled":true,
+                        "changes":{"name":"Recovery fixture","configuration":{"baseUrl":endpoint},"enabled":true,
                             "enabledModelIds":["fixture-model"],"modelOverrides":{"fixture-model":{
                                 "thinkingLevels":["low","high"],"defaultThinkingLevel":default
                             }}}

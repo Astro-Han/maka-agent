@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { copy } from './client/copy.js';
+
 import { useEffect, useMemo, useState } from 'react';
 import type { ClientContext, ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
 import type { UsageSelection } from '@maka-agent/plugin-sdk/host';
@@ -39,7 +41,7 @@ function Insights({
   locale,
   onOpenSession,
 }: ClientSlots['settings.page'] & { context: ClientContext }) {
-  const zh = locale !== 'en';
+  const t = copy[locale];
   const api = useMemo(() => connect(context), [context]);
   const report = useReport(api, context.signal);
   const refresh = report.refresh;
@@ -84,12 +86,12 @@ function Insights({
     }
   }
   const tabs: readonly [Tab, string][] = [
-    ['overview', zh ? '概览' : 'Overview'],
-    ['activity', zh ? '活动' : 'Activity'],
-    ['providers', zh ? '提供商' : 'Providers'],
-    ['models', zh ? '模型' : 'Models'],
-    ['tools', zh ? '工具' : 'Tools'],
-    ['pricing', zh ? '报价' : 'Pricing'],
+    ['overview', t.overview],
+    ['activity', t.activity],
+    ['providers', t.providers],
+    ['models', t.models],
+    ['tools', t.tools],
+    ['pricing', t.pricing],
   ];
   function select(selection: UsageSelection) {
     if (view) setView({ ...view, selection });
@@ -97,21 +99,21 @@ function Insights({
   return (
     <section data-maka-insights>
       <header>
-        <h2>{zh ? '用量与报价' : 'Usage & pricing'}</h2>
+        <h2>{t.title}</h2>
         <button
           type="button"
           disabled={saving || report.busy}
           onClick={() => setReload((value) => value + 1)}
         >
-          {zh ? '载入已保存视图' : 'Load saved view'}
+          {t.loadView}
         </button>
       </header>
       {error && <p role="alert">{error}</p>}
       {!view ? (
-        !error && <p role="status">{zh ? '正在读取视图…' : 'Loading view…'}</p>
+        !error && <p role="status">{t.loadingView}</p>
       ) : (
         <>
-          <nav aria-label={zh ? '统计页面' : 'Usage pages'}>
+          <nav aria-label={t.pages}>
             {tabs.map(([tab, label]) => (
               <button
                 type="button"
@@ -129,7 +131,7 @@ function Insights({
           </nav>
           <div className="insights-actions">
             <label>
-              {zh ? '范围' : 'Range'}
+              {t.range}
               <select
                 value={view.range}
                 disabled={report.busy}
@@ -141,11 +143,7 @@ function Insights({
               >
                 {(['24h', '7d', '30d', 'all'] as const).map((range, index) => (
                   <option key={range} value={range}>
-                    {
-                      (zh
-                        ? ['24 小时', '7 天', '30 天', '全部时间']
-                        : ['24 hours', '7 days', '30 days', 'All time'])[index]
-                    }
+                    {t.ranges[index]}
                   </option>
                 ))}
               </select>
@@ -156,19 +154,19 @@ function Insights({
                 disabled={report.busy}
                 onClick={() => void report.refresh(view.range, view.selection)}
               >
-                {zh ? '刷新快照' : 'Refresh snapshot'}
+                {t.refresh}
               </button>
             )}
             <button type="button" disabled={saving} onClick={() => void saveView()}>
-              {zh ? '保存此视图' : 'Save this view'}
+              {t.saveView}
             </button>
           </div>
           {view.tab === 'pricing' ? (
-            <Pricing api={api} signal={context.signal} zh={zh} />
+            <Pricing api={api} signal={context.signal} locale={locale} />
           ) : (
             <>
               {report.error && <p role="alert">{report.error}</p>}
-              {report.busy && <p role="status">{zh ? '正在读取快照…' : 'Reading snapshot…'}</p>}
+              {report.busy && <p role="status">{t.readingSnapshot}</p>}
               {view.tab === 'activity' ? (
                 <>
                   <form
@@ -179,7 +177,7 @@ function Insights({
                     }}
                   >
                     <label>
-                      {zh ? '类型' : 'Kind'}
+                      {t.kind}
                       <select
                         value={view.selection.kind ?? ''}
                         onChange={(event) =>
@@ -189,13 +187,13 @@ function Insights({
                           })
                         }
                       >
-                        <option value="">{zh ? '全部' : 'All'}</option>
-                        <option value="model">{zh ? '模型' : 'Model'}</option>
-                        <option value="tool">{zh ? '工具' : 'Tool'}</option>
+                        <option value="">{t.all}</option>
+                        <option value="model">{t.model}</option>
+                        <option value="tool">{t.tool}</option>
                       </select>
                     </label>
                     <label>
-                      {zh ? '结果' : 'Outcome'}
+                      {t.outcome}
                       <select
                         value={view.selection.status ?? ''}
                         onChange={(event) =>
@@ -208,25 +206,14 @@ function Insights({
                         {['', 'success', 'error', 'aborted', 'unknown', 'rejected'].map(
                           (status, index) => (
                             <option key={status} value={status}>
-                              {
-                                (zh
-                                  ? ['全部', '成功', '失败', '取消', '未知', '拒绝']
-                                  : [
-                                      'All',
-                                      'Success',
-                                      'Error',
-                                      'Cancelled',
-                                      'Unknown',
-                                      'Rejected',
-                                    ])[index]
-                              }
+                              {t.outcomes[index]}
                             </option>
                           ),
                         )}
                       </select>
                     </label>
                     <label>
-                      {zh ? '搜索' : 'Search'}
+                      {t.search}
                       <input
                         value={view.selection.search ?? ''}
                         onChange={(event) =>
@@ -235,19 +222,15 @@ function Insights({
                       />
                     </label>
                     <button type="submit" disabled={report.busy || !report.page}>
-                      {zh ? '应用筛选' : 'Apply filters'}
+                      {t.applyFilters}
                     </button>
                   </form>
-                  <p className="insights-note">
-                    {zh
-                      ? '筛选仅作用于活动列表；概览和分组仍使用同一快照的完整统计。'
-                      : 'Filters affect this list only. Overview and breakdowns keep complete totals from the same snapshot.'}
-                  </p>
+                  <p className="insights-note">{t.filterDescription}</p>
                   {report.page && (
                     <>
                       <ActivityTable
                         page={report.page}
-                        zh={zh}
+                        locale={locale}
                         onOpenSession={
                           onOpenSession
                             ? (id) => {
@@ -258,28 +241,28 @@ function Insights({
                       />
                       <div className="insights-actions">
                         <span>
-                          {report.page.total} {zh ? '条匹配活动' : 'matching activities'}
+                          {report.page.total} {t.matchingActivities}
                         </span>
                         <button
                           type="button"
                           disabled={report.busy || report.history.length < 2}
                           onClick={() => void report.back()}
                         >
-                          {zh ? '上一页' : 'Previous'}
+                          {t.previous}
                         </button>
                         <button
                           type="button"
                           disabled={report.busy || !report.page.nextCursor}
                           onClick={() => void report.next()}
                         >
-                          {zh ? '下一页' : 'Next'}
+                          {t.next}
                         </button>
                       </div>
                     </>
                   )}
                 </>
               ) : (
-                report.summary && <Totals summary={report.summary} tab={view.tab} zh={zh} />
+                report.summary && <Totals summary={report.summary} tab={view.tab} locale={locale} />
               )}
             </>
           )}

@@ -2916,15 +2916,18 @@ const makaBridge = {
     },
   },
   connections: {
+    getProviders(host?: DesktopRuntimeHostRef) {
+      return invokeSelectedRuntimeHost(host, 'connections:getProviders');
+    },
     getSnapshot(sessionId?: string, host?: DesktopRuntimeHostRef) {
       return sessionId
         ? invokeRuntimeHostForSession('connections:getSnapshot', sessionId)
         : invokeSelectedRuntimeHost(host, 'connections:getSnapshot');
     },
-    setDefault(connection: import('../shared/desktop-connection-snapshot.js').DesktopConnectionIdentity | string | null, host?: DesktopRuntimeHostRef): Promise<void> {
+    setDefault(connection: import('../shared/desktop-connection-snapshot.js').DesktopConnectionIdentity | null, host?: DesktopRuntimeHostRef): Promise<void> {
       return invokeSelectedRuntimeHost(
         host,
-        typeof connection === 'string' ? 'connections:setDefaultBySlug' : 'connections:setDefault',
+        'connections:setDefault',
         connection,
       );
     },
@@ -2946,10 +2949,10 @@ const makaBridge = {
     delete(connection: import('../shared/desktop-connection-snapshot.js').DesktopConnectionIdentity, host?: DesktopRuntimeHostRef): Promise<void> {
       return invokeSelectedRuntimeHost(host, 'connections:delete', connection);
     },
-    test(connection: import('../shared/desktop-connection-snapshot.js').DesktopConnectionIdentity | string, opts?: { model?: string }, host?: DesktopRuntimeHostRef): Promise<ConnectionTestResult> {
+    test(connection: import('../shared/desktop-connection-snapshot.js').DesktopConnectionIdentity, opts?: { model?: string }, host?: DesktopRuntimeHostRef): Promise<ConnectionTestResult> {
       return invokeSelectedRuntimeHost(
         host,
-        typeof connection === 'string' ? 'connections:testBySlug' : 'connections:test',
+        'connections:test',
         connection,
         opts,
       );

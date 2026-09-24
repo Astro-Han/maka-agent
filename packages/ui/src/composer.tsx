@@ -94,7 +94,7 @@ import type {
 } from '@maka/core/events';
 import type { SandboxMode } from '@maka/core/permission';
 import type { OrchestrationMode } from '@maka/core/orchestration';
-import type { ProviderType } from '@maka/core/llm-connections';
+import type { ProviderIdentity } from '@maka/core/runtime-policy';
 import type { SessionSummary } from '@maka/core/session';
 import {
   Button as UiButton,
@@ -357,7 +357,7 @@ export const Composer = forwardRef<
     activeModelConnectionSlug?: string;
     activeModel?: string;
     activeModelLabel?: string;
-    activeProviderType?: ProviderType;
+    activeProvider?: ProviderIdentity;
     modelChoices?: ChatModelChoice[];
     /** Model-picker surface; 'wheel' is the collapsed WorkHub's inline picker, and any non-popover surface drops the thinking picker to a bottom sheet. */
     pickerPresentation?: 'popover' | 'bottom-sheet' | 'wheel';
@@ -375,7 +375,7 @@ export const Composer = forwardRef<
     hideUnavailableCurrentModel?: boolean;
     /** Renders the provider brand mark beside each model option;
      *  injected by the desktop app to keep the provider SVG library out of @maka/ui. */
-    renderProviderMark?(type: ProviderType): ReactNode;
+    renderProviderMark?(provider: ProviderIdentity): ReactNode;
     /** Host-projected availability when another recovery surface opens this picker. */
     modelSwitchAvailability?: ComposerModelSwitchAvailability;
     onModelChange?(input: {
@@ -397,7 +397,7 @@ export const Composer = forwardRef<
      * choose the new-chat model inline instead of only via Settings · 模型.
      */
     newChatModel?: { llmConnectionId: string; llmConnectionSlug: string; model: string };
-    newChatProviderType?: ProviderType;
+    newChatProvider?: ProviderIdentity;
     onPickNewChatModel?(input: {
       llmConnectionId: string;
       llmConnectionSlug: string;
@@ -2132,7 +2132,7 @@ export const Composer = forwardRef<
                     activeModelConnectionSlug={props.activeModelConnectionSlug}
                     activeModel={props.activeModel}
                     activeModelLabel={props.activeModelLabel}
-                    currentProviderType={props.activeProviderType}
+                    currentProvider={props.activeProvider}
                     choices={props.modelChoices ?? []}
                     hasConversationHistory={props.modelSwitchHasHistory}
                     availability={modelSwitchAvailability}
@@ -2157,7 +2157,7 @@ export const Composer = forwardRef<
                           )
                         : undefined
                     }
-                    currentProviderType={props.newChatProviderType}
+                    currentProvider={props.newChatProvider}
                     renderProviderMark={props.renderProviderMark}
                     onPick={props.onPickNewChatModel}
                   />

@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { copy } from './presets-copy.js';
+
 import { useEffect, useState } from 'react';
 import type { ClientContext, ClientSlots } from '@maka-agent/plugin-sdk/client';
 
@@ -34,53 +36,8 @@ type Snapshot = { revision: number | null; presets: Preset[] };
 type Request = { kind: 'read' } | { kind: 'replace'; snapshot: Snapshot };
 type Props = ClientSlots['application.manage'] & { context: ClientContext };
 
-const copy = {
-  en: {
-    add: 'Add agent preset',
-    reload: 'Reload',
-    save: 'Save',
-    remove: 'Remove',
-    cancel: 'Cancel',
-    id: 'ID',
-    name: 'Name',
-    description: 'Instructions for choosing this preset',
-    connection: 'Connection slug',
-    model: 'Model',
-    profile: 'Capabilities',
-    thinking: 'Reasoning effort',
-    enabled: 'Enabled',
-    inherited: 'Default',
-    empty: 'No presets. General-purpose agents remain available.',
-    loading: 'Loading…',
-    local_read: 'Read-only repository',
-    web_research: 'Web research',
-    implementation: 'Isolated implementation',
-  },
-  zh: {
-    add: '添加 Agent 预设',
-    reload: '重新加载',
-    save: '保存',
-    remove: '删除',
-    cancel: '取消',
-    id: '标识',
-    name: '名称',
-    description: '选择此预设的说明',
-    connection: '连接标识',
-    model: '模型',
-    profile: '能力',
-    thinking: '思考程度',
-    enabled: '启用',
-    inherited: '默认',
-    empty: '尚无预设，仍可使用通用 Agent。',
-    loading: '加载中…',
-    local_read: '只读代码库',
-    web_research: '网络调研',
-    implementation: '独立工作区实现',
-  },
-};
-
 export function Presets({ context, locale }: Props) {
-  const t = locale === 'en' ? copy.en : copy.zh;
+  const t = copy[locale];
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [draft, setDraft] = useState<Preset>();
   const [editing, setEditing] = useState<string>();

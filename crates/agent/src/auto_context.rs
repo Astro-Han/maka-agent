@@ -76,7 +76,7 @@ fn threshold(input: Option<u64>, output: Option<u64>, window: u64) -> bool {
 
 pub(super) async fn attempt(
     inner: &Arc<Inner>,
-    input: &RunInput,
+    input: &mut RunInput,
     source: &ModelContextSource,
     mid_turn: bool,
     cancellation: &CancellationToken,

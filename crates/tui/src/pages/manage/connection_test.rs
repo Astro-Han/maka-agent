@@ -104,9 +104,10 @@ mod tests {
                     epoch: "epoch".into(),
                 };
                 app.apply(Action::Visit(Route::Connections));
+                app.providers = crate::providers::fixtures::catalog();
                 app.connections.query().unwrap();
                 app.connections.complete(Ok(json!({"kind":"page","revision":1,"connectionCount":1,"nextCursor":null,"defaultTarget":null,
-                    "items":[{"kind":"connection","connectionIndex":0,"connectionId":"id","revision":1,"slug":"fixture","name":"Fixture","providerType":"openai-compatible","enabled":true,"enabledModelIdCount":0}]})));
+                    "items":[{"kind":"connection","connectionIndex":0,"connectionId":"id","revision":1,"slug":"fixture","name":"Fixture","provider":crate::providers::fixtures::entry("openai-compatible", false).identity,"configuration":{"baseUrl":"http://127.0.0.1/v1"},"enabled":true,"enabledModelIdCount":0}]})));
                 let open = app
                     .management_commands()
                     .into_iter()

@@ -49,6 +49,7 @@ impl Operation {
                 | Self::ConnectionCatalogCreate
                 | Self::ConnectionCatalogQuery
                 | Self::ExecutorCatalogQuery
+                | Self::ModelProviderCatalogQuery
                 | Self::ConnectionCatalogRemove
                 | Self::ConnectionCatalogSetDefaultTarget
                 | Self::ConnectionCatalogUpdate

@@ -80,8 +80,12 @@ impl RunTools {
     }
 
     pub fn with_model(mut self, model: maka_runtime::tools::ModelToolContext) -> Self {
-        self.model = Some(model);
+        self.set_model(model);
         self
+    }
+
+    pub fn set_model(&mut self, model: maka_runtime::tools::ModelToolContext) {
+        self.model = Some(model);
     }
 
     pub fn checkpoint(&self) -> maka_runtime::handoff::HandoffTools {

@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 impl Client {
     pub async fn oauth_enrollment(
         &self,
-        provider: Provider,
+        provider: Identity,
     ) -> Result<EnrollmentProjection, RequestFailure> {
         let value = self
             .request(
@@ -48,7 +48,7 @@ impl Client {
         let value = self
             .request(Operation::OauthLoginStart, json!(input))
             .await?;
-        self.oauth_login_result(value, input, None)
+        self.oauth_login_result(value, &input.recovery(), None)
     }
 
     /// `connection` is the identity from the first confirmed projection. Only
@@ -56,7 +56,7 @@ impl Client {
     /// callers must also establish that they are addressing the original Root.
     pub async fn query_oauth_login(
         &self,
-        input: &LoginStart,
+        input: &LoginRecovery,
         connection: Option<&ConnectionIdentity>,
     ) -> Result<LoginProjection, RequestFailure> {
         self.oauth_attempt(Operation::OauthLoginQuery, input, connection)
@@ -67,7 +67,7 @@ impl Client {
     /// an in-flight phase or an already committed authenticated projection.
     pub async fn cancel_oauth_login(
         &self,
-        input: &LoginStart,
+        input: &LoginRecovery,
         connection: Option<&ConnectionIdentity>,
     ) -> Result<LoginProjection, RequestFailure> {
         self.oauth_attempt(Operation::OauthLoginCancel, input, connection)
@@ -77,12 +77,12 @@ impl Client {
     async fn oauth_attempt(
         &self,
         operation: Operation,
-        input: &LoginStart,
+        input: &LoginRecovery,
         connection: Option<&ConnectionIdentity>,
     ) -> Result<LoginProjection, RequestFailure> {
         // Query/cancel carry only an attempt ID on the wire. Validate the local
         // target too, so a malformed recovery basis causes no Host operation.
-        decode_start(&json!(input)).map_err(|_| {
+        input.validate().map_err(|_| {
             RequestFailure::NotDispatched(ClientError::Protocol(
                 "Invalid OAuth attempt basis".into(),
             ))
@@ -101,11 +101,11 @@ impl Client {
     fn oauth_login_result(
         &self,
         value: Value,
-        input: &LoginStart,
+        input: &LoginRecovery,
         connection: Option<&ConnectionIdentity>,
     ) -> Result<LoginProjection, RequestFailure> {
         let result = decode_login(&value).map_err(|_| self.oauth_invalid())?;
-        assert_start(input, &result).map_err(|_| self.oauth_invalid())?;
+        assert_recovery(input, &result).map_err(|_| self.oauth_invalid())?;
         if connection.is_some_and(|identity| *identity != result.connection) {
             return Err(self.oauth_invalid());
         }

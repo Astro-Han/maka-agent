@@ -43,6 +43,8 @@ use tokio_util::sync::CancellationToken;
 
 fn input(base: &str, suffix: &str, effect: Arc<dyn maka_runtime::tools::ToolExecutor>) -> RunInput {
     RunInput {
+        model_source: None,
+        model_revision: None,
         provider_id: "fixture".into(),
         main_output_limit: None,
         context: None,

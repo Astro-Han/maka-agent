@@ -67,8 +67,7 @@ fn terminal_creation_reopens_queries_and_retries_without_duplicating_or_resurrec
             tui.wait_for("connection failed");
             assert_eq!(proxy.requests().len(), 1);
             // Crash without a final flush: the pre-dispatch checkpoint is sufficient.
-            tui.child.kill().unwrap();
-            assert!(!tui.child.wait().unwrap().success());
+            assert!(!tui.terminate().unwrap().success());
             drop(tui);
             let original = proxy.requests()[0]["input"].clone();
             let operation = original["revision"].as_str().unwrap();

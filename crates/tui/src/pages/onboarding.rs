@@ -29,11 +29,6 @@ use maka_client::{Client, RequestFailure};
 use maka_protocol::configuration::{ModelInfo, onboarding::*};
 use std::collections::BTreeSet;
 
-const PROVIDERS: [(&str, &str); 3] = [
-    ("openai-compatible", "OpenAI-compatible"),
-    ("openai", "OpenAI"),
-    ("anthropic", "Anthropic"),
-];
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Open,
@@ -107,6 +102,8 @@ impl Onboarding {
 pub struct Form {
     ticket: Ticket,
     provider: usize,
+    providers: Vec<maka_protocol::model_provider::Entry>,
+    default_slug: String,
     fields: [Editor; 3],
     models: Option<Vec<ModelInfo>>,
     selected: BTreeSet<String>,
@@ -121,15 +118,25 @@ impl Form {
         if self.models.is_some() { 4 } else { 6 }
     }
     fn input(&self) -> OnboardingInput {
-        let optional = |value: &str| (!value.trim().is_empty()).then(|| value.trim().to_owned());
+        let provider = &self.providers[self.provider];
+        let name = self.fields[0].text().trim();
+        let slug = self.fields[2].text().trim();
         OnboardingInput {
-            target: OnboardingTarget::Create {
-                provider_type: PROVIDERS[self.provider].0.into(),
-                slug: None,
-                name: optional(self.fields[0].text()),
+            target: maka_protocol::oauth::Target::Create {
+                provider: provider.identity.clone(),
+                configuration: serde_json::from_str(self.fields[1].text())
+                    .expect("reviewed configuration"),
+                name: if name.is_empty() {
+                    provider.descriptor.label.clone()
+                } else {
+                    name.into()
+                },
+                slug: if slug.is_empty() {
+                    self.default_slug.clone()
+                } else {
+                    slug.into()
+                },
             },
-            base_url: optional(self.fields[1].text()),
-            api_key: optional(self.fields[2].text()),
         }
     }
 }
@@ -151,14 +158,29 @@ impl App {
             return !self.onboarding.pending.as_ref().is_some_and(|p| p.save);
         }
         let identity = matches!(&self.connection,ConnectionState::Connected{root_id,epoch} if *root_id==form.ticket.root && *epoch==form.ticket.epoch);
-        if !form.visible || form.blocked || !identity || self.onboarding.pending.is_some() {
+        if !form.visible
+            || form.blocked
+            || !identity
+            || form.providers.is_empty()
+            || self.onboarding.pending.is_some()
+        {
             return false;
         }
         match c {
             Command::Verify => {
                 form.models.is_none()
-                    && !form.fields[2].text().trim().is_empty()
-                    && (form.provider != 0 || !form.fields[1].text().trim().is_empty())
+                    && form.fields.iter().all(|field| field.error.is_none())
+                    && serde_json::from_str::<serde_json::Value>(form.fields[1].text()).is_ok_and(
+                        |value| {
+                            maka_protocol::configuration::validation::provider_configuration(&value)
+                                .is_ok()
+                        },
+                    )
+                    && (form.fields[2].text().trim().is_empty()
+                        || maka_protocol::configuration::validation::slug(
+                            form.fields[2].text().trim(),
+                        )
+                        .is_ok())
             }
             Command::Save => form.models.is_some() && !form.selected.is_empty(),
             Command::Toggle(id) => form
@@ -186,10 +208,12 @@ impl App {
                         save: false,
                     },
                     provider: 0,
+                    providers: Vec::new(),
+                    default_slug: format!("connection-{}", uuid::Uuid::new_v4().simple()),
                     fields: [
                         Editor::bounded(128, "onboard-field-invalid"),
-                        Editor::bounded(2048, "onboard-field-invalid"),
-                        Editor::bounded(10240, "onboard-field-invalid"),
+                        Editor::bounded(64 * 1024, "onboard-field-invalid"),
+                        Editor::bounded(64, "onboard-field-invalid"),
                     ],
                     models: None,
                     selected: BTreeSet::new(),
@@ -199,6 +223,7 @@ impl App {
                     blocked: false,
                     error: None,
                 });
+                self.onboarding_catalog_loaded();
                 self.hover = None;
             }
             Command::Close => self.onboarding.dialog = None,
@@ -210,7 +235,14 @@ impl App {
                 f.error = None;
                 match c {
                     Command::Provider => {
-                        f.provider = (f.provider + 1) % PROVIDERS.len();
+                        f.provider = (f.provider + 1) % f.providers.len();
+                        f.fields[1] = Editor::bounded(64 * 1024, "onboard-field-invalid");
+                        f.fields[1].insert(
+                            &f.providers[f.provider]
+                                .descriptor
+                                .configuration_defaults
+                                .to_string(),
+                        );
                         f.focus = 0;
                     }
                     Command::Field(index) => f.focus = index + 1,
@@ -238,6 +270,24 @@ impl App {
         }
         self.hits.clear();
         None
+    }
+    pub fn onboarding_catalog_loaded(&mut self) {
+        let Some(form) = &mut self.onboarding.dialog else {
+            return;
+        };
+        if !form.providers.is_empty() || form.blocked {
+            return;
+        }
+        form.providers = self
+            .providers
+            .entries()
+            .iter()
+            .filter(|provider| provider.descriptor.anonymous)
+            .cloned()
+            .collect();
+        if let Some(provider) = form.providers.first() {
+            form.fields[1].insert(&provider.descriptor.configuration_defaults.to_string());
+        }
     }
     pub fn onboarding_request(&mut self, save: bool) -> Option<Request> {
         if !self.onboarding_enabled(&if save { Command::Save } else { Command::Verify }) {
@@ -299,8 +349,10 @@ impl App {
             Ok(ResultValue::Verified(OnboardingVerifyResult::Rejected { reason }))
             | Ok(ResultValue::Saved(OnboardingSaveResult::Rejected { reason })) => {
                 f.error = Some(match reason {
-                    OnboardingRejection::CredentialNotConfigured => "onboard-key-required",
-                    OnboardingRejection::BaseUrlNotConfigured => "onboard-url-required",
+                    OnboardingRejection::CredentialNotConfigured => {
+                        "onboard-authentication-required"
+                    }
+                    OnboardingRejection::BaseUrlNotConfigured => "onboard-configuration-required",
                     OnboardingRejection::ProviderUnsupported => "onboard-unsupported",
                     OnboardingRejection::ModelUnavailable => "onboard-models-changed",
                     OnboardingRejection::CatalogFull => "onboard-catalog-full",
@@ -335,7 +387,6 @@ impl App {
         let uncertain = self.onboarding.pending.take().is_some_and(|p| p.save);
         if let Some(f) = &mut self.onboarding.dialog {
             f.blocked = true;
-            f.fields[2] = Editor::bounded(10240, "onboard-field-invalid");
             f.error = Some(if uncertain {
                 "onboard-unknown"
             } else {
@@ -356,7 +407,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn onboarding_masks_secrets_isolates_async_steps_and_never_replays_unknown_saves() {
+    fn anonymous_onboarding_isolates_async_steps_and_never_replays_unknown_saves() {
         let mut app = App::new(
             "/unused".into(),
             I18n::new(LocalePreference::Explicit(Locale::En), Locale::En),
@@ -368,17 +419,37 @@ mod tests {
         app.apply(Action::Onboard(Command::Open));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+        assert!(app.onboarding.dialog.is_some());
+        assert!(app.onboarding_enabled(&Command::Close));
+        assert!(!app.onboarding_enabled(&Command::Verify));
+        assert!(app.onboarding_request(false).is_none());
+        app.providers = crate::providers::fixtures::catalog();
+        app.onboarding_catalog_loaded();
+        terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
         for (index, text) in [
             "Private fixture",
-            "http://127.0.0.1/v1",
-            "fixture-SECRET-中文",
+            r#"{"baseUrl":"http://127.0.0.1/v1"}"#,
+            "fixture-connection",
         ]
         .into_iter()
         .enumerate()
         {
             app.apply(Action::Onboard(Command::Field(index)));
+            app.input(Event::Key(KeyEvent::new(
+                KeyCode::Char('a'),
+                KeyModifiers::CONTROL,
+            )));
             app.input(Event::Paste(text.into()));
         }
+        app.providers.refresh();
+        app.onboarding_catalog_loaded();
+        app.providers = crate::providers::fixtures::catalog();
+        app.onboarding_catalog_loaded();
+        assert_eq!(
+            app.onboarding.dialog.as_ref().unwrap().fields[1].text(),
+            r#"{"baseUrl":"http://127.0.0.1/v1"}"#,
+            "catalog refresh cannot replace an active form's provider or configuration"
+        );
         for locale in Locale::ALL {
             app.i18n = I18n::new(LocalePreference::Explicit(locale), locale);
             for (width, height) in [(80, 24), (44, 22), (20, 8)] {
@@ -391,10 +462,9 @@ mod tests {
                     .iter()
                     .map(|c| c.symbol())
                     .collect::<String>();
-                assert!(!text.contains("SECRET") && !text.contains("fixture-"));
                 assert_eq!(app.onboarding_enabled(&Command::Verify), width >= 44);
                 if width >= 44 {
-                    assert!(text.contains("*****"));
+                    assert!(text.contains("fixture-connection"));
                     assert!(
                         screen
                             .backend()
@@ -411,10 +481,21 @@ mod tests {
         }
         terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
         let request = app.onboarding_request(false).unwrap();
+        let maka_protocol::oauth::Target::Create {
+            provider,
+            configuration,
+            slug,
+            ..
+        } = &request.input.target
+        else {
+            panic!()
+        };
         assert_eq!(
-            request.input.api_key.as_deref(),
-            Some("fixture-SECRET-中文")
+            *provider,
+            crate::providers::fixtures::entry("openai-compatible", false).identity
         );
+        assert_eq!(*configuration, json!({"baseUrl":"http://127.0.0.1/v1"}));
+        assert_eq!(slug, "fixture-connection");
         app.input(Event::Paste("ignored while verifying".into()));
         assert!(!app.onboarding_enabled(&Command::Verify));
         app.input(Event::Mouse(MouseEvent {
@@ -441,8 +522,15 @@ mod tests {
         );
         app.apply(Action::Onboard(Command::Open));
         terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
-        for (index, text) in [(1, "http://127.0.0.1/v1"), (2, "new-secret")] {
+        for (index, text) in [
+            (1, r#"{"baseUrl":"http://127.0.0.1/v1"}"#),
+            (2, "new-connection"),
+        ] {
             app.apply(Action::Onboard(Command::Field(index)));
+            app.input(Event::Key(KeyEvent::new(
+                KeyCode::Char('a'),
+                KeyModifiers::CONTROL,
+            )));
             app.input(Event::Paste(text.into()));
         }
         let request = app.onboarding_request(false).unwrap();
@@ -547,10 +635,6 @@ mod tests {
                 .contains("new-secret")
         );
         app.abandon_onboarding();
-        assert!(
-            app.onboarding.dialog.as_ref().unwrap().fields[2]
-                .text()
-                .is_empty()
-        );
+        assert!(app.onboarding.dialog.as_ref().unwrap().blocked);
     }
 }

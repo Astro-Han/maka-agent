@@ -106,8 +106,7 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> Result<Value>
                 .map_err(|error| ProtocolError::invalid(error.to_string()))?;
         }
         Operation::ModelProviderCatalogQuery => {
-            serde_json::from_value::<maka_plugins::provider::catalog::Query>(value.clone())
-                .map_err(|_| ProtocolError::invalid("Invalid model provider query"))?;
+            maka_protocol::model_provider::decode_query(value)?;
         }
         Operation::NetworkProxyTest => {
             maka_protocol::network_proxy::decode_input(value)?;
@@ -169,8 +168,7 @@ pub(super) fn decode_output(operation: Operation, value: &Value) -> Result<Value
                 .map_err(|error| ProtocolError::invalid(error.to_string()))?;
         }
         Operation::ModelProviderCatalogQuery => {
-            serde_json::from_value::<maka_plugins::provider::catalog::Page>(value.clone())
-                .map_err(|_| ProtocolError::invalid("Invalid model provider directory"))?;
+            maka_protocol::model_provider::decode_page(value)?;
         }
         Operation::NetworkProxyTest => {
             maka_protocol::network_proxy::decode_output(value)?;

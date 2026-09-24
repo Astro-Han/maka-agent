@@ -22,6 +22,8 @@ use maka_event_log::root::{RootNamespaces, RootOwner};
 use maka_runtime::configuration::*;
 use serde_json::json;
 use std::sync::Arc;
+#[path = "support/provider.rs"]
+mod provider_support;
 
 fn committed_basis(result: CatalogMutationResult) -> ConnectionVersionBasis {
     match result {
@@ -41,14 +43,15 @@ async fn edits_preserve_endpoint_ownership_and_removal_durably_cleans_only_its_c
         ownership: temp.path().join("owners"),
         control: temp.path().join("control"),
     };
-    let store =
+    let store = Arc::new(
         ConfigurationStore::for_root(Arc::new(RootOwner::create(&root, &namespaces).unwrap()))
             .await
-            .unwrap();
+            .unwrap(),
+    );
     let create: CreateCatalogConnectionInput = serde_json::from_value(json!({
         "expectedCatalogRevision": 0,
-        "connection": {"slug":"relay", "name":"Relay", "providerType":"openai-compatible",
-            "baseUrl":"http://127.0.0.1:18080/v1", "enabled":true,
+        "connection": {"slug":"relay", "name":"Relay", "provider":{"packageId":"external","entryId":"api","scope":"profile","name":"api"},
+            "configuration":{"baseUrl":"http://127.0.0.1:18080/v1"}, "enabled":true,
             "enabledModelIds":["first", "second"],
             "modelOverrides":{"first":{"vision":true}, "second":{"contextWindow":8192}}}
     }))
@@ -74,7 +77,7 @@ async fn edits_preserve_endpoint_ownership_and_removal_durably_cleans_only_its_c
 
     let key = CredentialLocator::Connection {
         connection_id: basis.connection_id.clone(),
-        kind: ConnectionCredentialKind::ApiKey,
+        kind: ConnectionCredentialKind::Provider,
     };
     let headers = CredentialLocator::Connection {
         connection_id: basis.connection_id.clone(),
@@ -83,15 +86,27 @@ async fn edits_preserve_endpoint_ownership_and_removal_durably_cleans_only_its_c
     let unrelated = CredentialLocator::NetworkProxy {
         kind: PasswordKind::Password,
     };
+    provider_support::login(&store, &basis.connection_id, "fixture-key").await;
+    basis.revision = store
+        .catalog()
+        .await
+        .unwrap()
+        .connections
+        .iter()
+        .find(|row| row.connection_id == basis.connection_id)
+        .unwrap()
+        .revision;
     let credential_target = ConnectionCredentialTarget {
         connection_id: basis.connection_id.clone(),
         revision: basis.revision,
         slug: "relay".into(),
-        provider_type: "openai-compatible".into(),
-        effective_base_url: "http://127.0.0.1:18080/v1".into(),
+        provider: serde_json::from_value(
+            json!({"packageId":"external","entryId":"api","scope":"profile","name":"api"}),
+        )
+        .unwrap(),
+        configuration: json!({"baseUrl":"http://127.0.0.1:18080/v1"}),
     };
     for (locator, secret) in [
-        (key.clone(), "fixture-key"),
         (headers.clone(), r#"{"X-Fixture":"headers"}"#),
         (unrelated.clone(), "fixture-password"),
     ] {
@@ -130,7 +145,7 @@ async fn edits_preserve_endpoint_ownership_and_removal_durably_cleans_only_its_c
             .unwrap()
     };
     let mut changes: ConnectionCatalogEntryUpdate = serde_json::from_value(json!({
-        "name":"Renamed relay", "baseUrl":"http://127.0.0.1:18080/v1",
+        "name":"Renamed relay", "configuration":{"baseUrl":"http://127.0.0.1:18080/v1"},
         "enabled":true, "enabledModelIds":["first", "second"]
     }))
     .unwrap();
@@ -187,14 +202,10 @@ async fn edits_preserve_endpoint_ownership_and_removal_durably_cleans_only_its_c
         store.credential_status(key.clone()).await.unwrap(),
         key_status
     );
-    assert_eq!(
-        store
-            .credential_secret(&key, None)
-            .await
-            .unwrap()
-            .as_deref(),
-        Some("fixture-key")
-    );
+    let stored: maka_runtime::provider::Credential =
+        serde_json::from_str(&store.credential_secret(&key, None).await.unwrap().unwrap()).unwrap();
+    assert_eq!(stored.secret, "fixture-key");
+    assert!(stored.refresh_at.is_none());
     assert_eq!(
         vault_state(),
         (3, 3),
@@ -211,10 +222,10 @@ async fn edits_preserve_endpoint_ownership_and_removal_durably_cleans_only_its_c
         "disabling a model must not discard its declaration"
     );
     assert_eq!(store.catalog().await.unwrap().default_target, Some(target));
-    changes.base_url = Some("http://127.0.0.1:18081/v1".into());
+    changes.configuration = json!({"baseUrl":"http://127.0.0.1:18081/v1"});
     basis = edit(basis, changes.clone()).await;
     assert_eq!(row().await.model_overrides, None);
-    changes.base_url = Some("http://127.0.0.1:18082/v1".into());
+    changes.configuration = json!({"baseUrl":"http://127.0.0.1:18082/v1"});
     changes.model_overrides = Patch::Set(first_profile.clone());
     basis = edit(basis, changes.clone()).await;
     assert_eq!(row().await.model_overrides, Some(first_profile));
@@ -266,7 +277,8 @@ async fn edits_preserve_endpoint_ownership_and_removal_durably_cleans_only_its_c
         removed
     );
     assert_eq!(vault_state(), (4, 1));
-    store.close().await.unwrap();
+    store.shutdown().await.unwrap();
+    drop(store);
     let store =
         ConfigurationStore::for_root(Arc::new(RootOwner::open(&root, &namespaces).unwrap()))
             .await

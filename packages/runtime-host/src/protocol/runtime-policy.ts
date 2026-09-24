@@ -22,7 +22,6 @@ import {
   CONNECTION_CATALOG_MAX_ENABLED_MODEL_IDS,
   CONNECTION_CATALOG_MAX_ENTRIES_PER_CONNECTION,
   CONNECTION_CATALOG_MAX_MODELS_PER_CONNECTION,
-  decodeCanonicalConnectionBaseUrl,
   decodeModelCatalogEntry,
   decodeCanonicalRuntimePolicy,
   decodeConnectionModel,
@@ -36,7 +35,8 @@ import {
   decodeCredentialLocator,
   decodeCredentialStatus,
   decodeCredentialVersionBasis,
-  decodeProviderType,
+  decodeProviderIdentity,
+  decodeProviderConfiguration,
   normalizeCreateCatalogConnectionInput,
   normalizeDeleteCredentialInput,
   normalizeRemoveCatalogConnectionInput,
@@ -82,7 +82,7 @@ import { invalidProtocolFrame } from './errors.js';
 import { defineOperation } from './operation-spec.js';
 
 export const CONNECTION_CATALOG_PAGE_MAX_ITEMS = 128;
-export const CONNECTION_CATALOG_PAGE_MAX_BYTES = 48 * 1024;
+export const CONNECTION_CATALOG_PAGE_MAX_BYTES = 128 * 1024;
 export const RUNTIME_POLICY_SNAPSHOT_MAX_BYTES = 48 * 1024;
 export const CREDENTIAL_SECRET_MAX_BYTES = 10 * 1024;
 
@@ -733,8 +733,8 @@ function catalogPageItem(value: unknown): ConnectionCatalogPageItem {
       'revision',
       'slug',
       'name',
-      'providerType',
-      'baseUrl',
+      'provider',
+      'configuration',
       'enabled',
       'modelSource',
       'lastTest',
@@ -750,18 +750,16 @@ function catalogPageItem(value: unknown): ConnectionCatalogPageItem {
       'revision',
       'slug',
       'name',
-      'providerType',
+      'provider',
+      'configuration',
       'enabled',
       'enabledModelIdCount',
       'modelCount',
       'catalogEntryCount',
     ],
   );
-  const provider = decodeDomain(() => decodeProviderType(header.providerType));
-  const baseUrl =
-    header.baseUrl === undefined
-      ? undefined
-      : decodeDomain(() => decodeCanonicalConnectionBaseUrl(header.baseUrl, provider));
+  const provider = decodeDomain(() => decodeProviderIdentity(header.provider));
+  const configuration = decodeDomain(() => decodeProviderConfiguration(header.configuration));
   const modelCount = integer(
     header.modelCount,
     'model count',
@@ -793,8 +791,8 @@ function catalogPageItem(value: unknown): ConnectionCatalogPageItem {
     revision: basis.revision,
     slug: decodeDomain(() => decodeConnectionSlug(header.slug)),
     name: decodeDomain(() => decodeConnectionName(header.name)),
-    providerType: provider,
-    ...(baseUrl === undefined ? {} : { baseUrl }),
+    provider,
+    configuration,
     enabled: boolean(header.enabled, 'connection enabled'),
     ...(header.modelSource === undefined ? {} : { modelSource: modelSource(header.modelSource) }),
     ...(header.lastTest === undefined

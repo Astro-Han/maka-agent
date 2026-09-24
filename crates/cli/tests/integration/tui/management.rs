@@ -148,7 +148,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
         .unwrap();
     assert_eq!(
         original.workspace.host_cwd,
-        directory.path().to_str().unwrap()
+        directory.path().canonicalize().unwrap().to_str().unwrap()
     );
     tui.send(format!("\x01\x1b[200~{}\x1b[201~", moved.display()).as_bytes());
     tui.wait_for("中文 workspace");
@@ -160,7 +160,10 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
     tui.wait_until(|text| !text.contains("Cancel") && text.contains("draft remains here"));
     runtime.block_on(async {
         let current = client.session("managed").await.unwrap().unwrap();
-        assert_eq!(current.workspace.host_cwd, moved.to_str().unwrap());
+        assert_eq!(
+            current.workspace.host_cwd,
+            moved.canonicalize().unwrap().to_str().unwrap()
+        );
         assert!(current.revision > original.revision);
         assert_eq!(
             client
@@ -170,7 +173,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
                 .unwrap()
                 .workspace
                 .host_cwd,
-            directory.path().to_str().unwrap()
+            directory.path().canonicalize().unwrap().to_str().unwrap()
         );
     });
     // Switching an existing session selects a project identity, not a client-side path.
@@ -196,7 +199,7 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
             .unwrap()
             .workspace
             .host_cwd,
-        moved.to_str().unwrap()
+        moved.canonicalize().unwrap().to_str().unwrap()
     );
     tui.click_text("Selected project");
     tui.wait_for("› Selected project"); // Observe selection before the independent catalog mutation.
@@ -253,13 +256,16 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
                 project_id: project.id.clone()
             }
         );
-        assert_eq!(current.workspace.host_cwd, project_path.to_str().unwrap());
+        assert_eq!(
+            current.workspace.host_cwd,
+            project_path.canonicalize().unwrap().to_str().unwrap()
+        );
         assert_eq!(current.name, "Concurrent project edit");
         let neighbor = client.session("neighbor").await.unwrap().unwrap();
         assert_eq!(neighbor.revision, 1);
         assert_eq!(
             neighbor.workspace.host_cwd,
-            directory.path().to_str().unwrap()
+            directory.path().canonicalize().unwrap().to_str().unwrap()
         );
         assert!(moved.is_dir(), "switching must not move existing files");
     });

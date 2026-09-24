@@ -219,7 +219,11 @@ async fn foreground_background_and_closure_commit_failures_drain_host() {
             assert!(
                 matches!(
                     frame["kind"].as_str(),
-                    Some("session.catalog.changed" | "plugin.client.changed")
+                    Some(
+                        "session.catalog.changed"
+                            | "plugin.client.changed"
+                            | "model.provider.catalog.changed"
+                    )
                 ),
                 "{frame}"
             );

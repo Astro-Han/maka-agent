@@ -17,11 +17,12 @@
  * under the License.
  */
 
+import { copy } from './client/copy.js';
+
 import { useEffect, useRef, useState } from 'react';
 import type { ClientContext, ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
 
 import {
-  copy,
   states,
   type Cursor,
   type Epoch,
@@ -149,10 +150,7 @@ function Panel({ context, ...props }: Props & { context: ClientContext }) {
               void act(async () => {
                 const grant = await context.authorization.approve('profile', {
                   operationId: crypto.randomUUID(),
-                  title:
-                    props.locale === 'en'
-                      ? 'Allow Agent Graph background work'
-                      : '允许 Agent Graph 后台执行',
+                  title: copy[props.locale].authorize,
                   target: { kind: 'session', sessionId: props.sessionId },
                   capabilities: ['executions'],
                 });
@@ -166,7 +164,7 @@ function Panel({ context, ...props }: Props & { context: ClientContext }) {
               })
             }
           >
-            {props.locale === 'en' ? 'Authorize background execution' : '授权后台执行'}
+            {copy[props.locale].authorizeButton}
           </button>
         ) : null}
         {epochs.length ? (

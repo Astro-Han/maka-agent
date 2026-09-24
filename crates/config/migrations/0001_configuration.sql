@@ -53,6 +53,13 @@ CREATE TABLE credentials (
     updated_at INTEGER NOT NULL
 );
 
+-- A consumed or uncertain grant must not be exchanged again after a crash.
+-- Replacement/logout deletes the generation; successful rotation clears the claim.
+CREATE TABLE credential_refresh_claims (
+    credential_id TEXT PRIMARY KEY REFERENCES credentials(credential_id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL CHECK(revision > 0)
+);
+
 CREATE TABLE access_credentials (
     document TEXT NOT NULL CHECK(json_valid(document) AND length(CAST(document AS BLOB)) <= 524288),
     credential_id TEXT GENERATED ALWAYS AS (json_extract(document, '$.credentialId')) STORED NOT NULL UNIQUE,
@@ -72,6 +79,9 @@ CREATE TABLE oauth_login_receipts (
     completion_order INTEGER PRIMARY KEY AUTOINCREMENT,
     attempt_id TEXT NOT NULL UNIQUE CHECK(length(attempt_id) BETWEEN 1 AND 128),
     target TEXT NOT NULL,
+    method TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    phase TEXT NOT NULL CHECK(json_valid(phase)),
     connection TEXT NOT NULL
 );
 

@@ -102,6 +102,15 @@ export interface RemoteOptions {
   /** Host rejects the endpoint for callers without path access. */
   access?: 'granted' | 'host_paths';
 }
+export interface TerminalView {
+  version: 3;
+  title: { fallback: string; translations?: Record<string, string> };
+  context: 'application' | 'session';
+}
+export interface RemoteMethodOptions extends RemoteOptions {
+  /** Navigation is bound to this exact Remote registration. */
+  terminalView?: TerminalView;
+}
 /** Throw an Error carrying this code to preserve its meaning across Remote.
  * Unclassified exceptions become unavailable. An unknown outcome requires
  * domain recovery; it does not imply that the plugin failed to clean up.
@@ -320,7 +329,7 @@ export interface HostContext {
     method<I extends Json, O extends Json>(
       name: string,
       invoke: (input: I, caller: RemoteCaller) => Awaitable<O>,
-      options?: RemoteOptions,
+      options?: RemoteMethodOptions,
     ): Promise<Registration>;
     stream<I extends Json, O extends Json>(
       name: string,

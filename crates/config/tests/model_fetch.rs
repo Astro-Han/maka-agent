@@ -44,8 +44,9 @@ impl Fixture {
         let store = Arc::new(ConfigurationStore::for_root(owner).await.unwrap());
         let input = serde_json::from_value(json!({
             "expectedCatalogRevision":0,
-            "connection":{"slug":"relay","name":"Relay","providerType":"openai-compatible",
-                "baseUrl":"http://127.0.0.1:18080/v1","enabled":true,
+            "connection":{"slug":"relay","name":"Relay",
+                "provider":{"packageId":"example","entryId":"account","scope":"profile","name":"api"},
+                "configuration":{"baseUrl":"http://127.0.0.1:18080/v1"},"enabled":true,
                 "enabledModelIds":selected,"requestBodyOverlay":{"temperature":0.5}}
         }))
         .unwrap();
@@ -78,7 +79,7 @@ impl Fixture {
                     },
                     changes: ConnectionCatalogEntryUpdate {
                         name: row.name,
-                        base_url: row.base_url,
+                        configuration: row.configuration,
                         enabled: row.enabled,
                         enabled_model_ids: row.enabled_model_ids,
                         model_overrides: Patch::Keep,
@@ -92,47 +93,48 @@ impl Fixture {
     }
 
     async fn key(&self, secret: &str) {
+        use maka_config::oauth::enrollment::{LoginCompletion, LoginPreparation};
+        use maka_runtime::{
+            oauth::{LoginStart, Target},
+            provider::{AuthenticationInput, Credential},
+        };
         let row = self.row().await;
-        let locator = CredentialLocator::Connection {
-            connection_id: self.id.clone(),
-            kind: ConnectionCredentialKind::ApiKey,
-        };
-        let CredentialVaultQueryResult::Status { status } =
-            self.store.credential_status(locator.clone()).await.unwrap()
+        let LoginPreparation::Ready(ticket) = self
+            .store
+            .prepare_oauth_login(LoginStart {
+                attempt_id: uuid::Uuid::new_v4().to_string(),
+                target: Target::Existing {
+                    expected: ConnectionCredentialTarget {
+                        connection_id: row.connection_id,
+                        revision: row.revision,
+                        slug: row.slug,
+                        provider: row.provider,
+                        configuration: row.configuration.clone(),
+                    },
+                    configuration: row.configuration,
+                },
+                authentication: AuthenticationInput {
+                    method: "key".into(),
+                    input: json!({}),
+                },
+            })
+            .await
+            .unwrap()
         else {
-            panic!("expected credential status")
-        };
-        let expected = match status.state {
-            CredentialState::Absent => None,
-            CredentialState::Configured {
-                credential_id,
-                revision,
-                ..
-            } => Some(CredentialIdentityBasis {
-                credential_id,
-                revision,
-            }),
+            panic!("prepared credential receipt")
         };
         assert!(matches!(
-            self.store
-                .set_credential(
-                    SetCredentialInput {
-                        locator,
-                        expected,
-                        expected_connection: Some(ConnectionCredentialTarget {
-                            connection_id: self.id.clone(),
-                            revision: row.revision,
-                            slug: row.slug,
-                            provider_type: row.provider_type,
-                            effective_base_url: row.base_url.unwrap(),
-                        }),
+            ticket
+                .complete(
+                    Credential {
                         secret: secret.into(),
+                        refresh_at: None
                     },
                     42
                 )
                 .await
                 .unwrap(),
-            CredentialMutationResult::Committed { .. }
+            LoginCompletion::Committed(_)
         ));
     }
 
@@ -147,21 +149,23 @@ impl Fixture {
 #[tokio::test]
 async fn rejected_preparation_and_invalid_completion_leave_catalog_untouched() {
     let fixture = Fixture::new(&[]).await;
-    for (id, reason) in [
-        (
-            "00000000-0000-4000-8000-000000000000",
-            ConnectionEffectRejectionReason::ConnectionNotFound,
-        ),
-        (
-            fixture.id.as_str(),
-            ConnectionEffectRejectionReason::CredentialNotConfigured,
-        ),
-    ] {
-        assert!(
-            matches!(fixture.store.prepare_model_fetch(id).await.unwrap(),
-            ModelFetchPreparation::Rejected(actual) if actual == reason)
-        );
-    }
+    assert!(matches!(
+        fixture
+            .store
+            .prepare_model_fetch("00000000-0000-4000-8000-000000000000")
+            .await
+            .unwrap(),
+        ModelFetchPreparation::Rejected(ConnectionEffectRejectionReason::ConnectionNotFound)
+    ));
+    assert!(
+        fixture
+            .prepare()
+            .await
+            .provider_credential()
+            .unwrap()
+            .is_none(),
+        "configuration preparation must allow anonymous providers"
+    );
     let mut row = fixture.row().await;
     row.enabled = false;
     fixture.edit(row).await;
@@ -196,7 +200,7 @@ async fn completion_preserves_concurrent_metadata_and_choices_across_reopen() {
         fixture
             .store
             .set_default_target(SetDefaultConnectionTargetInput {
-                expected_catalog_revision: 1,
+                expected_catalog_revision: fixture.store.catalog().await.unwrap().revision,
                 target: Some(target.clone()),
             })
             .await
@@ -268,7 +272,7 @@ async fn selection_seed_is_one_time_and_changed_fetch_basis_cannot_overwrite_inv
 
     let prepared = fixture.prepare().await;
     let mut row = fixture.row().await;
-    row.base_url = Some("http://127.0.0.1:18081/v1".into());
+    row.configuration = json!({"baseUrl":"http://127.0.0.1:18081/v1"});
     fixture.edit(row).await;
     let before = fixture.store.catalog().await.unwrap();
     assert_eq!(
@@ -285,6 +289,7 @@ async fn selection_seed_is_one_time_and_changed_fetch_basis_cannot_overwrite_inv
     let prepared = fixture.prepare().await;
     fixture.key("replacement-key").await;
     fixture.key("original-key").await;
+    let before = fixture.store.catalog().await.unwrap();
     assert_eq!(
         prepared
             .complete(vec![ModelInfo::new("stale")], 103)

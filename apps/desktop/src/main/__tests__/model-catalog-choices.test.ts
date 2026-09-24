@@ -20,34 +20,30 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import type {
-  IdentifiedLlmConnection,
   ProjectedLlmConnection,
 } from '@maka/core/llm-connections';
 import {
-  resolveConnectionModelCatalog,
   type ModelCatalogEntry,
 } from '@maka/core/model-catalog';
 import { buildChatModelChoices } from '@maka/core/chat-model-choice';
 import { pickNewChatModel } from '../../renderer/shell-chat-model-selection.js';
 import { buildCatalogDailyReviewModelOptions } from '../../renderer/model-catalog-choices.js';
 
-function connection(
-  overrides: Partial<IdentifiedLlmConnection> &
-    Pick<IdentifiedLlmConnection, 'slug' | 'providerType'>,
-): ProjectedLlmConnection {
-  const stored: IdentifiedLlmConnection = {
+const provider = { packageId: 'external.provider', entryId: 'account', scope: 'profile', name: 'custom' } as const;
+
+function connection(overrides: Partial<ProjectedLlmConnection> & Pick<ProjectedLlmConnection, 'slug'>): ProjectedLlmConnection {
+  return {
     connectionId: `connection-${overrides.slug}`,
+    revision: 1,
     name: overrides.slug,
-    defaultModel: '',
+    provider,
+    configuration: {},
     enabled: true,
-    enabledModelIds: overrides.enabledModelIds ?? overrides.models?.map((model) => model.id),
-    createdAt: 1,
-    updatedAt: 1,
+    enabledModelIds: ['model'],
+    models: [{ id: 'model' }],
+    catalogEntries: [{ id: 'model', isDefault: true, canUseAsChatDefault: true, supportsVision: true, thinkingLevels: [] }],
     ...overrides,
   };
-  // The Host resolves the catalog and projects it; tests build connections the
-  // same way so they exercise what a client actually receives.
-  return { ...stored, catalogEntries: resolveConnectionModelCatalog(stored) };
 }
 
 describe('model catalog picker helpers', () => {
@@ -64,7 +60,7 @@ describe('model catalog picker helpers', () => {
           {
             connectionId: 'connection-missing',
             connectionSlug: 'missing-key-first',
-            providerType: 'anthropic',
+            provider,
             providerLabel: 'Anthropic',
             model: 'unusable-model',
             label: 'Unusable',
@@ -74,7 +70,7 @@ describe('model catalog picker helpers', () => {
           {
             connectionId: 'connection-ready',
             connectionSlug: 'ready-second',
-            providerType: 'opencode-go',
+            provider,
             providerLabel: 'OpenCode Zen',
             model: 'ready-model',
             label: 'Ready',
@@ -90,66 +86,35 @@ describe('model catalog picker helpers', () => {
       },
     );
   });
-  it('keeps API connection labels while redacting OAuth account identities', () => {
-    const choices = buildChatModelChoices([
-      connection({
-        slug: 'openrouter',
-        name: 'Openrouter',
-        providerType: 'openai-compatible',
-        models: [{ id: 'anthropic/claude-sonnet-5' }],
-        modelSource: 'fetched',
-      }),
-      connection({
-        slug: 'claude-sub',
-        name: 'person@example.com',
-        providerType: 'claude-subscription',
-        models: [{ id: 'claude-sonnet-4-5-20250929' }],
-        modelSource: 'fetched',
-      }),
-      connection({
-        slug: 'codex-account',
-        name: 'private@example.com',
-        providerType: 'openai-codex',
-        models: [{ id: 'gpt-5.5' }],
-        modelSource: 'fetched',
-      }),
+  it('offers external providers and disambiguates their user-assigned connection names', () => {
+    const connections = ['first', 'second'].map((slug) => connection({ slug, name: 'Research' }));
+    const choices = buildChatModelChoices(connections);
+    assert.deepEqual(choices.map((choice) => [choice.provider, choice.connectionName]), [
+      [provider, 'Research'], [provider, 'Research'],
     ]);
-    const bySlug = new Map(choices.map((choice) => [choice.connectionSlug, choice]));
-    assert.equal(bySlug.get('openrouter')?.connectionName, 'Openrouter');
-    assert.equal(bySlug.get('claude-sub')?.connectionName, undefined);
-    assert.equal(bySlug.get('codex-account')?.connectionName, undefined);
-    assert.ok(choices.every((choice) => !(choice.connectionName ?? '').includes('@')));
+    assert.deepEqual(buildCatalogDailyReviewModelOptions(connections, '', 'en'), [
+      ['first::model', 'model · Research · first'],
+      ['second::model', 'model · Research · second'],
+    ]);
   });
 
-  it('does not offer Daily Review a Codex model the subscription cannot serve', () => {
-    // A connection saved while `gpt-5-codex` was still picker-visible keeps it
-    // in `enabledModelIds`. The inventory filter alone left it there, and the
-    // catalog listed it back as a model no inventory describes — selectable,
-    // and failing at the provider once a scheduled run sent to it.
+  it('uses Host eligibility rather than an enabled ID or a local vendor catalog', () => {
+    const entries: ModelCatalogEntry[] = ['chat', 'embedding'].map((id) => ({
+      id, isDefault: id === 'chat', canUseAsChatDefault: id === 'chat', supportsVision: false, thinkingLevels: [],
+    }));
     const options = buildCatalogDailyReviewModelOptions(
       [
         connection({
           slug: 'codex',
-          providerType: 'openai-codex',
-          defaultModel: 'gpt-5.5',
-          enabledModelIds: ['gpt-5.5', 'gpt-5-codex'],
-          models: [{ id: 'gpt-5.5' }],
-          modelSource: 'fetched',
+          enabledModelIds: ['chat', 'embedding', 'missing'],
+          catalogEntries: entries,
         }),
       ],
       '',
       'zh-CN',
     );
     const keys = options.map(([key]) => key);
-    assert.ok(
-      keys.includes('codex::gpt-5.5'),
-      `expected the servable model to be offered, got ${JSON.stringify(keys)}`,
-    );
-    assert.equal(
-      keys.includes('codex::gpt-5-codex'),
-      false,
-      `unsupported Codex model was offered: ${JSON.stringify(keys)}`,
-    );
+    assert.deepEqual(keys, ['codex::chat']);
   });
 
   it('labels a saved-but-unavailable selection in the UI locale', () => {

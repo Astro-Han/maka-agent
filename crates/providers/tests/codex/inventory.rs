@@ -39,10 +39,26 @@ async fn discovery_and_preparation_share_account_facts_and_explicit_policy() {
     });
     transport.release.notify_one();
     let provider = Codex::default();
+    use base64::Engine;
+    let access = format!(
+        "header.{}.signature",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&json!({"chatgpt_account_id":"account-a"})).unwrap())
+    );
+    let credential = Credential {
+        secret: json!({
+            "access_token":access,"refresh_token":"refresh","expires_at":1,"id_token":null
+        })
+        .to_string(),
+        refresh_at: None,
+    };
     let inventory = provider
         .discover(
-            connection(),
-            Some(credential()),
+            maka_plugins::provider::Discovery {
+                connection: connection(),
+                credential: Some(credential.clone()),
+                request_headers: [("ChatGPT-Account-ID".into(), "account-a".into())].into(),
+            },
             Context {
                 transport: transport.clone(),
                 cancellation: CancellationToken::new(),
@@ -52,6 +68,23 @@ async fn discovery_and_preparation_share_account_facts_and_explicit_policy() {
         .await
         .unwrap();
     assert_eq!(inventory.len(), 1);
+    assert!(matches!(
+        provider
+            .discover(
+                maka_plugins::provider::Discovery {
+                    connection: connection(),
+                    credential: Some(credential),
+                    request_headers: [("ChatGPT-Account-ID".into(), "account-b".into())].into(),
+                },
+                Context {
+                    transport: transport.clone(),
+                    cancellation: CancellationToken::new(),
+                    interaction: None
+                }
+            )
+            .await,
+        Err(Error::Invalid(_))
+    ));
     let request = Resolve {
         connection: connection(),
         model: inventory[0].clone(),

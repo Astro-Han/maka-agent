@@ -26,6 +26,9 @@ import {
 } from '../model-metadata.js';
 import { PROVIDER_REGISTRY, providerFallbackModelIds } from '../provider-registry.js';
 import {
+  authorizeConnectionModel,
+  connectionEnabledModelIds,
+  offerableCatalogEntries,
   effectiveBaseUrl,
   normalizeConnectionBaseUrl,
   providerAuthRequiresSecret,
@@ -52,11 +55,68 @@ function chatModelChoicesFor(
 ): ReturnType<typeof buildChatModelChoices> {
   return buildChatModelChoices(
     connections.map((connection) => ({
-      ...connection,
+      connectionId: connection.connectionId,
+      revision: 1,
+      name: connection.name,
+      slug: connection.slug,
+      provider: {
+        packageId: 'fixture.providers',
+        entryId: 'fixture.providers',
+        scope: 'profile' as const,
+        name: connection.providerType,
+      },
+      configuration: {},
+      enabled: connection.enabled,
+      enabledModelIds: connection.enabledModelIds ?? [],
+      models: connection.models ?? [],
       catalogEntries: resolveConnectionModelCatalog(connection),
     })),
   );
 }
+
+test('public model selection follows Host facts and explicit choices without provider recognition', () => {
+  const row = {
+    connectionId: 'external-connection',
+    revision: 1,
+    slug: 'custom',
+    name: 'My account',
+    configuration: {},
+    provider: {
+      packageId: 'external.models',
+      entryId: 'entry',
+      scope: 'profile' as const,
+      name: 'new-provider',
+    },
+    enabled: true,
+    defaultModel: 'removed-model',
+    enabledModelIds: ['live-model', 'unlisted-model', 'embedding-model'],
+    models: [{ id: 'live-model', contextWindow: 128_000 }],
+    catalogEntries: ['live-model', 'embedding-model', 'removed-model'].map((id) => ({
+      id,
+      canUseAsChatDefault: id !== 'embedding-model',
+      isDefault: false,
+      supportsVision: false,
+      defaultSupportsVision: false,
+      thinkingLevels: [],
+    })),
+  };
+  assert.deepEqual(connectionEnabledModelIds(row), row.enabledModelIds);
+  assert.equal(authorizeConnectionModel(row, 'removed-model'), undefined);
+  assert.deepEqual(authorizeConnectionModel(row, 'unlisted-model'), { id: 'unlisted-model' });
+  assert.equal(authorizeConnectionModel(row, 'live-model'), row.models[0]);
+  assert.deepEqual(
+    offerableCatalogEntries(row).map(({ id }) => id),
+    ['live-model'],
+  );
+  assert.deepEqual(offerableCatalogEntries({ ...row, enabled: false }), []);
+  const choices = buildChatModelChoices([row]);
+  assert.deepEqual(
+    choices.map(({ model }) => model),
+    ['live-model'],
+  );
+  assert.deepEqual(choices[0]?.provider, row.provider);
+  assert.equal(choices[0]?.connectionName, 'My account');
+});
 
 test('slug validation returns stable issues and preserves format and length boundaries', () => {
   for (const slug of ['', '  ']) assert.equal(validateSlug(slug), 'required');
@@ -119,7 +179,7 @@ test('a fetch never deletes a choice the user made', () => {
       { defaultModel: 'live', enabledModelIds: ['retired', 'live'] },
       [{ id: 'live' }, { id: 'other' }],
     ),
-    { defaultModel: 'live', enabledModelIds: ['live', 'retired'] },
+    { defaultModel: 'live', enabledModelIds: ['retired', 'live'] },
   );
   // A default absent from the response is not repaired onto another model
   // either — silently switching which model answers is its own surprise.
@@ -396,7 +456,7 @@ test('provider recognition does not resolve inherited object members', () => {
           enabled: true,
           defaultModel: 'm',
           models: [{ id: 'm' }],
-        } as unknown as Parameters<typeof buildChatModelChoices>[0][number],
+        } as unknown as IdentifiedLlmConnection,
       ]),
       [],
       inherited,

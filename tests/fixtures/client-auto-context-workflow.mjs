@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { readPage } from '../../packages/runtime/src/read-page.ts';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -144,38 +145,18 @@ export async function verifyAutoContext(connection, workspace, reopened) {
       readResult(await rows(connection, saved.sessionId));
     } else {
       await writeFile(join(workspace, 'evidence.txt'), evidence);
-      const created = await request('connection.catalog.create', {
-        expectedCatalogRevision: 0,
-        connection: {
-          slug: 'auto-context',
-          name: 'Automatic context fixture',
-          providerType: 'openai',
-          baseUrl: model.baseUrl,
-          enabled: true,
-          enabledModelIds: ['fixture-model'],
-          modelOverrides: {
-            'fixture-model': { vision: false, contextWindow: 10000, compactionThreshold: 120 },
-          },
+      const created = await createModelConnection(request, {
+        providerName: 'openai',
+        slug: 'auto-context',
+        name: 'Automatic context fixture',
+        baseUrl: model.baseUrl,
+        apiKey: 'auto-context-fixture',
+        enabledModelIds: ['fixture-model'],
+        modelOverrides: {
+          'fixture-model': { vision: false, contextWindow: 10000, compactionThreshold: 120 },
         },
       });
-      assert.equal(created.kind, 'committed');
       const basis = created.connection;
-      assert.equal(
-        (
-          await request('credential.vault.set', {
-            locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-            expected: null,
-            expectedConnection: {
-              ...basis,
-              slug: 'auto-context',
-              providerType: 'openai',
-              effectiveBaseUrl: model.baseUrl,
-            },
-            secret: 'auto-context-fixture',
-          })
-        ).kind,
-        'committed',
-      );
       await request('session.create', {
         sessionId: saved.sessionId,
         workspace: { kind: 'host_path', path: workspace },

@@ -22,10 +22,10 @@ use maka_plugins::{
     composition::Scope,
     contributions::{Catalog, Staged},
     fiber::Fiber,
-    model::Credentials,
+    model::{Connect, Credentials, Socket, Transport},
     provider::{
-        Binding, Connection, Definition, Descriptor, Error, Model, Provider, Resolve,
-        authentication::Credential,
+        Binding, Connection, Context, Definition, Descriptor, Error, Model, Provider, Resolve,
+        authentication::{Authenticate, Credential, Method},
     },
 };
 use serde_json::json;
@@ -44,6 +44,47 @@ impl Provider for Fixture {
     ) -> BoxFuture<'_, Result<Credentials, Error>> {
         Box::pin(async { Err(Error::AuthenticationRequired) })
     }
+    fn refresh(
+        &self,
+        _: Connection,
+        mut credential: Credential,
+        _: Context,
+    ) -> BoxFuture<'_, Result<Credential, Error>> {
+        Box::pin(async move {
+            credential.secret = "rotated".into();
+            Ok(credential)
+        })
+    }
+    fn authenticate(
+        &self,
+        _: Authenticate,
+        _: Context,
+    ) -> BoxFuture<'_, Result<Credential, Error>> {
+        Box::pin(async {
+            Ok(Credential {
+                secret: "authenticated".into(),
+                refresh_at: None,
+            })
+        })
+    }
+}
+
+impl Transport for Fixture {
+    fn identity(&self) -> u64 {
+        1
+    }
+    fn request(
+        &self,
+        _: maka_plugins::http::Request,
+    ) -> BoxFuture<'_, Result<maka_plugins::http::Response, maka_plugins::model::Error>> {
+        Box::pin(async { panic!("unexpected HTTP") })
+    }
+    fn connect(
+        &self,
+        _: Connect,
+    ) -> BoxFuture<'_, Result<Arc<dyn Socket>, maka_plugins::model::Error>> {
+        Box::pin(async { panic!("unexpected WebSocket") })
+    }
 }
 fn publish(catalog: &Catalog, package: &str, scope: Scope) -> (Fiber, maka_plugins::Registration) {
     let owner = Fiber::new(package, package, scope).unwrap();
@@ -59,7 +100,13 @@ fn publish(catalog: &Catalog, package: &str, scope: Scope) -> (Fiber, maka_plugi
                     label: package.into(),
                     configuration_schema: json!({"type":"object"}),
                     configuration_defaults: json!({}),
-                    authentication: vec![],
+                    authentication: vec![Method {
+                        id: "login".into(),
+                        label: "Login".into(),
+                        input_schema: json!({"type":"object"}),
+                        interactive: false,
+                    }],
+                    anonymous: false,
                     discovery: false,
                 },
                 Arc::new(Fixture),
@@ -92,15 +139,55 @@ async fn persisted_recipient_survives_reload_but_never_rebinds_to_a_shadow_or_im
         &recipient
     );
 
-    let admitted = binding.admit().unwrap();
+    let admitted = binding
+        .prepare_refresh(
+            Connection {
+                id: "connection".into(),
+                revision: 1,
+                configuration: json!({}),
+            },
+            Credential {
+                secret: "original".into(),
+                refresh_at: Some(1),
+            },
+        )
+        .unwrap();
+    let login = binding
+        .prepare_authenticate(
+            Authenticate {
+                connection: Connection {
+                    id: "connection".into(),
+                    revision: 1,
+                    configuration: json!({}),
+                },
+                method: "login".into(),
+                input: json!({}),
+            },
+            Context {
+                transport: Arc::new(Fixture),
+                cancellation: tokio_util::sync::CancellationToken::new(),
+                interaction: None,
+            },
+        )
+        .unwrap();
     drop(registration);
     assert!(binding.admit().is_err());
     assert!(matches!(
         Binding::resolve(&recipient, &catalog),
         Err(Error::Unavailable)
     ));
-    // An already admitted call owns its guard independently of publication.
-    drop(admitted);
+    // Host can persist its grant claim between admission and execution. A
+    // retirement in that interval must not prevent the admitted callback.
+    let credential = admitted
+        .run(Context {
+            transport: Arc::new(Fixture),
+            cancellation: tokio_util::sync::CancellationToken::new(),
+            interaction: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(credential.secret, "rotated");
+    assert_eq!(login.run().await.unwrap().secret, "authenticated");
     drop(owner);
 
     let (impostor, impostor_registration) = publish(&catalog, "example.other", Scope::Profile);

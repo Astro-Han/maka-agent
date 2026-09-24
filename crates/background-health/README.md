@@ -19,6 +19,8 @@
 
 # Background task health
 
+[简体中文](./README.zh-CN.md)
+
 `maka.background-health` is a statically linked Profile plugin exposing the
 `BackgroundTaskHealth` Agent tool. Desktop uses its existing tool result UI.
 
@@ -39,8 +41,8 @@ Network permission interaction and transport timeouts are owned by Host. The
 plugin does not time out a user awaiting permission approval. `elapsedMs` includes
 that approval time. Cancellation drains the child scope; unconfirmed cleanup is
 an error. Incognito permits local task observation but skips endpoint probing.
-Logs are opt-in and retain Host's bounded/redacted output representation.
+Logs are opt-in and retain Host's bounded output representation.
 
 This plugin has no Remote endpoint or private process registry. Tests cover the
 real Agent → Files → Shell path and cross-Session denial, plus HTTP fallback,
-body disposal, cancellation, privacy, and delayed HTTP service behavior (permission waiting is verified by code-path audit).
+body disposal, cancellation and privacy.

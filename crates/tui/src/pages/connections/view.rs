@@ -98,10 +98,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
             ),
             Span::styled(status, muted),
         ]);
-        let identity = if row.slug == row.provider {
+        let identity = if row.slug == row.provider.name {
             safe(&row.slug)
         } else {
-            format!("{} · {}", safe(&row.slug), safe(&row.provider))
+            format!("{} · {}", safe(&row.slug), safe(&row.provider.name))
         };
         let detail = if let Some(model) = &row.default_model {
             format!(

@@ -24,7 +24,8 @@
 // shows only the shortest next action. Provider configuration remains owned
 // by Settings, and a ready workspace returns to the ordinary Composer.
 
-import { type LlmConnection, type ProviderType } from '@maka/core/llm-connections';
+import { type ProviderType } from '@maka/core/llm-connections';
+import type { ConnectionCatalogEntry } from '@maka/core/runtime-policy';
 
 import { type OnboardingState } from '@maka/core/onboarding';
 
@@ -60,7 +61,7 @@ export interface OnboardingHeroProps {
   /** Open the shared Settings provider catalog. */
   onBrowseProviders: () => void;
   /** Resolve a state slug to a human-friendly label when possible. */
-  connections?: ReadonlyArray<LlmConnection>;
+  connections?: ReadonlyArray<Pick<ConnectionCatalogEntry, 'slug' | 'name'>>;
   /** Re-query setup state after an out-of-band configuration change. */
   onRefreshConnections?: () => Promise<void> | void;
   /** Permanently skip the initial guide and enter the app. */
@@ -126,7 +127,7 @@ function recoveryCallbacks(props: OnboardingHeroProps) {
 
 function connectionLabel(
   slug: string,
-  connections?: ReadonlyArray<LlmConnection>,
+  connections?: ReadonlyArray<Pick<ConnectionCatalogEntry, 'slug' | 'name'>>,
 ): { name: string; isFallback: boolean } {
   const match = connections?.find((connection) => connection.slug === slug);
   return match?.name

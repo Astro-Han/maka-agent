@@ -19,7 +19,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ClientContext, ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
-import { copy, request, type Invocable, type Target } from './client/model.js';
+import { copy } from './client/copy.js';
+import { request, type Invocable, type Target } from './client/model.js';
 import { Manage } from './client/manage.js';
 import { useSuggestions } from './client/suggestions.js';
 import { useChanges } from './client/changes.js';
@@ -39,7 +40,7 @@ function Panel({
   manageOnly?: boolean;
   contextRevision?: number;
 }) {
-  const t = copy[props.locale === 'en' ? 'en' : 'zh-CN'];
+  const t = copy[props.locale];
   const call = useMemo(() => request(context, target), [context, target]);
   const [open, setOpen] = useState(false);
   const [manage, setManage] = useState(false);

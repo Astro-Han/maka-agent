@@ -55,41 +55,28 @@ fn verified() -> ConnectionTestProjection {
 async fn discovery_tracks_authenticated_generation_without_losing_edits_or_accepting_relogin() {
     let temp = tempfile::tempdir().unwrap();
     let store = open(temp.path(), true).await;
-    for (provider, protocol) in [
-        (Provider::OpenaiCodex, ModelListProtocol::Codex),
-        (Provider::GithubCopilot, ModelListProtocol::Copilot),
-        (Provider::XaiOauth, ModelListProtocol::Openai),
-    ] {
-        let ticket = prepare(
-            &store,
-            LoginStart {
-                attempt_id: format!("discovery-{}", provider.as_str()),
-                target: Target::Create {
-                    provider_type: provider,
-                    slug: None,
-                    name: None,
-                },
-            },
-        )
-        .await;
+    {
+        let ticket = prepare(&store, create("discovery-account")).await;
         let id = ticket.identity().connection_id.clone();
         assert!(matches!(
-            ticket.complete("original-grant".into(), 1).await.unwrap(),
+            ticket
+                .complete(credential("original-grant"), 1)
+                .await
+                .unwrap(),
             LoginCompletion::Committed(_)
         ));
         let mut observation = fetch(&store, &id).await;
         let mut verification = test(&store, &id).await;
-        assert_eq!(observation.protocol(), protocol);
-        let admitted = observation.oauth_credential().unwrap();
-        assert_eq!(admitted.secret(), "original-grant");
+        let admitted = observation.provider_credential().unwrap().unwrap();
+        assert_eq!(admitted.credential().secret.as_str(), "original-grant");
         admitted
-            .commit_refresh("replacement-grant".into(), 2)
+            .commit_refresh(credential("replacement-grant"), 2)
             .await
             .unwrap()
             .unwrap();
         let resolved = admitted.current_generation().await.unwrap().unwrap();
-        observation.accept_oauth(resolved.clone()).unwrap();
-        verification.accept_oauth(resolved.clone()).unwrap();
+        observation.accept_credential(resolved.clone()).unwrap();
+        verification.accept_credential(resolved.clone()).unwrap();
         let original_row = observation.connection().clone();
         store
             .update_connection(UpdateCatalogConnectionInput {
@@ -99,7 +86,7 @@ async fn discovery_tracks_authenticated_generation_without_losing_edits_or_accep
                 },
                 changes: ConnectionCatalogEntryUpdate {
                     name: "Edited while fetching".into(),
-                    base_url: original_row.base_url,
+                    configuration: original_row.configuration,
                     enabled: true,
                     enabled_model_ids: original_row.enabled_model_ids,
                     model_overrides: Patch::Keep,
@@ -134,7 +121,7 @@ async fn discovery_tracks_authenticated_generation_without_losing_edits_or_accep
         let observation = fetch(&store, &id).await;
         let verification = test(&store, &id).await;
         resolved
-            .commit_refresh("later-grant".into(), 4)
+            .commit_refresh(credential("later-grant"), 4)
             .await
             .unwrap()
             .unwrap();
@@ -156,35 +143,35 @@ async fn discovery_tracks_authenticated_generation_without_losing_edits_or_accep
         let mut observation = fetch(&store, &id).await;
         let mut verification = test(&store, &id).await;
         assert!(
-            observation.accept_oauth(admitted).is_err(),
+            observation.accept_credential(admitted).is_err(),
             "cannot move an observation backwards"
         );
-        let old = observation.oauth_credential().unwrap();
+        let old = observation.provider_credential().unwrap().unwrap();
         // Direct re-login must rotate identity without requiring an earlier logout.
-        let ticket = prepare(
-            &store,
-            existing(&format!("relogin-{}", provider.as_str()), &id),
-        )
-        .await;
+        let ticket = prepare(&store, existing(&store, "relogin-account", &id).await).await;
         assert!(matches!(
-            ticket.complete("later-grant".into(), 6).await.unwrap(),
+            ticket.complete(credential("later-grant"), 6).await.unwrap(),
             LoginCompletion::Committed(_)
         ));
-        let new = fetch(&store, &id).await.oauth_credential().unwrap();
+        let new = fetch(&store, &id)
+            .await
+            .provider_credential()
+            .unwrap()
+            .unwrap();
         assert_ne!(old.basis().credential_id, new.basis().credential_id);
         assert!(old.current_generation().await.unwrap().is_none());
         assert!(
-            old.commit_refresh("stale-login-refresh".into(), 7)
+            old.commit_refresh(credential("stale-login-refresh"), 7)
                 .await
                 .unwrap()
                 .is_none()
         );
-        assert!(verification.accept_oauth(new.clone()).is_err());
+        assert!(verification.accept_credential(new.clone()).is_err());
         assert!(matches!(verification.complete(verified()).await.unwrap(),
             ConnectionTestRunResult::Superseded { changed }
                 if changed.contains(&ConnectionEffectChangedDomain::Credential)));
         assert!(
-            observation.accept_oauth(new).is_err(),
+            observation.accept_credential(new).is_err(),
             "same token bytes do not authorize a new identity"
         );
         assert!(

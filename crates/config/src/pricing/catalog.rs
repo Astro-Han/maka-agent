@@ -21,11 +21,12 @@
 use super::{MAX_REVISION, sort_key};
 use maka_event_log::StoreError;
 use maka_runtime::pricing::Pricing;
+use sha2::{Digest, Sha256};
 use sqlx::{Connection, QueryBuilder, SqliteConnection};
 use std::sync::LazyLock;
 
-const FACTS: &str = include_str!(concat!(env!("OUT_DIR"), "/pricing-facts.json"));
-const DIGEST: &str = include_str!(concat!(env!("OUT_DIR"), "/pricing-digest.txt"));
+const FACTS: &str = include_str!("../../data/pricing-facts.json");
+static DIGEST: LazyLock<String> = LazyLock::new(|| format!("{:x}", Sha256::digest(FACTS)));
 static PRICES: LazyLock<Vec<Pricing>> = LazyLock::new(|| {
     let prices: Vec<Pricing> = serde_json::from_str(FACTS).expect("generated model rates");
     for price in &prices {
@@ -71,8 +72,8 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> Result<(), 
          WHERE singleton = 1 AND builtin_digest IS NOT ?
            AND (builtin_digest IS NULL OR revision < ?)",
     )
-    .bind(DIGEST)
-    .bind(DIGEST)
+    .bind(DIGEST.as_str())
+    .bind(DIGEST.as_str())
     .bind(MAX_REVISION as i64)
     .execute(&mut *tx)
     .await?;
@@ -81,7 +82,7 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> Result<(), 
             sqlx::query_scalar("SELECT builtin_digest FROM pricing_authority WHERE singleton = 1")
                 .fetch_one(&mut *tx)
                 .await?;
-        if digest != DIGEST {
+        if digest != *DIGEST {
             return Err(StoreError::InvalidTransition(
                 "pricing revision exhausted".into(),
             ));

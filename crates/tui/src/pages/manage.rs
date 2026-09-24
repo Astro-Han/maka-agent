@@ -133,18 +133,17 @@ impl Kind {
                 | Self::Relink
                 | Self::Rename
                 | Self::Workspace
-                | Self::Connection(connection::Change::Endpoint)
-                | Self::Credential(credentials::Change::Set)
+                | Self::Connection(connection::Change::Configuration)
         )
     }
     fn requires_review(self) -> bool {
         matches!(
             self,
-            Self::Relink | Self::Connection(connection::Change::Endpoint)
+            Self::Relink | Self::Connection(connection::Change::Configuration)
         )
     }
-    fn edits_endpoint(self) -> bool {
-        self == Self::Connection(connection::Change::Endpoint)
+    fn edits_configuration(self) -> bool {
+        self == Self::Connection(connection::Change::Configuration)
     }
     fn edits_path(self) -> bool {
         matches!(self, Self::Register | Self::Relink | Self::Workspace)
@@ -251,13 +250,9 @@ pub struct Dialog {
     removal: Option<removal::State>,
 }
 
-pub async fn execute(
-    client: &Client,
-    ticket: &Ticket,
-    secret: Option<String>,
-) -> Result<Updated, RequestFailure> {
+pub async fn execute(client: &Client, ticket: &Ticket) -> Result<Updated, RequestFailure> {
     if matches!(ticket.kind, Kind::Credential(_)) {
-        return credentials::execute(client, ticket, secret).await;
+        return credentials::execute(client, ticket).await;
     }
     if ticket.target.is_default_model() {
         let revision = ticket.catalog_revision.ok_or_else(|| {
@@ -558,7 +553,7 @@ impl App {
                     && self.management_identity(&dialog.target)
                     && dialog.browser.as_ref().map_or_else(
                         || {
-                            dialog.kind.edits_endpoint()
+                            dialog.kind.edits_configuration()
                                 || !dialog.kind.edits_text()
                                 || !dialog.editor.text().trim().is_empty()
                         },
@@ -656,10 +651,8 @@ impl App {
                     None
                 };
                 let mut editor = Editor::bounded(
-                    if matches!(kind, Kind::Credential(_)) {
-                        10240
-                    } else if kind.edits_endpoint() {
-                        2048
+                    if kind.edits_configuration() {
+                        64 * 1024
                     } else if kind.edits_path() {
                         4096
                     } else if matches!(target.entity, Entity::Project { .. }) {
@@ -669,29 +662,27 @@ impl App {
                     } else {
                         320
                     },
-                    if matches!(kind, Kind::Credential(_)) {
-                        "credential-key-too-large"
-                    } else if kind.edits_endpoint() {
-                        "connection-endpoint-too-large"
+                    if kind.edits_configuration() {
+                        "connection-configuration-too-large"
                     } else if kind.edits_path() {
                         "session-path-too-large"
                     } else {
                         "session-name-too-large"
                     },
                 );
-                editor.insert(if matches!(kind, Kind::Credential(_)) {
-                    ""
-                } else if kind.edits_endpoint() {
+                let configuration;
+                editor.insert(if kind.edits_configuration() {
                     let Entity::Connection(row) = &target.entity else {
                         unreachable!()
                     };
-                    row.base_url.as_deref().unwrap_or("")
+                    configuration = row.configuration.to_string();
+                    &configuration
                 } else if kind == Kind::Workspace {
                     let Entity::Session { workspace, .. } = &target.entity else {
                         unreachable!()
                     };
                     workspace
-                } else if kind == Kind::Relink {
+                } else if kind == Kind::Relink || matches!(kind, Kind::Credential(_)) {
                     ""
                 } else {
                     &target.name
@@ -772,11 +763,11 @@ impl App {
             Command::Save => {
                 let dialog = self.management.dialog.as_mut()?;
                 if dialog.kind.requires_review() && !dialog.reviewing {
-                    if dialog.kind.edits_endpoint() {
+                    if dialog.kind.edits_configuration() {
                         let Entity::Connection(row) = &dialog.target.entity else {
                             unreachable!()
                         };
-                        match connection::endpoint(row, dialog.editor.text()) {
+                        match connection::configuration(row, dialog.editor.text()) {
                             Ok(endpoint) => {
                                 dialog
                                     .editor
@@ -791,6 +782,11 @@ impl App {
                         }
                     }
                     dialog.reviewing = true;
+                    if dialog.kind.edits_configuration() {
+                        dialog
+                            .editor
+                            .key(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL));
+                    }
                     dialog.focus = 0; // Confirming a bulk change defaults to Cancel.
                     dialog.visible = false;
                     dialog.editor.invalidate_geometry();
@@ -986,7 +982,6 @@ impl App {
             }
             Ok(Updated::Credential(_)) => {
                 dialog.blocked = true;
-                dialog.editor = credentials::editor();
                 dialog.error = Some("credential-conflict");
             }
             Ok(Updated::Catalog(result)) => {
@@ -1127,9 +1122,6 @@ impl App {
         self.management.credential_pending = None;
         let unknown = self.management.pending.take().is_some();
         if let Some(dialog) = &mut self.management.dialog {
-            if dialog.credentials.is_some() {
-                dialog.editor = credentials::editor();
-            }
             dialog.blocked = true;
             dialog.error = Some(if unknown || dialog.error == Some("session-edit-unknown") {
                 "session-edit-unknown"
@@ -1206,6 +1198,7 @@ impl App {
             && self.management.pending.is_none()
             && !dialog.blocked;
         let browse = dialog.kind == Kind::Register;
+        let configuration_review = dialog.kind.edits_configuration() && dialog.reviewing;
         let count = if dialog.connection_test.is_some() {
             1
         } else if browse {
@@ -1228,6 +1221,16 @@ impl App {
                     return (true, Some(Action::Quit));
                 }
                 _ if !dialog.visible => return (false, None),
+                KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Home
+                | KeyCode::End
+                    if configuration_review =>
+                {
+                    return (dialog.editor.key(key), None);
+                }
                 KeyCode::F(5) if dialog.credentials.is_some() => Some(Command::CredentialRetry),
                 KeyCode::Tab => {
                     dialog.focus = (dialog.focus + 1) % count;
@@ -1263,20 +1266,22 @@ impl App {
             },
             Event::Paste(text) if dialog.visible && editing => {
                 dialog.error = None;
-                if (dialog.kind.edits_path() || dialog.kind.edits_endpoint())
-                    && text.chars().any(char::is_control)
-                {
-                    dialog.editor.error = Some(if dialog.kind.edits_endpoint() {
-                        "connection-endpoint-invalid"
-                    } else {
-                        "session-path-control"
-                    });
+                if dialog.kind.edits_configuration() {
+                    return (dialog.editor.insert(&text), None);
+                }
+                if dialog.kind.edits_path() && text.chars().any(char::is_control) {
+                    dialog.editor.error = Some("session-path-control");
                     return (true, None);
                 }
                 return (dialog.editor.insert(&text.replace(['\n', '\r'], " ")), None);
             }
             Event::Mouse(mouse) if dialog.visible => {
                 let point = (mouse.column, mouse.row).into();
+                if configuration_review
+                    && (dialog.editor.contains(point) || dialog.editor.dragging())
+                {
+                    return (dialog.editor.mouse(mouse), None);
+                }
                 if dialog.kind.edits_text()
                     && !dialog.reviewing
                     && (dialog.editor.contains(point) || dialog.editor.dragging())

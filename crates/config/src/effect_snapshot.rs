@@ -18,17 +18,63 @@
  */
 
 use crate::{
-    ConfigError, ConfigurationStore, Result, model_catalog, network::NetworkSnapshot,
-    oauth::OAuthCredential, vault,
+    ConfigError, ConfigurationStore, Result,
+    network::NetworkSnapshot,
+    oauth::{self, ProviderCredential},
+    vault,
 };
 use maka_runtime::configuration::*;
 use sqlx::SqliteConnection;
 use std::sync::Arc;
 
-/// A single SQL snapshot of the facts that determine a connection effect.
+/// Private execution material, never a catalog or plugin projection. All fields
+/// were observed in one transaction; absent credentials are valid for no-auth providers.
+pub struct ConnectionObservation {
+    pub connection: ConnectionCatalogEntry,
+    pub credential: Option<ProviderCredential>,
+    pub request_headers: std::collections::BTreeMap<String, String>,
+    pub network: crate::network::NetworkConfiguration,
+}
+
+impl ConfigurationStore {
+    pub async fn observe_model(
+        self: &Arc<Self>,
+        target: maka_runtime::execution::ModelBinding,
+    ) -> Result<Option<ConnectionObservation>> {
+        let store = self.clone();
+        self.transaction(crate::TransactionMode::Deferred, move |tx| {
+            Box::pin(async move {
+                let Some(connection) = crate::catalog::find(tx, &target.connection_id).await?
+                else {
+                    return Ok(None);
+                };
+                if !connection.enabled
+                    || connection.slug != target.connection_slug
+                    || !connection.enabled_model_ids.contains(&target.model)
+                {
+                    return Ok(None);
+                }
+                let material = EffectSnapshot::read(tx, connection).await?;
+                Ok(Some(ConnectionObservation {
+                    credential: material.provider_credential(&store)?,
+                    request_headers: material
+                        .request_headers()
+                        .map(validation::parse_headers)
+                        .transpose()
+                        .map_err(ConfigError::Invalid)?
+                        .unwrap_or_default(),
+                    connection: material.connection,
+                    network: material.network.configuration,
+                }))
+            })
+        })
+        .await
+    }
+}
+
+/// A single SQL snapshot of connection, credential and proxy authority.
 pub(crate) struct EffectSnapshot {
     pub connection: ConnectionCatalogEntry,
-    pub endpoint: String,
     pub network: NetworkSnapshot,
     credential: SecretSnapshot,
     headers: SecretSnapshot,
@@ -46,17 +92,13 @@ impl EffectSnapshot {
         connection: ConnectionCatalogEntry,
     ) -> Result<Self> {
         let id = &connection.connection_id;
-        let kind = if model_catalog::provider_facts(&connection.provider_type)?.auth_kind
-            == ProviderAuthKind::OauthToken
-        {
-            ConnectionCredentialKind::OauthToken
-        } else {
-            ConnectionCredentialKind::ApiKey
-        };
-        let credential = secret(tx, id, kind).await?;
+        let credential = secret(tx, id, ConnectionCredentialKind::Provider).await?;
+        // Reject malformed persisted envelopes before handing out a ticket.
+        if let Some(secret) = &credential.secret {
+            oauth::decode(secret)?;
+        }
         let headers = secret(tx, id, ConnectionCredentialKind::RequestHeaders).await?;
         Ok(Self {
-            endpoint: endpoint(&connection)?,
             network: NetworkSnapshot::read(tx).await?,
             connection,
             credential,
@@ -64,69 +106,57 @@ impl EffectSnapshot {
         })
     }
 
-    pub fn api_key(&self) -> Option<&str> {
-        match self.credential.locator {
-            CredentialLocator::Connection {
-                kind: ConnectionCredentialKind::ApiKey,
-                ..
-            } => self.credential.secret.as_deref(),
-            _ => None,
-        }
-    }
-
-    pub fn has_credential(&self) -> bool {
-        self.credential.secret.is_some()
-    }
-
-    pub fn oauth_credential(&self, store: &Arc<ConfigurationStore>) -> Option<OAuthCredential> {
-        if !matches!(
-            self.credential.locator,
-            CredentialLocator::Connection {
-                kind: ConnectionCredentialKind::OauthToken,
-                ..
-            }
-        ) {
-            return None;
-        }
-        Some(OAuthCredential {
+    pub fn provider_credential(
+        &self,
+        store: &Arc<ConfigurationStore>,
+    ) -> Result<Option<ProviderCredential>> {
+        let Some(basis) = self.credential.basis.clone() else {
+            return Ok(None);
+        };
+        let secret = self
+            .credential
+            .secret
+            .as_deref()
+            .ok_or_else(|| ConfigError::Invalid("credential envelope is missing".into()))?;
+        Ok(Some(ProviderCredential {
             store: store.clone(),
-            basis: self.credential.basis.clone()?,
-            secret: self.credential.secret.as_deref()?.into(),
+            basis,
+            credential: Arc::new(oauth::decode(secret)?),
             network: self.network.configuration.clone(),
             target: ConnectionCredentialTarget {
                 connection_id: self.connection.connection_id.clone(),
                 revision: self.connection.revision,
-                provider_type: self.connection.provider_type.clone(),
+                provider: self.connection.provider.clone(),
                 slug: self.connection.slug.clone(),
-                effective_base_url: self.endpoint.clone(),
+                configuration: self.connection.configuration.clone(),
             },
-        })
+        }))
     }
 
-    /// Pin the exact generation actually used by the authenticated request. Only
-    /// the issuing root and the same credential identity can advance this basis.
-    pub fn accept_oauth(
+    /// Advance only to the generation actually used by the request, never to a
+    /// replacement login or a credential issued by another root/provider.
+    pub fn accept_credential(
         &mut self,
         store: &Arc<ConfigurationStore>,
-        resolved: OAuthCredential,
+        resolved: ProviderCredential,
     ) -> Result<()> {
         let before = self
-            .oauth_credential(store)
-            .ok_or_else(|| ConfigError::Invalid("effect is not OAuth authenticated".into()))?;
+            .provider_credential(store)?
+            .ok_or_else(|| ConfigError::Invalid("effect has no provider credential".into()))?;
         if !Arc::ptr_eq(&resolved.store, store)
             || resolved.basis.locator != before.basis.locator
             || resolved.basis.credential_id != before.basis.credential_id
             || resolved.basis.revision < before.basis.revision
-            || resolved.target.provider_type != before.target.provider_type
+            || resolved.target.provider != before.target.provider
             || resolved.target.slug != before.target.slug
-            || resolved.target.effective_base_url != before.target.effective_base_url
+            || resolved.target.configuration != before.target.configuration
         {
             return Err(ConfigError::Invalid(
-                "OAuth observation changed credential identity".into(),
+                "effect changed credential identity".into(),
             ));
         }
         self.credential.basis = Some(resolved.basis);
-        self.credential.secret = Some(resolved.secret.to_string());
+        self.credential.secret = Some(serde_json::to_string(&resolved.credential)?);
         Ok(())
     }
 
@@ -143,12 +173,10 @@ impl EffectSnapshot {
         let mut changed = Vec::new();
         if current.is_none_or(|row| {
             !row.enabled
-                || row.provider_type != self.connection.provider_type
+                || row.provider != self.connection.provider
+                || row.configuration != self.connection.configuration
                 || row.enabled_model_ids != self.connection.enabled_model_ids
-        }) || match current {
-            Some(row) => endpoint(row)? != self.endpoint,
-            None => true,
-        } {
+        }) {
             changed.push(Changed::Connection);
         }
         if self.credentials_changed(tx).await? {
@@ -196,34 +224,15 @@ async fn secret(
     })
 }
 
-fn endpoint(row: &ConnectionCatalogEntry) -> Result<String> {
-    let effective = row.base_url.as_deref().unwrap_or(
-        validation::provider_default_base_url(&row.provider_type).map_err(ConfigError::Invalid)?,
-    );
-    validation::normalize_base_url(Some(effective), None)
-        .map_err(ConfigError::Invalid)?
-        .ok_or_else(|| ConfigError::Invalid("connection has no effective endpoint".into()))
-}
-
 pub(crate) fn same_test_basis(
     before: &ConnectionCatalogEntry,
     after: &ConnectionCatalogEntry,
 ) -> bool {
-    before.enabled_model_ids == after.enabled_model_ids
+    before.provider == after.provider
+        && before.configuration == after.configuration
+        && before.enabled_model_ids == after.enabled_model_ids
         && before.model_source == after.model_source
-        && test_models(before) == test_models(after)
-}
-
-fn test_models(
-    row: &ConnectionCatalogEntry,
-) -> std::collections::BTreeMap<String, Option<maka_runtime::configuration::ApiProtocol>> {
-    let mut models: std::collections::BTreeMap<_, _> = row
-        .enabled_model_ids
-        .iter()
-        .map(|id| (id.clone(), None))
-        .collect();
-    for model in row.effective_models() {
-        models.insert(model.id, model.api_protocol);
-    }
-    models
+        && before.models == after.models
+        && before.model_overrides == after.model_overrides
+        && before.request_body_overlay == after.request_body_overlay
 }

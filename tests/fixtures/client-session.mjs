@@ -18,6 +18,8 @@
  */
 
 import assert from 'node:assert/strict';
+import { readRuntimeHostModelProviders } from '../../packages/runtime-host/src/client/catalog-reader.ts';
+import { authenticateModelConnection } from './client-model-connection.mjs';
 import { realpath, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { mergeSessionTurnContributions } from '../../packages/runtime-host/src/protocol/session-turns.ts';
@@ -104,44 +106,40 @@ export async function verifySessionWorkflow(connection, workspace, reopened, con
     const initial = await request('connection.catalog.query', { kind: 'start' });
     assert.equal(initial.revision, 0);
     assert.deepEqual(initial.items, []);
+    const directory = await readRuntimeHostModelProviders(connection);
     const draft = {
       expectedCatalogRevision: 0,
       connection: {
         slug: 'local-fixture',
         name: 'Local fixture',
-        providerType: 'openai-compatible',
-        baseUrl: fixture.baseUrl,
+        provider: directory.entries.find((entry) => entry.identity.name === 'openai-compatible')
+          .identity,
+        configuration: { baseUrl: fixture.baseUrl },
         enabled: true,
         enabledModelIds: ['fixture-model'],
+        modelOverrides: { 'fixture-model': { thinkingLevels: ['off'] } },
       },
     };
     const created = await request('connection.catalog.create', draft);
     assert.equal(created.kind, 'committed');
     assert.equal(created.catalogRevision, 1);
     assert.equal((await request('connection.catalog.create', draft)).kind, 'revision_conflict');
-    const basis = created.connection;
-    const locator = { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' };
-    const saved = await request('credential.vault.set', {
-      locator,
-      expected: null,
-      expectedConnection: {
-        ...basis,
-        slug: 'local-fixture',
-        providerType: 'openai-compatible',
-        effectiveBaseUrl: draft.connection.baseUrl,
-      },
-      secret: 'dummy-local-fixture',
-    });
-    assert.equal(saved.kind, 'committed');
-    assert.equal(saved.vaultRevision, 1);
+    let basis = created.connection;
+    const locator = { scope: 'connection', connectionId: basis.connectionId, kind: 'provider' };
+    await authenticateModelConnection(request, basis.connectionId, 'dummy-local-fixture');
     const credential = await request('credential.vault.query', { locator });
-    assert.deepEqual(credential.status, saved.status);
+    assert.equal(credential.status.configured, true);
+    const authenticated = await request('connection.catalog.query', { kind: 'start' });
+    const authenticatedRow = authenticated.items.find(
+      (item) => item.kind === 'connection' && item.connectionId === basis.connectionId,
+    );
+    basis = { connectionId: basis.connectionId, revision: authenticatedRow.revision };
     const target = { connectionId: basis.connectionId, modelId: 'fixture-model' };
     const selected = await request('connection.catalog.set-default-target', {
-      expectedCatalogRevision: 1,
+      expectedCatalogRevision: authenticated.revision,
       target,
     });
-    assert.equal(selected.catalogRevision, 2);
+    assert.equal(selected.catalogRevision, authenticated.revision + 1);
     const configured = await request('connection.catalog.query', { kind: 'start' });
     assert.deepEqual(configured.defaultTarget, target);
     assert(

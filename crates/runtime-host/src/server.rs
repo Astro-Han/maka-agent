@@ -328,7 +328,7 @@ impl Host {
         plugin_tasks.spawn(
             plugins
                 .clone()
-                .publish_client_changes(changes.clone(), draining.clone()),
+                .publish_catalog_changes(changes.clone(), draining.clone()),
         );
         let plugin_failure = draining.clone();
         plugin_tasks.spawn(async move {
@@ -373,20 +373,9 @@ impl Host {
             commands: TaskTracker::new(),
             diagnostic_log: Mutex::default(),
         });
-        let recovery = host.executions.recover_messages().await;
-        if let Err(error) = recovery {
-            host.draining.cancel();
-            host.plugin_tasks.close();
-            host.plugin_tasks.wait().await;
-            host.capabilities.begin_drain();
-            host.executions.shutdown().await;
-            host.shells.shutdown().await;
-            host.capabilities.shutdown().await;
-            let _ = tokio::join!(host.log.shutdown(), host.configuration.shutdown());
-            return Err(error.message.into());
-        }
         startup_guard.disarm();
-        host.executions.start_handoff_recovery(host.epoch.clone());
+        host.executions
+            .start_handoff_recovery(host.epoch.clone(), host.plugins.clone());
         host.executions.start_removal_recovery();
         host.record_diagnostic(format_args!("Host ready: epoch {}", host.epoch));
         Ok(host)

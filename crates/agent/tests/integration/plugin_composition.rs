@@ -46,6 +46,39 @@ use tokio::{io::AsyncWriteExt, net::TcpListener};
 use tokio_util::sync::CancellationToken;
 
 struct Echo(Arc<AtomicUsize>);
+
+struct Models {
+    provider: maka_model::ProviderConfig,
+    generation: Arc<AtomicUsize>,
+    captures: Arc<AtomicUsize>,
+}
+impl maka_agent::ModelSource for Models {
+    fn capture(
+        &self,
+    ) -> futures_util::future::BoxFuture<'_, Result<maka_agent::PreparedModel, maka_agent::RunError>>
+    {
+        self.captures.fetch_add(1, Ordering::SeqCst);
+        let generation = self.generation.load(Ordering::SeqCst);
+        Box::pin(async move {
+            Ok(maka_agent::PreparedModel {
+                provider_id: "example.provider".into(),
+                provider: self.provider.clone(),
+                options: json!({}),
+                context: None,
+                main_output_limit: Some((generation as u64 + 1) * 1000),
+                supports_vision: false,
+                revision: maka_runtime::composition::SourceRevision {
+                    kind: maka_runtime::composition::SourceKind::ModelProvider,
+                    name: "example.provider".into(),
+                    package_id: "example.provider".into(),
+                    entry_id: "example.provider".into(),
+                    activation: format!("activation-{generation}"),
+                    revision: generation.to_string(),
+                },
+            })
+        })
+    }
+}
 impl ToolExecutor for Echo {
     fn names(&self) -> Vec<String> {
         vec!["echo".into()]
@@ -97,6 +130,10 @@ fn publish(catalog: &Catalog, version: &str, count: Arc<AtomicUsize>) -> Fiber {
     fiber
 }
 fn check(request: &Value, version: &str) {
+    assert_eq!(
+        request["max_tokens"],
+        if version == "old" { 1000 } else { 2000 }
+    );
     let messages = request["messages"].as_array().unwrap();
     assert_eq!(messages[0]["content"], format!("Plugin {version}"));
     assert_eq!(
@@ -137,12 +174,16 @@ async fn plugin_step_surface_survives_retry_changes_only_between_steps_and_reope
         let base = format!("http://{}/v1", listener.local_addr().unwrap());
         let server_catalog = catalog.clone();
         let server_count = count.clone();
+        let generation = Arc::new(AtomicUsize::new(0));
+        let captures = Arc::new(AtomicUsize::new(0));
+        let server_generation = generation.clone();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let original = fixture::read_request(&mut socket).await;
             check(&original, "old");
             first.shutdown(tokio::time::Instant::now() + Duration::from_secs(1)).await.unwrap();
             let second = publish(&server_catalog, "new", server_count.clone());
+            server_generation.store(1, Ordering::SeqCst);
             socket.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
             drop(socket);
             let (mut socket, _) = listener.accept().await.unwrap();
@@ -160,6 +201,9 @@ async fn plugin_step_surface_survives_retry_changes_only_between_steps_and_reope
             second
         });
         let mut input = fixture::input(&base, "composition", false);
+        input.model_source = Some(Arc::new(Models {
+            provider: input.provider.clone(), generation, captures: captures.clone(),
+        }));
         let session = input.invocation.session_id.clone();
         input.work = RunWork::Message {
             source_messages: Vec::new(), message: "Use echo".into(),
@@ -173,6 +217,7 @@ async fn plugin_step_surface_survives_retry_changes_only_between_steps_and_reope
         engine.drain().await;
         let second = server.await.unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(captures.load(Ordering::SeqCst), 3, "physical retry does not recapture provider");
         let prefix = log.prefix(200, 1024 * 1024).await.unwrap();
         let requests: Vec<_> = prefix.events.iter().filter(|event| matches!(event.event.fact, Fact::ModelRequested { .. })).map(|event| event.event.id.clone()).collect();
         assert_eq!(requests.len(), 4);
@@ -184,7 +229,12 @@ async fn plugin_step_surface_survives_retry_changes_only_between_steps_and_reope
         assert_eq!(surfaces[0], surfaces[1]);
         assert_eq!(surfaces[2], surfaces[3]);
         assert_ne!(surfaces[0], surfaces[2]);
-        assert_eq!(surfaces[0].sources.len(), 5);
+        assert_eq!(surfaces[0].sources.len(), 6);
+        for (surface, revision) in surfaces.iter().zip(["0", "0", "1", "1"]) {
+            let providers: Vec<_> = surface.sources.iter().filter(|source| source.kind == maka_runtime::composition::SourceKind::ModelProvider).collect();
+            assert_eq!(providers.len(), 1);
+            assert_eq!(providers[0].revision, revision);
+        }
         assert_eq!(surfaces[0].sources.iter().filter(|source| source.kind == maka_runtime::composition::SourceKind::ModelAdapter).count(), 1);
         assert_eq!(surfaces[2].system_prompt.as_deref(), Some("Plugin new"));
         second.shutdown(tokio::time::Instant::now() + Duration::from_secs(1)).await.unwrap();

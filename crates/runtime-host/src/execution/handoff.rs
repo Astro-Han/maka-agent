@@ -53,9 +53,19 @@ impl Executions {
         self.handoff_wake.notify_one();
     }
 
-    pub(crate) fn start_handoff_recovery(self: &Arc<Self>, host_epoch: String) {
+    pub(crate) fn start_handoff_recovery(
+        self: &Arc<Self>,
+        host_epoch: String,
+        plugins: crate::plugins::Platform,
+    ) {
         let executions = self.clone();
         self.workers.spawn(async move {
+            // Opening the control plane does not wait for plugin code. Accepted
+            // work must nevertheless observe initial activation before deciding
+            // that its provider or executor has disappeared.
+            if !plugins.wait_for_activation(&executions.shutdown).await {
+                return;
+            }
             let mut delay = Duration::from_millis(250);
             let mut pending = false;
             loop {

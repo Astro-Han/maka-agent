@@ -144,14 +144,39 @@ pub async fn configure(fixture: &ClientFixture, base_url: &str) -> SessionModel 
 pub async fn configure_provider(
     fixture: &ClientFixture,
     base_url: &str,
-    provider_type: &str,
+    provider_name: &str,
 ) -> SessionModel {
     let owner = Arc::new(fixture.owner());
-    let config = ConfigurationStore::for_root(owner).await.unwrap();
-    let created = config.create_connection(serde_json::from_value(json!({
-        "expectedCatalogRevision":0,
-        "connection":{"slug":"recovery", "name":"Recovery fixture","providerType":provider_type,
-            "baseUrl":base_url,"enabled":true,"enabledModelIds":["fixture-model"]}
+    let config = Arc::new(ConfigurationStore::for_root(owner).await.unwrap());
+    let login = config.prepare_oauth_login(serde_json::from_value(json!({
+        "attemptId":"fixture-login",
+        "target":{"kind":"create","slug":"recovery","name":"Recovery fixture",
+            "provider":{"packageId":"maka.providers","entryId":"maka.providers","scope":"profile","name":provider_name},
+            "configuration":{"baseUrl":base_url}},
+        "authentication":{"method":"api-key","input":{"apiKey":"local-recovery-fixture"}}
+    })).unwrap()).await.unwrap();
+    let maka_config::oauth::enrollment::LoginPreparation::Ready(login) = login else {
+        panic!("fixture login");
+    };
+    assert!(login.claim().await.unwrap());
+    assert!(matches!(
+        login
+            .complete(
+                maka_runtime::provider::Credential {
+                    secret: "local-recovery-fixture".into(),
+                    refresh_at: None,
+                },
+                1
+            )
+            .await
+            .unwrap(),
+        maka_config::oauth::enrollment::LoginCompletion::Committed(_)
+    ));
+    let row = login.connection();
+    let created = config.update_connection(serde_json::from_value(json!({
+        "expected":{"connectionId":row.connection_id,"revision":row.revision},
+        "changes":{"name":row.name,"configuration":row.configuration,"enabled":true,"enabledModelIds":["fixture-model"],
+            "modelOverrides":{"fixture-model":{"thinkingLevels":["off"]}}}
     })).unwrap()).await.unwrap();
     let CatalogMutationResult::Committed {
         connection: Some(connection),
@@ -160,28 +185,7 @@ pub async fn configure_provider(
     else {
         panic!("fixture connection")
     };
-    config
-        .set_credential(
-            SetCredentialInput {
-                locator: CredentialLocator::Connection {
-                    connection_id: connection.connection_id.clone(),
-                    kind: ConnectionCredentialKind::ApiKey,
-                },
-                expected: None,
-                expected_connection: Some(ConnectionCredentialTarget {
-                    connection_id: connection.connection_id.clone(),
-                    revision: 1,
-                    slug: "recovery".into(),
-                    provider_type: provider_type.into(),
-                    effective_base_url: base_url.into(),
-                }),
-                secret: "local-recovery-fixture".into(),
-            },
-            1,
-        )
-        .await
-        .unwrap();
-    config.close().await.unwrap();
+    config.shutdown().await.unwrap();
     SessionModel {
         connection_id: connection.connection_id,
         connection_slug: "recovery".into(),

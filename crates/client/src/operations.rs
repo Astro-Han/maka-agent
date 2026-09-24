@@ -27,6 +27,10 @@ use serde_json::Value;
 pub struct Operations;
 impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if operation == Operation::ModelProviderCatalogQuery {
+            maka_protocol::model_provider::decode_query(value)?;
+            return Ok(value.clone());
+        }
         if matches!(
             operation,
             Operation::PluginRemote
@@ -141,6 +145,10 @@ impl OperationRegistry for Operations {
         }
     }
     fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if operation == Operation::ModelProviderCatalogQuery {
+            maka_protocol::model_provider::decode_page(value)?;
+            return Ok(value.clone());
+        }
         if matches!(
             operation,
             Operation::PluginRemote
@@ -231,6 +239,9 @@ impl OperationRegistry for Operations {
         }
     }
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
+        if operation == Operation::ModelProviderCatalogQuery {
+            return Some(maka_protocol::configuration::QUERY_ERRORS);
+        }
         if matches!(
             operation,
             Operation::PluginRemote

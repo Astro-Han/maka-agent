@@ -95,7 +95,7 @@ impl Binding {
         self.definition()
             .validate_configuration(&connection.configuration)?;
         if let Some(credential) = &credential {
-            credential.validate()?;
+            credential.validate().map_err(Error::Invalid)?;
         }
         let _call = self.admit()?;
         let credentials = self
@@ -112,6 +112,14 @@ impl Binding {
         request: super::authentication::Authenticate,
         context: super::Context,
     ) -> Result<super::authentication::Credential, Error> {
+        self.prepare_authenticate(request, context)?.run().await
+    }
+
+    pub fn prepare_authenticate(
+        &self,
+        request: super::authentication::Authenticate,
+        context: super::Context,
+    ) -> Result<super::AuthenticationCall, Error> {
         self.definition()
             .validate_configuration(&request.connection.configuration)?;
         let validator = self
@@ -140,14 +148,12 @@ impl Binding {
         if method.interactive && context.interaction.is_none() {
             return Err(Error::Unavailable);
         }
-        let _call = self.admit()?;
-        let credential = self
-            .definition()
-            .implementation
-            .authenticate(request, context)
-            .await?;
-        credential.validate()?;
-        Ok(credential)
+        Ok(super::AuthenticationCall {
+            call: self.admit()?,
+            implementation: self.definition().implementation.clone(),
+            request,
+            context,
+        })
     }
 
     pub async fn refresh(
@@ -156,56 +162,29 @@ impl Binding {
         credential: super::authentication::Credential,
         context: super::Context,
     ) -> Result<super::authentication::Credential, Error> {
-        self.definition()
-            .validate_configuration(&connection.configuration)?;
-        credential.validate()?;
-        let _call = self.admit()?;
-        let credential = self
-            .definition()
-            .implementation
-            .refresh(connection, credential, context)
-            .await?;
-        credential.validate()?;
-        Ok(credential)
+        self.prepare_refresh(connection, credential)?
+            .run(context)
+            .await
     }
 
-    pub async fn discover(
+    /// Admit before Host persists a single-use grant claim. Retirement after
+    /// this point cannot turn an unstarted callback into an uncertain exchange.
+    pub fn prepare_refresh(
         &self,
         connection: super::Connection,
-        credential: Option<super::authentication::Credential>,
-        context: super::Context,
-    ) -> Result<Vec<maka_runtime::configuration::ModelInfo>, Error> {
-        if !self.definition().descriptor.discovery {
-            return Err(Error::Unavailable);
-        }
+        credential: super::authentication::Credential,
+    ) -> Result<RefreshCall, Error> {
         self.definition()
             .validate_configuration(&connection.configuration)?;
-        if let Some(credential) = &credential {
-            credential.validate()?;
-        }
-        let _call = self.admit()?;
-        let models = self
-            .definition()
-            .implementation
-            .discover(connection, credential, context)
-            .await?;
-        if models.len() > 2048
-            || serde_json::to_vec(&models)
-                .map_err(|_| Error::Invalid("invalid model inventory".into()))?
-                .len()
-                > 4 * 1024 * 1024
-        {
-            return Err(Error::Invalid("model inventory exceeds its bounds".into()));
-        }
-        let mut seen = std::collections::HashSet::new();
-        for model in &models {
-            model.validate().map_err(Error::Invalid)?;
-            if !seen.insert(&model.id) {
-                return Err(Error::Invalid("duplicate model identity".into()));
-            }
-        }
-        Ok(models)
+        credential.validate().map_err(Error::Invalid)?;
+        Ok(RefreshCall {
+            call: self.admit()?,
+            implementation: self.definition().implementation.clone(),
+            connection,
+            credential,
+        })
     }
+
     pub fn admit(&self) -> Result<CallGuard, Error> {
         self.contribution.admit().map_err(|_| Error::Unavailable)
     }
@@ -223,5 +202,33 @@ impl Binding {
             activation: owner.activation,
             revision: self.contribution.registration_id().to_string(),
         })
+    }
+}
+
+/// A single admitted refresh. It owns the provider instance until settlement.
+pub struct RefreshCall {
+    call: CallGuard,
+    implementation: std::sync::Arc<dyn super::Provider>,
+    connection: super::Connection,
+    credential: super::authentication::Credential,
+}
+
+impl RefreshCall {
+    pub async fn run(
+        self,
+        context: super::Context,
+    ) -> Result<super::authentication::Credential, Error> {
+        let Self {
+            call,
+            implementation,
+            connection,
+            credential,
+        } = self;
+        let _call = call;
+        let credential = implementation
+            .refresh(connection, credential, context)
+            .await?;
+        credential.validate().map_err(Error::Invalid)?;
+        Ok(credential)
     }
 }

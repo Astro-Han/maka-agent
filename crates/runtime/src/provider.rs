@@ -20,6 +20,54 @@
 use crate::scope::Scope;
 use serde::{Deserialize, Serialize};
 
+/// Transient, secret-bearing form data, not persistent provider configuration.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AuthenticationInput {
+    pub method: String,
+    pub input: serde_json::Value,
+}
+
+impl AuthenticationInput {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.method.is_empty()
+            || self.method.len() > 256
+            || self
+                .method
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control())
+            || serde_json::to_vec(&self.input)
+                .map_err(|_| "invalid authentication input")?
+                .len()
+                > 64 * 1024
+        {
+            return Err("invalid authentication input".into());
+        }
+        Ok(())
+    }
+}
+
+/// Host-owned envelope. Only its provider interprets the secret or chooses when
+/// to refresh it. Deliberately no Debug: credentials are not diagnostic output.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Credential {
+    pub secret: String,
+    pub refresh_at: Option<u64>,
+}
+
+impl Credential {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.secret.is_empty()
+            || self.secret.len() > 64 * 1024
+            || self.refresh_at.is_some_and(|v| v > 9_007_199_254_740_991)
+        {
+            return Err("invalid provider credential envelope".into());
+        }
+        Ok(())
+    }
+}
+
 /// Durable recipient, not a registration lease. Re-loading the same package can
 /// restore it; another package, Entry or scope cannot inherit its credentials.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

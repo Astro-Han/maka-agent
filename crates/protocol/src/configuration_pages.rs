@@ -124,7 +124,7 @@ pub fn decode_catalog_query_result(value: &Value) -> Result<Value> {
             return Err(invalid());
         }
     }
-    if serde_json::to_vec(&page).map_err(|_| invalid())?.len() > 48 * 1024 {
+    if serde_json::to_vec(&page).map_err(|_| invalid())?.len() > 128 * 1024 {
         return Err(invalid());
     }
     Ok(page)
@@ -288,13 +288,14 @@ fn header(value: &Value) -> Result<Value> {
         "revision",
         "slug",
         "name",
-        "providerType",
+        "provider",
+        "configuration",
         "enabled",
         "enabledModelIdCount",
         "modelCount",
         "catalogEntryCount",
     ];
-    let optional = ["baseUrl", "modelSource", "lastTest", "requestBodyOverlay"];
+    let optional = ["modelSource", "lastTest", "requestBodyOverlay"];
     let o = record(value, "connection header")?;
     shaped(o, &required, &optional)?;
     let models = bounded(&value["modelCount"], 2048)?;

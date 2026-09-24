@@ -24,7 +24,7 @@ import {
   type SelectorOptionType,
   type SelectorSection,
 } from '@astryxdesign/core/Selector';
-import type { ProviderType } from '@maka/core/llm-connections';
+import type { ProviderIdentity } from '@maka/core/runtime-policy';
 import {
   type ModelMenuGroup,
 } from './chat-model-helpers.js';
@@ -32,20 +32,20 @@ import {
 export interface ModelPickerLeadingOption {
   value: string;
   label: string;
-  providerType?: ProviderType;
+  provider?: ProviderIdentity;
   disabled?: boolean;
 }
 
 type ModelChoiceValueFn = (choice: ModelMenuGroup['choices'][number]) => string;
 
 export function providerMarkIcon(
-  providerType: ProviderType | undefined,
-  renderProviderMark: ((type: ProviderType) => ReactNode) | undefined,
+  provider: ProviderIdentity | undefined,
+  renderProviderMark: ((type: ProviderIdentity) => ReactNode) | undefined,
 ): ReactNode {
-  if (!providerType || !renderProviderMark) return undefined;
+  if (!provider || !renderProviderMark) return undefined;
   return (
-    <span className="modelPickerProviderMark" data-provider={providerType} aria-hidden="true">
-      {renderProviderMark(providerType)}
+    <span className="modelPickerProviderMark" data-provider={provider.name} aria-hidden="true">
+      {renderProviderMark(provider)}
     </span>
   );
 }
@@ -63,7 +63,7 @@ export function buildModelPickerOptions(
   groups: readonly ModelMenuGroup[],
   leadingOption: ModelPickerLeadingOption | undefined,
   toValue: ModelChoiceValueFn,
-  renderProviderMark?: (type: ProviderType) => ReactNode,
+  renderProviderMark?: (type: ProviderIdentity) => ReactNode,
 ): SelectorOptionType[] {
   const sections: SelectorSection[] = groups.map((group) => ({
     type: 'section',
@@ -71,7 +71,7 @@ export function buildModelPickerOptions(
     options: group.choices.map((choice) => ({
       value: toValue(choice),
       label: choice.label,
-      icon: providerMarkIcon(group.providerType, renderProviderMark),
+      icon: providerMarkIcon(group.provider, renderProviderMark),
     })),
   }));
 
@@ -80,7 +80,7 @@ export function buildModelPickerOptions(
   const option: SelectorOptionData = {
     value: leadingOption.value,
     label: leadingOption.label,
-    icon: providerMarkIcon(leadingOption.providerType, renderProviderMark),
+    icon: providerMarkIcon(leadingOption.provider, renderProviderMark),
     disabled: leadingOption.disabled,
   };
   return sections.length > 0 ? [option, { type: 'divider' }, ...sections] : [option];

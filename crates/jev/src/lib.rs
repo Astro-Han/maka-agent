@@ -21,6 +21,3 @@
 pub mod decision;
 pub mod plugin;
 pub mod settings;
-
-#[cfg(test)]
-mod tests;

@@ -28,7 +28,7 @@ use std::sync::Arc;
 pub(crate) fn install(setup: &mut Setup) -> Result<(), maka_plugins::Error> {
     if setup.builtins.contains_key(ID) || setup.layers.contains_key(ID) {
         return Err(maka_plugins::Error::Invalid(
-            "built-in Jev identity is reserved".into(),
+            "built-in Session recap identity is reserved".into(),
         ));
     }
     setup.builtins.insert(

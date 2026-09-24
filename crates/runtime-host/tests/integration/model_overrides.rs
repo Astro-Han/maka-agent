@@ -21,8 +21,7 @@ use super::support::client_probe::ClientFixture;
 use maka_runtime::{context::ModelPurpose, event::Fact};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn original_client_declarations_freeze_each_invocation_and_reopen_without_rewriting_requests()
-{
+async fn client_declarations_freeze_each_model_step_and_reopen_without_rewriting_requests() {
     let fixture = ClientFixture::new("maka-model-overrides-");
     let mut original = None;
     for reopened in [false, true] {
@@ -62,7 +61,7 @@ async fn original_client_declarations_freeze_each_invocation_and_reopen_without_
                 ("input-only-1", Some(20), None, None),
                 ("input-only-2", Some(20), None, None),
                 ("frozen", Some(32000), Some(64000), Some(64000)),
-                ("frozen", Some(32000), Some(64000), Some(64000)),
+                ("frozen", Some(32000), Some(96000), Some(96000)),
                 ("next", Some(32000), Some(96000), Some(96000)),
             ]
         );

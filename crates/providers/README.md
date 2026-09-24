@@ -23,4 +23,13 @@
 
 Bundled model providers using the public `maka-plugins::provider` contract. Provider code owns authentication exchanges, model discovery and request policy; Host owns connections, credentials, proxy routing and durable settlement.
 
-The ChatGPT provider registers its subscription policy and composes the native Responses adapter. It does not require V8.
+API providers own their bundled model facts, authentication, bounded inventory discovery and protocol policy. The ChatGPT provider composes the native Responses adapter; neither provider authentication nor discovery requires V8. Discovery support does not imply support for every inference protocol.
+
+Cargo embeds the checked-in facts without Node. To refresh model and pricing data from the repository metadata snapshot and provider definitions, run from the repository root:
+
+```sh
+node scripts/rust/generate-catalog-facts.mjs crates/providers/data providers
+node scripts/rust/generate-catalog-facts.mjs crates/config/data pricing
+```
+
+Review the generated data changes together with provider tests; metadata updates do not implement new inference protocols.

@@ -21,7 +21,7 @@ use super::*;
 use maka_protocol::configuration::ConnectionCatalogQueryInput;
 
 #[test]
-fn connection_setup_verifies_without_writes_masks_keys_and_creates_first_chat() {
+fn anonymous_setup_verifies_without_writes_and_creates_first_chat() {
     let directory = tempfile::tempdir().unwrap();
     let mut host = super::super::candidate::CandidateFixture::new(directory.path().join("root"));
     host.child = Some(
@@ -53,18 +53,31 @@ fn connection_setup_verifies_without_writes_masks_keys_and_creates_first_chat() 
     tui.click_text("Model connections");
     tui.wait_for("No model connections yet.");
     tui.click_text("⊕");
-    tui.wait_for("API key");
-    tui.wait_for("Verify"); // The modal may arrive across multiple PTY reads.
-    tui.send(b"\t");
+    tui.wait_for("Add anonymous model connection");
+    let providers = runtime
+        .block_on(client.provider_directory(maka_protocol::model_provider::Scope::Profile))
+        .unwrap();
+    for provider in providers
+        .entries
+        .iter()
+        .filter(|entry| entry.descriptor.anonymous)
+    {
+        tui.wait_for(&provider.descriptor.label);
+        if provider.identity.name == "lm-studio" {
+            break;
+        }
+        tui.click_text(&provider.descriptor.label);
+    }
+    tui.click_text("Name (optional)");
     tui.send(b"New connection");
-    tui.send(b"\t");
-    tui.send(format!("\x1b[200~{url}\x1b[201~").as_bytes());
-    tui.send(b"\twrong-onboarding-secret");
-    tui.click_last_text("Verify");
-    tui.wait_for("The service rejected this key.");
-    assert!(!String::from_utf8_lossy(&tui.output).contains("wrong-onboarding-secret"));
-    tui.click_text("API key");
-    tui.send(b"\x01good-onboarding-secret");
+    tui.click_text("Provider configuration (JSON)");
+    tui.send(
+        format!(
+            "\x01\x1b[200~{}\x1b[201~",
+            serde_json::json!({"baseUrl":url})
+        )
+        .as_bytes(),
+    );
     tui.click_last_text("Verify");
     tui.wait_for("Choose models");
     tui.wait_for("Save connection");
@@ -79,7 +92,9 @@ fn connection_setup_verifies_without_writes_masks_keys_and_creates_first_chat() 
     tui.wait_for("[x] fixture-model");
     tui.click_last_text("Save connection");
     tui.wait_until(|s| {
-        !s.contains("API key") && !s.contains("Choose models") && s.contains("New connection")
+        !s.contains("Save connection")
+            && !s.contains("Choose models")
+            && s.contains("New connection")
     });
     runtime.block_on(async {
         let catalog = client
@@ -89,10 +104,10 @@ fn connection_setup_verifies_without_writes_masks_keys_and_creates_first_chat() 
         assert_eq!(catalog["connectionCount"], 1);
         assert_eq!(catalog["defaultTarget"]["modelId"], "fixture-model");
         assert_eq!(catalog["items"][0]["name"], "New connection");
+        assert_eq!(catalog["items"][0]["provider"]["name"], "lm-studio");
         assert_eq!(catalog["items"][0]["enabledModelIdCount"], 1);
         assert_eq!(catalog["items"][0]["modelCount"], 2);
     });
-    assert!(!String::from_utf8_lossy(&tui.output).contains("good-onboarding-secret"));
     tui.click_text("▤ Workspace");
     tui.wait_until(|s| s.lines().next().is_some_and(|l| l.contains("Workspace")));
     tui.send(b"\x0e");
@@ -111,21 +126,11 @@ fn connection_setup_verifies_without_writes_masks_keys_and_creates_first_chat() 
 async fn serve(listener: tokio::net::TcpListener) {
     use serde_json::json;
     use tokio::io::AsyncWriteExt;
-    for index in 0..3 {
+    for _ in 0..2 {
         let (mut stream, request) = support::model_list_request(&listener).await;
-        let (status, body) = if index == 0 {
-            assert!(request.contains("Bearer wrong-onboarding-secret"));
-            (
-                "401 Unauthorized",
-                json!({"error":"wrong-onboarding-secret"}),
-            )
-        } else {
-            assert!(request.contains("Bearer good-onboarding-secret"));
-            (
-                "200 OK",
-                json!({"data":[{"id":"fixture-model"},{"id":"unused-model"}]}),
-            )
-        };
+        assert!(!request.to_ascii_lowercase().contains("authorization:"));
+        let status = "200 OK";
+        let body = json!({"data":[{"id":"fixture-model"},{"id":"unused-model"}]});
         let body = body.to_string();
         stream.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
     }

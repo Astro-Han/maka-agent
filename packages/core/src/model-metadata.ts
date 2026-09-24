@@ -183,7 +183,7 @@ export function openAiAdapterApiProtocol(
     (providerType === 'opencode-go' && id === 'muse-spark-1.2-contributor') ||
     ((providerType === 'alibaba-token-plan-cn' || providerType === 'alibaba-token-plan') &&
       id === 'qwen3.8-max') ||
-    /^gpt-5/i.test(id) ||
+    /^gpt-[56]/i.test(id) ||
     ((providerType === 'xai' || providerType === 'xai-oauth') && id === 'grok-4.5')
     ? 'openai-responses'
     : 'openai-chat';
@@ -261,6 +261,23 @@ const GOOGLE_MODEL_OVERRIDES: Record<string, ModelMetadata> = {
   },
 };
 
+// These models are newer than the bundled models.dev snapshot. Keep request
+// IDs unchanged and advertise only efforts supported by the SDK-backed path.
+const OPENAI_GPT6_THINKING_OPTIONS: ThinkingOptions = {
+  efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+};
+
+const OPENAI_GPT6_MODEL_OVERRIDES: Record<string, ModelMetadata> = {
+  'gpt-6-sol': {
+    displayName: 'GPT-6 Sol',
+    thinkingOptions: OPENAI_GPT6_THINKING_OPTIONS,
+  },
+  'gpt-6-luna': {
+    displayName: 'GPT-6 Luna',
+    thinkingOptions: OPENAI_GPT6_THINKING_OPTIONS,
+  },
+};
+
 // The OAuth path pins its own context windows over whatever the public
 // catalog says. Base facts come from the active table, falling back to the
 // shipped snapshot so a model upstream stops listing keeps a display name.
@@ -278,6 +295,14 @@ function withoutInputLimit(metadata: ModelMetadata | undefined): ModelMetadata |
 
 function openAiOAuthModelMetadata(active: ModelsDevMetadata): Record<string, ModelMetadata> {
   return {
+    'gpt-6-sol': {
+      ...openAiOAuthBase(active, 'gpt-6-sol'),
+      ...OPENAI_GPT6_MODEL_OVERRIDES['gpt-6-sol'],
+    },
+    'gpt-6-luna': {
+      ...openAiOAuthBase(active, 'gpt-6-luna'),
+      ...OPENAI_GPT6_MODEL_OVERRIDES['gpt-6-luna'],
+    },
     'gpt-5.6-sol': {
       ...openAiOAuthBase(active, 'gpt-5.6-sol'),
       contextWindow: 372_000,
@@ -395,6 +420,7 @@ function ollamaCloudThinkingModels(active: ModelsDevMetadata): Record<string, Mo
 function buildStaticModelMetadata(active: ModelsDevMetadata): ModelsDevMetadata {
   return {
     anthropic: ANTHROPIC_MODEL_OVERRIDES,
+    openai: OPENAI_GPT6_MODEL_OVERRIDES,
     'claude-subscription': claudeSubscriptionModelMetadata(active),
     'alibaba-token-plan-cn': {
       'qwen3.8-max': {

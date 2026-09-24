@@ -57,6 +57,7 @@ async fn managed_shell_approvals_enforce_exact_once_grants_and_never_prompt_poli
         let server = tokio::spawn(LocalListener::bind(&fixture.workspace.parent().unwrap().join("permissions.sock"))
             .unwrap().serve(host.clone(), cancel));
         let mut peer = Peer::new(host.clone(), "permissions-client").await;
+        peer.wait_for_plugins().await;
         let created = peer.rpc("session.create", json!({
             "sessionId":SESSION,"sandboxMode":"read-only",
             "approvalPolicy":{"kind":"on-request"},
@@ -146,6 +147,7 @@ async fn scenario() {
                 .serve(host.clone(), cancel.clone()),
         );
         let mut peer = Peer::new(host.clone(), "boundary-client").await;
+        peer.wait_for_plugins().await;
         if !reopened {
             let created = peer
                 .rpc(
@@ -350,6 +352,7 @@ async fn file_approvals_are_exact_call_scoped_and_refuse_partial_or_protected_mu
         let cleanup = cancellation.clone().drop_guard();
         let server = tokio::spawn(LocalListener::bind(&endpoint).unwrap().serve(host.clone(), cancellation));
         let mut peer = Peer::new(host.clone(), "file-permissions-client").await;
+        peer.wait_for_plugins().await;
         let created = peer.rpc("session.create", json!({
             "sessionId":SESSION, "sandboxMode":"workspace-write",
             "approvalPolicy":{"kind":"on-request"},
@@ -385,8 +388,8 @@ async fn file_approvals_are_exact_call_scoped_and_refuse_partial_or_protected_mu
         finish(&mut peer, "files").await;
 
         let patched = peer.rpc("connection.catalog.update",json!({
-            "expected":{"connectionId":model.connection_id,"revision":1},
-            "changes":{"name":"Recovery fixture","baseUrl":provider.base_url,"enabled":true,
+            "expected":{"connectionId":model.connection_id,"revision":2},
+            "changes":{"name":"Recovery fixture","configuration":{"baseUrl":provider.base_url},"enabled":true,
                 "enabledModelIds":["fixture-model"],"modelOverrides":{"fixture-model":{"applyPatch":true}}}
         })).await;
         assert_eq!(patched["result"]["kind"],"committed","{patched}");

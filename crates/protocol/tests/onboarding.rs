@@ -26,8 +26,10 @@ use std::{
 };
 
 #[test]
-fn onboarding_wire_matches_source_required_nulls_identity_and_variant_limits() {
-    let base = json!({"target":{"kind":"create","providerType":"openrouter"},"apiKey":null,"baseUrl":null});
+fn onboarding_wire_matches_source_provider_identity_and_variant_limits() {
+    let provider = json!({"packageId":"example.provider","entryId":"example.provider","scope":"profile","name":"custom"});
+    let target = json!({"kind":"create","provider":provider,"configuration":{"region":"local"},"slug":"custom","name":"Custom"});
+    let base = json!({"target":target});
     let mut cases = Vec::new();
     let mut add = |save, output, value: Value| {
         let result = if output {
@@ -38,8 +40,7 @@ fn onboarding_wire_matches_source_required_nulls_identity_and_variant_limits() {
             }
         } else {
             decode_input(&value, save).map(|(input, ids)| {
-                let mut v =
-                    json!({"target":input.target,"apiKey":input.api_key,"baseUrl":input.base_url});
+                let mut v = json!({"target":input.target});
                 if save {
                     v["enabledModelIds"] = json!(ids);
                 }
@@ -53,29 +54,24 @@ fn onboarding_wire_matches_source_required_nulls_identity_and_variant_limits() {
         );
     };
     add(false, false, base.clone());
-    for field in ["apiKey", "baseUrl", "target"] {
+    add(false, false, json!({}));
+    for field in ["apiKey", "baseUrl"] {
         let mut v = base.clone();
-        v.as_object_mut().unwrap().remove(field);
+        v[field] = Value::Null;
         add(false, false, v);
     }
-    for value in [
-        json!(""),
-        json!(5),
-        json!("x".repeat(65537)),
-        json!("\u{feff}key\u{feff}"),
-    ] {
+    for field in ["provider", "configuration", "slug", "name"] {
         let mut v = base.clone();
-        v["apiKey"] = value;
+        v["target"].as_object_mut().unwrap().remove(field);
         add(false, false, v);
     }
+    let expected = json!({"connectionId":"existing-id","revision":1,"slug":"custom","provider":provider,"configuration":{"region":"local"}});
     for target in [
-        json!({"kind":"create","providerType":"openrouter","slug":"my-relay","name":""}),
-        json!({"kind":"create","providerType":"openrouter","name":null}),
-        json!({"kind":"create","providerType":"openrouter","slug":"x"}),
-        json!({"kind":"create","providerType":"bogus"}),
+        json!({"kind":"create","provider":provider,"configuration":{},"slug":"custom","name":""}),
+        json!({"kind":"create","provider":provider,"configuration":[],"slug":"custom","name":"Custom"}),
+        json!({"kind":"existing","expected":expected,"configuration":{}}),
         json!({"kind":"existing","connectionId":"existing-id"}),
-        json!({"kind":"existing","connectionId":"bad/id"}),
-        json!({"kind":"existing","connectionId":"x","providerType":"openrouter"}),
+        json!({"kind":"existing","expected":expected,"configuration":{},"providerType":"openrouter"}),
     ] {
         let mut v = base.clone();
         v["target"] = target;
@@ -107,7 +103,7 @@ fn onboarding_wire_matches_source_required_nulls_identity_and_variant_limits() {
         add(
             true,
             true,
-            json!({"kind":"saved","connection":{"connectionId":"e1f7b7af-a771-4530-b83e-c80a4ac235b4","revision":revision,"slug":"relay","providerType":"openrouter"}}),
+            json!({"kind":"saved","connection":{"connectionId":"e1f7b7af-a771-4530-b83e-c80a4ac235b4","revision":revision,"slug":"relay","provider":provider}}),
         );
     }
     let mut child = Command::new("node")

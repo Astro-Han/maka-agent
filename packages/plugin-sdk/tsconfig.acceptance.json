@@ -14,10 +14,7 @@
     "useUnknownInCatchVariables": false
   },
   "include": [
-    "../../crates/session-import/src/client.tsx",
-    "../../crates/insights/src/client.tsx",
-    "../../crates/insights/src/client/**/*.ts",
-    "../../crates/insights/src/client/**/*.tsx",
+    "../../crates/*/src/client.tsx",
     "../../crates/runtime-host/tests/fixtures/host-plugin.mjs",
     "../../crates/runtime-host/tests/fixtures/workflow/host.mjs",
     "../../crates/runtime-host/tests/fixtures/workflow/client.tsx",
@@ -26,12 +23,8 @@
     "../../crates/runtime-host/tests/fixtures/files-plugin.mjs",
     "../../crates/runtime-host/tests/fixtures/clients-plugin.mjs",
     "../../crates/runtime-host/tests/fixtures/remote-plugin.mjs",
-    "../../crates/graph/src/client.tsx",
     "../workhub/src/client.tsx",
     "../workhub/src/styles.d.ts",
-    "../../crates/skills/src/client.tsx",
-    "../../crates/web/src/client.tsx",
-    "../../crates/assistant/src/todo/client.tsx",
-    "../../crates/scheduler/src/client.tsx"
+    "../../crates/assistant/src/todo/client.tsx"
   ]
 }

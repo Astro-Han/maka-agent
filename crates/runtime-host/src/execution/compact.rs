@@ -72,15 +72,11 @@ impl Executions {
                 "Cannot compact an archived Session",
             ));
         }
-        let provider = provider::resolve(
-            &self.configuration,
-            &self.oauth,
-            &input.session_id,
-            &session.configuration,
-        )
-        .await?;
+        let provider = provider::resolve(self, &input.session_id, &session.configuration).await?;
         let snapshot = self
             .launch(RunInput {
+                model_source: Some(provider.source.clone()),
+                model_revision: Some(provider.revision.clone()),
                 provider_id: provider.provider_id,
                 invocation: Invocation {
                     session_id: input.session_id,

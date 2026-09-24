@@ -17,6 +17,9 @@
  * under the License.
  */
 
+import type { ClientLocale } from '@maka-agent/plugin-sdk/client';
+import { copy } from './sources-copy.js';
+
 import { useState } from 'react';
 import type { Snapshot, Source } from './model.js';
 import { path } from './model.js';
@@ -24,25 +27,22 @@ import { path } from './model.js';
 export function Sources({
   snapshot,
   busy,
-  zh,
+  locale,
   save,
 }: {
   snapshot: Snapshot;
   busy: boolean;
-  zh: boolean;
+  locale: ClientLocale;
   save: (sources: Source[]) => void;
 }) {
+  const t = copy[locale];
   const [kind, setKind] = useState<Source['location']['kind']>('codex');
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   return (
     <details>
-      <summary>{zh ? '管理导入来源' : 'Manage import sources'}</summary>
-      <p>
-        {zh
-          ? '路径属于当前 Host，不是桌面客户端。来源仅用于只读导入。'
-          : 'Paths belong to this Host, not the desktop client. Sources are read only.'}
-      </p>
+      <summary>{t.title}</summary>
+      <p>{t.description}</p>
       <ul>
         {snapshot.configuration.sources.map((source) => (
           <li key={source.id}>
@@ -54,7 +54,7 @@ export function Sources({
                 save(snapshot.configuration.sources.filter((item) => item.id !== source.id))
               }
             >
-              {zh ? '移除来源' : 'Remove source'}
+              {t.remove}
             </button>
           </li>
         ))}
@@ -76,7 +76,7 @@ export function Sources({
         }}
       >
         <label>
-          {zh ? '格式' : 'Format'}
+          {t.format}
           <select
             value={kind}
             disabled={busy}
@@ -88,7 +88,7 @@ export function Sources({
           </select>
         </label>
         <label>
-          {zh ? '名称' : 'Name'}
+          {t.name}
           <input
             required
             maxLength={256}
@@ -98,13 +98,7 @@ export function Sources({
           />
         </label>
         <label>
-          {kind === 'open_code'
-            ? zh
-              ? 'Host 数据库绝对路径'
-              : 'Absolute Host database path'
-            : zh
-              ? 'Host 来源根目录'
-              : 'Host source root'}
+          {kind === 'open_code' ? t.database : t.root}
           <input
             required
             value={location}
@@ -118,7 +112,7 @@ export function Sources({
             busy || !name.trim() || !location.trim() || snapshot.configuration.sources.length >= 16
           }
         >
-          {zh ? '添加来源' : 'Add source'}
+          {t.add}
         </button>
       </form>
     </details>

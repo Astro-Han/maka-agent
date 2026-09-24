@@ -41,6 +41,7 @@ export interface ModelInfo {
   inputLimit?: number;
   maxOutputTokens?: number;
   thinkingLevels?: readonly ThinkingLevel[];
+  defaultThinkingLevel?: ThinkingLevel;
   supportsReasoningSummary?: boolean;
   knowledgeCutoff?: string;
   structuredOutput?: boolean;
@@ -89,6 +90,8 @@ export interface ProviderDescriptor {
   configurationSchema: Json;
   configurationDefaults: Json;
   authentication: readonly AuthenticationMethod[];
+  /** Supports a connection without a stored credential; not an authorization grant. */
+  anonymous: boolean;
   discovery: boolean;
 }
 /** Opaque state stored by Host, never ordinary plugin storage or catalog metadata. */
@@ -110,6 +113,8 @@ export interface ResolvedModel {
   info: ModelInfo;
   thinkingLevels: readonly ThinkingLevel[];
   providerOptions: Json;
+  /** Resolved reply budget, not advertised model capacity. */
+  mainOutputLimit: number | null;
 }
 export type RequestCredentials =
   | { apiKey: string }
@@ -146,9 +151,21 @@ export interface ModelProvider {
     input: {
       connection: ProviderConnection;
       credential: ProviderCredential | null;
+      requestHeaders: Readonly<Record<string, string>>;
     },
     context: ProviderContext,
   ): Awaitable<readonly ModelInfo[]>;
+  verify?(
+    input: {
+      connection: ProviderConnection;
+      credential: ProviderCredential | null;
+      requestHeaders: Readonly<Record<string, string>>;
+      model: ModelInfo;
+      overrides: ModelOverride | null;
+      requestBodyOverlay: Json | null;
+    },
+    context: ProviderContext,
+  ): Awaitable<void>;
 }
 export interface ModelProviders {
   register(
@@ -159,4 +176,5 @@ export interface ModelProviders {
 }
 export type ProviderFailure =
   | { kind: 'unavailable' | 'cancelled' | 'authentication_required' | 'outcome_unknown' }
+  | { kind: 'http'; message: number }
   | { kind: 'rejected' | 'invalid' | 'transport'; message: string };

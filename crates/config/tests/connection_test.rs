@@ -30,6 +30,8 @@ use std::sync::Arc;
 mod header_cases;
 #[path = "connection_test/network.rs"]
 mod network_cases;
+#[path = "support/provider.rs"]
+mod provider_support;
 
 fn failed(error_class: ConnectionEffectFailureClass) -> ConnectionTestProjection {
     ConnectionTestProjection::Failed {
@@ -59,8 +61,8 @@ impl Fixture {
         let store = Arc::new(ConfigurationStore::for_root(owner).await.unwrap());
         let input = serde_json::from_value(json!({
             "expectedCatalogRevision":0,
-            "connection":{"slug":"relay","name":"Relay","providerType":"openai-compatible",
-                "baseUrl":"http://127.0.0.1:18080/v1","enabled":true,
+            "connection":{"slug":"relay","name":"Relay","provider":{"packageId":"external","entryId":"api","scope":"profile","name":"api"},
+                "configuration":{"baseUrl":"http://127.0.0.1:18080/v1"},"enabled":true,
                 "enabledModelIds":["manual"]}
         }))
         .unwrap();
@@ -99,30 +101,7 @@ impl Fixture {
     }
 
     async fn key(&self) {
-        assert!(matches!(
-            self.store
-                .set_credential(
-                    SetCredentialInput {
-                        locator: CredentialLocator::Connection {
-                            connection_id: self.id.clone(),
-                            kind: ConnectionCredentialKind::ApiKey,
-                        },
-                        expected: None,
-                        expected_connection: Some(ConnectionCredentialTarget {
-                            connection_id: self.id.clone(),
-                            revision: 1,
-                            slug: "relay".into(),
-                            provider_type: "openai-compatible".into(),
-                            effective_base_url: "http://127.0.0.1:18080/v1".into(),
-                        }),
-                        secret: "private-fixture-key".into(),
-                    },
-                    42
-                )
-                .await
-                .unwrap(),
-            CredentialMutationResult::Committed { .. }
-        ));
+        provider_support::login(&self.store, &self.id, "private-fixture-key").await;
     }
 
     async fn inventory(&self, model: Value) {
@@ -144,7 +123,7 @@ impl Fixture {
         let row = self.store.catalog().await.unwrap().connections.remove(0);
         let mut input = json!({
             "expected":{"connectionId":self.id,"revision":row.revision},
-            "changes":{"name":"Renamed during test","baseUrl":row.base_url,
+            "changes":{"name":"Renamed during test","configuration":row.configuration,
                 "enabled":true,"enabledModelIds":row.enabled_model_ids}
         });
         if let Some(overlay) = overlay {
@@ -161,19 +140,17 @@ impl Fixture {
 }
 
 #[tokio::test]
-async fn preparation_requires_key_and_admits_manual_or_unselected_discovered_models() {
+async fn preparation_allows_anonymous_providers_and_admits_only_known_models() {
     let fixture = Fixture::new().await;
     let before = fixture.store.catalog().await.unwrap();
-    assert!(matches!(
+    assert!(
         fixture
-            .store
-            .prepare_connection_test(fixture.input(None))
+            .prepare(None)
             .await
-            .unwrap(),
-        ConnectionTestPreparation::Rejected(
-            ConnectionEffectRejectionReason::CredentialNotConfigured
-        )
-    ));
+            .provider_credential()
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(fixture.store.catalog().await.unwrap(), before);
     fixture.key().await;
     fixture.inventory(json!({"id":"discovered"})).await;
@@ -251,7 +228,7 @@ async fn failed_tests_preserve_rename_and_store_only_safe_summary_across_reopen(
 }
 
 #[tokio::test]
-async fn model_metadata_can_change_but_model_wire_source_and_overlay_supersede() {
+async fn changed_provider_inputs_and_overlay_supersede_in_flight_verification() {
     let fixture = Fixture::new().await;
     fixture.key().await;
     for model in [
@@ -284,44 +261,47 @@ async fn model_metadata_can_change_but_model_wire_source_and_overlay_supersede()
         model_id: "manual".into(),
         latency_ms: 8,
     };
-    assert!(matches!(
+    // The provider receives the full model and override. Host cannot assume
+    // arbitrary plugin code ignores fields which bundled providers treat as cosmetic.
+    assert_eq!(
         prepared.complete(verified.clone()).await.unwrap(),
-        ConnectionTestRunResult::Committed { .. }
-    ));
+        ConnectionTestRunResult::Superseded {
+            changed: vec![ConnectionEffectChangedDomain::Connection]
+        }
+    );
+    fixture
+        .prepare(Some("manual"))
+        .await
+        .complete(verified.clone())
+        .await
+        .unwrap();
     let saved = fixture.store.catalog().await.unwrap();
     assert_eq!(saved.connections[0].models, before.connections[0].models);
     assert_eq!(
         saved.connections[0].last_test.as_ref().unwrap().status,
         ConnectionTestStatus::Verified
     );
-    for (declaration, superseded) in [
-        (
-            json!({"displayName":"Configured", "compactionThreshold":8000}),
-            false,
-        ),
-        (json!({"apiProtocol":"openai-chat"}), true),
+    for declaration in [
+        json!({"displayName":"Configured", "compactionThreshold":8000}),
+        json!({"apiProtocol":"openai-chat"}),
     ] {
         let prepared = fixture.prepare(Some("manual")).await;
         let row = fixture.store.catalog().await.unwrap().connections.remove(0);
         let input = serde_json::from_value(json!({
             "expected":{"connectionId":row.connection_id,"revision":row.revision},
-            "changes":{"name":row.name,"baseUrl":row.base_url,"enabled":row.enabled,
+            "changes":{"name":row.name,"configuration":row.configuration,"enabled":row.enabled,
                 "enabledModelIds":row.enabled_model_ids,"modelOverrides":{"manual":declaration}}
         }))
         .unwrap();
         fixture.store.update_connection(input).await.unwrap();
-        assert_eq!(
+        assert!(
             fixture.store.catalog().await.unwrap().connections[0]
                 .last_test
                 .is_none(),
-            superseded,
-            "only a changed wire invalidates connection-test evidence"
+            "changed provider input invalidates connection-test evidence"
         );
         let result = prepared.complete(verified.clone()).await.unwrap();
-        assert_eq!(
-            matches!(result, ConnectionTestRunResult::Superseded { .. }),
-            superseded
-        );
+        assert!(matches!(result, ConnectionTestRunResult::Superseded { .. }));
     }
     let prepared = fixture.prepare(None).await;
     fixture.edit(Some(json!({"temperature":0.5}))).await;

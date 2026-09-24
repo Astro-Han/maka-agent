@@ -192,7 +192,8 @@ async fn seed_catalog(owner: RootOwner, root: &Path) {
     ];
     let document = serde_json::json!({
         "connectionId": id, "revision": 1, "slug": "relay", "name": "Relay",
-        "providerType": "openai-responses-compatible", "baseUrl": base_url, "enabled": true,
+        "provider":{"packageId":"maka.providers","entryId":"maka.providers","scope":"profile","name":"openai-responses-compatible"},
+        "configuration":{"baseUrl":base_url}, "enabled": true,
         "enabledModelIds": models, "modelSource": "fetched", "modelsFetchedAt": 1,
         "models": models.iter().map(|model| serde_json::json!({
             "id": model, "capabilities": {

@@ -19,7 +19,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ClientContext } from '@maka-agent/plugin-sdk/client';
-import type { Copy, Target } from './model.js';
+import type { Copy } from './copy.js';
+import type { Target } from './model.js';
 
 type Location = {
   id: 'project:maka' | 'project:agents' | 'workspace:legacy' | 'user:maka' | 'user:agents';

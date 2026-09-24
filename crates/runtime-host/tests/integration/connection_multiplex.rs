@@ -155,7 +155,10 @@ async fn slow_rpc_allows_same_connection_status_and_flushes_after_input_eof() {
     let mut seen = std::collections::HashSet::new();
     while seen.len() < 65 {
         let frame = receive(&mut replies).await;
-        if frame["kind"] == "plugin.client.changed" {
+        if matches!(
+            frame["kind"].as_str(),
+            Some("plugin.client.changed" | "model.provider.catalog.changed")
+        ) {
             continue;
         }
         assert_eq!(frame["result"]["state"], "ready", "{frame}");

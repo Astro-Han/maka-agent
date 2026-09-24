@@ -30,16 +30,28 @@ use crate::{
 };
 use maka_client::{Client, OAuthPresentation, OAuthPresentationService, RequestFailure};
 use maka_protocol::oauth::{
-    ConnectionIdentity, EnrollmentProjection, LoginProjection, LoginStart, Phase, Provider,
+    ConnectionIdentity, EnrollmentProjection, LoginProjection, LoginRecovery, LoginStart, Phase,
     Target as LoginTarget,
 };
 use std::time::{Duration, Instant};
 
-const PROVIDERS: [Provider; 3] = [
-    Provider::OpenaiCodex,
-    Provider::GithubCopilot,
-    Provider::XaiOauth,
-];
+#[derive(Clone)]
+struct Choice {
+    provider: maka_protocol::model_provider::Entry,
+    method: usize,
+}
+impl Choice {
+    fn label(&self) -> String {
+        format!(
+            "{} · {}",
+            self.provider.descriptor.label,
+            self.authentication().label
+        )
+    }
+    fn authentication(&self) -> &maka_protocol::model_provider::Method {
+        &self.provider.descriptor.authentication[self.method]
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -59,7 +71,9 @@ impl Command {
             Self::Provider(_) => "onboard-provider",
             Self::Identity => "oauth-identity",
             Self::Field(0) => "oauth-name",
-            Self::Field(_) => "oauth-slug",
+            Self::Field(1) => "oauth-slug",
+            Self::Field(2) => "oauth-configuration",
+            Self::Field(_) => "oauth-authentication-input",
             Self::Begin => "oauth-begin",
             Self::Cancel => "oauth-cancel",
             Self::Check => "oauth-check",
@@ -79,20 +93,51 @@ enum Operation {
     Cancel,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 pub struct Request {
     sequence: u64,
     root: String,
     epoch: String,
-    operation: Operation,
-    provider: Provider,
-    start: Option<LoginStart>,
+    call: Call,
+}
+
+#[derive(Clone, PartialEq)]
+enum Call {
+    Publish,
+    Enrollment(maka_protocol::model_provider::Identity),
+    Start(Box<LoginStart>),
+    Query(Observation),
+    Cancel(Observation),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Observation {
+    attempt: LoginRecovery,
     connection: Option<ConnectionIdentity>,
 }
 
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Request")
+            .field("sequence", &self.sequence)
+            .field("root", &self.root)
+            .field("epoch", &self.epoch)
+            .field("operation", &self.operation())
+            .finish_non_exhaustive()
+    }
+}
 impl Request {
+    fn operation(&self) -> Operation {
+        match &self.call {
+            Call::Publish => Operation::Publish,
+            Call::Enrollment(_) => Operation::Enrollment,
+            Call::Start(_) => Operation::Start,
+            Call::Query(_) => Operation::Query,
+            Call::Cancel(_) => Operation::Cancel,
+        }
+    }
     pub fn needs_checkpoint(&self) -> bool {
-        self.operation == Operation::Start
+        matches!(self.call, Call::Start(_))
     }
 }
 
@@ -103,33 +148,24 @@ pub enum Output {
 }
 
 pub async fn execute(client: &Client, request: &Request) -> Result<Output, RequestFailure> {
-    match request.operation {
-        Operation::Publish => client
+    match &request.call {
+        Call::Publish => client
             .publish_oauth_presentation()
             .await
             .map(Output::Published),
-        Operation::Enrollment => client
-            .oauth_enrollment(request.provider)
+        Call::Enrollment(provider) => client
+            .oauth_enrollment(provider.clone())
             .await
             .map(Output::Enrollment),
-        operation => {
-            let input = request.start.as_ref().expect("login request");
-            match operation {
-                Operation::Start => client.start_oauth_login(input).await,
-                Operation::Query => {
-                    client
-                        .query_oauth_login(input, request.connection.as_ref())
-                        .await
-                }
-                Operation::Cancel => {
-                    client
-                        .cancel_oauth_login(input, request.connection.as_ref())
-                        .await
-                }
-                _ => unreachable!(),
-            }
-            .map(Output::Login)
-        }
+        Call::Start(input) => client.start_oauth_login(input).await.map(Output::Login),
+        Call::Query(input) => client
+            .query_oauth_login(&input.attempt, input.connection.as_ref())
+            .await
+            .map(Output::Login),
+        Call::Cancel(input) => client
+            .cancel_oauth_login(&input.attempt, input.connection.as_ref())
+            .await
+            .map(Output::Login),
     }
 }
 
@@ -137,11 +173,13 @@ pub async fn execute(client: &Client, request: &Request) -> Result<Output, Reque
 pub struct State {
     root: String,
     provider: usize,
-    existing: Option<String>,
+    choices: Vec<Choice>,
+    existing: Option<maka_protocol::configuration::ConnectionCredentialTarget>,
     connection_label: String,
     ready: bool,
     enrollment: Option<bool>,
-    attempt: Option<LoginStart>,
+    attempt: Option<LoginRecovery>,
+    prepared: Option<LoginStart>,
     projection: Option<LoginProjection>,
     recovered_connection: Option<ConnectionIdentity>,
     awaiting_checkpoint: bool,
@@ -168,6 +206,8 @@ impl State {
     }
 
     pub fn abandon(&mut self) {
+        self.prepared = None;
+        self.identity.clear_authentication();
         self.awaiting_checkpoint = false;
         self.pending = None;
         self.requested = None;
@@ -182,6 +222,7 @@ impl State {
 
     fn reset(&mut self) {
         self.attempt = None;
+        self.prepared = None;
         self.projection = None;
         self.recovered_connection = None;
         self.awaiting_checkpoint = false;
@@ -197,13 +238,15 @@ impl State {
 
     pub(super) fn controls(&self) -> Vec<Manage> {
         let mut controls = Vec::new();
-        if self.attempt.is_none() && self.existing.is_none() {
-            controls.extend((0..PROVIDERS.len()).map(|i| Manage::Oauth(Command::Provider(i))));
+        if self.attempt.is_none() && !self.choices.is_empty() {
+            controls.push(Manage::Oauth(Command::Provider(
+                (self.provider + 1) % self.choices.len(),
+            )));
         }
         if self.customizable() {
             controls.push(Manage::Oauth(Command::Identity));
             if self.identity.expanded {
-                controls.extend((0..2).map(|i| Manage::Oauth(Command::Field(i))));
+                controls.extend(self.fields().map(|i| Manage::Oauth(Command::Field(i))));
             }
         }
         if self.display.is_some() {
@@ -234,6 +277,9 @@ impl State {
     fn status(&self) -> &'static str {
         if let Some(error) = self.error {
             return error;
+        }
+        if self.attempt.is_none() && self.pending.is_some() {
+            return "oauth-preparing";
         }
         if self.customizable()
             && let Some(error) = self.identity.error()
@@ -273,15 +319,61 @@ impl State {
     }
 }
 
-fn provider_name(index: usize) -> &'static str {
-    match PROVIDERS[index] {
-        Provider::OpenaiCodex => "OpenAI Codex",
-        Provider::GithubCopilot => "GitHub Copilot",
-        Provider::XaiOauth => "xAI",
+impl State {
+    fn refresh_choices(&mut self, catalog: &crate::providers::Providers) {
+        self.choices = catalog
+            .entries()
+            .iter()
+            .filter(|provider| {
+                self.existing
+                    .as_ref()
+                    .is_none_or(|existing| existing.provider == provider.identity)
+            })
+            .flat_map(|provider| {
+                (0..provider.descriptor.authentication.len()).map(|method| Choice {
+                    provider: provider.clone(),
+                    method,
+                })
+            })
+            .collect();
+        self.provider = 0;
+        if let Some(choice) = self.choices.first() {
+            self.identity.configure(choice, self.existing.as_ref());
+            self.identity.expanded = !choice.authentication().interactive;
+        }
+    }
+
+    fn fields(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..4).filter(|index| {
+            (*index >= 2 || self.existing.is_none())
+                && (*index != 3 || self.identity.authentication_field().is_some())
+        })
+    }
+    fn provider_name(&self) -> String {
+        self.choices
+            .get(self.provider)
+            .map(Choice::label)
+            .unwrap_or_else(|| {
+                self.attempt
+                    .as_ref()
+                    .map(|attempt| match &attempt.target {
+                        LoginTarget::Create { provider, .. } => provider.name.clone(),
+                        LoginTarget::Existing { expected, .. } => expected.provider.name.clone(),
+                    })
+                    .unwrap_or_default()
+            })
     }
 }
 
 impl App {
+    pub fn oauth_catalog_loaded(&mut self) {
+        let state = &mut self.management.oauth;
+        if state.choices.is_empty() && state.attempt.is_none() {
+            state.refresh_choices(&self.providers);
+            self.hits.clear();
+        }
+    }
+
     pub fn oauth_commands(&self) -> Vec<(Action, &'static str)> {
         // Account setup belongs with workspace/settings/connection management;
         // do not displace conversation and recovery controls in a chat palette.
@@ -320,9 +412,10 @@ impl App {
                 .rows
                 .iter()
                 .find(|row| Some(&row.id) == self.connections.selected.as_ref())
-            && PROVIDERS
-                .iter()
-                .any(|provider| provider.as_str() == row.provider)
+            && self
+                .providers
+                .find(&row.provider)
+                .is_some_and(|provider| !provider.descriptor.authentication.is_empty())
         {
             commands.push((
                 Action::Manage(Manage::Open(
@@ -349,15 +442,18 @@ impl App {
             state.root = target.root.clone();
             state.existing = if let Entity::Connection(row) = &target.entity {
                 state.connection_label = format!("{} · {}", row.name, row.slug);
-                state.provider = PROVIDERS
-                    .iter()
-                    .position(|provider| provider.as_str() == row.provider)
-                    .unwrap_or(0);
-                Some(row.id.clone())
+                Some(maka_protocol::configuration::ConnectionCredentialTarget {
+                    connection_id: row.id.clone(),
+                    revision: row.revision,
+                    slug: row.slug.clone(),
+                    provider: row.provider.clone(),
+                    configuration: row.configuration.clone(),
+                })
             } else {
                 state.connection_label.clear();
                 None
             };
+            state.refresh_choices(&self.providers);
         }
     }
 
@@ -383,11 +479,13 @@ impl App {
                 .as_ref()
                 .is_some_and(|(_, code)| code.is_some()),
             _ if state.pending.is_some() || state.requested.is_some() => false,
-            Command::Provider(index) => {
-                index < PROVIDERS.len() && state.attempt.is_none() && state.existing.is_none()
-            }
+            Command::Provider(index) => index < state.choices.len() && state.attempt.is_none(),
             Command::Identity => state.customizable(),
-            Command::Field(index) => state.customizable() && state.identity.expanded && index < 2,
+            Command::Field(index) => {
+                state.customizable()
+                    && state.identity.expanded
+                    && state.fields().any(|field| field == index)
+            }
             Command::Begin => {
                 state.attempt.is_none()
                     && state.ready
@@ -409,6 +507,10 @@ impl App {
                     return None;
                 }
                 state.provider = index;
+                state
+                    .identity
+                    .configure(&state.choices[index], state.existing.as_ref());
+                state.identity.expanded = !state.choices[index].authentication().interactive;
                 state.identity.invalidate_geometry();
                 state.enrollment = None;
                 state.error = None;
@@ -419,27 +521,15 @@ impl App {
             }
             Command::Field(_) => {}
             Command::Begin => {
-                state.attempt = Some(LoginStart {
-                    attempt_id: uuid::Uuid::new_v4().to_string(),
-                    target: state.existing.as_ref().map_or_else(
-                        || state.identity.target(PROVIDERS[state.provider]),
-                        |id| LoginTarget::Existing {
-                            connection_id: id.clone(),
-                        },
-                    ),
-                });
-                if let Some(LoginStart {
-                    target: LoginTarget::Create { name, slug, .. },
-                    ..
-                }) = &state.attempt
-                {
-                    state.connection_label = name
-                        .iter()
-                        .chain(slug.iter())
-                        .map(String::as_str)
-                        .collect::<Vec<_>>()
-                        .join(" · ");
-                }
+                let choice = state.choices.get(state.provider)?;
+                let start = state.identity.start(choice, state.existing.as_ref()).ok()?;
+                state.connection_label = match &start.target {
+                    LoginTarget::Create { name, slug, .. } => format!("{name} · {slug}"),
+                    LoginTarget::Existing { expected, .. } => expected.slug.clone(),
+                };
+                state.attempt = Some(start.recovery());
+                state.prepared = Some(start);
+                state.identity.clear_authentication();
                 state.error = None;
                 state.requested = Some(Operation::Start);
             }
@@ -453,7 +543,10 @@ impl App {
                 state.error = None;
                 state.requested = state.attempt.as_ref().map(|_| Operation::Query);
             }
-            Command::New => state.reset(),
+            Command::New => {
+                state.reset();
+                state.refresh_choices(&self.providers);
+            }
             Command::CopyLink | Command::CopyCode => {
                 return Some(Action::Manage(Manage::Oauth(command)));
             }
@@ -512,14 +605,28 @@ impl App {
             sequence: state.sequence,
             root: root_id.clone(),
             epoch: epoch.clone(),
-            operation,
-            provider: PROVIDERS[state.provider],
-            start: state.attempt.clone(),
-            connection: state
-                .projection
-                .as_ref()
-                .map(|projection| projection.connection.clone())
-                .or_else(|| state.recovered_connection.clone()),
+            call: match operation {
+                Operation::Publish => Call::Publish,
+                Operation::Enrollment => {
+                    Call::Enrollment(state.choices.get(state.provider)?.provider.identity.clone())
+                }
+                Operation::Start => Call::Start(Box::new(state.prepared.take()?)),
+                Operation::Query | Operation::Cancel => {
+                    let observation = Observation {
+                        attempt: state.attempt.clone()?,
+                        connection: state
+                            .projection
+                            .as_ref()
+                            .map(|projection| projection.connection.clone())
+                            .or_else(|| state.recovered_connection.clone()),
+                    };
+                    if operation == Operation::Query {
+                        Call::Query(observation)
+                    } else {
+                        Call::Cancel(observation)
+                    }
+                }
+            },
         };
         state.awaiting_checkpoint = request.needs_checkpoint();
         state.pending = Some(request.clone());
@@ -575,14 +682,14 @@ impl App {
                 }
             }
             Err(error) => {
-                state.not_found = request.operation == Operation::Query
+                state.not_found = request.operation() == Operation::Query
                     && matches!(&error, RequestFailure::Rejected(maka_client::ClientError::Rejected(error))
                         if error.code == maka_protocol::OperationErrorCode::NotFound);
                 if state.not_found {
                     state.display = None;
                     state.presentation = None;
                 }
-                if request.operation == Operation::Start
+                if request.operation() == Operation::Start
                     && !matches!(error, RequestFailure::Unknown(_))
                 {
                     state.attempt = None;
@@ -698,6 +805,7 @@ mod tests {
             "/unused".into(),
             I18n::new(LocalePreference::Explicit(Locale::En), Locale::En),
         );
+        app.providers = crate::providers::fixtures::catalog();
         app.connection = ConnectionState::Connected {
             root_id: "root".into(),
             epoch: "epoch".into(),
@@ -722,19 +830,17 @@ mod tests {
     }
 
     fn login(app: &App, phase: Phase) -> LoginProjection {
+        let attempt = app.management.oauth.attempt.as_ref().unwrap();
+        let (provider, slug) = match &attempt.target {
+            LoginTarget::Create { provider, slug, .. } => (provider, slug),
+            LoginTarget::Existing { expected, .. } => (&expected.provider, &expected.slug),
+        };
         LoginProjection {
-            attempt_id: app
-                .management
-                .oauth
-                .attempt
-                .as_ref()
-                .unwrap()
-                .attempt_id
-                .clone(),
+            attempt_id: attempt.attempt_id.clone(),
             connection: ConnectionIdentity {
                 connection_id: "connection".into(),
-                slug: "codex".into(),
-                provider_type: PROVIDERS[app.management.oauth.provider],
+                provider: provider.clone(),
+                slug: slug.clone(),
             },
             phase,
         }
@@ -748,15 +854,22 @@ mod tests {
     #[test]
     fn oauth_modal_preserves_attempt_on_hide_cancel_race_and_unknown_without_invisible_actions() {
         let mut app = app();
+        app.management.oauth.choices.clear();
+        app.providers = Default::default();
+        render(&mut app, 80, 24);
+        assert!(!app.oauth_enabled(Command::Begin));
+        app.providers = crate::providers::fixtures::catalog();
+        app.oauth_catalog_loaded();
+        assert!(!app.management.oauth.choices.is_empty());
         // Client publication/admission is covered by the wire test below. Here
         // the already-published service is a fixed prerequisite for UI states.
         app.management.oauth.ready = true;
         let enrollment = app.oauth_request().unwrap();
-        assert_eq!(enrollment.operation, Operation::Enrollment);
+        assert_eq!(enrollment.operation(), Operation::Enrollment);
         app.oauth_completed(
             enrollment,
             Ok(Output::Enrollment(EnrollmentProjection {
-                provider: Provider::OpenaiCodex,
+                provider: crate::providers::fixtures::entry("openai-codex", true).identity,
                 enabled: false,
             })),
         );
@@ -764,11 +877,13 @@ mod tests {
         assert!(!app.oauth_enabled(Command::Begin));
         act(&mut app, Command::Provider(2));
         let enrollment = app.oauth_request().unwrap();
-        assert_eq!(enrollment.provider, Provider::XaiOauth);
+        assert!(
+            matches!(&enrollment.call, Call::Enrollment(provider) if provider == &crate::providers::fixtures::entry("xai-oauth", true).identity)
+        );
         app.oauth_completed(
             enrollment,
             Ok(Output::Enrollment(EnrollmentProjection {
-                provider: Provider::XaiOauth,
+                provider: crate::providers::fixtures::entry("xai-oauth", true).identity,
                 enabled: true,
             })),
         );
@@ -803,7 +918,10 @@ mod tests {
         render(&mut app, 80, 24);
         act(&mut app, Command::Begin);
         let started = app.oauth_request().unwrap();
-        let identity = started.start.clone().unwrap();
+        let Call::Start(start) = &started.call else {
+            panic!()
+        };
+        let identity = start.recovery();
         let projection = login(&app, Phase::AwaitingAuthorization);
         app.oauth_completed(started, Ok(Output::Login(projection)));
         app.management.oauth.display = Some((
@@ -821,7 +939,7 @@ mod tests {
         app.management.dialog.as_mut().unwrap().focus = copy;
         app.management.oauth.next_poll = Some(Instant::now());
         let query = app.oauth_request().unwrap();
-        assert_eq!(query.operation, Operation::Query);
+        assert_eq!(query.operation(), Operation::Query);
         let projection = login(&app, Phase::AwaitingAuthorization);
         app.oauth_completed(query, Ok(Output::Login(projection)));
         assert_eq!(
@@ -848,8 +966,10 @@ mod tests {
         render(&mut app, 80, 24);
         act(&mut app, Command::Cancel);
         let cancelled = app.oauth_request().unwrap();
-        assert_eq!(cancelled.operation, Operation::Cancel);
-        assert_eq!(cancelled.start.as_ref(), Some(&identity));
+        assert_eq!(cancelled.operation(), Operation::Cancel);
+        assert!(
+            matches!(&cancelled.call, Call::Cancel(observation) if observation.attempt == identity)
+        );
         assert!(app.management.oauth.display.is_none());
         let projection = login(&app, Phase::Committing);
         app.oauth_completed(cancelled, Ok(Output::Login(projection)));
@@ -878,23 +998,27 @@ mod tests {
         render(&mut app, 80, 24);
         act(&mut app, Command::New);
         let enrollment = app.oauth_request().unwrap();
-        assert_eq!(enrollment.operation, Operation::Enrollment);
+        assert_eq!(enrollment.operation(), Operation::Enrollment);
         app.oauth_completed(
             enrollment,
             Ok(Output::Enrollment(EnrollmentProjection {
-                provider: Provider::XaiOauth,
+                provider: crate::providers::fixtures::entry("xai-oauth", true).identity,
                 enabled: true,
             })),
         );
         render(&mut app, 80, 24);
         act(&mut app, Command::Begin);
         let unknown = app.oauth_request().unwrap();
-        let original = unknown.start.clone();
+        let Call::Start(start) = &unknown.call else {
+            panic!()
+        };
+        let original = start.recovery();
         app.oauth_completed(
             unknown.clone(),
             Err(RequestFailure::Unknown(maka_client::ClientError::Timeout)),
         );
         app.management.oauth.abandon();
+        app.providers = crate::providers::fixtures::catalog();
         app.connection = ConnectionState::Connected {
             root_id: "root".into(),
             epoch: "new-epoch".into(),
@@ -907,8 +1031,8 @@ mod tests {
         );
         act(&mut app, Command::Check);
         let query = app.oauth_request().unwrap();
-        assert_eq!(query.operation, Operation::Query);
-        assert_eq!(query.start, original);
+        assert_eq!(query.operation(), Operation::Query);
+        assert!(matches!(&query.call, Call::Query(observation) if observation.attempt == original));
         assert_eq!(query.epoch, "new-epoch");
         let old = login(&app, Phase::Authenticated);
         app.oauth_completed(unknown, Ok(Output::Login(old)));
@@ -1002,6 +1126,7 @@ mod tests {
             "/unused".into(),
             I18n::new(LocalePreference::Explicit(Locale::En), Locale::En),
         );
+        app.providers = crate::providers::fixtures::catalog();
         app.connection = ConnectionState::Connected {
             root_id: ROOT.into(),
             epoch: "epoch".into(),
@@ -1023,13 +1148,13 @@ mod tests {
             &mut reader,
             &mut writer,
             "oauth.enrollment.query",
-            |_| json!({"provider":"openai-codex","enabled":true}),
+            |frame| json!({"provider":frame["input"]["provider"],"enabled":true}),
         )
         .await;
         render(&mut app, 80, 24);
         act(&mut app, Command::Begin);
         rpc(&mut app, &client, &mut reader, &mut writer, "oauth.login.start", |frame|
-            json!({"attemptId":frame["input"]["attemptId"],"connection":{"connectionId":"connection","slug":"codex","providerType":"openai-codex"},"phase":"awaiting_authorization"})).await;
+            json!({"attemptId":frame["input"]["attemptId"],"connection":{"connectionId":"connection","slug":frame["input"]["target"]["slug"],"provider":frame["input"]["target"]["provider"]},"phase":"awaiting_authorization"})).await;
         write(&mut writer, json!({"kind":"client.capability.service_call","registrationId":service.registration_id,
             "invocationId":"presentation","serviceId":"oauth_presentation","version":"1","method":"open_external",
             "input":{"url":"https://login.example/device","stateHint":"CODE-1234"}})).await;
@@ -1080,12 +1205,21 @@ mod tests {
             .unwrap()
             .attempt_id
             .clone();
+        let authenticated = serde_json::to_value(login(&app, Phase::Authenticated)).unwrap();
         app.apply(Action::Manage(Manage::Close));
         app.management.oauth.next_poll = Some(Instant::now());
-        rpc(&mut app, &client, &mut reader, &mut writer, "oauth.login.query", |frame| {
-            assert_eq!(frame["input"], json!({"attemptId":attempt}));
-            json!({"attemptId":attempt,"connection":{"connectionId":"connection","slug":"codex","providerType":"openai-codex"},"phase":"authenticated"})
-        }).await;
+        rpc(
+            &mut app,
+            &client,
+            &mut reader,
+            &mut writer,
+            "oauth.login.query",
+            |frame| {
+                assert_eq!(frame["input"], json!({"attemptId":attempt}));
+                authenticated
+            },
+        )
+        .await;
         assert!(app.management.oauth.terminal());
         assert!(app.management.dialog.is_none());
         assert!(app.management.oauth.display.is_none());

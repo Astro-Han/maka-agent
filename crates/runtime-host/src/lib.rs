@@ -22,7 +22,6 @@ mod controllers;
 mod execution;
 pub mod oauth;
 pub mod plugins;
-mod provider_route;
 pub mod sandbox;
 pub mod server;
 pub mod session;

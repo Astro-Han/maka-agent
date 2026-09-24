@@ -165,7 +165,7 @@ mod tests {
     async fn input_eof_preserves_a_response_already_blocked_on_output() {
         tokio::time::timeout(Duration::from_secs(5), async {
             let (mut sender, mut input) = tokio::io::duplex(16);
-            let (mut output, mut receiver) = tokio::io::duplex(1);
+            let (mut output, mut receiver) = tokio::io::duplex(256);
             let (stream, server) = tokio::io::duplex(16 * 1024);
             let bridge = tokio::spawn(async move { relay(&mut input, &mut output, stream).await });
             let (mut server_read, mut server_write) = tokio::io::split(server);

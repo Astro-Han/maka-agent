@@ -71,6 +71,7 @@ type HostConnectionsClient = Pick<
   | 'fetchConnectionModels'
   | 'getConnectionRequestHeaders'
   | 'loadConnectionCatalog'
+  | 'loadModelProviders'
   | 'queryCredential'
   | 'removeConnection'
   | 'replaceConnectionRequestHeaders'
@@ -92,6 +93,8 @@ export function registerRuntimeHostConnectionsIpc(
   deps: RuntimeHostConnectionsIpcDeps,
 ): void {
   const snapshot = () => deps.client.loadConnectionCatalog();
+
+  handleReconnectableRead(deps.ipcMain, 'connections:getProviders', () => deps.client.loadModelProviders());
 
   handleReconnectableRead(deps.ipcMain, 'connections:getSnapshot', async () => {
     const catalog = await snapshot();
@@ -141,17 +144,6 @@ export function registerRuntimeHostConnectionsIpc(
       : defaultTargetForConnection(requireConnectionIdentity(catalog, identity));
     requireCommitted(
       await deps.client.setDefaultConnectionTarget(catalog.revision, target),
-      'set default Connection',
-    );
-    deps.emitConnectionListChanged();
-  });
-  deps.ipcMain.handle('connections:setDefaultBySlug', async (_event, slug: unknown) => {
-    const catalog = await snapshot();
-    requireCommitted(
-      await deps.client.setDefaultConnectionTarget(
-        catalog.revision,
-        defaultTargetForConnection(requireConnection(catalog, slug)),
-      ),
       'set default Connection',
     );
     deps.emitConnectionListChanged();
@@ -354,19 +346,6 @@ export function registerRuntimeHostConnectionsIpc(
       return projectHostConnectionTest(result);
     },
   );
-  deps.ipcMain.handle(
-    'connections:testBySlug',
-    async (_event, slug: unknown, options?: { model?: unknown }) => {
-      const current = requireConnection(await snapshot(), slug);
-      const model = options?.model;
-      if (model !== undefined && (typeof model !== 'string' || model.length === 0)) {
-        throw new Error('Invalid Connection test model');
-      }
-      const result = await deps.client.testConnection(current.connectionId, model);
-      deps.emitConnectionListChanged();
-      return projectHostConnectionTest(result);
-    },
-  );
 }
 
 export function projectHostConnectionTest(result: ConnectionTestRunResult): ConnectionTestResult {
@@ -394,42 +373,11 @@ export function projectHostConnectionTest(result: ConnectionTestRunResult): Conn
 export function projectHostConnections(
   catalog: ConnectionCatalogSnapshot,
 ): ProjectedLlmConnection[] {
-  return catalog.connections.map((connection) => {
-    const defaultModel =
-      catalog.defaultTarget?.connectionId === connection.connectionId
-        ? catalog.defaultTarget.modelId
-        : '';
-    return {
-      connectionId: connection.connectionId,
-      slug: connection.slug,
-      name: connection.name,
-      providerType: connection.providerType,
-      ...(connection.baseUrl === undefined ? {} : { baseUrl: connection.baseUrl }),
-      enabled: connection.enabled,
-      defaultModel,
+  return catalog.connections.map((connection) => ({
+      ...connection,
       enabledModelIds: [...connection.enabledModelIds],
       models: [...connection.models],
-      catalogEntries: connection.catalogEntries,
-      ...(connection.modelOverrides === undefined
-        ? {}
-        : { modelOverrides: connection.modelOverrides }),
-      ...(connection.requestBodyOverlay === undefined
-        ? {}
-        : { requestBodyOverlay: connection.requestBodyOverlay }),
-      ...(connection.modelSource === undefined ? {} : { modelSource: connection.modelSource }),
-      ...(connection.lastTest === undefined
-        ? {}
-        : {
-            lastTestStatus: connection.lastTest.status,
-            lastTestAt: connection.lastTest.checkedAt,
-            ...(connection.lastTest.errorClass === undefined
-              ? {}
-              : { lastTestMessage: connection.lastTest.errorClass }),
-          }),
-      createdAt: 0,
-      updatedAt: connection.revision,
-    };
-  });
+  }));
 }
 
 async function updateCredential(

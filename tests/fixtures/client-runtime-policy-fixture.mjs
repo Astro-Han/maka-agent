@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { createDefaultRuntimePolicy } from '../../packages/core/src/runtime-policy.ts';
 
 export const proxyLocator = { scope: 'network_proxy', kind: 'password' };
@@ -55,34 +56,14 @@ export async function settingsSnapshot(request) {
 export async function configureModel(request, baseUrl = 'http://127.0.0.1:9/v1') {
   const initial = await request('connection.catalog.query', { kind: 'start' });
   assert.equal(initial.revision, 0);
-  const created = await request('connection.catalog.create', {
-    expectedCatalogRevision: initial.revision,
-    connection: {
-      slug: 'runtime-policy',
-      name: 'Runtime policy fixture',
-      providerType: 'openai-compatible',
-      baseUrl,
-      enabled: true,
-      enabledModelIds: ['fixture-model'],
-    },
+  const created = await createModelConnection(request, {
+    providerName: 'openai-compatible',
+    slug: 'runtime-policy',
+    name: 'Runtime policy fixture',
+    baseUrl: baseUrl,
+    apiKey: 'runtime-policy-test-model-key',
+    enabledModelIds: ['fixture-model'],
   });
-  assert.equal(created.kind, 'committed');
-  const credential = await request('credential.vault.set', {
-    locator: {
-      scope: 'connection',
-      connectionId: created.connection.connectionId,
-      kind: 'api_key',
-    },
-    expected: null,
-    expectedConnection: {
-      ...created.connection,
-      slug: 'runtime-policy',
-      providerType: 'openai-compatible',
-      effectiveBaseUrl: baseUrl,
-    },
-    secret: 'runtime-policy-test-model-key',
-  });
-  assert.equal(credential.kind, 'committed');
   const selected = await request('connection.catalog.set-default-target', {
     expectedCatalogRevision: created.catalogRevision,
     target: { connectionId: created.connection.connectionId, modelId: 'fixture-model' },

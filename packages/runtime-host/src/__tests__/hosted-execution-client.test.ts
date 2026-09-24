@@ -27,13 +27,17 @@ import {
   runHostedExecutionWithDependencies,
 } from '../client/hosted-execution.js';
 
-test('real startup preparation failure reaches the hosted execution result', async () => {
+test('missing native CLI fails startup without admitting execution', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'maka-hosted-startup-error-'));
   try {
     const rootPath = join(directory, 'file');
     await writeFile(rootPath, 'not a directory');
-    const result = await runHostedExecution({ ...input(), rootPath });
-    assert.match(result.failureReason ?? '', /invalid_root/);
+    const result = await runHostedExecution({
+      ...input(),
+      rootPath,
+      executable: join(directory, 'missing-maka'),
+    });
+    assert.equal(result.failureReason, 'Runtime Host did not start: internal_startup_failure');
     assert.doesNotMatch(result.failureReason ?? '', /host_unresponsive/);
   } finally {
     await rm(directory, { recursive: true, force: true });

@@ -21,7 +21,7 @@ use super::{Executions, Result, internal};
 use std::sync::Arc;
 
 impl Executions {
-    /// Called before publishing readiness, after reconciling abandoned effects.
+    /// Called after initial plugin activation and abandoned-effect reconciliation.
     /// Pending rows have no canonical delivery: this starts their accepted work,
     /// never an old model request or a dispatched tool with an unknown outcome.
     pub(crate) async fn recover_messages(self: &Arc<Self>) -> Result<()> {

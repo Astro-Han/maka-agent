@@ -283,6 +283,7 @@ export const REMOTE_OWNER_OPERATION_GRANTS = Object.freeze([
   'connection.catalog.create',
   'connection.catalog.query',
   'executor.catalog.query',
+  'model.provider.catalog.query',
   'connection.catalog.remove',
   'connection.catalog.set-default-target',
   'connection.catalog.update',

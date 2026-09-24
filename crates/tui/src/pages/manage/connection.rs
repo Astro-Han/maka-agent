@@ -31,7 +31,7 @@ pub enum Change {
     ModelOverrides,
     FetchModels,
     Test,
-    Endpoint,
+    Configuration,
     Enable,
     Disable,
     Remove,
@@ -43,7 +43,7 @@ impl Change {
             Self::ModelOverrides => "connection-model-overrides",
             Self::FetchModels => "connection-models-fetch",
             Self::Test => "connection-test",
-            Self::Endpoint => "connection-endpoint",
+            Self::Configuration => "connection-configuration",
             Self::Enable => "connection-enable",
             Self::Disable => "connection-disable",
             Self::Remove => "connection-remove",
@@ -55,7 +55,7 @@ impl Change {
             Self::ModelOverrides => "model-profile-note",
             Self::FetchModels => "connection-models-fetch-note",
             Self::Test => "connection-test-note",
-            Self::Endpoint => "connection-endpoint-note",
+            Self::Configuration => "connection-configuration-note",
             Self::Enable => "connection-enable-note",
             Self::Disable => "connection-disable-note",
             Self::Remove => "connection-remove-note",
@@ -72,12 +72,10 @@ pub(super) fn update(row: &Row, kind: Kind, name: &str) -> UpdateCatalogConnecti
             } else {
                 row.name.clone()
             },
-            base_url: if kind == Kind::Connection(Change::Endpoint) {
-                // The review step has already canonicalized and validated this value.
-                validation::normalize_base_url(Some(name), Some(&row.provider))
-                    .expect("reviewed endpoint")
+            configuration: if kind == Kind::Connection(Change::Configuration) {
+                serde_json::from_str(name).expect("reviewed provider configuration")
             } else {
-                row.base_url.clone()
+                row.configuration.clone()
             },
             enabled: match kind {
                 Kind::Connection(Change::Enable) => true,
@@ -116,7 +114,7 @@ pub(super) async fn execute(
         }
         Kind::Rename
         | Kind::Connection(
-            Change::Endpoint
+            Change::Configuration
             | Change::Enable
             | Change::Disable
             | Change::EnabledModels
@@ -158,30 +156,24 @@ impl App {
             entity: Entity::Connection(row.clone()),
         };
         let mut kinds = vec![];
-        if row.provider != "gemini-cli" {
-            // The Host retires this provider: removal only.
-            kinds.push(Kind::Rename);
-            kinds.push(Kind::Connection(Change::EnabledModels));
-            kinds.push(Kind::Connection(Change::ModelOverrides));
-            if row.enabled {
+        kinds.push(Kind::Rename);
+        kinds.push(Kind::Connection(Change::EnabledModels));
+        kinds.push(Kind::Connection(Change::ModelOverrides));
+        if row.enabled
+            && let Some(provider) = self.providers.find(&row.provider)
+        {
+            if provider.descriptor.discovery {
                 kinds.push(Kind::Connection(Change::FetchModels));
-                kinds.push(Kind::Connection(Change::Test));
             }
-            if validation::provider_auth_kind(&row.provider) == Ok(ProviderAuthKind::ApiKey) {
-                kinds.push(Kind::Credential(super::credentials::Change::Set));
-                kinds.push(Kind::Credential(super::credentials::Change::Clear));
-            }
-            if validation::provider_auth_kind(&row.provider)
-                .is_ok_and(|auth| auth != ProviderAuthKind::OauthToken)
-            {
-                kinds.push(Kind::Connection(Change::Endpoint));
-            }
-            kinds.push(Kind::Connection(if row.enabled {
-                Change::Disable
-            } else {
-                Change::Enable
-            }));
+            kinds.push(Kind::Connection(Change::Test));
         }
+        kinds.push(Kind::Credential(super::credentials::Change::Clear));
+        kinds.push(Kind::Connection(Change::Configuration));
+        kinds.push(Kind::Connection(if row.enabled {
+            Change::Disable
+        } else {
+            Change::Enable
+        }));
         kinds.push(Kind::Connection(Change::Remove));
         kinds
             .into_iter()
@@ -231,7 +223,7 @@ impl App {
                     let mut changed = (**basis).clone();
                     let changes = update(&changed, ticket.kind, &ticket.text).changes;
                     changed.name = changes.name;
-                    changed.base_url = changes.base_url;
+                    changed.configuration = changes.configuration;
                     changed.enabled = changes.enabled;
                     if let Some(ids) = &ticket.enabled_model_ids {
                         changed.model_ids = ids.clone();
@@ -254,20 +246,14 @@ impl App {
     }
 }
 
-pub(super) fn endpoint(row: &Row, text: &str) -> Result<String, &'static str> {
-    let normalized = validation::normalize_base_url(Some(text), Some(&row.provider))
-        .map_err(|_| "connection-endpoint-invalid")?;
-    let effective = normalized.as_deref().unwrap_or(
-        validation::provider_default_base_url(&row.provider)
-            .map_err(|_| "connection-endpoint-invalid")?,
-    );
-    if effective.is_empty() {
-        return Err("connection-endpoint-required");
+pub(super) fn configuration(row: &Row, text: &str) -> Result<String, &'static str> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|_| "connection-configuration-invalid")?;
+    validation::provider_configuration(&value).map_err(|_| "connection-configuration-invalid")?;
+    if value == row.configuration {
+        return Err("connection-configuration-unchanged");
     }
-    if normalized == row.base_url {
-        return Err("connection-endpoint-unchanged");
-    }
-    Ok(effective.into())
+    Ok(value.to_string())
 }
 
 #[cfg(test)]
@@ -280,18 +266,19 @@ mod tests {
     const ID: &str = "b746eb13-287c-4f3a-8590-dac93c0a1253";
 
     fn load(app: &mut App) {
+        app.providers = crate::providers::fixtures::catalog();
         app.connections.refresh();
         app.connections.query().unwrap();
         app.connections.complete(Ok(json!({"kind":"page","revision":10,"connectionCount":1,
             "defaultTarget":null,"nextCursor":null,"items":[
             {"kind":"connection","connectionIndex":0,"connectionId":ID,"revision":7,"slug":"fixture","name":"Fixture",
-                "providerType":"openai-compatible","enabled":true,"enabledModelIdCount":1,"baseUrl":"http://127.0.0.1/v1"},
+                "provider":crate::providers::fixtures::entry("openai-compatible", false).identity,"configuration":{"baseUrl":"http://127.0.0.1/v1"},"enabled":true,"enabledModelIdCount":1},
             {"kind":"enabled_model_id","connectionIndex":0,"itemIndex":0,"modelId":"model"}
         ]})));
     }
 
     #[test]
-    fn endpoint_review_shows_the_complete_destination_and_never_replays_uncertain_changes() {
+    fn configuration_review_preserves_provider_data_and_never_replays_uncertain_changes() {
         let mut app = App::new(
             "/unused".into(),
             I18n::new(LocalePreference::Explicit(Locale::En), Locale::En),
@@ -309,57 +296,30 @@ mod tests {
         let Entity::Connection(row) = &target.entity else {
             panic!()
         };
-        for invalid in [
-            "file:///tmp/model",
-            "https://user:secret@example.org/v1",
-            "https://example.org/v1?key=value",
-            "https://example.org/#fragment",
-        ] {
-            assert_eq!(endpoint(row, invalid), Err("connection-endpoint-invalid"));
+        for invalid in ["", "[]", "null", "https://example.org/v1"] {
+            assert_eq!(
+                configuration(row, invalid),
+                Err("connection-configuration-invalid")
+            );
         }
-        assert_eq!(endpoint(row, ""), Err("connection-endpoint-required"));
         assert_eq!(
-            endpoint(row, "http://127.0.0.1/v1"),
-            Err("connection-endpoint-unchanged")
+            configuration(row, r#"{"baseUrl":"http://127.0.0.1/v1"}"#),
+            Err("connection-configuration-unchanged")
         );
-        let mut provider = (**row).clone();
-        provider.provider = "openai".into();
-        assert_eq!(
-            endpoint(&provider, " ").unwrap(),
-            "https://api.openai.com/v1"
-        );
-        assert!(
-            update(
-                &provider,
-                Kind::Connection(Change::Endpoint),
-                "https://api.openai.com/v1"
-            )
-            .changes
-            .base_url
-            .is_none()
-        );
-        provider.provider = "openai-codex".into();
-        app.connections.rows = vec![std::sync::Arc::new(provider)];
-        assert!(
-            !app.management_commands()
-                .iter()
-                .any(|(_, key)| *key == "connection-endpoint")
-        );
-        load(&mut app);
         app.apply(Action::Manage(Command::Open(
             target,
-            Kind::Connection(Change::Endpoint),
+            Kind::Connection(Change::Configuration),
         )));
         let mut screen = Terminal::new(TestBackend::new(80, 24)).unwrap();
         screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
-        app.input(Event::Paste("https://new.example.org/v1".into()));
+        let canonical = r#"{"region":"eu","tenant":"new"}"#;
+        app.input(Event::Paste(canonical.into()));
         assert!(
             app.management_request().is_none(),
             "editing does not dispatch"
         );
         app.apply(Action::Manage(Command::Save));
         assert!(app.management.dialog.as_ref().unwrap().reviewing);
-        let canonical = "https://new.example.org/v1";
         for locale in Locale::ALL {
             app.i18n = I18n::new(LocalePreference::Explicit(locale), Locale::En);
             for (width, height) in [(80, 24), (45, 24), (25, 10)] {
@@ -385,7 +345,8 @@ mod tests {
                         .collect();
                     assert!(compact(&text).contains(canonical));
                     assert!(
-                        compact(&text).contains(&compact(&app.i18n.text(Change::Endpoint.note())))
+                        compact(&text)
+                            .contains(&compact(&app.i18n.text(Change::Configuration.note())))
                     );
                 }
                 assert!(app.i18n.diagnostics().is_empty());
@@ -406,16 +367,38 @@ mod tests {
         app.apply(
             app.management_commands()
                 .into_iter()
-                .find(|(_, key)| *key == "connection-endpoint")
+                .find(|(_, key)| *key == "connection-configuration")
                 .unwrap()
                 .0,
         );
         screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
-        app.input(Event::Paste(canonical.into()));
+        let configuration = json!({"tenant":"x".repeat(4096),"zone":"visible-tail"}).to_string();
+        app.input(Event::Paste(configuration.clone()));
         app.apply(Action::Manage(Command::Save));
         screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+        assert!(
+            app.management_enabled(&Command::Save),
+            "large configurations remain reviewable"
+        );
+        app.input(Event::Key(KeyEvent::new(
+            KeyCode::End,
+            KeyModifiers::CONTROL,
+        )));
+        app.input(Event::Key(KeyEvent::new(
+            KeyCode::Delete,
+            KeyModifiers::NONE,
+        )));
+        screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+        let displayed: String = screen
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(displayed.contains("visible-tail"));
         let ticket = app.management_request().unwrap();
-        assert_eq!(ticket.text, canonical);
+        assert_eq!(ticket.text, configuration);
         app.management_completed(ticket, Err(RequestFailure::Unknown(ClientError::Timeout)));
         assert!(!app.management_enabled(&Command::Edit));
         assert!(!app.management_enabled(&Command::Save));
@@ -520,8 +503,8 @@ mod tests {
         let renamed = update(row, Kind::Rename, "New name");
         assert_eq!(renamed.expected.revision, 7);
         assert_eq!(
-            renamed.changes.base_url.as_deref(),
-            Some("http://127.0.0.1/v1")
+            renamed.changes.configuration,
+            json!({"baseUrl":"http://127.0.0.1/v1"})
         );
         assert_eq!(renamed.changes.enabled_model_ids, ["model"]);
         let wire = serde_json::to_value(renamed).unwrap();
@@ -734,7 +717,7 @@ mod tests {
         let current = std::sync::Arc::make_mut(&mut app.connections.rows[0]);
         current.revision = 8;
         current.name = "Updated".into();
-        current.base_url = Some("https://updated.example/v1".into());
+        current.configuration = json!({"baseUrl":"https://updated.example/v1"});
         assert!(app.enabled(&action));
         app.apply(action.clone());
         let dialog = app.management.dialog.as_ref().unwrap();
@@ -744,7 +727,10 @@ mod tests {
             panic!()
         };
         assert_eq!(row.revision, 8);
-        assert_eq!(row.base_url.as_deref(), Some("https://updated.example/v1"));
+        assert_eq!(
+            row.configuration,
+            json!({"baseUrl":"https://updated.example/v1"})
+        );
 
         // A later read must not silently authorize the edited form on a new basis.
         std::sync::Arc::make_mut(&mut app.connections.rows[0]).revision = 9;

@@ -42,27 +42,7 @@ impl Method {
     }
 }
 
-/// Host-owned opaque secret. The provider owns its format and refresh lead time.
-/// No Debug: neither private state nor submitted form data is diagnostic output.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Credential {
-    pub secret: String,
-    pub refresh_at: Option<u64>,
-}
-impl Credential {
-    pub fn validate(&self) -> Result<(), Error> {
-        if self.secret.is_empty()
-            || self.secret.len() > 64 * 1024
-            || self.refresh_at.is_some_and(|v| v > 9_007_199_254_740_991)
-        {
-            return Err(Error::Invalid(
-                "invalid provider credential envelope".into(),
-            ));
-        }
-        Ok(())
-    }
-}
+pub use maka_runtime::provider::Credential;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

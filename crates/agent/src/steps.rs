@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(super) async fn run(
     inner: &Arc<Inner>,
-    input: &RunInput,
+    input: &mut RunInput,
     catalog: &maka_tools::ToolCatalog,
     max_steps: usize,
     cancellation: &CancellationToken,
@@ -34,7 +34,7 @@ pub(super) async fn run(
     handoff: &crate::HandoffGate,
 ) -> Result<maka_runtime::event::InvocationOutcome, RunError> {
     let lane = maka_model::Conversation::default();
-    let tools = RunTools::new(
+    let mut tools = RunTools::new(
         inner.log.clone(),
         input.invocation.clone(),
         catalog.clone(),
@@ -122,6 +122,7 @@ pub(super) async fn run(
             if cancellation.is_cancelled() {
                 return Err(RunError::Cancelled);
             }
+            input.refresh_model(cancellation).await?;
             let mut source = inner
                 .log
                 .read_model_context(
@@ -158,7 +159,11 @@ pub(super) async fn run(
                         8 * 1024 * 1024,
                     )
                     .await?;
+                // Compaction makes its own logical requests. The following
+                // main step must observe any provider change made meanwhile.
+                input.refresh_model(cancellation).await?;
             }
+            tools.set_model(input.provider.tool_context());
             let request_tools = tools
                 .capture(&input.configuration.cwd, cancellation.clone())
                 .await?;

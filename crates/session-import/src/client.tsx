@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { copy } from './client/copy.js';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ClientContext, ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
 import type { ModelChoice, ModelChoices, SandboxMode } from '@maka-agent/plugin-sdk/host';
@@ -38,7 +40,7 @@ export function ImportPage({
   locale,
   onOpenSession,
 }: ClientSlots['settings.page'] & { context: ClientContext }) {
-  const zh = locale !== 'en';
+  const t = copy[locale];
   const api = useMemo(() => connect(context), [context]);
   const epoch = useRef(0);
   const [snapshot, setSnapshot] = useState<Snapshot>();
@@ -222,30 +224,20 @@ export function ImportPage({
   return (
     <section data-maka-import>
       <header>
-        <h2>{zh ? '导入外部会话' : 'Import external conversations'}</h2>
+        <h2>{t.title}</h2>
         <button type="button" disabled={busy} onClick={() => setReload((value) => value + 1)}>
-          {zh ? '刷新状态' : 'Refresh state'}
+          {t.refresh}
         </button>
       </header>
-      <p>
-        {zh
-          ? '创建独立副本，保留历史观察；不会重放工具，也不会继承来源的执行权限。'
-          : 'Create an independent copy of historical observations. Tools are not replayed and source permissions are not inherited.'}
-      </p>
+      <p>{t.description}</p>
       {error && <p role="alert">{error}</p>}
-      {busy && (
-        <p role="status">
-          {zh
-            ? '正在处理…关闭页面不会撤销 Host 已接受的工作。'
-            : 'Working… Leaving this page does not undo work accepted by the Host.'}
-        </p>
-      )}
+      {busy && <p role="status">{t.working}</p>}
       {snapshot && (
         <>
           <Sources
             snapshot={snapshot}
             busy={locked}
-            zh={zh}
+            locale={locale}
             save={(sources) => {
               void run(async () => {
                 const result = await api(
@@ -271,7 +263,7 @@ export function ImportPage({
             }}
           >
             <label>
-              {zh ? '来源' : 'Source'}
+              {t.source}
               <select
                 value={sourceId}
                 disabled={locked}
@@ -280,7 +272,7 @@ export function ImportPage({
                   invalidate();
                 }}
               >
-                <option value="">{zh ? '请选择来源' : 'Choose a source'}</option>
+                <option value="">{t.chooseSource}</option>
                 {snapshot.configuration.sources.map((source) => (
                   <option key={source.id} value={source.id}>
                     {source.name}
@@ -289,7 +281,7 @@ export function ImportPage({
               </select>
             </label>
             <label>
-              {zh ? '搜索' : 'Search'}
+              {t.search}
               <input
                 value={text}
                 disabled={locked}
@@ -300,7 +292,7 @@ export function ImportPage({
               />
             </label>
             <label>
-              {zh ? '来源工作目录筛选' : 'Source workspace filter'}
+              {t.workspaceFilter}
               <input
                 value={cwd}
                 disabled={locked}
@@ -320,16 +312,16 @@ export function ImportPage({
                   invalidate();
                 }}
               />
-              {zh ? '包括归档' : 'Include archived'}
+              {t.includeArchived}
             </label>
             <button type="submit" disabled={locked || !sourceId}>
-              {zh ? '读取目录' : 'Read catalog'}
+              {t.readCatalog}
             </button>
           </form>
           {page && (
             <fieldset disabled={locked}>
-              <legend>{zh ? '选择会话' : 'Choose a conversation'}</legend>
-              {!page.entries.length && <p>{zh ? '没有匹配会话' : 'No matching conversations'}</p>}
+              <legend>{t.chooseConversation}</legend>
+              {!page.entries.length && <p>{t.noConversations}</p>}
               {page.entries.map((entry) => (
                 <label key={entry.id + entry.path} className="import-entry">
                   <input
@@ -344,24 +336,22 @@ export function ImportPage({
                     <small>
                       {entry.updatedAt
                         ? new Date(entry.updatedAt).toLocaleString(locale)
-                        : zh
-                          ? '时间未知'
-                          : 'Unknown time'}
+                        : t.unknownTime}
                     </small>
                   </span>
                 </label>
               ))}
               {page.next && (
                 <button type="button" onClick={() => catalog(page.next)}>
-                  {zh ? '下一页' : 'Next page'}
+                  {t.nextPage}
                 </button>
               )}
             </fieldset>
           )}
           <fieldset disabled={locked}>
-            <legend>{zh ? '新会话的执行配置' : 'Execution settings for the new Session'}</legend>
+            <legend>{t.executionSettings}</legend>
             <label>
-              {zh ? '目标 Host 工作目录' : 'Destination Host workspace'}
+              {t.destinationWorkspace}
               <input
                 required
                 value={destination}
@@ -369,7 +359,7 @@ export function ImportPage({
               />
             </label>
             <label>
-              {zh ? '搜索模型' : 'Find a model'}
+              {t.findModel}
               <input value={modelQuery} onChange={(event) => setModelQuery(event.target.value)} />
             </label>
             <button
@@ -387,19 +377,13 @@ export function ImportPage({
                 })
               }
             >
-              {zh ? '查询模型' : 'Search models'}
+              {t.searchModels}
             </button>
-            {models && !models.complete && (
-              <p>
-                {zh
-                  ? '结果不完整，请缩小模型搜索范围。'
-                  : 'Results are incomplete. Refine the model search.'}
-              </p>
-            )}
+            {models && !models.complete && <p>{t.incompleteModels}</p>}
             <label>
-              {zh ? '模型' : 'Model'}
+              {t.model}
               <select value={model} onChange={(event) => setModel(event.target.value)}>
-                <option value="">{zh ? '请选择模型' : 'Choose a model'}</option>
+                <option value="">{t.chooseModel}</option>
                 {models?.models.map((choice) => (
                   <option key={modelKey(choice)} value={modelKey(choice)}>
                     {choice.connectionName} / {choice.displayName}
@@ -408,14 +392,14 @@ export function ImportPage({
               </select>
             </label>
             <label>
-              {zh ? '沙箱' : 'Sandbox'}
+              {t.sandbox}
               <select
                 value={sandbox}
                 onChange={(event) => setSandbox(event.target.value as SandboxMode)}
               >
-                <option value="read-only">{zh ? '只读' : 'Read only'}</option>
-                <option value="workspace-write">{zh ? '工作区可写' : 'Workspace write'}</option>
-                <option value="danger-full-access">{zh ? '完全绕过沙箱' : 'Bypass sandbox'}</option>
+                <option value="read-only">{t.readOnly}</option>
+                <option value="workspace-write">{t.workspaceWrite}</option>
+                <option value="danger-full-access">{t.bypass}</option>
               </select>
             </label>
           </fieldset>
@@ -425,27 +409,17 @@ export function ImportPage({
               disabled={busy || (!pending && (!selected || !model || !destination.trim()))}
               onClick={importSelection}
             >
-              {pending
-                ? zh
-                  ? '重试同一次导入'
-                  : 'Retry this import'
-                : zh
-                  ? '创建导入副本'
-                  : 'Create imported copy'}
+              {pending ? t.retry : t.create}
             </button>
             {pending && (
               <button type="button" disabled={busy} onClick={() => history(null)}>
-                {zh ? '查看持久记录' : 'View saved imports'}
+                {t.savedImports}
               </button>
             )}
           </div>
           {pending && (
             <aside>
-              <p>
-                {zh
-                  ? '重试会沿用同一操作。若需更改输入，可放下这次尝试；这不会撤销 Host 已接受的导入，之后新建会产生另一份副本。'
-                  : 'Retry keeps the same operation. To change the input, set this attempt aside. This does not undo an import accepted by the Host; starting again creates another copy.'}
-              </p>
+              <p>{t.retryDescription}</p>
               <button
                 type="button"
                 disabled={busy}
@@ -454,7 +428,7 @@ export function ImportPage({
                   setSelected(undefined);
                 }}
               >
-                {zh ? '放下这次尝试' : 'Set aside this attempt'}
+                {t.setAside}
               </button>
             </aside>
           )}
@@ -463,7 +437,7 @@ export function ImportPage({
       <History
         page={copies}
         busy={busy}
-        zh={zh}
+        locale={locale}
         next={history}
         settle={settle}
         open={

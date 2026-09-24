@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Command, Manage, provider_name};
+use super::{Command, Manage};
 use crate::{
     app::{Action, App},
     view::{button, safe, tone},
@@ -37,7 +37,7 @@ pub(in crate::pages::manage) fn draw(
     base: Style,
 ) {
     app.hits.clear();
-    let picking = app.management.oauth.attempt.is_none() && app.management.oauth.existing.is_none();
+    let picking = app.management.oauth.attempt.is_none();
     let presenting = app.management.oauth.display.is_some();
     let customizable = app.management.oauth.customizable();
     let expanded = customizable && app.management.oauth.identity.expanded;
@@ -45,7 +45,7 @@ pub(in crate::pages::manage) fn draw(
         app.management.oauth.identity.invalidate_geometry();
     }
     let height = if expanded {
-        20
+        22
     } else if picking {
         16
     } else if presenting {
@@ -101,7 +101,7 @@ pub(in crate::pages::manage) fn draw(
         };
     if !picking {
         frame.render_widget(
-            Paragraph::new(provider_name(state.provider))
+            Paragraph::new(safe(&state.provider_name()))
                 .style(Style::default().add_modifier(Modifier::BOLD)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
@@ -174,38 +174,31 @@ pub(in crate::pages::manage) fn draw(
                 if expanded { "▾" } else { "▸" },
                 if expanded { "v" } else { ">" }
             ),
-            app.i18n.text(
-                if app
-                    .management
-                    .oauth
-                    .identity
-                    .fields
-                    .iter()
-                    .any(|field| !field.text().trim().is_empty())
-                {
-                    "oauth-identity-set"
-                } else {
-                    "oauth-identity"
-                }
-            )
+            app.i18n.text("oauth-identity")
         );
         crate::view::list_item(
             frame,
             app,
-            Rect::new(inner.x, inner.y + 6, inner.width, 1),
+            Rect::new(inner.x, inner.y + 2, inner.width, 1),
             &label,
             action,
             controls.get(focus) == Some(&Manage::Oauth(Command::Identity)),
         );
         if expanded {
-            for index in 0..2 {
+            let fields: Vec<_> = app.management.oauth.fields().collect();
+            for (position, index) in fields.into_iter().enumerate() {
                 let command = Command::Field(index);
                 let enabled = app.oauth_enabled(command);
                 let focused = enabled && controls.get(focus) == Some(&Manage::Oauth(command));
                 // Keep each label with its editor, then leave a quiet row
                 // between fields instead of packing content above empty space.
-                let y = inner.y + 8 + index as u16 * 3;
-                let label = app.i18n.text(command.label());
+                let y = inner.y + 4 + position as u16 * 2;
+                let mut label = app.i18n.text(command.label());
+                if index == 3
+                    && let Some(field) = app.management.oauth.identity.authentication_field()
+                {
+                    label.push_str(&format!(" · {}", safe(field)));
+                }
                 frame.render_widget(
                     Paragraph::new(label).style(Style::default().fg(if focused {
                         tone::accent(app.theme.colors())
@@ -220,8 +213,12 @@ pub(in crate::pages::manage) fn draw(
                     rect,
                 );
                 let field = &mut app.management.oauth.identity.fields[index];
-                field.draw(frame, rect, focused, app.theme.colors());
-                if field.text().is_empty() && !focused {
+                if index == 3 {
+                    field.draw_masked(frame, rect, focused, app.theme.colors());
+                } else {
+                    field.draw(frame, rect, focused, app.theme.colors());
+                }
+                if index < 2 && field.text().is_empty() && !focused {
                     frame.render_widget(
                         Paragraph::new(app.i18n.text("oauth-identity-default"))
                             .style(Style::default().fg(app.theme.colors().subtle)),
@@ -240,15 +237,14 @@ pub(in crate::pages::manage) fn draw(
     let mut right = inner.right();
     let mut copy_x = inner.x;
     for (index, command) in controls.iter().enumerate() {
-        let (label, rect) = if let Manage::Oauth(Command::Provider(provider)) = command {
-            let marker = if *provider == app.management.oauth.provider {
-                app.chrome.symbol("●", "*")
-            } else {
-                " "
-            };
+        let (label, rect) = if let Manage::Oauth(Command::Provider(_)) = command {
             (
-                format!("{marker} {}", provider_name(*provider)),
-                Rect::new(inner.x, inner.y + *provider as u16 * 2, inner.width, 1),
+                format!(
+                    "{} {}",
+                    safe(&app.management.oauth.provider_name()),
+                    app.chrome.symbol("›", ">")
+                ),
+                Rect::new(inner.x, inner.y, inner.width, 1),
             )
         } else if matches!(
             command,

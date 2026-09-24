@@ -20,8 +20,7 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionCredentialKind {
-    ApiKey,
-    OauthToken,
+    Provider,
     RequestHeaders,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

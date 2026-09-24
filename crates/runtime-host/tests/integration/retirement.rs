@@ -63,10 +63,21 @@ fn hello() -> Value {
 }
 
 async fn receive(frames: &mut mpsc::UnboundedReceiver<Value>) -> Value {
-    tokio::time::timeout(Duration::from_secs(5), frames.recv())
-        .await
-        .unwrap()
-        .unwrap()
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let frame = frames.recv().await.expect("Host reply channel closed");
+            if frame.get("requestId").is_some()
+                || matches!(
+                    frame["kind"].as_str(),
+                    Some("accepted" | "rejected" | "draining")
+                )
+            {
+                return frame;
+            }
+        }
+    })
+    .await
+    .unwrap()
 }
 
 async fn attach(

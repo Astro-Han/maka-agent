@@ -99,7 +99,7 @@ fn real_edits_show_request_diff_without_claiming_a_file_snapshot_and_copy_withou
     );
     tui.click_text("source.rs");
     use base64::Engine;
-    let full_path = directory.path().join("source.rs");
+    let full_path = directory.path().canonicalize().unwrap().join("source.rs");
     let encoded = base64::engine::general_purpose::STANDARD.encode(full_path.to_str().unwrap());
     tui.wait_output(format!("\x1b]52;c;{encoded}\x07").as_bytes());
     tui.wait_for("Copy request sent to terminal");
@@ -181,7 +181,7 @@ fn code_mode_patch_stops_after_failure_and_keeps_real_tools_visible() {
         let connection = catalog["items"].as_array().unwrap().iter().find(|item| item["kind"] == "connection").unwrap();
         let updated = client.request(Operation::ConnectionCatalogUpdate, json!({
             "expected":{"connectionId":connection["connectionId"],"revision":connection["revision"]},
-            "changes":{"name":"TUI fixture","baseUrl":url,"enabled":true,"enabledModelIds":["fixture-model"],
+            "changes":{"name":"TUI fixture","configuration":{"baseUrl":url},"enabled":true,"enabledModelIds":["fixture-model"],
                 "modelOverrides":{"fixture-model":{"contextWindow":128000,"codeMode":true,"applyPatch":true}}}
         })).await.unwrap();
         assert_eq!(updated["kind"], "committed");

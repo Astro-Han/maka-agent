@@ -407,10 +407,9 @@ impl Executions {
             .await
             .map_err(|error| failed(error.message))?,
         };
-        let provider =
-            super::super::provider::observe_binding(&self.configuration, &key, &model, thinking)
-                .await
-                .map_err(|error| failed(error.message))?;
+        let provider = super::super::provider::observe_binding(self, &key, &model, thinking)
+            .await
+            .map_err(|error| failed(error.message))?;
         let models = self.models.clone();
         let adapter = maka_model::adapters::resolve(
             &self.plugin_catalog.capture(&scope),

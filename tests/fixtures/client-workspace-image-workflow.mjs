@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -126,36 +127,16 @@ export async function verifyWorkspaceImage(connection, workspace, reopened) {
       );
     } else {
       await writeFile(source, png);
-      const created = await request('connection.catalog.create', {
-        expectedCatalogRevision: 0,
-        connection: {
-          slug: 'workspace-image',
-          name: 'Workspace image fixture',
-          providerType: 'openai',
-          baseUrl: model.baseUrl,
-          enabled: true,
-          enabledModelIds: ['gpt-4o'],
-          modelOverrides: { 'gpt-4o': { vision: true, codeMode: false } },
-        },
+      const created = await createModelConnection(request, {
+        providerName: 'openai',
+        slug: 'workspace-image',
+        name: 'Workspace image fixture',
+        baseUrl: model.baseUrl,
+        apiKey: 'workspace-image-fixture',
+        enabledModelIds: ['gpt-4o'],
+        modelOverrides: { 'gpt-4o': { vision: true, codeMode: false } },
       });
-      assert.equal(created.kind, 'committed');
       const basis = created.connection;
-      assert.equal(
-        (
-          await request('credential.vault.set', {
-            locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-            expected: null,
-            expectedConnection: {
-              ...basis,
-              slug: 'workspace-image',
-              providerType: 'openai',
-              effectiveBaseUrl: model.baseUrl,
-            },
-            secret: 'workspace-image-fixture',
-          })
-        ).kind,
-        'committed',
-      );
       await request('session.create', {
         sessionId: saved.sessionId,
         workspace: { kind: 'host_path', path: workspace },

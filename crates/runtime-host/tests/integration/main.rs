@@ -68,7 +68,6 @@ mod model_overrides;
 mod model_providers;
 mod oauth;
 mod oauth_execution;
-mod oauth_refresh;
 mod plugin_authorization;
 mod plugin_clients;
 mod plugin_commands;
@@ -109,6 +108,7 @@ mod support {
     #[cfg(unix)]
     pub(crate) mod execution_fixture;
     pub(crate) mod message_recovery;
+    pub(crate) mod model_connection;
     pub(crate) mod peer;
     #[cfg(unix)]
     pub(crate) mod question_model;

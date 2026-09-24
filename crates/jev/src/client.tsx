@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { copy } from './client/copy.js';
+
 import { useEffect, useRef, useState } from 'react';
 import type { ClientContext, ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
 type Settings = { enabled: boolean; url: string; model: string; timeoutMs: number };
@@ -44,13 +46,13 @@ function SettingsPage({
   context,
   locale,
 }: ClientSlots['settings.page'] & { context: ClientContext }) {
-  const zh = locale !== 'en';
+  const t = copy[locale];
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [secret, setSecret] = useState('');
   const [headers, setHeaders] = useState('{}');
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('');
+  const [tested, setTested] = useState(false);
   const [error, setError] = useState('');
   const version = useRef(0);
   const active = useRef(false);
@@ -63,7 +65,7 @@ function SettingsPage({
     setDraft(null);
     setSecret('');
     setHeaders('{}');
-    setStatus('');
+    setTested(false);
     setError('');
     void call({ kind: 'read' })
       .then((r) => {
@@ -84,8 +86,8 @@ function SettingsPage({
     active.current = true;
     setBusy(true);
     setError('');
-    setStatus('');
-    const generation = version.current;
+    setTested(false);
+    const generation = ++version.current;
     try {
       const result = await call(request);
       if (generation !== version.current || context.signal.aborted) return;
@@ -94,7 +96,7 @@ function SettingsPage({
         setDraft(result.snapshot.settings);
         setSecret('');
         setHeaders('{}');
-      } else setStatus(zh ? '连接测试成功' : 'Connection test succeeded');
+      } else setTested(true);
     } catch (e) {
       if (generation === version.current && !context.signal.aborted) setError(String(e));
     } finally {
@@ -107,15 +109,11 @@ function SettingsPage({
   const changed = draft && snapshot && JSON.stringify(draft) !== JSON.stringify(snapshot.settings);
   return (
     <section data-maka-jev>
-      <p>
-        {zh
-          ? '为插件提供 Jev 结构化决策。密钥分别保存到每个端点；更改 URL 后请为新端点配置密钥。隐私模式下禁止调用。'
-          : 'Structured Jev decisions for plugins. Keys are saved per endpoint; configure a key after changing the URL. Calls are disabled in incognito mode.'}
-      </p>
+      <p>{t.description}</p>
       {error && <p role="alert">{error}</p>}
-      {status && <p role="status">{status}</p>}
+      {tested && <p role="status">{t.testSucceeded}</p>}
       <button disabled={busy} onClick={() => void run({ kind: 'read' })}>
-        {zh ? '刷新' : 'Refresh'}
+        {t.refresh}
       </button>
       {snapshot && draft && (
         <fieldset disabled={busy}>
@@ -125,7 +123,7 @@ function SettingsPage({
               checked={draft.enabled}
               onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
             />
-            {zh ? '启用 Jev' : 'Enable Jev'}
+            {t.enable}
           </label>
           <label>
             URL
@@ -137,7 +135,7 @@ function SettingsPage({
             />
           </label>
           <label>
-            {zh ? '模型' : 'Model'}
+            {t.model}
             <input
               value={draft.model}
               maxLength={256}
@@ -145,7 +143,7 @@ function SettingsPage({
             />
           </label>
           <label>
-            {zh ? '超时（毫秒）' : 'Timeout (ms)'}
+            {t.timeout}
             <input
               type="number"
               min={100}
@@ -160,21 +158,21 @@ function SettingsPage({
               void run({ kind: 'configure', expectedRevision: snapshot.revision, settings: draft })
             }
           >
-            {zh ? '保存配置' : 'Save configuration'}
+            {t.save}
           </button>
           <label>
-            {zh ? '密钥' : 'API key'}
+            {t.apiKey}
             <input
               type="password"
               autoComplete="new-password"
               maxLength={4096}
               value={secret}
-              placeholder={snapshot.configured ? (zh ? '已保存' : 'Saved') : ''}
+              placeholder={snapshot.configured ? t.saved : ''}
               onChange={(e) => setSecret(e.target.value)}
             />
           </label>
           <label>
-            {zh ? '自定义请求头（JSON）' : 'Custom headers (JSON)'}
+            {t.headers}
             <textarea
               value={headers}
               maxLength={16000}
@@ -182,9 +180,7 @@ function SettingsPage({
             />
           </label>
           <p>
-            {zh
-              ? '保存会替换当前端点的全部认证与请求头。已保存的请求头：'
-              : 'Saving replaces all authentication and headers for this endpoint. Saved header names: '}
+            {t.replaceWarning}
             {snapshot.headerNames.join(', ') || '—'}
           </p>
           <button
@@ -198,11 +194,7 @@ function SettingsPage({
                   Array.isArray(parsed) ||
                   Object.values(parsed).some((v) => typeof v !== 'string')
                 )
-                  throw new Error(
-                    zh
-                      ? '请求头必须是字符串值的 JSON 对象'
-                      : 'Headers must be a JSON object with string values',
-                  );
+                  throw new Error(t.invalidHeaders);
                 void run({
                   kind: 'credential',
                   url: snapshot.settings.url,
@@ -217,7 +209,7 @@ function SettingsPage({
               }
             }}
           >
-            {zh ? '替换认证与请求头' : 'Replace authentication and headers'}
+            {t.replaceCredentials}
           </button>
           <button
             disabled={!!changed || !snapshot.configured}
@@ -230,13 +222,13 @@ function SettingsPage({
               })
             }
           >
-            {zh ? '删除密钥' : 'Remove key'}
+            {t.removeKey}
           </button>
           <button
             disabled={!!changed || !snapshot.configured || !snapshot.settings.enabled}
             onClick={() => void run({ kind: 'test', operationId: crypto.randomUUID() })}
           >
-            {zh ? '测试已保存配置' : 'Test saved configuration'}
+            {t.test}
           </button>
         </fieldset>
       )}

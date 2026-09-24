@@ -18,29 +18,30 @@
  */
 
 use super::*;
-use std::time::{SystemTime, UNIX_EPOCH};
+use maka_runtime::provider::Credential as Envelope;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(super) struct State {
-    pub credential: OAuthCredential,
+    pub credential: ProviderCredential,
     pub outcome: Outcome,
 }
 
 pub(super) enum Outcome {
     Ready,
-    // Keep a spent replacement on every SQL failure. Retrying persistence is
-    // safe; retrying the old remote grant to resolve uncertainty is not.
-    Replacement(String),
+    /// Keep a spent replacement on SQL failure. Retry persistence, not exchange.
+    Replacement(Envelope),
     Failed(String),
 }
 
 impl State {
     pub async fn resolve(
         &mut self,
-        provider: Provider,
-        client: Client,
+        provider: Binding,
+        connection: Connection,
+        context: Context,
         shutdown: &CancellationToken,
         superseded: &CancellationToken,
-    ) -> Result<ResolvedToken, ModelError> {
+    ) -> Result<ProviderCredential, ModelError> {
         if let Outcome::Failed(message) = &self.outcome {
             return Err(failure(message));
         }
@@ -52,76 +53,88 @@ impl State {
             .current_generation()
             .await
             .map_err(failure)?
-            .ok_or_else(|| failure("OAuth credential was superseded"))?;
+            .ok_or_else(|| failure("Provider credential was superseded"))?;
         if current.basis() != self.credential.basis() {
-            return Err(failure("OAuth credential was superseded"));
+            return Err(failure("Provider credential was superseded"));
         }
-        let tokens = Tokens::from_stored(self.credential.secret()).map_err(failure)?;
-        if tokens.expires_at.saturating_sub(now()?) > 5 * 60 * 1000 {
-            return Ok(ResolvedToken {
-                access_token: tokens.access_token,
-                credential: self.credential.clone(),
-            });
+        let now = now()?;
+        if self
+            .credential
+            .credential()
+            .refresh_at
+            .is_none_or(|at| at > now)
+        {
+            return Ok(self.credential.clone());
         }
         if shutdown.is_cancelled() || superseded.is_cancelled() {
             return Err(ModelError::Cancelled);
         }
-        let tokens = match client.refresh(provider, tokens).await {
-            Ok(tokens) => tokens,
-            Err(error) => {
-                // Even a transport error can follow a consumed rotating grant.
-                // All waiters observe this failure until a new credential is supplied.
-                self.outcome = Outcome::Failed(error.to_string());
+        let refresh = provider
+            .prepare_refresh(connection, self.credential.credential().clone())
+            .map_err(failure)?;
+        if !self.credential.claim_refresh().await.map_err(failure)? {
+            let message = "Provider refresh was already claimed; its outcome is unknown";
+            self.outcome = Outcome::Failed(message.into());
+            return Err(failure(message));
+        }
+        // JS already drains its exchange deadline; native callbacks must also
+        // settle within a bounded Host lifetime. A timeout never reuses a grant.
+        let result = tokio::time::timeout(Duration::from_secs(90), refresh.run(context)).await;
+        let replacement = match result {
+            Ok(Ok(credential)) => credential,
+            result => {
+                let error = match result {
+                    Ok(Err(error)) => error.to_string(),
+                    Err(_) => "Provider refresh outcome is unknown".into(),
+                    Ok(Ok(_)) => unreachable!(),
+                };
+                self.outcome = Outcome::Failed(error.clone());
                 return Err(failure(error));
             }
         };
-        self.outcome = Outcome::Replacement(serde_json::to_string(&tokens).map_err(failure)?);
+        self.outcome = Outcome::Replacement(replacement);
         self.settle().await?;
-        Ok(ResolvedToken {
-            access_token: tokens.access_token,
-            credential: self.credential.clone(),
-        })
+        Ok(self.credential.clone())
     }
 
     async fn settle(&mut self) -> Result<(), ModelError> {
         let Outcome::Replacement(replacement) = &self.outcome else {
             unreachable!("received replacement")
         };
-        // The same check handles an earlier unknown commit, including a lost
-        // acknowledgement. Never use a replacement without canonical proof.
         let current = self
             .credential
             .current_generation()
             .await
             .map_err(failure)?
-            .ok_or_else(|| failure("OAuth credential was superseded"))?;
+            .ok_or_else(|| failure("Provider credential was superseded"))?;
         let next = self
             .credential
             .basis()
             .revision
             .checked_add(1)
-            .ok_or_else(|| failure("OAuth credential revision exhausted"))?;
-        if current.basis().revision == next && current.secret() == replacement {
+            .ok_or_else(|| failure("Provider credential revision exhausted"))?;
+        // The complete envelope matters: refresh_at is Host scheduling authority.
+        if current.basis().revision == next && current.credential() == replacement {
             self.credential = current;
             self.outcome = Outcome::Ready;
             return Ok(());
         }
         if current.basis() != self.credential.basis() {
-            return Err(failure("OAuth credential was superseded"));
+            return Err(failure("Provider credential was superseded"));
         }
         self.credential
             .commit_refresh(replacement.clone(), now()?)
             .await
             .map_err(failure)?
-            .ok_or_else(|| failure("OAuth credential was superseded"))?;
+            .ok_or_else(|| failure("Provider credential was superseded"))?;
         let current = self
             .credential
             .current_generation()
             .await
             .map_err(failure)?
-            .ok_or_else(|| failure("OAuth credential was superseded"))?;
-        if current.basis().revision != next || current.secret() != replacement {
-            return Err(failure("OAuth credential was superseded"));
+            .ok_or_else(|| failure("Provider credential was superseded"))?;
+        if current.basis().revision != next || current.credential() != replacement {
+            return Err(failure("Provider credential was superseded"));
         }
         self.credential = current;
         self.outcome = Outcome::Ready;
@@ -135,5 +148,5 @@ fn now() -> Result<u64, ModelError> {
         .ok()
         .and_then(|time| u64::try_from(time.as_millis()).ok())
         .filter(|time| *time <= 9_007_199_254_740_991)
-        .ok_or_else(|| failure("Invalid system time for OAuth"))
+        .ok_or_else(|| failure("Invalid system time for credentials"))
 }

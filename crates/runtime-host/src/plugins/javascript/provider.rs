@@ -25,7 +25,7 @@ use futures_util::future::BoxFuture;
 use maka_plugins::{
     model::Credentials,
     provider::{
-        Connection, Context, Error, Model, Provider, Resolve,
+        Connection, Context, Discovery, Error, Model, Provider, Resolve, Verification,
         authentication::{Authenticate, Credential},
     },
 };
@@ -58,10 +58,8 @@ enum Operation {
         connection: Connection,
         credential: Credential,
     },
-    Discover {
-        connection: Connection,
-        credential: Option<Credential>,
-    },
+    Discover(Box<Discovery>),
+    Verify(Box<Verification>),
 }
 
 impl JavaScript {
@@ -76,7 +74,7 @@ impl JavaScript {
         );
         let deadline = std::time::Duration::from_secs(match &operation {
             Operation::Authenticate(_) => 15 * 60,
-            Operation::Refresh { .. } | Operation::Discover { .. } => 30,
+            Operation::Refresh { .. } | Operation::Discover(_) | Operation::Verify(_) => 30,
             Operation::Resolve(_) | Operation::Authorize { .. } => 10,
         });
         let input = serde_json::to_value(operation)
@@ -166,7 +164,7 @@ impl Provider for JavaScript {
             let credential: Credential = self
                 .invoke(Operation::Authenticate(request), Some(context))
                 .await?;
-            credential.validate()?;
+            credential.validate().map_err(Error::Invalid)?;
             Ok(credential)
         })
     }
@@ -186,25 +184,18 @@ impl Provider for JavaScript {
                     Some(context),
                 )
                 .await?;
-            credential.validate()?;
+            credential.validate().map_err(Error::Invalid)?;
             Ok(credential)
         })
     }
     fn discover(
         &self,
-        connection: Connection,
-        credential: Option<Credential>,
+        request: Discovery,
         context: Context,
     ) -> BoxFuture<'_, Result<Vec<ModelInfo>, Error>> {
         Box::pin(async move {
             let models: Vec<ModelInfo> = self
-                .invoke(
-                    Operation::Discover {
-                        connection,
-                        credential,
-                    },
-                    Some(context),
-                )
+                .invoke(Operation::Discover(Box::new(request)), Some(context))
                 .await?;
             if models.len() > 2048 {
                 return Err(Error::Invalid(
@@ -216,5 +207,8 @@ impl Provider for JavaScript {
             }
             Ok(models)
         })
+    }
+    fn verify(&self, request: Verification, context: Context) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(self.invoke(Operation::Verify(Box::new(request)), Some(context)))
     }
 }

@@ -84,19 +84,16 @@ impl Drop for NativeHost {
 }
 
 pub async fn configure(client: &Client, url: &str, models: Value) -> Value {
-    let created = client.request(Operation::ConnectionCatalogCreate, json!({
-        "expectedCatalogRevision":0,"connection":{"slug":"attachments","name":"Attachment fixture",
-        "providerType":"openai","baseUrl":url,"enabled":true,
-        "enabledModelIds":models.as_object().unwrap().keys().collect::<Vec<_>>(),"modelOverrides":models}
-    })).await.unwrap();
-    assert_eq!(created["kind"], "committed");
+    let created = super::model_connection::create(
+        client,
+        "openai",
+        "attachments",
+        url,
+        "attachment-fixture",
+        models,
+    )
+    .await;
     let basis = &created["connection"];
-    let credential = client.request(Operation::CredentialVaultSet, json!({
-        "locator":{"scope":"connection","connectionId":basis["connectionId"],"kind":"api_key"},
-        "expected":null,"expectedConnection":{"connectionId":basis["connectionId"],"revision":basis["revision"],
-        "slug":"attachments","providerType":"openai","effectiveBaseUrl":url},"secret":"attachment-fixture"
-    })).await.unwrap();
-    assert_eq!(credential["kind"], "committed");
     basis["connectionId"].clone()
 }
 pub async fn session(client: &Client, connection: &Value, workspace: &Path, id: &str, model: &str) {

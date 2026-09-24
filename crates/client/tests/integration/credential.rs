@@ -27,7 +27,7 @@ use std::time::Duration;
 async fn credential_requests_bind_identity_cas_and_absence_without_exposing_saved_secrets() {
     let locator = CredentialLocator::Connection {
         connection_id: "b746eb13-287c-4f3a-8590-dac93c0a1253".into(),
-        kind: ConnectionCredentialKind::ApiKey,
+        kind: ConnectionCredentialKind::RequestHeaders,
     };
     let id = "fe26c818-0e6a-47ce-861c-e8c28f053bbd";
     let basis = CredentialVersionBasis {
@@ -104,7 +104,7 @@ async fn credential_requests_bind_identity_cas_and_absence_without_exposing_save
                                 revision: basis.revision,
                             }),
                             expected_connection: None,
-                            secret: "synthetic-new-key".into(),
+                            secret: json!({"x-custom":"synthetic-new-key"}).to_string(),
                         })
                         .await
                         .map(|v| serde_json::to_value(v).unwrap())

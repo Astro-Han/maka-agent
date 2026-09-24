@@ -53,16 +53,22 @@ async fn native_effects_share_network_policy_snapshot_without_superseding_cosmet
     else {
         panic!("prepared discovery")
     };
-    let onboarding = || OnboardingInput {
-        target: OnboardingTarget::Existing {
-            connection_id: fixture.id.clone(),
-        },
-        api_key: None,
-        base_url: None,
+    let onboarding = async || {
+        let row = fixture.store.catalog().await.unwrap().connections.remove(0);
+        maka_runtime::oauth::Target::Existing {
+            expected: ConnectionCredentialTarget {
+                connection_id: row.connection_id,
+                revision: row.revision,
+                slug: row.slug,
+                provider: row.provider,
+                configuration: row.configuration.clone(),
+            },
+            configuration: row.configuration,
+        }
     };
     let OnboardingPreparation::Ready(save) = fixture
         .store
-        .prepare_onboarding(onboarding())
+        .prepare_onboarding(onboarding().await)
         .await
         .unwrap()
     else {
@@ -141,7 +147,7 @@ async fn native_effects_share_network_policy_snapshot_without_superseding_cosmet
     };
     let OnboardingPreparation::Ready(save) = fixture
         .store
-        .prepare_onboarding(onboarding())
+        .prepare_onboarding(onboarding().await)
         .await
         .unwrap()
     else {

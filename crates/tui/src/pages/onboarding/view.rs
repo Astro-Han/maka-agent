@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Command, PROVIDERS};
+use super::Command;
 use crate::{
     app::{Action, App, Hit},
     view::{button, safe},
@@ -32,8 +32,15 @@ use unicode_width::UnicodeWidthStr;
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     app.hits.clear();
-    let busy = app.onboarding.pending.is_some();
+    let availability = if app.providers.loading() {
+        "providers-loading"
+    } else if app.providers.failed() {
+        "providers-failed"
+    } else {
+        "onboard-no-providers"
+    };
     let f = app.onboarding.dialog.as_mut().expect("onboarding form");
+    let busy = app.onboarding.pending.is_some() || f.providers.is_empty();
     if area.width < 44 || area.height < 22 {
         f.visible = false;
         for field in &mut f.fields {
@@ -121,15 +128,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 .style(Style::default().fg(app.theme.colors().subtle)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        for (index, key) in ["onboard-name", "onboard-url", "onboard-key"]
+        for (index, key) in ["onboard-name", "oauth-configuration", "oauth-slug"]
             .into_iter()
             .enumerate()
         {
-            let key = if index == 1 && f.provider == 0 {
-                "onboard-url-custom"
-            } else {
-                key
-            };
             let y = inner.y + 3 + index as u16 * 3;
             frame.render_widget(
                 Paragraph::new(app.i18n.text(key))
@@ -150,21 +152,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
                 Rect::new(rect.x, rect.y, rect.width, 2),
             );
             let field = &mut f.fields[index];
-            if index == 2 {
-                field.draw_masked(
-                    frame,
-                    rect,
-                    focus == index + 1 && !busy && !f.blocked,
-                    app.theme.colors(),
-                );
-            } else {
-                field.draw(
-                    frame,
-                    rect,
-                    focus == index + 1 && !busy && !f.blocked,
-                    app.theme.colors(),
-                );
-            }
+            field.draw(
+                frame,
+                rect,
+                focus == index + 1 && !busy && !f.blocked,
+                app.theme.colors(),
+            );
             if !busy && !f.blocked {
                 app.hits.push(Hit {
                     area: Rect::new(rect.x, rect.y - 1, rect.width, 2),
@@ -173,7 +166,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
             }
         }
     }
-    let key = if busy {
+    let key = if f.providers.is_empty() {
+        availability
+    } else if busy {
         "onboard-busy"
     } else {
         error.unwrap_or(if models {
@@ -194,7 +189,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         })),
         Rect::new(inner.x, inner.bottom() - 5, inner.width, 3),
     );
-    let provider = PROVIDERS[f.provider].1;
+    let provider = f.providers.get(f.provider).map_or_else(
+        || app.i18n.text(availability),
+        |provider| safe(&provider.descriptor.label),
+    );
     if !models {
         crate::view::list_item(
             frame,

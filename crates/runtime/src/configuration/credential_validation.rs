@@ -33,23 +33,8 @@ pub fn credential_target(value: &ConnectionCredentialTarget) -> ValidationResult
     entity_id(&value.connection_id)?;
     revision(value.revision, true)?;
     slug(&value.slug)?;
-    provider_default_base_url(&value.provider_type)?;
-    let raw = normalize_base_url(Some(&value.effective_base_url), None)?
-        .ok_or("empty credential endpoint")?;
-    if raw != value.effective_base_url {
-        return Err("credential endpoint must be canonical".into());
-    }
-    let normalized = normalize_base_url(Some(&raw), Some(&value.provider_type))?;
-    if normalized.is_none()
-        && url::Url::parse(provider_default_base_url(&value.provider_type)?)
-            .map(|v| v.to_string())
-            .ok()
-            .as_ref()
-            != Some(&raw)
-    {
-        return Err("credential endpoint mismatch".into());
-    }
-    Ok(())
+    value.provider.validate()?;
+    provider_configuration(&value.configuration)
 }
 pub fn credential_status(value: &CredentialStatus) -> ValidationResult {
     locator(&value.locator)?;
@@ -94,6 +79,15 @@ pub fn parse_headers(secret: &str) -> ValidationResult<std::collections::BTreeMa
 }
 pub fn validate_set_credential(value: &SetCredentialInput) -> ValidationResult {
     locator(&value.locator)?;
+    if matches!(
+        value.locator,
+        CredentialLocator::Connection {
+            kind: ConnectionCredentialKind::Provider,
+            ..
+        }
+    ) {
+        return Err("provider credentials require an authentication receipt".into());
+    }
     if let Some(expected) = &value.expected {
         entity_id(&expected.credential_id)?;
         revision(expected.revision, true)?;
@@ -115,16 +109,6 @@ pub fn validate_set_credential(value: &SetCredentialInput) -> ValidationResult {
         }
     ) {
         normalize_headers(&value.secret)?;
-    } else if matches!(
-        value.locator,
-        CredentialLocator::Connection {
-            kind: ConnectionCredentialKind::OauthToken,
-            ..
-        }
-    ) {
-        // A subscription record contains access, refresh and sometimes ID tokens.
-        // Match the canonical vault's UTF-16 limit, not the API-key byte budget.
-        text(&value.secret, 64 * 1024, true)?;
     } else if value.secret.len() > 10240 {
         return Err("credential exceeds byte limit".into());
     }

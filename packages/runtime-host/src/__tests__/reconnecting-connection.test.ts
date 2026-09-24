@@ -69,6 +69,9 @@ test('a reconnecting Client retries an interrupted query on the replacement conn
       return replacement.connection;
     },
   });
+  const revisions: number[] = [];
+  connection.subscribeModelProviderCatalogChanges((revision) => revisions.push(revision));
+  first.providerCatalogChanged(1);
   assert.deepEqual(await connection.request('goal.query', { sessionId: 'session-1' }, 185_000), {
     sessionId: 'session-1',
     goal: null,
@@ -77,7 +80,12 @@ test('a reconnecting Client retries an interrupted query on the replacement conn
   assert.deepEqual(first.operations, ['goal.query']);
   assert.deepEqual(unstable.operations, ['goal.query']);
   assert.deepEqual(replacement.operations, ['goal.query']);
+  first.providerCatalogChanged(99);
+  replacement.providerCatalogChanged(2);
+  assert.deepEqual(revisions, [1, 2]);
   await connection.close();
+  replacement.providerCatalogChanged(3);
+  assert.deepEqual(revisions, [1, 2]);
 });
 
 test('a reconnecting Client reports the connection generation used by direct operations', async () => {
@@ -874,6 +882,7 @@ function connectionHarness(
     resolveClosed = resolve;
   });
   const operations: DirectRequestOperationKey[] = [];
+  const providerListeners = new Set<(revision: number) => void>();
   let openedSubscriptions = 0;
   const connection = {
     rootId: 'root-id',
@@ -894,6 +903,10 @@ function connectionHarness(
     },
     subscribeConfigurationChanges: () => () => {},
     subscribeConnectionCatalogChanges: () => () => {},
+    subscribeModelProviderCatalogChanges: (listener: (revision: number) => void) => {
+      providerListeners.add(listener);
+      return () => providerListeners.delete(listener);
+    },
     subscribeProjectCatalogChanges: () => () => {},
     subscribeSessionCatalogChanges: () => () => {},
     subscribeScheduledTaskChanges: () => () => {},
@@ -903,6 +916,9 @@ function connectionHarness(
     connection,
     operations,
     disconnect: resolveClosed,
+    providerCatalogChanged: (revision: number) => {
+      for (const listener of providerListeners) listener(revision);
+    },
     get openedSubscriptions() {
       return openedSubscriptions;
     },

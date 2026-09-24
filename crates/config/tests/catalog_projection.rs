@@ -25,8 +25,9 @@ fn snapshot() -> ConnectionCatalogSnapshot {
     serde_json::from_value(json!({"revision":7,"defaultTarget":{
         "connectionId":"11111111-1111-4111-8111-111111111111","modelId":"manual-0"},
         "connections":[{"connectionId":"11111111-1111-4111-8111-111111111111",
-        "revision":3,"slug":"relay","name":"Relay","providerType":"openai-compatible",
-        "baseUrl":"http://localhost:1234/v1","enabled":true,
+        "revision":3,"slug":"relay","name":"Relay",
+        "provider":{"packageId":"example","entryId":"account","scope":"profile","name":"api"},
+        "configuration":{"baseUrl":"http://localhost:1234/v1"},"enabled":true,
         "enabledModelIds":(0..96).map(|i|format!("manual-{i}")).collect::<Vec<_>>(),
         "models":[{"id":"observed","contextWindow":8192}],
         "modelSource":"fetched","modelsFetchedAt":123,
@@ -62,7 +63,7 @@ fn pages_preserve_items_profiles_and_resolved_facts() {
     loop {
         let page = project(&snapshot, &input, resolve).unwrap();
         projected.push(page.clone());
-        assert!(serde_json::to_vec(&page).unwrap().len() <= 48 * 1024);
+        assert!(serde_json::to_vec(&page).unwrap().len() <= 128 * 1024);
         assert_eq!(page["revision"], 7);
         assert_eq!(
             page["defaultTarget"],
@@ -99,7 +100,7 @@ fn pages_preserve_items_profiles_and_resolved_facts() {
             adjacent[1]["nextCursor"].clone()
         };
         assert!(
-            serde_json::to_vec(&full).unwrap().len() > 48 * 1024,
+            serde_json::to_vec(&full).unwrap().len() > 128 * 1024,
             "page must fit the maximal prefix including its actual next cursor"
         );
     }

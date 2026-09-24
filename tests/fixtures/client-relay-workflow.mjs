@@ -22,6 +22,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { watchSession } from './client-subscription.mjs';
 import { relayFixture } from './client-relay-fixture.mjs';
+import { authenticateModelConnection } from './client-model-connection.mjs';
 
 const models = ['unknown-relay', 'relay/gpt-5.2', 'gpt-5-relay', 'gpt-5-nano', 'plain-model'];
 export async function verifyRelayOptions(connection, workspace, reopened) {
@@ -42,7 +43,7 @@ export async function verifyRelayOptions(connection, workspace, reopened) {
   }
   const initial = await catalog();
   const row = initial.items.find((item) => item.kind === 'connection');
-  const provider = await relayFixture(Number(new URL(row.baseUrl).port));
+  const provider = await relayFixture(Number(new URL(row.configuration.baseUrl).port));
   const profiles = {
     'unknown-relay': { thinkingLevels: ['high', 'max'], vision: true, contextWindow: 32000 },
     'gpt-5-relay': { serviceTier: 'fast' },
@@ -57,7 +58,7 @@ export async function verifyRelayOptions(connection, workspace, reopened) {
           expected: { connectionId: row.connectionId, revision: current.revision },
           changes: {
             name: row.name,
-            baseUrl: row.baseUrl,
+            configuration: row.configuration,
             enabled: true,
             enabledModelIds: models,
             modelOverrides,
@@ -98,23 +99,7 @@ export async function verifyRelayOptions(connection, workspace, reopened) {
     provider.check();
   };
   try {
-    assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: { scope: 'connection', connectionId: row.connectionId, kind: 'api_key' },
-          expected: null,
-          expectedConnection: {
-            connectionId: row.connectionId,
-            revision: row.revision,
-            slug: row.slug,
-            providerType: row.providerType,
-            effectiveBaseUrl: row.baseUrl,
-          },
-          secret: 'relay-fixture',
-        })
-      ).kind,
-      'committed',
-    );
+    await authenticateModelConnection(request, row.connectionId, 'relay-fixture');
     await update(profiles);
     const items = (await catalog()).items;
     const published = items.find(
@@ -150,11 +135,9 @@ export async function verifyRelayOptions(connection, workspace, reopened) {
             parallel: model !== 'unknown-relay',
             reasoning:
               model === 'unknown-relay'
-                ? // The native SDK defaults explicit effort to detailed summary;
-                  // Maka's canonical-family policy alone requests auto summary.
-                  level === null
+                ? level === null
                   ? undefined
-                  : { effort: level, summary: 'detailed' }
+                  : { effort: level }
                 : model === 'relay/gpt-5.2' || model === 'gpt-5-nano'
                   ? { effort: 'medium', summary: 'auto' }
                   : undefined,
@@ -178,7 +161,7 @@ export async function verifyRelayOptions(connection, workspace, reopened) {
           if (model === 'unknown-relay') {
             const context = await request('context.diagnostics.query', { sessionId });
             assert.equal(context.status, 'available');
-            assert.equal(context.providerId, row.providerType);
+            assert.equal(context.providerId, row.provider.name);
             assert.equal(context.contextWindow, 32000);
           }
         }

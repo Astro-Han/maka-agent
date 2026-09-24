@@ -28,8 +28,6 @@ fn oauth_entry_uses_host_enrollment_mouse_keyboard_and_never_starts_on_dismiss()
         Command::new(env!("CARGO_BIN_EXE_maka"))
             .args(["host", "serve", "--root"])
             .arg(&host.root)
-            .env("MAKA_CODEX_SUBSCRIPTION_EXPERIMENTAL", "0")
-            .env("MAKA_GITHUB_COPILOT_DEVICE_LOGIN_EXPERIMENTAL", "0")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -40,6 +38,7 @@ fn oauth_entry_uses_host_enrollment_mouse_keyboard_and_never_starts_on_dismiss()
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let (client, before) = runtime.block_on(async {
         let client = support::client(&host.root).await;
+        support::provider(&client, "chatgpt").await;
         let before = catalog(&client).await;
         (client, before)
     });
@@ -51,20 +50,13 @@ fn oauth_entry_uses_host_enrollment_mouse_keyboard_and_never_starts_on_dismiss()
     tui.click_text("▤ Workspace");
     tui.filter_command("Sign in to a provider");
     tui.click_text("Sign in to a provider");
-    tui.wait_for("Sign-in for this provider is disabled");
+    let providers = runtime
+        .block_on(client.provider_directory(maka_protocol::model_provider::Scope::Profile))
+        .unwrap();
+    select_provider(&mut tui, &providers, "chatgpt");
+    tui.wait_for("Choose a provider and authentication method.");
+    tui.resize(60, 20);
     tui.wait_for("Continue");
-    tui.click_text("Continue"); // Visible but disabled; cannot begin an OAuth flow.
-    tui.click_text("GitHub Copilot");
-    tui.wait_for("● GitHub Copilot");
-    tui.wait_for("Sign-in for this provider is disabled");
-    tui.resize(44, 20);
-    tui.wait_until(|screen| {
-        screen
-            .lines()
-            .any(|line| line.find("xAI").is_some_and(|column| column < 12))
-    });
-    tui.click_text("xAI");
-    tui.wait_for("Choose a provider.");
     // Selection schedules the original enrollment query, not a login. Enter
     // remains on Close after it settles, even when this provider is enabled.
     tui.send(b"\r");
@@ -75,7 +67,7 @@ fn oauth_entry_uses_host_enrollment_mouse_keyboard_and_never_starts_on_dismiss()
     tui.wait_for("▤ Workspace");
     tui.filter_command("Sign in to a provider");
     tui.click_text("Sign in to a provider");
-    tui.wait_for("Choose a provider");
+    tui.wait_for("Continue");
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
     tui.wait_until(|screen| {
         !screen.contains("Sign in to a provider") && screen.contains("No sessions yet.")
@@ -101,8 +93,6 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
         Command::new(env!("CARGO_BIN_EXE_maka"))
             .args(["host", "serve", "--root"])
             .arg(&host.root)
-            .env("MAKA_CODEX_SUBSCRIPTION_EXPERIMENTAL", "1")
-            .env("MAKA_GITHUB_COPILOT_DEVICE_LOGIN_EXPERIMENTAL", "0")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -113,6 +103,7 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
         let client = support::client(&host.root).await;
+        support::provider(&client, "chatgpt").await;
         let before = catalog(&client).await;
         let relay = super::recovery::LostReply::oauth_start(&host.root, directory.path()).await;
         let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
@@ -122,7 +113,12 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
         tui.click_text("▤ Workspace");
         tui.filter_command("Sign in to a provider");
         tui.click_text("Sign in to a provider");
-        tui.wait_for("Choose a provider.");
+        let providers = client
+            .provider_directory(maka_protocol::model_provider::Scope::Profile)
+            .await
+            .unwrap();
+        select_provider(&mut tui, &providers, "chatgpt");
+        tui.wait_for("Choose a provider and authentication method.");
         custom_identity(&mut tui);
         let checkpoint = directory
             .path()
@@ -144,7 +140,8 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
         tui.click_last_text("Check");
         tui.wait_for("This Host cannot find the attempt");
         tui.click_text("New sign-in");
-        tui.wait_for("Choose a provider.");
+        select_provider(&mut tui, &providers, "chatgpt");
+        tui.wait_for("Choose a provider and authentication method.");
         custom_identity(&mut tui);
         tui.click_text("Continue");
         tui.wait_for("connection failed");
@@ -152,13 +149,15 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
         assert_eq!(requests.len(), 1);
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
-        assert_eq!(saved["oauth"]["start"], requests[0]);
-        assert_eq!(requests[0]["target"]["providerType"], "openai-codex");
+        assert_eq!(
+            saved["oauth"]["attempt"],
+            serde_json::json!({"attemptId":requests[0]["attemptId"],"target":requests[0]["target"]})
+        );
+        assert_eq!(requests[0]["target"]["provider"]["name"], "chatgpt");
         assert_eq!(requests[0]["target"]["slug"], "work-codex");
         assert_eq!(requests[0]["target"]["name"], "Work 中文");
-        assert_eq!(saved["oauth"].as_object().unwrap().len(), 3);
-        tui.child.kill().unwrap();
-        assert!(!tui.child.wait().unwrap().success());
+        assert_eq!(saved["oauth"].as_object().unwrap().len(), 2);
+        assert!(!tui.terminate().unwrap().success());
         let mut reopened = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
         reopened.wait_for("Workspace");
         reopened.click_text("◉ Host");
@@ -191,15 +190,7 @@ fn oauth_start_is_durable_before_dispatch_and_crash_reopens_only_the_original_qu
 
 fn custom_identity(tui: &mut Pty) {
     tui.wait_for("Close   Continue");
-    let footer = tui
-        .screen
-        .snapshot()
-        .unwrap()
-        .screen
-        .lines()
-        .position(|line| line.contains("Close   Continue"))
-        .unwrap();
-    tui.click_text("Account details");
+    tui.click_text("Connection details");
     tui.wait_for("Display name");
     tui.wait_for("Connection ID");
     tui.click_text("Display name");
@@ -208,14 +199,25 @@ fn custom_identity(tui: &mut Pty) {
     tui.send(b"\x1b[200~BAD ID\x1b[201~");
     tui.wait_for("lowercase letters");
     tui.send(b"\x01\x1b[200~work-codex\x1b[201~");
-    tui.wait_for("Choose a provider.");
-    tui.click_text("Account details");
+    tui.wait_for("Choose a provider and authentication method.");
+    tui.click_text("Connection details");
     tui.wait_until(|screen| {
-        !screen.contains("Display name")
-            && screen.contains("customized")
-            && screen
-                .lines()
-                .nth(footer)
-                .is_some_and(|line| line.contains("Close   Continue"))
+        !screen.contains("Display name") && screen.contains("Close   Continue")
     });
+}
+
+fn select_provider(tui: &mut Pty, directory: &maka_client::ProviderDirectory, name: &str) {
+    for provider in &directory.entries {
+        for method in &provider.descriptor.authentication {
+            let label = format!("{} · {}", provider.descriptor.label, method.label);
+            tui.wait_until(|screen| {
+                screen.contains(&label) && !screen.contains("Checking availability…")
+            });
+            if provider.identity.name == name {
+                return;
+            }
+            tui.click_text(&label);
+        }
+    }
+    panic!("fixture provider was not published: {name}");
 }

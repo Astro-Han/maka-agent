@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { copy } from './copy.js';
+
 import { useEffect, useState } from 'react';
 import type { ClientContext, ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
 
@@ -31,7 +33,7 @@ function Checklist({
   const [snapshot, setSnapshot] = useState<{ sessionId: string; items: Item[] } | null>(null);
   const [failure, setFailure] = useState<{ sessionId: string; message: string } | null>(null);
   const [attempt, retry] = useState(0);
-  const zh = locale !== 'en';
+  const t = copy[locale];
   useEffect(() => {
     const stop = new AbortController();
     setFailure(null);
@@ -74,7 +76,7 @@ function Checklist({
       <div className="maka-todo" role="status">
         <span>{failure.message}</span>
         <button type="button" onClick={() => retry((value) => value + 1)}>
-          {zh ? '重试' : 'Retry'}
+          {t.retry}
         </button>
       </div>
     );
@@ -83,17 +85,13 @@ function Checklist({
   return (
     <details className="maka-todo">
       <summary>
-        {zh ? '待办' : 'Checklist'} · {complete}/{snapshot.items.length}
+        {t.title} · {complete}/{snapshot.items.length}
       </summary>
-      <p>
-        {zh
-          ? '状态由模型报告，不代表执行结果已验证。'
-          : 'Model-reported progress, not verified execution evidence.'}
-      </p>
+      <p>{t.description}</p>
       <ol>
         {snapshot.items.map((item, index) => (
           <li key={index} data-status={item.status}>
-            <span aria-label={item.status}>
+            <span aria-label={t.statuses[item.status]}>
               {item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '◐' : '○'}
             </span>
             <span>{item.content}</span>

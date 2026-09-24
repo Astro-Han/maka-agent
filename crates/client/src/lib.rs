@@ -25,6 +25,7 @@ mod credential;
 mod interaction;
 pub mod local;
 mod message;
+mod model_provider;
 mod notification;
 mod oauth;
 mod operations;
@@ -37,6 +38,7 @@ pub mod transcript;
 mod turn;
 
 pub use connection::{Client, ClientError, HostIdentity, RequestFailure};
+pub use model_provider::{ProviderDirectory, ProviderDirectoryError};
 pub use notification::{CatalogNotification, Notification};
 pub use operations::Operations;
 pub use presentation::{OAuthPresentation, OAuthPresentationService};

@@ -23,6 +23,7 @@ mod connection;
 mod credential;
 mod interaction;
 mod message;
+mod model_provider;
 mod oauth;
 mod plugin;
 mod presentation;

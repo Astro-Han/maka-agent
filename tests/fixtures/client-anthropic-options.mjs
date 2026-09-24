@@ -23,6 +23,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { watchSession } from './client-subscription.mjs';
+import { createModelConnection } from './client-model-connection.mjs';
 
 const models = ['claude-sonnet-4-5', 'claude-opus-4-6'];
 const signature = 'fixture-signed-thinking';
@@ -32,6 +33,13 @@ async function fixture() {
   let failure;
   const server = createServer(async (request, response) => {
     try {
+      if (request.method === 'GET') {
+        assert.equal(request.url, '/v1/models');
+        assert.equal(request.headers['x-api-key'], 'dummy-anthropic-options');
+        response.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
+        response.end(JSON.stringify({ data: models.map((id) => ({ id })) }));
+        return;
+      }
       let body = '';
       for await (const chunk of request) {
         body += chunk;
@@ -156,35 +164,20 @@ export async function verifyAnthropicOptions(connection, workspace, reopened) {
   }
   const provider = await fixture();
   try {
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: 0,
-      connection: {
-        slug: 'anthropic-fixture',
-        name: 'Anthropic fixture',
-        providerType: 'anthropic',
-        baseUrl: provider.baseUrl,
-        enabled: true,
-        enabledModelIds: models,
-        modelOverrides: Object.fromEntries(models.map((id) => [id, { maxOutputTokens: 7000 }])),
-        requestBodyOverlay: { fixture_context: { revision: 1 } },
-      },
+    const created = await createModelConnection(request, {
+      slug: 'anthropic-fixture',
+      name: 'Anthropic fixture',
+      providerName: 'anthropic',
+      apiKey: 'dummy-anthropic-options',
+      baseUrl: provider.baseUrl,
+      enabledModelIds: models,
+      modelOverrides: Object.fromEntries(models.map((id) => [id, { maxOutputTokens: 7000 }])),
+      requestBodyOverlay: { fixture_context: { revision: 1 } },
     });
     assert.equal(created.kind, 'committed');
     const basis = created.connection;
     assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-          expected: null,
-          expectedConnection: {
-            ...basis,
-            slug: 'anthropic-fixture',
-            providerType: 'anthropic',
-            effectiveBaseUrl: provider.baseUrl,
-          },
-          secret: 'dummy-anthropic-options',
-        })
-      ).kind,
+      (await request('connection.models.fetch', { connectionId: basis.connectionId })).kind,
       'committed',
     );
     assert.deepEqual(
@@ -239,7 +232,7 @@ export async function verifyAnthropicOptions(connection, workspace, reopened) {
                     expected: { connectionId: row.connectionId, revision: row.revision },
                     changes: {
                       name: row.name,
-                      baseUrl: provider.baseUrl,
+                      configuration: row.configuration,
                       enabled: true,
                       enabledModelIds: models,
                       requestBodyOverlay: { fixture_context: { revision: 2 } },

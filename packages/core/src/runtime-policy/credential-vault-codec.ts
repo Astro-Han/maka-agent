@@ -51,7 +51,7 @@ export function decodeCredentialLocator(value: unknown): CredentialLocator {
       'connectionId',
       'kind',
     ]);
-    if (item.kind !== 'api_key' && item.kind !== 'oauth_token' && item.kind !== 'request_headers') {
+    if (item.kind !== 'provider' && item.kind !== 'request_headers') {
       throw domainError('connection credential kind is invalid');
     }
     return {
@@ -130,6 +130,9 @@ export function normalizeSetCredentialInput(value: unknown): SetCredentialInput 
     };
   }
   const locator = decodeCredentialLocator(input.locator);
+  if (locator.scope === 'connection' && locator.kind === 'provider') {
+    throw domainError('Provider credentials require an authentication receipt');
+  }
   const expectedConnection =
     input.expectedConnection === undefined
       ? undefined

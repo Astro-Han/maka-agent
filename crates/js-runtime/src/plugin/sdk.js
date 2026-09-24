@@ -416,7 +416,7 @@
               const method = provider[request.method];
               if (typeof method !== 'function') return { error: { kind: 'unavailable' } };
               try {
-                return { value: await method(request.input, call) };
+                return { value: (await method(request.input, call)) ?? null };
               } catch (error) {
                 if (error?.providerFailure) return { error: error.providerFailure };
                 throw error;

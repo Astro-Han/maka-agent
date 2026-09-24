@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 
@@ -41,33 +42,15 @@ export async function verifyRemoteDrain(local, issue, ready, bounded) {
   let unsubscribe;
   try {
     const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: (await request('connection.catalog.query', { kind: 'start' }))
-        .revision,
-      connection: {
-        slug: 'revocation-drain',
-        name: 'Revocation drain',
-        providerType: 'openai-compatible',
-        baseUrl,
-        enabled: true,
-        enabledModelIds: ['fixture-model'],
-      },
+    const created = await createModelConnection(request, {
+      providerName: 'openai-compatible',
+      slug: 'revocation-drain',
+      name: 'Revocation drain',
+      baseUrl: baseUrl,
+      apiKey: 'dummy-remote-drain-key',
+      enabledModelIds: ['fixture-model'],
     });
-    assert.equal(created.kind, 'committed');
-    const { connectionId, revision } = created.connection;
-    const saved = await request('credential.vault.set', {
-      locator: { scope: 'connection', connectionId, kind: 'api_key' },
-      expected: null,
-      expectedConnection: {
-        connectionId,
-        revision,
-        slug: 'revocation-drain',
-        providerType: 'openai-compatible',
-        effectiveBaseUrl: baseUrl,
-      },
-      secret: 'dummy-remote-drain-key',
-    });
-    assert.equal(saved.kind, 'committed');
+    const { connectionId } = created.connection;
     const credential = await issue(['connection.test.run']);
     const remote = await ready(credential.bearer);
     const committed = Promise.withResolvers();

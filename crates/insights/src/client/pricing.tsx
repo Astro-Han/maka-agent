@@ -17,6 +17,9 @@
  * under the License.
  */
 
+import type { ClientLocale } from '@maka-agent/plugin-sdk/client';
+import { copy } from './pricing-copy.js';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Price, PricingPage, PricingQuery, PricingUpdate } from '@maka-agent/plugin-sdk/host';
 import type { Api } from './model.js';
@@ -35,12 +38,21 @@ function edit(price: Price): Draft {
   };
 }
 
-export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh: boolean }) {
+export function Pricing({
+  api,
+  signal,
+  locale,
+}: {
+  api: Api;
+  signal: AbortSignal;
+  locale: ClientLocale;
+}) {
+  const t = copy[locale];
   const [page, setPage] = useState<Page>();
   const [draft, setDraft] = useState<Draft>(blank);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [saved, setSaved] = useState(false);
   const version = useRef(0);
   const active = useRef(false);
   const load = useCallback(
@@ -54,7 +66,7 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
         if (signal.aborted || ticket !== version.current) return;
         if (result.kind === 'revision_changed') {
           setPage(undefined);
-          throw new Error(zh ? '报价已变化，请刷新。' : 'Rates changed. Refresh the catalog.');
+          throw new Error(t.ratesChanged);
         }
         setPage(result);
       } catch (reason) {
@@ -66,7 +78,7 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
         }
       }
     },
-    [api, signal, zh],
+    [api, signal, locale],
   );
   useEffect(() => {
     void load({ kind: 'start' });
@@ -81,22 +93,15 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
     const ticket = ++version.current;
     setBusy(true);
     setError('');
-    setNotice('');
+    setSaved(false);
     try {
       const receipt = await api.updatePrice({ expectedRevision: page.revision, mutation });
       if (signal.aborted || ticket !== version.current) return;
       // A conflict or missing reply never authorizes a blind resubmission.
       setPage(undefined);
-      if (receipt.kind === 'revision_conflict')
-        throw new Error(
-          zh
-            ? '报价已被修改。刷新后检查，再决定是否保存。'
-            : 'Rates changed. Refresh and review before deciding to save again.',
-        );
+      if (receipt.kind === 'revision_conflict') throw new Error(t.reviewChanges);
       setDraft(blank);
-      setNotice(
-        zh ? '已保存；仅影响此后准入的调用。' : 'Saved; applies to future admissions only.',
-      );
+      setSaved(true);
       const refreshed = await api.prices({ kind: 'start' });
       if (!signal.aborted && ticket === version.current && refreshed.kind === 'page')
         setPage(refreshed);
@@ -113,14 +118,11 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
   function save() {
     const rate = (raw: string) => {
       const value = Number(raw);
-      if (!raw.trim() || !Number.isFinite(value) || value < 0)
-        throw new Error(
-          zh ? '单价必须是非负有限数字。' : 'Rates must be finite, non-negative numbers.',
-        );
+      if (!raw.trim() || !Number.isFinite(value) || value < 0) throw new Error(t.invalidRates);
       return value;
     };
     try {
-      if (!draft.modelKey.trim()) throw new Error(zh ? '请输入模型标识。' : 'Enter a model key.');
+      if (!draft.modelKey.trim()) throw new Error(t.modelRequired);
       void update({
         kind: 'upsert',
         pricing: {
@@ -136,17 +138,13 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
     }
   }
   return (
-    <section aria-label={zh ? '报价' : 'Pricing'}>
-      <p className="insights-note">
-        {zh
-          ? '美元 / 百万 token。空白缓存价表示未配置，不是免费。历史调用保留准入时的报价。'
-          : 'USD per million tokens. Blank cache rates are unspecified, not free. Historical calls retain their admission quote.'}
-      </p>
+    <section aria-label={t.title}>
+      <p className="insights-note">{t.description}</p>
       <button type="button" disabled={busy} onClick={() => void load({ kind: 'start' })}>
-        {zh ? '刷新报价' : 'Refresh rates'}
+        {t.refresh}
       </button>
       {error && <p role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
+      {saved && <p role="status">{t.saved}</p>}
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -154,9 +152,9 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
         }}
       >
         <fieldset disabled={busy || !page} className="insights-price-form">
-          <legend>{zh ? '设置模型报价' : 'Set model rates'}</legend>
+          <legend>{t.setRates}</legend>
           <label>
-            {zh ? '模型标识' : 'Model key'}
+            {t.modelKey}
             <input
               required
               maxLength={512}
@@ -166,11 +164,7 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
           </label>
           {(['input', 'output', 'read', 'write'] as const).map((key, index) => (
             <label key={key}>
-              {
-                (zh
-                  ? ['输入', '输出', '缓存读取（可选）', '缓存写入（可选）']
-                  : ['Input', 'Output', 'Cache read (optional)', 'Cache write (optional)'])[index]
-              }
+              {t.rateLabels[index]}
               <input
                 type="number"
                 min="0"
@@ -181,9 +175,9 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
               />
             </label>
           ))}
-          <button type="submit">{zh ? '保存报价' : 'Save rates'}</button>
+          <button type="submit">{t.save}</button>
           <button type="button" onClick={() => setDraft(blank)}>
-            {zh ? '清空草稿' : 'Clear draft'}
+            {t.clear}
           </button>
         </fieldset>
       </form>
@@ -193,10 +187,7 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
             <table>
               <thead>
                 <tr>
-                  {(zh
-                    ? ['模型', '输入', '输出', '缓存读取', '缓存写入', '来源', '操作']
-                    : ['Model', 'Input', 'Output', 'Cache read', 'Cache write', 'Source', 'Actions']
-                  ).map((label) => (
+                  {t.columns.map((label) => (
                     <th key={label}>{label}</th>
                   ))}
                 </tr>
@@ -211,24 +202,16 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
                       entry.pricing.cacheReadUsdPer1M,
                       entry.pricing.cacheWriteUsdPer1M,
                     ].map((value, index) => (
-                      <td key={index}>{value === undefined ? '—' : dollars(value)}</td>
+                      <td key={index}>{value === undefined ? '—' : dollars(value, locale)}</td>
                     ))}
-                    <td>
-                      {entry.source === 'builtin'
-                        ? zh
-                          ? '内置'
-                          : 'Built-in'
-                        : zh
-                          ? '自定义'
-                          : 'Custom'}
-                    </td>
+                    <td>{entry.source === 'builtin' ? t.builtin : t.custom}</td>
                     <td>
                       <button
                         type="button"
                         disabled={busy}
                         onClick={() => setDraft(edit(entry.pricing))}
                       >
-                        {zh ? '编辑' : 'Edit'}
+                        {t.edit}
                       </button>
                       {entry.source === 'custom' && (
                         <button
@@ -238,13 +221,7 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
                             void update({ kind: 'delete', modelKey: entry.pricing.modelKey })
                           }
                         >
-                          {entry.resetEffect === 'restore_builtin'
-                            ? zh
-                              ? '恢复内置价'
-                              : 'Restore built-in'
-                            : zh
-                              ? '移除报价'
-                              : 'Remove rates'}
+                          {entry.resetEffect === 'restore_builtin' ? t.restore : t.remove}
                         </button>
                       )}
                     </td>
@@ -255,7 +232,7 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
           </div>
           <div className="insights-actions">
             <span>
-              {zh ? '当前条目' : 'Entries'} {page.entries.length ? page.offset + 1 : 0}–
+              {t.entries} {page.entries.length ? page.offset + 1 : 0}–
               {page.offset + page.entries.length}
             </span>
             <button
@@ -263,7 +240,7 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
               disabled={busy || page.offset === 0}
               onClick={() => void load({ kind: 'start' })}
             >
-              {zh ? '首页' : 'First'}
+              {t.first}
             </button>
             <button
               type="button"
@@ -273,7 +250,7 @@ export function Pricing({ api, signal, zh }: { api: Api; signal: AbortSignal; zh
                   void load({ kind: 'continue', revision: page.revision, offset: page.nextOffset });
               }}
             >
-              {zh ? '下一页' : 'Next'}
+              {t.next}
             </button>
           </div>
         </>

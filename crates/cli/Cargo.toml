@@ -37,6 +37,7 @@ test = false
 
 [dependencies]
 maka-client.workspace = true
+maka-config.workspace = true
 maka-tui.workspace = true
 base64 = "0.22"
 clap.workspace = true

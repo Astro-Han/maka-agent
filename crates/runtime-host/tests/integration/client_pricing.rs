@@ -63,6 +63,7 @@ async fn in_flight_model_quotes_are_frozen_and_next_admission_observes_rate_chan
             .serve(host.clone(), cancel.clone()),
     );
     let mut peer = Peer::new(host, "pricing-flight").await;
+    peer.wait_for_plugins().await;
     let created = peer
         .rpc(
             "session.create",

@@ -25,6 +25,7 @@ import { consumeAccessCredentialDeliveryFromControlDirectory as consume } from '
 import { verifyRemoteDrain } from './client-remote-drain.mjs';
 import { verifyProviderAccess } from './client-provider-access.mjs';
 import { verifyPairingAccess } from './client-pairing-access.mjs';
+import { readRuntimeHostModelProviders } from '../../packages/runtime-host/src/client/catalog-reader.ts';
 
 function bounded(promise, label) {
   let timer;
@@ -326,13 +327,15 @@ export async function verifyRemoteAccess(local, handshake, url, control) {
       changed = resolve;
     });
     unsubscribe.push(granted.subscribeConfigurationChanges(changed));
+    const directory = await readRuntimeHostModelProviders(local);
     const mutation = await request(local, 'connection.catalog.create', {
       expectedCatalogRevision: catalog.revision,
       connection: {
         slug: 'remote-acceptance',
         name: 'Remote acceptance',
-        providerType: 'openai-compatible',
-        baseUrl: 'http://127.0.0.1:1/v1',
+        provider: directory.entries.find((entry) => entry.identity.name === 'openai-compatible')
+          .identity,
+        configuration: { baseUrl: 'http://127.0.0.1:1/v1' },
         enabled: true,
         enabledModelIds: ['fixture-model'],
       },

@@ -811,9 +811,9 @@ function AppShellContent({
     openModelPicker: openComposerModelPicker,
     refreshModelChoices: sessionHostConnections.refreshConnections,
   });
-  const newChatProviderType = connections.find(
+  const newChatProvider = connections.find(
     (connection) => connection.slug === newChatModel?.llmConnectionSlug,
-  )?.providerType;
+  )?.provider;
   // PR109d-b: turn footer actions per turn. Derived from the
   // materialized turn list (status + lineage descendants) + pending
   // mask. Per @kenji PR109d review: pending state prevents double-click
@@ -2510,7 +2510,7 @@ function AppShellContent({
                   activeModelConnectionSlug={activeSessionForModelControls?.llmConnectionSlug}
                   activeModel={activeModel}
                   activeModelLabel={activeModelLabel}
-                  activeProviderType={activeConnection?.providerType}
+                  activeProvider={activeConnection?.provider}
                   latestRequestUsageTokens={selectLatestRequestUsage(messages, activeModel, activeSessionForModelControls)}
                   onOpenContextUsage={() => commands.toggleTool('inspector')}
                   LiveContextUsageProbe={LiveContextUsageProbe}
@@ -2518,13 +2518,13 @@ function AppShellContent({
                   modelChoices={(!activeId && newTaskExecutor) || activeSession?.backend === 'plugin-executor' ? [] : chatModelChoices}
                   modelSwitchHasHistory={modelSwitchHasHistory}
                   hideUnavailableCurrentModel={sessionHealthNotice?.onClickTarget === 'model_picker'}
-                  renderProviderMark={(type) => <ProviderBrandMark type={type} />}
+                  renderProviderMark={(provider) => <ProviderBrandMark type={provider.name} />}
                   onModelChange={activeSession?.backend === 'plugin-executor' ? undefined : (input) => activeId ? void setSessionModel(activeId, input) : undefined}
                   {...{ modelSwitchAvailability, activeThinkingLevels, activeThinkingLevel }}
                   onThinkingLevelChange={activeSession?.backend === 'plugin-executor' ? undefined : (level) => {
                     if (activeId) void setSessionThinkingLevel(activeId, level ?? null);
                   }}
-                  {...{ newChatModel, newChatProviderType, newChatThinkingLevels, newChatThinkingLevel }}
+                  {...{ newChatModel, newChatProvider, newChatThinkingLevels, newChatThinkingLevel }}
                   onPickNewChatModel={newTaskExecutor ? undefined : (input) => {
                     setPendingNewChatModel(input);
                     if (modelSettingsOwnsComposerHost) saveComposerDefaults({ model: input });
@@ -2623,8 +2623,8 @@ function AppShellContent({
                 activeSession={activeSessionForView}
                 activeConnectionLabel={activeConnectionLabel}
                 activeModelLabel={activeModelLabel}
-                activeProviderType={activeConnection?.providerType}
-                renderProviderMark={(type) => <ProviderLogo type={type} compact />}
+                activeProvider={activeConnection?.provider}
+                renderProviderMark={(provider) => <ProviderLogo type={provider.name} compact />}
                 modelChoices={chatModelChoices}
                 onModelChange={sharedSessionActive || usesPluginExecutor ? undefined : (input) => {
                   if (activeId) void setSessionModel(activeId, input);

@@ -17,7 +17,10 @@
  * under the License.
  */
 
-import { authorizeConnectionModel, effectiveBaseUrl } from '@maka/core/llm-connections';
+import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
+import { authorizeConnectionModel } from '@maka/core/llm-connections';
+import { assertOAuthStartOutput, type OAuthLoginStartInput } from '../protocol/oauth.js';
 import { readRuntimeHostConnectionCatalog } from './catalog-reader.js';
 import type { RuntimeHostConnection } from './connection.js';
 import { abortable } from './wait-for-ready.js';
@@ -25,13 +28,10 @@ import { abortable } from './wait-for-ready.js';
 type TargetConnection = Pick<RuntimeHostConnection, 'request'>;
 
 export interface HostedExecutionTargetInput {
-  readonly connection?: {
-    readonly providerType: import('@maka/core/llm-connections').ProviderType;
-    readonly apiKey: string;
-  };
+  /** An explicit, caller-owned authentication attempt; never recreated on retry. */
+  readonly connection?: OAuthLoginStartInput;
   readonly connectionSlug: string;
   readonly model: string;
-  readonly baseUrl: string;
 }
 
 export interface ConfiguredHostedExecutionTarget {
@@ -44,50 +44,32 @@ export async function configureHostedExecutionTarget(
   input: HostedExecutionTargetInput,
   signal?: AbortSignal,
 ): Promise<ConfiguredHostedExecutionTarget> {
+  const start = input.connection;
+  if (start) {
+    const slug = start.target.kind === 'create' ? start.target.slug : start.target.expected.slug;
+    if (slug !== input.connectionSlug) throw new Error('Authentication target does not match');
+  }
+  const authenticated = start ? await authenticate(connection, start, signal) : undefined;
   const before = await abortable(() => readRuntimeHostConnectionCatalog(connection), signal);
   const target = before.connections.find((candidate) => candidate.slug === input.connectionSlug);
-  const onboarding = input.connection;
-  if (onboarding && target && target.providerType !== onboarding.providerType) {
-    throw new Error('Runtime Host connection provider does not match');
-  }
-  if (onboarding) {
-    const onboardingTarget = target
-      ? { kind: 'existing' as const, connectionId: target.connectionId }
-      : {
-          kind: 'create' as const,
-          providerType: onboarding.providerType,
-          slug: input.connectionSlug,
-          name: input.connectionSlug,
-        };
-    const saved = await abortable(
-      () =>
-        connection.request('connection.onboarding.save', {
-          target: onboardingTarget,
-          apiKey: onboarding.apiKey,
-          baseUrl: input.baseUrl,
-          enabledModelIds: [input.model],
-        }),
-      signal,
-    );
-    if (saved.kind !== 'saved') throw new Error('Runtime Host connection onboarding failed');
-    return {
-      connectionId: saved.connection.connectionId,
-      connectionSlug: saved.connection.slug,
-    };
-  }
   if (!target) throw new Error('Runtime Host connection is unavailable');
+  if (
+    authenticated &&
+    (target.connectionId !== authenticated.connectionId ||
+      !isDeepStrictEqual(target.provider, authenticated.provider))
+  ) {
+    throw new Error('Authenticated connection changed');
+  }
 
-  const baseUrl = new URL(input.baseUrl).toString();
   const enabledModelIds = [...new Set([...target.enabledModelIds, input.model])];
-  const endpointChanged = canonicalBaseUrl(effectiveBaseUrl(target)) !== baseUrl;
-  if (endpointChanged || !target.enabled || !target.enabledModelIds.includes(input.model)) {
+  if (!target.enabled || !target.enabledModelIds.includes(input.model)) {
     const updated = await abortable(
       () =>
         connection.request('connection.catalog.update', {
           expected: { connectionId: target.connectionId, revision: target.revision },
           changes: {
             name: target.name,
-            baseUrl,
+            configuration: target.configuration,
             enabled: true,
             enabledModelIds,
           },
@@ -99,43 +81,50 @@ export async function configureHostedExecutionTarget(
     }
   }
 
-  // Best-effort: a fetch here is how the target picks up wire metadata for a
-  // model the catalog has not described yet, so it is worth trying. It is not
-  // worth failing over. A provider with no model-list endpoint refuses the
-  // operation outright, one whose list lags simply returns the same array, and
-  // in both cases the user's selection still authorizes the model — the
-  // admission check below is what decides.
-  if (endpointChanged || !target.models.some((model) => model.id === input.model)) {
+  // Discovery contributes metadata; selecting a model does not require a listing endpoint.
+  if (!target.models.some((model) => model.id === input.model)) {
     await abortable(
-      () =>
-        connection.request('connection.models.fetch', {
-          connectionId: target.connectionId,
-        }),
+      () => connection.request('connection.models.fetch', { connectionId: target.connectionId }),
       signal,
     );
   }
-
   const after = await abortable(() => readRuntimeHostConnectionCatalog(connection), signal);
   const configured = after.connections.find(
     (candidate) => candidate.connectionId === target.connectionId,
   );
   if (
     !configured?.enabled ||
-    canonicalBaseUrl(effectiveBaseUrl(configured)) !== baseUrl ||
+    !isDeepStrictEqual(configured.provider, target.provider) ||
+    !isDeepStrictEqual(configured.configuration, target.configuration) ||
     !authorizeConnectionModel(configured, input.model)
   ) {
     throw new Error('Runtime Host did not admit the requested model target');
   }
-  return {
-    connectionId: configured.connectionId,
-    connectionSlug: configured.slug,
-  };
+  return { connectionId: configured.connectionId, connectionSlug: configured.slug };
 }
 
-function canonicalBaseUrl(value: string): string | undefined {
-  try {
-    return new URL(value).toString();
-  } catch {
-    return undefined;
+async function authenticate(
+  connection: TargetConnection,
+  input: OAuthLoginStartInput,
+  signal?: AbortSignal,
+) {
+  const deadline = AbortSignal.timeout(120_000);
+  const waiting = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  let result = await abortable(() => connection.request('oauth.login.start', input), waiting);
+  while (true) {
+    assertOAuthStartOutput(input, result);
+    switch (result.phase) {
+      case 'authenticated':
+        return result.connection;
+      case 'failed':
+      case 'cancelled':
+        throw new Error('Runtime Host authentication did not complete');
+      default:
+        await delay(100, undefined, { signal: waiting });
+        result = await abortable(
+          () => connection.request('oauth.login.query', { attemptId: input.attemptId }),
+          waiting,
+        );
+    }
   }
 }

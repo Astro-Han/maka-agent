@@ -65,6 +65,9 @@ impl Surface {
             )?,
         };
         prompt.sources.push(adapter.source(name)?);
+        if let Some(source) = &input.model_revision {
+            prompt.sources.push(source.clone());
+        }
         let evidence = RequestComposition {
             system_prompt: prompt.system.clone(),
             dynamic_context: prompt.contexts.clone(),

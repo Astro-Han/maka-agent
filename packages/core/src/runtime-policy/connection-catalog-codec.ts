@@ -19,8 +19,6 @@
 
 import {
   isModelModality,
-  isRelayProviderType,
-  effectiveBaseUrl,
   PROVIDER_REGISTRY,
   providerDefaultsOf,
   validateSlug,
@@ -41,6 +39,7 @@ import {
 } from '../model-thinking.js';
 import type {
   ConnectionCatalogEntry,
+  ConnectionOnboardingTarget,
   ConnectionCredentialTarget,
   ConnectionCatalogEntryDraft,
   ConnectionCatalogEntryUpdate,
@@ -71,6 +70,7 @@ import {
   revisionValue,
   stringValue,
 } from './domain-codec.js';
+import { decodeProviderConfiguration, decodeProviderIdentity } from './provider.js';
 
 export const CONNECTION_CATALOG_MAX_CONNECTIONS = 1_024;
 export const CONNECTION_CATALOG_MAX_MODELS_PER_CONNECTION = 2_048;
@@ -150,17 +150,15 @@ export function normalizeConnectionCatalogEntryDraft(value: unknown): Connection
     [
       'slug',
       'name',
-      'providerType',
-      'baseUrl',
+      'provider',
+      'configuration',
       'enabled',
       'enabledModelIds',
       'modelOverrides',
       'requestBodyOverlay',
     ],
-    ['slug', 'name', 'providerType', 'enabled', 'enabledModelIds'],
+    ['slug', 'name', 'provider', 'configuration', 'enabled', 'enabledModelIds'],
   );
-  const providerType = decodeProviderType(item.providerType);
-  const baseUrl = normalizeCatalogConnectionBaseUrl(item.baseUrl, providerType);
   const enabledModelIds = decodeConnectionModelIds(item.enabledModelIds);
   const requestBodyOverlay =
     item.requestBodyOverlay === undefined
@@ -168,12 +166,11 @@ export function normalizeConnectionCatalogEntryDraft(value: unknown): Connection
       : decodeRequestBodyOverlay(item.requestBodyOverlay);
   const profiles =
     item.modelOverrides === undefined ? {} : nonEmptyRelayProfiles(item.modelOverrides);
-  assertProfileFieldsFitProvider(profiles.modelOverrides, providerType);
   return {
     slug: decodeConnectionSlug(item.slug),
     name: decodeConnectionName(item.name),
-    providerType,
-    ...(baseUrl === undefined ? {} : { baseUrl }),
+    provider: decodeProviderIdentity(item.provider),
+    configuration: decodeProviderConfiguration(item.configuration),
     enabled: booleanValue(item.enabled, 'connection enabled'),
     enabledModelIds,
     ...profiles,
@@ -187,10 +184,9 @@ export function normalizeConnectionCatalogEntryUpdate(
   const item = exactRecord(
     value,
     'connection update',
-    ['name', 'baseUrl', 'enabled', 'enabledModelIds', 'modelOverrides', 'requestBodyOverlay'],
-    ['name', 'enabled', 'enabledModelIds'],
+    ['name', 'configuration', 'enabled', 'enabledModelIds', 'modelOverrides', 'requestBodyOverlay'],
+    ['name', 'configuration', 'enabled', 'enabledModelIds'],
   );
-  const baseUrl = normalizeCatalogConnectionBaseUrl(item.baseUrl);
   const enabledModelIds = decodeConnectionModelIds(item.enabledModelIds);
   const requestBodyOverlay =
     item.requestBodyOverlay === undefined
@@ -203,7 +199,7 @@ export function normalizeConnectionCatalogEntryUpdate(
   // a clear — profile-blind writers omit the key by definition.
   return {
     name: decodeConnectionName(item.name),
-    ...(baseUrl === undefined ? {} : { baseUrl }),
+    configuration: decodeProviderConfiguration(item.configuration),
     enabled: booleanValue(item.enabled, 'connection enabled'),
     enabledModelIds,
     ...(item.modelOverrides === undefined ? {} : profilesUpdateInstruction(item.modelOverrides)),
@@ -216,25 +212,6 @@ function profilesUpdateInstruction(value: unknown): {
 } {
   return {
     modelOverrides: value === null ? null : (nonEmptyRelayProfiles(value).modelOverrides ?? null),
-  };
-}
-
-export function normalizeConnectionCatalogEntryUpdateForProvider(
-  value: unknown,
-  providerType: ProviderType,
-): ConnectionCatalogEntryUpdate {
-  const update = normalizeConnectionCatalogEntryUpdate(value);
-  const baseUrl = normalizeCatalogConnectionBaseUrl(update.baseUrl, providerType);
-  assertProfileFieldsFitProvider(update.modelOverrides, providerType);
-  return {
-    name: update.name,
-    ...(baseUrl === undefined ? {} : { baseUrl }),
-    enabled: update.enabled,
-    enabledModelIds: update.enabledModelIds,
-    ...(update.modelOverrides === undefined ? {} : { modelOverrides: update.modelOverrides }),
-    ...(update.requestBodyOverlay === undefined
-      ? {}
-      : { requestBodyOverlay: update.requestBodyOverlay }),
   };
 }
 
@@ -366,41 +343,6 @@ export function decodeModelOverridesTable(value: unknown): Readonly<Record<strin
   return Object.fromEntries(parsed);
 }
 
-/**
- * Which declarations a provider can actually carry.
- *
- * `contextWindow` and `vision` state facts about a model. A user has them when
- * Maka does not — a model newer than the bundled snapshot, or any model on a
- * provider with no model-list endpoint — and that need is not confined to
- * relays (#1584), so they are legal everywhere.
- *
- * `thinkingLevels` and `serviceTier` name a wire feature instead. They encode
- * into request shapes only the OpenAI-compatible relays accept —
- * `reasoning_effort` tiers and priority processing — and
- * `supportsRelayFastServiceTier` gates the read side by provider for the same
- * reason. A table carrying them on another provider describes a request Maka
- * would never send: dead state at best, and on a provider whose wire rejects
- * the unknown value, a 400 the user cannot explain.
- */
-function assertProfileFieldsFitProvider(
-  profiles: Readonly<Record<string, ModelOverride>> | null | undefined,
-  providerType: ProviderType,
-): void {
-  if (!profiles || isRelayProviderType(providerType)) return;
-  for (const [modelId, profile] of Object.entries(profiles)) {
-    if (profile.thinkingLevels !== undefined) {
-      throw domainError(
-        `declared thinking levels for ${modelId} require an OpenAI-compatible connection`,
-      );
-    }
-    if (profile.serviceTier !== undefined) {
-      throw domainError(
-        `declared service tier for ${modelId} requires an OpenAI-compatible connection`,
-      );
-    }
-  }
-}
-
 // An empty table is not a state worth storing: drafts/canonical entries omit
 // the key, and updates treat it as the same instruction as `null` (clear).
 function nonEmptyRelayProfiles(value: unknown): {
@@ -419,8 +361,8 @@ export function decodeCanonicalConnectionCatalogEntry(value: unknown): Connectio
       'revision',
       'slug',
       'name',
-      'providerType',
-      'baseUrl',
+      'provider',
+      'configuration',
       'enabled',
       'enabledModelIds',
       'modelOverrides',
@@ -435,7 +377,8 @@ export function decodeCanonicalConnectionCatalogEntry(value: unknown): Connectio
       'revision',
       'slug',
       'name',
-      'providerType',
+      'provider',
+      'configuration',
       'enabled',
       'enabledModelIds',
       'models',
@@ -444,8 +387,8 @@ export function decodeCanonicalConnectionCatalogEntry(value: unknown): Connectio
   const draft = normalizeConnectionCatalogEntryDraft({
     slug: item.slug,
     name: item.name,
-    providerType: item.providerType,
-    ...(item.baseUrl === undefined ? {} : { baseUrl: item.baseUrl }),
+    provider: item.provider,
+    configuration: item.configuration,
     enabled: item.enabled,
     enabledModelIds: item.enabledModelIds,
     ...(item.modelOverrides === undefined ? {} : { modelOverrides: item.modelOverrides }),
@@ -499,29 +442,18 @@ export function decodeConnectionVersionBasis(value: unknown): ConnectionVersionB
   };
 }
 
-export function canonicalConnectionEffectiveBaseUrl(
-  connection: Pick<ConnectionCatalogEntry, 'providerType' | 'baseUrl'>,
-): string {
-  const endpoint = effectiveBaseUrl(connection);
-  try {
-    return new URL(endpoint).toString();
-  } catch {
-    throw domainError('connection has an invalid effective base URL');
-  }
-}
-
 export function connectionCredentialTarget(
   connection: Pick<
     ConnectionCatalogEntry,
-    'connectionId' | 'revision' | 'slug' | 'providerType' | 'baseUrl'
+    'connectionId' | 'revision' | 'slug' | 'provider' | 'configuration'
   >,
 ): ConnectionCredentialTarget {
   return {
     connectionId: connection.connectionId,
     revision: connection.revision,
     slug: connection.slug,
-    providerType: connection.providerType,
-    effectiveBaseUrl: canonicalConnectionEffectiveBaseUrl(connection),
+    provider: connection.provider,
+    configuration: connection.configuration,
   };
 }
 
@@ -530,33 +462,18 @@ export function decodeConnectionCredentialTarget(value: unknown): ConnectionCred
     'connectionId',
     'revision',
     'slug',
-    'providerType',
-    'effectiveBaseUrl',
+    'provider',
+    'configuration',
   ]);
   const version = decodeConnectionVersionBasis({
     connectionId: item.connectionId,
     revision: item.revision,
   });
-  const providerType = decodeProviderType(item.providerType);
-  const effectiveBaseUrl = stringValue(
-    item.effectiveBaseUrl,
-    'connection credential target effective base URL',
-    2_048,
-  );
-  let canonical: string;
-  try {
-    canonical = new URL(effectiveBaseUrl).toString();
-  } catch {
-    throw domainError('connection credential target effective base URL must be valid');
-  }
-  if (canonical !== effectiveBaseUrl) {
-    throw domainError('connection credential target effective base URL must be canonical');
-  }
   return {
     ...version,
     slug: decodeConnectionSlug(item.slug),
-    providerType,
-    effectiveBaseUrl,
+    provider: decodeProviderIdentity(item.provider),
+    configuration: decodeProviderConfiguration(item.configuration),
   };
 }
 
@@ -566,6 +483,41 @@ export function decodeConnectionTarget(value: unknown): ConnectionTarget {
     connectionId: entityIdValue(item.connectionId, 'connection id'),
     modelId: decodeConnectionModelId(item.modelId),
   };
+}
+
+export function decodeConnectionOnboardingTarget(value: unknown): ConnectionOnboardingTarget {
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    throw domainError('Invalid connection target');
+  const target = value as Record<string, unknown>;
+  if (target.kind === 'create') {
+    const item = exactRecord(value, 'create connection target', [
+      'kind',
+      'provider',
+      'configuration',
+      'slug',
+      'name',
+    ]);
+    return {
+      kind: 'create',
+      provider: decodeProviderIdentity(item.provider),
+      configuration: decodeProviderConfiguration(item.configuration),
+      slug: decodeConnectionSlug(item.slug),
+      name: decodeConnectionName(item.name),
+    };
+  }
+  if (target.kind === 'existing') {
+    const item = exactRecord(value, 'existing connection target', [
+      'kind',
+      'expected',
+      'configuration',
+    ]);
+    return {
+      kind: 'existing',
+      expected: decodeConnectionCredentialTarget(item.expected),
+      configuration: decodeProviderConfiguration(item.configuration),
+    };
+  }
+  throw domainError('Invalid connection target');
 }
 
 export function decodeConnectionModel(value: unknown): ConnectionModel {
@@ -580,6 +532,9 @@ export function decodeConnectionModel(value: unknown): ConnectionModel {
       'contextWindow',
       'inputLimit',
       'maxOutputTokens',
+      'thinkingLevels',
+      'defaultThinkingLevel',
+      'supportsReasoningSummary',
       'knowledgeCutoff',
       'structuredOutput',
       'lastUpdated',
@@ -622,8 +577,36 @@ export function decodeConnectionModel(value: unknown): ConnectionModel {
   }
   const modalities =
     item.modalities === undefined ? undefined : decodeModelModalities(item.modalities);
+  let thinkingLevels: ThinkingLevel[] | undefined;
+  if (item.thinkingLevels !== undefined) {
+    if (
+      !Array.isArray(item.thinkingLevels) ||
+      item.thinkingLevels.some((level) => !isThinkingLevel(level)) ||
+      new Set(item.thinkingLevels).size !== item.thinkingLevels.length
+    ) {
+      throw domainError('Invalid model thinking choices');
+    }
+    thinkingLevels = item.thinkingLevels as ThinkingLevel[];
+  }
+  const defaultThinkingLevel = item.defaultThinkingLevel;
+  if (
+    defaultThinkingLevel !== undefined &&
+    (!isThinkingLevel(defaultThinkingLevel) || !thinkingLevels?.includes(defaultThinkingLevel))
+  ) {
+    throw domainError('Model default thinking level is not advertised');
+  }
   return {
     id: decodeConnectionModelId(item.id),
+    ...(thinkingLevels === undefined ? {} : { thinkingLevels }),
+    ...(defaultThinkingLevel === undefined ? {} : { defaultThinkingLevel }),
+    ...(item.supportsReasoningSummary === undefined
+      ? {}
+      : {
+          supportsReasoningSummary: booleanValue(
+            item.supportsReasoningSummary,
+            'model reasoning summary',
+          ),
+        }),
     ...(item.displayName === undefined
       ? {}
       : {

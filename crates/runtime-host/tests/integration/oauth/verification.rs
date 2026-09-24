@@ -24,7 +24,8 @@ use maka_config::{
 };
 use maka_runtime::{
     configuration::*,
-    oauth::{LoginStart, Provider, Target},
+    oauth::{LoginStart, Target},
+    provider::{AuthenticationInput, Credential},
 };
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
@@ -33,10 +34,10 @@ use tokio::{
     net::TcpListener,
 };
 
-/// OAuth endpoints are fixed by the provider. A refused CONNECT exercises Host
-/// authentication/routing/proxy and durable failure without bypassing TLS trust.
+/// The public provider chooses its endpoint; Host transport applies the pinned
+/// proxy without leaking origin credentials to the CONNECT hop.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn oauth_verification_uses_readiness_or_pinned_proxy_and_persists_observations() {
+async fn provider_verification_uses_pinned_proxy_and_persists_observations() {
     let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let fixture = Fixture::new(Some(proxy.local_addr().unwrap().port())).await;
     let store = Arc::new(
@@ -45,18 +46,34 @@ async fn oauth_verification_uses_readiness_or_pinned_proxy_and_persists_observat
             .unwrap(),
     );
     let mut ids = Vec::new();
-    for provider in [
-        Provider::OpenaiCodex,
-        Provider::GithubCopilot,
-        Provider::XaiOauth,
+    for (name, provider, endpoint, secret) in [
+        (
+            "subscription",
+            codex(),
+            "https://chatgpt.com/backend-api/codex",
+            json!({"access_token":"fixture-access", "refresh_token":"must-not-refresh",
+                "expires_at":9_007_199_254_740_991_u64})
+            .to_string(),
+        ),
+        (
+            "api",
+            json!({"packageId":"maka.providers", "entryId":"maka.providers", "scope":"profile", "name":"openai"}),
+            "https://provider.invalid/v1",
+            "fixture-access".into(),
+        ),
     ] {
         let LoginPreparation::Ready(ticket) = store
             .prepare_oauth_login(LoginStart {
-                attempt_id: provider.as_str().into(),
+                attempt_id: name.into(),
                 target: Target::Create {
-                    provider_type: provider,
-                    slug: None,
-                    name: None,
+                    provider: serde_json::from_value(provider).unwrap(),
+                    configuration: json!({"baseUrl":endpoint}),
+                    slug: name.into(),
+                    name: name.into(),
+                },
+                authentication: AuthenticationInput {
+                    method: "fixture".into(),
+                    input: json!({}),
                 },
             })
             .await
@@ -65,11 +82,18 @@ async fn oauth_verification_uses_readiness_or_pinned_proxy_and_persists_observat
             panic!("enrollment")
         };
         let id = ticket.identity().connection_id.clone();
-        let secret = json!({"access_token":"fixture-access", "refresh_token":"must-not-refresh",
-            "expires_at":9_007_199_254_740_991_u64})
-        .to_string();
+        assert!(ticket.claim().await.unwrap());
         assert!(matches!(
-            ticket.complete(secret, 1).await.unwrap(),
+            ticket
+                .complete(
+                    Credential {
+                        secret,
+                        refresh_at: None
+                    },
+                    1
+                )
+                .await
+                .unwrap(),
             LoginCompletion::Committed(_)
         ));
         let row = store
@@ -89,7 +113,7 @@ async fn oauth_verification_uses_readiness_or_pinned_proxy_and_persists_observat
                     },
                     changes: ConnectionCatalogEntryUpdate {
                         name: row.name,
-                        base_url: row.base_url,
+                        configuration: row.configuration,
                         enabled: true,
                         enabled_model_ids: vec!["fixture-model".into()],
                         model_overrides: Patch::Keep,
@@ -106,23 +130,8 @@ async fn oauth_verification_uses_readiness_or_pinned_proxy_and_persists_observat
     drop(store);
     let (host, drain, server) = fixture.serve().await;
     let mut peer = Peer::new(host.clone(), "oauth-verification").await;
-    let ready = peer
-        .rpc(
-            "connection.test.run",
-            json!({"connectionId":ids[0], "modelId":"fixture-model"}),
-        )
-        .await;
-    assert_eq!(ready["result"]["kind"], "committed", "{ready}");
-    assert_eq!(ready["result"]["test"]["kind"], "verified", "{ready}");
-    assert_eq!(ready["result"]["test"]["modelId"], "fixture-model");
-    // Readiness must not send a synthetic inference request or require that an
-    // enabled custom model appears in a remotely fetched inventory.
-    assert!(
-        tokio::time::timeout(Duration::from_millis(20), proxy.accept())
-            .await
-            .is_err()
-    );
-    for (id, host) in [(&ids[1], "api.githubcopilot.com"), (&ids[2], "api.x.ai")] {
+    crate::javascript_plugins::ready(&mut peer).await;
+    for (id, host) in [(&ids[0], "chatgpt.com"), (&ids[1], "provider.invalid")] {
         let observed = async {
             let (mut socket, _) = proxy.accept().await.unwrap();
             let mut bytes = Vec::new();
@@ -145,11 +154,18 @@ async fn oauth_verification_uses_readiness_or_pinned_proxy_and_persists_observat
             "connection.test.run",
             json!({"connectionId":id, "modelId":"fixture-model"}),
         );
-        let (reply, ()) = tokio::time::timeout(Duration::from_secs(5), async {
-            tokio::join!(probe, observed)
+        let (reply, observed) = tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(
+                probe,
+                tokio::time::timeout(Duration::from_secs(5), observed)
+            )
         })
         .await
         .unwrap();
+        assert!(
+            observed.is_ok(),
+            "provider did not use the configured proxy: {reply}"
+        );
         assert_eq!(reply["result"]["kind"], "committed", "{reply}");
         assert_eq!(reply["result"]["test"]["kind"], "failed", "{reply}");
         assert_eq!(reply["result"]["test"]["errorClass"], "network", "{reply}");
@@ -162,11 +178,7 @@ async fn oauth_verification_uses_readiness_or_pinned_proxy_and_persists_observat
     let store = ConfigurationStore::for_root(Arc::new(fixture.owner()))
         .await
         .unwrap();
-    for (id, expected) in ids.iter().zip([
-        ConnectionTestStatus::Verified,
-        ConnectionTestStatus::Error,
-        ConnectionTestStatus::Error,
-    ]) {
+    for id in &ids {
         let row = store
             .catalog()
             .await
@@ -175,7 +187,7 @@ async fn oauth_verification_uses_readiness_or_pinned_proxy_and_persists_observat
             .into_iter()
             .find(|row| row.connection_id == *id)
             .unwrap();
-        assert_eq!(row.last_test.unwrap().status, expected);
+        assert_eq!(row.last_test.unwrap().status, ConnectionTestStatus::Error);
     }
     store.close().await.unwrap();
     fixture.temp.close().unwrap();

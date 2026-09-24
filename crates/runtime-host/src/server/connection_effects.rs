@@ -19,8 +19,7 @@
 
 use super::{Host, configuration};
 use maka_config::model_fetch::ModelFetchPreparation;
-use maka_model::connection::{ConnectionClient, DiscoveryRequest};
-use maka_protocol::{OperationError, OperationErrorCode};
+use maka_protocol::OperationError;
 use maka_runtime::configuration::ConnectionModelFetchResult;
 use std::{
     collections::HashMap,
@@ -28,7 +27,9 @@ use std::{
 };
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
+mod provider;
 mod test;
+pub(super) use provider::ProviderOperation;
 
 /// Serialize connection effects, not ordinary catalog edits or network-wide traffic.
 #[derive(Default)]
@@ -72,46 +73,24 @@ impl ConnectionEffects {
             ModelFetchPreparation::Rejected(reason) => {
                 return Ok(ConnectionModelFetchResult::Rejected { reason });
             }
-            ModelFetchPreparation::Unsupported => {
-                return Err(OperationError {
-                    code: OperationErrorCode::OperationUnavailable,
-                    message: "Provider model discovery is not installed".into(),
-                });
-            }
         };
-        let authentication = prepared
-            .oauth_credential()
-            .map(|snapshot| bind_oauth(host, snapshot))
-            .transpose()?;
-        drop(admission);
-        let access_token = if let Some((credential, client)) = authentication {
-            let resolved = credential.resolve(client).await.map_err(oauth_failure)?;
+        let operation = ProviderOperation::prepare(
+            host,
+            prepared.connection(),
             prepared
-                .accept_oauth(resolved.credential)
+                .provider_credential()
+                .map_err(configuration::failure)?,
+            prepared.network_configuration(),
+        )?;
+        drop(admission);
+        let credential = operation.credential().await?;
+        if let Some(credential) = &credential {
+            prepared
+                .accept_credential(credential.clone())
                 .map_err(configuration::failure)?;
-            Some(resolved.access_token)
-        } else {
-            None
-        };
-        let kind = prepared.protocol();
-        let headers = prepared
-            .request_headers()
-            .map(serde_json::from_str)
-            .transpose()
-            .map_err(|_| OperationError {
-                code: OperationErrorCode::InternalFailure,
-                message: "Stored request headers are invalid".into(),
-            })?
-            .unwrap_or_default();
-        let result = client(prepared.network_configuration())?
-            .fetch(DiscoveryRequest {
-                kind,
-                base_url: prepared.endpoint(),
-                credential: access_token
-                    .as_deref()
-                    .unwrap_or_else(|| prepared.api_key()),
-                headers: &headers,
-            })
+        }
+        let result = operation
+            .discover(credential.as_ref(), prepared.request_headers())
             .await;
         match result {
             Ok(models) => prepared
@@ -124,53 +103,4 @@ impl ConnectionEffects {
             Err(error_class) => Ok(ConnectionModelFetchResult::Failed { error_class }),
         }
     }
-}
-
-/// Called under the existing admission gate; the returned refresh runs outside it.
-fn bind_oauth(
-    host: &Host,
-    snapshot: maka_config::oauth::OAuthCredential,
-) -> Result<(crate::oauth::Credential, maka_model::oauth::Client), OperationError> {
-    let provider = serde_json::from_value(serde_json::Value::String(
-        snapshot.target().provider_type.clone(),
-    ))
-    .map_err(|_| OperationError {
-        code: OperationErrorCode::OperationUnavailable,
-        message: "Provider OAuth refresh is not installed".into(),
-    })?;
-    let settings = snapshot.network_configuration();
-    let policy =
-        maka_network::Policy::from_host_settings(&settings.proxy, settings.password.as_deref())
-            .map_err(oauth_failure)?;
-    let client = maka_model::oauth::Client::new(&policy).map_err(oauth_failure)?;
-    let credential = host
-        .executions
-        .oauth
-        .bind(snapshot, provider)
-        .map_err(oauth_failure)?;
-    Ok((credential, client))
-}
-
-fn oauth_failure(error: impl std::fmt::Display) -> OperationError {
-    OperationError {
-        code: OperationErrorCode::OperationUnavailable,
-        message: error.to_string(),
-    }
-}
-
-pub(super) fn client(
-    configuration: &maka_config::network::NetworkConfiguration,
-) -> Result<ConnectionClient, OperationError> {
-    let policy = maka_network::Policy::from_host_settings(
-        &configuration.proxy,
-        configuration.password.as_deref(),
-    )
-    .map_err(|error| OperationError {
-        code: OperationErrorCode::OperationUnavailable,
-        message: error.to_string(),
-    })?;
-    ConnectionClient::with_policy(&policy).map_err(|_| OperationError {
-        code: OperationErrorCode::InternalFailure,
-        message: "Cannot initialize network client".into(),
-    })
 }

@@ -19,7 +19,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ClientContext, ClientSlots } from '@maka-agent/plugin-sdk/client';
-import { copy, type Query, type Reply, type ResultPage } from './model.js';
+import { copy } from './copy.js';
+import type { Query, Reply, ResultPage } from './model.js';
 
 export function WorkResult(props: {
   context: ClientContext;

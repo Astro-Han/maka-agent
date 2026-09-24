@@ -168,12 +168,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     let width = area.width.saturating_sub(2).min(64);
     let editing = dialog.kind.edits_text() && !dialog.reviewing;
     let workspace = dialog.kind.edits_path();
-    let endpoint_review = dialog.kind.edits_endpoint() && dialog.reviewing;
-    let endpoint_lines =
-        endpoint_review.then(|| note_lines(dialog.editor.text(), width.saturating_sub(4)));
-    let field_height = if let Some(lines) = &endpoint_lines {
-        lines.len() as u16
-    } else if workspace || dialog.kind.edits_endpoint() {
+    let configuration_review = dialog.kind.edits_configuration() && dialog.reviewing;
+    let field_height = if workspace || dialog.kind.edits_configuration() {
         dialog.editor.preferred_height(
             width.saturating_sub(4),
             if area.height >= 14 { 3 } else { 1 },
@@ -182,7 +178,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         1
     };
     let name_rows = u16::from(
-        matches!(dialog.kind, Kind::Workspace | Kind::Relink) || dialog.kind.edits_endpoint(),
+        matches!(dialog.kind, Kind::Workspace | Kind::Relink) || dialog.kind.edits_configuration(),
     );
     let text = if busy {
         Some(
@@ -195,8 +191,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     } else {
         dialog.editor.error.or(dialog.error).or(match dialog.kind {
             Kind::Connection(change) => {
-                Some(if dialog.kind.edits_endpoint() && !dialog.reviewing {
-                    "connection-endpoint-edit-note"
+                Some(if dialog.kind.edits_configuration() && !dialog.reviewing {
+                    "connection-configuration-edit-note"
                 } else {
                     change.note()
                 })
@@ -276,8 +272,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         } else {
             ratatui::widgets::BorderType::Rounded
         })
-        .title(app.i18n.text(if endpoint_review {
-            "connection-endpoint-confirm"
+        .title(app.i18n.text(if configuration_review {
+            "connection-configuration-confirm"
         } else if dialog.reviewing {
             "project-relink-confirm"
         } else {
@@ -297,10 +293,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         );
     }
     let name_area = Rect::new(inner.x, inner.y + 1 + name_rows, inner.width, field_height);
-    if let Some(lines) = endpoint_lines {
-        dialog.editor.invalidate_geometry();
-        frame.render_widget(Paragraph::new(lines), name_area);
-    } else if dialog.kind.edits_text() {
+    if dialog.kind.edits_text() {
         frame.render_widget(
             Block::default().style(Style::default().bg(app.theme.colors().surface)),
             name_area,
@@ -353,11 +346,11 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     let kind = dialog.kind;
     let reviewing = dialog.reviewing;
     let buttons_start = usize::from(editing) + usize::from(kind == Kind::Register);
-    let save_label = if kind.edits_endpoint() {
+    let save_label = if kind.edits_configuration() {
         if reviewing {
-            "connection-endpoint-apply"
+            "connection-configuration-apply"
         } else {
-            "connection-endpoint-review"
+            "connection-configuration-review"
         }
     } else if kind == Kind::Relink {
         if reviewing {
@@ -387,8 +380,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         save_width,
         1,
     );
-    let edit_label = if kind.edits_endpoint() {
-        "connection-endpoint-edit"
+    let edit_label = if kind.edits_configuration() {
+        "connection-configuration-edit"
     } else {
         "project-relink-edit"
     };

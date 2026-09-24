@@ -231,7 +231,14 @@ async fn execute_once(
                 tools: request.tools.clone(),
                 provider_options: Some(request.provider_options.clone()),
                 max_output_tokens: request.max_output_tokens,
-                sources: vec![binding.source(request.provider.adapter_name())?],
+                sources: input
+                    .model_revision
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::once(
+                        binding.source(request.provider.adapter_name())?,
+                    ))
+                    .collect(),
             }
             .freeze()
             .map_err(|error| RunError::Internal(error.into()))?;

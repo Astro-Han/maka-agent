@@ -34,6 +34,7 @@ pub mod handshake;
 pub mod host;
 pub mod interaction;
 pub mod message;
+pub mod model_provider;
 pub mod navigation;
 pub mod oauth;
 pub mod onboarding;

@@ -19,44 +19,47 @@
 
 use super::*;
 use maka_model::{AuthResolver, ModelError, ProviderAuth};
-use maka_runtime::oauth::Provider;
+use maka_plugins::provider::{Binding as ProviderBinding, Connection, Context};
 use std::{future::Future, pin::Pin};
 
 pub(super) struct Binding {
-    snapshot: maka_config::oauth::OAuthCredential,
-    credential: std::sync::OnceLock<crate::oauth::Credential>,
-    client: maka_model::oauth::Client,
-    provider: Provider,
+    snapshot: Option<maka_config::oauth::ProviderCredential>,
+    credential: std::sync::OnceLock<Option<crate::oauth::Credential>>,
+    provider: ProviderBinding,
+    connection: Connection,
+    transport: Arc<dyn maka_plugins::model::Transport>,
     session_id: String,
 }
 
 impl Binding {
     pub fn auth(self: &Arc<Self>) -> Result<ProviderAuth, OperationError> {
-        let basis = self.snapshot.basis();
+        let generation = self
+            .snapshot
+            .as_ref()
+            .map(|snapshot| (&snapshot.basis().locator, &snapshot.basis().credential_id));
         Ok(ProviderAuth::Bound {
-            // Refresh advances the secret revision, not the login generation.
-            // Enrollment always mints a new ID; the resolver still validates its
-            // real current basis and cannot revive a revoked generation.
             identity: serde_json::to_string(&(
-                "maka.oauth.execution.v1",
-                self.provider,
-                &basis.locator,
-                &basis.credential_id,
+                "maka.provider.execution.v1",
+                self.provider.identity(),
+                &self.connection.id,
+                generation,
             ))
-            .map_err(|_| unavailable("Invalid OAuth credential identity"))?,
+            .map_err(|_| unavailable("Invalid provider credential identity"))?,
             resolver: self.clone(),
         })
     }
 
-    /// Caller holds Host admission, before exposing a new execution. A query
-    /// never admits this observation or changes the root's current generation.
+    /// Caller holds Host admission. Pure observations cannot start refresh work.
     pub fn admit(&self, authority: &crate::oauth::Authority) -> Result<(), OperationError> {
-        let credential = authority
-            .bind(self.snapshot.clone(), self.provider)
+        let credential = self
+            .snapshot
+            .clone()
+            .map(|snapshot| authority.bind(snapshot))
+            .transpose()
             .map_err(|error| unavailable(error.to_string()))?;
         self.credential
             .set(credential)
-            .map_err(|_| unavailable("OAuth binding was already admitted"))
+            .map_err(|_| unavailable("Provider binding was already admitted"))
     }
 }
 
@@ -65,51 +68,70 @@ impl AuthResolver for Binding {
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<ProviderAuth, ModelError>> + Send + '_>> {
         Box::pin(async move {
-            let credential = self.credential.get().ok_or_else(|| {
-                ModelError::Adapter("OAuth observation is not admitted for execution".into())
+            let admitted = self.credential.get().ok_or_else(|| {
+                ModelError::Adapter("Provider observation is not admitted".into())
             })?;
-            let access_token = credential.access_token(self.client.clone()).await?;
-            Ok(match self.provider {
-                Provider::OpenaiCodex => ProviderAuth::RequestHeaders(
-                    maka_providers::codex::request_headers(&access_token, &self.session_id)?,
-                ),
-                Provider::XaiOauth => ProviderAuth::ApiKey(access_token),
-                Provider::GithubCopilot => {
-                    return Err(ModelError::Adapter(
-                        "Copilot model profile is not installed".into(),
-                    ));
+            let credential = if let Some(admitted) = admitted {
+                Some(
+                    admitted
+                        .resolve(
+                            self.provider.clone(),
+                            Context {
+                                transport: self.transport.clone(),
+                                cancellation: tokio_util::sync::CancellationToken::new(),
+                                interaction: None,
+                            },
+                        )
+                        .await?
+                        .credential()
+                        .clone(),
+                )
+            } else {
+                None
+            };
+            let credentials = self
+                .provider
+                .authorize(self.connection.clone(), credential, self.session_id.clone())
+                .await
+                .map_err(|error| ModelError::Adapter(error.to_string()))?;
+            Ok(match credentials {
+                maka_plugins::model::Credentials::ApiKey(key) => ProviderAuth::ApiKey(key),
+                maka_plugins::model::Credentials::RequestHeaders(headers) => {
+                    ProviderAuth::RequestHeaders(headers)
                 }
             })
         })
     }
 }
 
-pub(super) async fn observe(
-    config: &Arc<ConfigurationStore>,
-    target: ConnectionCredentialTarget,
+pub(super) fn observe(
+    models: &maka_model::ModelExecutor,
+    provider: ProviderBinding,
+    material: &maka_config::ConnectionObservation,
     session_id: &str,
 ) -> Result<Arc<Binding>, OperationError> {
-    let provider = match target.provider_type.as_str() {
-        "openai-codex" => Provider::OpenaiCodex,
-        "xai-oauth" => Provider::XaiOauth,
-        _ => return Err(unavailable("Provider OAuth model profile is not installed")),
-    };
-    let snapshot = config
-        .oauth_credential(target)
-        .await
-        .map_err(crate::server::configuration::failure)?
-        .ok_or_else(|| unavailable("OAuth credential connection is no longer available"))?;
-    let settings = snapshot.network_configuration();
+    if provider.identity() != &material.connection.provider {
+        return Err(unavailable(
+            "Provider does not match the connection recipient",
+        ));
+    }
+    let settings = &material.network;
     let policy =
         maka_network::Policy::from_host_settings(&settings.proxy, settings.password.as_deref())
             .map_err(|error| unavailable(error.to_string()))?;
-    let client =
-        maka_model::oauth::Client::new(&policy).map_err(|error| unavailable(error.to_string()))?;
+    let transport = models
+        .transport(&policy)
+        .map_err(|error| unavailable(error.to_string()))?;
     Ok(Arc::new(Binding {
-        snapshot,
+        snapshot: material.credential.clone(),
         credential: std::sync::OnceLock::new(),
-        client,
         provider,
+        connection: Connection {
+            id: material.connection.connection_id.clone(),
+            revision: material.connection.revision,
+            configuration: material.connection.configuration.clone(),
+        },
+        transport,
         session_id: session_id.into(),
     }))
 }

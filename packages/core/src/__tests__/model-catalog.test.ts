@@ -198,6 +198,7 @@ test('the catalog and the readiness gate agree that no catalog is a veto', () =>
         name: 'Relay',
         providerType: 'openai-compatible',
         defaultModel: 'custom-default',
+        enabledModelIds: ['custom-default'],
         enabled: true,
         models: [{ id: 'relay-static-model' }],
         modelSource,

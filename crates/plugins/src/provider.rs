@@ -21,12 +21,16 @@
 //! Credentials and connections belong to Host, not to the contribution catalog.
 pub mod authentication;
 mod binding;
+mod login;
+pub use login::AuthenticationCall;
+mod inspection;
+pub use inspection::{Discovery, Verification};
 pub mod catalog;
 pub mod configuration;
 
 use crate::model::{Credentials, Transport};
 use authentication::{Authenticate, Credential, Interaction};
-pub use binding::{Binding, Identity};
+pub use binding::{Binding, Identity, RefreshCall};
 pub use configuration::{Connection, Descriptor, Model, Resolve};
 use futures_util::future::BoxFuture;
 use maka_runtime::configuration::ModelInfo;
@@ -59,6 +63,9 @@ pub enum Error {
     OutcomeUnknown,
     #[error("provider transport failed: {0}")]
     Transport(String),
+    /// Status only; provider error bodies can contain credentials.
+    #[error("provider HTTP request failed with status {0}")]
+    Http(u16),
 }
 
 /// Pure request policy is separate from credential resolution. Host can freeze
@@ -92,10 +99,19 @@ pub trait Provider: Send + Sync {
 
     fn discover(
         &self,
-        _connection: Connection,
-        _credential: Option<Credential>,
+        _request: Discovery,
         _context: Context,
     ) -> BoxFuture<'_, Result<Vec<ModelInfo>, Error>> {
+        Box::pin(async { Err(Error::Unavailable) })
+    }
+
+    /// The provider chooses its meaningful readiness check. Host does not
+    /// infer subscription behavior from a vendor name or fabricate a probe.
+    fn verify(
+        &self,
+        _request: Verification,
+        _context: Context,
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::Unavailable) })
     }
 }

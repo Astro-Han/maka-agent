@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { readPage } from '../../packages/runtime/src/read-page.ts';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
@@ -134,35 +135,15 @@ export async function verifyReadWorkflow(connection, workspace, reopened) {
   const model = await fixture(workspace);
   const request = (operation, input) => connection.request(operation, input, 3000);
   try {
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: 0,
-      connection: {
-        slug: 'read-fixture',
-        name: 'Read fixture',
-        providerType: 'openai-compatible',
-        baseUrl: model.baseUrl,
-        enabled: true,
-        enabledModelIds: ['fixture-model'],
-      },
+    const created = await createModelConnection(request, {
+      providerName: 'openai-compatible',
+      slug: 'read-fixture',
+      name: 'Read fixture',
+      baseUrl: model.baseUrl,
+      apiKey: 'dummy-read-fixture',
+      enabledModelIds: ['fixture-model'],
     });
-    assert.equal(created.kind, 'committed');
     const basis = created.connection;
-    assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-          expected: null,
-          expectedConnection: {
-            ...basis,
-            slug: 'read-fixture',
-            providerType: 'openai-compatible',
-            effectiveBaseUrl: model.baseUrl,
-          },
-          secret: 'dummy-read-fixture',
-        })
-      ).kind,
-      'committed',
-    );
     await request('connection.catalog.set-default-target', {
       expectedCatalogRevision: created.catalogRevision,
       target: { connectionId: basis.connectionId, modelId: 'fixture-model' },

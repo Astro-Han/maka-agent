@@ -21,9 +21,8 @@ mod admission;
 mod login;
 
 use super::{Host, HostError};
-use maka_config::oauth::enrollment::LoginReceipt;
 use maka_protocol::{Operation, OperationError, OperationErrorCode as Code, Outcome, oauth};
-use maka_runtime::oauth::{Failure, LoginProjection, LoginStart, Phase, Provider};
+use maka_runtime::oauth::{Failure, LoginProjection, LoginStart, Phase};
 use serde_json::Value;
 use std::{
     collections::VecDeque,
@@ -53,28 +52,20 @@ impl Coordinator {
 #[derive(Default)]
 struct State {
     active: Option<Arc<Attempt>>,
-    terminal: VecDeque<(LoginStart, LoginProjection)>,
+    terminal: VecDeque<(String, LoginProjection)>,
 }
 struct Attempt {
     input: LoginStart,
     connection: oauth::ConnectionIdentity,
-    progress: Mutex<Progress>,
+    phase: Mutex<Phase>,
     cancellation: CancellationToken,
-}
-struct Progress {
-    phase: Phase,
-    deferred: bool,
 }
 impl Attempt {
     fn projection(&self) -> LoginProjection {
         LoginProjection {
             attempt_id: self.input.attempt_id.clone(),
             connection: self.connection.clone(),
-            phase: self
-                .progress
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .phase,
+            phase: *self.phase.lock().unwrap_or_else(|e| e.into_inner()),
         }
     }
     fn cancel(&self) {
@@ -82,28 +73,26 @@ impl Attempt {
         // decide whether a concurrent poll already spent the grant.
         self.cancellation.cancel();
     }
-    fn boundary(&self, boundary: maka_model::oauth::PollBoundary) {
-        use maka_model::oauth::PollBoundary;
-        let mut progress = self.progress.lock().unwrap_or_else(|e| e.into_inner());
-        progress.deferred = boundary != PollBoundary::Retry;
-    }
 }
 impl State {
-    fn find(&self, id: &str) -> Option<(LoginStart, LoginProjection)> {
+    fn find(&self, id: &str) -> Option<(String, LoginProjection)> {
         if let Some(active) = &self.active
             && active.input.attempt_id == id
         {
-            return Some((active.input.clone(), active.projection()));
+            return Some((
+                active.input.fingerprint().expect("validated login input"),
+                active.projection(),
+            ));
         }
         self.terminal
             .iter()
-            .find(|(input, _)| input.attempt_id == id)
+            .find(|(_, projection)| projection.attempt_id == id)
             .cloned()
     }
-    fn remember(&mut self, input: LoginStart, projection: LoginProjection) {
+    fn remember(&mut self, fingerprint: String, projection: LoginProjection) {
         self.terminal
-            .retain(|(prior, _)| prior.attempt_id != input.attempt_id);
-        self.terminal.push_back((input, projection));
+            .retain(|(_, prior)| prior.attempt_id != projection.attempt_id);
+        self.terminal.push_back((fingerprint, projection));
         while self.terminal.len() > 256 {
             self.terminal.pop_front();
         }
@@ -119,9 +108,14 @@ pub(super) async fn execute(
     let result = match operation {
         Operation::OauthEnrollmentQuery => {
             let provider = oauth::decode_enrollment(input)?.provider;
+            let enabled = maka_plugins::provider::Binding::resolve(
+                &provider,
+                &host.executions.plugin_catalog,
+            )
+            .is_ok_and(|binding| !binding.definition().descriptor().authentication.is_empty());
             Ok(serde_json::to_value(oauth::EnrollmentProjection {
                 provider,
-                enabled: enabled(provider),
+                enabled,
             })?)
         }
         Operation::OauthLoginStart => {
@@ -171,36 +165,19 @@ async fn query(host: &Host, id: String) -> Result<LoginProjection, OperationErro
         .await
         .map_err(|_| failure(Code::PersistenceFailed, "OAuth receipt query failed"))?
         .ok_or_else(|| failure(Code::NotFound, "OAuth login was not found"))?;
-    let (input, projection) = authenticated(id, receipt);
-    host.oauth
-        .state
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remember(input, projection.clone());
-    Ok(projection)
+    Ok(LoginProjection {
+        attempt_id: id,
+        connection: receipt.connection,
+        phase: receipt_phase(receipt.phase),
+    })
 }
-fn authenticated(id: String, receipt: LoginReceipt) -> (LoginStart, LoginProjection) {
-    (
-        LoginStart {
-            attempt_id: id.clone(),
-            target: receipt.target,
-        },
-        LoginProjection {
-            attempt_id: id,
-            connection: receipt.connection,
-            phase: Phase::Authenticated,
-        },
-    )
-}
-fn enabled(provider: Provider) -> bool {
-    match provider {
-        Provider::XaiOauth => true,
-        Provider::OpenaiCodex => {
-            std::env::var("MAKA_CODEX_SUBSCRIPTION_EXPERIMENTAL").as_deref() != Ok("0")
+fn receipt_phase(phase: Phase) -> Phase {
+    if phase == Phase::Exchanging {
+        Phase::Failed {
+            failure: Failure::OutcomeUnknown,
         }
-        Provider::GithubCopilot => {
-            std::env::var("MAKA_GITHUB_COPILOT_DEVICE_LOGIN_EXPERIMENTAL").as_deref() == Ok("1")
-        }
+    } else {
+        phase
     }
 }
 fn failure(code: Code, message: &'static str) -> OperationError {

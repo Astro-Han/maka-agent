@@ -19,12 +19,13 @@
 
 use crate::{Client, ClientError, RequestFailure};
 use maka_protocol::configuration::onboarding::{
-    OnboardingInput, OnboardingSaveResult, OnboardingTarget, OnboardingVerifyResult,
+    OnboardingInput, OnboardingSaveResult, OnboardingVerifyResult,
 };
 use maka_protocol::configuration::{
     CatalogMutationResult, ConnectionVersionBasis, RemoveCatalogConnectionInput,
     SetDefaultConnectionTargetInput, UpdateCatalogConnectionInput,
 };
+use maka_protocol::oauth::Target;
 use maka_protocol::{
     Operation, ProtocolError,
     configuration::{ConnectionCatalogCursor, ConnectionCatalogQueryInput},
@@ -245,16 +246,13 @@ impl Client {
         let result = maka_protocol::onboarding::decode_save_result(&value).map_err(invalid)?;
         if let OnboardingSaveResult::Saved { connection } = &result {
             let valid = match target {
-                OnboardingTarget::Create {
-                    provider_type,
-                    slug,
-                    ..
-                } => {
-                    connection.provider_type == provider_type
-                        && slug.is_none_or(|slug| slug == connection.slug)
+                Target::Create { provider, slug, .. } => {
+                    connection.provider == provider && slug == connection.slug
                 }
-                OnboardingTarget::Existing { connection_id } => {
-                    connection.connection_id == connection_id
+                Target::Existing { expected, .. } => {
+                    connection.connection_id == expected.connection_id
+                        && connection.provider == expected.provider
+                        && connection.slug == expected.slug
                 }
             };
             if !valid {
@@ -315,7 +313,7 @@ impl Client {
 }
 
 fn onboarding_value(input: OnboardingInput) -> Value {
-    serde_json::json!({"target":input.target,"apiKey":input.api_key,"baseUrl":input.base_url})
+    serde_json::json!({"target":input.target})
 }
 
 fn starts_at(item: &Value, cursor: &ConnectionCatalogCursor) -> bool {

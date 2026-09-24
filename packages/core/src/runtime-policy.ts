@@ -23,7 +23,7 @@ import type {
   ModelDiscoveryResult,
   ModelInfo,
 } from './llm-connections.js';
-import type { ProviderType } from './provider-registry.js';
+import type { ProviderIdentity } from './runtime-policy/provider.js';
 import type { ModelOverride } from './model-thinking.js';
 import {
   defaultChatDefaultsSettings,
@@ -36,6 +36,8 @@ import {
 import type { JsonObject } from './request-customization.js';
 export { networkProxyCredentialTarget };
 export type { NetworkProxyCredentialTarget };
+export { decodeProviderConfiguration, decodeProviderIdentity } from './runtime-policy/provider.js';
+export type { ProviderIdentity } from './runtime-policy/provider.js';
 export type { ConnectionTestErrorClass, ModelDiscoverySource } from './llm-connections.js';
 export {
   decodeRuntimePolicyEntityId,
@@ -60,6 +62,7 @@ export {
   decodeCanonicalConnectionCatalogEntry,
   decodeConnectionModelId,
   decodeConnectionCredentialTarget,
+  decodeConnectionOnboardingTarget,
   decodeModelOverridesTable,
   decodeConnectionModel,
   decodeConnectionModels,
@@ -72,9 +75,7 @@ export {
   normalizeCatalogConnectionBaseUrl,
   normalizeConnectionCatalogEntryDraft,
   normalizeConnectionCatalogEntryUpdate,
-  normalizeConnectionCatalogEntryUpdateForProvider,
   normalizeConnectionModelDiscoveryResult,
-  canonicalConnectionEffectiveBaseUrl,
   connectionCredentialTarget,
   normalizeCreateCatalogConnectionInput,
   normalizeRemoveCatalogConnectionInput,
@@ -263,8 +264,8 @@ export interface ConnectionTestSummary {
 export interface ConnectionConfiguration {
   readonly slug: string;
   readonly name: string;
-  readonly providerType: ProviderType;
-  readonly baseUrl?: string;
+  readonly provider: ProviderIdentity;
+  readonly configuration: JsonObject;
   readonly enabled: boolean;
   readonly enabledModelIds: readonly string[];
   /** Connection-scoped user declarations, independent of the enabled selection. */
@@ -284,28 +285,22 @@ export interface ConnectionCatalogEntry extends ConnectionConfiguration {
 export type ConnectionOnboardingTarget =
   | {
       readonly kind: 'create';
-      readonly providerType: ProviderType;
-      /**
-       * Optional caller-requested identity. When absent, the Host derives the
-       * slug (`openai`, `openai-2`, …) and display name as before. When
-       * present, the Host validates the slug against the catalog and rejects
-       * the save with `slug_taken` on collision rather than silently deriving
-       * a different identity. A surface talking to an older Host must omit
-       * both keys — the wire decoder there rejects unknown fields.
-       */
-      readonly slug?: string;
-      readonly name?: string;
+      readonly provider: ProviderIdentity;
+      readonly configuration: JsonObject;
+      readonly slug: string;
+      readonly name: string;
     }
   | {
       readonly kind: 'existing';
-      readonly connectionId: EntityId;
+      readonly expected: ConnectionCredentialTarget;
+      readonly configuration: JsonObject;
     };
 
 export type ConnectionCatalogEntryDraft = ConnectionConfiguration;
 
 export interface ConnectionCatalogEntryUpdate {
   readonly name: string;
-  readonly baseUrl?: string;
+  readonly configuration: JsonObject;
   readonly enabled: boolean;
   readonly enabledModelIds: readonly string[];
   /**
@@ -327,8 +322,8 @@ export interface ConnectionVersionBasis {
 
 export interface ConnectionCredentialTarget extends ConnectionVersionBasis {
   readonly slug: string;
-  readonly providerType: ProviderType;
-  readonly effectiveBaseUrl: string;
+  readonly provider: ProviderIdentity;
+  readonly configuration: JsonObject;
 }
 
 export interface ConnectionTarget {
@@ -379,7 +374,7 @@ export type CredentialLocator =
   | {
       readonly scope: 'connection';
       readonly connectionId: EntityId;
-      readonly kind: 'api_key' | 'oauth_token' | 'request_headers';
+      readonly kind: 'provider' | 'request_headers';
     }
   | { readonly scope: 'network_proxy'; readonly kind: 'password' };
 

@@ -41,7 +41,7 @@ impl App {
             let editor = &mut self.management.oauth.identity.fields[index];
             match &event {
                 Event::Paste(text) => {
-                    if text.chars().any(char::is_control) {
+                    if index < 2 && text.chars().any(char::is_control) {
                         editor.error = Some("oauth-field-invalid");
                     } else {
                         editor.insert(text);

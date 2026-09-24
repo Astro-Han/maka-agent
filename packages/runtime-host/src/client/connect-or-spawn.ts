@@ -41,13 +41,18 @@ import {
 } from './connection.js';
 import {
   launchDetachedRuntimeHostCandidate,
-  launchOwnedRuntimeHostCandidate,
   type CandidateExitDetails,
   type CandidateProcessExit,
   type CandidateLauncher,
   type DetachedCandidateAttempt,
   type OwnedCandidateAttempt,
 } from './launcher.js';
+import { launchNativeRuntimeHostCandidate } from './native-launcher.js';
+import {
+  initializeNativeRuntimeHost,
+  type HostedRuntimeInitialization,
+} from './native-initialization.js';
+export type { HostedRuntimeInitialization } from './native-initialization.js';
 
 export type { CandidateExitDetails } from './launcher.js';
 import {
@@ -236,11 +241,13 @@ export type ConnectOwnedRuntimeHostResult =
   | { kind: 'failed'; reason: 'startup_failed'; detail: string };
 
 interface ConnectOwnedRuntimeHostDependencies {
-  launchCandidate: typeof launchOwnedRuntimeHostCandidate;
+  initializeRoot: typeof initializeNativeRuntimeHost;
+  launchCandidate: typeof launchNativeRuntimeHostCandidate;
 }
 
 const defaultOwnedDependencies: ConnectOwnedRuntimeHostDependencies = {
-  launchCandidate: launchOwnedRuntimeHostCandidate,
+  initializeRoot: initializeNativeRuntimeHost,
+  launchCandidate: launchNativeRuntimeHostCandidate,
 };
 
 export async function connectOwnedRuntimeHost(
@@ -253,26 +260,25 @@ export async function connectOwnedRuntimeHostWithDependencies(
   input: OwnedRuntimeHostInput,
   dependencies: ConnectOwnedRuntimeHostDependencies,
 ): Promise<ConnectOwnedRuntimeHostResult> {
-  let launch: ReturnType<typeof launchOwnedRuntimeHostCandidate> | undefined;
+  let launch: ReturnType<typeof launchNativeRuntimeHostCandidate> | undefined;
   let connection: RuntimeHostConnection | undefined;
   try {
+    const executable = input.candidateExecutable ?? 'maka';
+    await dependencies.initializeRoot(
+      executable,
+      input.rootPath,
+      input.initialization,
+      input.signal,
+    );
     const result = await connectOrSpawnRuntimeHostWithDependencies(
       {
         ...input,
-        candidateEntrypoint: new URL('../execution-candidate-main.js', import.meta.url),
+        candidateEntrypoint: executable,
         idleGraceMs: 0,
       },
       {
         launchCandidate(candidate) {
-          launch ??= dependencies.launchCandidate({
-            ...candidate,
-            // Proxy passwords belong in the child environment, never process arguments.
-            env: {
-              MAKA_HOSTED_INITIALIZATION: input.initialization
-                ? JSON.stringify(input.initialization)
-                : '',
-            },
-          });
+          launch ??= dependencies.launchCandidate(executable, candidate);
           return launch;
         },
         random: Math.random,
@@ -321,11 +327,6 @@ export async function connectOwnedRuntimeHostWithDependencies(
   }
 }
 
-export interface HostedRuntimeInitialization {
-  readonly incognito: true;
-  readonly proxyUrl?: string;
-}
-
 type OwnedRuntimeHostInput = Omit<
   ConnectOrSpawnRuntimeHostInput,
   'candidateEntrypoint' | 'idleGraceMs'
@@ -334,7 +335,7 @@ type OwnedRuntimeHostInput = Omit<
 };
 
 function releaseOwnedLaunch(
-  launch: ReturnType<typeof launchOwnedRuntimeHostCandidate> | undefined,
+  launch: ReturnType<typeof launchNativeRuntimeHostCandidate> | undefined,
 ): void {
   if (!launch) return;
   void launch.spawned

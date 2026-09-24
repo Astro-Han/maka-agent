@@ -18,6 +18,19 @@
  */
 
 use super::*;
+use maka_config::oauth::enrollment::{LoginCompletion, LoginPreparation};
+use maka_runtime::{
+    oauth::{LoginStart, Target},
+    provider::{AuthenticationInput, Credential, Identity},
+    scope::Scope,
+};
+
+pub(super) fn credential(secret: &str) -> Credential {
+    Credential {
+        secret: secret.into(),
+        refresh_at: Some(50_000),
+    }
+}
 
 pub(super) struct Fixture {
     pub(super) temp: tempfile::TempDir,
@@ -25,17 +38,34 @@ pub(super) struct Fixture {
     pub(super) target: ConnectionCredentialTarget,
 }
 impl Fixture {
-    pub(super) async fn new(provider: &str) -> Self {
+    pub(super) async fn new(name: &str) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let owner = Arc::new(
             RootOwner::create(&temp.path().join("root"), &namespaces(temp.path())).unwrap(),
         );
         let store = Arc::new(ConfigurationStore::for_root(owner).await.unwrap());
-        let created = store.create_connection(serde_json::from_value(json!({
-            "expectedCatalogRevision":0,
-            "connection":{"slug":"subscription","name":"Subscription","providerType":provider,
-                "enabled":true,"enabledModelIds":[]}
-        })).unwrap()).await.unwrap();
+        let provider = Identity {
+            package_id: "external.provider".into(),
+            entry_id: "external-entry".into(),
+            scope: Scope::Profile,
+            name: name.into(),
+        };
+        let created = store
+            .create_connection(CreateCatalogConnectionInput {
+                expected_catalog_revision: 0,
+                connection: ConnectionCatalogEntryDraft {
+                    slug: "subscription".into(),
+                    name: "Subscription".into(),
+                    provider: provider.clone(),
+                    configuration: json!({"endpoint":"https://provider.test/v1"}),
+                    enabled: true,
+                    enabled_model_ids: vec![],
+                    model_overrides: None,
+                    request_body_overlay: None,
+                },
+            })
+            .await
+            .unwrap();
         let CatalogMutationResult::Committed {
             connection: Some(basis),
             ..
@@ -47,13 +77,8 @@ impl Fixture {
             connection_id: basis.connection_id,
             revision: basis.revision,
             slug: "subscription".into(),
-            provider_type: provider.into(),
-            effective_base_url: validation::normalize_base_url(
-                Some(validation::provider_default_base_url(provider).unwrap()),
-                None,
-            )
-            .unwrap()
-            .unwrap(),
+            provider,
+            configuration: json!({"endpoint":"https://provider.test/v1"}),
         };
         Self {
             temp,
@@ -61,25 +86,32 @@ impl Fixture {
             target,
         }
     }
-    pub(super) async fn login(&self, secret: &str) -> Result<SetCredentialResult, ConfigError> {
-        self.store
-            .set_credential(
-                SetCredentialInput {
-                    locator: CredentialLocator::Connection {
-                        connection_id: self.target.connection_id.clone(),
-                        kind: ConnectionCredentialKind::OauthToken,
-                    },
-                    expected: None,
-                    expected_connection: Some(self.target.clone()),
-                    secret: secret.into(),
-                },
-                10,
-            )
-            .await
+
+    pub(super) async fn login(&mut self, secret: &str) {
+        let input = LoginStart {
+            attempt_id: uuid::Uuid::new_v4().to_string(),
+            target: Target::Existing {
+                expected: self.target.clone(),
+                configuration: self.target.configuration.clone(),
+            },
+            authentication: AuthenticationInput {
+                method: "account".into(),
+                input: json!({}),
+            },
+        };
+        let LoginPreparation::Ready(ticket) = self.store.prepare_oauth_login(input).await.unwrap()
+        else {
+            panic!("prepared authentication");
+        };
+        assert!(matches!(
+            ticket.complete(credential(secret), 10).await.unwrap(),
+            LoginCompletion::Committed(_)
+        ));
+        self.target.revision = ticket.connection().revision;
     }
-    pub(super) async fn snapshot(&self) -> OAuthCredential {
+    pub(super) async fn snapshot(&self) -> ProviderCredential {
         self.store
-            .oauth_credential(self.target.clone())
+            .provider_credential(self.target.clone())
             .await
             .unwrap()
             .unwrap()
@@ -95,7 +127,7 @@ impl Fixture {
                 },
                 changes: ConnectionCatalogEntryUpdate {
                     name: format!("Edited during refresh {}", row.revision),
-                    base_url: row.base_url,
+                    configuration: row.configuration,
                     enabled,
                     enabled_model_ids: row.enabled_model_ids,
                     model_overrides: Patch::Keep,

@@ -55,12 +55,12 @@ pub struct Row {
     pub id: String,
     pub name: String,
     pub slug: String,
-    pub provider: String,
+    pub provider: maka_protocol::model_provider::Identity,
+    pub configuration: Value,
     pub enabled: bool,
     pub enabled_models: u64,
     pub model_ids: Vec<String>,
     pub revision: u64,
-    pub base_url: Option<String>,
     pub default_model: Option<String>,
 }
 
@@ -214,12 +214,13 @@ impl Connections {
                 id: id.into(),
                 name: item["name"].as_str().unwrap().into(),
                 slug: item["slug"].as_str().unwrap().into(),
-                provider: item["providerType"].as_str().unwrap().into(),
+                provider: serde_json::from_value(item["provider"].clone())
+                    .expect("validated provider identity"),
+                configuration: item["configuration"].clone(),
                 enabled: item["enabled"].as_bool().unwrap(),
                 enabled_models: item["enabledModelIdCount"].as_u64().unwrap(),
                 model_ids: vec![],
                 revision: item["revision"].as_u64().unwrap(),
-                base_url: item["baseUrl"].as_str().map(str::to_owned),
                 default_model: (page["defaultTarget"]["connectionId"] == id)
                     .then(|| page["defaultTarget"]["modelId"].as_str().unwrap().into()),
             });
@@ -307,7 +308,10 @@ impl App {
                 self.connections.selected = Some(id);
                 self.focus = Focus::List;
             }
-            Command::Refresh => self.connections.refresh(),
+            Command::Refresh => {
+                self.connections.refresh();
+                self.providers.refresh();
+            }
             Command::Next => self.connections.change_page(true),
             Command::Previous => self.connections.change_page(false),
         }
@@ -326,7 +330,7 @@ mod tests {
             "defaultTarget":{"connectionId":"id-0","modelId":"main"},
             "items":(start..end).flat_map(|index| [json!({
                 "kind":"connection","connectionIndex":index,"connectionId":format!("id-{index}"),
-                "slug":format!("slug-{index}"),"name":"Same name","providerType":"openai-compatible",
+                "slug":format!("slug-{index}"),"name":"Same name","provider":crate::providers::fixtures::entry("openai-compatible", false).identity,"configuration":{"baseUrl":"http://127.0.0.1/v1"},
                 "enabled":index != 1,"enabledModelIdCount":1,"revision":1
             }), json!({"kind":"enabled_model_id","connectionIndex":index,"itemIndex":0,"modelId":"main"})]).collect::<Vec<_>>(),
             "nextCursor":{"part":"model","connectionIndex":end.saturating_sub(1),"itemIndex":0}

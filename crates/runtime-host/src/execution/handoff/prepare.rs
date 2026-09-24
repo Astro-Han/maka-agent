@@ -186,13 +186,15 @@ impl PreparedHandoff {
             .as_ref()
             .ok_or_else(|| unavailable("Handoff has no admitted model"))?;
         let observed = provider::observe_binding(
-            &executions.configuration,
+            executions,
             &self.source.invocation.session_id,
             target,
             self.configuration.thinking_level,
         )
         .await?;
         let run = RunInput {
+            model_source: Some(observed.source.clone()),
+            model_revision: Some(observed.revision.clone()),
             provider_id: observed.provider_id.clone(),
             invocation: self.pause.intent.successor(&self.source.invocation),
             request_fingerprint: None,

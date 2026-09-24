@@ -19,26 +19,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Enrollment providers. This is not the model wire protocol:
-/// each provider may use a different device grant, token exchange or entitlement check.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Provider {
-    OpenaiCodex,
-    GithubCopilot,
-    XaiOauth,
-}
-impl Provider {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::OpenaiCodex => "openai-codex",
-            Self::GithubCopilot => "github-copilot",
-            Self::XaiOauth => "xai-oauth",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -47,22 +28,74 @@ impl Provider {
 )]
 pub enum Target {
     Create {
-        provider_type: Provider,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        slug: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        name: Option<String>,
+        provider: crate::provider::Identity,
+        configuration: serde_json::Value,
+        slug: String,
+        name: String,
     },
     Existing {
-        connection_id: String,
+        expected: crate::configuration::ConnectionCredentialTarget,
+        configuration: serde_json::Value,
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Authentication input may contain secrets; it is never a public projection.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LoginStart {
     pub attempt_id: String,
     pub target: Target,
+    pub authentication: crate::provider::AuthenticationInput,
+}
+
+impl LoginStart {
+    pub fn recovery(&self) -> LoginRecovery {
+        LoginRecovery {
+            attempt_id: self.attempt_id.clone(),
+            target: self.target.clone(),
+        }
+    }
+
+    /// Bind the complete request without persisting secret-bearing form input.
+    /// The attempt nonce domain-separates otherwise identical authentication.
+    pub fn fingerprint(&self) -> Result<String, String> {
+        use sha2::{Digest, Sha256};
+        let mut value = serde_json::to_value(self).map_err(|_| "invalid authentication request")?;
+        value.sort_all_objects();
+        let bytes = serde_json::to_vec(&value).map_err(|_| "invalid authentication request")?;
+        Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        validate_attempt(&self.attempt_id, &self.target)?;
+        self.authentication.validate()
+    }
+}
+
+/// Public recovery basis. Authentication input is never needed to observe or
+/// cancel an admitted attempt, and must not enter client recovery storage.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LoginRecovery {
+    pub attempt_id: String,
+    pub target: Target,
+}
+impl LoginRecovery {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_attempt(&self.attempt_id, &self.target)
+    }
+}
+fn validate_attempt(id: &str, target: &Target) -> Result<(), String> {
+    target.validate_create_identity()?;
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
+    {
+        return Err("invalid authentication attempt".into());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,41 +109,43 @@ pub struct Attempt {
 pub struct ConnectionIdentity {
     pub connection_id: String,
     pub slug: String,
-    pub provider_type: Provider,
+    pub provider: crate::provider::Identity,
 }
 impl Target {
     pub fn validate_create_identity(&self) -> Result<(), String> {
         use crate::configuration::validation;
         if let Self::Create {
-            provider_type,
+            provider,
+            configuration,
             slug,
             name,
         } = self
         {
-            if *provider_type != Provider::OpenaiCodex && (slug.is_some() || name.is_some()) {
-                return Err("Custom OAuth identity is only supported for Codex".into());
-            }
-            if let Some(slug) = slug {
-                validation::slug(slug)?;
-            }
-            if let Some(name) = name {
-                validation::text(name, 256, false)?;
-            }
+            provider.validate()?;
+            validation::provider_configuration(configuration)?;
+            validation::slug(slug)?;
+            validation::text(name, 256, false)?;
+        } else if let Self::Existing {
+            expected,
+            configuration,
+        } = self
+        {
+            validation::credential_target(expected)?;
+            validation::provider_configuration(configuration)?;
         }
         Ok(())
     }
 
     pub fn matches(&self, connection: &ConnectionIdentity) -> bool {
         match self {
-            Self::Create {
-                provider_type,
-                slug,
-                ..
-            } => {
-                *provider_type == connection.provider_type
-                    && slug.as_ref().is_none_or(|slug| *slug == connection.slug)
+            Self::Create { provider, slug, .. } => {
+                *provider == connection.provider && *slug == connection.slug
             }
-            Self::Existing { connection_id } => *connection_id == connection.connection_id,
+            Self::Existing { expected, .. } => {
+                expected.connection_id == connection.connection_id
+                    && expected.provider == connection.provider
+                    && expected.slug == connection.slug
+            }
         }
     }
 }
@@ -126,6 +161,7 @@ pub enum Failure {
     ConnectionChanged,
     PersistenceFailed,
     InternalFailure,
+    OutcomeUnknown,
 }
 
 /// Failure cannot accompany a successful or pending login.
@@ -149,15 +185,15 @@ pub struct LoginProjection {
     pub phase: Phase,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnrollmentQuery {
-    pub provider: Provider,
+    pub provider: crate::provider::Identity,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnrollmentProjection {
-    pub provider: Provider,
+    pub provider: crate::provider::Identity,
     pub enabled: bool,
 }
 

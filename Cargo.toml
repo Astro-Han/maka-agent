@@ -17,8 +17,50 @@
 
 [workspace]
 default-members = ["crates/cli"]
-exclude = ["native/gitoxide-helper", "native/runtime-host-peer", "native/runtime-host-windows-task-launcher", "experiments/windows-sandbox/launcher"]
-members = ["crates/goal", "crates/background-health", "crates/session-recap", "crates/jev", "crates/session-import", "crates/insights", "crates/sandbox", "crates/web", "crates/workhub", "crates/assistant", "crates/scheduler", "crates/graph", "crates/plugins", "crates/skills", "crates/apply-patch", "crates/cli", "crates/runtime", "crates/event-log", "crates/js-runtime", "crates/runtime-host", "crates/protocol", "crates/model", "crates/responses", "crates/providers", "crates/transport", "crates/agent", "crates/config", "crates/presentation", "crates/tools", "crates/tool-catalog", "crates/fs-tools", "crates/process", "crates/client-capability", "crates/network"]
+exclude = [
+    "experiments/windows-sandbox/launcher",
+    "native/gitoxide-helper",
+    "native/runtime-host-peer",
+    "native/runtime-host-windows-task-launcher",
+]
+members = [
+    "crates/agent",
+    "crates/apply-patch",
+    "crates/assistant",
+    "crates/background-health",
+    "crates/cli",
+    "crates/client",
+    "crates/client-capability",
+    "crates/config",
+    "crates/event-log",
+    "crates/fs-tools",
+    "crates/goal",
+    "crates/graph",
+    "crates/insights",
+    "crates/jev",
+    "crates/js-runtime",
+    "crates/model",
+    "crates/network",
+    "crates/plugins",
+    "crates/presentation",
+    "crates/process",
+    "crates/protocol",
+    "crates/providers",
+    "crates/responses",
+    "crates/runtime",
+    "crates/runtime-host",
+    "crates/sandbox",
+    "crates/scheduler",
+    "crates/session-import",
+    "crates/session-recap",
+    "crates/skills",
+    "crates/tool-catalog",
+    "crates/tools",
+    "crates/transport",
+    "crates/tui",
+    "crates/web",
+    "crates/workhub",
+]
 resolver = "3"
 
 [workspace.package]
@@ -29,75 +71,74 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-maka-session-import = { path = "crates/session-import" }
-maka-insights = { path = "crates/insights" }
-maka-providers = { path = "crates/providers" }
-maka-responses = { path = "crates/responses" }
-fluent-bundle = "0.16.0"
-unic-langid = "0.9.6"
-sys-locale = "0.3.2"
-unicode-width = "0.2.2"
-pulldown-cmark = { version = "0.13.4", default-features = false }
-unicode-segmentation = "1.13.3"
-maka-client = { path = "crates/client" }
-maka-tui = { path = "crates/tui" }
-ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
-crossterm = { version = "0.29.0", features = ["event-stream"] }
-maka-sandbox = { path = "crates/sandbox" }
-maka-goal = { path = "crates/goal" }
-maka-background-health = { path = "crates/background-health" }
-maka-session-recap = { path = "crates/session-recap" }
-maka-jev = { path = "crates/jev" }
-maka-web = { path = "crates/web" }
-maka-assistant = { path = "crates/assistant" }
-maka-scheduler = { path = "crates/scheduler" }
-maka-graph = { path = "crates/graph" }
-maka-workhub = { path = "crates/workhub" }
-maka-plugins = { path = "crates/plugins" }
-chrono = { version = "0.4.45", default-features = false, features = ["std"] }
-maka-network = { path = "crates/network" }
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "gzip", "brotli", "deflate", "socks"] }
-maka-runtime-host = { path = "crates/runtime-host" }
-clap = { version = "4.6.6", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
-maka-client-capability = { path = "crates/client-capability" }
 apply-patch = { path = "crates/apply-patch" }
-maka-process = { path = "crates/process" }
-jsonschema = { version = "0.56.0", default-features = false }
-maka-tools = { path = "crates/tools" }
-maka-tool-catalog = { path = "crates/tool-catalog" }
-maka-fs-tools = { path = "crates/fs-tools" }
-cap-std = "4.0.3"
 cap-fs-ext = "4.0.3"
-gix = { version = "=0.87.1", default-features = false, features = ["sha1", "sha256"] }
-imagesize = { version = "=0.15.0", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-maka-runtime = { path = "crates/runtime" }
-maka-skills = { path = "crates/skills" }
-maka-presentation = { path = "crates/presentation" }
-maka-event-log = { path = "crates/event-log" }
-maka-js-runtime = { path = "crates/js-runtime" }
-maka-protocol = { path = "crates/protocol" }
-maka-model = { path = "crates/model" }
-maka-transport = { path = "crates/transport" }
-maka-agent = { path = "crates/agent" }
-maka-config = { path = "crates/config" }
+cap-std = "4.0.3"
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+clap = { version = "4.6.6", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
+crossterm = { version = "0.29.0", features = ["event-stream"] }
 deno_core = "=0.411.0"
 deno_error = "0.7"
+fastrand = "2"
+fluent-bundle = "0.16.0"
+futures-util = { version = "0.3", features = ["sink"] }
+gix = { version = "=0.87.1", default-features = false, features = ["sha1", "sha256"] }
+imagesize = { version = "=0.15.0", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+jsonschema = { version = "0.56.0", default-features = false }
+libc = "0.2"
+maka-agent = { path = "crates/agent" }
+maka-assistant = { path = "crates/assistant" }
+maka-background-health = { path = "crates/background-health" }
+maka-client = { path = "crates/client" }
+maka-client-capability = { path = "crates/client-capability" }
+maka-config = { path = "crates/config" }
+maka-event-log = { path = "crates/event-log" }
+maka-fs-tools = { path = "crates/fs-tools" }
+maka-goal = { path = "crates/goal" }
+maka-graph = { path = "crates/graph" }
+maka-insights = { path = "crates/insights" }
+maka-jev = { path = "crates/jev" }
+maka-js-runtime = { path = "crates/js-runtime" }
+maka-model = { path = "crates/model" }
+maka-network = { path = "crates/network" }
+maka-plugins = { path = "crates/plugins" }
+maka-presentation = { path = "crates/presentation" }
+maka-process = { path = "crates/process" }
+maka-protocol = { path = "crates/protocol" }
+maka-providers = { path = "crates/providers" }
+maka-responses = { path = "crates/responses" }
+maka-runtime = { path = "crates/runtime" }
+maka-runtime-host = { path = "crates/runtime-host" }
+maka-sandbox = { path = "crates/sandbox" }
+maka-scheduler = { path = "crates/scheduler" }
+maka-session-import = { path = "crates/session-import" }
+maka-session-recap = { path = "crates/session-recap" }
+maka-skills = { path = "crates/skills" }
+maka-tool-catalog = { path = "crates/tool-catalog" }
+maka-tools = { path = "crates/tools" }
+maka-transport = { path = "crates/transport" }
+maka-tui = { path = "crates/tui" }
+maka-web = { path = "crates/web" }
+maka-workhub = { path = "crates/workhub" }
+pulldown-cmark = { version = "0.13.4", default-features = false }
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "gzip", "brotli", "deflate", "socks"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+schemars = "1.2.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-schemars = "1.2.2"
 sha2 = "0.10"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+sys-locale = "0.3.2"
+tempfile = "3"
 thiserror = "2"
-libc = "0.2"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "signal", "io-util"] }
-futures-util = { version = "0.3", features = ["sink"] }
-fastrand = "2"
 tokio-tungstenite = "0.29"
 tokio-util = { version = "0.7", features = ["rt"] }
+unic-langid = "0.9.6"
+unicode-segmentation = "1.13.3"
+unicode-width = "0.2.2"
 uuid = { version = "1", features = ["v4", "serde"] }
-
-tempfile = "3"
 
 [profile.dev]
 # Keep useful backtraces without embedding hundreds of MiB of dependency types.

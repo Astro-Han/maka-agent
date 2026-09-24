@@ -19,6 +19,8 @@
 
 # Jev structured evaluation
 
+[简体中文](./README.zh-CN.md)
+
 `maka.jev` is a statically linked Profile plugin. It publishes the callable
 service `maka.jev.evaluate`; the separate Desktop UI entry contributes a Settings
 page. Consumers use the same service from native Rust or JavaScript.

@@ -23,6 +23,7 @@ import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { watchSession } from './client-subscription.mjs';
+import { authenticateModelConnection } from './client-model-connection.mjs';
 
 const modelId = 'gpt-5.2';
 const wires = ['openai-chat', 'openai-responses'];
@@ -153,33 +154,20 @@ export async function verifyOpenaiOptions(connection, workspace, reopened) {
     return;
   }
   const initial = await request('connection.catalog.query', { kind: 'start' });
-  const endpoint = initial.items.find((item) => item.kind === 'connection').baseUrl;
+  const endpoint = initial.items.find((item) => item.kind === 'connection').configuration.baseUrl;
   const provider = await fixture(Number(new URL(endpoint).port));
   try {
     for (const wire of wires) {
       const catalog = await request('connection.catalog.query', { kind: 'start' });
       const row = catalog.items.find((item) => item.kind === 'connection' && item.slug === wire);
       const basis = { connectionId: row.connectionId, revision: row.revision };
-      assert.equal(
-        (
-          await request('credential.vault.set', {
-            locator: { scope: 'connection', connectionId: basis.connectionId, kind: 'api_key' },
-            expected: null,
-            expectedConnection: {
-              ...basis,
-              slug: wire,
-              providerType: 'openai',
-              effectiveBaseUrl: provider.baseUrl,
-            },
-            secret: 'dummy-options-fixture',
-          })
-        ).kind,
-        'committed',
-      );
+      await authenticateModelConnection(request, basis.connectionId, 'dummy-options-fixture');
       assert.equal(
         (
           await request('connection.catalog.set-default-target', {
-            expectedCatalogRevision: catalog.revision,
+            expectedCatalogRevision: (
+              await request('connection.catalog.query', { kind: 'start' })
+            ).revision,
             target: { connectionId: basis.connectionId, modelId },
           })
         ).kind,
@@ -230,6 +218,26 @@ export async function verifyOpenaiOptions(connection, workspace, reopened) {
             'completed',
           );
         }
+        // Unknown inventory allowed the explicit choices above. A declared
+        // capability ceiling must reject an unsupported choice before execution.
+        const current = (await request('connection.catalog.query', { kind: 'start' })).items.find(
+          (item) => item.kind === 'connection' && item.connectionId === basis.connectionId,
+        );
+        assert.equal(
+          (
+            await request('connection.catalog.update', {
+              expected: { connectionId: current.connectionId, revision: current.revision },
+              changes: {
+                name: current.name,
+                configuration: current.configuration,
+                enabled: true,
+                enabledModelIds: [modelId],
+                modelOverrides: { [modelId]: { thinkingLevels: ['high'] } },
+              },
+            })
+          ).kind,
+          'committed',
+        );
         const before = await query(wire);
         await assert.rejects(
           request('session.configuration.update', {

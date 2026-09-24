@@ -54,6 +54,8 @@ import {
   prepareConnectedRuntimeHostRetirement,
   readRuntimeHostAgentGraphEpochs,
   readRuntimeHostConnectionCatalog,
+  readRuntimeHostModelProviders,
+  type RuntimeHostModelProviderCatalogSnapshot,
   type RuntimeHostConnectionCatalogSnapshot,
   readRuntimeHostResources,
   readRuntimeHostProjectDetails,
@@ -414,6 +416,11 @@ export class DesktopRuntimeHostClient {
     }
   }
 
+  loadModelProviders(): Promise<RuntimeHostModelProviderCatalogSnapshot> {
+    this.#assertOpen();
+    return readRuntimeHostModelProviders(this.connection);
+  }
+
   queryCredential(
     locator: CredentialLocator,
   ): Promise<CredentialStatus | null> {
@@ -561,10 +568,9 @@ export class DesktopRuntimeHostClient {
   }
 
   startOAuthLogin(
-    attemptId: string,
-    target: OperationInput<"oauth.login.start">["target"],
+    input: OperationInput<"oauth.login.start">,
   ): Promise<OperationOutput<"oauth.login.start">> {
-    return this.request("oauth.login.start", { attemptId, target });
+    return this.request("oauth.login.start", input);
   }
 
   queryOAuthLogin(

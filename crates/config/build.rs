@@ -18,35 +18,5 @@
  */
 
 fn main() {
-    for source in [
-        "migrations",
-        "../../scripts/rust/generate-catalog-facts.mjs",
-        "../../scripts/rust/catalog-facts-entry.mjs",
-        "../../packages/core/src",
-        "../../packages/runtime/src/telemetry/builtin-pricing.ts",
-        "../../scripts/sync-model-metadata.mjs",
-        "../../scripts/model-metadata/models-dev-api.snapshot.json",
-        "../../package-lock.json",
-    ] {
-        println!("cargo:rerun-if-changed={source}");
-    }
-    println!("cargo:rerun-if-env-changed=MAKA_JS_DEPS");
-    let dependencies = std::env::var_os("MAKA_JS_DEPS")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| "../..".into());
-    for source in ["package-lock.json", "node_modules/.package-lock.json"] {
-        println!(
-            "cargo:rerun-if-changed={}",
-            dependencies.join(source).display()
-        );
-    }
-    let status = std::process::Command::new("node")
-        .arg("../../scripts/rust/generate-catalog-facts.mjs")
-        .arg(std::env::var("OUT_DIR").expect("Cargo OUT_DIR"))
-        .status()
-        .expect("Node is required to generate model facts at build time");
-    assert!(
-        status.success(),
-        "model fact generation failed; install repository npm dependencies first"
-    );
+    println!("cargo:rerun-if-changed=migrations");
 }

@@ -28,16 +28,15 @@ pub fn catalog_entry(value: &ConnectionCatalogEntry) -> ValidationResult {
     let mut draft = ConnectionCatalogEntryDraft {
         slug: value.slug.clone(),
         name: value.name.clone(),
-        provider_type: value.provider_type.clone(),
-        base_url: value.base_url.clone(),
+        provider: value.provider.clone(),
+        configuration: value.configuration.clone(),
         enabled: value.enabled,
         enabled_model_ids: value.enabled_model_ids.clone(),
         model_overrides: value.model_overrides.clone(),
         request_body_overlay: value.request_body_overlay.clone(),
     };
     normalize_draft(&mut draft)?;
-    if draft.base_url != value.base_url
-        || draft.model_overrides != value.model_overrides
+    if draft.model_overrides != value.model_overrides
         || draft.request_body_overlay != value.request_body_overlay
     {
         return Err("stored connection must be canonical".into());

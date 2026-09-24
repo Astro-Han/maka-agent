@@ -42,17 +42,16 @@ fn model_fetch_confirms_network_writes_rechecks_effects_and_preserves_user_confi
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let client = support::model_client(&host.root, "http://127.0.0.1:9/v1").await;
+        let catalog = client.connection_catalog(Query::Start).await.unwrap();
         let created = client.request(Operation::ConnectionCatalogCreate, json!({
-            "expectedCatalogRevision":2,
-            "connection":{"slug":"discovery","name":"Discovery","providerType":"openai-compatible",
-                "baseUrl":url,"enabled":true,"enabledModelIds":[],"requestBodyOverlay":{"temperature":0.3},
+            "expectedCatalogRevision":catalog["revision"],
+            "connection":{"slug":"discovery","name":"Discovery","provider":support::provider(&client,"openai-compatible").await,
+                "configuration":{"baseUrl":url},"enabled":true,"enabledModelIds":[],"requestBodyOverlay":{"temperature":0.3},
                 "modelOverrides":{"first-model":{"contextWindow":64000}}}
         })).await.unwrap();
         let id = created["connection"]["connectionId"].as_str().unwrap().to_owned();
-        let locator = json!({"scope":"connection","connectionId":id,"kind":"api_key"});
-        client.request(Operation::CredentialVaultSet, json!({"locator":locator,"expected":null,
-            "expectedConnection":{"connectionId":id,"revision":1,"slug":"discovery","providerType":"openai-compatible","effectiveBaseUrl":url},
-            "secret":"discovery-secret"})).await.unwrap();
+        let locator = json!({"scope":"connection","connectionId":id,"kind":"provider"});
+        support::authenticate(&client, &json!(id), "discovery-secret").await;
         let initial = client.connection_catalog(Query::Start).await.unwrap();
         (client, listener, url, id, locator, initial)
     });
@@ -100,20 +99,23 @@ fn model_fetch_confirms_network_writes_rechecks_effects_and_preserves_user_confi
     );
 
     tui.click_last_text("Fetch models"); // Explicit retry; rotate the credential while discovery is in flight.
-    runtime.block_on(async {
+    let (rotated, rotated_credential) = runtime.block_on(async {
         let (stream, _) = support::model_list_request(&listener).await;
-        let status = client.request(Operation::CredentialVaultQuery, json!({"locator":locator})).await.unwrap();
-        client.request(Operation::CredentialVaultSet, json!({"locator":locator,
-            "expected":{"credentialId":status["status"]["credentialId"],"revision":status["status"]["revision"]},
-            "secret":"rotated-discovery-secret"})).await.unwrap();
+        support::authenticate(&client, &json!(id), "rotated-discovery-secret").await;
+        let catalog = client.connection_catalog(Query::Start).await.unwrap();
+        let credential = client
+            .request(Operation::CredentialVaultQuery, json!({"locator":locator}))
+            .await
+            .unwrap();
         reply(stream, "200 OK", json!({"data":[{"id":"stale-model"}]})).await;
+        (catalog, credential)
     });
     tui.wait_for("Connection, credentials or network settings changed");
     assert_eq!(
         runtime
             .block_on(client.connection_catalog(Query::Start))
             .unwrap(),
-        initial
+        rotated
     );
     tui.send(b"\x1b");
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("Discovery"));
@@ -125,8 +127,8 @@ fn model_fetch_confirms_network_writes_rechecks_effects_and_preserves_user_confi
         assert!(request.contains("Bearer rotated-discovery-secret"));
         // Unrelated edits during the effect must survive its commit.
         client.request(Operation::ConnectionCatalogUpdate, json!({
-            "expected":{"connectionId":id,"revision":1},
-            "changes":{"name":"Discovery renamed","baseUrl":url,"enabled":true,"enabledModelIds":[]}
+            "expected":{"connectionId":id,"revision":row(&rotated, &id)["revision"]},
+            "changes":{"name":"Discovery renamed","configuration":{"baseUrl":url},"enabled":true,"enabledModelIds":[]}
         })).await.unwrap();
         reply(
             stream,
@@ -138,9 +140,10 @@ fn model_fetch_confirms_network_writes_rechecks_effects_and_preserves_user_confi
     tui.wait_until(|s| !s.contains("Cancel") && s.contains("Discovery renamed"));
     runtime.block_on(async {
         let page = client.connection_catalog(Query::Start).await.unwrap();
+        let basis = row(&rotated, &id)["revision"].as_u64().unwrap();
         let row = row(&page, &id);
-        assert_eq!(page["revision"], 5);
-        assert_eq!(row["revision"], 3);
+        assert_eq!(page["revision"], rotated["revision"].as_u64().unwrap() + 2);
+        assert_eq!(row["revision"], basis + 2);
         assert_eq!(row["modelCount"], 2);
         assert_eq!(
             row["enabledModelIdCount"], 1,
@@ -171,7 +174,10 @@ fn model_fetch_confirms_network_writes_rechecks_effects_and_preserves_user_confi
     runtime.block_on(async {
         let page = client.connection_catalog(Query::Start).await.unwrap();
         let current = row(&page, &id);
-        assert_eq!(current["revision"], 4);
+        assert_eq!(
+            current["revision"],
+            row(&rotated, &id)["revision"].as_u64().unwrap() + 3
+        );
         assert_eq!(current["modelCount"], 1);
         let index = &current["connectionIndex"];
         let enabled: Vec<_> = page["items"]
@@ -191,7 +197,7 @@ fn model_fetch_confirms_network_writes_rechecks_effects_and_preserves_user_confi
             .request(Operation::CredentialVaultQuery, json!({"locator":locator}))
             .await
             .unwrap();
-        assert_eq!(credential["status"]["revision"], 2);
+        assert_eq!(credential, rotated_credential);
     });
     tui.send(b"\x11");
     tui.finish();

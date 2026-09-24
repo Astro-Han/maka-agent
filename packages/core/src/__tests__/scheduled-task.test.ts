@@ -319,17 +319,6 @@ describe('decodePersistedScheduledTask', () => {
     lastError: null,
   };
 
-  it('folds a retired permission mode to its live equivalent', () => {
-    const stored = JSON.parse(
-      JSON.stringify(base).replace('"sandboxMode":"workspace-write"', '"sandboxMode":"execute"'),
-    ) as ScheduledTask;
-    const decoded = decodePersistedScheduledTask(markPersisted<ScheduledTask>(stored));
-    assert.equal(
-      decoded.effect.kind === 'agent_run' ? decoded.effect.execution.sandboxMode : undefined,
-      'workspace-write',
-    );
-  });
-
   it('returns the same task when nothing needs folding', () => {
     assert.equal(decodePersistedScheduledTask(markPersisted<ScheduledTask>(base)), base);
   });

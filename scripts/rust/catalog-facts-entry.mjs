@@ -27,16 +27,8 @@ import {
   lookupModelMetadata,
   lookupModelRuntimeOverride,
 } from '../../packages/core/src/model-metadata.ts';
-import {
-  buildModelCatalogEntries,
-  buildConnectionModelCatalogEntries,
-} from '../../packages/core/src/model-catalog.ts';
+import { buildModelCatalogEntries } from '../../packages/core/src/model-catalog.ts';
 import { getModelCapabilities } from '@ai-sdk/anthropic/internal';
-import { BUILTIN_PRICING } from '../../packages/runtime/src/telemetry/builtin-pricing.ts';
-
-export function outputPricingFacts() {
-  return BUILTIN_PRICING;
-}
 
 export function outputProviderFacts() {
   return Object.fromEntries(
@@ -79,89 +71,4 @@ export function outputProviderFacts() {
       ];
     }),
   );
-}
-export function oracleFixtures() {
-  const fixtures = [
-    {
-      providerType: 'openai',
-      models: [],
-      modelSource: 'fetched',
-      enabledModelIds: ['manual-unknown'],
-    },
-    { providerType: 'openai', models: [{ id: 'gpt-5' }], defaultModel: 'gpt-5' },
-    {
-      providerType: 'openai',
-      models: [{ id: 'gpt-5', contextWindow: 12345, capabilities: { vision: true } }],
-      enabledModelIds: ['gpt-5'],
-      modelOverrides: {
-        'gpt-5': { vision: false, thinkingLevels: ['high', 'low'], contextWindow: 999 },
-      },
-    },
-    { providerType: 'openai', models: [], modelSource: 'fetched' },
-    {
-      providerType: 'openai-compatible',
-      models: [
-        {
-          id: 'reported',
-          contextWindow: 16000,
-          inputLimit: 12000,
-          capabilities: { chat: true, vision: true },
-        },
-      ],
-      enabledModelIds: ['reported'],
-      modelOverrides: {
-        reported: {
-          contextWindow: 14000,
-          inputLimit: 10000,
-          compactionThreshold: 9000,
-          maxOutputTokens: 1024,
-          displayName: 'Configured',
-          description: '',
-          vision: false,
-          capabilities: { functionCalling: false },
-        },
-        'disabled-but-configured': {
-          displayName: 'Remembered',
-          modalities: { input: ['image'], output: ['image'] },
-        },
-      },
-    },
-    {
-      providerType: 'anthropic',
-      models: [],
-      modelSource: 'fallback',
-      defaultModel: 'manual-default',
-      enabledModelIds: ['saved-model'],
-    },
-    { providerType: 'anthropic', models: [{ id: 'claude-99-sonnet-test' }] },
-    {
-      providerType: 'openai',
-      models: [
-        { id: 'gpt-5', capabilities: { chat: false } },
-        { id: 'audio-model', modalities: { input: ['text'], output: ['audio'] } },
-      ],
-    },
-    ...Object.keys(PROVIDER_REGISTRY).map((providerType) => ({ providerType, models: [] })),
-    {
-      providerType: 'openai',
-      models: [{ id: ' custom ' }, { id: 'custom', displayName: 'ignored' }],
-      defaultModel: ' missing ',
-      enabledModelIds: [' custom ', 'second', 'second'],
-    },
-    {
-      providerType: 'openai',
-      models: [
-        {
-          id: 'gpt-5',
-          capabilities: { chat: true },
-          modalities: { input: ['text'], output: ['image'] },
-        },
-      ],
-    },
-    { providerType: 'unknown-provider', models: [{ id: 'manual' }] },
-  ];
-  return fixtures.map((connection) => ({
-    connection,
-    expected: buildConnectionModelCatalogEntries({ connection: { slug: 'test', ...connection } }),
-  }));
 }

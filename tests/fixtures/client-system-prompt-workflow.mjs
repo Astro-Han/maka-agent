@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createModelConnection } from './client-model-connection.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -126,38 +127,14 @@ export async function verifySystemPrompt(connection, workspace, reopened) {
       expectedRevision: 0,
       actualRevision: 1,
     });
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: 0,
-      connection: {
-        slug: 'prompt',
-        name: 'Prompt',
-        providerType: 'openai',
-        baseUrl: fixture.baseUrl,
-        enabled: true,
-        enabledModelIds: [modelId],
-      },
+    const created = await createModelConnection(request, {
+      providerName: 'openai',
+      slug: 'prompt',
+      name: 'Prompt',
+      baseUrl: fixture.baseUrl,
+      apiKey: secret,
+      enabledModelIds: [modelId],
     });
-    assert.equal(created.kind, 'committed');
-    assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: {
-            scope: 'connection',
-            connectionId: created.connection.connectionId,
-            kind: 'api_key',
-          },
-          expected: null,
-          expectedConnection: {
-            ...created.connection,
-            slug: 'prompt',
-            providerType: 'openai',
-            effectiveBaseUrl: fixture.baseUrl,
-          },
-          secret,
-        })
-      ).kind,
-      'committed',
-    );
     const input = sessionInput(
       workspace,
       { ...created.connection, slug: 'prompt' },

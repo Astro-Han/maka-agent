@@ -18,7 +18,7 @@
  */
 
 import { useMemo, useState, type ComponentProps, type ReactNode } from 'react';
-import { type LlmConnection, type ProviderType } from '@maka/core/llm-connections';
+import { type ProjectedLlmConnection, type ProviderType } from '@maka/core/llm-connections';
 import { type OnboardingState } from '@maka/core/onboarding';
 import { type SettingsSection } from '@maka/core/settings';
 import {
@@ -81,7 +81,7 @@ interface ChatMessageSurfaceProps extends Omit<
   onOpenConnectionDetail: (connectionSlug: string) => void;
   onAddProvider: (providerType: ProviderType) => void;
   onBrowseProviders: () => void;
-  connections: LlmConnection[];
+  connections: ProjectedLlmConnection[];
   onRefreshConnections: () => Promise<void> | void;
   onSkip: () => Promise<void> | void;
 }

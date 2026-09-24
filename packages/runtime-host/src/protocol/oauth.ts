@@ -18,12 +18,16 @@
  */
 
 import {
-  decodeConnectionName,
   decodeConnectionSlug,
+  decodeConnectionOnboardingTarget,
+  decodeProviderIdentity,
+  type ConnectionOnboardingTarget,
+  type ProviderIdentity,
   RuntimePolicyDomainDecodeError,
 } from '@maka/core/runtime-policy';
 import {
   requireEntityId,
+  requireEncodedByteLimit,
   requireExactRecord,
   requireRecord,
   requireShapedRecord,
@@ -36,7 +40,6 @@ export const OAUTH_PRESENTATION_SERVICE_ID = 'oauth_presentation';
 export const OAUTH_PRESENTATION_SERVICE_VERSION = '1';
 export const OAUTH_PRESENTATION_URL_MAX_LENGTH = 8_192;
 export const OAUTH_PRESENTATION_STATE_HINT_MAX_LENGTH = 1_024;
-export const OAUTH_LOGIN_PROVIDERS = ['openai-codex', 'xai-oauth', 'github-copilot'] as const;
 export const OAUTH_LOGIN_PHASES = [
   'awaiting_authorization',
   'exchanging',
@@ -54,6 +57,7 @@ export const OAUTH_LOGIN_FAILURE_CODES = [
   'connection_changed',
   'persistence_failed',
   'internal_failure',
+  'outcome_unknown',
 ] as const;
 
 const COMMON_ERRORS = [
@@ -70,10 +74,11 @@ const START_ERRORS = [
   'capability_unavailable',
   'not_found',
   'persistence_failed',
+  'commit_outcome_unknown',
 ] as const;
 const ATTEMPT_ERRORS = [...COMMON_ERRORS, 'not_found', 'persistence_failed'] as const;
 
-export type OAuthLoginProvider = (typeof OAUTH_LOGIN_PROVIDERS)[number];
+export type OAuthLoginProvider = ProviderIdentity;
 export type OAuthLoginPhase = (typeof OAUTH_LOGIN_PHASES)[number];
 export type OAuthLoginFailureCode = (typeof OAUTH_LOGIN_FAILURE_CODES)[number];
 // One member today: every live enrolment is a device flow that opens a browser.
@@ -107,30 +112,24 @@ export interface OAuthEnrollmentProjection {
   readonly enabled: boolean;
 }
 
-export interface OAuthLoginStartInput {
+export interface OAuthLoginRecovery {
   readonly attemptId: string;
   readonly target: OAuthLoginTarget;
 }
 
-export type OAuthLoginTarget =
-  | {
-      readonly kind: 'create';
-      readonly providerType: 'openai-codex';
-      readonly slug?: string;
-      readonly name?: string;
-    }
-  | {
-      readonly kind: 'create';
-      readonly providerType: Exclude<OAuthLoginProvider, 'openai-codex'>;
-      readonly slug?: never;
-      readonly name?: never;
-    }
-  | { readonly kind: 'existing'; readonly connectionId: string };
+export interface OAuthLoginStartInput extends OAuthLoginRecovery {
+  readonly authentication: {
+    readonly method: string;
+    readonly input: import('@maka-agent/plugin-sdk/host').Json;
+  };
+}
+
+export type OAuthLoginTarget = ConnectionOnboardingTarget;
 
 export interface OAuthConnectionIdentity {
   readonly connectionId: string;
   readonly slug: string;
-  readonly providerType: OAuthLoginProvider;
+  readonly provider: ProviderIdentity;
 }
 
 export interface OAuthLoginAttemptInput {
@@ -188,16 +187,45 @@ export const OAUTH_OPERATION_SPECS = {
 } as const;
 
 export function decodeOAuthLoginStartInput(value: unknown): OAuthLoginStartInput {
-  const input = requireExactRecord(value, 'OAuth login start input', ['attemptId', 'target']);
+  const input = requireExactRecord(value, 'OAuth login start input', [
+    'attemptId',
+    'target',
+    'authentication',
+  ]);
+  const authentication = requireExactRecord(input.authentication, 'provider authentication input', [
+    'method',
+    'input',
+  ]);
+  const method = requireString(authentication.method, 'authentication method', 256);
+  if (
+    !method ||
+    /[\p{White_Space}\p{Cc}]/u.test(method) ||
+    new TextEncoder().encode(method).length > 256
+  ) {
+    throw invalidProtocolFrame('Invalid authentication method');
+  }
+  requireEncodedByteLimit(authentication.input, 'authentication input', 64 * 1024);
   return {
     attemptId: requireEntityId(input.attemptId, 'attemptId'),
     target: decodeOAuthLoginTarget(input.target),
+    authentication: {
+      method,
+      input: authentication.input as OAuthLoginStartInput['authentication']['input'],
+    },
   };
 }
 
 export function decodeOAuthLoginAttemptInput(value: unknown): OAuthLoginAttemptInput {
   const input = requireExactRecord(value, 'OAuth login attempt input', ['attemptId']);
   return { attemptId: requireEntityId(input.attemptId, 'attemptId') };
+}
+
+export function decodeOAuthLoginRecovery(value: unknown): OAuthLoginRecovery {
+  const input = requireExactRecord(value, 'login recovery identity', ['attemptId', 'target']);
+  return {
+    attemptId: requireEntityId(input.attemptId, 'attemptId'),
+    target: decodeOAuthLoginTarget(input.target),
+  };
 }
 
 export function decodeOAuthEnrollmentQueryInput(value: unknown): OAuthEnrollmentQueryInput {
@@ -238,62 +266,35 @@ export function decodeOAuthLoginProjection(value: unknown): OAuthLoginProjection
 }
 
 function decodeOAuthLoginTarget(value: unknown): OAuthLoginTarget {
-  const target = requireRecord(value, 'OAuth login target');
-  if (target.kind === 'create') {
-    const exact = requireShapedRecord(
-      target,
-      'OAuth create target',
-      ['kind', 'providerType'],
-      ['slug', 'name'],
-    );
-    const providerType = oauthLoginProvider(exact.providerType);
-    if (providerType !== 'openai-codex') {
-      if (exact.slug !== undefined || exact.name !== undefined) {
-        throw invalidProtocolFrame(
-          'Custom OAuth Connection identity is only supported for openai-codex',
-        );
-      }
-      return { kind: 'create', providerType };
-    }
-    return {
-      kind: 'create',
-      providerType,
-      ...(exact.slug === undefined
-        ? {}
-        : { slug: decodeDomain(() => decodeConnectionSlug(exact.slug)) }),
-      ...(exact.name === undefined
-        ? {}
-        : { name: decodeDomain(() => decodeConnectionName(exact.name)) }),
-    };
-  }
-  if (target.kind === 'existing') {
-    const exact = requireExactRecord(target, 'OAuth existing target', ['kind', 'connectionId']);
-    return { kind: 'existing', connectionId: requireEntityId(exact.connectionId, 'connectionId') };
-  }
-  throw invalidProtocolFrame('Invalid OAuth login target');
+  return decodeDomain(() => decodeConnectionOnboardingTarget(value));
 }
 
 function decodeOAuthConnectionIdentity(value: unknown): OAuthConnectionIdentity {
   const connection = requireExactRecord(value, 'OAuth connection identity', [
     'connectionId',
     'slug',
-    'providerType',
+    'provider',
   ]);
   return {
     connectionId: requireEntityId(connection.connectionId, 'connectionId'),
     slug: decodeDomain(() => decodeConnectionSlug(connection.slug)),
-    providerType: oauthLoginProvider(connection.providerType),
+    provider: oauthLoginProvider(connection.provider),
   };
 }
 
-function assertOAuthStartOutput(input: OAuthLoginStartInput, output: OAuthLoginProjection): void {
+export function assertOAuthStartOutput(
+  input: OAuthLoginRecovery,
+  output: OAuthLoginProjection,
+): void {
   assertOAuthAttemptOutput(input, output);
   if (
     (input.target.kind === 'create' &&
-      (output.connection.providerType !== input.target.providerType ||
-        (input.target.slug !== undefined && output.connection.slug !== input.target.slug))) ||
+      (!sameProvider(output.connection.provider, input.target.provider) ||
+        output.connection.slug !== input.target.slug)) ||
     (input.target.kind === 'existing' &&
-      output.connection.connectionId !== input.target.connectionId)
+      (output.connection.connectionId !== input.target.expected.connectionId ||
+        output.connection.slug !== input.target.expected.slug ||
+        !sameProvider(output.connection.provider, input.target.expected.provider)))
   ) {
     throw invalidProtocolFrame('OAuth login start changed Connection identity');
   }
@@ -357,10 +358,16 @@ export function decodeOAuthPresentationResult(
 }
 
 function oauthLoginProvider(value: unknown): OAuthLoginProvider {
-  if (typeof value !== 'string' || !OAUTH_LOGIN_PROVIDERS.includes(value as OAuthLoginProvider)) {
-    throw invalidProtocolFrame('Invalid OAuth login provider');
-  }
-  return value as OAuthLoginProvider;
+  return decodeDomain(() => decodeProviderIdentity(value));
+}
+
+function sameProvider(a: ProviderIdentity, b: ProviderIdentity): boolean {
+  return (
+    a.packageId === b.packageId &&
+    a.entryId === b.entryId &&
+    a.scope === b.scope &&
+    a.name === b.name
+  );
 }
 
 function oauthLoginPhase(value: unknown): OAuthLoginPhase {

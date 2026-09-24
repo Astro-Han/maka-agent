@@ -29,7 +29,9 @@ use maka_event_log::{
 use maka_runtime::{
     configuration::*,
     event::{Fact, InvocationOutcome},
-    oauth::{LoginStart, Provider, Target},
+    oauth::{LoginStart, Target},
+    provider::{AuthenticationInput, Credential, Identity},
+    scope::Scope,
 };
 use maka_runtime_host::server::{Host, local::LocalListener};
 use serde_json::{Value, json};
@@ -91,9 +93,19 @@ async fn run(secret: String, network: NetworkConfiguration) {
         .prepare_oauth_login(LoginStart {
             attempt_id: "execution-enrollment".into(),
             target: Target::Create {
-                provider_type: Provider::OpenaiCodex,
-                slug: None,
-                name: None,
+                provider: Identity {
+                    package_id: "maka.codex".into(),
+                    entry_id: "maka.codex".into(),
+                    scope: Scope::Profile,
+                    name: "chatgpt".into(),
+                },
+                configuration: json!({"baseUrl":"https://chatgpt.com/backend-api/codex"}),
+                slug: "subscription".into(),
+                name: "Subscription".into(),
+            },
+            authentication: AuthenticationInput {
+                method: "chatgpt".into(),
+                input: json!({}),
             },
         })
         .await
@@ -102,13 +114,23 @@ async fn run(secret: String, network: NetworkConfiguration) {
         panic!("new enrollment");
     };
     let identity = ticket.identity().clone();
+    assert!(ticket.claim().await.unwrap());
     assert!(matches!(
-        ticket.complete(secret.clone(), 1).await.unwrap(),
+        ticket
+            .complete(
+                Credential {
+                    secret: secret.clone(),
+                    refresh_at: None
+                },
+                1
+            )
+            .await
+            .unwrap(),
         LoginCompletion::Committed(_)
     ));
     let locator = CredentialLocator::Connection {
-        connection_id: identity.connection_id,
-        kind: ConnectionCredentialKind::OauthToken,
+        connection_id: identity.connection_id.clone(),
+        kind: ConnectionCredentialKind::Provider,
     };
     let credential_before = store.credential_status(locator.clone()).await.unwrap();
     store.shutdown().await.unwrap();
@@ -216,7 +238,9 @@ async fn run(secret: String, network: NetworkConfiguration) {
             .credential_secret(&locator, None)
             .await
             .unwrap()
-            .is_some_and(|stored| stored == secret)
+            .is_some_and(
+                |stored| serde_json::from_str::<Credential>(&stored).unwrap().secret == secret
+            )
     );
     store.close().await.unwrap();
     temp.close().unwrap();

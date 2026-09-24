@@ -22,10 +22,10 @@ import { importSource, openSource, recoverUser } from './files.js';
 import { UpdatePreview } from './preview.js';
 import { Locations } from './locations.js';
 import type { ClientContext } from '@maka-agent/plugin-sdk/client';
+import type { Copy } from './copy.js';
 import {
   type Call,
   type Catalog,
-  type Copy,
   type Mutation,
   type Preview,
   type Reply,

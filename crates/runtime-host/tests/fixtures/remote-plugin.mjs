@@ -197,6 +197,7 @@ export default async function activate(ctx) {
     { access: 'host_paths' },
   );
   const state = { generation: 0, opening: 0, active: 0, stopped: 0 };
+  /** @type {import('../../../../packages/plugin-sdk/src/host.js').TerminalView} */
   const terminalView = {
     version: 3,
     context: 'application',

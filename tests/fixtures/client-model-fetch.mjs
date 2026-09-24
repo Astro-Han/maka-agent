@@ -18,6 +18,8 @@
  */
 
 import assert from 'node:assert/strict';
+import { readRuntimeHostModelProviders } from '../../packages/runtime-host/src/client/catalog-reader.ts';
+import { authenticateModelConnection } from './client-model-connection.mjs';
 import { once } from 'node:events';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -125,21 +127,16 @@ export async function verifyModelFetch(connection, workspace, reopened, openClie
     );
   };
   const header = (page, id) => rows(page, id, 'connection')[0];
-  const put = (call, item) =>
-    call('credential.vault.set', {
-      locator: { scope: 'connection', connectionId: item.connectionId, kind: 'api_key' },
-      expected: null,
-      expectedConnection: {
-        ...basis(item),
-        slug: item.slug,
-        providerType: item.providerType,
-        effectiveBaseUrl: provider.baseUrl,
-      },
-      secret,
+  const put = async (call, item) => {
+    await authenticateModelConnection(call, item.connectionId, secret);
+    return call('credential.vault.query', {
+      locator: { scope: 'connection', connectionId: item.connectionId, kind: 'provider' },
     });
+  };
   const fetch = (id) => request('connection.models.fetch', { connectionId: id });
   try {
     const connections = [];
+    const directory = await readRuntimeHostModelProviders(connection);
     for (const providerType of ['openai', 'openai-compatible', 'anthropic']) {
       const before = await catalog();
       const created = await request('connection.catalog.create', {
@@ -147,8 +144,9 @@ export async function verifyModelFetch(connection, workspace, reopened, openClie
         connection: {
           slug: providerType,
           name: providerType,
-          providerType,
-          baseUrl: provider.baseUrl,
+          provider: directory.entries.find((entry) => entry.identity.name === providerType)
+            .identity,
+          configuration: { baseUrl: provider.baseUrl },
           enabled: true,
           enabledModelIds: [],
         },
@@ -157,11 +155,11 @@ export async function verifyModelFetch(connection, workspace, reopened, openClie
       const id = created.connection.connectionId;
       const noKey = await catalog();
       const count = provider.count;
-      assert.deepEqual(await fetch(id), { kind: 'rejected', reason: 'credential_not_configured' });
+      assert.deepEqual(await fetch(id), { kind: 'failed', errorClass: 'auth' });
       assert.equal(provider.count, count);
       assert.deepEqual(await catalog(), noKey);
       const credential = await put(request, header(noKey, id));
-      assert.equal(credential.kind, 'committed');
+      assert.equal(credential.kind, 'status');
       const fetched = await fetch(id);
       assert.equal(fetched.kind, 'committed');
       assert.equal(fetched.source, 'fetched');
@@ -198,7 +196,7 @@ export async function verifyModelFetch(connection, workspace, reopened, openClie
       expected: basis(header(beforeFailure, id)),
       changes: {
         name: 'Renamed during discovery',
-        baseUrl: provider.baseUrl,
+        configuration: { baseUrl: provider.baseUrl },
         enabled: true,
         enabledModelIds: [ids[0]],
       },
@@ -228,7 +226,7 @@ export async function verifyModelFetch(connection, workspace, reopened, openClie
     arrived = provider.hold();
     fetching = fetch(id);
     release = await arrived;
-    const locator = { scope: 'connection', connectionId: id, kind: 'api_key' };
+    const locator = { scope: 'connection', connectionId: id, kind: 'provider' };
     const previous = await other('credential.vault.query', { locator });
     assert.equal(previous.kind, 'status');
     assert.equal(previous.status.revision, 1);
@@ -241,7 +239,7 @@ export async function verifyModelFetch(connection, workspace, reopened, openClie
       'committed',
     );
     const replacement = await put(other, header(renamed, id));
-    assert.equal(replacement.kind, 'committed');
+    assert.equal(replacement.kind, 'status');
     assert.equal(replacement.status.revision, 1);
     assert.notEqual(replacement.status.credentialId, previous.status.credentialId);
     const beforeSuperseded = await other('connection.catalog.query', { kind: 'start' });

@@ -25,6 +25,7 @@ import {
   RuntimeHostCatalogReadError,
   RuntimeHostSessionCatalogRevisionChangedError,
   readRuntimeHostConnectionCatalog,
+  readRuntimeHostModelProviders,
   readRuntimeHostProjectDetails,
   readRuntimeHostProjects,
   readRuntimeHostSessionCatalogPage,
@@ -55,6 +56,45 @@ function session(id: string) {
     orchestrationMode: 'default',
   };
 }
+
+test('provider directory discards mixed revisions and preserves external configuration contracts', async () => {
+  const entry = (name: string) => ({
+    identity: { packageId: 'external.provider', entryId: 'account', scope: 'profile', name },
+    descriptor: {
+      label: name,
+      configurationSchema: { type: 'object', properties: { region: { type: 'string' } } },
+      configurationDefaults: { region: 'local' },
+      authentication: [],
+      anonymous: true,
+      discovery: true,
+    },
+  });
+  const inputs: Record<string, unknown>[] = [];
+  const connection = fakeConnection(async (operation, input) => {
+    assert.equal(operation, 'model.provider.catalog.query');
+    inputs.push(input);
+    switch (inputs.length) {
+      case 1:
+        return { kind: 'page', revision: 1, entries: [entry('stale')], next: 'stale' };
+      case 2:
+        return { kind: 'revision_changed', revision: 2 };
+      case 3:
+        return { kind: 'page', revision: 2, entries: [entry('a')], next: 'a' };
+      default:
+        return { kind: 'page', revision: 2, entries: [entry('b')], next: null };
+    }
+  });
+  assert.deepEqual(await readRuntimeHostModelProviders(connection, 'session:work'), {
+    revision: 2,
+    entries: [entry('a'), entry('b')],
+  });
+  assert.deepEqual(inputs, [
+    { scope: 'session:work', revision: null, after: null },
+    { scope: 'session:work', revision: 1, after: 'stale' },
+    { scope: 'session:work', revision: null, after: null },
+    { scope: 'session:work', revision: 2, after: 'a' },
+  ]);
+});
 
 test('reads one Session catalog page and carries its revision into the continuation cursor', async () => {
   const inputs: Record<string, unknown>[] = [];

@@ -39,13 +39,14 @@ test('runtime artifact capture includes committed WAL rows in a standalone datab
   const stateRoot = join(root, 'state');
   const destinationRoot = join(root, 'artifacts');
   await mkdir(stateRoot);
-  const database = new DatabaseSync(join(stateRoot, 'runtime.sqlite'));
+  const database = new DatabaseSync(join(stateRoot, 'runtime-rust.sqlite'));
   try {
     database.exec('PRAGMA journal_mode=WAL');
     database.exec('PRAGMA wal_autocheckpoint=0');
     database.exec('CREATE TABLE evidence (value TEXT NOT NULL)');
     database.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     database.prepare('INSERT INTO evidence (value) VALUES (?)').run('from-wal');
+    await writeFile(join(stateRoot, 'configuration-rust.sqlite'), 'private-credential');
     await writeFile(join(stateRoot, 'runtime-host-candidate.log'), 'candidate-ready\n', {
       mode: 0o600,
     });
@@ -59,24 +60,33 @@ test('runtime artifact capture includes committed WAL rows in a standalone datab
 
     assert.equal(manifest.capturedAt, 42);
     assert.equal(manifest.reason, 'signal');
-    const snapshot = new DatabaseSync(join(destinationRoot, 'runtime.sqlite'), { readOnly: true });
+    await assert.rejects(stat(join(destinationRoot, 'configuration-rust.sqlite')), {
+      code: 'ENOENT',
+    });
+    const snapshot = new DatabaseSync(join(destinationRoot, 'runtime-rust.sqlite'), {
+      readOnly: true,
+    });
     try {
       assert.equal(snapshot.prepare('SELECT value FROM evidence').get()?.value, 'from-wal');
     } finally {
       snapshot.close();
     }
-    await assert.rejects(stat(join(destinationRoot, 'runtime.sqlite-wal')), { code: 'ENOENT' });
-    await assert.rejects(stat(join(destinationRoot, 'runtime.sqlite-shm')), { code: 'ENOENT' });
+    await assert.rejects(stat(join(destinationRoot, 'runtime-rust.sqlite-wal')), {
+      code: 'ENOENT',
+    });
+    await assert.rejects(stat(join(destinationRoot, 'runtime-rust.sqlite-shm')), {
+      code: 'ENOENT',
+    });
     assert.equal(
       await readFile(join(destinationRoot, 'runtime-host-candidate.log'), 'utf8'),
       'candidate-ready\n',
     );
-    const databaseFile = manifest.files.find(({ path }) => path === 'runtime.sqlite');
+    const databaseFile = manifest.files.find(({ path }) => path === 'runtime-rust.sqlite');
     assert.ok(databaseFile);
     assert.equal(
       databaseFile.sha256,
       `sha256:${createHash('sha256')
-        .update(await readFile(join(destinationRoot, 'runtime.sqlite')))
+        .update(await readFile(join(destinationRoot, 'runtime-rust.sqlite')))
         .digest('hex')}`,
     );
   } finally {
@@ -91,20 +101,20 @@ test('startup artifacts survive a missing or unreadable runtime database', async
   const destinationRoot = join(root, 'artifacts');
   await mkdir(stateRoot);
   try {
-    await writeFile(join(stateRoot, 'runtime-policy.json'), '{"policy":"evidence"}');
+    await writeFile(join(stateRoot, 'runtime-host-candidate.log'), 'candidate-ready');
     for (const corrupt of [false, true]) {
-      if (corrupt) await writeFile(join(stateRoot, 'runtime.sqlite'), 'not a database');
+      if (corrupt) await writeFile(join(stateRoot, 'runtime-rust.sqlite'), 'not a database');
       const manifest = await captureMakaRuntimeArtifacts({
         stateRoot,
         destinationRoot,
         reason: 'settled',
       });
       assert.equal(
-        await readFile(join(destinationRoot, 'runtime-policy.json'), 'utf8'),
-        '{"policy":"evidence"}',
+        await readFile(join(destinationRoot, 'runtime-host-candidate.log'), 'utf8'),
+        'candidate-ready',
       );
       assert.equal(
-        manifest.files.some((file) => file.path === 'runtime.sqlite'),
+        manifest.files.some((file) => file.path === 'runtime-rust.sqlite'),
         false,
       );
       if (corrupt) {
@@ -176,12 +186,21 @@ function makaCell(): ExperimentCell {
     subject: {
       id: 'maka',
       kind: 'maka',
-      credentials: ['DEEPSEEK_API_KEY'],
+      credentials: ['MAKA_AUTH_INPUT'],
       config: {
         nodePath: '/opt/node',
         shimPath: '/opt/maka-subject.js',
         runtimeHostsPath: '/tmp/maka-runtime-hosts',
-        baseUrl: 'https://api.deepseek.com',
+        connection: {
+          provider: {
+            packageId: 'maka.providers',
+            entryId: 'maka.providers',
+            scope: 'profile',
+            name: 'deepseek',
+          },
+          configuration: { baseUrl: 'https://api.deepseek.com' },
+          authentication: { method: 'api-key', inputEnvironment: 'MAKA_AUTH_INPUT' },
+        },
         connectionSlug: 'env-deepseek',
         model: 'deepseek-v4-flash',
         thinkingLevel: 'max',

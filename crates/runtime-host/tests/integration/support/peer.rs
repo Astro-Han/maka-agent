@@ -46,6 +46,22 @@ pub struct Peer {
     task: tokio::task::JoinHandle<()>,
 }
 impl Peer {
+    pub async fn wait_for_plugins(&mut self) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let status = self
+                    .rpc("plugin.platform.query", json!({"view":"status"}))
+                    .await;
+                assert_eq!(status["ok"], true, "{status}");
+                if status["result"]["convergence"] == "converged" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("fixture plugins did not converge");
+    }
     pub async fn new(host: Arc<Host>, id: &str) -> Self {
         let (peer, hello) = Self::handshake(host, id).await;
         assert_eq!(hello["state"], "ready", "{hello}");

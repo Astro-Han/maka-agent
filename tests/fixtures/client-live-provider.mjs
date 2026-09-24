@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { decodeStoredMessage } from '../../packages/core/src/session.ts';
 import { watchSession } from './client-subscription.mjs';
+import { createModelConnection } from './client-model-connection.mjs';
 
 const sessionId = 'live-provider';
 const turnId = 'live-once';
@@ -40,38 +41,15 @@ export async function verifyLiveProvider(connection, workspace, reopened) {
   const snapshotPath = join(workspace, 'live-transcript.json');
   if (!reopened) {
     const secret = process.env.MAKA_LIVE_API_KEY ?? 'fixture-only';
-    const created = await request('connection.catalog.create', {
-      expectedCatalogRevision: 0,
-      connection: {
-        slug: 'live-provider',
-        name: 'Disposable live acceptance',
-        providerType,
-        baseUrl,
-        enabled: true,
-        enabledModelIds: [model],
-      },
+    const created = await createModelConnection(request, {
+      slug: 'live-provider',
+      name: 'Disposable live acceptance',
+      providerName: providerType,
+      apiKey: secret,
+      baseUrl,
+      enabledModelIds: [model],
     });
     assert.equal(created.kind, 'committed');
-    assert.equal(
-      (
-        await request('credential.vault.set', {
-          locator: {
-            scope: 'connection',
-            connectionId: created.connection.connectionId,
-            kind: 'api_key',
-          },
-          expected: null,
-          expectedConnection: {
-            ...created.connection,
-            slug: 'live-provider',
-            providerType,
-            effectiveBaseUrl: baseUrl,
-          },
-          secret,
-        })
-      ).kind,
-      'committed',
-    );
     await request('session.create', {
       sessionId,
       workspace: { kind: 'host_path', path: workspace },

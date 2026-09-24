@@ -17,7 +17,7 @@
  * under the License.
  */
 use maka_protocol::Operation;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::path::Path;
 
 pub(super) async fn json_response(
@@ -77,19 +77,23 @@ pub(super) async fn client(root: &Path) -> maka_client::Client {
 /// Configure an isolated Host's controlled model. The TUI itself uses Client::Operations.
 pub(super) async fn model_client(root: &Path, url: &str) -> maka_client::Client {
     let client = client(root).await;
-    let created = client.request(Operation::ConnectionCatalogCreate, json!({
-        "expectedCatalogRevision":0,
-        "connection":{"slug":"tui-fixture","name":"TUI fixture","providerType":"openai-compatible",
-        "baseUrl":url,"enabled":true,"enabledModelIds":["fixture-model"],
-        "modelOverrides":{"fixture-model":{"contextWindow":128000}}}
+    let login = login(
+        &client,
+        maka_protocol::oauth::Target::Create {
+            provider: provider(&client, "openai-compatible").await,
+            configuration: json!({"baseUrl":url}),
+            slug: "tui-fixture".into(),
+            name: "TUI fixture".into(),
+        },
+        "dummy-local-fixture",
+    )
+    .await;
+    let created = client.request(Operation::ConnectionCatalogUpdate, json!({
+        "expected":{"connectionId":login.connection.connection_id,"revision":1},
+        "changes":{"name":"TUI fixture","configuration":{"baseUrl":url},"enabled":true,
+            "enabledModelIds":["fixture-model"],"modelOverrides":{"fixture-model":{"contextWindow":128000}}}
     })).await.unwrap();
     let basis = &created["connection"];
-    client.request(Operation::CredentialVaultSet, json!({
-        "locator":{"scope":"connection","connectionId":basis["connectionId"],"kind":"api_key"},"expected":null,
-        "expectedConnection":{"connectionId":basis["connectionId"],"revision":basis["revision"],
-            "slug":"tui-fixture","providerType":"openai-compatible","effectiveBaseUrl":url},
-        "secret":"dummy-local-fixture"
-    })).await.unwrap();
     client
         .request(
             Operation::ConnectionCatalogSetDefaultTarget,
@@ -101,4 +105,75 @@ pub(super) async fn model_client(root: &Path, url: &str) -> maka_client::Client 
         .await
         .unwrap();
     client
+}
+
+pub(super) async fn provider(
+    client: &maka_client::Client,
+    name: &str,
+) -> maka_protocol::model_provider::Identity {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let directory = client
+                .provider_directory(maka_protocol::model_provider::Scope::Profile)
+                .await
+                .unwrap();
+            if let Some(entry) = directory
+                .entries
+                .into_iter()
+                .find(|entry| entry.identity.name == name)
+            {
+                return entry.identity;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("fixture provider did not publish")
+}
+
+pub(super) async fn authenticate(client: &maka_client::Client, id: &Value, key: &str) {
+    let (_, rows) = super::enabled_models::catalog(client).await;
+    let row = rows
+        .iter()
+        .find(|row| row["kind"] == "connection" && row["connectionId"] == *id)
+        .unwrap();
+    let target = maka_protocol::oauth::Target::Existing {
+        expected: serde_json::from_value(json!({
+            "connectionId":id,"revision":row["revision"],"slug":row["slug"],
+            "provider":row["provider"],"configuration":row["configuration"]
+        }))
+        .unwrap(),
+        configuration: row["configuration"].clone(),
+    };
+    login(client, target, key).await;
+}
+
+async fn login(
+    client: &maka_client::Client,
+    target: maka_protocol::oauth::Target,
+    key: &str,
+) -> maka_protocol::oauth::LoginProjection {
+    use maka_protocol::oauth::{LoginStart, Phase};
+    let input = LoginStart {
+        attempt_id: uuid::Uuid::new_v4().to_string(),
+        target,
+        authentication: maka_runtime::provider::AuthenticationInput {
+            method: "api-key".into(),
+            input: json!({"apiKey":key}),
+        },
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut result = client.start_oauth_login(&input).await.unwrap();
+        while matches!(result.phase, Phase::Exchanging | Phase::Committing) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            result = client
+                .query_oauth_login(&input.recovery(), Some(&result.connection))
+                .await
+                .unwrap();
+        }
+        assert_eq!(result.phase, Phase::Authenticated);
+        result
+    })
+    .await
+    .expect("fixture authentication did not settle")
 }

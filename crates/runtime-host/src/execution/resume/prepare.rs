@@ -45,10 +45,8 @@ impl Executions {
                 .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
         let session_id = &source.invocation.session_id;
         let provider = match &mode {
-            Mode::Observe(_) => provider::observe(&self.configuration, session_id, session).await?,
-            Mode::Prepared(_) => {
-                provider::resolve(&self.configuration, &self.oauth, session_id, session).await?
-            }
+            Mode::Observe(_) => provider::observe(self, session_id, session).await?,
+            Mode::Prepared(_) => provider::resolve(self, session_id, session).await?,
         };
         let mut configuration = session.observed_configuration(workspace);
         let mut editing = provider.editing_tools;
@@ -97,6 +95,8 @@ impl Executions {
         }
         configuration.system_prompt = system_prompt;
         Ok(RunInput {
+            model_source: Some(provider.source.clone()),
+            model_revision: Some(provider.revision.clone()),
             provider_id: provider.provider_id,
             invocation: Invocation {
                 session_id: session_id.clone(),

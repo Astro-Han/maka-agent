@@ -36,6 +36,7 @@ function realConnection(overrides: Partial<LlmConnection> = {}): LlmConnection {
     name: 'Anthropic Live',
     providerType: 'anthropic',
     defaultModel: 'claude-sonnet-4-5-20250929',
+    enabledModelIds: [overrides.defaultModel ?? 'claude-sonnet-4-5-20250929'],
     enabled: true,
     models: [
       {

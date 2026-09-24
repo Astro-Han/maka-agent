@@ -20,6 +20,3 @@
 //! Health observations of Host-owned background tasks and independently probed endpoints.
 mod health;
 pub mod plugin;
-
-#[cfg(test)]
-mod tests;

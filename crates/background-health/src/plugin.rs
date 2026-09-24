@@ -65,10 +65,25 @@ impl Plugin for Builtin {
                 http: host.http,
                 preferences: host.preferences,
             });
-            let tool=PluginTool::new(ToolRegistration{
-                definition:ToolDefinition{provider:None,name:TOOL.into(),description:"Check a tracked background task returned by Shell and optionally an HTTP(S) endpoint. Reports process state separately from HTTP readiness; a healthy endpoint does not prove listener ownership or browser readiness. Uses HEAD with one GET fallback for 405/501, never follows redirects and discards bodies. Logs are omitted unless include_logs is true. Endpoint probing uses Host network timeouts; elapsed time includes permission approval.".into(),input_schema:schemars::schema_for!(Input).into()},
-                nesting:ToolNesting::Nestable,semantics:ToolSemantics::Parallel,handler:ToolHandler::Prepared(health),
-            }).map_err(|e|e.to_string())?.always_visible();
+            let tool = PluginTool::new(ToolRegistration {
+                definition: ToolDefinition {
+                    provider: None,
+                    name: TOOL.into(),
+                    description: "Check a tracked background task returned by Shell and optionally \
+                        an HTTP(S) endpoint. Reports process state separately from HTTP readiness; \
+                        a healthy endpoint does not prove listener ownership or browser readiness. \
+                        Uses HEAD with one GET fallback for 405/501, never follows redirects and \
+                        discards bodies. Logs are omitted unless include_logs is true. Endpoint \
+                        probing uses Host network timeouts; elapsed time includes permission approval."
+                        .into(),
+                    input_schema: schemars::schema_for!(Input).into(),
+                },
+                nesting: ToolNesting::Nestable,
+                semantics: ToolSemantics::Parallel,
+                handler: ToolHandler::Prepared(health),
+            })
+            .map_err(|error| error.to_string())?
+            .always_visible();
             let mut staged = Staged::default();
             staged.insert(TOOL, tool).map_err(|e| e.to_string())?;
             Ok(staged)

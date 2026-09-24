@@ -17,9 +17,12 @@
  * under the License.
  */
 
+import { copy } from './client/copy.js';
+
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   ClientContext,
+  ClientLocale,
   ClientPlugin,
   ClientSlots,
   AuthorizationRequest,
@@ -44,8 +47,9 @@ type Mutation =
 async function authorize(
   context: ClientContext,
   effect: ScheduledTaskEffect,
-  zh: boolean,
+  locale: ClientLocale,
 ): Promise<string> {
+  const t = copy[locale];
   const target: AuthorizationRequest['target'] =
     effect.kind === 'notify'
       ? { kind: 'profile' }
@@ -60,13 +64,12 @@ async function authorize(
           };
   const request: AuthorizationRequest = {
     operationId: crypto.randomUUID(),
-    title: zh ? '允许定时任务在后台执行' : 'Allow scheduled background work',
+    title: t.authorize,
     target,
     capabilities: effect.kind === 'notify' ? ['notifications'] : ['executions', 'notifications'],
   };
   const grant = await context.authorization.approve('profile', request);
-  if (!grant || grant.revoked)
-    throw new Error(zh ? '未获得后台授权' : 'Background authorization was not granted');
+  if (!grant || grant.revoked) throw new Error(t.authorizationDenied);
   await context.remote.method('request')({ kind: 'remember_grant', id: grant.id });
   return grant.id;
 }
@@ -79,7 +82,7 @@ function Manage({
 }: ClientSlots['application.manage'] & { context: ClientContext; tasks: Tasks }) {
   const snapshot = useSyncExternalStore(tasks.subscribe, tasks.snapshot, tasks.snapshot);
   const toast = useToast();
-  const zh = locale !== 'en';
+  const t = copy[locale];
   const [createNonce, setCreateNonce] = useState(0);
   const handled = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -95,7 +98,7 @@ function Manage({
   >('request');
   const mutate = async (mutation: Mutation, effect?: ScheduledTaskEffect): Promise<boolean> => {
     try {
-      const grant = effect ? await authorize(context, effect, zh) : undefined;
+      const grant = effect ? await authorize(context, effect, locale) : undefined;
       await call({ kind: 'mutate', mutation, grant });
       await tasks.refresh();
       return true;
@@ -132,10 +135,8 @@ function Manage({
         onDelete={async (taskId) => {
           if (
             await toast.confirm({
-              title: zh ? '删除定时任务？' : 'Delete scheduled task?',
-              description: zh
-                ? '已接受的执行不会被取消。'
-                : 'Already accepted executions will not be cancelled.',
+              title: t.deleteTitle,
+              description: t.deleteDescription,
             })
           )
             await mutate({ kind: 'delete', taskId });
@@ -152,7 +153,7 @@ function Session({
 }: ClientSlots['session.composer.before'] & { context: ClientContext }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const zh = locale !== 'en';
+  const t = copy[locale];
   const lifetime = useRef(0);
   useEffect(() => {
     lifetime.current++;
@@ -167,7 +168,7 @@ function Session({
     setError('');
     try {
       if (!root) {
-        await authorize(context, { kind: 'session_resume', sessionId }, zh);
+        await authorize(context, { kind: 'session_resume', sessionId }, locale);
       } else {
         const view = await context.remote.method<
           { kind: 'session' },
@@ -176,8 +177,7 @@ function Session({
           'request',
           sessionId,
         )({ kind: 'session' });
-        if (view.target.kind !== 'model')
-          throw new Error(zh ? '此会话没有模型' : 'This Session has no model');
+        if (view.target.kind !== 'model') throw new Error(t.noModel);
         await authorize(
           context,
           {
@@ -196,7 +196,7 @@ function Session({
               orchestrationMode: view.behavior,
             },
           },
-          zh,
+          locale,
         );
       }
     } catch (error) {
@@ -208,17 +208,9 @@ function Session({
   };
   return (
     <details data-maka-scheduler-consent>
-      <summary>{zh ? '定时任务后台权限' : 'Scheduled background access'}</summary>
-      <Button
-        isDisabled={busy}
-        onClick={() => void approve(false)}
-        label={zh ? '允许继续此会话' : 'Allow resuming this Session'}
-      />
-      <Button
-        isDisabled={busy}
-        onClick={() => void approve(true)}
-        label={zh ? '允许在此工作区创建会话' : 'Allow new Sessions in this workspace'}
-      />
+      <summary>{t.accessTitle}</summary>
+      <Button isDisabled={busy} onClick={() => void approve(false)} label={t.allowResume} />
+      <Button isDisabled={busy} onClick={() => void approve(true)} label={t.allowCreate} />
       {error && <p role="alert">{error}</p>}
     </details>
   );
@@ -240,11 +232,7 @@ const plugin: ClientPlugin = {
       const state = useSyncExternalStore(tasks.subscribe, tasks.snapshot, tasks.snapshot);
       if (props.section !== 'automations') return null;
       const count = state.tasks.filter((task) => task.status === 'active').length;
-      return count ? (
-        <span aria-label={props.locale === 'en' ? 'Active scheduled tasks' : '活动定时任务'}>
-          {count}
-        </span>
-      ) : null;
+      return count ? <span aria-label={copy[props.locale].activeTasks}>{count}</span> : null;
     });
   },
 };

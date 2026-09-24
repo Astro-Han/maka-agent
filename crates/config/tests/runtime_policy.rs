@@ -223,10 +223,23 @@ async fn defaults_are_read_only_and_cas_is_durable_even_for_same_value() {
         store.set_chat_defaults(2, clear.clone()).await.unwrap(),
         RuntimePolicyMutationResult::Committed { revision: 3 }
     );
+    assert_eq!(
+        store
+            .set_privacy(
+                3,
+                PrivacyPolicy {
+                    incognito_active: true
+                }
+            )
+            .await
+            .unwrap(),
+        RuntimePolicyMutationResult::Committed { revision: 4 }
+    );
     store.close().await.unwrap();
     let reopened = ConfigurationStore::for_root(owner).await.unwrap();
     let snapshot = reopened.runtime_policy().await.unwrap();
-    assert_eq!(snapshot.revision, 3);
+    assert_eq!(snapshot.revision, 4);
+    assert!(snapshot.policy.privacy.incognito_active);
     assert_eq!(snapshot.policy.chat_defaults, clear);
     snapshot.validate().unwrap();
     assert_eq!(count(&db), 1);

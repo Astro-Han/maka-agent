@@ -99,7 +99,13 @@ impl Peer {
     }
 }
 pub fn start(id: &str) -> Value {
-    json!({"attemptId":id,"target":{"kind":"create","providerType":"xai-oauth"}})
+    json!({"attemptId":id,"target":{
+        "kind":"create", "provider":codex(), "configuration":{},
+        "slug":"subscription", "name":"Subscription"
+    },"authentication":{"method":"chatgpt","input":{}}})
+}
+pub fn codex() -> Value {
+    json!({"packageId":"maka.codex", "entryId":"maka.codex", "scope":"profile", "name":"chatgpt"})
 }
 pub async fn finish(task: tokio::task::JoinHandle<()>) {
     tokio::time::timeout(Duration::from_secs(5), task)

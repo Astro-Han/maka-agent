@@ -22,7 +22,7 @@ import type { OAuthPresentationBackend } from '@maka/runtime-host/client';
 const PRESENTATION_TIMEOUT_MS = 30_000;
 
 export interface OAuthExternalPresentation {
-  readonly stateHint: string;
+  readonly stateHint?: string;
 }
 
 export interface OAuthPresentationExpectation {
@@ -100,7 +100,7 @@ export class RuntimeHostOAuthPresentation implements OAuthPresentationBackend {
   ): Promise<void> {
     signal.throwIfAborted();
     const pending = this.#pending;
-    if (!pending || !stateHint) {
+    if (!pending) {
       throw new OAuthPresentationError('Desktop has no matching OAuth presentation request');
     }
     if (pending.expectedStateHint !== undefined && pending.expectedStateHint !== stateHint) {
@@ -111,7 +111,10 @@ export class RuntimeHostOAuthPresentation implements OAuthPresentationBackend {
       await this.openSystemBrowser(url);
       opened = true;
       signal.throwIfAborted();
-      pending.resolve({ stateHint });
+      if (this.#pending !== pending) {
+        throw new OAuthPresentationError('OAuth presentation is no longer active');
+      }
+      pending.resolve(stateHint === undefined ? {} : { stateHint });
     } catch (error) {
       // A browser that will not open is a Desktop-owned presentation failure;
       // anything after it opened (an abort) keeps its own shape.

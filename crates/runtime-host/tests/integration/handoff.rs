@@ -74,6 +74,7 @@ async fn cooperative_retirement_recovers_frozen_step_without_repeating_effects()
             .serve(host.clone(), CancellationToken::new()),
     );
     let (mut peer, hello) = Peer::handshake(host.clone(), "cooperative").await;
+    peer.wait_for_plugins().await;
     assert_eq!(hello["cooperativeHandoff"], true, "{hello}");
     let publication = json!({"registrationId":"before-upgrade", "offers":[{
         "offerId":"desktop", "version":"1", "affinity":"session", "hostPathAccess":"none",

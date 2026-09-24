@@ -22,80 +22,122 @@ import test from 'node:test';
 import type { RuntimeHostConnection } from '../client/connection.js';
 import { configureHostedExecutionTarget } from '../client/hosted-execution-target.js';
 
-test('explicit hosted target preserves the default target and proves the requested model', async () => {
+const CONNECTION_ID = '00000000-0000-4000-8000-000000000001';
+const provider = {
+  packageId: 'external.provider',
+  entryId: 'entry',
+  scope: 'profile' as const,
+  name: 'custom',
+};
+const configuration = { region: 'opaque-region', deployment: { name: 'model' } };
+const authentication = {
+  attemptId: 'stable-attempt',
+  target: { kind: 'create' as const, provider, configuration, slug: 'personal', name: 'Personal' },
+  authentication: { method: 'custom-login', input: { token: 'transient-secret' } },
+};
+
+test('hosted target consumes public authentication and preserves opaque configuration and default', async () => {
   const requests: Array<{ operation: string; input: unknown }> = [];
-  let queryCount = 0;
+  let queries = 0;
   const connection = {
     request: async (operation: string, input: unknown) => {
       requests.push({ operation, input });
-      if (operation === 'connection.catalog.query') {
-        queryCount += 1;
-        return queryCount === 1
-          ? catalogPage(['gpt-4o-mini'], ['gpt-4o-mini'])
-          : catalogPage(
-              ['gpt-4o-mini', 'deepseek-v4-flash'],
-              ['gpt-4o-mini', 'deepseek-v4-flash'],
-              'https://api.deepseek.com/',
-            );
+      if (operation.startsWith('oauth.login.')) {
+        return {
+          attemptId: authentication.attemptId,
+          connection: { connectionId: CONNECTION_ID, slug: 'personal', provider },
+          phase: operation === 'oauth.login.start' ? 'committing' : 'authenticated',
+        };
       }
-      if (operation === 'connection.catalog.update') {
+      if (operation === 'connection.catalog.query') {
+        return catalogPage(++queries === 1 ? ['old-model'] : ['old-model', 'new-model']);
+      }
+      if (operation === 'connection.catalog.update' || operation === 'connection.models.fetch')
         return {
           kind: 'committed',
           catalogRevision: 2,
           connection: { connectionId: CONNECTION_ID, revision: 2 },
         };
-      }
-      if (operation === 'connection.models.fetch') {
-        return {
-          kind: 'committed',
-          catalogRevision: 3,
-          connection: { connectionId: CONNECTION_ID, revision: 3 },
-          modelCount: 2,
-          source: 'fetched',
-          fetchedAt: 1,
-        };
-      }
       throw new Error(`Unexpected operation ${operation}`);
     },
   } as unknown as Pick<RuntimeHostConnection, 'request'>;
-
   assert.deepEqual(
     await configureHostedExecutionTarget(connection, {
-      connectionSlug: 'env-openai',
-      model: 'deepseek-v4-flash',
-      baseUrl: 'https://api.deepseek.com',
+      connection: authentication,
+      connectionSlug: 'personal',
+      model: 'new-model',
     }),
-    { connectionId: CONNECTION_ID, connectionSlug: 'env-openai' },
+    { connectionId: CONNECTION_ID, connectionSlug: 'personal' },
   );
-
   assert.deepEqual(
     requests.map(({ operation }) => operation),
     [
+      'oauth.login.start',
+      'oauth.login.query',
       'connection.catalog.query',
       'connection.catalog.update',
       'connection.models.fetch',
       'connection.catalog.query',
     ],
   );
-  assert.deepEqual(requests[1]?.input, {
+  assert.deepEqual(requests[0]?.input, authentication);
+  assert.deepEqual(requests[1]?.input, { attemptId: 'stable-attempt' });
+  assert.deepEqual(requests[3]?.input, {
     expected: { connectionId: CONNECTION_ID, revision: 1 },
     changes: {
-      name: 'OpenAI',
-      baseUrl: 'https://api.deepseek.com/',
+      name: 'Personal',
+      configuration,
       enabled: true,
-      enabledModelIds: ['gpt-4o-mini', 'deepseek-v4-flash'],
+      enabledModelIds: ['old-model', 'new-model'],
     },
   });
 });
 
-test('explicit hosted target stops waiting when cancelled', { timeout: 1_000 }, async () => {
+test('hosted target rejects authentication recipient changes and concurrent configuration replacement', async () => {
+  for (const changed of ['recipient', 'configuration']) {
+    let queries = 0;
+    const connection = {
+      request: async (operation: string) => {
+        if (operation === 'oauth.login.start')
+          return {
+            attemptId: authentication.attemptId,
+            connection: {
+              connectionId: CONNECTION_ID,
+              slug: 'personal',
+              provider: { ...provider, name: 'other' },
+            },
+            phase: 'authenticated',
+          };
+        assert.equal(operation, 'connection.catalog.query');
+        return catalogPage(
+          ['new-model'],
+          ++queries === 2 ? { region: 'other-account' } : configuration,
+        );
+      },
+    } as unknown as Pick<RuntimeHostConnection, 'request'>;
+    await assert.rejects(
+      configureHostedExecutionTarget(connection, {
+        ...(changed === 'recipient' ? { connection: authentication } : {}),
+        connectionSlug: 'personal',
+        model: 'new-model',
+      }),
+    );
+    assert.equal(queries, changed === 'recipient' ? 0 : 2);
+  }
+});
+
+test('cancelling a waiter does not repeat an accepted authentication attempt', {
+  timeout: 1_000,
+}, async () => {
   const abort = new AbortController();
+  const requests: string[] = [];
   let started!: () => void;
-  const requestStarted = new Promise<void>((resolve) => {
+  const accepted = new Promise<void>((resolve) => {
     started = resolve;
   });
   const connection = {
-    request: async () => {
+    request: async (operation: string) => {
+      requests.push(operation);
       started();
       return await new Promise<never>(() => {});
     },
@@ -103,128 +145,48 @@ test('explicit hosted target stops waiting when cancelled', { timeout: 1_000 }, 
   const configuring = configureHostedExecutionTarget(
     connection,
     {
-      connectionSlug: 'env-openai',
-      model: 'deepseek-v4-flash',
-      baseUrl: 'https://api.deepseek.com',
+      connection: authentication,
+      connectionSlug: 'personal',
+      model: 'new-model',
     },
     abort.signal,
   );
-  await requestStarted;
+  await accepted;
   abort.abort(new Error('cancelled'));
-
   await assert.rejects(configuring, /cancelled/u);
+  assert.deepEqual(requests, ['oauth.login.start']);
 });
 
-test('explicit hosted target reuses an already admitted target', async () => {
-  const connection = {
-    request: async (operation: string) => {
-      assert.equal(operation, 'connection.catalog.query');
-      return catalogPage(['deepseek-v4-flash'], ['deepseek-v4-flash'], null, 'deepseek');
-    },
-  } as unknown as Pick<RuntimeHostConnection, 'request'>;
-
-  assert.deepEqual(
-    await configureHostedExecutionTarget(connection, {
-      connectionSlug: 'env-openai',
-      model: 'deepseek-v4-flash',
-      baseUrl: 'https://api.deepseek.com',
-    }),
-    { connectionId: CONNECTION_ID, connectionSlug: 'env-openai' },
-  );
-});
-
-test('explicit hosted target replaces a missing effective endpoint', async () => {
-  const operations: string[] = [];
-  let queryCount = 0;
-  const connection = {
-    request: async (operation: string) => {
-      operations.push(operation);
-      if (operation === 'connection.catalog.query') {
-        queryCount += 1;
-        return queryCount === 1
-          ? catalogPage(['deepseek-v4-flash'], [], null, 'openai-compatible')
-          : catalogPage(
-              ['deepseek-v4-flash'],
-              ['deepseek-v4-flash'],
-              'https://api.deepseek.com/',
-              'openai-compatible',
-            );
-      }
-      if (operation === 'connection.catalog.update') {
-        return {
-          kind: 'committed',
-          catalogRevision: 2,
-          connection: { connectionId: CONNECTION_ID, revision: 2 },
-        };
-      }
-      if (operation === 'connection.models.fetch') {
-        return {
-          kind: 'committed',
-          catalogRevision: 3,
-          connection: { connectionId: CONNECTION_ID, revision: 3 },
-          modelCount: 1,
-          source: 'fetched',
-          fetchedAt: 1,
-        };
-      }
-      throw new Error(`Unexpected operation ${operation}`);
-    },
-  } as unknown as Pick<RuntimeHostConnection, 'request'>;
-
-  assert.deepEqual(
-    await configureHostedExecutionTarget(connection, {
-      connectionSlug: 'env-openai',
-      model: 'deepseek-v4-flash',
-      baseUrl: 'https://api.deepseek.com',
-    }),
-    { connectionId: CONNECTION_ID, connectionSlug: 'env-openai' },
-  );
-  assert.deepEqual(operations, [
-    'connection.catalog.query',
-    'connection.catalog.update',
-    'connection.models.fetch',
-    'connection.catalog.query',
-  ]);
-});
-
-const CONNECTION_ID = '00000000-0000-4000-8000-000000000001';
-
-function catalogPage(
-  enabledModelIds: string[],
-  models: string[],
-  baseUrl: string | null = 'https://api.openai.com/v1/',
-  providerType: 'openai' | 'deepseek' | 'openai-compatible' = 'openai',
-) {
+function catalogPage(enabledModelIds: string[], config = configuration as object) {
   return {
-    kind: 'page' as const,
+    kind: 'page',
     revision: 1,
-    defaultTarget: { connectionId: CONNECTION_ID, modelId: 'gpt-4o-mini' },
+    defaultTarget: { connectionId: CONNECTION_ID, modelId: 'old-model' },
     connectionCount: 1,
     items: [
       {
-        kind: 'connection' as const,
+        kind: 'connection',
         connectionIndex: 0,
         connectionId: CONNECTION_ID,
         revision: 1,
-        slug: 'env-openai',
-        name: 'OpenAI',
-        providerType,
-        ...(baseUrl === null ? {} : { baseUrl }),
+        slug: 'personal',
+        name: 'Personal',
+        provider,
+        configuration: config,
         enabled: true,
         enabledModelIdCount: enabledModelIds.length,
-        modelCount: models.length,
-        // These tests are about which endpoint a target resolves to, not about
-        // what the models are, so the page carries no resolved entries.
+        modelCount: enabledModelIds.length,
+        modelSource: 'fetched',
         catalogEntryCount: 0,
       },
       ...enabledModelIds.map((modelId, itemIndex) => ({
-        kind: 'enabled_model_id' as const,
+        kind: 'enabled_model_id',
         connectionIndex: 0,
         itemIndex,
         modelId,
       })),
-      ...models.map((id, itemIndex) => ({
-        kind: 'model' as const,
+      ...enabledModelIds.map((id, itemIndex) => ({
+        kind: 'model',
         connectionIndex: 0,
         itemIndex,
         model: { id },

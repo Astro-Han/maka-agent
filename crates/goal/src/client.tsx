@@ -17,13 +17,17 @@
  * under the License.
  */
 
+import { copy } from './client/copy.js';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ClientPlugin, ClientContext, ClientSlots } from '@maka-agent/plugin-sdk/client';
+type Status = keyof (typeof copy)['en']['statuses'];
+type Control = 'pause' | 'resume' | 'cancel' | 'complete';
 type Current = {
   revision: number;
   goal: {
     id: string;
-    status: string;
+    status: Status;
     iterations: number;
     pending: { dispatched: boolean } | null;
     note: string;
@@ -43,13 +47,13 @@ type Arm = {
 type Request =
   | { kind: 'read' }
   | { kind: 'arm'; arm: Arm }
-  | { kind: 'control'; id: string; revision: number; action: string; grant?: string };
+  | { kind: 'control'; id: string; revision: number; action: Control; grant?: string };
 function GoalView({
   context,
   sessionId,
   locale,
 }: ClientSlots['session.inspector.overview'] & { context: ClientContext }) {
-  const zh = locale !== 'en';
+  const t = copy[locale];
   const call = useMemo(
     () => context.remote.method<Request, { current: Current | null }>('request', sessionId),
     [context, sessionId],
@@ -95,7 +99,7 @@ function GoalView({
       clearTimeout(timer);
     };
   }, [call, context]);
-  async function act(action: string) {
+  async function act(action: Control | 'start' | 'arm' | 'retry' | 'retry_cancel') {
     if (locked.current) return;
     locked.current = true;
     setBusy(true);
@@ -115,22 +119,15 @@ function GoalView({
             count > 100 ||
             (tokens !== null && (!Number.isSafeInteger(tokens) || tokens < 1 || tokens > 1e9))
           )
-            throw new Error(
-              zh
-                ? '请填写目标、1–100轮及有效 token 阈值'
-                : 'Enter an objective, 1–100 iterations and a valid token threshold',
-            );
+            throw new Error(t.invalidGoal);
           const grant = await context.authorization.approve('profile', {
             operationId: crypto.randomUUID(),
-            title: zh
-              ? '允许此目标在会话中自动续跑'
-              : 'Allow this Goal to continue in this Session',
+            title: t.authorizeContinuation,
             target: { kind: 'session', sessionId },
             capabilities: ['executions', 'read_usage'],
           });
           if (version !== epoch.current || context.signal.aborted) return;
-          if (!grant || grant.revoked)
-            throw new Error(zh ? '未获得后台授权' : 'Background access was not granted');
+          if (!grant || grant.revoked) throw new Error(t.backgroundDenied);
           arm = {
             operationId: crypto.randomUUID(),
             objective: objective.trim(),
@@ -153,13 +150,12 @@ function GoalView({
         ) {
           const grant = await context.authorization.approve('profile', {
             operationId: crypto.randomUUID(),
-            title: zh ? '重新授权此目标续跑' : 'Renew Goal background access',
+            title: t.renewAccess,
             target: { kind: 'session', sessionId },
             capabilities: ['executions', 'read_usage'],
           });
           if (version !== epoch.current || context.signal.aborted) return;
-          if (!grant || grant.revoked)
-            throw new Error(zh ? '未获得授权' : 'Access was not granted');
+          if (!grant || grant.revoked) throw new Error(t.accessDenied);
           grantId = grant.id;
         }
         request = {
@@ -197,55 +193,28 @@ function GoalView({
       'budget_unknown',
     ].includes(current.goal.status);
   const canCreate = !current || (terminal && !current.goal.pending);
-  const statuses: Record<string, string> = {
-    armed: '待启动',
-    active: '执行中',
-    paused: '已暂停',
-    waiting: '等待输入',
-    achieved: '已完成',
-    impossible: '无法完成',
-    cancelled: '已取消',
-    cancellation_unknown: '取消待核对',
-    max_iterations: '达到轮数上限',
-    budget_limited: '达到用量阈值',
-    budget_unknown: '用量不完整',
-    blocked: '需要处理执行问题',
-  };
   return (
     <section data-maka-goal>
-      <h3>Goal</h3>
-      <p>
-        {zh
-          ? '明确目标后允许自动续跑。模型报告完成后，还需本轮执行正常结束。'
-          : 'Authorize automatic continuation toward an objective. Model completion reports apply after the execution ends successfully.'}
-      </p>
+      <h3>{t.title}</h3>
+      <p>{t.description}</p>
       {current && (
         <>
           <p>{current.goal.arm.objective}</p>
           <p>
-            {zh ? (statuses[current.goal.status] ?? current.goal.status) : current.goal.status} ·{' '}
-            {current.goal.iterations}/{current.goal.arm.maxIterations}
+            {t.statuses[current.goal.status]} · {current.goal.iterations}/
+            {current.goal.arm.maxIterations}
           </p>
           <p>{current.goal.note}</p>
           <small>
-            {zh ? '本会话新增已观测 token' : 'Observed additional Session tokens'}:{' '}
-            {current.goal.consumed.known}
-            {current.goal.consumed.missing > 0 ? ' (incomplete)' : ''}
+            {t.observedTokens}: {current.goal.consumed.known}
+            {current.goal.consumed.missing > 0 ? ` (${t.incomplete})` : ''}
           </small>
-          {current.goal.pending && (
-            <p>
-              {zh
-                ? '当前一轮尚未结算；暂停只停止后续轮次。取消会按原操作 ID 等待结果，已进入派发的请求可能先被 Host 接受。'
-                : 'The current iteration is unsettled. Pause stops later iterations; cancellation waits on the original operation, which may still be admitted if dispatch already began.'}
-            </p>
-          )}
+          {current.goal.pending && <p>{t.unsettled}</p>}
           <div>
             {['cancelled', 'cancellation_unknown'].includes(current.goal.status) &&
               current.goal.pending && (
                 <button disabled={busy} onClick={() => void act('retry_cancel')}>
-                  {zh
-                    ? '重查取消状态（必要时重新授权）'
-                    : 'Check cancellation (renew access if needed)'}
+                  {t.checkCancellation}
                 </button>
               )}
             {!terminal && (
@@ -254,7 +223,7 @@ function GoalView({
                   disabled={busy || current.goal.status === 'paused'}
                   onClick={() => void act('pause')}
                 >
-                  {zh ? '暂停' : 'Pause'}
+                  {t.pause}
                 </button>
                 <button
                   disabled={
@@ -262,16 +231,16 @@ function GoalView({
                   }
                   onClick={() => void act('resume')}
                 >
-                  {zh ? '启动／继续' : 'Start / resume'}
+                  {t.resume}
                 </button>
                 <button disabled={busy} onClick={() => void act('cancel')}>
-                  {zh ? '取消目标' : 'Cancel goal'}
+                  {t.cancel}
                 </button>
                 <button
                   disabled={busy || !!current.goal.pending}
                   onClick={() => void act('complete')}
                 >
-                  {zh ? '标记完成' : 'Mark complete'}
+                  {t.complete}
                 </button>
               </>
             )}
@@ -281,7 +250,7 @@ function GoalView({
       {canCreate && (
         <>
           <label>
-            {zh ? '目标' : 'Objective'}
+            {t.objective}
             <textarea
               value={objective}
               onChange={(e) => setObjective(e.target.value)}
@@ -289,7 +258,7 @@ function GoalView({
             />
           </label>
           <label>
-            {zh ? '最多续跑轮数' : 'Maximum iterations'}
+            {t.iterations}
             <input
               type="number"
               min="1"
@@ -300,7 +269,7 @@ function GoalView({
             />
           </label>
           <label>
-            {zh ? '本会话新增 token 阈值（可选）' : 'Additional Session token threshold (optional)'}
+            {t.tokenThreshold}
             <input
               type="number"
               min="1"
@@ -309,24 +278,20 @@ function GoalView({
               disabled={busy || !!retry}
             />
           </label>
-          <small>
-            {zh
-              ? '包含创建目标后的其他会话活动；达到已观测阈值或用量缺失时停止续跑，不是单次请求的硬上限。'
-              : 'Includes other Session activity since Goal creation. Stops continuation after the observed threshold or missing usage; not a hard request limit.'}
-          </small>
+          <small>{t.budgetDescription}</small>
           <div>
             <button disabled={busy || !!retry} onClick={() => void act('arm')}>
-              {zh ? '保存，稍后启动' : 'Save for later'}
+              {t.save}
             </button>
             <button disabled={busy || !!retry} onClick={() => void act('start')}>
-              {zh ? '授权并启动' : 'Authorize and start'}
+              {t.start}
             </button>
           </div>
         </>
       )}
       {retry && (
         <button disabled={busy} onClick={() => void act('retry')}>
-          {zh ? '查询／重试原请求' : 'Retry original request'}
+          {t.retry}
         </button>
       )}
       {error && <p role="alert">{error}</p>}

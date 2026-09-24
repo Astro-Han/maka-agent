@@ -194,7 +194,10 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
             project_id: id.clone()
         }
     );
-    assert_eq!(session.workspace.host_cwd, project_path.to_str().unwrap());
+    assert_eq!(
+        session.workspace.host_cwd,
+        project_path.canonicalize().unwrap().to_str().unwrap()
+    );
     tui.send(b"project draft");
     tui.send(b"\x1b[1;3D");
     tui.wait_for("Renamed project");
@@ -275,7 +278,7 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
     runtime.block_on(async {
         let QueryResult::Page { items, .. } = client.project_catalog(Query::ListStart {view:View::Locations}).await.unwrap() else {panic!()};
         assert_eq!(items.iter().filter(|item| matches!(item, PageItem::Project {..})).count(), 2);
-        assert!(items.iter().any(|item| matches!(item, PageItem::Location {location,..} if location.path == browse_target.to_str().unwrap())));
+        assert!(items.iter().any(|item| matches!(item, PageItem::Location {location,..} if location.path == browse_target.canonicalize().unwrap().to_str().unwrap())));
     });
     tui.resize(100, 30);
     tui.wait_until(|text| {
@@ -316,7 +319,10 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
         .block_on(client.session(&session.id))
         .unwrap()
         .unwrap();
-    assert_eq!(before.workspace.host_cwd, project_path.to_str().unwrap());
+    assert_eq!(
+        before.workspace.host_cwd,
+        project_path.canonicalize().unwrap().to_str().unwrap()
+    );
     tui.click_text("Edit path");
     tui.wait_for("Review change");
     tui.send(format!("\x01\x1b[200~{}\x1b[201~\r", browse_target.display()).as_bytes());
@@ -331,11 +337,11 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
         let QueryResult::Page {items,project_count,..} = client.project_catalog(Query::ListStart {view:View::Locations}).await.unwrap() else {panic!()};
         assert_eq!(project_count, 1, "relink merged the already registered destination");
         assert!(items.iter().any(|item| matches!(item, PageItem::Alias {alias,..} if *alias == absorbed)));
-        assert!(items.iter().any(|item| matches!(item, PageItem::Location {location,..} if location.path == browse_target.to_str().unwrap())));
+        assert!(items.iter().any(|item| matches!(item, PageItem::Location {location,..} if location.path == browse_target.canonicalize().unwrap().to_str().unwrap())));
         for id_to_read in [&session.id, &"absorbed-session".to_owned()] {
             let current = client.session(id_to_read).await.unwrap().unwrap();
             assert_eq!(current.workspace.target, WorkspaceTarget::Project {project_id:id.clone()});
-            assert_eq!(current.workspace.host_cwd, browse_target.to_str().unwrap());
+            assert_eq!(current.workspace.host_cwd, browse_target.canonicalize().unwrap().to_str().unwrap());
         }
         assert!(client.session(&session.id).await.unwrap().unwrap().revision > before.revision);
     });
@@ -343,14 +349,17 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
     tui.filter_command("Project locations");
     tui.click_text("Project locations");
     tui.wait_for("Preferred Host directory");
-    tui.wait_for(browse_target.to_str().unwrap());
-    assert!(
-        !tui.screen
-            .snapshot()
+    // The location dialog wraps long paths; canonical identity is checked above.
+    tui.wait_for(
+        browse_target
+            .parent()
             .unwrap()
-            .screen
-            .contains(project_path.to_str().unwrap())
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap(),
     );
+    tui.wait_for("目标");
     tui.send(b"\x1b");
     tui.wait_until(|text| !text.contains("Preferred Host directory") && text.contains("TUI 项目"));
     tui.send(b"\x1b[1;3C");

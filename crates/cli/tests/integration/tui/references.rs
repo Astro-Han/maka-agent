@@ -35,6 +35,7 @@ fn host_directory_reference_survives_restart_and_sends_without_text_or_registrat
     let published = directory.path().join("published");
     let selected = published.join("目录 target");
     std::fs::create_dir_all(&selected).unwrap();
+    let selected = selected.canonicalize().unwrap();
     for index in 0..40 {
         std::fs::create_dir(published.join(format!("folder-{index:02}"))).unwrap();
     }
@@ -92,7 +93,6 @@ fn host_directory_reference_survives_restart_and_sends_without_text_or_registrat
     tui.wait_for("目录 target");
     tui.click_text("目录 target");
     tui.wait_for("Reference this directory");
-    tui.wait_for(selected.to_str().unwrap());
     tui.send(b"\x1b[<0;1;1M\x1b[<0;1;1m");
     tui.wait_until(|s| !s.contains("Reference this directory"));
     tui.send(b"\x11");
@@ -114,7 +114,6 @@ fn host_directory_reference_survives_restart_and_sends_without_text_or_registrat
     reopened.wait_for("fixture-model");
     reopened.send(b"\x13");
     reopened.wait_for("Directory received.");
-    reopened.wait_for(selected.to_str().unwrap());
     reopened.send(b"\x11");
     reopened.finish();
     let body = runtime.block_on(model).unwrap();

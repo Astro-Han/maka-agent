@@ -41,7 +41,7 @@ pub(super) struct Tokens {
 }
 impl Tokens {
     pub fn read(credential: &Credential) -> Result<Self, Error> {
-        credential.validate()?;
+        credential.validate().map_err(Error::Invalid)?;
         let tokens: Self =
             serde_json::from_str(&credential.secret).map_err(|_| Error::AuthenticationRequired)?;
         tokens.validate()?;
@@ -67,7 +67,7 @@ impl Tokens {
         let secret = serde_json::to_string(&self)
             .map_err(|_| Error::Invalid("invalid credential".into()))?;
         let credential = Credential { secret, refresh_at };
-        credential.validate()?;
+        credential.validate().map_err(Error::Invalid)?;
         Ok(credential)
     }
 }
@@ -149,13 +149,16 @@ pub(super) async fn authenticate(
     if context.cancellation.is_cancelled() {
         return Err(Error::Cancelled);
     }
-    let device: Device = post_json(
-        &context,
-        "https://auth.openai.com/api/accounts/deviceauth/usercode",
-        json!({"client_id": CLIENT_ID}),
-    )
-    .await?
-    .decode()?;
+    // Obtaining a device code cannot spend a login grant. Cancel this wait
+    // promptly; only the later poll/exchange must retain a possibly spent grant.
+    let device: Device = tokio::select! {
+        _ = context.cancellation.cancelled() => return Err(Error::Cancelled),
+        response = post_json(
+            &context,
+            "https://auth.openai.com/api/accounts/deviceauth/usercode",
+            json!({"client_id": CLIENT_ID}),
+        ) => response?.decode()?,
+    };
     if device.device_auth_id.is_empty()
         || device.device_auth_id.len() > 1024
         || device.user_code.is_empty()

@@ -96,6 +96,10 @@ fn real_host_queue_edits_retracts_promotes_and_steers_at_the_model_boundary() {
     tui.send("\x01\x1b[200~follow-first-edited 中文🦀\x1b[201~".as_bytes());
     tui.wait_for("follow-first-edited 中文🦀");
     tui.click_last_text("Save"); // The actual modal button, not its shortcut hint.
+    // Drain PTY output until the canonical projection is painted before querying
+    // Host facts; an unread terminal can block rendering and subsequent input.
+    tui.wait_until(|screen| !screen.contains("Edit queued message"));
+    tui.wait_for("↳ follow-first-edited");
     runtime.block_on(wait_queue(&client, |snapshot| {
         snapshot
             .queue
@@ -103,10 +107,9 @@ fn real_host_queue_edits_retracts_promotes_and_steers_at_the_model_boundary() {
             .iter()
             .any(|entry| entry.message.content.text == "follow-first-edited 中文🦀")
     }));
-    tui.wait_until(|screen| !screen.contains("Edit queued message"));
-    tui.wait_for("↳ follow-first-edited"); // Receipt may precede the TUI's canonical projection.
     tui.click_text("remove-me");
     tui.send(b"x");
+    tui.wait_until(|screen| !screen.contains("remove-me"));
     runtime.block_on(wait_queue(&client, |snapshot| {
         !snapshot
             .queue
@@ -114,9 +117,9 @@ fn real_host_queue_edits_retracts_promotes_and_steers_at_the_model_boundary() {
             .iter()
             .any(|entry| entry.message.content.text == "remove-me")
     }));
-    tui.wait_until(|screen| !screen.contains("remove-me")); // Wait for the painted row positions too.
     tui.click_text("promote-me");
     tui.send(b"s");
+    tui.wait_for("↗ promote-me");
     runtime.block_on(wait_queue(&client, |snapshot| {
         snapshot
             .queue
@@ -124,7 +127,6 @@ fn real_host_queue_edits_retracts_promotes_and_steers_at_the_model_boundary() {
             .iter()
             .any(|entry| entry.message.content.text == "promote-me")
     }));
-    tui.wait_for("↗ promote-me");
     tui.click_text("Message…");
     tui.send("direct-steering 中文🦀".as_bytes());
     tui.wait_for("direct-steering 中文🦀"); // Observe the edit before waiting for its removal.
@@ -136,6 +138,7 @@ fn real_host_queue_edits_retracts_promotes_and_steers_at_the_model_boundary() {
     tui.wait_for("↗ direct-steering");
     tui.click_text("follow-first-edited");
     tui.send(b"\x1b[1;3B"); // Alt+Down reorders the complete follow-up lane.
+    tui.wait_for("follow-last");
     let queued = runtime.block_on(wait_queue(&client, |snapshot| {
         snapshot
             .queue

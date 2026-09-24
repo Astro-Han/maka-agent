@@ -20,11 +20,9 @@
 import { resolveConnectionModelCatalog, type ModelCatalogEntry } from '@maka/core/model-catalog';
 import {
   offerableCatalogEntries,
-  providerDefaultsOf,
-  providerMenuLabel,
-  type HostResolvedConnectionCatalog,
+  type ProjectedLlmConnection,
 } from '@maka/core/llm-connections';
-import type { LlmConnection, ProviderType } from '@maka/core/llm-connections';
+import type { ProviderType } from '@maka/core/llm-connections';
 import type { UiLocale } from '@maka/core/ui-locale';
 import { getShellRemainingCopy } from './locales/shell-remaining-copy.js';
 
@@ -46,18 +44,18 @@ export function buildCatalogRecommendedDefaultModel(providerType: ProviderType):
 }
 
 export function buildCatalogDailyReviewModelOptions(
-  connections: readonly (LlmConnection & HostResolvedConnectionCatalog)[],
+  connections: readonly ProjectedLlmConnection[],
   currentModelKey: string,
   locale: UiLocale,
 ): Array<readonly [string, string]> {
   const current = parseDailyReviewModelKey(currentModelKey);
   const candidates: Array<{ key: string; label: string; safeSourceLabel: string }> = [];
   const seenKeys = new Set<string>();
-  const providerCounts = enabledProviderCounts(connections);
 
   for (const connection of connections) {
-    if (!isModelConsumerConnection(connection)) continue;
-    const safeSourceLabel = safeConnectionLabel(connection.providerType, connection.slug, providerCounts);
+    const safeSourceLabel = connection.name === connection.slug
+      ? connection.slug
+      : `${connection.name} · ${connection.slug}`;
     // The Host decides what is offerable; the caller appends a saved-but-
     // unavailable selection itself, with a label that says so.
     for (const entry of offerableCatalogEntries(connection)) {
@@ -92,31 +90,6 @@ export function buildCatalogDailyReviewModelOptions(
 
 function modelDisplayLabel(entry: Pick<ModelCatalogEntry, 'id' | 'displayName'>): string {
   return entry.displayName?.trim() || entry.id;
-}
-
-function isModelConsumerConnection(connection: Pick<LlmConnection, 'enabled' | 'providerType'>): boolean {
-  // Unknown providerType (legacy seed, or a connection persisted on a branch
-  // that registers a provider this build doesn't know) → not a model consumer.
-  // Mirrors `isRealConnection` in connection-readiness.ts.
-  return connection.enabled && providerDefaultsOf(connection.providerType) !== undefined;
-}
-
-function enabledProviderCounts(connections: readonly LlmConnection[]): Map<ProviderType, number> {
-  const counts = new Map<ProviderType, number>();
-  for (const connection of connections) {
-    if (!isModelConsumerConnection(connection)) continue;
-    counts.set(connection.providerType, (counts.get(connection.providerType) ?? 0) + 1);
-  }
-  return counts;
-}
-
-function safeConnectionLabel(
-  providerType: ProviderType,
-  connectionSlug: string,
-  providerCounts: ReadonlyMap<ProviderType, number>,
-): string {
-  const label = providerMenuLabel(providerType) ?? providerType;
-  return (providerCounts.get(providerType) ?? 0) > 1 ? `${label} · ${connectionSlug}` : label;
 }
 
 function dailyReviewModelKey(connectionSlug: string, model: string): string {

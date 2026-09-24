@@ -17,17 +17,21 @@
  * under the License.
  */
 
+import type { ClientLocale } from '@maka-agent/plugin-sdk/client';
+import { copy } from './activity-copy.js';
+
 import type { Activity, UsagePage } from '@maka-agent/plugin-sdk/host';
 import { dollars, number } from './totals.js';
 
-function detail(row: Activity, zh: boolean) {
+function detail(row: Activity, locale: ClientLocale) {
+  const t = copy[locale];
   if (row.kind === 'model') {
     const attempt = row.attempt;
     return (
       <>
         <strong>{attempt.modelId}</strong>
         <small>
-          {attempt.quote?.providerId ?? (zh ? '未知提供商' : 'Unknown provider')}
+          {attempt.quote?.providerId ?? t.unknownProvider}
           {attempt.binding ? ' / ' + attempt.binding.connection_slug : ''}
         </small>
       </>
@@ -43,33 +47,27 @@ function detail(row: Activity, zh: boolean) {
 
 export function ActivityTable({
   page,
-  zh,
+  locale,
   onOpenSession,
 }: {
   page: UsagePage;
-  zh: boolean;
+  locale: ClientLocale;
   onOpenSession?: (id: string) => void;
 }) {
+  const t = copy[locale];
   const status = {
-    success: zh ? '成功' : 'Success',
-    error: zh ? '失败' : 'Error',
-    aborted: zh ? '取消' : 'Cancelled',
-    unknown: zh ? '未知' : 'Unknown',
-    rejected: zh ? '拒绝' : 'Rejected',
+    success: t.success,
+    error: t.error,
+    aborted: t.cancelled,
+    unknown: t.unknown,
+    rejected: t.rejected,
   };
   return (
     <div className="insights-table">
       <table>
         <thead>
           <tr>
-            {[
-              zh ? '结算时间' : 'Settled',
-              zh ? '模型 / 工具' : 'Model / tool',
-              zh ? 'Session' : 'Session',
-              zh ? '结果' : 'Outcome',
-              zh ? '输入 / 输出 token' : 'Input / output tokens',
-              zh ? '费用' : 'Cost',
-            ].map((label) => (
+            {[t.settled, t.modelOrTool, t.session, t.outcome, t.tokens, t.cost].map((label) => (
               <th key={label}>{label}</th>
             ))}
           </tr>
@@ -87,8 +85,8 @@ export function ActivityTable({
                   : row.attempt.result.outcome;
             return (
               <tr key={attempt.requestId}>
-                <td>{new Date(attempt.completedAt).toLocaleString()}</td>
-                <td>{detail(row, zh)}</td>
+                <td>{new Date(attempt.completedAt).toLocaleString(locale)}</td>
+                <td>{detail(row, locale)}</td>
                 <td>
                   {session && onOpenSession ? (
                     <button type="button" onClick={() => onOpenSession(session)}>
@@ -106,14 +104,14 @@ export function ActivityTable({
                 </td>
                 <td>
                   {row.kind === 'model'
-                    ? `${row.attempt.usage.input_tokens == null ? '?' : number(row.attempt.usage.input_tokens)} / ${row.attempt.usage.output_tokens == null ? '?' : number(row.attempt.usage.output_tokens)}`
+                    ? `${row.attempt.usage.input_tokens == null ? '?' : number(row.attempt.usage.input_tokens, locale)} / ${row.attempt.usage.output_tokens == null ? '?' : number(row.attempt.usage.output_tokens, locale)}`
                     : '—'}
                 </td>
                 <td>
                   {row.kind === 'model'
                     ? row.attempt.costUsd === null
                       ? '?'
-                      : dollars(row.attempt.costUsd)
+                      : dollars(row.attempt.costUsd, locale)
                     : '—'}
                 </td>
               </tr>
@@ -121,9 +119,7 @@ export function ActivityTable({
           })}
         </tbody>
       </table>
-      {page.total === 0 ? (
-        <p>{zh ? '此快照没有匹配的活动。' : 'No matching activity in this snapshot.'}</p>
-      ) : null}
+      {page.total === 0 ? <p>{t.empty}</p> : null}
     </div>
   );
 }

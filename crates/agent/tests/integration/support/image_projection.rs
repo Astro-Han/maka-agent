@@ -54,6 +54,8 @@ pub fn engine(log: Arc<EventLog>) -> Engine {
 
 pub fn input(base: &str, attachments: Value) -> RunInput {
     RunInput {
+        model_source: None,
+        model_revision: None,
         provider_id: "fixture".into(),
         main_output_limit: None,
         context: None,

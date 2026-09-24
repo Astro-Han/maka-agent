@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { copy } from './inspector-copy.js';
+
 import { useEffect, useMemo, useState } from 'react';
 import type { ClientContext, ClientSlots } from '@maka-agent/plugin-sdk/client';
 import type { UsageSummary } from '@maka-agent/plugin-sdk/host';
@@ -45,7 +47,7 @@ export function Inspector({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
-  const zh = locale !== 'en';
+  const t = copy[locale];
   useEffect(() => {
     let live = true;
     let reading = false;
@@ -105,25 +107,21 @@ export function Inspector({
     };
   }, [api, context, sessionId, reload]);
   return (
-    <section data-maka-insights aria-label={zh ? '会话用量' : 'Session usage'}>
+    <section data-maka-insights aria-label={t.title}>
       <header>
-        <h2>{zh ? '会话用量' : 'Session usage'}</h2>
+        <h2>{t.title}</h2>
         <button type="button" disabled={busy} onClick={() => setReload((value) => value + 1)}>
-          {zh ? '刷新' : 'Refresh'}
+          {t.refresh}
         </button>
       </header>
       {error && (
         <p role="alert">
-          {summary
-            ? zh
-              ? '刷新失败；以下是上次成功读取的快照。'
-              : 'Refresh failed; showing the last successful snapshot.'
-            : ''}
+          {summary ? t.refreshFailed : ''}
           {error}
         </p>
       )}
-      {busy && !summary && <p role="status">{zh ? '正在读取用量…' : 'Loading usage…'}</p>}
-      {summary && <Totals summary={summary} tab="overview" zh={zh} />}
+      {busy && !summary && <p role="status">{t.loading}</p>}
+      {summary && <Totals summary={summary} tab="overview" locale={locale} />}
     </section>
   );
 }

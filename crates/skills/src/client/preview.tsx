@@ -17,7 +17,8 @@
  * under the License.
  */
 
-import type { Copy, Mutation, Preview } from './model.js';
+import type { Copy } from './copy.js';
+import type { Mutation, Preview } from './model.js';
 
 export function UpdatePreview({
   preview,

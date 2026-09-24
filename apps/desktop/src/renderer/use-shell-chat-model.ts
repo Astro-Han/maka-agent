@@ -20,7 +20,6 @@
 import { useMemo } from 'react';
 import type { ChatModelChoice } from '@maka/core/chat-model-choice';
 import type {
-  IdentifiedLlmConnection,
   ProjectedLlmConnection,
 } from '@maka/core/llm-connections';
 import type { SessionSendProjection } from '@maka/core/session-send-projection';
@@ -85,7 +84,7 @@ export function useShellChatModel(options: {
   refreshModelChoices(): void | Promise<void>;
 }): {
   chatModelChoices: ChatModelChoice[];
-  activeConnection: IdentifiedLlmConnection | undefined;
+  activeConnection: ProjectedLlmConnection | undefined;
   activeConnectionLabel: string | undefined;
   activeModel: string | undefined;
   activeModelLabel: string | undefined;
@@ -199,7 +198,7 @@ export function useShellChatModel(options: {
     : activeConnection?.name ?? activeSession?.llmConnectionSlug;
   const activeModel = isRetiredBackend
     ? undefined
-    : activeSession?.model || activeConnection?.defaultModel;
+    : activeSession?.model;
   const activeModelLabel = isRetiredBackend
     ? undefined
     : activeSession?.llmConnectionId
@@ -272,7 +271,7 @@ export function useShellChatModel(options: {
       hasModelChoices: chatModelChoices.length > 0,
       modelChoicesSettled: options.connectionSnapshotReady,
       modelPickerDisabled: options.modelPickerDisabled,
-      lastTestStatus: sessionHealthConnection?.lastTestStatus,
+      lastTestStatus: sessionHealthConnection?.lastTest?.status,
     });
     if (!derived) return undefined;
     const target = derived.onClickTarget;
@@ -304,7 +303,7 @@ export function useShellChatModel(options: {
     options.connectionSnapshotReady,
     options.modelPickerDisabled,
     options.refreshModelChoices,
-    sessionHealthConnection?.lastTestStatus,
+    sessionHealthConnection?.lastTest?.status,
     uiLocale,
     openModelPicker,
   ]);

@@ -192,3 +192,52 @@ impl Secrets {
 fn invalid_headers() -> storage::StoreError {
     storage::StoreError::Unavailable("Invalid Jev authentication or request headers".into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn destination_and_header_validation_prevent_credential_confusion() {
+        let a = Settings::default();
+        let b = Settings {
+            url: "https://another.example/jev".into(),
+            ..a.clone()
+        };
+        assert_ne!(a.credential_key(), b.credential_key());
+        for url in [
+            "file:///tmp/key",
+            "https://user:pass@example.com/",
+            "https://example.com/#secret",
+        ] {
+            assert!(
+                Settings {
+                    url: url.into(),
+                    ..a.clone()
+                }
+                .validate()
+                .is_err()
+            );
+        }
+        for headers in [
+            json!({"X-Key":"a","x-key":"b"}),
+            json!({"X-Key":"a\r\nInjected: true"}),
+            json!({"Host":"other.example"}),
+            json!({"Authorization":"custom"}),
+        ] {
+            let secrets: Secrets =
+                serde_json::from_value(json!({"apiKey":"key","headers":headers})).unwrap();
+            assert!(secrets.validate().is_err());
+        }
+        let secrets: Secrets =
+            serde_json::from_value(json!({"apiKey":null,"headers":{"Authorization":"Custom key"}}))
+                .unwrap();
+        assert!(
+            secrets
+                .request_headers()
+                .unwrap()
+                .contains(&("Authorization".into(), "Custom key".into()))
+        );
+    }
+}

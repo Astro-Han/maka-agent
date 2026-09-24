@@ -43,7 +43,7 @@ import {
   type PromptAnchorRailTurn,
 } from './prompt-anchor-rail.js';
 import { useMessageSelectionQuote } from './use-message-selection-quote.js';
-import type { ProviderType } from '@maka/core/llm-connections';
+import type { ProviderIdentity } from '@maka/core/runtime-policy';
 import { isUserVisibleSessionSystemNote, type SessionSummary, type StoredMessage } from '@maka/core/session';
 import type {
   AttachmentRef,
@@ -162,10 +162,10 @@ export function ChatView(props: {
   activeModel?: string;
   activeModelLabel?: string;
   /** Renders a provider brand mark next to the model name in the chat tab. */
-  activeProviderType?: ProviderType;
+  activeProvider?: ProviderIdentity;
   /** Optional renderer for the provider mark; supplied by the desktop app to
    *  avoid bringing the full provider SVG library into @maka/ui. */
-  renderProviderMark?(type: ProviderType): ReactNode;
+  renderProviderMark?(provider: ProviderIdentity): ReactNode;
   modelChoices?: ChatModelChoice[];
   onModelChange?(input: {
     llmConnectionId: string;

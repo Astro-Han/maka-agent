@@ -179,10 +179,10 @@ export async function verifyModelOverrides(connection, workspace, reopened, open
       hold: true,
     });
     const toolGate = fixture.expect({
-      path: '/v1/chat/completions',
+      path: '/v1/responses',
       model: modelId,
       outputLimit: 12345,
-      parallel: false,
+      parallel: true,
       marker: 'FACTS_FROZEN',
       toolResult: true,
       hold: true,
@@ -203,18 +203,20 @@ export async function verifyModelOverrides(connection, workspace, reopened, open
     gate.release();
     await toolGate.wait();
     const withResult = await queryDiagnostics('facts-frozen');
-    assert(
-      withResult.current.tokens > 43,
-      'new model-facing Read result increases current occupancy',
+    assert.equal(withResult.inputTokens, 42);
+    assert.equal(withResult.contextWindow, 64000);
+    assert.equal(
+      withResult.current,
+      undefined,
+      'a changed provider route cannot reuse the previous prompt encoding as an occupancy estimate',
     );
-    assert.equal(withResult.current.approximate, true);
     toolGate.release();
     turns.push({
       input: frozenInput,
       terminal: await terminal(request, fixture, frozenInput.sessionId, frozenInput.turnId),
     });
     const frozenDiagnostics = await queryDiagnostics('facts-frozen');
-    diagnostics(frozenDiagnostics, modelId, 64000, 42);
+    diagnostics(frozenDiagnostics, modelId, 96000, 43);
 
     fixture.expect({
       path: '/v1/responses',
@@ -270,7 +272,7 @@ export async function verifyModelOverrides(connection, workspace, reopened, open
       JSON.stringify({
         check: 'original-client-model-overrides',
         mainRequests: 5,
-        connectionTests: 2,
+        connectionTests: 3,
         sessionIds: inputs.map((input) => input.sessionId),
       }),
     );

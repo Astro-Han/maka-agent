@@ -97,7 +97,6 @@ impl Method for Service {
             let result = async {
                 // Probe canonical Session existence and current boundary even for cached reads.
                 let commands = owner
-                    .host
                     .executions
                     .acquire(owned.scope())
                     .await

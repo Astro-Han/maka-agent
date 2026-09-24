@@ -55,7 +55,7 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
         let (_,rows) = super::enabled_models::catalog(&client).await;
         client.request(maka_protocol::Operation::ConnectionCatalogUpdate,json!({
             "expected":{"connectionId":rows[0]["connectionId"],"revision":rows[0]["revision"]},
-            "changes":{"name":"TUI fixture","baseUrl":format!("http://{}/v1",listener.local_addr().unwrap()),"enabled":true,"enabledModelIds":["fixture-model"],
+            "changes":{"name":"TUI fixture","configuration":{"baseUrl":format!("http://{}/v1",listener.local_addr().unwrap())},"enabled":true,"enabledModelIds":["fixture-model"],
                 "modelOverrides":{"fixture-model":{"contextWindow":128000,"vision":true,"modalities":{"input":["text","image"],"output":["text"]}}}}
         })).await.unwrap();
         for (id,name) in [("files","Attachment session"),("other","Other session")] {

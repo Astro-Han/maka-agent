@@ -16,23 +16,20 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 mod view;
 use super::{Command, Entity, Kind, Target, Ticket, Updated};
-use crate::{app::App, editor::Editor, pages::connections::Row};
+use crate::{app::App, pages::connections::Row};
 use maka_client::{Client, ClientError, RequestFailure};
 use maka_protocol::configuration::*;
 pub(super) use view::draw;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Change {
-    Set,
     Clear,
 }
 impl Change {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Set => "credential-key",
             Self::Clear => "credential-clear",
         }
     }
@@ -66,24 +63,22 @@ impl State {
         }
     }
 }
-pub(super) fn editor() -> Editor {
-    Editor::bounded(10240, "credential-key-too-large")
-}
 fn locator(row: &Row) -> CredentialLocator {
     CredentialLocator::Connection {
         connection_id: row.id.clone(),
-        kind: ConnectionCredentialKind::ApiKey,
+        kind: ConnectionCredentialKind::Provider,
     }
 }
-pub(super) fn address(row: &Row) -> Option<String> {
-    let raw = row
-        .base_url
-        .as_deref()
-        .or_else(|| validation::provider_default_base_url(&row.provider).ok())?;
-    validation::normalize_base_url(Some(raw), None)
-        .ok()
-        .flatten()
+pub(super) fn address(row: &Row) -> String {
+    format!(
+        "{} / {} / {} / {}",
+        row.provider.package_id,
+        row.provider.entry_id,
+        String::from(row.provider.scope.clone()),
+        row.provider.name
+    )
 }
+
 fn basis(status: &CredentialStatus) -> Option<CredentialVersionBasis> {
     let CredentialState::Configured {
         credential_id,
@@ -99,38 +94,12 @@ fn basis(status: &CredentialStatus) -> Option<CredentialVersionBasis> {
         revision: *revision,
     })
 }
-pub(super) async fn execute(
-    client: &Client,
-    ticket: &Ticket,
-    secret: Option<String>,
-) -> Result<Updated, RequestFailure> {
+pub(super) async fn execute(client: &Client, ticket: &Ticket) -> Result<Updated, RequestFailure> {
     let invalid =
         || RequestFailure::NotDispatched(ClientError::Protocol("Missing credential basis".into()));
-    let Entity::Connection(row) = &ticket.target.entity else {
-        return Err(invalid());
-    };
     let status = ticket.credential.as_ref().ok_or_else(invalid)?;
     let expected = basis(status);
     let result = match ticket.kind {
-        Kind::Credential(Change::Set) => {
-            client
-                .set_credential(SetCredentialInput {
-                    locator: locator(row),
-                    expected: expected.map(|basis| CredentialIdentityBasis {
-                        credential_id: basis.credential_id,
-                        revision: basis.revision,
-                    }),
-                    expected_connection: Some(ConnectionCredentialTarget {
-                        connection_id: row.id.clone(),
-                        revision: row.revision,
-                        slug: row.slug.clone(),
-                        provider_type: row.provider.clone(),
-                        effective_base_url: address(row).ok_or_else(invalid)?,
-                    }),
-                    secret: secret.ok_or_else(invalid)?,
-                })
-                .await?
-        }
         Kind::Credential(Change::Clear) => {
             client
                 .delete_credential(DeleteCredentialInput {
@@ -198,7 +167,6 @@ impl App {
             }
             Ok(CredentialVaultQueryResult::ConnectionNotFound) => {
                 dialog.blocked = true;
-                dialog.editor = editor();
                 dialog.error = Some("credential-missing");
             }
             Err(_) => {
@@ -221,26 +189,8 @@ impl App {
             Kind::Credential(Change::Clear) => {
                 matches!(status.state, CredentialState::Configured { .. })
             }
-            Kind::Credential(Change::Set) => {
-                !dialog.editor.text().trim().is_empty()
-                    && matches!(&dialog.target.entity,Entity::Connection(row) if address(row).is_some())
-            }
             _ => false,
         }
-    }
-    pub fn take_credential_secret(&mut self, ticket: &Ticket) -> Option<String> {
-        if ticket.kind != Kind::Credential(Change::Set)
-            || self.management.pending.as_ref() != Some(ticket)
-        {
-            return None;
-        }
-        let dialog = self.management.dialog.as_mut()?;
-        if dialog.editor.text().is_empty() {
-            return None;
-        }
-        let secret = dialog.editor.text().to_owned();
-        dialog.editor = editor(); // Discard the undo/redo history as well.
-        Some(secret)
     }
     pub(super) fn credential_retry_enabled(&self) -> bool {
         self.management.dialog.as_ref().is_some_and(|d| {
@@ -271,10 +221,8 @@ mod tests {
         i18n::{I18n, Locale, LocalePreference},
         navigation::Route,
     };
-    use crossterm::event::Event;
     use ratatui::{Terminal, backend::TestBackend};
     use serde_json::json;
-    const KEY: &str = "synthetic-private-key";
     fn configured(locator: CredentialLocator) -> CredentialVaultQueryResult {
         CredentialVaultQueryResult::Status {
             status: CredentialStatus {
@@ -288,7 +236,7 @@ mod tests {
         }
     }
     #[test]
-    fn credential_form_masks_drafts_binds_reads_and_discards_uncertain_secrets() {
+    fn credential_removal_uses_the_current_read_and_does_not_replay_unknown_changes() {
         let mut app = App::new(
             "/unused".into(),
             I18n::new(LocalePreference::Explicit(Locale::En), Locale::En),
@@ -301,13 +249,12 @@ mod tests {
         app.connections.refresh();
         app.connections.query().unwrap();
         app.connections.complete(Ok(json!({"kind":"page","revision":1,"connectionCount":1,"defaultTarget":null,"nextCursor":null,"items":[
-            {"kind":"connection","connectionIndex":0,"connectionId":"b746eb13-287c-4f3a-8590-dac93c0a1253","revision":2,"slug":"fixture","name":"Fixture","providerType":"openai-compatible","enabled":true,"enabledModelIdCount":0,"baseUrl":"http://127.0.0.1:9/v1"}
+            {"kind":"connection","connectionIndex":0,"connectionId":"b746eb13-287c-4f3a-8590-dac93c0a1253","revision":2,"slug":"fixture","name":"Fixture","provider":crate::providers::fixtures::entry("openai-compatible", false).identity,"configuration":{"baseUrl":"http://127.0.0.1:9/v1"},"enabled":true,"enabledModelIdCount":0}
         ]})));
-        let original_row = app.connections.rows[0].clone();
         let open = app
             .management_commands()
             .into_iter()
-            .find(|(_, key)| *key == "credential-key")
+            .find(|(_, key)| *key == "credential-clear")
             .unwrap()
             .0;
         app.apply(open.clone());
@@ -333,71 +280,31 @@ mod tests {
         let read = app.credential_request().unwrap();
         app.credential_completed(read, Ok(status));
         screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
-        app.input(Event::Paste(KEY.into()));
-        for locale in Locale::ALL {
-            app.i18n = I18n::new(LocalePreference::Explicit(locale), Locale::En);
-            for (width, height) in [(80, 24), (44, 24), (25, 8)] {
-                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal
-                    .draw(|f| super::draw(f, &mut app, f.area(), ratatui::style::Style::default()))
-                    .unwrap();
-                let text: String = terminal
-                    .backend()
-                    .buffer()
-                    .content
-                    .iter()
-                    .map(|c| c.symbol())
-                    .collect();
-                assert!(!text.contains(KEY));
-                if width >= 44 {
-                    assert!(text.contains("***"));
-                    let compact = |s: &str| {
-                        s.chars()
-                            .filter(|c| !c.is_whitespace() && !"│─╭╮╰╯".contains(*c))
-                            .collect::<String>()
-                    };
-                    assert!(
-                        compact(&text).contains(&compact(&app.i18n.text("credential-set-note")))
-                    );
-                }
-                assert_eq!(app.management_enabled(&Command::Save), width >= 44);
-                assert!(app.i18n.diagnostics().is_empty());
-            }
-        }
-        screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+        assert!(app.management_enabled(&Command::Save));
         let ticket = app.management_request().unwrap();
-        assert!(ticket.text.is_empty());
-        assert!(!format!("{ticket:?}").contains(KEY));
-        assert_eq!(app.take_credential_secret(&ticket).as_deref(), Some(KEY));
-        assert!(app.take_credential_secret(&ticket).is_none());
-        assert_eq!(
-            app.management
-                .dialog
-                .as_ref()
-                .unwrap()
-                .editor
-                .retained_bytes(),
-            0
-        );
+        let status = ticket.credential.as_ref().unwrap();
+        assert!(matches!(
+            status.locator,
+            CredentialLocator::Connection {
+                kind: ConnectionCredentialKind::Provider,
+                ..
+            }
+        ));
+        assert_eq!(basis(status).unwrap().revision, 7);
         app.management_completed(ticket, Err(RequestFailure::Unknown(ClientError::Timeout)));
         assert!(!app.management_enabled(&Command::Save));
+        assert!(app.credential_request().is_none());
         app.apply(Action::Manage(Command::Close));
-        // A fresh open after disconnect must not restore input or undo history.
-        app.connections.rows = vec![original_row.clone()];
-        app.connections.selected = Some(original_row.id.clone());
+        app.connections.query().unwrap();
+        app.connections.complete(Ok(json!({"kind":"page","revision":1,"connectionCount":1,"defaultTarget":null,"nextCursor":null,"items":[
+            {"kind":"connection","connectionIndex":0,"connectionId":"b746eb13-287c-4f3a-8590-dac93c0a1253","revision":2,"slug":"fixture","name":"Fixture","provider":crate::providers::fixtures::entry("openai-compatible", false).identity,"configuration":{"baseUrl":"http://127.0.0.1:9/v1"},"enabled":true,"enabledModelIdCount":0}
+        ]})));
         app.apply(open);
-        screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
-        app.input(Event::Paste(KEY.into()));
-        assert_eq!(app.management.dialog.as_ref().unwrap().editor.text(), KEY);
-        app.abandon_management();
-        assert_eq!(
-            app.management
-                .dialog
-                .as_ref()
-                .unwrap()
-                .editor
-                .retained_bytes(),
-            0
-        );
+        let request = app.credential_request().unwrap();
+        app.credential_completed(request.clone(), Ok(configured(request.locator())));
+        screen
+            .draw(|frame| crate::view::draw(frame, &mut app))
+            .unwrap();
+        assert!(app.management_enabled(&Command::Save));
     }
 }

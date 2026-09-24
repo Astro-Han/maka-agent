@@ -18,7 +18,11 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { PROVIDER_REGISTRY } from '@maka/core/llm-connections';
+import {
+  decodeProviderConfiguration,
+  decodeProviderIdentity,
+  type ProviderIdentity,
+} from '@maka/core/runtime-policy';
 import { isThinkingLevel } from '@maka/core/model-thinking';
 import { isSessionToolProfile, type SessionToolProfile } from '@maka/core/session';
 import { decodeHostedExecutionProjection } from '@maka/runtime-host/protocol';
@@ -38,11 +42,8 @@ export function createMakaSubjectAdapter(): SubjectAdapter {
     kind: 'maka',
     validate: (cell) => {
       const config = decodeConfig(cell.subject.config);
-      if (
-        config.apiKeyEnvironment &&
-        !cell.subject.credentials.includes(config.apiKeyEnvironment)
-      ) {
-        throw new Error('Maka apiKeyEnvironment must name a declared subject credential');
+      if (!cell.subject.credentials.includes(config.connection.authentication.inputEnvironment)) {
+        throw new Error('Maka authentication input must name a declared subject credential');
       }
       return config;
     },
@@ -70,16 +71,9 @@ export function createMakaSubjectAdapter(): SubjectAdapter {
       const payload = Buffer.from(
         JSON.stringify({
           rootPath: `${config.runtimeHostsPath}/${executionId}`,
+          ...(config.executable === undefined ? {} : { executable: config.executable }),
           artifactRoot: MAKA_RUNTIME_ARTIFACT_PATH,
-          baseUrl: config.baseUrl,
-          ...(config.providerType
-            ? {
-                connection: {
-                  providerType: config.providerType,
-                  apiKeyEnvironment: config.apiKeyEnvironment,
-                },
-              }
-            : {}),
+          connection: config.connection,
           hostSettlementTimeoutMs: config.hostSettlementTimeoutMs,
           execution: input,
         }),
@@ -277,14 +271,19 @@ function makaArtifacts(
   ];
 }
 
+export interface MakaConnection {
+  readonly provider: ProviderIdentity;
+  readonly configuration: JsonObject;
+  readonly authentication: { readonly method: string; readonly inputEnvironment: string };
+}
+
 interface MakaConfig {
-  readonly providerType?: NonNullable<RunHostedExecutionInput['connection']>['providerType'];
-  readonly apiKeyEnvironment?: string;
+  readonly executable?: string;
+  readonly connection: MakaConnection;
   readonly nodePath: string;
   readonly shimPath: string;
   readonly runtimeHostsPath: string;
   readonly hostSettlementTimeoutMs: number;
-  readonly baseUrl: string;
   readonly connectionSlug: string;
   readonly model: string;
   readonly thinkingLevel?: RunHostedExecutionInput['execution']['session']['thinkingLevel'];
@@ -296,13 +295,13 @@ interface MakaConfig {
 
 function decodeConfig(value: JsonObject): MakaConfig {
   const fields = [
+    ...(Object.hasOwn(value, 'executable') ? ['executable'] : []),
     'nodePath',
     'shimPath',
     'runtimeHostsPath',
-    'baseUrl',
     'connectionSlug',
     'model',
-    ...(Object.hasOwn(value, 'providerType') ? ['providerType', 'apiKeyEnvironment'] : []),
+    'connection',
     ...(Object.hasOwn(value, 'thinkingLevel') ? ['thinkingLevel'] : []),
     'sandboxMode',
     'collaborationMode',
@@ -311,16 +310,23 @@ function decodeConfig(value: JsonObject): MakaConfig {
     'toolProfile',
   ];
   const config = exact(value, fields);
-  if (
-    config.providerType !== undefined &&
-    !Object.hasOwn(PROVIDER_REGISTRY, String(config.providerType))
-  ) {
-    throw new Error('Maka config.providerType is invalid');
+  {
+    const connection = exact(config.connection, ['provider', 'configuration', 'authentication']);
+    const authentication = exact(connection.authentication, ['method', 'inputEnvironment']);
+    if (
+      Buffer.byteLength(authentication.method as string) > 256 ||
+      /[\p{White_Space}\p{Cc}]/u.test(authentication.method as string)
+    )
+      throw new Error('Maka authentication method is invalid');
+    config.connection = {
+      provider: decodeProviderIdentity(connection.provider),
+      configuration: decodeProviderConfiguration(connection.configuration),
+      authentication,
+    };
   }
   if (config.thinkingLevel !== undefined && !isThinkingLevel(config.thinkingLevel)) {
     throw new Error('Maka config.thinkingLevel is invalid');
   }
-  if (!URL.canParse(String(config.baseUrl))) throw new Error('Maka baseUrl is invalid');
   const hostSettlementTimeoutMs = positiveInteger(
     config.hostSettlementTimeoutMs,
     'Maka config.hostSettlementTimeoutMs',
@@ -341,7 +347,16 @@ function exact(value: unknown, fields: readonly string[]): Record<string, unknow
   )
     throw new Error('Maka config fields are invalid');
   for (const field of fields) {
-    if (field === 'hostSettlementTimeoutMs') continue;
+    if (
+      [
+        'hostSettlementTimeoutMs',
+        'connection',
+        'provider',
+        'configuration',
+        'authentication',
+      ].includes(field)
+    )
+      continue;
     if (typeof record[field] !== 'string' || record[field] === '')
       throw new Error(`Maka config.${field} is invalid`);
   }

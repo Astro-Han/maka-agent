@@ -18,7 +18,7 @@
  */
 
 use super::*;
-use crate::{effect_snapshot::same_test_basis, vault};
+use crate::effect_snapshot::same_test_basis;
 
 impl PreparedOnboarding {
     pub async fn complete(
@@ -53,9 +53,6 @@ impl PreparedOnboarding {
             store,
             material,
             original_revision,
-            requested_slug,
-            supplied_secret,
-            protocol: _,
         } = self;
         store
             .transaction(TransactionMode::Immediate, move |tx| {
@@ -77,11 +74,7 @@ impl PreparedOnboarding {
                         }
                     } else {
                         if catalog.connections.iter().any(|r| r.slug == row.slug) {
-                            return Ok(reject(if requested_slug {
-                                R::SlugTaken
-                            } else {
-                                R::Superseded
-                            }));
+                            return Ok(reject(R::SlugTaken));
                         }
                         if previous.is_some() {
                             return Ok(reject(R::Superseded));
@@ -103,45 +96,34 @@ impl PreparedOnboarding {
                             }
                         }
                         row.revision = catalog::next_revision(previous.revision)?;
-                        if row.base_url != previous.base_url {
+                        if row.configuration != previous.configuration {
                             row.model_overrides = None;
                         }
                     }
-                    let secret_changed = supplied_secret
-                        .as_deref()
-                        .is_some_and(|secret| Some(secret) != material.api_key());
                     row.enabled = true;
                     row.enabled_model_ids = enabled;
                     row.models = models;
                     row.model_source = Some(ModelDiscoverySource::Fetched);
                     row.models_fetched_at = Some(now);
-                    if previous
-                        .is_none_or(|p| p.base_url != row.base_url || !same_test_basis(p, &row))
-                        || secret_changed
-                    {
+                    if previous.is_none_or(|p| !same_test_basis(p, &row)) {
                         row.last_test = None;
                     }
                     catalog::write_entry(tx, &row).await?;
-                    if secret_changed {
-                        let locator = CredentialLocator::Connection {
-                            connection_id: row.connection_id.clone(),
-                            kind: ConnectionCredentialKind::ApiKey,
-                        };
-                        vault::write_secret(tx, &locator, supplied_secret.as_deref().unwrap(), now)
-                            .await?;
-                        vault::advance(tx).await?;
-                    }
-                    let target = catalog.default_target.unwrap_or_else(|| ConnectionTarget {
-                        connection_id: row.connection_id.clone(),
-                        model_id: row.enabled_model_ids[0].clone(),
+                    let target = catalog.default_target.or_else(|| {
+                        (row.provider.scope == maka_runtime::scope::Scope::Profile).then(|| {
+                            ConnectionTarget {
+                                connection_id: row.connection_id.clone(),
+                                model_id: row.enabled_model_ids[0].clone(),
+                            }
+                        })
                     });
-                    catalog::advance(tx, catalog.revision, Some(&target)).await?;
+                    catalog::advance(tx, catalog.revision, target.as_ref()).await?;
                     Ok(OnboardingSaveResult::Saved {
                         connection: OnboardedConnection {
                             connection_id: row.connection_id,
                             revision: row.revision,
                             slug: row.slug,
-                            provider_type: row.provider_type,
+                            provider: row.provider,
                         },
                     })
                 })

@@ -54,7 +54,6 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
         (client,listener,url,initial,default)
     });
     let id = initial[0]["connectionId"].as_str().unwrap();
-    let locator = json!({"scope":"connection","connectionId":id,"kind":"api_key"});
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.read_size = 128; // Never click a partially received command palette.
     tui.wait_for("Workspace");
@@ -93,7 +92,10 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
     assert!(!String::from_utf8_lossy(&tui.output).contains("do-not-display-provider-secret"));
     runtime.block_on(async {
         let (current_default, items) = catalog(&client).await;
-        assert_eq!(items[0]["revision"], 2);
+        assert_eq!(
+            items[0]["revision"],
+            initial[0]["revision"].as_u64().unwrap() + 1
+        );
         assert_eq!(items[0]["lastTest"]["status"], "needs_reauth");
         assert_eq!(current_default, default);
         assert_eq!(&items[1..], &initial[1..]);
@@ -104,7 +106,8 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
     tui.click_last_text("Test connection");
     runtime.block_on(async {
         let (stream,_,_)=model_http_request(&listener).await;
-        client.request(Operation::ConnectionCatalogUpdate,json!({"expected":{"connectionId":id,"revision":2},"changes":{"name":"Verified fixture","baseUrl":url,"enabled":true,"enabledModelIds":["fixture-model"]}})).await.unwrap();
+        let (_, rows) = catalog(&client).await;
+        client.request(Operation::ConnectionCatalogUpdate,json!({"expected":{"connectionId":id,"revision":rows[0]["revision"]},"changes":{"name":"Verified fixture","configuration":{"baseUrl":url},"enabled":true,"enabledModelIds":["fixture-model"]}})).await.unwrap();
         // The Host checks HTTP acceptance, not completion-body semantics.
         support::json_response(stream,"200 OK",json!({})).await;
     });
@@ -112,7 +115,10 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
     tui.wait_for("fixture-model ·");
     runtime.block_on(async {
         let (current_default, items) = catalog(&client).await;
-        assert_eq!(items[0]["revision"], 4);
+        assert_eq!(
+            items[0]["revision"],
+            initial[0]["revision"].as_u64().unwrap() + 3
+        );
         assert_eq!(items[0]["name"], "Verified fixture");
         assert_eq!(items[0]["lastTest"]["status"], "verified");
         assert_eq!(current_default, default);
@@ -126,12 +132,11 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
     tui.wait_until(|s| !s.contains("Host check passed") && s.contains("Verified fixture"));
     open(&mut tui);
     tui.click_last_text("Test connection");
-    let after_rotation=runtime.block_on(async {
-        let (stream,_,_)=model_http_request(&listener).await;
-        let key=client.request(Operation::CredentialVaultQuery,json!({"locator":locator})).await.unwrap();
-        client.request(Operation::CredentialVaultSet,json!({"locator":locator,"expected":{"credentialId":key["status"]["credentialId"],"revision":key["status"]["revision"]},"secret":"rotated-probe-secret"})).await.unwrap();
-        let state=catalog(&client).await;
-        support::json_response(stream,"200 OK",json!({})).await;
+    let after_rotation = runtime.block_on(async {
+        let (stream, _, _) = model_http_request(&listener).await;
+        support::authenticate(&client, &json!(id), "rotated-probe-secret").await;
+        let state = catalog(&client).await;
+        support::json_response(stream, "200 OK", json!({})).await;
         state
     });
     tui.wait_for("Connection, credentials or network settings changed.");
@@ -165,7 +170,7 @@ fn connection_test_confirms_network_records_failure_preserves_configuration_and_
             let (_, items) = catalog(&client).await;
             client.request(Operation::ConnectionCatalogUpdate,json!({
                 "expected":{"connectionId":id,"revision":items[0]["revision"]},
-                "changes":{"name":name,"baseUrl":url,"enabled":true,"enabledModelIds":["fixture-model"]}
+                "changes":{"name":name,"configuration":{"baseUrl":url},"enabled":true,"enabledModelIds":["fixture-model"]}
             })).await.unwrap();
         });
         tui.wait_for(name);
