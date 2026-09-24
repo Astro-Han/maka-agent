@@ -85,6 +85,7 @@ pub(super) async fn run(
         cancellation,
         continuation_base,
         &input.invocation.invocation_id,
+        false,
     )
     .await?;
     let base = format!(

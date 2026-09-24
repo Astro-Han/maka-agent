@@ -210,6 +210,7 @@ impl Executions {
                 message: prepared_content,
                 tools,
                 max_steps,
+                allow_prior_unknown: matches!(origin, MessageOrigin::Client { .. }),
             },
             request_fingerprint,
             provider: provider.config,

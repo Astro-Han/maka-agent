@@ -35,6 +35,8 @@ use maka_runtime::interaction::{
 use maka_runtime::model::{ModelPart, ModelStep, ModelToolCall, ModelUsage};
 use maka_tools::ToolMode;
 use serde_json::json;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 use crate::support::recovery;
@@ -310,6 +312,7 @@ async fn unknown_dispatch_stays_unknown_and_blocks_next_admission_after_reopen()
                 supports_vision: false,
                 configuration: invocation::configuration(ToolMode::Direct),
                 work: maka_agent::RunWork::Message {
+                    allow_prior_unknown: false,
                     source_messages: Vec::new(),
                     message: "continue".into(),
                     tools: Default::default(),
@@ -324,4 +327,82 @@ async fn unknown_dispatch_stays_unknown_and_blocks_next_admission_after_reopen()
         log.prefix(100, 128 * 1024).await.unwrap().high_water,
         prefix.high_water
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_new_message_after_unknown_dispatch_informs_model_without_replaying_tool() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("events.sqlite");
+        {
+            let log = EventLog::open(&path).await.unwrap();
+            opening(&log).await;
+            request(&log).await;
+            append(&log, Fact::ModelCompleted {
+                step_id: "step".into(),
+                output: ModelStep {
+                    parts: ["call", "never-dispatched"].into_iter().map(|id| ModelPart::ToolCall {
+                        call: ModelToolCall {
+                            id: id.into(),
+                            name: "write_file".into(),
+                            input: json!({"path": if id == "call" { "effect.txt" } else { "never.txt" }}),
+                            provider_options: None,
+                            provider_executed: false,
+                        },
+                    }).collect(),
+                    finish_reason: maka_runtime::model::ModelFinishReason::ToolCalls,
+                    usage: ModelUsage::default(),
+                    provider_options: None,
+                    response_id: None,
+                    model: None,
+                    timestamp: None,
+                },
+            }).await;
+            append(&log, Fact::ToolDispatched {
+                operation_id: "step:call".into(),
+                call: maka_runtime::tool_call::ToolCallIdentity::provider("step".into(), "call".into()),
+                name: "write_file".into(),
+                input: json!({"path":"effect.txt"}),
+            }).await;
+            assert!(log.check_manual_message_history("session").await.is_err());
+            log.close().await.unwrap();
+        }
+        let log = Arc::new(EventLog::open(&path).await.unwrap());
+        assert_eq!(recover(&log).await.unwrap(), 1);
+        assert!(log.check_manual_message_history("session").await.unwrap());
+        assert!(log.read_model_context("session", None, 100, 128 * 1024).await.is_err());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = crate::support::http::read_request(&mut socket).await;
+            let chunk = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{"content":"continued"},"finish_reason":"stop"}]});
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {chunk}\n\ndata: [DONE]\n\n").as_bytes()).await.unwrap();
+            request
+        });
+        let engine = Engine::new(log.clone(), ModelExecutor::new(1, Duration::from_secs(5)).unwrap(), CodeExecutor::new(2, CellLimits::default()).unwrap());
+        let run = RunInput {
+            provider_id: "fixture".into(),
+            main_output_limit: None,
+            context: None,
+            invocation: Invocation { session_id: "session".into(), turn_id: "new-turn".into(), run_id: "new-run".into(), invocation_id: "new-invocation".into() },
+            request_fingerprint: None,
+            provider: ProviderConfig { adapter: None, capabilities: Default::default(), kind: ProviderKind::OpenaiChat,
+                model: "test".into(), base_url, auth: maka_model::ProviderAuth::ApiKey("unused".into()),
+                headers: BTreeMap::new(), network: Default::default(), body_overlay: None },
+            provider_options: json!({}),
+            supports_vision: false,
+            configuration: invocation::configuration(ToolMode::Direct),
+            work: maka_agent::RunWork::Message { allow_prior_unknown: true, source_messages: Vec::new(),
+                message: "What happened to effect.txt?".into(), tools: Default::default(), max_steps: 1 },
+        };
+        engine.run(run, CancellationToken::new()).await.unwrap();
+        let request = server.await.unwrap();
+        let messages = request["messages"].as_array().unwrap();
+        assert!(messages.iter().any(|message| message["role"] == "system" && message["content"].as_str().is_some_and(|text| text.contains("write_file") && text.contains("may or may not have happened"))), "{messages:?}");
+        assert!(messages.iter().any(|message| message["role"] == "tool" && message.to_string().contains("outcome_unknown")));
+        assert!(messages.iter().any(|message| message["role"] == "tool" && message["tool_call_id"] == "never-dispatched"));
+        let prefix = log.prefix(100, 128 * 1024).await.unwrap();
+        assert!(!prefix.events.iter().any(|event| event.event.invocation.invocation_id == "invocation" && matches!(event.event.fact, Fact::ToolSettled { .. })));
+    }).await.unwrap();
 }

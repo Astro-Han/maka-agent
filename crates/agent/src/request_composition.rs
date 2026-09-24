@@ -37,6 +37,7 @@ impl Surface {
         models: &maka_model::ModelExecutor,
         input: &RunInput,
         cancellation: &CancellationToken,
+        prior_unknown_notice: Option<&str>,
     ) -> Result<Self, RunError> {
         let mut prompt = tools
             .prompt(
@@ -49,6 +50,13 @@ impl Surface {
                 cancellation.clone(),
             )
             .await?;
+        if let Some(notice) = prior_unknown_notice {
+            let system = prompt.system.get_or_insert_with(String::new);
+            if !system.is_empty() {
+                system.push_str("\n\n");
+            }
+            system.push_str(notice);
+        }
         if let Some(base) = &input.configuration.system_prompt {
             for source in &base.sources {
                 if !prompt.sources.contains(source) {

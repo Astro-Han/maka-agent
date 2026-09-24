@@ -154,6 +154,7 @@ pub(super) async fn inspect(
             _ => Some(base.high_water),
         },
         &input.invocation.invocation_id,
+        false,
     )
     .await?;
     let tools = maka_tools::RunTools::new(

@@ -83,6 +83,7 @@ pub fn input(base: &str, id: &str, compact: bool) -> RunInput {
             RunWork::ContextCompact
         } else {
             RunWork::Message {
+                allow_prior_unknown: false,
                 source_messages: Vec::new(),
                 message: format!("question-{id}").into(),
                 tools: Default::default(),
