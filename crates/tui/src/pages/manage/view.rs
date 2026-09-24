@@ -94,9 +94,18 @@ pub(crate) fn sheet(app: &App) -> Option<Sheet<Action>> {
         .management
         .dialog
         .as_ref()
-        .filter(|dialog| dialog.plain())?;
+        .filter(|dialog| dialog.in_sheet())?;
     if dialog.credentials.is_some() {
         return Some(super::credentials::sheet(app, dialog));
+    }
+    if dialog.removal.is_some() {
+        return Some(super::removal::sheet(app, dialog));
+    }
+    if dialog.sandbox.is_some() {
+        return Some(super::sandbox::sheet(app, dialog));
+    }
+    if dialog.chooser.is_some() {
+        return Some(super::choose_project::sheet(app, dialog));
     }
     let busy = app.management.pending.is_some();
     let kind = dialog.kind;
@@ -299,7 +308,7 @@ pub(crate) fn draw_field(frame: &mut Frame<'_>, app: &mut App) {
     let Some(dialog) = app.management.dialog.as_mut() else {
         return;
     };
-    let Some(rect) = rect.filter(|_| dialog.plain()) else {
+    let Some(rect) = rect.filter(|_| dialog.in_sheet()) else {
         dialog.editor.invalidate_geometry();
         return;
     };
@@ -318,20 +327,14 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         return;
     };
     app.hits.clear();
-    if dialog.kind == Kind::Remove {
-        super::removal::draw(frame, app, area, base);
-    } else if dialog.kind == Kind::Oauth {
+    if dialog.kind == Kind::Oauth {
         super::oauth::draw(frame, app, area, base);
-    } else if dialog.sandbox.is_some() {
-        super::sandbox::draw(frame, app, area, base);
     } else if dialog.enabled_models.is_some() {
         super::enabled_models::draw(frame, app, area, base);
     } else if dialog.models.is_some() {
         super::models::draw(frame, app, area, base);
     } else if dialog.locations.is_some() {
         super::locations::draw(frame, app, area, base);
-    } else if dialog.chooser.is_some() {
-        super::choose_project::draw(frame, app, area, base);
     } else if dialog.browser.is_some() {
         super::directory::draw(frame, app, area, base);
     }

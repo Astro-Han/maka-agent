@@ -21,10 +21,9 @@ pub mod defaults;
 mod view;
 use super::{Command as Manage, Entity, Kind, Target};
 use crate::app::{Action, App};
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use maka_protocol::session::{ApprovalPolicy, SandboxMode};
 use maka_sandbox::ApprovalKind;
-pub(super) use view::draw;
+pub(super) use view::sheet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -60,16 +59,18 @@ pub(super) struct State {
     approvals: bool,
 }
 impl State {
-    pub fn initial_focus(&self) -> usize {
-        let command = if bypass(self.mode, self.approval) && self.defaults.is_none() {
+    /// The control holding the current choice, focused when a step opens.
+    pub fn initial(&self) -> Option<Command> {
+        let command = if self.approvals {
+            Command::Approval(self.approval)
+        } else if bypass(self.mode, self.approval) && self.defaults.is_none() {
             Command::Bypass
         } else {
             Command::Mode(self.mode)
         };
         self.controls()
-            .iter()
-            .position(|candidate| *candidate == command)
-            .unwrap_or(0)
+            .into_iter()
+            .find(|candidate| *candidate == command)
     }
     pub fn changed(&self) -> bool {
         self.loaded() && (self.mode != self.initial_mode || self.approval != self.initial_approval)
@@ -236,68 +237,10 @@ impl App {
     }
     pub(super) fn sandbox_update(&mut self, command: Command) {
         let dialog = self.management.dialog.as_mut().unwrap();
-        let state = dialog.sandbox.as_mut().unwrap();
-        let focus = state
-            .controls()
-            .iter()
-            .position(|item| *item == command)
-            .unwrap_or(0);
-        state.apply(command);
-        dialog.focus = if matches!(command, Command::Approvals(_)) {
-            0
-        } else {
-            focus
-        };
+        dialog.sandbox.as_mut().unwrap().apply(command);
         dialog.error = None;
+        // A new choice brings a new warning: Save waits until it is drawn.
         dialog.visible = false;
-        self.hits.clear();
-    }
-    pub(super) fn sandbox_input(&mut self, event: Event) -> (bool, Option<Action>) {
-        let dialog = self.management.dialog.as_mut().unwrap();
-        let controls = dialog.sandbox.as_ref().unwrap().controls();
-        let command = match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
-                KeyCode::Esc => Some(Manage::Close),
-                KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return (true, Some(Action::Quit));
-                }
-                _ if !dialog.visible => None,
-                KeyCode::Tab | KeyCode::Down => {
-                    dialog.focus = (dialog.focus + 1) % (controls.len() + 2);
-                    return (true, None);
-                }
-                KeyCode::BackTab | KeyCode::Up => {
-                    dialog.focus = (dialog.focus + controls.len() + 1) % (controls.len() + 2);
-                    return (true, None);
-                }
-                KeyCode::Enter | KeyCode::Char(' ') => Some(match dialog.focus {
-                    index if index < controls.len() => Manage::Sandbox(controls[index]),
-                    index if index == controls.len() => Manage::Close,
-                    _ => Manage::Save,
-                }),
-                _ => None,
-            },
-            Event::Mouse(mouse)
-                if dialog.visible && mouse.kind == MouseEventKind::Down(MouseButton::Left) =>
-            {
-                self.hits
-                    .iter()
-                    .rev()
-                    .find(|hit| hit.area.contains((mouse.column, mouse.row).into()))
-                    .and_then(|hit| {
-                        if let Action::Manage(command) = &hit.action {
-                            Some(command.clone())
-                        } else {
-                            None
-                        }
-                    })
-            }
-            _ => None,
-        };
-        (
-            command.is_some(),
-            command.and_then(|command| self.apply(Action::Manage(command))),
-        )
     }
 }
 
@@ -305,7 +248,9 @@ impl App {
 mod tests {
     use super::*;
     use crate::{Locale, LocalePreference, app::ConnectionState, i18n::I18n, navigation::Route};
-    use crossterm::event::{KeyEvent, MouseEvent};
+    use crossterm::event::{
+        Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
     use ratatui::{Terminal, backend::TestBackend};
 
     #[test]

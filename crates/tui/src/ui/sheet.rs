@@ -51,6 +51,8 @@ pub struct Sheet<M> {
     key: String,
     title: String,
     body: Vec<Node<M>>,
+    /// Secondary commands at the bottom left (paging, retrying).
+    aside: Vec<Node<M>>,
     buttons: Vec<Node<M>>,
     /// Full id of the node focused on open.
     focus: Option<String>,
@@ -65,6 +67,7 @@ impl<M> Sheet<M> {
             key: key.into(),
             title: title.into(),
             body: vec![],
+            aside: vec![],
             buttons: vec![],
             focus: None,
             back: None,
@@ -129,10 +132,27 @@ impl<M> Sheet<M> {
         self.body(Node::column(key, children))
     }
 
+    /// A secondary command kept apart from the decision, at the bottom left.
+    pub fn aside(mut self, key: &'static str, label: String, message: M, enabled: bool) -> Self {
+        self.aside.push(
+            Node::button(key, label, Role::Normal)
+                .on(On::Activate(message))
+                .enabled(enabled),
+        );
+        self
+    }
+
     /// The button focused on open. Confirmations of a change choose Cancel,
     /// so Enter alone never commits it.
     pub fn focus(mut self, key: &'static str) -> Self {
         self.focus = Some(format!("{ROOT}/footer/{key}"));
+        self
+    }
+
+    /// A body node focused on open, by its path below the sheet (the
+    /// current choice of a list).
+    pub fn focus_node(mut self, path: impl std::fmt::Display) -> Self {
+        self.focus = Some(format!("{ROOT}/{path}"));
         self
     }
 
@@ -148,14 +168,17 @@ impl<M> Sheet<M> {
     }
 
     fn footer_width(&self) -> u16 {
-        let gaps = 2 * self.buttons.len().saturating_sub(1) as u16;
-        self.buttons.iter().map(layout::width).sum::<u16>() + gaps
+        let count = self.aside.len() + self.buttons.len();
+        let gaps = 2 * count.saturating_sub(1) as u16;
+        let width = |nodes: &[Node<M>]| nodes.iter().map(layout::width).sum::<u16>();
+        width(&self.aside) + width(&self.buttons) + gaps
     }
 
     fn tree(self) -> Node<M> {
         let mut children = vec![Node::text("title", vec![(self.title, Tone::Strong)])];
         children.extend(self.body);
-        let mut footer = vec![Node::text("space", vec![]).size(Size::Fill)];
+        let mut footer = self.aside;
+        footer.push(Node::text("space", vec![]).size(Size::Fill));
         footer.extend(self.buttons);
         children.push(Node::row("footer", footer).gap(2));
         Node::column(ROOT, children).gap(1)

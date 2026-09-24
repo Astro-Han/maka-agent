@@ -20,10 +20,9 @@
 mod view;
 use super::{Command, Entity, Kind, Target, Ticket, Updated};
 use crate::app::{Action, App, ConnectionState};
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use maka_client::{Client, RequestFailure};
 use maka_protocol::{OperationErrorCode, session::*};
-pub(super) use view::draw;
+pub(super) use view::sheet;
 
 pub(super) struct State {
     generation: u64,
@@ -233,51 +232,6 @@ impl App {
             });
         }
     }
-    pub(super) fn removal_input(&mut self, event: Event) -> (bool, Option<Action>) {
-        let dialog = self.management.dialog.as_mut().unwrap();
-        let state = dialog.removal.as_ref().unwrap();
-        let primary = if state.error.is_some() {
-            Command::RemovalQuery
-        } else {
-            Command::Save
-        };
-        let command = match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
-                KeyCode::Esc => Some(Command::Close),
-                KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return (true, Some(Action::Quit));
-                }
-                _ if !dialog.visible => return (false, None),
-                KeyCode::Tab | KeyCode::BackTab => {
-                    dialog.focus = 1 - dialog.focus;
-                    return (true, None);
-                }
-                KeyCode::Enter => Some(if dialog.focus == 0 {
-                    Command::Close
-                } else {
-                    primary
-                }),
-                KeyCode::F(5) => Some(Command::RemovalQuery),
-                _ => None,
-            },
-            Event::Mouse(mouse)
-                if dialog.visible && mouse.kind == MouseEventKind::Down(MouseButton::Left) =>
-            {
-                self.hits
-                    .iter()
-                    .rev()
-                    .find(|h| h.area.contains((mouse.column, mouse.row).into()))
-                    .and_then(|h| match &h.action {
-                        Action::Manage(
-                            c @ (Command::Close | Command::Save | Command::RemovalQuery),
-                        ) => Some(c.clone()),
-                        _ => None,
-                    })
-            }
-            _ => None,
-        };
-        (true, command.and_then(|c| self.apply(Action::Manage(c))))
-    }
     pub fn session_removed(&mut self, id: &str, local: bool) {
         if self.management.dialog.as_ref().is_some_and(|dialog| {
             dialog.kind == Kind::Remove
@@ -329,7 +283,9 @@ fn failure(error: &RequestFailure, reading: bool) -> &'static str {
 mod tests {
     use super::*;
     use crate::{Locale, LocalePreference, i18n::I18n, navigation::Route};
-    use crossterm::event::{KeyEvent, MouseEvent};
+    use crossterm::event::{
+        Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
     use ratatui::{Terminal, backend::TestBackend};
 
     fn fixture() -> (App, Target) {
@@ -391,17 +347,28 @@ mod tests {
                 screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
                 assert_eq!(app.management_enabled(&Command::Save), width >= 44);
                 if width >= 44 {
-                    let popup = app.modal_area.unwrap();
+                    let buffer = screen.backend().buffer();
+                    let rows: Vec<String> = (0..height)
+                        .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
+                        .collect();
+                    let top = rows.iter().position(|row| row.contains('╭')).unwrap();
+                    let bottom = top
+                        + rows[top..]
+                            .iter()
+                            .position(|row| row.contains('╰'))
+                            .unwrap();
                     assert!(
-                        popup.height < height - 2,
+                        bottom - top + 1 < usize::from(height) - 2,
                         "compact confirmation with breathing room"
                     );
-                    let save = app
-                        .hits
-                        .iter()
-                        .find(|h| h.action == Action::Manage(Command::Save))
-                        .unwrap();
-                    assert!(popup.contains(save.area.as_position()));
+                    let compact = |s: &str| s.split_whitespace().collect::<String>();
+                    let confirm = compact(&app.i18n.text("session-remove-confirm"));
+                    assert!(
+                        rows[top..=bottom]
+                            .iter()
+                            .any(|row| compact(row).contains(&confirm)),
+                        "the confirmation is inside the sheet"
+                    );
                 }
             }
             screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();

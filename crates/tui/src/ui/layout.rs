@@ -47,6 +47,7 @@ pub(super) struct Item<M> {
     pub enabled: bool,
     pub current: bool,
     pub follow_focus: bool,
+    pub submit: Option<M>,
     pub hint: Option<String>,
     pub role: Option<Role>,
     /// Owner-drawn: the surface paints neither focus nor hover over it.
@@ -149,6 +150,7 @@ impl<'a, M> Pass<'a, M> {
             enabled,
             current,
             follow_focus,
+            submit,
             hint,
             role,
             ..
@@ -188,6 +190,7 @@ impl<'a, M> Pass<'a, M> {
                 enabled,
                 current,
                 follow_focus,
+                submit,
                 hint,
                 role,
                 slot: matches!(kind, Kind::Slot),

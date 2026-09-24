@@ -137,7 +137,6 @@ impl App {
                 state.mode = snapshot.policy.chat_defaults.sandbox_mode;
                 state.initial_mode = state.mode;
                 state.defaults.as_mut().unwrap().revision = Some(snapshot.revision);
-                dialog.focus = state.initial_focus();
             }
             Err(_) => {
                 dialog.blocked = true;
@@ -196,7 +195,11 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(state.mode, SandboxMode::WorkspaceWrite);
-        assert_eq!(app.management.dialog.as_ref().unwrap().focus, 1);
+        assert_eq!(
+            state.initial(),
+            Some(super::super::Command::Mode(SandboxMode::WorkspaceWrite)),
+            "arriving defaults focus their choice"
+        );
         assert_eq!(state.approval, maka_sandbox::Approval::OnRequest);
         assert!(!state.changed());
         assert!(app.management_request().is_none());

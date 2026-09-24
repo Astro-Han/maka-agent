@@ -265,15 +265,13 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    /// Dialogs without a sub-view of their own are kernel sheets:
-    /// confirmations, text fields and credentials.
-    pub(crate) fn plain(&self) -> bool {
-        !matches!(self.kind, Kind::Oauth | Kind::Remove)
-            && self.sandbox.is_none()
+    /// Presented as a kernel sheet. OAuth, models, enabled models,
+    /// locations and the directory browser still draw their own sub-view.
+    pub(crate) fn in_sheet(&self) -> bool {
+        self.kind != Kind::Oauth
             && self.enabled_models.is_none()
             && self.models.is_none()
             && self.locations.is_none()
-            && self.chooser.is_none()
             && self.browser.is_none()
     }
 }
@@ -830,8 +828,6 @@ impl App {
                             .iter()
                             .position(|control| *control == Command::Close)
                             .unwrap_or(0)
-                    } else if let Some(state) = &sandbox {
-                        state.initial_focus()
                     } else {
                         0
                     },
@@ -1255,22 +1251,6 @@ impl App {
             .management
             .dialog
             .as_ref()
-            .is_some_and(|d| d.sandbox.is_some())
-        {
-            return self.sandbox_input(event);
-        }
-        if self
-            .management
-            .dialog
-            .as_ref()
-            .is_some_and(|d| d.kind == Kind::Remove)
-        {
-            return self.removal_input(event);
-        }
-        if self
-            .management
-            .dialog
-            .as_ref()
             .is_some_and(|dialog| dialog.kind == Kind::Oauth)
         {
             return self.oauth_input(event);
@@ -1303,14 +1283,6 @@ impl App {
             .management
             .dialog
             .as_ref()
-            .is_some_and(|d| d.chooser.is_some())
-        {
-            return self.choose_project_input(event);
-        }
-        if self
-            .management
-            .dialog
-            .as_ref()
             .is_some_and(|d| d.browser.is_some())
         {
             return self.directory_input(event);
@@ -1319,23 +1291,38 @@ impl App {
         (false, None)
     }
 
-    /// Input the sheet's owner takes before the sheet: F5 retries a
-    /// credential read, and a focused text field gets every key but the
-    /// sheet's own (Esc, Tab, Enter, quitting), pastes, and its pointer.
+    /// Input the sheet's owner takes before the sheet: shortcuts of its
+    /// sub-states (F5 retries a read, PgUp/PgDn page the project chooser,
+    /// Ctrl+Enter applies it), and a focused text field gets every key but
+    /// the sheet's own (Esc, Tab, Enter, quitting), pastes, and its pointer.
     pub(crate) fn management_sheet_input(
         &mut self,
         event: &Event,
     ) -> Option<(bool, Option<Action>)> {
         if let Event::Key(key) = event
             && key.kind != KeyEventKind::Release
-            && key.code == KeyCode::F(5)
-            && self
-                .management
-                .dialog
-                .as_ref()
-                .is_some_and(|dialog| dialog.credentials.is_some())
+            && let Some(command) = self.management.dialog.as_ref().and_then(|dialog| {
+                let chooser = dialog.chooser.is_some();
+                match key.code {
+                    KeyCode::F(5) if dialog.credentials.is_some() => Some(Command::CredentialRetry),
+                    KeyCode::F(5) if dialog.removal.is_some() => Some(Command::RemovalQuery),
+                    KeyCode::F(5) if chooser => {
+                        Some(Command::ChooseProject(choose_project::Command::Refresh))
+                    }
+                    KeyCode::PageUp if chooser => {
+                        Some(Command::ChooseProject(choose_project::Command::Previous))
+                    }
+                    KeyCode::PageDown if chooser => {
+                        Some(Command::ChooseProject(choose_project::Command::Next))
+                    }
+                    KeyCode::Enter if chooser && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        Some(Command::Save)
+                    }
+                    _ => None,
+                }
+            })
         {
-            return Some((true, self.apply(Action::Manage(Command::CredentialRetry))));
+            return Some((true, self.apply(Action::Manage(command))));
         }
         let busy = self.management.pending.is_some();
         let dialog = self.management.dialog.as_mut()?;
@@ -1415,9 +1402,6 @@ impl Management {
             dialog.editor.invalidate_geometry();
             if let Some(browser) = &mut dialog.browser {
                 browser.invalidate_geometry();
-            }
-            if let Some(chooser) = &mut dialog.chooser {
-                chooser.invalidate_geometry();
             }
             if let Some(locations) = &mut dialog.locations {
                 locations.invalidate_geometry();

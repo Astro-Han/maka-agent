@@ -48,6 +48,8 @@ pub enum Tone {
 pub enum Role {
     Normal,
     Primary,
+    /// Weakens a protection (turning a sandbox off); amber even while focused.
+    Caution,
     /// Loses or discards something; red even while focused.
     Destructive,
 }
@@ -115,6 +117,9 @@ pub struct Node<M> {
     /// Keyboard focus arriving here also activates it, for lists whose
     /// selection follows the focus.
     pub follow_focus: bool,
+    /// What Enter sends instead of the activation: a list row selects on
+    /// click or arrow, and Enter commits the sheet's choice.
+    pub submit: Option<M>,
     pub hint: Option<String>,
     /// Set on buttons: a filled hit area whose label keeps its role color.
     pub role: Option<Role>,
@@ -130,6 +135,7 @@ impl<M> Node<M> {
             enabled: true,
             current: false,
             follow_focus: false,
+            submit: None,
             hint: None,
             role: None,
         }
@@ -156,6 +162,7 @@ impl<M> Node<M> {
         let tone = match role {
             Role::Normal => Tone::Normal,
             Role::Primary => Tone::Primary,
+            Role::Caution => Tone::Warning,
             Role::Destructive => Tone::Error,
         };
         let width = unicode_width::UnicodeWidthStr::width(label.as_str()) as u16 + 4;
@@ -212,6 +219,10 @@ impl<M> Node<M> {
     }
     pub fn follow_focus(mut self) -> Self {
         self.follow_focus = true;
+        self
+    }
+    pub fn submit(mut self, message: M) -> Self {
+        self.submit = Some(message);
         self
     }
     pub fn hint(mut self, hint: impl Into<String>) -> Self {

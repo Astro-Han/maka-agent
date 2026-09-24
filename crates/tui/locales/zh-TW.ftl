@@ -917,6 +917,7 @@ sidebar-project = 專案
 home-recent = 最近
 home-host-failed = Host 無法啟動
 home-retry = 重試
+list-retry = 重試
 home-host = Host 詳情
 home-connecting = 正在連線 Host…
 home-connect = 連線

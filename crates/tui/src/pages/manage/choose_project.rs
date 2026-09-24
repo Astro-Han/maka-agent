@@ -18,14 +18,13 @@
  */
 
 mod view;
-pub(super) use view::draw;
+pub(super) use view::sheet;
 
 use super::{Command as Manage, Target};
 use crate::{
     app::{Action, App},
     pages::projects::{Item, Projects},
 };
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use maka_protocol::project::{Query, QueryResult};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,8 +53,6 @@ pub struct Request {
 pub(super) struct Chooser {
     generation: u64,
     pub catalog: Projects,
-    focus: usize, // List, refresh, previous, next, cancel, apply.
-    hovered: Option<Manage>,
 }
 impl Chooser {
     pub fn new(generation: u64) -> Self {
@@ -64,8 +61,6 @@ impl Chooser {
         Self {
             generation,
             catalog,
-            focus: 0,
-            hovered: None,
         }
     }
     pub fn selection(&self) -> Option<&Item> {
@@ -74,9 +69,6 @@ impl Chooser {
             .items
             .iter()
             .find(|item| Some(&item.id) == self.catalog.selected.as_ref() && item.usable())
-    }
-    pub fn invalidate_geometry(&mut self) {
-        self.hovered = None;
     }
 }
 
@@ -127,17 +119,12 @@ impl App {
         let dialog = self.management.dialog.as_mut()?;
         let chooser = dialog.chooser.as_mut()?;
         match command {
-            Command::Select(id) => {
-                chooser.catalog.selected = Some(id);
-                chooser.focus = 0;
-            }
+            Command::Select(id) => chooser.catalog.selected = Some(id),
             Command::Refresh => chooser.catalog.restart(),
             Command::Previous => chooser.catalog.change_page(false),
             Command::Next => chooser.catalog.change_page(true),
         }
-        chooser.hovered = None;
         dialog.error = None;
-        self.hits.clear();
         None
     }
     pub fn choose_project_request(&mut self) -> Option<Request> {
@@ -191,105 +178,6 @@ impl App {
             chooser.catalog.selected = None;
         } // A newly opened chooser never implicitly commits the first project.
     }
-    pub(super) fn choose_project_input(&mut self, event: Event) -> (bool, Option<Action>) {
-        let dialog = self
-            .management
-            .dialog
-            .as_mut()
-            .expect("project chooser dialog");
-        let chooser = dialog.chooser.as_mut().expect("project chooser");
-        let movable = !dialog.blocked && self.management.pending.is_none();
-        if matches!(&event, Event::Key(key) if key.kind != KeyEventKind::Release) {
-            chooser.hovered = None;
-        }
-        let command = match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
-                KeyCode::Esc => Some(Manage::Close),
-                KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return (true, Some(Action::Quit));
-                }
-                _ if !dialog.visible => None,
-                KeyCode::Tab => {
-                    chooser.focus = (chooser.focus + 1) % 6;
-                    return (true, None);
-                }
-                KeyCode::BackTab => {
-                    chooser.focus = (chooser.focus + 5) % 6;
-                    return (true, None);
-                }
-                KeyCode::Up | KeyCode::Down if movable => {
-                    chooser.catalog.move_selection(key.code == KeyCode::Down);
-                    chooser.focus = 0;
-                    dialog.error = None;
-                    return (true, None);
-                }
-                KeyCode::Home | KeyCode::End if movable => {
-                    chooser.catalog.selected = if key.code == KeyCode::Home {
-                        chooser.catalog.items.first()
-                    } else {
-                        chooser.catalog.items.last()
-                    }
-                    .map(|item| item.id.clone());
-                    chooser.focus = 0;
-                    dialog.error = None;
-                    return (true, None);
-                }
-                KeyCode::F(5) => Some(Manage::ChooseProject(Command::Refresh)),
-                KeyCode::PageUp => Some(Manage::ChooseProject(Command::Previous)),
-                KeyCode::PageDown => Some(Manage::ChooseProject(Command::Next)),
-                KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    Some(Manage::Save)
-                }
-                KeyCode::Enter => Some(focused(chooser)),
-                _ => None,
-            },
-            Event::Mouse(mouse) if dialog.visible => {
-                let hit = self
-                    .hits
-                    .iter()
-                    .rev()
-                    .find(|hit| hit.area.contains((mouse.column, mouse.row).into()))
-                    .and_then(|hit| match &hit.action {
-                        Action::Manage(command) => Some(command.clone()),
-                        _ => None,
-                    });
-                match mouse.kind {
-                    MouseEventKind::Down(MouseButton::Left) => hit,
-                    MouseEventKind::Moved => {
-                        let changed = chooser.hovered != hit;
-                        chooser.hovered = hit;
-                        return (changed, None);
-                    }
-                    MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
-                        if movable
-                            && matches!(hit, Some(Manage::ChooseProject(Command::Select(_)))) =>
-                    {
-                        chooser
-                            .catalog
-                            .move_selection(mouse.kind == MouseEventKind::ScrollDown);
-                        chooser.focus = 0;
-                        dialog.error = None;
-                        return (true, None);
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        };
-        (
-            command.is_some(),
-            command.and_then(|command| self.apply(Action::Manage(command))),
-        )
-    }
-}
-fn focused(chooser: &Chooser) -> Manage {
-    match chooser.focus {
-        1 => Manage::ChooseProject(Command::Refresh),
-        2 => Manage::ChooseProject(Command::Previous),
-        3 => Manage::ChooseProject(Command::Next),
-        4 => Manage::Close,
-        _ => Manage::Save,
-    }
 }
 
 #[cfg(test)]
@@ -297,6 +185,7 @@ mod tests {
     use super::super::{Entity, Kind};
     use super::*;
     use crate::{Locale, LocalePreference, app::ConnectionState, i18n::I18n};
+    use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEventKind};
     use maka_protocol::project::{PageItem, View};
     use ratatui::{Terminal, backend::TestBackend};
 
@@ -365,18 +254,24 @@ mod tests {
         app.project_catalog_changed();
         let request = app.choose_project_request().unwrap();
         terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
-        let hit = app
-            .hits
-            .iter()
-            .find(|h| {
-                h.action == Action::Manage(Manage::ChooseProject(Command::Select("b".into())))
+        // The row whose whole text inside the sheet is the project name.
+        let buffer = terminal.backend().buffer();
+        let (x, y) = (0..buffer.area.height)
+            .find_map(|y| {
+                let line: String = (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect();
+                let inside = line.split('│').nth(1)?;
+                (inside.trim() == "b").then(|| {
+                    let x = line.find('│').unwrap() + '│'.len_utf8() + inside.find('b').unwrap();
+                    (line[..x].chars().count() as u16, y)
+                })
             })
-            .unwrap()
-            .area;
+            .expect("row b is on screen");
         app.input(Event::Mouse(crossterm::event::MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
-            column: hit.x,
-            row: hit.y,
+            column: x,
+            row: y,
             modifiers: KeyModifiers::NONE,
         }));
         assert_eq!(

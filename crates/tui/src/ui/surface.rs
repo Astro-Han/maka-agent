@@ -168,13 +168,11 @@ impl<M: Clone> Surface<M> {
             // Keyboard focus and the pointer stay distinguishable: focus takes
             // the selection, hover only lifts the row.
             let style = if context.focused && Some(&item.id) == self.focus.as_ref() {
-                colors
-                    .focused()
-                    .fg(if item.role == Some(Role::Destructive) {
-                        colors.error
-                    } else {
-                        colors.accent
-                    })
+                colors.focused().fg(match item.role {
+                    Some(Role::Destructive) => colors.error,
+                    Some(Role::Caution) => colors.warning,
+                    _ => colors.accent,
+                })
             } else if Some(&item.id) == self.hover.as_ref() {
                 if colors.terminal {
                     Style::default().add_modifier(Modifier::UNDERLINED)
@@ -578,6 +576,11 @@ impl<M: Clone> Surface<M> {
             }
             (KeyCode::Enter | KeyCode::Char(' '), Some(at)) => {
                 let item = item(stops[at]);
+                if key.code == KeyCode::Enter
+                    && let Some(message) = &item.submit
+                {
+                    return Outcome::emit(message.clone());
+                }
                 return match &item.on {
                     On::Activate(message) => Outcome::emit(message.clone()),
                     On::Choose { current, .. } => {
