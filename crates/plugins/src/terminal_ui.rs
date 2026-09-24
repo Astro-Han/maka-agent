@@ -25,7 +25,7 @@ use crate::Error;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// Presentation text is distinct from the stable identity used for navigation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

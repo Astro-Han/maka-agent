@@ -18,6 +18,8 @@
  */
 
 mod consent;
+mod saved;
+pub use saved::Checkpoint;
 pub(crate) mod io;
 mod view;
 pub use consent::draw as draw_consent;
@@ -45,10 +47,14 @@ pub enum Command {
     Field(usize),
     Submit(usize),
     ApproveConsent,
+    Reconcile,
+    Retry,
     DismissConsent,
     Back,
     Refresh,
     Discard,
+    ConfirmDiscard,
+    CancelDiscard,
     Next,
 }
 impl Command {
@@ -58,11 +64,15 @@ impl Command {
             Self::Back => "extensions-back",
             Self::Refresh => "command-refresh",
             Self::Discard => "extensions-discard",
+            Self::ConfirmDiscard => "extensions-forget",
+            Self::CancelDiscard => "session-cancel",
             Self::Next => "sessions-next",
             Self::Row(_) => "extensions-open",
             Self::Field(_) => "extensions-edit",
             Self::Submit(_) => "extensions-save",
             Self::ApproveConsent => "extensions-authorize",
+            Self::Reconcile => "extensions-reconcile",
+            Self::Retry => "extensions-retry",
             Self::DismissConsent => "session-cancel",
         }
     }
@@ -71,13 +81,29 @@ impl Command {
 #[derive(Clone)]
 pub struct Request {
     generation: u64,
+    replaying: bool,
     root: String,
     epoch: String,
     session: Option<String>,
     pub(super) work: Work,
 }
+impl Request {
+    pub fn needs_checkpoint(&self) -> bool {
+        matches!(
+            self.work,
+            Work::Page {
+                input: Input::Submit { .. },
+                ..
+            } | Work::Authorize { .. }
+        )
+    }
+}
 #[derive(Clone)]
 pub(super) enum Work {
+    Recover {
+        view: Box<TerminalViewProjection>,
+        route: Value,
+    },
     Directory(Option<String>),
     Page {
         view: Box<TerminalViewProjection>,
@@ -108,6 +134,10 @@ pub struct State {
     pub(super) drafts: BTreeMap<String, Value>,
     pub(super) editors: BTreeMap<String, Editor>,
     pending: Option<Work>,
+    unresolved: Option<saved::Pending>,
+    saving: bool,
+    unrecorded: bool,
+    confirm_discard: bool,
     consent: Option<consent::Consent>,
     pub(super) busy: bool,
     writing: bool,
@@ -145,6 +175,9 @@ impl State {
         }
     }
     pub fn disconnect(&mut self) {
+        self.saving = false;
+        self.unrecorded = false;
+        self.confirm_discard = false;
         self.consent = None;
         self.generation += 1;
         self.pending = None;
@@ -154,11 +187,13 @@ impl State {
         self.directory.clear();
         self.next = None;
         // Retain drafts, but revoke every operation on the old registration.
-        self.message = self.blocked.then_some(Message::Local(if self.writing {
-            "extensions-unknown"
-        } else {
-            "extensions-disconnected"
-        }));
+        self.message = self.blocked.then_some(Message::Local(
+            if self.writing || self.unresolved.is_some() {
+                "extensions-unknown"
+            } else {
+                "extensions-disconnected"
+            },
+        ));
         self.writing = false;
     }
     fn read(&mut self) {
@@ -221,6 +256,23 @@ impl State {
 impl App {
     pub fn extensions_actions(&self) -> Vec<Action> {
         let mut commands = Vec::new();
+        if self.extensions.confirm_discard {
+            return [Command::CancelDiscard, Command::ConfirmDiscard]
+                .into_iter()
+                .map(Action::Extension)
+                .collect();
+        }
+        if self
+            .extensions
+            .unresolved
+            .as_ref()
+            .is_some_and(|pending| pending.recovery.is_some())
+        {
+            commands.push(Command::Reconcile);
+            if self.extensions.unrecorded {
+                commands.push(Command::Retry);
+            }
+        }
         if self.extensions.view.is_some() {
             commands.push(Command::Back);
         }
@@ -257,6 +309,8 @@ impl App {
             self.extensions.pending = Some(Work::Directory(None));
         }
         let work = self.extensions.pending.take()?;
+        let replaying = self.extensions.unresolved.is_some();
+        self.extensions.generation += 1;
         self.extensions.busy = true;
         self.extensions.writing = matches!(
             work,
@@ -265,9 +319,35 @@ impl App {
                 ..
             } | Work::Authorize { .. }
         );
+        if self.extensions.writing {
+            let (input, proposal) = match &work {
+                Work::Page { input, .. } => (input.clone(), None),
+                Work::Authorize {
+                    input, proposal, ..
+                } => (input.clone(), Some(proposal.clone())),
+                _ => unreachable!(),
+            };
+            let recovery = match &input {
+                Input::Submit { action, .. } => self
+                    .extensions
+                    .page
+                    .as_ref()
+                    .and_then(|page| page.actions.iter().find(|item| &item.id == action))
+                    .and_then(|action| action.recovery.clone()),
+                _ => None,
+            };
+            self.extensions.unresolved = Some(saved::Pending {
+                input,
+                proposal,
+                recovery,
+            });
+            self.extensions.saving = true;
+            self.extensions.unrecorded = false;
+        }
         self.extensions.message = None;
         Some(Request {
             generation: self.extensions.generation,
+            replaying,
             root: root_id.clone(),
             epoch: epoch.clone(),
             session: self.extensions.session.clone(),
@@ -283,9 +363,38 @@ impl App {
         }
         let state = &mut self.extensions;
         state.busy = false;
+        state.saving = false;
         state.writing = false;
         state.area = None;
+        let recovering = matches!(request.work, Work::Recover { .. });
+        let result = match result {
+            Ok(Output::Recovered { view, reply }) if recovering => {
+                state.view = Some(*view);
+                Ok(Output::Page(reply))
+            }
+            Ok(Output::Recovered { .. }) => Err(io::Failure { unknown: false }),
+            result => result,
+        };
+        // A rejected recovery read says nothing about the original write.
+        if !recovering
+            && !request.replaying
+            && request.needs_checkpoint()
+            && matches!(
+                &result,
+                Ok(Output::Page(
+                    Reply::Consent { .. } | Reply::Conflict | Reply::Rejected { .. }
+                )) | Err(io::Failure { unknown: false })
+            )
+        {
+            state.unresolved = None;
+        }
         match result {
+            Ok(Output::Recovered { .. }) => unreachable!(),
+            Ok(Output::Page(Reply::Unrecorded)) => {
+                state.blocked = true;
+                state.unrecorded = recovering;
+                state.message = Some(Message::Local("extensions-unrecorded"));
+            }
             Ok(Output::Directory(page)) => {
                 state.loaded = true;
                 state.directory = page.items;
@@ -299,6 +408,8 @@ impl App {
             }
             Ok(Output::Page(Reply::Page { page })) => state.install(page),
             Ok(Output::Page(Reply::Consent { request: proposal })) => {
+                // A retry needing consent does not settle an earlier lost write.
+                state.blocked = request.replaying;
                 // Preparing consent does not authorize anything. Leaving the page
                 // cancels presentation, without discarding the form or opening a
                 // delayed modal over another destination.
@@ -323,6 +434,9 @@ impl App {
                 }
             }
             Ok(Output::Page(Reply::Applied { route })) => {
+                state.unresolved = None;
+                state.unrecorded = false;
+                state.blocked = false;
                 state.applied = match &request.work {
                     Work::Page {
                         input:
@@ -349,6 +463,7 @@ impl App {
                 state.message = Some(Message::Local("extensions-conflict"));
             }
             Ok(Output::Page(Reply::Rejected { message })) => {
+                state.blocked = recovering || request.replaying;
                 state.message = Some(Message::Remote(message));
             }
             Err(failure) => {
@@ -371,7 +486,7 @@ impl App {
                 Command::ApproveConsent => {
                     consent.rendered
                         && !state.busy
-                        && !state.blocked
+                        && (!state.blocked || state.unresolved.is_some())
                         && self.navigation.current() == Route::Extensions
                         && matches!(self.connection, ConnectionState::Connected { .. })
                 }
@@ -379,10 +494,7 @@ impl App {
             };
         }
         if *command == Command::Open {
-            return matches!(self.connection, ConnectionState::Connected { .. })
-                && !state.busy
-                && !state.dirty()
-                && !state.blocked;
+            return matches!(self.connection, ConnectionState::Connected { .. }) && !state.busy;
         }
         if !matches!(self.connection, ConnectionState::Connected { .. })
             || self.navigation.current() != Route::Extensions
@@ -392,8 +504,24 @@ impl App {
             return false;
         }
         match command {
+            Command::Reconcile => {
+                !state.confirm_discard
+                    && state
+                        .unresolved
+                        .as_ref()
+                        .is_some_and(|pending| pending.recovery.is_some())
+            }
+            Command::Retry => {
+                !state.confirm_discard
+                    && state.unrecorded
+                    && state
+                        .unresolved
+                        .as_ref()
+                        .is_some_and(|pending| pending.recovery.is_some())
+            }
+            Command::ConfirmDiscard | Command::CancelDiscard => state.confirm_discard,
             Command::Discard => state.dirty() || state.blocked,
-            Command::Back => !state.dirty(),
+            Command::Back => !state.dirty() && state.unresolved.is_none() && !state.blocked,
             Command::Refresh => !state.dirty() && !state.blocked,
             Command::Next => state.view.is_none() && state.next.is_some() && !state.blocked,
             Command::Choose(index) => {
@@ -438,6 +566,13 @@ impl App {
             return;
         }
         if command == Command::Open {
+            if self.extensions.dirty()
+                || self.extensions.blocked
+                || self.extensions.unresolved.is_some()
+            {
+                self.apply(Action::Visit(Route::Extensions));
+                return;
+            }
             let session = match self.navigation.current() {
                 Route::Session(id) => Some(id),
                 _ => None,
@@ -456,6 +591,37 @@ impl App {
         let state = &mut self.extensions;
         state.applied = None;
         match command {
+            Command::Reconcile => {
+                state.unrecorded = false;
+                state.pending = Some(Work::Recover {
+                    view: Box::new(state.view.clone().unwrap()),
+                    route: state.unresolved.as_ref().unwrap().recovery.clone().unwrap(),
+                });
+            }
+            Command::Retry => {
+                state.unrecorded = false;
+                let pending = state.unresolved.as_ref().unwrap();
+                let view = Box::new(state.view.clone().unwrap());
+                state.pending = Some(match &pending.proposal {
+                    Some(proposal) => Work::Authorize {
+                        view,
+                        input: pending.input.clone(),
+                        proposal: proposal.clone(),
+                    },
+                    None => Work::Page {
+                        view,
+                        input: pending.input.clone(),
+                    },
+                });
+            }
+            Command::Discard if state.unresolved.is_some() => {
+                state.confirm_discard = true;
+                state.message = Some(Message::Local("extensions-forget-confirm"));
+            }
+            Command::CancelDiscard => {
+                state.confirm_discard = false;
+                state.message = Some(Message::Local("extensions-unknown"));
+            }
             Command::ApproveConsent => {
                 let consent = state.consent.take().unwrap();
                 state.pending = Some(Work::Authorize {
@@ -528,7 +694,11 @@ impl App {
                     state.pending = Some(Work::Directory(None));
                 }
             }
-            Command::Discard => {
+            Command::Discard | Command::ConfirmDiscard => {
+                state.unresolved = None;
+                state.unrecorded = false;
+                state.confirm_discard = false;
+                state.message = None;
                 state.generation += 1;
                 state.page = None;
                 state.view = None;
@@ -738,7 +908,7 @@ impl App {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::i18n::{I18n, LocalePreference};
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -760,7 +930,7 @@ mod tests {
             method: "preferences".into(),
             target: Target {
                 entry_id: "notes".into(),
-                activation: "a".into(),
+                activation: uuid::Uuid::new_v4().to_string(),
                 registration: uuid::Uuid::new_v4(),
             },
             descriptor: Descriptor {
@@ -800,6 +970,7 @@ mod tests {
                 label: Text::plain("Save"),
                 enabled: true,
                 fields: vec!["enabled".into(), "name".into()],
+                recovery: None,
             }],
         }
     }
@@ -816,7 +987,7 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect()
     }
-    fn app() -> App {
+    pub(crate) fn app() -> App {
         let mut app = App::new(
             "/test".into(),
             I18n::new(
@@ -932,6 +1103,9 @@ mod tests {
         };
         let mut app = app();
         app.extensions.drafts.insert("name".into(), json!("Draft"));
+        let editor = app.extensions.editors.get_mut("name").unwrap();
+        editor.clear_if_unchanged("My notes");
+        editor.insert("Draft");
         let prepare = |app: &mut App| {
             app.extensions_action(Command::Submit(0));
             let request = app.extensions_request().unwrap();
@@ -1000,6 +1174,19 @@ mod tests {
         };
         assert_eq!(fields["name"], json!("Draft"));
         assert!(grant.is_none());
+        let saved = app.extensions.checkpoint("root").unwrap();
+        saved.validate("root").unwrap();
+        let mut restored = State::default();
+        restored.restore(saved).unwrap();
+        assert!(restored.pending.is_none());
+        assert!(
+            restored.consent.is_none(),
+            "restoring explicit consent is not another approval"
+        );
+        assert_eq!(
+            restored.unresolved.unwrap().proposal.as_ref(),
+            Some(&proposal)
+        );
         app.extensions_complete(request, Err(io::Failure { unknown: true }));
         assert!(!app.extensions_enabled(&Command::Submit(0)));
         assert!(app.extensions_request().is_none());
@@ -1042,5 +1229,102 @@ mod tests {
                 .any(|hit| matches!(hit.action, Action::Extension(_)))
         );
         assert!(app.extensions_request().is_none());
+    }
+
+    #[test]
+    fn saved_unknown_submission_queries_first_and_retries_only_the_original_idempotent_intent() {
+        let mut app = app();
+        let recovery = json!({"operation":"one"});
+        app.extensions.page.as_mut().unwrap().actions[0].recovery = Some(recovery.clone());
+        app.extensions_action(Command::Field(0));
+        app.extensions_action(Command::Submit(0));
+        let original = app.extensions_request().unwrap();
+        assert!(original.needs_checkpoint());
+        let frozen = app.extensions.unresolved.as_ref().unwrap().input.clone();
+        let saved = serde_json::to_value(app.extensions.checkpoint("root").unwrap()).unwrap();
+        for (pointer, value) in [
+            ("/root", json!("other")),
+            ("/pending/input/revision", json!("different")),
+            ("/pending/input/fields/enabled", json!(true)),
+            ("/pending/recovery", json!({"operation":"other"})),
+            ("/cursors/name/cursor", json!(999)),
+            ("/drafts/name", json!("x".repeat(129))),
+            ("/view/target/activation", json!("not-an-activation")),
+        ] {
+            let mut invalid = saved.clone();
+            *invalid.pointer_mut(pointer).unwrap() = value;
+            assert!(
+                serde_json::from_value::<Checkpoint>(invalid)
+                    .unwrap()
+                    .validate("root")
+                    .is_err(),
+                "{pointer}"
+            );
+        }
+        app.extensions.disconnect();
+        assert!(!app.extensions_after_checkpoint(&original, &Ok(())));
+        app.extensions = State::default();
+        app.extensions
+            .restore(serde_json::from_value(saved).unwrap())
+            .unwrap();
+        assert!(app.extensions_request().is_none());
+        assert!(!app.extensions_enabled(&Command::Retry));
+        assert!(!app.extensions_enabled(&Command::Back));
+        assert!(!app.extensions_enabled(&Command::Submit(0)));
+        app.apply(Action::Visit(Route::Workspace));
+        app.extensions_action(Command::Open);
+        assert_eq!(app.navigation.current(), Route::Extensions);
+        app.extensions_action(Command::Reconcile);
+        let query = app.extensions_request().unwrap();
+        assert!(matches!(&query.work, Work::Recover { route, .. } if route == &recovery));
+        assert!(!query.needs_checkpoint());
+        app.extensions_complete(query, Err(io::Failure { unknown: false }));
+        assert!(app.extensions.unresolved.is_some());
+        assert!(!app.extensions_enabled(&Command::Retry));
+        app.extensions_action(Command::Reconcile);
+        let query = app.extensions_request().unwrap();
+        let mut view = app.extensions.view.clone().unwrap();
+        view.target.registration = uuid::Uuid::new_v4();
+        app.extensions_complete(
+            query,
+            Ok(Output::Recovered {
+                view: Box::new(view.clone()),
+                reply: Reply::Unrecorded,
+            }),
+        );
+        assert!(draw(&mut app, 58, 24).contains("Retry original submission"));
+        app.extensions_action(Command::Retry);
+        let retry = app.extensions_request().unwrap();
+        assert!(retry.needs_checkpoint());
+        assert!(
+            matches!(&retry.work, Work::Page { view: actual, input } if actual.target == view.target && input == &frozen)
+        );
+        assert!(!app.extensions_after_checkpoint(&original, &Ok(())));
+        assert!(app.extensions_after_checkpoint(&retry, &Ok(())));
+        assert!(!app.extensions_after_checkpoint(&retry, &Ok(())));
+        // A rejection of this retry cannot settle the earlier uncertain attempt.
+        app.extensions_complete(retry, Err(io::Failure { unknown: false }));
+        assert!(app.extensions.unresolved.is_some());
+        assert!(!app.extensions_enabled(&Command::Submit(0)));
+        app.extensions_action(Command::Discard);
+        assert!(app.extensions.unresolved.is_some());
+        assert!(app.extensions_request().is_none());
+        assert!(draw(&mut app, 90, 24).contains("does not cancel"));
+        app.extensions_action(Command::CancelDiscard);
+        app.extensions_action(Command::Reconcile);
+        let query = app.extensions_request().unwrap();
+        app.extensions_complete(
+            query,
+            Ok(Output::Recovered {
+                view: Box::new(view),
+                reply: Reply::Applied {
+                    route: json!({"task":"original"}),
+                },
+            }),
+        );
+        assert!(app.extensions.unresolved.is_none());
+        assert!(
+            matches!(app.extensions_request().unwrap().work, Work::Page { input: Input::Read { route }, .. } if route == json!({"task":"original"}))
+        );
     }
 }

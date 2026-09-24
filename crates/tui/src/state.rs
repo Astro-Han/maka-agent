@@ -22,7 +22,7 @@ mod store;
 
 use crate::{
     app::App,
-    pages::{branch, manage::oauth, recap, revision, sending::Submission},
+    pages::{branch, extensions, manage::oauth, recap, revision, sending::Submission},
 };
 use maka_client::Error;
 use snapshot::Snapshot;
@@ -41,6 +41,7 @@ pub struct State {
     branch: Option<branch::Request>,
     recap: Option<recap::Request>,
     revision: Option<revision::Request>,
+    extension: Option<extensions::Request>,
     attachment: Option<crate::pages::attachments::Ticket>,
     generation: u64,
     job: Option<Writing>,
@@ -53,6 +54,7 @@ struct Writing {
     branch: Option<branch::Request>,
     recap: Option<recap::Request>,
     revision: Option<revision::Request>,
+    extension: Option<extensions::Request>,
     attachment: Option<crate::pages::attachments::Ticket>,
     generation: u64,
 }
@@ -64,6 +66,7 @@ pub struct Written {
     pub branch: Option<branch::Request>,
     pub recap: Option<recap::Request>,
     pub revision: Option<revision::Request>,
+    pub extension: Option<extensions::Request>,
     pub attachment: Option<crate::pages::attachments::Ticket>,
 }
 impl State {
@@ -98,6 +101,7 @@ impl State {
                     branch: None,
                     recap: None,
                     revision: None,
+                    extension: None,
                     attachment: None,
                     generation: 0,
                     job: None,
@@ -133,6 +137,7 @@ impl State {
         self.branch = None;
         self.recap = None;
         self.revision = None;
+        self.extension = None;
         self.attachment = None;
         let mut requests = std::mem::take(&mut self.requests);
         if let Some(job) = &self.job
@@ -163,6 +168,10 @@ impl State {
         self.revision = Some(request);
         self.force();
     }
+    pub fn submit_extension(&mut self, request: extensions::Request) {
+        self.extension = Some(request);
+        self.force();
+    }
     pub fn idle(&self) -> bool {
         self.job.is_none() && self.deadline.is_none()
     }
@@ -187,6 +196,7 @@ impl State {
             branch: self.branch.take(),
             recap: self.recap.take(),
             revision: self.revision.take(),
+            extension: self.extension.take(),
             attachment: self.attachment.take(),
             generation,
         });
@@ -202,6 +212,11 @@ impl State {
         let job = self.job.take().expect("completed writer");
         Written {
             result,
+            extension: if job.generation == self.generation {
+                job.extension
+            } else {
+                None
+            },
             attachment: if job.generation == self.generation {
                 job.attachment
             } else {
@@ -269,6 +284,7 @@ mod tests {
             branch: None,
             recap: None,
             revision: None,
+            extension: None,
             attachment: None,
             generation: 0,
             job: None,
@@ -395,6 +411,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plugin_submission_requires_its_own_durable_checkpoint_and_never_replays_on_restore() {
+        use crate::pages::extensions::Command;
+        let (directory, mut state, _) = fixture();
+        let mut app = extensions::tests::app();
+        app.connection = ConnectionState::Connected {
+            root_id: ROOT.into(),
+            epoch: "epoch".into(),
+        };
+        app.extensions_action(Command::Field(0));
+        app.extensions_action(Command::Submit(0));
+        let request = app.extensions_request().unwrap();
+        let (release, blocked) = gate(&state).await;
+        state.submit_extension(request.clone());
+        state.start(&app);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), state.completed())
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        blocked.await.unwrap();
+        let completed = written(&mut state).await;
+        assert!(completed.extension.is_some());
+        assert!(completed.result.is_ok(), "{:?}", completed.result);
+        let bytes = read(&directory);
+        assert_eq!(
+            bytes["extension"]["pending"]["input"]["fields"]["enabled"],
+            false
+        );
+        let mut reopened = App::new(
+            "/unused".into(),
+            I18n::new(LocalePreference::Auto, Locale::En),
+        );
+        serde_json::from_value::<Snapshot>(bytes)
+            .unwrap()
+            .restore(&mut reopened, false)
+            .unwrap();
+        assert!(reopened.extensions_request().is_none());
+        assert!(app.extensions_after_checkpoint(&request, &completed.result));
+        assert!(!app.extensions_after_checkpoint(&request, &completed.result));
+        app.extensions_complete(request, Err(extensions::io::Failure { unknown: true }));
+        // No idempotency declaration means no unsafe retry, including after a failed query.
+        assert!(!app.extensions_enabled(&Command::Retry));
+        assert!(!app.extensions_enabled(&Command::Reconcile));
+        app.extensions_action(Command::Discard);
+        assert!(app.extensions_request().is_none());
+        app.extensions_action(Command::ConfirmDiscard);
+        assert!(app.extensions_request().is_some());
+
+        for closing in [false, true] {
+            let mut app = extensions::tests::app();
+            app.connection = ConnectionState::Connected {
+                root_id: ROOT.into(),
+                epoch: "epoch".into(),
+            };
+            app.extensions_action(Command::Submit(0));
+            let request = app.extensions_request().unwrap();
+            app.closing = closing;
+            assert!(!app.extensions_after_checkpoint(&request, &Err("disk failure".into())));
+            assert!(app.extensions.checkpoint(ROOT).is_some());
+            assert!(app.extensions_request().is_none());
+        }
+        let mut app = extensions::tests::app();
+        app.extensions_action(Command::Submit(0));
+        let request = app.extensions_request().unwrap();
+        state.submit_extension(request);
+        let (release, blocked) = gate(&state).await;
+        state.start(&app);
+        state.cancel_requests();
+        app.extensions.disconnect();
+        release.send(()).unwrap();
+        blocked.await.unwrap();
+        assert!(written(&mut state).await.extension.is_none());
+    }
+
+    #[tokio::test]
     async fn revision_writer_persists_frozen_identity_and_cancels_obsolete_save_authority() {
         use crate::pages::revision::{Checkpoint, Command};
         use serde_json::json;
@@ -438,7 +530,7 @@ mod tests {
         assert_eq!(written.revision, Some(request.clone()));
         assert!(written.result.is_ok());
         let bytes = read(&directory);
-        assert_eq!(bytes["version"], 14);
+        assert_eq!(bytes["version"], 15);
         assert_eq!(bytes["revision"]["copy"]["targetSessionId"], "revised");
         assert_eq!(bytes["revision"]["inputs"][0]["content"]["text"], "edited");
         let mut incomplete = bytes.clone();

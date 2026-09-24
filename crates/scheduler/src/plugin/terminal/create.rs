@@ -138,6 +138,7 @@ pub(super) fn read(service: &Service, creation: Route) -> Result<Reply, Error> {
                 label: Text::localized("Create reminder", "创建提醒", "建立提醒"),
                 enabled: true,
                 fields: page.fields.iter().map(|field| field.id.clone()).collect(),
+                recovery: Some(serde_json::json!({"operation":page.revision})),
             });
         }
     }
@@ -241,6 +242,24 @@ pub(super) async fn submit(
         })
         .map_err(invalid)?,
     })
+}
+pub(super) async fn recover(service: &Service, value: Value) -> Result<Reply, Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Recovery {
+        operation: uuid::Uuid,
+    }
+    let recovery: Recovery = serde_json::from_value(value).map_err(invalid)?;
+    match service.creation(recovery.operation).await.map_err(error)? {
+        Some(task) => Ok(Reply::Applied {
+            route: serde_json::to_value(super::Route {
+                task: Some(task),
+                ..Default::default()
+            })
+            .map_err(invalid)?,
+        }),
+        None => Ok(Reply::Unrecorded),
+    }
 }
 fn take(fields: &mut BTreeMap<String, Value>, key: &str) -> Result<String, Error> {
     fields

@@ -423,11 +423,23 @@ pub async fn run(options: Options) -> Result<(), Error> {
                 });
             }
             if let Some(request) = app.extensions_request() {
-                let client = client.clone();
-                jobs.spawn(async move {
-                    let result = pages::extensions::execute(&client, &request).await;
-                    Completed::Extension(request, result)
-                });
+                if request.needs_checkpoint() {
+                    if let Some(state) = &mut state {
+                        state.submit_extension(request);
+                    } else {
+                        app.extensions_after_checkpoint(
+                            &request,
+                            &Err("TUI checkpoint unavailable".into()),
+                        );
+                    }
+                } else {
+                    let client = client.clone();
+                    jobs.spawn(async move {
+                        let result = pages::extensions::execute(&client, &request).await;
+                        Completed::Extension(request, result)
+                    });
+                }
+                dirty = true;
             }
             if let Some(request) = app.skills_request() {
                 let client = client.clone();
@@ -809,6 +821,14 @@ pub async fn run(options: Options) -> Result<(), Error> {
                     jobs.spawn(async move {
                         let result=pages::recap::execute(&client,&request).await;
                         Completed::Recap(request,result)
+                    });
+                }
+                if let Some(request) = written.extension
+                    && app.extensions_after_checkpoint(&request, &written.result)
+                    && let Some(client) = client.clone() {
+                    jobs.spawn(async move {
+                        let result = pages::extensions::execute(&client, &request).await;
+                        Completed::Extension(request, result)
                     });
                 }
                 if let Some(ticket) = written.attachment

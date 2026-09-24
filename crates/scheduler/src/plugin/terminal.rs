@@ -75,6 +75,7 @@ impl Method for View {
             request.validate().map_err(invalid)?;
             let _lease = service.context.admit().map_err(|_| Error::Retired)?;
             let reply = match request {
+                Request::Recover { route } => create::recover(&service, route).await?,
                 Request::Read { route } => read(&service, decode(route)?)?,
                 Request::Submit {
                     route,
@@ -323,6 +324,7 @@ fn detail(task: Task, revision: u64) -> Page {
             label: Text::localized("Save", "保存", "儲存"),
             enabled: true,
             fields: vec!["title".into(), "intent".into()],
+            recovery: None,
         });
     } else {
         page.body.push_str("\n\n");
@@ -340,6 +342,7 @@ fn detail(task: Task, revision: u64) -> Page {
             label,
             enabled: true,
             fields: vec![],
+            recovery: None,
         });
     }
     page

@@ -76,6 +76,9 @@ impl Method for View {
                 workspace: view.workspace.target.clone(),
             };
             let reply = match request {
+                Request::Recover { .. } => {
+                    return Err(invalid("This action has no recovery receipt"));
+                }
                 Request::Read { route } => {
                     let route: Route = if route.is_null() {
                         Route::default()
@@ -240,6 +243,7 @@ fn project(
             label: Text::localized("Save", "保存", "儲存"),
             enabled,
             fields: vec!["enabled".into(), "pinned".into()],
+            recovery: None,
         });
     } else {
         for item in items.iter().skip(route.offset).take(WINDOW) {

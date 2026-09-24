@@ -33,11 +33,69 @@ use ratatui::{
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     app.extensions.invalidate_geometry();
-    let area = area.inner(Margin::new(2, 1));
+    let mut area = area.inner(Margin::new(2, 1));
     if area.is_empty() {
         return;
     }
     let colors = app.theme.colors();
+    if app.extensions.unresolved.is_some() && !app.extensions.busy && area.height >= 5 {
+        let commands = if app.extensions.confirm_discard {
+            vec![Command::CancelDiscard, Command::ConfirmDiscard]
+        } else {
+            [Command::Reconcile, Command::Retry]
+                .into_iter()
+                .filter(|command| *command != Command::Retry || app.extensions.unrecorded)
+                .filter(|_| {
+                    app.extensions
+                        .unresolved
+                        .as_ref()
+                        .is_some_and(|pending| pending.recovery.is_some())
+                })
+                .collect()
+        };
+        // Keep contextual recovery actions on one line whenever they fit.
+        let buttons: Vec<_> = commands
+            .into_iter()
+            .map(|command| {
+                let label = app.i18n.text(command.label());
+                let width = (unicode_width::UnicodeWidthStr::width(label.as_str()) as u16 + 4)
+                    .min(area.width);
+                (command, label, width)
+            })
+            .collect();
+        let horizontal = buttons.iter().map(|(_, _, width)| width).sum::<u16>()
+            + 2 * buttons.len().saturating_sub(1) as u16
+            <= area.width;
+        let mut x = area.x;
+        let mut y = area.y;
+        for (command, label, width) in &buttons {
+            let selected = app.focus == Focus::Page
+                && app.page_actions().get(app.selected_control)
+                    == Some(&Action::Extension(command.clone()));
+            crate::view::button(
+                frame,
+                app,
+                Rect::new(x, y, *width, 1),
+                label,
+                Action::Extension(command.clone()),
+                selected,
+            );
+            if horizontal {
+                x += width + 2;
+            } else {
+                y += 2;
+            }
+        }
+        let rows = if buttons.is_empty() {
+            0
+        } else if horizontal {
+            2
+        } else {
+            2 * buttons.len() as u16
+        };
+        area.y += rows;
+        area.height = area.height.saturating_sub(rows);
+    }
     let consent = app.extensions.consent_visible();
     let locale = app.i18n.locale().id();
     let form_width = area.width.saturating_sub(1).min(52);

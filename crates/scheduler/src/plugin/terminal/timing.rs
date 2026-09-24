@@ -66,6 +66,7 @@ pub(super) fn page(task: &Task, revision: u64, timezone: &str) -> Result<Page, E
         label: Text::localized("Save", "保存", "儲存"),
         enabled,
         fields: page.fields.iter().map(|field| field.id.clone()).collect(),
+        recovery: None,
     });
     Ok(page)
 }

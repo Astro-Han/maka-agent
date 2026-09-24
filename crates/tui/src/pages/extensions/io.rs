@@ -21,13 +21,17 @@ use super::{Request, Work};
 use maka_client::{Client, ClientError, RequestFailure};
 use maka_plugins::terminal_ui::page::{Reply, Request as Input};
 use maka_protocol::plugin::{
-    Page, Query, QueryResult, RemoteBinding, RemoteRequest, RemoteResult, TerminalViewProjection,
-    View,
+    Page, Query, QueryResult, RemoteBinding, RemoteKind, RemoteRequest, RemoteResult,
+    TerminalViewProjection, View,
 };
 
 pub enum Output {
     Directory(Page<TerminalViewProjection>),
     Page(Reply),
+    Recovered {
+        view: Box<TerminalViewProjection>,
+        reply: Reply,
+    },
 }
 pub struct Failure {
     pub unknown: bool,
@@ -43,6 +47,39 @@ fn failure(error: RequestFailure, writing: bool) -> Failure {
 }
 pub async fn execute(client: &Client, request: &Request) -> Result<Output, Failure> {
     match &request.work {
+        Work::Recover { view, route } => {
+            let RemoteResult::Bound {
+                target,
+                handler: RemoteKind::Method,
+            } = client
+                .plugin_remote(RemoteRequest::Bind {
+                    binding: binding(view, session(view, request)),
+                })
+                .await
+                .map_err(|error| failure(error, false))?
+            else {
+                return Err(Failure { unknown: false });
+            };
+            // A fresh registration may serve the original entry, never a replacement owner.
+            if target.entry_id != view.target.entry_id {
+                return Err(Failure { unknown: false });
+            }
+            let mut view = view.clone();
+            view.target = target;
+            let Output::Page(reply) = call_page(
+                client,
+                &view,
+                &Input::Recover {
+                    route: route.clone(),
+                },
+                session(&view, request),
+            )
+            .await?
+            else {
+                return Err(Failure { unknown: false });
+            };
+            Ok(Output::Recovered { view, reply })
+        }
         Work::Directory(cursor) => {
             let result = client
                 .plugin_query(Query {
@@ -142,6 +179,9 @@ async fn call_page(
         (
             Input::Read { .. },
             Reply::Page { .. } | Reply::Conflict | Reply::Rejected { .. }
+        ) | (
+            Input::Recover { .. },
+            Reply::Applied { .. } | Reply::Unrecorded | Reply::Conflict | Reply::Rejected { .. }
         ) | (
             Input::Submit { .. },
             Reply::Applied { .. } | Reply::Conflict | Reply::Rejected { .. }

@@ -187,6 +187,13 @@ impl LostReply {
     pub(super) async fn oauth_start(root: &std::path::Path, directory: &std::path::Path) -> Self {
         Self::start_operation(root, directory, false, "oauth.login.start").await
     }
+    pub(super) async fn terminal_submit(
+        root: &std::path::Path,
+        directory: &std::path::Path,
+        after_acceptance: bool,
+    ) -> Self {
+        Self::start_operation(root, directory, after_acceptance, "plugin.remote").await
+    }
 
     pub(super) fn requests(&self) -> Vec<serde_json::Value> {
         self.requests.lock().unwrap().clone()
@@ -225,12 +232,14 @@ impl LostReply {
                 let (read_host, mut write_host) = host.into_split();
                 let mut from_client = BufReader::new(read_client).lines();
                 let mut from_host = BufReader::new(read_host).lines();
+                let mut submission_id = None;
                 loop {
                     tokio::select! {
                         line = from_client.next_line() => {
                             let Ok(Some(line)) = line else { break };
                             let value: serde_json::Value = serde_json::from_str(&line).unwrap();
-                            if value["operation"] == operation {
+                            if value["operation"] == operation && (operation != "plugin.remote" || value["input"]["kind"] == "call" && value["input"]["input"]["kind"] == "submit") {
+                                submission_id = value.get("requestId").cloned();
                                 let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
                                 if operation == "oauth.login.start" {
                                     assert_eq!(saved["root"], discovery.root_id);
@@ -241,16 +250,22 @@ impl LostReply {
                                     // enrollment/query/cancel exercise the actual Host here.
                                     break;
                                 }
-                                let original = &saved["unresolved"][0];
-                                assert_eq!(original["root_id"], discovery.root_id);
-                                assert_eq!(original["origin_epoch"], value["input"]["originHostEpoch"]);
-                                assert_eq!(original["session"], value["input"]["sessionId"]);
-                                assert_eq!(original["id"], value["input"]["messageId"]);
-                                assert_eq!(saved["version"], 14);
-                                assert_eq!(original["content"], value["input"]["content"]);
-                                assert_eq!(original["placement"], value["input"]["placement"]);
-                                assert_eq!(original["input_selections"], value["input"].get("inputSelections").cloned().unwrap_or_else(|| json!({})));
-                                assert_eq!(original["turn_orchestration"], value["input"]["turnOrchestration"]);
+                                if operation == "plugin.remote" {
+                                    assert_eq!(saved["root"], discovery.root_id);
+                                    assert_eq!(saved["extension"]["pending"]["input"], value["input"]["input"]);
+                                    assert_eq!(saved["extension"]["view"]["target"], value["input"]["target"]);
+                                } else {
+                                    let original = &saved["unresolved"][0];
+                                    assert_eq!(original["root_id"], discovery.root_id);
+                                    assert_eq!(original["origin_epoch"], value["input"]["originHostEpoch"]);
+                                    assert_eq!(original["session"], value["input"]["sessionId"]);
+                                    assert_eq!(original["id"], value["input"]["messageId"]);
+                                    assert_eq!(saved["version"], 15);
+                                    assert_eq!(original["content"], value["input"]["content"]);
+                                    assert_eq!(original["placement"], value["input"]["placement"]);
+                                    assert_eq!(original["input_selections"], value["input"].get("inputSelections").cloned().unwrap_or_else(|| json!({})));
+                                    assert_eq!(original["turn_orchestration"], value["input"]["turnOrchestration"]);
+                                }
                                 captured.lock().unwrap().push(value["input"].clone());
                                 if lose && !after_acceptance {
                                     lose = false;
@@ -262,7 +277,7 @@ impl LostReply {
                         line = from_host.next_line() => {
                             let Ok(Some(line)) = line else { break };
                             let value: serde_json::Value = serde_json::from_str(&line).unwrap();
-                            if lose && value["operation"] == operation && value["ok"] == true {
+                            if lose && value["operation"] == operation && value["ok"] == true && value.get("requestId") == submission_id.as_ref() {
                                 lose = false;
                                 break;
                             }

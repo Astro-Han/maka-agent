@@ -24,6 +24,8 @@ use maka_protocol::{
 };
 use serde_json::{Value, json};
 
+mod recovery;
+
 #[test]
 fn scheduler_form_edits_multiline_and_fences_stale_writes_without_running_a_model() {
     let directory = tempfile::tempdir().unwrap();

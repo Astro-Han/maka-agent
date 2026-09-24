@@ -77,11 +77,17 @@ pub struct Action {
     pub enabled: bool,
     /// Only these fields are submitted; unrelated drafts are not implicit input.
     pub fields: Vec<String>,
+    /// Opaque read-only recovery route. Declares that replaying this exact
+    /// submission is idempotent, including after deletion of its result.
+    pub recovery: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    Recover {
+        route: Value,
+    },
     Read {
         route: Value,
     },
@@ -99,6 +105,8 @@ pub enum Request {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reply {
+    /// No committed receipt was observed; this does not prove non-admission.
+    Unrecorded,
     Page {
         page: Page,
     },
@@ -214,6 +222,13 @@ impl Page {
         for action in &self.actions {
             identifier(&action.id)?;
             action.label.validate()?;
+            if let Some(value) = &action.recovery {
+                // null represents absence on the wire, not a replay promise.
+                if value.is_null() {
+                    return Err(invalid());
+                }
+                route(value)?;
+            }
             let mut used = BTreeSet::new();
             if !actions.insert(&action.id)
                 || action
@@ -276,7 +291,7 @@ impl Page {
 impl Request {
     pub fn validate(&self) -> Result<(), Error> {
         match self {
-            Self::Read { route: value } => route(value)?,
+            Self::Read { route: value } | Self::Recover { route: value } => route(value)?,
             Self::Submit {
                 route: value,
                 revision,
@@ -309,7 +324,7 @@ impl Reply {
             Self::Page { page } => page.validate()?,
             Self::Applied { route: value } => route(value)?,
             Self::Rejected { message } => message.validate()?,
-            Self::Conflict => {}
+            Self::Conflict | Self::Unrecorded => {}
             Self::Consent { request } => request.validate()?,
         }
         bounded(self, MAX_BYTES)
@@ -339,6 +354,7 @@ mod tests {
                 label: Text::plain("Save"),
                 enabled: true,
                 fields: vec!["enabled".into()],
+                recovery: None,
             }],
         }
     }
@@ -351,7 +367,7 @@ mod tests {
             .submission(json!(null), "save", fields.clone())
             .unwrap();
         request.validate().unwrap();
-        for variant in 0..7 {
+        for variant in 0..9 {
             let mut invalid = valid.clone();
             match variant {
                 0 => invalid.version += 1,
@@ -360,6 +376,8 @@ mod tests {
                 3 => invalid.body = "\u{001b}[2J".into(),
                 4 => invalid.body = "\u{202e}spoof".into(),
                 5 => invalid.body = "x".repeat(32769),
+                6 => invalid.actions[0].recovery = Some(Value::Null),
+                7 => invalid.actions[0].recovery = Some(json!(vec![Value::Null; 129])),
                 _ => invalid.actions.push(invalid.actions[0].clone()),
             }
             assert!(invalid.validate().is_err(), "{variant}");

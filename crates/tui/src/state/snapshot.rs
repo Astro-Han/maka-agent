@@ -51,6 +51,7 @@ pub struct Snapshot {
     branch: Option<crate::pages::branch::Checkpoint>,
     recap: Option<crate::pages::recap::Checkpoint>,
     revision: Option<crate::pages::revision::Checkpoint>,
+    extension: Option<crate::pages::extensions::Checkpoint>,
 }
 
 impl Snapshot {
@@ -63,7 +64,7 @@ impl Snapshot {
             .collect();
         unresolved.sort_by(|left, right| left.session.cmp(&right.session));
         Self {
-            version: 14,
+            version: 15,
             attachments: app.attachments.saved.clone(),
             directories: app.directories.clone(),
             skills: app.skills.saved.clone(),
@@ -88,6 +89,7 @@ impl Snapshot {
             branch: app.branch.checkpoint(),
             recap: app.recap.checkpoint(),
             revision: app.revision.checkpoint(),
+            extension: app.extensions.checkpoint(root),
         }
     }
 
@@ -95,7 +97,7 @@ impl Snapshot {
         let id = |id: &str| {
             !id.is_empty() && id.encode_utf16().count() <= 256 && !id.chars().any(char::is_control)
         };
-        if self.version != 14
+        if self.version != 15
             || self.root != root
             || self.tabs.len() > LIMIT
             || self.drafts.len() > LIMIT
@@ -194,6 +196,9 @@ impl Snapshot {
         if let Some(oauth) = &self.oauth {
             oauth.validate()?;
         }
+        if let Some(extension) = &self.extension {
+            extension.validate(root)?;
+        }
         if let Some(revision) = &self.revision {
             revision.validate(root)?;
             if revision.upload_ids().any(|id| !uploads.insert(id)) {
@@ -219,6 +224,9 @@ impl Snapshot {
         }
         if let Some(revision) = self.revision {
             app.revision.restore(revision);
+        }
+        if let Some(extension) = self.extension {
+            app.extensions.restore(extension)?;
         }
         if let Some(recap) = self.recap {
             app.recap.restore(recap);
@@ -425,7 +433,7 @@ mod tests {
         request.input().validate().unwrap();
         original.sending.get_mut("a").unwrap().request = request.clone();
         let saved = serde_json::to_value(Snapshot::capture(&original, "root")).unwrap();
-        assert_eq!(saved["version"], 14);
+        assert_eq!(saved["version"], 15);
         let mut restored = app();
         serde_json::from_value::<Snapshot>(saved.clone())
             .unwrap()
