@@ -72,7 +72,7 @@ pub(super) fn publish(
     }
     Ok(())
 }
-struct Service(Arc<Owner>);
+pub(super) struct Service(pub(super) Arc<Owner>);
 impl Method for Service {
     fn call(&self, input: Value, caller: Caller) -> BoxFuture<'static, Result<Value, Error>> {
         let owner = self.0.clone();
