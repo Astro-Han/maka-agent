@@ -22,7 +22,7 @@ mod store;
 
 use crate::{
     app::App,
-    pages::{branch, extensions, manage::oauth, recap, revision, sending::Submission},
+    pages::{branch, extensions, manage::oauth, recap, resume, revision, sending::Submission},
 };
 use maka_client::Error;
 use snapshot::Snapshot;
@@ -40,6 +40,7 @@ pub struct State {
     oauth: Option<oauth::Request>,
     branch: Option<branch::Request>,
     recap: Option<recap::Request>,
+    resume: Option<resume::Request>,
     revision: Option<revision::Request>,
     extension: Option<extensions::Request>,
     attachment: Option<crate::pages::attachments::Ticket>,
@@ -53,6 +54,7 @@ struct Writing {
     oauth: Option<oauth::Request>,
     branch: Option<branch::Request>,
     recap: Option<recap::Request>,
+    resume: Option<resume::Request>,
     revision: Option<revision::Request>,
     extension: Option<extensions::Request>,
     attachment: Option<crate::pages::attachments::Ticket>,
@@ -65,6 +67,7 @@ pub struct Written {
     pub oauth: Option<oauth::Request>,
     pub branch: Option<branch::Request>,
     pub recap: Option<recap::Request>,
+    pub resume: Option<resume::Request>,
     pub revision: Option<revision::Request>,
     pub extension: Option<extensions::Request>,
     pub attachment: Option<crate::pages::attachments::Ticket>,
@@ -100,6 +103,7 @@ impl State {
                     oauth: None,
                     branch: None,
                     recap: None,
+                    resume: None,
                     revision: None,
                     extension: None,
                     attachment: None,
@@ -136,6 +140,7 @@ impl State {
         self.oauth = None;
         self.branch = None;
         self.recap = None;
+        self.resume = None;
         self.revision = None;
         self.extension = None;
         self.attachment = None;
@@ -154,6 +159,10 @@ impl State {
     }
     pub fn submit_recap(&mut self, request: recap::Request) {
         self.recap = Some(request);
+        self.force();
+    }
+    pub fn submit_resume(&mut self, request: resume::Request) {
+        self.resume = Some(request);
         self.force();
     }
     pub fn submit_branch(&mut self, request: branch::Request) {
@@ -195,6 +204,7 @@ impl State {
             oauth: self.oauth.take(),
             branch: self.branch.take(),
             recap: self.recap.take(),
+            resume: self.resume.take(),
             revision: self.revision.take(),
             extension: self.extension.take(),
             attachment: self.attachment.take(),
@@ -242,6 +252,11 @@ impl State {
             } else {
                 None
             },
+            resume: if job.generation == self.generation {
+                job.resume
+            } else {
+                None
+            },
             branch: if job.generation == self.generation {
                 job.branch
             } else {
@@ -283,6 +298,7 @@ mod tests {
             oauth: None,
             branch: None,
             recap: None,
+            resume: None,
             revision: None,
             extension: None,
             attachment: None,
@@ -797,5 +813,47 @@ mod tests {
         assert_eq!(reopened.recap.checkpoint(), Some(checkpoint));
         assert!(reopened.recap_request().is_none());
         assert!(app.recap_after_checkpoint(&request, &written.result));
+    }
+
+    #[tokio::test]
+    async fn resume_dispatch_waits_for_saved_turn_identity_and_restore_requires_explicit_retry() {
+        use crate::pages::resume::{Command, Output};
+        use maka_protocol::turn::TurnResumePlan;
+        let (directory, mut state, mut app) = fixture();
+        app.apply(app.resume_commands()[0].0.clone());
+        let query = app.resume_request().unwrap();
+        app.resume_completed(
+            query,
+            Ok(Output::Plan(TurnResumePlan::Ready {
+                session_id: "a".into(),
+                source_run_id: "run".into(),
+                source_turn_id: "turn".into(),
+                source_runtime_event_high_water: 1,
+            })),
+        );
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 35))
+            .unwrap()
+            .draw(|frame| crate::view::draw(frame, &mut app))
+            .unwrap();
+        app.apply(Action::Resume(Command::Start));
+        let request = app.resume_request().unwrap();
+        let checkpoint = app.resume.checkpoint().unwrap();
+        state.submit_resume(request.clone());
+        state.start(&app);
+        let written = state.completed().await;
+        assert!(written.result.is_ok());
+        assert_eq!(written.resume, Some(request.clone()));
+        let saved: Snapshot = serde_json::from_value(read(&directory)).unwrap();
+        let mut reopened = App::new(
+            "/unused".into(),
+            I18n::new(LocalePreference::Auto, Locale::En),
+        );
+        saved.restore(&mut reopened, false).unwrap();
+        assert_eq!(
+            serde_json::to_value(reopened.resume.checkpoint()).unwrap(),
+            serde_json::to_value(Some(checkpoint)).unwrap()
+        );
+        assert!(reopened.resume_request().is_none());
+        assert!(app.resume_after_checkpoint(&request, &written.result));
     }
 }
