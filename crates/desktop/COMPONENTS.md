@@ -81,7 +81,7 @@ Each written component appears in a gallery window (`maka-desktop --gallery`) in
 
 ## Pitfall checklist
 
-Problems Waku hit and solved, restated as checks. Waku started on gpui-component and later replaced it in the transcript and markdown, so the gpui-kit items below are unverified until a UI test proves them; a failing item is fixed upstream where possible, otherwise the component is written here. Each item becomes a test.
+Problems Waku hit and solved, restated as checks. Waku started on gpui-component and later replaced it in the transcript and markdown; the gpui-kit items are checked against 0.6.6 in [Verification](#verification-gpui-kit-066). A failing item is fixed upstream where possible, otherwise covered here.
 
 ### Transcript list (gpui-kit `MessageScroller`)
 
@@ -131,3 +131,29 @@ Problems Waku hit and solved, restated as checks. Waku started on gpui-component
 - No animation redraws at display rate; animations use a low-rate timer that stops when idle, and stay still under reduce motion.
 - Notify the smallest enclosing view; never refresh the whole window.
 - A cached view needs a flex parent, or its height collapses to zero.
+
+## Verification (gpui-kit 0.6.6)
+
+Our tests are in [tests/gpui_kit.rs](tests/gpui_kit.rs); other evidence is gpui-kit's or GPUI's own tests and source. Paths are relative to each crate's `src/`.
+
+| Check | Result | Evidence | Route |
+|---|---|---|---|
+| Unmeasured rows are unknown | Pass in GPUI; gpui-kit's `is_scrolled_up` counts unknown as scrolled up, so the jump button can show for a frame while following is off | gpui-pre `list.rs` `test_follow_tail_reengagement_not_fooled_by_unmeasured_items`; gpui-component `message_scroller.rs:58-63` | one-line upstream fix |
+| Prompt pinned at top while the reply grows | Missing: `MessageScroller` fixes alignment and follow mode and has no end space | gpui-component `message_scroller.rs:36-38` | trailing spacer row sized to the viewport, or an upstream option |
+| User scroll, scroll back, scrollbar drag | Pass | gpui-pre `list.rs` `test_follow_tail_disengages_on_user_scroll`, `…_on_scrollbar_reposition`, `…_reengages_when_scrolled_back_to_bottom`, `…_reengages_after_scrollbar_drag_to_bottom_while_growing` | use as is |
+| Remeasure only changed rows; expand keeps position | Pass, when the caller remeasures the toggled row | `remeasure_items`, `splice`; gpui-pre `test_remeasure_item_preserves_scroll_offset` | caller calls `remeasure_items` |
+| Unclosed markers hidden while streaming | Fail: `Hello **bol` renders `**` | `an_unclosed_emphasis_does_not_show_its_marker_while_streaming` (ignored) | upstream |
+| Streamed parse equals full parse | Pass for tables, lists, fences | `a_streamed_table_renders_like_a_full_parse`, `a_streamed_list_and_fence_render_like_a_full_parse`; last block reparsed, gpui-base `text/state.rs:961` | use as is |
+| Fade is paint-only, refades past the common prefix, full opacity on attach | Pass | gpui-base `text/inline.rs:103`, `text/stream_fade.rs` `record`, `note_replace` | use as is |
+| Fade, `Spinner`, `ShimmerText` redraw rate | Fail: display rate while visible; the fade costs 3.5 s CPU per 17 s reply | measured on the spike; gpui-base `text/state.rs:761` | upstream (issue drafted); local patch meanwhile |
+| IME with multibyte text before the caret | Pass | gpui-base `input/base/state.rs` `test_ime_selection_is_relative_to_replacement_start` | use as is |
+| Undo per gesture, composition as one step | Pass | `test_ime_composition_undoes_as_one_unit`, `test_undo_manager_composition_cancel_leaves_no_entry`, `test_edit_after_composition_is_separate_undo` | use as is |
+| Enter family and modified deletes | Pass: `shift-`, `ctrl-`, `alt-backspace` bound; Enter submits or inserts by `submit_on_enter` | gpui-base `input/base/state.rs:133-150`, `:1887` | use as is |
+| Paste images and files | Hook exists; ordering is ours | gpui-component `input/textarea.rs:123` `on_paste` | composer |
+| Overlay takes focus on open | Pass | `an_opened_popover_takes_focus_so_escape_closes_it` | use as is |
+| Trigger click closes an open popover | Pass | `clicking_the_trigger_of_an_open_popover_closes_it` | use as is |
+| Selection across soft-wrapped rows | Not tested (needs drag geometry) | | check by hand |
+| Enter while an IME composes | Not tested (OS input path) | | check by hand with Pinyin |
+| Streaming code highlight stability | Not tested; highlighting needs the `tree-sitter` feature | | decide when code blocks are styled |
+
+Nothing found forces the transcript or markdown off gpui-kit. The gaps are the fade rate, marker mending and prompt pinning, all fixable upstream or in the list's row content.
