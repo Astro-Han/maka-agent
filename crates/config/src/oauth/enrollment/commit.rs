@@ -34,6 +34,7 @@ impl PreparedLogin {
             identity,
             credential,
             network: _,
+            catalog_revision,
         } = self;
         store
             .transaction(TransactionMode::Immediate, move |tx| {
@@ -71,9 +72,26 @@ impl PreparedLogin {
                         });
                     }
                     if before.as_ref() != Some(&after) {
+                        // Only initialize a new connection. A re-login, another
+                        // default choice or an explicit concurrent clear wins.
+                        let mut default = catalog.default_target.clone();
+                        if before.is_none()
+                            && default.is_none()
+                            && catalog.revision == catalog_revision
+                        {
+                            default = model_catalog::resolve(&after, None)?
+                                .into_iter()
+                                .find(|model| {
+                                    model.can_use_as_chat_default
+                                        && after.enabled_model_ids.contains(&model.id)
+                                })
+                                .map(|model| ConnectionTarget {
+                                    connection_id: after.connection_id.clone(),
+                                    model_id: model.id,
+                                });
+                        }
                         catalog::write_entry(tx, &after).await?;
-                        catalog::advance(tx, catalog.revision, catalog.default_target.as_ref())
-                            .await?;
+                        catalog::advance(tx, catalog.revision, default.as_ref()).await?;
                     }
                     vault::replace_secret(tx, &locator, &secret, now).await?;
                     vault::advance(tx).await?;

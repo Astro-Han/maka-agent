@@ -1420,8 +1420,13 @@ impl App {
 }
 
 impl Management {
-    pub(crate) fn is_removal(&self) -> bool {
-        self.dialog.as_ref().is_some_and(|d| d.kind == Kind::Remove)
+    pub(crate) fn destructive(&self) -> bool {
+        self.dialog.as_ref().is_some_and(|dialog| {
+            matches!(
+                dialog.kind,
+                Kind::Remove | Kind::Connection(connection::Change::Remove)
+            )
+        })
     }
     pub fn invalidate_geometry(&mut self) {
         if let Some(dialog) = &mut self.dialog {

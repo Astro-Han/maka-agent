@@ -160,6 +160,17 @@ async fn all_providers_publish_atomically_and_replay_bounded_receipts_after_reop
         }
         assert_eq!(snapshot.revision, before.revision + 1);
         assert!(snapshot.connections.contains(&after));
+        if before.default_target.is_none() {
+            assert_eq!(
+                snapshot.default_target,
+                Some(ConnectionTarget {
+                    connection_id: after.connection_id.clone(),
+                    model_id: after.enabled_model_ids[0].clone(),
+                })
+            );
+        } else {
+            assert_eq!(snapshot.default_target, before.default_target);
+        }
         let target = ConnectionCredentialTarget {
             connection_id: identity.connection_id.clone(),
             revision: after.revision,
@@ -252,3 +263,6 @@ mod recovery;
 
 #[path = "oauth_login/discovery.rs"]
 mod discovery;
+
+#[path = "oauth_login/inventory.rs"]
+mod inventory;

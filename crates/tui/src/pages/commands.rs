@@ -144,11 +144,17 @@ impl App {
                             if list.contains((mouse.column, mouse.row).into()) =>
                         {
                             state.dragging = false;
-                            self.palette = Some(if mouse.kind == MouseEventKind::ScrollDown {
-                                (selected + 1).min(last)
+                            let capacity = usize::from(list.height).max(1);
+                            state.top = if mouse.kind == MouseEventKind::ScrollDown {
+                                (state.top + 3).min(items.len().saturating_sub(capacity))
                             } else {
-                                selected.saturating_sub(1)
-                            });
+                                state.top.saturating_sub(3)
+                            };
+                            self.palette = Some(
+                                selected.clamp(state.top, (state.top + capacity - 1).min(last)),
+                            );
+                            self.hover = None;
+                            self.hover_area = None;
                         }
                         MouseEventKind::Down(MouseButton::Left)
                         | MouseEventKind::Drag(MouseButton::Left)
@@ -307,7 +313,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
             .begin_symbol(None)
             .end_symbol(None)
             .track_symbol(Some(app.chrome.symbol("│", "|")))
-            .thumb_symbol(app.chrome.symbol("┃", "#"))
+            .thumb_symbol(app.chrome.symbol("█", "#"))
             .track_style(Style::default().fg(colors.subtle))
             .thumb_style(Style::default().fg(colors.accent));
         let mut state = ScrollbarState::new(items.len() - capacity + 1)
@@ -358,9 +364,54 @@ mod tests {
             app.apply(Action::Palette);
             frame(&mut app, 52, 18);
             let list = app.command_palette.list.unwrap();
-            assert!(!app.input(mouse(MouseEventKind::Moved, list.x, list.y)).0);
+            let selected = app.palette;
+            assert_eq!(
+                app.input(mouse(MouseEventKind::Moved, list.x, list.y)),
+                (true, None)
+            );
+            assert_eq!(
+                app.palette, selected,
+                "hover highlights without changing the keyboard choice"
+            );
+            assert!(app.hover.is_some());
+            assert!(
+                !app.input(mouse(MouseEventKind::Moved, list.x, list.y)).0,
+                "unchanged hover does not redraw"
+            );
             let count = app.commands().len();
             assert!(count > usize::from(list.height));
+            app.input(mouse(MouseEventKind::ScrollDown, list.x, list.y));
+            frame(&mut app, 52, 18);
+            assert_eq!(
+                app.command_palette.top, 3,
+                "wheel scrolls immediately, not after selection reaches the bottom"
+            );
+            assert!(app.hover.is_none());
+            for _ in 0..count {
+                if app.hits.iter().any(|hit| hit.action == Action::Quit) {
+                    break;
+                }
+                app.input(mouse(MouseEventKind::ScrollDown, list.x, list.y));
+                frame(&mut app, 52, 18);
+            }
+            let quit = app
+                .hits
+                .iter()
+                .find(|hit| hit.action == Action::Quit)
+                .expect("quit is reachable by scrolling")
+                .area;
+            assert_eq!(
+                app.input(mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    quit.x,
+                    quit.y
+                ))
+                .1,
+                Some(Action::Quit)
+            );
+            assert_eq!(app.drafts["draft"].text(), "preserved draft");
+            app.apply(Action::Palette);
+            frame(&mut app, 52, 18);
             assert!(
                 app.input(mouse(
                     MouseEventKind::Down(MouseButton::Left),
@@ -431,6 +482,11 @@ mod tests {
             assert_eq!(app.drafts["draft"].text(), "preserved draft");
             app.apply(Action::Palette);
             assert!(app.command_palette.query.is_empty());
+            app.input(Event::Paste(app.i18n.text("command-quit")));
+            frame(&mut app, 52, 18);
+            assert_eq!(app.commands(), vec![(Action::Quit, "command-quit")]);
+            assert_eq!(app.input(key(KeyCode::Enter)).1, Some(Action::Quit));
+            app.apply(Action::Palette);
             app.input(Event::Paste("🦀".repeat(200)));
             assert!(app.command_palette.query.len() <= 512);
             frame(&mut app, 20, 6);

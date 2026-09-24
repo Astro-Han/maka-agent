@@ -505,6 +505,39 @@ mod tests {
             }
             let mut screen = Terminal::new(TestBackend::new(80, 24)).unwrap();
             screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+            let save = app
+                .hits
+                .iter()
+                .find(|hit| hit.action == Action::Manage(Command::Save))
+                .unwrap()
+                .area;
+            let normal = screen.backend().buffer()[(save.x, save.y)].style();
+            let hover = |x, y| {
+                Event::Mouse(crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Moved,
+                    column: x,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                })
+            };
+            assert!(app.input(hover(save.x, save.y)).0);
+            assert!(app.management.pending.is_none(), "hover never submits");
+            assert_eq!(
+                app.management.dialog.as_ref().unwrap().focus,
+                0,
+                "hover does not move keyboard focus"
+            );
+            screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+            let highlighted = screen.backend().buffer()[(save.x, save.y)].style();
+            assert_ne!(normal.bg, highlighted.bg);
+            if change == Change::Remove {
+                assert_eq!(normal.fg, Some(app.theme.colors().error));
+                assert_eq!(highlighted.fg, normal.fg);
+            }
+            assert!(app.input(hover(0, 0)).0);
+            assert!(app.hover.is_none(), "no hover leaks to the covered page");
+            screen.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+            assert_eq!(screen.backend().buffer()[(save.x, save.y)].style(), normal);
             app.input(Event::Key(KeyEvent::new(
                 KeyCode::Enter,
                 KeyModifiers::NONE,

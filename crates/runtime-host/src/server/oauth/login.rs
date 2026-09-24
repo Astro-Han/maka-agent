@@ -30,11 +30,56 @@ use std::{sync::atomic::Ordering, time::Duration};
 pub(super) async fn run(
     host: &Host,
     attempt: &Attempt,
-    ticket: PreparedLogin,
+    mut ticket: PreparedLogin,
     registration: Arc<Registration>,
 ) -> Phase {
     let result = authorize(host, attempt, &ticket, registration).await;
+    if let Ok(tokens) = &result {
+        // Inventory is optional enrichment, not another authorization boundary.
+        // Failure must not discard an already spent grant. No database/admission
+        // lock is held during this bounded, cancellable read.
+        tokio::select! {
+            biased;
+            _ = attempt.cancellation.cancelled() => {}
+            _ = host.draining.cancelled() => {}
+            _ = discover(&mut ticket, tokens) => {}
+        }
+    }
     settle(host, attempt, ticket, result).await
+}
+
+async fn discover(ticket: &mut PreparedLogin, tokens: &maka_model::oauth::Tokens) {
+    use maka_model::connection::DiscoveryRequest;
+    let Ok(facts) = maka_config::model_catalog::provider_facts(&ticket.connection().provider_type)
+    else {
+        return;
+    };
+    let Some(kind) = facts.native_model_list() else {
+        return;
+    };
+    let Ok(client) = super::super::connection_effects::client(ticket.network_configuration())
+    else {
+        return;
+    };
+    let endpoint = ticket
+        .connection()
+        .base_url
+        .as_deref()
+        .unwrap_or(&facts.base_url);
+    let Ok(models) = client
+        .fetch(DiscoveryRequest {
+            kind,
+            base_url: endpoint,
+            credential: &tokens.access_token,
+            headers: &Default::default(),
+        })
+        .await
+    else {
+        return;
+    };
+    if let Ok(now) = super::super::configuration::now() {
+        let _ = ticket.discovered_models(models, now);
+    }
 }
 
 async fn settle(

@@ -887,7 +887,7 @@ fn control(
     }
     let enabled = app.enabled(&action);
     let destructive = matches!(action, Action::Manage(crate::pages::manage::Command::Save))
-        && app.management.is_removal();
+        && app.management.destructive();
     let caution = matches!(action, Action::Manage(crate::pages::manage::Command::Save))
         && app.sandbox_disabling();
     let style = if !enabled {

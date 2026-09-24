@@ -1169,7 +1169,30 @@ impl App {
         if keyboard && let Some(reader) = self.chat.reader_mut() {
             reader.text_selection.end_drag();
         }
-        let outcome = self.dispatch_input(event);
+        // Modal handlers own activation/focus, but all shared controls need the
+        // same hover feedback. Only the top overlay's rendered hits are eligible.
+        let mut hover_changed = false;
+        if self.modal_area.is_some()
+            && let Event::Mouse(mouse) = &event
+            && mouse.kind == MouseEventKind::Moved
+        {
+            let point = Position::new(mouse.column, mouse.row);
+            let hit = self.hits.iter().rev().find(|hit| {
+                self.modal_area.is_some_and(|area| area.contains(point))
+                    && hit.area.contains(point)
+                    && self.enabled(&hit.action)
+            });
+            let target = hit.map(|hit| hit.action.clone());
+            let area = hit.map(|hit| hit.area);
+            hover_changed = self.hover != target || self.hover_area != area;
+            if hover_changed {
+                self.hover = target;
+                self.hover_area = area;
+                self.hover_since = None; // Feedback, not an unsolicited tooltip.
+            }
+        }
+        let mut outcome = self.dispatch_input(event);
+        outcome.0 |= hover_changed;
         if mouse
             && outcome.0
             && self.focus == Focus::Transcript

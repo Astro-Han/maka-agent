@@ -57,6 +57,7 @@ pub struct PreparedLogin {
     identity: ConnectionIdentity,
     credential: Option<CredentialVersionBasis>,
     network: NetworkConfiguration,
+    catalog_revision: u64,
 }
 
 impl ConfigurationStore {
@@ -146,6 +147,7 @@ impl ConfigurationStore {
                     identity,
                     credential,
                     network,
+                    catalog_revision: catalog.revision,
                 })))
             })
         })
@@ -162,6 +164,40 @@ impl ConfigurationStore {
 }
 
 impl PreparedLogin {
+    /// Apply authenticated inventory before publishing the login. Reauthorization
+    /// refreshes facts but never replaces the user's enabled-model selection.
+    pub fn discovered_models(&mut self, models: Vec<ModelInfo>, now: u64) -> Result<()> {
+        validation::revision(now, false).map_err(ConfigError::Invalid)?;
+        if models.is_empty() || models.len() > 2048 {
+            return Err(ConfigError::Invalid(
+                "discovery requires 1..2048 models".into(),
+            ));
+        }
+        for model in &models {
+            model.validate().map_err(ConfigError::Invalid)?;
+        }
+        let mut after = self.after.clone();
+        after.models = models;
+        after.model_source = Some(ModelDiscoverySource::Fetched);
+        after.models_fetched_at = Some(now);
+        if self.before.is_none() {
+            after.enabled_model_ids = model_catalog::resolve(&after, None)?
+                .into_iter()
+                .filter(|model| model.can_use_as_chat_default)
+                .filter(|model| after.models.iter().any(|info| info.id == model.id))
+                .map(|model| model.id)
+                .collect();
+        } else if self
+            .before
+            .as_ref()
+            .is_some_and(|before| before.revision == after.revision)
+        {
+            after.revision = catalog::next_revision(after.revision)?;
+        }
+        self.after = after;
+        Ok(())
+    }
+
     pub fn identity(&self) -> &ConnectionIdentity {
         &self.identity
     }
