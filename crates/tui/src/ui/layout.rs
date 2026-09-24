@@ -386,6 +386,7 @@ fn distribute(sizes: &[(Size, u16)], available: u16, gap: u16) -> Vec<u16> {
         .iter()
         .map(|(size, content)| match size {
             Size::Fixed(n) => *n,
+            Size::Upto(n) => (*content).min(*n),
             Size::Content => *content,
             Size::Fill => 0,
         })
@@ -397,6 +398,7 @@ fn distribute(sizes: &[(Size, u16)], available: u16, gap: u16) -> Vec<u16> {
         .iter()
         .map(|(size, content)| match size {
             Size::Fixed(n) => *n,
+            Size::Upto(n) => (*content).min(*n),
             Size::Content => *content,
             Size::Fill => {
                 let extra = u16::from(spare > 0);
@@ -413,6 +415,7 @@ pub(super) fn height<M>(node: &Node<M>, width: u16) -> u16 {
             .iter()
             .map(|child| match child.size {
                 Size::Fixed(n) => n,
+                Size::Upto(n) => height(child, width).min(n),
                 _ => height(child, width),
             })
             .fold(

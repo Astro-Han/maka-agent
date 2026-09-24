@@ -18,11 +18,10 @@
  */
 
 mod view;
-pub(super) use view::draw;
+pub(super) use view::sheet;
 
 use super::{Command as Manage, Entity, Target};
 use crate::app::{Action, App};
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use maka_protocol::project::{Location, PageItem, Query, QueryResult, View};
 use std::collections::VecDeque;
 
@@ -31,7 +30,6 @@ pub enum Command {
     Refresh,
     Previous,
     Next,
-    Scroll(bool),
 }
 impl Command {
     pub fn label(&self) -> &'static str {
@@ -39,7 +37,6 @@ impl Command {
             Self::Refresh => "command-refresh",
             Self::Previous => "sessions-previous",
             Self::Next => "sessions-next",
-            Self::Scroll(_) => "project-locations",
         }
     }
 }
@@ -65,10 +62,6 @@ pub(super) struct Locations {
     restart: bool,
     loading: bool,
     error: Option<&'static str>,
-    offset: usize,
-    max_offset: usize,
-    focus: usize, // Content, refresh, previous, next, close.
-    hovered: Option<Manage>,
 }
 impl Locations {
     pub fn new(generation: u64) -> Self {
@@ -87,19 +80,11 @@ impl Locations {
             restart: false,
             loading: false,
             error: None,
-            offset: 0,
-            max_offset: 0,
-            focus: 0,
-            hovered: None,
         }
     }
     pub fn refresh(&mut self) {
         self.restart = true;
         self.requested = true;
-    }
-    pub fn invalidate_geometry(&mut self) {
-        self.hovered = None;
-        self.max_offset = 0;
     }
     fn ready(&self) -> bool {
         !self.loading && !self.requested && self.error.is_none()
@@ -118,7 +103,6 @@ impl Locations {
             self.cursor = None;
             self.next = None;
             self.previous.clear();
-            self.offset = 0;
         }
         self.loading = true;
         self.requested = false;
@@ -189,7 +173,6 @@ impl Locations {
                         .last()
                         .is_some_and(|(index, _)| index + 1 < self.count)
                 });
-                self.offset = 0;
             }
             _ => unreachable!("client enforces locations reply"),
         }
@@ -213,14 +196,6 @@ impl App {
                 !locations.loading && !locations.requested && !locations.previous.is_empty()
             }
             Command::Next => locations.ready() && locations.next.is_some(),
-            Command::Scroll(down) => {
-                locations.ready()
-                    && if *down {
-                        locations.offset < locations.max_offset
-                    } else {
-                        locations.offset > 0
-                    }
-            }
         }
     }
     pub(super) fn locations_action(&mut self, command: Command) -> Option<Action> {
@@ -239,16 +214,7 @@ impl App {
                 locations.cursor = locations.previous.pop_back()?;
                 locations.requested = true;
             }
-            Command::Scroll(down) => {
-                locations.offset = if down {
-                    (locations.offset + 3).min(locations.max_offset)
-                } else {
-                    locations.offset.saturating_sub(3)
-                };
-            }
         }
-        locations.hovered = None;
-        self.hits.clear();
         None
     }
     pub fn locations_request(&mut self) -> Option<Request> {
@@ -297,93 +263,13 @@ impl App {
         };
         locations.complete(id, result);
     }
-    pub(super) fn locations_input(&mut self, event: Event) -> (bool, Option<Action>) {
-        let dialog = self.management.dialog.as_mut().expect("locations dialog");
-        let locations = dialog.locations.as_mut().expect("locations reader");
-        if matches!(&event,Event::Key(k) if k.kind!=KeyEventKind::Release) {
-            locations.hovered = None;
-        }
-        let command = match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
-                KeyCode::Esc => Some(Manage::Close),
-                KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return (true, Some(Action::Quit));
-                }
-                _ if !dialog.visible => None,
-                KeyCode::Tab => {
-                    locations.focus = (locations.focus + 1) % 5;
-                    return (true, None);
-                }
-                KeyCode::BackTab => {
-                    locations.focus = (locations.focus + 4) % 5;
-                    return (true, None);
-                }
-                KeyCode::Up => Some(Manage::Locations(Command::Scroll(false))),
-                KeyCode::Down => Some(Manage::Locations(Command::Scroll(true))),
-                KeyCode::Home | KeyCode::End if locations.ready() => {
-                    locations.offset = if key.code == KeyCode::Home {
-                        0
-                    } else {
-                        locations.max_offset
-                    };
-                    return (true, None);
-                }
-                KeyCode::PageUp => Some(Manage::Locations(Command::Previous)),
-                KeyCode::PageDown => Some(Manage::Locations(Command::Next)),
-                KeyCode::F(5) => Some(Manage::Locations(Command::Refresh)),
-                KeyCode::Enter => Some(focused(locations)),
-                _ => None,
-            },
-            Event::Mouse(mouse) if dialog.visible => {
-                let hit = self
-                    .hits
-                    .iter()
-                    .rev()
-                    .find(|h| h.area.contains((mouse.column, mouse.row).into()))
-                    .and_then(|h| match &h.action {
-                        Action::Manage(command) => Some(command.clone()),
-                        _ => None,
-                    });
-                match mouse.kind {
-                    MouseEventKind::Moved => {
-                        let changed = locations.hovered != hit;
-                        locations.hovered = hit;
-                        return (changed, None);
-                    }
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        hit.filter(|c| !matches!(c, Manage::Locations(Command::Scroll(_))))
-                    }
-                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-                        if matches!(hit, Some(Manage::Locations(Command::Scroll(_)))) =>
-                    {
-                        Some(Manage::Locations(Command::Scroll(
-                            mouse.kind == MouseEventKind::ScrollDown,
-                        )))
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        };
-        (
-            command.is_some(),
-            command.and_then(|c| self.apply(Action::Manage(c))),
-        )
-    }
-}
-fn focused(locations: &Locations) -> Manage {
-    match locations.focus {
-        1 => Manage::Locations(Command::Refresh),
-        2 => Manage::Locations(Command::Previous),
-        3 => Manage::Locations(Command::Next),
-        _ => Manage::Close,
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Locale, LocalePreference, app::ConnectionState, i18n::I18n};
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
 
     fn project(index: u64, id: &str, count: u64) -> PageItem {
@@ -547,9 +433,24 @@ mod tests {
                 None,
             ),
         );
+        // Cells a wide glyph covers keep stale symbols in the test backend.
+        let screen = |terminal: &Terminal<TestBackend>| -> String {
+            let buffer = terminal.backend().buffer();
+            let mut text = String::new();
+            for y in 0..buffer.area.height {
+                let mut x = 0;
+                while x < buffer.area.width {
+                    let symbol = buffer[(x, y)].symbol();
+                    text.push_str(symbol);
+                    x += (unicode_width::UnicodeWidthStr::width(symbol) as u16).max(1);
+                }
+                text.push('\n');
+            }
+            text
+        };
         for locale in Locale::ALL {
             app.i18n = I18n::new(LocalePreference::Explicit(locale), Locale::En);
-            for (width, height) in [(80, 24), (42, 13), (20, 8)] {
+            for (width, height) in [(80, 24), (42, 16), (20, 8)] {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                 terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
                 assert!(
@@ -557,13 +458,15 @@ mod tests {
                     "a location view cannot become a mutation"
                 );
                 if width >= 42 {
-                    app.input(Event::Key(crossterm::event::KeyEvent::new(
-                        KeyCode::Home,
-                        KeyModifiers::NONE,
-                    )));
-                    assert!(app.locations_enabled(&Command::Scroll(true)));
-                    app.apply(Action::Manage(Manage::Locations(Command::Scroll(true))));
-                    assert!(app.locations_enabled(&Command::Scroll(false)));
+                    // The viewer holds focus and scrolls the long path.
+                    let top = screen(&terminal);
+                    app.input(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
+                    terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+                    assert_ne!(screen(&terminal), top, "End reaches the rest of the path");
+                    app.input(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+                    terminal.draw(|f| crate::view::draw(f, &mut app)).unwrap();
+                    assert_eq!(screen(&terminal), top, "Home returns to its start");
+                    assert!(app.locations_enabled(&Command::Refresh));
                 } else {
                     assert!(!app.locations_enabled(&Command::Refresh));
                 }

@@ -264,13 +264,10 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    /// Presented as a kernel sheet. OAuth, enabled models, locations and
-    /// the directory browser still draw their own sub-view.
+    /// Presented as a kernel sheet. OAuth, enabled models and the directory
+    /// browser still draw their own sub-view.
     pub(crate) fn in_sheet(&self) -> bool {
-        self.kind != Kind::Oauth
-            && self.enabled_models.is_none()
-            && self.locations.is_none()
-            && self.browser.is_none()
+        self.kind != Kind::Oauth && self.enabled_models.is_none() && self.browser.is_none()
     }
 }
 
@@ -1284,14 +1281,6 @@ impl App {
             .management
             .dialog
             .as_ref()
-            .is_some_and(|d| d.locations.is_some())
-        {
-            return self.locations_input(event);
-        }
-        if self
-            .management
-            .dialog
-            .as_ref()
             .is_some_and(|d| d.browser.is_some())
         {
             return self.directory_input(event);
@@ -1313,7 +1302,17 @@ impl App {
             && let Some(command) = self.management.dialog.as_ref().and_then(|dialog| {
                 let chooser = dialog.chooser.is_some();
                 let models = dialog.models.is_some();
+                let locations = dialog.locations.is_some();
                 match key.code {
+                    KeyCode::F(5) if locations => {
+                        Some(Command::Locations(locations::Command::Refresh))
+                    }
+                    KeyCode::PageUp if locations => {
+                        Some(Command::Locations(locations::Command::Previous))
+                    }
+                    KeyCode::PageDown if locations => {
+                        Some(Command::Locations(locations::Command::Next))
+                    }
                     KeyCode::F(5) if models => Some(Command::Models(models::Command::Refresh)),
                     KeyCode::PageUp if models => Some(Command::Models(models::Command::Previous)),
                     KeyCode::PageDown if models => Some(Command::Models(models::Command::Next)),
@@ -1442,9 +1441,6 @@ impl Management {
             dialog.editor.invalidate_geometry();
             if let Some(browser) = &mut dialog.browser {
                 browser.invalidate_geometry();
-            }
-            if let Some(locations) = &mut dialog.locations {
-                locations.invalidate_geometry();
             }
             if let Some(models) = &mut dialog.enabled_models {
                 models.invalidate_geometry();

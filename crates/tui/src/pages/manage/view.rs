@@ -110,6 +110,9 @@ pub(crate) fn sheet(app: &App) -> Option<Sheet<Action>> {
     if dialog.models.is_some() {
         return Some(super::models::sheet(app, dialog));
     }
+    if dialog.locations.is_some() {
+        return Some(super::locations::sheet(app, dialog));
+    }
     let busy = app.management.pending.is_some();
     let kind = dialog.kind;
     let label = kind.label(&dialog.target);
@@ -336,8 +339,6 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
         super::oauth::draw(frame, app, area, base);
     } else if dialog.enabled_models.is_some() {
         super::enabled_models::draw(frame, app, area, base);
-    } else if dialog.locations.is_some() {
-        super::locations::draw(frame, app, area, base);
     } else if dialog.browser.is_some() {
         super::directory::draw(frame, app, area, base);
     }

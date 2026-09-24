@@ -517,6 +517,61 @@ mod tests {
     }
 
     #[test]
+    fn viewers_grow_to_their_cap_scroll_by_keyboard_and_otherwise_pass_focus_on() {
+        let viewer = |count: usize| {
+            let rows = (0..count)
+                .map(|index| {
+                    Node::text(
+                        index.to_string(),
+                        vec![(format!("line {index}"), Tone::Normal)],
+                    )
+                })
+                .collect();
+            Sheet::new("viewer", "Viewer")
+                .body(
+                    Node::scroll("view", Node::column("rows", rows))
+                        .on(On::Scroll)
+                        .size(Size::Upto(4)),
+                )
+                .button("close", "Close".into(), Role::Normal, Message::Cancel, true)
+        };
+        let shown = |terminal: &Terminal<TestBackend>, text: &str| {
+            let buffer = terminal.backend().buffer();
+            (0..buffer.area.height).any(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    .contains(text)
+            })
+        };
+        let mut layer = Layer::default();
+        let (_, terminal) = draw(&mut layer, viewer(10), 60, 24);
+        assert!(
+            shown(&terminal, "line 3") && !shown(&terminal, "line 4"),
+            "capped at 4 rows"
+        );
+        layer.input(&key(KeyCode::Down), Message::Dismiss, None);
+        let (_, terminal) = draw(&mut layer, viewer(10), 60, 24);
+        assert!(shown(&terminal, "line 4") && !shown(&terminal, "line 0"));
+        layer.input(&key(KeyCode::End), Message::Dismiss, None);
+        let (_, terminal) = draw(&mut layer, viewer(10), 60, 24);
+        assert!(shown(&terminal, "line 9"));
+        // Short content has nothing to scroll; Tab still moves on to Close.
+        let mut layer = Layer::default();
+        let (_, terminal) = draw(&mut layer, viewer(2), 60, 24);
+        assert!(shown(&terminal, "line 1"));
+        let down = layer.input(&key(KeyCode::Down), Message::Dismiss, None);
+        assert!(down.message.is_none() && !down.redraw);
+        layer.input(&key(KeyCode::Tab), Message::Dismiss, None);
+        assert_eq!(
+            layer
+                .input(&key(KeyCode::Enter), Message::Dismiss, None)
+                .message,
+            Some(Message::Cancel)
+        );
+    }
+
+    #[test]
     fn a_sheet_that_does_not_fit_presents_nothing_to_activate() {
         let mut layer = Layer::default();
         draw(&mut layer, sheet("a", true), 80, 24);

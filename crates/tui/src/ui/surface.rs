@@ -161,10 +161,9 @@ impl<M: Clone> Surface<M> {
             self.hover = None;
         }
         let colors = context.colors;
-        for item in items
-            .iter()
-            .filter(|item| item.enabled && !item.slot && self.popover.is_none())
-        {
+        for item in items.iter().filter(|item| {
+            item.enabled && !item.slot && !matches!(item.on, On::Scroll) && self.popover.is_none()
+        }) {
             // Keyboard focus and the pointer stay distinguishable: focus takes
             // the selection, hover only lifts the row.
             let style = if context.focused && Some(&item.id) == self.focus.as_ref() {
@@ -451,8 +450,10 @@ impl<M: Clone> Surface<M> {
                 };
                 let id = item.id.clone();
                 let outcome = match &item.on {
-                    // Clicking into a field places focus; only Enter submits.
+                    // Clicking into a field or a viewer places focus; only
+                    // Enter submits.
                     On::Activate(_) if item.slot => Outcome::handled(true),
+                    On::Scroll => Outcome::handled(true),
                     On::Activate(message) => Outcome::emit(message.clone()),
                     On::Choose { current, .. } => {
                         self.popover = Some(Popover {
@@ -506,7 +507,7 @@ impl<M: Clone> Surface<M> {
                 On::Choose { choices, .. } => {
                     choices.get(index).map(|choice| choice.action.clone())
                 }
-                On::Activate(_) => None,
+                On::Activate(_) | On::Scroll => None,
             });
         match message {
             Some(message) => Outcome::emit(message),
@@ -536,6 +537,41 @@ impl<M: Clone> Surface<M> {
         let current = stops
             .iter()
             .position(|index| Some(&item(*index).id) == self.focus.as_ref());
+        // A focused viewer scrolls; with nothing to scroll the keys move focus.
+        if let Some(at) = current
+            && matches!(item(stops[at]).on, On::Scroll)
+            && let Some(scroller) = committed
+                .scrollers
+                .iter()
+                .find(|scroller| scroller.id == item(stops[at]).id)
+        {
+            let maximum = scroller.content.saturating_sub(scroller.viewport.height);
+            let page = scroller.viewport.height.saturating_sub(1).max(1);
+            if maximum > 0 {
+                let offset = self.offsets.entry(scroller.id.clone()).or_default();
+                let before = *offset;
+                *offset = match key.code {
+                    KeyCode::Up => offset.saturating_sub(1),
+                    KeyCode::Down => (*offset + 1).min(maximum),
+                    KeyCode::PageUp => offset.saturating_sub(page),
+                    KeyCode::PageDown => (*offset + page).min(maximum),
+                    KeyCode::Home => 0,
+                    KeyCode::End => maximum,
+                    _ => *offset,
+                };
+                if matches!(
+                    key.code,
+                    KeyCode::Up
+                        | KeyCode::Down
+                        | KeyCode::PageUp
+                        | KeyCode::PageDown
+                        | KeyCode::Home
+                        | KeyCode::End
+                ) {
+                    return Outcome::handled(*offset != before);
+                }
+            }
+        }
         let target = match (key.code, current) {
             (KeyCode::Tab | KeyCode::BackTab, _) => {
                 let backwards =
@@ -590,6 +626,7 @@ impl<M: Clone> Surface<M> {
                         });
                         Outcome::handled(true)
                     }
+                    On::Scroll => Outcome::handled(false),
                 };
             }
             (
@@ -699,7 +736,7 @@ impl<M: Clone> Surface<M> {
             .and_then(|committed| committed.items.iter().find(|item| item.id == popover.owner))
             .map_or(0, |item| match &item.on {
                 On::Choose { choices, .. } => choices.len(),
-                On::Activate(_) => 0,
+                On::Activate(_) | On::Scroll => 0,
             });
         match code {
             KeyCode::Up => {

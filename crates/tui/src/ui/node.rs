@@ -24,6 +24,9 @@ use std::borrow::Cow;
 pub enum Size {
     Content,
     Fixed(u16),
+    /// The content's size, but no more than this: a list that grows to a
+    /// cap and scrolls beyond it.
+    Upto(u16),
     Fill,
 }
 
@@ -76,6 +79,9 @@ pub enum On<M> {
         choices: Vec<Choice<M>>,
         current: Option<usize>,
     },
+    /// Set on a Scroll node: a read-only viewport that takes keyboard focus
+    /// and scrolls with the arrows, Home and End.
+    Scroll,
 }
 
 pub enum Kind<M> {
