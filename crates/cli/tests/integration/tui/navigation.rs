@@ -35,7 +35,7 @@ fn restart_keeps_forward_history_and_keyboard_control_without_replaying_actions(
     );
     host.wait_for_registration();
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    tui.wait_for("No sessions yet.");
+    tui.wait_for("No sessions yet");
     tui.click_text("Settings");
     tui.wait_for("Maka dark ▾");
     // Interface category, its first row, then Icons; the footer names the focus.
@@ -63,8 +63,8 @@ fn restart_keeps_forward_history_and_keyboard_control_without_replaying_actions(
     reopened.send(b"\x1b[1;3D");
     reopened.wait_for("ASCII v");
     reopened.send(b"\x1b[1;3D");
-    reopened.wait_for("No sessions yet.");
-    reopened.click_text("Host");
+    reopened.wait_for("No sessions yet");
+    reopened.command("Open Host connection");
     reopened.wait_for("Host epoch:");
     reopened.send(b"\x1b[1;3C"); // New destination replaces the previous forward branch.
     reopened.close_terminal();
@@ -73,7 +73,7 @@ fn restart_keeps_forward_history_and_keyboard_control_without_replaying_actions(
     let mut branched = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     branched.wait_for("Host epoch:");
     branched.send(b"\x1b[1;3D");
-    branched.wait_for("No sessions yet.");
+    branched.wait_for("No sessions yet");
     branched.close_terminal();
     branched.finish();
     host.retire_registered();

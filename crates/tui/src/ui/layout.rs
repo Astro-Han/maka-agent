@@ -224,7 +224,9 @@ impl<'a, M> Pass<'a, M> {
                     x = x.saturating_add(width).saturating_add(gap);
                 }
             }
-            Kind::Text { spans, align } => self.text(&spans, align, area, visible, scope.style),
+            Kind::Text { spans, align, clip } => {
+                self.text(&spans, align, clip, area, visible, scope.style)
+            }
             Kind::Rule => {
                 let symbol = match (scope.axis, self.ascii) {
                     (Axis::Horizontal, true) => "|",
@@ -280,24 +282,29 @@ impl<'a, M> Pass<'a, M> {
         &mut self,
         spans: &[(String, Tone)],
         align: Align,
+        clip: bool,
         area: Area,
         visible: Rect,
         style: Option<Style>,
     ) {
-        for (row, line) in wrap(spans, area.width).into_iter().enumerate() {
+        let lines = if clip {
+            vec![truncate(spans, area.width)]
+        } else {
+            wrap(spans, area.width)
+        };
+        for (row, line) in lines.into_iter().enumerate() {
             let y = area.y + row as i32;
             if y < i32::from(visible.top()) || y >= i32::from(visible.bottom()) {
                 continue;
             }
             let y = y as u16;
             let used: u16 = line.iter().map(|(text, _)| text.width() as u16).sum();
+            let spare = area.width.saturating_sub(used);
             let mut x = match align {
                 Align::Start => area.x,
-                Align::End => area
-                    .x
-                    .saturating_add(area.width)
-                    .saturating_sub(used)
-                    .max(area.x),
+                // Odd remainders sit left of center, like shell buttons.
+                Align::Center => area.x + spare / 2,
+                Align::End => area.x + spare,
             };
             for (text, tone) in line {
                 let base = self.tone(tone);
@@ -321,7 +328,9 @@ impl<'a, M> Pass<'a, M> {
                 .add_modifier(Modifier::BOLD),
             Tone::Muted => Style::default().fg(colors.muted),
             Tone::Subtle => Style::default().fg(colors.subtle),
+            Tone::Accent => Style::default().fg(colors.accent),
             Tone::Warning => Style::default().fg(colors.warning),
+            Tone::Hue(index) => Style::default().fg(crate::view::tone::hue(index, colors)),
         }
     }
 
@@ -403,6 +412,7 @@ pub(super) fn height<M>(node: &Node<M>, width: u16) -> u16 {
                 .max()
                 .unwrap_or(0)
         }
+        Kind::Text { clip: true, .. } => 1,
         Kind::Text { spans, .. } => wrap(spans, width).len() as u16,
         Kind::Rule => 1,
         Kind::Scroll(child) => height(child, width.saturating_sub(1)),
@@ -420,6 +430,40 @@ pub(super) fn width<M>(node: &Node<M>) -> u16 {
         Kind::Rule => 1,
         Kind::Scroll(child) => width(child).saturating_add(1),
     }
+}
+
+/// One row of at most `width` cells, ending in an ellipsis when it overflows.
+fn truncate(spans: &[(String, Tone)], width: u16) -> Vec<(String, Tone)> {
+    let width = usize::from(width);
+    let total: usize = spans
+        .iter()
+        .map(|(text, _)| crate::view::safe(text).width())
+        .sum();
+    let budget = if total > width {
+        width.saturating_sub(1)
+    } else {
+        width
+    };
+    let (mut line, mut used) = (vec![], 0);
+    'spans: for (text, tone) in spans {
+        let mut kept = String::new();
+        for grapheme in crate::view::safe(text).graphemes(true) {
+            if used + grapheme.width() > budget {
+                if !kept.is_empty() {
+                    line.push((kept, *tone));
+                }
+                break 'spans;
+            }
+            used += grapheme.width();
+            kept.push_str(grapheme);
+        }
+        line.push((kept, *tone));
+    }
+    if total > width && width > 0 {
+        let tone = line.last().map_or(Tone::Subtle, |(_, tone)| *tone);
+        line.push(("…".into(), tone));
+    }
+    line
 }
 
 /// Greedy wrapping that keeps words whole when they fit a line; wide
@@ -479,6 +523,17 @@ mod tests {
             vec![4, 0, 3, 0],
             "no underflow when space runs out"
         );
+    }
+
+    #[test]
+    fn clipped_text_ends_with_an_ellipsis_at_grapheme_boundaries() {
+        let text = |line: Vec<(String, Tone)>| -> String {
+            line.into_iter().map(|(text, _)| text).collect()
+        };
+        let spans = [("设计复核 review".into(), Tone::Normal)];
+        assert_eq!(text(truncate(&spans, 20)), "设计复核 review");
+        assert_eq!(text(truncate(&spans, 8)), "设计复…");
+        assert_eq!(text(truncate(&spans, 9)), "设计复核…");
     }
 
     #[test]

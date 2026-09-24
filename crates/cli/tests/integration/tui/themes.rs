@@ -36,7 +36,7 @@ fn visual_custom_theme_saves_reopens_and_rejects_external_changes_without_losing
     host.wait_for_registration();
     let path = directory.path().join("tui-state/theme.json");
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    tui.wait_for("No sessions yet.");
+    tui.wait_for("No sessions yet");
     tui.click_text("Settings");
     tui.wait_for("Customize theme");
     tui.click_text("Customize theme");

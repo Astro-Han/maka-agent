@@ -30,10 +30,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-mod activity;
+pub(crate) mod activity;
 mod queue;
 mod session;
-mod tabs;
 pub(crate) mod tone;
 
 pub fn safe(text: &str) -> String {
@@ -222,51 +221,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if nav_width > 0 {
         let nav = Block::default()
             .borders(Borders::RIGHT)
-            .border_style(Style::default().fg(app.theme.colors().subtle));
-        let inner = nav.inner(columns[0]);
+            .border_style(Style::default().fg(app.theme.colors().border));
+        let inner = nav.inner(columns[0]).inner(Margin::new(1, 1));
         frame.render_widget(nav, columns[0]);
-        let spacing = if inner.height >= 12 { 2 } else { 1 };
-        for (index, route) in Route::ALL.into_iter().enumerate() {
-            let rect = Rect::new(
-                inner.x,
-                inner.y + index as u16 * spacing + 1,
-                inner.width,
-                1,
-            )
-            .intersection(inner);
-            let action = Action::Visit(route.clone());
-            let symbol = icon(app, &action);
-            let title = if nav_width >= 12 {
-                format!("{symbol} {}", app.i18n.text(route.title()))
-            } else {
-                symbol.to_owned()
-            };
-            list_item(
-                frame,
-                app,
-                rect,
-                &title,
-                action,
-                app.focus == Focus::Navigation && app.selected_nav == index,
-            );
-            // Active route remains discoverable without relying only on color.
-            if route == app.navigation.current().section() && !rect.is_empty() {
-                frame.buffer_mut()[(rect.right() - 1, rect.y)]
-                    .set_symbol(app.chrome.symbol("▏", ">"));
-            }
-        }
-        tabs::draw(
-            frame,
-            app,
-            Rect::new(
-                inner.x,
-                inner.y + Route::ALL.len() as u16 * spacing + 1,
-                inner.width,
-                inner
-                    .height
-                    .saturating_sub(Route::ALL.len() as u16 * spacing + 1),
-            ),
-        );
+        crate::pages::sidebar::draw(frame, app, inner);
+    } else {
+        app.sidebar.surface.invalidate();
     }
 
     let page = columns[1].inner(Margin::new(1, 0));
@@ -275,7 +235,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         Route::Extensions => crate::pages::extensions::draw(frame, app, page),
         Route::Connections => crate::pages::connections::draw(frame, app, page),
         Route::Projects => crate::pages::projects::draw(frame, app, page),
-        Route::Workspace | Route::Inbox => crate::pages::sessions::draw_catalog(frame, app, page),
+        Route::Workspace => crate::pages::home::draw(frame, app, page, nav_width > 0),
+        Route::Inbox => crate::pages::sessions::draw_catalog(frame, app, page),
         Route::Session(id) => session::draw(frame, app, page, &id),
         Route::Settings => crate::pages::settings::draw(frame, app, page),
         _ => frame.render_widget(
@@ -285,11 +246,6 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     }
     crate::files::resolve_hits(app);
     let focused = match app.focus {
-        Focus::Navigation => app
-            .nav_routes()
-            .get(app.selected_nav)
-            .cloned()
-            .map(Action::Visit),
         Focus::Page => app.page_actions().get(app.selected_control).cloned(),
         _ => None,
     };
@@ -333,9 +289,15 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         app.i18n.text("chat-selection-help")
     } else if let Some(action) = app.hover.as_ref() {
         action_label(app, action)
-    } else if let Some(hint) = settings
-        .then(|| app.settings.surface.hint(app.focus == Focus::Page))
-        .flatten()
+    } else if let Some(hint) = app
+        .sidebar
+        .surface
+        .hint(app.focus == Focus::Navigation)
+        .or_else(|| match app.navigation.current() {
+            Route::Settings => app.settings.surface.hint(app.focus == Focus::Page),
+            Route::Workspace => app.home.surface.hint(app.focus == Focus::Page),
+            _ => None,
+        })
     {
         hint.to_owned()
     } else if let Some(action) = focused.as_ref() {
@@ -485,6 +447,10 @@ fn draw_tooltip(frame: &mut Frame<'_>, app: &mut App, area: Rect, base: Style) {
     }
     app.hits
         .retain(|hit| hit.area.intersection(popup).is_empty());
+    // Kernel surfaces drawn underneath lose pointer targets the tooltip covers.
+    app.sidebar.surface.occlude(popup);
+    app.settings.surface.occlude(popup);
+    app.home.surface.occlude(popup);
     clear_overlay(frame, popup);
     frame.render_widget(
         Paragraph::new(label)
@@ -633,6 +599,7 @@ pub(crate) fn icon(app: &App, action: &Action) -> &'static str {
         Action::ToggleSymbols => ("◇", "A"),
         Action::ToggleMotion => ("≈", "M"),
         Action::Settings(_) => ("⛭", "S"),
+        Action::Sidebar(_) | Action::Home(_) => ("≡", "="),
         Action::Quit | Action::Detach | Action::ConfirmQuit | Action::CancelQuit => ("×", "X"),
     };
     app.chrome.symbol(unicode, ascii)
@@ -677,7 +644,20 @@ pub(crate) fn action_label(app: &App, action: &Action) -> String {
         return safe(path);
     }
     if let Action::Visit(Route::Session(id)) = action {
-        return tabs::label(app, id);
+        return app
+            .tabs
+            .entries
+            .iter()
+            .find(|tab| tab.id == *id)
+            .and_then(|tab| tab.name.as_deref())
+            .or_else(|| {
+                app.sessions
+                    .items
+                    .iter()
+                    .find(|item| item.id == *id)
+                    .map(|item| item.name.as_str())
+            })
+            .map_or_else(|| app.i18n.text("route-session"), safe);
     }
     if let Action::ToggleMessage(message) = action
         && let Some(state) = app.chat.view.tool_status(message)
@@ -773,6 +753,7 @@ pub(crate) fn action_label(app: &App, action: &Action) -> String {
         Action::ToggleSymbols => "command-symbols",
         Action::ToggleMotion => "command-motion",
         Action::Settings(_) => "route-settings",
+        Action::Sidebar(_) | Action::Home(_) => "route-workspace",
         Action::Quit => "footer-quit",
         Action::Detach => "command-detach",
         Action::ConfirmQuit => "shutdown-force",
@@ -1051,31 +1032,25 @@ mod tests {
 
     #[test]
     fn keyboard_and_mouse_share_primary_action() {
-        let mut keyboard = App::new(
-            "/unconfigured".into(),
-            crate::i18n::I18n::new(
-                crate::LocalePreference::Explicit(crate::Locale::En),
-                crate::Locale::En,
-            ),
-        );
+        let app = || {
+            App::new(
+                "/unconfigured".into(),
+                crate::i18n::I18n::new(
+                    crate::LocalePreference::Explicit(crate::Locale::En),
+                    crate::Locale::En,
+                ),
+            )
+        };
+        let mut keyboard = app();
         keyboard.focus = Focus::Page;
-        keyboard.input(key(KeyCode::Enter));
-        let mut mouse = App::new(
-            "/unconfigured".into(),
-            crate::i18n::I18n::new(
-                crate::LocalePreference::Explicit(crate::Locale::En),
-                crate::Locale::En,
-            ),
-        );
-        render(&mut mouse, 120, 40);
-        let button = mouse
-            .hits
-            .iter()
-            .rev()
-            .find(|hit| hit.action == Action::Visit(Route::Host))
-            .unwrap()
-            .area;
-        mouse.input(click(button.x, button.y));
+        render(&mut keyboard, 120, 40);
+        let by_key = keyboard.input(key(KeyCode::Enter)).1;
+        let mut mouse = app();
+        let terminal = render(&mut mouse, 120, 40);
+        let (x, y) = locate(&terminal, "Connect");
+        let by_mouse = mouse.input(click(x, y)).1;
+        assert_eq!(by_key, Some(Action::Connect), "home's primary action");
+        assert_eq!(by_key, by_mouse);
         assert_eq!(keyboard.navigation.current(), mouse.navigation.current());
         assert_eq!(keyboard.focus, mouse.focus);
     }
@@ -1161,6 +1136,10 @@ mod tests {
                 crate::Locale::En,
             ),
         );
+        app.connection = ConnectionState::Connected {
+            root_id: "root".into(),
+            epoch: "epoch".into(),
+        };
         let mut terminal = render(&mut app, 120, 40);
         let anchor = app
             .hits
@@ -1168,12 +1147,7 @@ mod tests {
             .find(|hit| hit.action == Action::ToggleSidebar)
             .unwrap()
             .area;
-        let covered = app
-            .hits
-            .iter()
-            .find(|hit| hit.action == Action::Visit(Route::Workspace))
-            .unwrap()
-            .area;
+        let covered = locate(&terminal, "New session");
         app.hover = Some(Action::ToggleSidebar);
         app.hover_area = Some(anchor);
         terminal
@@ -1182,12 +1156,9 @@ mod tests {
                 draw_tooltip(frame, &mut app, frame.area(), Style::default());
             })
             .unwrap();
-        assert!(
-            !app.hits
-                .iter()
-                .any(|hit| hit.action == Action::Visit(Route::Workspace))
-        );
-        assert_eq!(app.input(click(covered.x, covered.y)), (true, None));
+        // The sidebar row under the tooltip is not clickable through it.
+        assert_eq!(app.input(click(covered.0, covered.1)), (true, None));
+        assert!(!app.creating);
         assert_eq!(app.focus, Focus::Navigation);
         let screen = terminal
             .backend()

@@ -129,15 +129,18 @@ fn real_edits_show_request_diff_without_claiming_a_file_snapshot_and_copy_withou
     tui.wait_for("+ replacement file");
     tui.wait_for("− previous file");
     tui.resize(55, 28);
-    tui.wait_until(|screen| !screen.contains("▤ Workspace") && screen.contains("replacement file"));
+    // Narrow windows hide the sidebar entirely.
+    tui.wait_until(|screen| {
+        !screen.contains("+  New session") && screen.contains("replacement file")
+    });
     tui.send(b"\x06");
     tui.wait_for("Loaded");
     tui.send("中文🦀".as_bytes());
     tui.wait_for("1/1");
     tui.wait_for("中文🦀");
     tui.send(b"\x1b");
-    tui.resize(120, 40);
-    tui.wait_until(|screen| screen.contains("▤ Workspace") && !screen.contains("Loaded"));
+    tui.resize(160, 40); // Wide enough for the result JSON on one line.
+    tui.wait_until(|screen| screen.contains("+  New session") && !screen.contains("Loaded"));
     tui.send(b"\x10");
     tui.wait_for("Commands · Esc closes");
     // Command additions may put execution details below the initial viewport.
@@ -223,7 +226,7 @@ fn code_mode_patch_stops_after_failure_and_keeps_real_tools_visible() {
         &["--root", host.root.to_str().unwrap()],
         Some(directory.path()),
     );
-    tui.resize(120, 50);
+    tui.resize(140, 50);
     tui.wait_for("Partial patch fixture");
     tui.click_text("Partial patch fixture");
     tui.wait_for("Message…");

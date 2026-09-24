@@ -88,8 +88,7 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
     tui.wait_for("vision.png");
     tui.click_text("vision.png");
     tui.wait_for("+1 · Ready");
-    tui.click_text("Workspace");
-    tui.wait_for("Other session");
+    tui.wait_for("Other session"); // Sessions are listed in the sidebar.
     tui.click_text("Other session");
     tui.wait_until(|screen| {
         screen
@@ -104,7 +103,6 @@ fn local_file_upload_survives_routes_and_restart_then_sends_without_text() {
             .screen
             .contains("attachment 中文.txt")
     );
-    tui.click_text("Workspace");
     tui.wait_for("Attachment session");
     tui.click_text("Attachment session");
     tui.wait_for("Ready");

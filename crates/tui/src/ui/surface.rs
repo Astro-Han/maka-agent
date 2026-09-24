@@ -70,6 +70,13 @@ impl<M> Outcome<M> {
             message: Some(message),
         }
     }
+    pub fn map<N>(self, f: impl FnOnce(M) -> N) -> Outcome<N> {
+        Outcome {
+            redraw: self.redraw,
+            consumed: self.consumed,
+            message: self.message.map(f),
+        }
+    }
 }
 
 struct Popover {
@@ -315,6 +322,18 @@ impl<M: Clone> Surface<M> {
         let mut stops = committed.items.iter().filter(|item| item.enabled);
         let target = if last { stops.last() } else { stops.next() };
         self.focus = target.map(|item| item.id.clone());
+    }
+
+    /// A shell overlay drawn over this surface hides these cells from the
+    /// pointer; the keyboard still reaches every item.
+    pub fn occlude(&mut self, rect: Rect) {
+        if let Some(committed) = &mut self.committed {
+            for item in &mut committed.items {
+                if !item.rect.intersection(rect).is_empty() {
+                    item.rect = Rect::default();
+                }
+            }
+        }
     }
 
     /// The page is no longer shown: close its chooser and forget geometry.

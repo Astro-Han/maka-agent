@@ -25,4 +25,4 @@ mod node;
 mod surface;
 
 pub use node::{Align, Choice, Node, On, Size, Tone};
-pub use surface::{Context, Surface};
+pub use surface::{Context, Outcome, Surface};

@@ -190,7 +190,7 @@ fn composer_sandbox_choice_requires_confirmation_and_preserves_approval_and_conc
         policy()["policy"]["chatDefaults"]["sandboxMode"],
         "workspace-write"
     );
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
     tui.wait_for("Sessions");
     tui.click_text("Sessions");
     tui.wait_for("New session sandbox");
@@ -210,9 +210,10 @@ fn composer_sandbox_choice_requires_confirmation_and_preserves_approval_and_conc
         "defaults never rewrite current sessions"
     );
     // Create through the TUI itself, without an explicit sandbox override.
-    tui.click_text("▤ Workspace");
-    tui.wait_until(|screen| screen.contains("Concurrent title") && screen.contains('+'));
-    tui.click_text("+");
+    tui.wait_until(|screen| {
+        screen.contains("Concurrent title") && screen.contains("+  New session")
+    });
+    tui.click_text("+  New session");
     tui.wait_for("New conversation");
     tui.wait_for("Message…");
     let SessionCatalogQueryResult::Page { sessions, .. } = runtime
@@ -227,7 +228,7 @@ fn composer_sandbox_choice_requires_confirmation_and_preserves_approval_and_conc
         .unwrap();
     assert_eq!(created.sandbox_mode, SandboxMode::ReadOnly);
     assert_eq!(created.approval_policy, ApprovalPolicy::OnRequest);
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
     tui.wait_for("Sessions");
     tui.click_text("Sessions");
     tui.wait_for("New session sandbox");

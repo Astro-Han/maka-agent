@@ -39,13 +39,15 @@ pub enum Category {
     Interface,
     Models,
     Sessions,
+    Host,
 }
 impl Category {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Appearance,
         Self::Interface,
         Self::Models,
         Self::Sessions,
+        Self::Host,
     ];
     fn key(self) -> &'static str {
         match self {
@@ -53,6 +55,7 @@ impl Category {
             Self::Interface => "interface",
             Self::Models => "models",
             Self::Sessions => "sessions",
+            Self::Host => "host",
         }
     }
     fn title(self) -> &'static str {
@@ -61,6 +64,7 @@ impl Category {
             Self::Interface => "settings-interface",
             Self::Models => "settings-models",
             Self::Sessions => "settings-sessions",
+            Self::Host => "route-host",
         }
     }
 }
@@ -75,6 +79,7 @@ pub enum Message {
     CustomTheme,
     Connections,
     SandboxDefaults,
+    Host,
 }
 
 #[derive(Default)]
@@ -359,6 +364,31 @@ fn section(app: &App, category: Category) -> Vec<Node<Message>> {
             Action::Visit(Route::Connections),
             Message::Connections,
         )],
+        Category::Host => {
+            let state = match app.connection {
+                crate::app::ConnectionState::Connected { .. } => "settings-host-connected",
+                crate::app::ConnectionState::Connecting => "settings-host-connecting",
+                crate::app::ConnectionState::Disconnected => "settings-host-disconnected",
+                crate::app::ConnectionState::Failed(_)
+                | crate::app::ConnectionState::WrongEpoch => "settings-host-failed",
+            };
+            let action = Action::Visit(Route::Host);
+            let hint = crate::view::action_label(app, &action);
+            vec![
+                row(
+                    app,
+                    Setting {
+                        key: "host",
+                        action,
+                        label: i18n.text("route-host"),
+                        value: i18n.text(state),
+                    },
+                    if ascii { " >" } else { " ›" },
+                )
+                .on(On::Activate(Message::Host))
+                .hint(hint),
+            ]
+        }
         Category::Sessions => match app.sandbox_defaults_action() {
             Some(action) => vec![link(
                 app,
@@ -466,6 +496,7 @@ impl App {
                 return self.apply(Action::Theme(crate::theme::editor::Command::Open));
             }
             Message::Connections => return self.apply(Action::Visit(Route::Connections)),
+            Message::Host => return self.apply(Action::Visit(Route::Host)),
             Message::SandboxDefaults => {
                 return self
                     .sandbox_defaults_action()
@@ -608,9 +639,9 @@ mod tests {
         app.input(click(locate(&terminal, "Maka dark")));
         let terminal = render(&mut app, 100, 30);
         assert!(app.settings.surface.captures());
-        // The sidebar sits under the chooser's modal layer: dismiss only.
-        let (_, help) = locate(&terminal, "Help");
-        assert_eq!(app.input(click((1, help))).1, None);
+        // The shell's Back button sits under the chooser's modal layer: the
+        // click only dismisses, it never navigates.
+        assert_eq!(app.input(click(locate(&terminal, "‹"))).1, None);
         assert_eq!(app.navigation.current(), Route::Settings);
         assert!(!app.settings.surface.captures());
         assert_eq!(app.theme.choice, Choice::Maka, "dismissal chooses nothing");

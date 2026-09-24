@@ -34,13 +34,17 @@ pub enum Tone {
     Strong,
     Muted,
     Subtle,
+    Accent,
     Warning,
+    /// One of the palette's stable identity hues (session titles).
+    Hue(u8),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Align {
     #[default]
     Start,
+    Center,
     End,
 }
 
@@ -69,9 +73,11 @@ pub enum Kind<M> {
         children: Vec<Node<M>>,
         gap: u16,
     },
+    /// `clip` keeps one row and ends an overflow with an ellipsis.
     Text {
         spans: Vec<(String, Tone)>,
         align: Align,
+        clip: bool,
     },
     /// A one-cell divider across the parent's cross axis.
     Rule,
@@ -121,6 +127,7 @@ impl<M> Node<M> {
             Kind::Text {
                 spans,
                 align: Align::Start,
+                clip: false,
             },
         )
     }
@@ -143,6 +150,13 @@ impl<M> Node<M> {
     pub fn align(mut self, to: Align) -> Self {
         if let Kind::Text { align, .. } = &mut self.kind {
             *align = to;
+        }
+        self
+    }
+    /// One row, truncated with an ellipsis instead of wrapping.
+    pub fn clip(mut self) -> Self {
+        if let Kind::Text { clip, .. } = &mut self.kind {
+            *clip = true;
         }
         self
     }

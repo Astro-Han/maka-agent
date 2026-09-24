@@ -61,7 +61,7 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Key verification");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
     tui.wait_for("Models"); // Connections live in the Models category.
     tui.click_text("Models");
     tui.wait_for("Model connections");
@@ -137,14 +137,13 @@ fn credential_management_rotates_with_cas_uses_the_new_key_and_clears_without_le
             1
         );
     });
-    tui.click_text("Workspace");
-    tui.wait_for("Key verification");
+    tui.wait_for("Key verification"); // Sessions are listed in the sidebar.
     tui.click_text("Key verification");
     tui.wait_for("Message…");
     tui.send(b"Verify saved key\x13");
     tui.wait_for("New key accepted");
     runtime.block_on(provider).unwrap();
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
     tui.wait_for("Models"); // Connections live in the Models category.
     tui.click_text("Models");
     tui.wait_for("Model connections");

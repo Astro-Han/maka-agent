@@ -73,8 +73,8 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
     });
     let client = runtime.block_on(support::model_client(&host.root, "http://127.0.0.1:9/v1"));
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    tui.wait_for("No sessions yet."); // Connection/catalog load has completed.
-    tui.click_text("Projects");
+    tui.wait_for("No sessions yet"); // Connection/catalog load has completed.
+    tui.command("Projects");
     tui.wait_for("No registered projects.");
     tui.click_text("⊕");
     tui.wait_for("Existing absolute directory on the Host.");
@@ -170,7 +170,7 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
     tui.wait_until(|text| {
         !text.contains("Preferred Host directory") && text.contains("Renamed project")
     });
-    tui.click_text("Renamed project"); // Closing restores the information button's focus.
+    tui.click_page_text("Renamed project"); // Closing restores the information button's focus.
     tui.send(b"\r");
     tui.wait_for("Message…");
     let session = runtime.block_on(async {
@@ -197,12 +197,19 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
     assert_eq!(session.workspace.host_cwd, project_path.to_str().unwrap());
     tui.send(b"project draft");
     tui.send(b"\x1b[1;3D");
-    tui.wait_for("Renamed project");
+    // The sidebar names the project group too; wait for the page itself.
+    let projects = |text: &str| {
+        text.lines()
+            .next()
+            .is_some_and(|line| line.contains("Projects"))
+            && text.contains("Renamed project")
+    };
+    tui.wait_until(projects);
     tui.close_terminal();
     tui.finish();
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
-    tui.wait_for("Renamed project"); // Restored route re-queries after connection, not a false empty state.
-    tui.click_text("Renamed project");
+    tui.wait_until(projects); // Restored route re-queries after connection, not a false empty state.
+    tui.click_page_text("Renamed project");
     tui.filter_command("Rename project");
     tui.click_text("Rename project");
     tui.wait_for("Cancel");
@@ -293,7 +300,7 @@ fn project_catalog_notifications_and_creation_use_host_project_identity() {
         })).unwrap()).await.unwrap();
         target
     });
-    tui.click_text("TUI 项目");
+    tui.click_page_text("TUI 项目");
     tui.filter_command("Relink project");
     tui.click_text("Relink project");
     tui.wait_for("Replacement absolute directory");

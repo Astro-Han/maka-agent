@@ -49,27 +49,33 @@ impl Default for Chrome {
             window_focused: true,
             animation: Default::default(),
             transition: None,
-            last_width: 21,
+            last_width: SIDEBAR,
         }
     }
 }
 
+/// The sidebar is the session directory: shown whole or not at all.
+const SIDEBAR: u16 = 32;
+fn open_by_default(width: u16) -> bool {
+    width >= 90
+}
+
 impl Chrome {
     pub fn toggle_sidebar(&mut self, width: u16, now: Instant) {
-        let expanded = !self.sidebar_expanded.unwrap_or(width >= 100);
+        let expanded = !self.sidebar_expanded.unwrap_or(open_by_default(width));
         self.sidebar_expanded = Some(expanded);
         self.transition = self.motion.then_some(Transition {
             from: self.last_width,
-            to: if expanded { 21 } else { 3 },
+            to: if expanded { SIDEBAR } else { 0 },
             started: now,
         });
     }
 
     pub fn sidebar_width(&mut self, width: u16, now: Instant) -> u16 {
-        let target = if width >= 60 && self.sidebar_expanded.unwrap_or(width >= 100) {
-            21
+        let target = if width >= 60 && self.sidebar_expanded.unwrap_or(open_by_default(width)) {
+            SIDEBAR
         } else {
-            3
+            0
         };
         let value = match &self.transition {
             Some(transition) if transition.to == target && self.motion => {
@@ -114,10 +120,10 @@ mod tests {
     fn sidebar_transition_is_reversible_bounded_and_stops_when_idle_or_reduced() {
         let mut chrome = Chrome::default();
         let now = Instant::now();
-        assert_eq!(chrome.sidebar_width(120, now), 21);
+        assert_eq!(chrome.sidebar_width(120, now), 32);
         chrome.toggle_sidebar(120, now);
         let halfway = chrome.sidebar_width(120, now + Duration::from_millis(60));
-        assert!((3..21).contains(&halfway));
+        assert!((1..32).contains(&halfway));
         chrome.toggle_sidebar(120, now + Duration::from_millis(60));
         assert_eq!(
             chrome.sidebar_width(120, now + Duration::from_millis(60)),
@@ -125,14 +131,15 @@ mod tests {
         );
         assert_eq!(
             chrome.sidebar_width(120, now + Duration::from_millis(220)),
-            21
+            32
         );
         assert!(!chrome.animating());
         chrome.motion = false;
         chrome.toggle_sidebar(120, now);
-        assert_eq!(chrome.sidebar_width(120, now), 3);
+        assert_eq!(chrome.sidebar_width(120, now), 0, "collapsed means hidden");
         assert!(!chrome.animating());
         chrome.sidebar_expanded = None;
-        assert_eq!(chrome.sidebar_width(80, now), 3);
+        assert_eq!(chrome.sidebar_width(80, now), 0);
+        assert_eq!(chrome.sidebar_width(90, now), 32);
     }
 }

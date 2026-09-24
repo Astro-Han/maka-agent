@@ -48,7 +48,7 @@ fn connection_setup_verifies_without_writes_masks_keys_and_creates_first_chat() 
         Some(directory.path()),
     );
     tui.wait_for("Workspace");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
     tui.wait_for("Models"); // Connections live in the Models category.
     tui.click_text("Models");
     tui.wait_for("Model connections");
@@ -95,7 +95,7 @@ fn connection_setup_verifies_without_writes_masks_keys_and_creates_first_chat() 
         assert_eq!(catalog["items"][0]["modelCount"], 2);
     });
     assert!(!String::from_utf8_lossy(&tui.output).contains("good-onboarding-secret"));
-    tui.click_text("▤ Workspace");
+    tui.command("Open workspace");
     tui.wait_until(|s| s.lines().next().is_some_and(|l| l.contains("Workspace")));
     tui.send(b"\x0e");
     tui.wait_for("Message…");

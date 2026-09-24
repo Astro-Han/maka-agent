@@ -32,13 +32,17 @@ pub fn thinking(colors: Palette) -> Color {
 pub fn selection(colors: Palette) -> Style {
     colors.focused()
 }
-pub fn session(id: &str, colors: Palette) -> Color {
-    if colors.terminal {
-        return colors.foreground;
-    }
+/// Stable identity hue index for a session ID (FNV-1a), never its position.
+pub fn session_hue(id: &str) -> u8 {
     let hash = id.bytes().fold(0xcbf29ce484222325_u64, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
     });
+    (hash % 6) as u8
+}
+pub fn hue(index: u8, colors: Palette) -> Color {
+    if colors.terminal {
+        return colors.foreground;
+    }
     let variants = [
         colors.accent,
         colors.thinking,
@@ -47,7 +51,10 @@ pub fn session(id: &str, colors: Palette) -> Color {
         colors.syntax[5],
         colors.syntax[0],
     ];
-    variants[(hash % variants.len() as u64) as usize]
+    variants[usize::from(index) % variants.len()]
+}
+pub fn session(id: &str, colors: Palette) -> Color {
+    hue(session_hue(id), colors)
 }
 pub fn border(colors: Palette, focused: bool, breath: Option<f32>) -> Color {
     colors.breath(focused, breath)

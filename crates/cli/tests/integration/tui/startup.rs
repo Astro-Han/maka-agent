@@ -34,8 +34,8 @@ fn fresh_terminals_share_one_on_demand_host_and_reopen_the_same_root() {
         "second",
     ]);
     for tui in [&mut first, &mut second] {
-        tui.wait_for("◉ Host");
-        tui.click_text("◉ Host");
+        tui.wait_for("Workspace");
+        tui.command("Open Host connection");
         tui.wait_for("State: \"ready\"");
     }
     let original = read_discovery(&root).unwrap();
@@ -130,8 +130,8 @@ fn busy_root_keeps_navigation_responsive_and_quit_does_not_take_over() {
     let namespaces = RootNamespaces::for_current_account().unwrap();
     let owner = RootOwner::create(&root, &namespaces).unwrap();
     let mut tui = Pty::spawn(&["--root", root.to_str().unwrap()]);
-    tui.wait_for("◉ Host");
-    tui.click_text("◉ Host");
+    tui.wait_for("Workspace");
+    tui.command("Open Host connection");
     tui.wait_for("Connecting");
     tui.click_text("Settings");
     tui.wait_for("Maka dark ▾");

@@ -116,10 +116,13 @@ fn session_management_cas_and_archive_preserve_identity_and_composer() {
             .unwrap()
             .is_archived
     );
-    // Workspace keeps archived rows discoverable; restore is an explicit state, not a toggle.
+    // The sidebar keeps archived sessions in their own folded group; restore
+    // is an explicit state, not a toggle.
     tui.send(b"\x1b[1;3D");
-    tui.wait_for("中文会话 · Archived");
-    tui.click_text("中文会话 · Archived");
+    tui.wait_for("▸ Archived");
+    tui.click_text("▸ Archived");
+    tui.wait_for("▾ Archived");
+    tui.click_text("中文会话");
     tui.wait_for("draft remains here");
     tui.filter_command("Restore session");
     tui.click_text("Restore session");

@@ -75,7 +75,10 @@ impl Saved {
                     | Route::Extensions
             ),
             Focus::Composer | Focus::Transcript => matches!(route, Route::Session(_)),
-            Focus::Page => matches!(route, Route::Settings | Route::Host | Route::Help),
+            Focus::Page => matches!(
+                route,
+                Route::Workspace | Route::Settings | Route::Host | Route::Help
+            ),
             Focus::Queue => false,
         };
         focus
@@ -107,7 +110,7 @@ impl State {
             },
             details: app.chrome.details,
             navigation: (app.focus == Focus::Navigation)
-                .then(|| app.nav_routes().get(app.selected_nav).cloned())
+                .then(|| app.sidebar.focused_route())
                 .flatten(),
         }
     }
@@ -172,8 +175,10 @@ impl App {
 
     pub(crate) fn leave_page(&mut self) {
         let route = self.navigation.current();
-        if route == Route::Settings {
-            self.settings.surface.leave();
+        match route {
+            Route::Settings => self.settings.surface.leave(),
+            Route::Workspace => self.home.surface.leave(),
+            _ => {}
         }
         let state = State::capture(self);
         self.page_states.retain(|(key, _)| *key != route);
@@ -194,11 +199,7 @@ impl App {
             self.inbox.selected = self.inbox.items.first().map(|item| item.id.clone());
         }
         self.focus = match route {
-            Route::Workspace
-            | Route::Inbox
-            | Route::Projects
-            | Route::Connections
-            | Route::Extensions => Focus::List,
+            Route::Inbox | Route::Projects | Route::Connections | Route::Extensions => Focus::List,
             Route::Session(_) => Focus::Composer,
             _ => Focus::Page,
         };
@@ -208,10 +209,12 @@ impl App {
             let (_, state) = self.page_states.remove(index).unwrap();
             self.focus = state.focus;
             self.chrome.details = state.details;
-            if let Some(route) = state.navigation
-                && let Some(index) = self.nav_routes().iter().position(|item| *item == route)
-            {
-                self.selected_nav = index;
+            if let Some(route) = &state.navigation {
+                self.sidebar.focus_route(route);
+            }
+            // Home was a list before the sidebar became the session directory.
+            if route == Route::Workspace && self.focus == Focus::List {
+                self.focus = Focus::Page;
             }
             if route == Route::Settings
                 && let Some(action) = &state.control

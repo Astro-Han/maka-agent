@@ -57,7 +57,7 @@ fn connections_directory_pages_reopens_and_manages_fixed_targets_with_cas() {
     });
     let mut tui = Pty::spawn(&["--root", host.root.to_str().unwrap()]);
     tui.wait_for("Workspace");
-    tui.click_text("⛭ Settings");
+    tui.click_text("⛭  Settings");
     tui.wait_for("Models"); // Connections live in the Models category.
     tui.click_text("Models");
     tui.wait_for("Model connections");

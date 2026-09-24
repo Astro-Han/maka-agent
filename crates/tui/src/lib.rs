@@ -447,9 +447,8 @@ where
                     )
                 });
             }
-            if app.navigation.current() == navigation::Route::Projects
-                && let Some(input) = app.projects.query()
-            {
+            // Always loaded: the sidebar labels project workspaces by name.
+            if let Some(input) = app.projects.query() {
                 let client = client.clone();
                 jobs.spawn(async move {
                     Completed::Projects(

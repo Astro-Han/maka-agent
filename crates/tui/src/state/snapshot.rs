@@ -550,14 +550,14 @@ mod tests {
 
         // Sidebar cursor is a destination, not an index into possibly changed tabs.
         restored.focus = Focus::Navigation;
-        restored.selected_nav = Route::ALL.len();
+        restored.sidebar.focus_route(&Route::Session("a".into()));
         let saved = Snapshot::capture(&restored, "root");
         let mut sidebar = app();
         saved.restore(&mut sidebar, false).unwrap();
         assert_eq!(sidebar.focus, Focus::Navigation);
         assert_eq!(
-            sidebar.nav_routes()[sidebar.selected_nav],
-            Route::Session("a".into())
+            sidebar.sidebar.focused_route(),
+            Some(Route::Session("a".into()))
         );
         sidebar.apply(Action::CloseTab("a".into()));
         Snapshot::capture(&sidebar, "root")
@@ -583,11 +583,16 @@ mod tests {
         Snapshot::capture(&tabs, "root")
             .restore(&mut reopened, false)
             .unwrap();
-        assert_eq!(reopened.tabs.reveal, Some(0));
         assert_eq!(
-            reopened.nav_routes()[reopened.selected_nav],
-            Route::Session("a".into())
+            reopened
+                .tabs
+                .entries
+                .iter()
+                .map(|tab| tab.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
         );
+        assert_eq!(reopened.navigation.current(), Route::Session("a".into()));
 
         for (pointer, value) in [
             ("/navigation/entries", serde_json::json!([])),
