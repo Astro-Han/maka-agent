@@ -131,6 +131,14 @@ impl OperationRegistry for Operations {
             maka_protocol::turn::decode_turn_query_input(value)?;
             return Ok(value.clone());
         }
+        if operation == Operation::TurnResumeQuery {
+            maka_protocol::turn::decode_turn_resume_query_input(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::TurnResumeStart {
+            maka_protocol::turn::decode_turn_resume_start_input(value)?;
+            return Ok(value.clone());
+        }
         if operation == Operation::ContextDiagnosticsQuery {
             maka_protocol::context::decode_context_diagnostics_input(value)?;
             return Ok(value.clone());
@@ -233,6 +241,14 @@ impl OperationRegistry for Operations {
             maka_protocol::turn::decode_turn_start_result(value)?;
             return Ok(value.clone());
         }
+        if operation == Operation::TurnResumeQuery {
+            maka_protocol::turn::decode_turn_resume_plan(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::TurnResumeStart {
+            maka_protocol::turn::decode_turn_resume_start_result(value)?;
+            return Ok(value.clone());
+        }
         if operation == Operation::ContextDiagnosticsQuery {
             maka_protocol::context::decode_context_diagnostics_result(value)?;
             return Ok(value.clone());
@@ -323,6 +339,19 @@ impl OperationRegistry for Operations {
         }
         if operation == Operation::TurnQuery {
             return Some(maka_protocol::turn::QUERY_ERRORS);
+        }
+        if operation == Operation::TurnResumeStart {
+            return Some(maka_protocol::turn::START_ERRORS);
+        }
+        if operation == Operation::TurnResumeQuery {
+            return Some(&[
+                OperationErrorCode::HostNotReady,
+                OperationErrorCode::HostDraining,
+                OperationErrorCode::OperationUnavailable,
+                OperationErrorCode::NotFound,
+                OperationErrorCode::SessionArchived,
+                OperationErrorCode::InternalFailure,
+            ]);
         }
         if operation == Operation::ContextDiagnosticsQuery {
             return Some(maka_protocol::context::DIAGNOSTICS_ERRORS);

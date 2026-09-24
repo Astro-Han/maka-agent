@@ -71,6 +71,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         && !app.branch.visible
         && !app.extensions.consent_visible()
         && !app.recap.visible
+        && !app.resume.visible
         && !app.revision.visible
         && app.attachments.dialog.is_none()
         && app.skills.dialog.is_none()
@@ -303,6 +304,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         || app.theme.editor.is_some()
         || app.branch.visible
         || app.recap.visible
+        || app.resume.visible
         || app.revision.visible
         || app.attachments.dialog.is_some()
         || app.skills.dialog.is_some()
@@ -416,6 +418,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         crate::pages::revision::draw(frame, app, area, base);
     } else if app.recap.visible {
         crate::pages::recap::draw(frame, app, area, base);
+    } else if app.resume.visible {
+        crate::pages::resume::draw(frame, app, area, base);
     } else if app.branch.visible {
         crate::pages::branch::draw(frame, app, area, base);
     } else if app.onboarding.dialog.is_some() {
@@ -592,6 +596,7 @@ fn icon(app: &App, action: &Action) -> &'static str {
         Action::References => ("▱", "/"),
         Action::Skills(_) => ("✧", "*"),
         Action::Recap(_) => ("≡", "="),
+        Action::Resume(_) => ("↻", "R"),
         Action::Branch(_) => ("↳", "+"),
         Action::Revision(_) => ("↶", "<"),
         Action::Onboard(_) => ("⊕", "+"),
@@ -718,6 +723,7 @@ fn action_label(app: &App, action: &Action) -> String {
         Action::Manage(command) => command.label(),
         Action::Branch(command) => command.label(),
         Action::Recap(command) => command.label(),
+        Action::Resume(command) => command.label(),
         Action::Revision(command) => command.label(),
         Action::Onboard(command) => command.label(),
         Action::Project(command) => command.label(),

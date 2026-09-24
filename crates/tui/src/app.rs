@@ -62,6 +62,7 @@ pub enum Action {
     CopyFile(String),
     Branch(crate::pages::branch::Command),
     Recap(crate::pages::recap::Command),
+    Resume(crate::pages::resume::Command),
     Attachment(crate::pages::attachments::Command),
     References,
     Extension(crate::pages::extensions::Command),
@@ -136,6 +137,7 @@ pub struct App {
     pub management: crate::pages::manage::Management,
     pub branch: crate::pages::branch::State,
     pub recap: crate::pages::recap::State,
+    pub resume: crate::pages::resume::State,
     pub attachments: crate::pages::attachments::State,
     pub skills: crate::pages::skills::State,
     pub extensions: crate::pages::extensions::State,
@@ -188,6 +190,7 @@ impl App {
             management: Default::default(),
             branch: Default::default(),
             recap: Default::default(),
+            resume: Default::default(),
             attachments: Default::default(),
             skills: Default::default(),
             extensions: Default::default(),
@@ -261,6 +264,7 @@ impl App {
         commands.extend(self.management_commands());
         commands.extend(self.branch_commands());
         commands.extend(self.recap_commands());
+        commands.extend(self.resume_commands());
         commands.extend(self.revision_commands());
         commands.extend(self.oauth_commands());
         if let Some(action) = self.default_model_action() {
@@ -484,6 +488,7 @@ impl App {
         self.attachments.begin_frame();
         self.branch.invalidate_geometry();
         self.recap.invalidate_geometry();
+        self.resume.invalidate_geometry();
         self.revision.begin_frame();
         for item in &self.sessions.items {
             self.tabs.rename(&item.id, &item.name);
@@ -510,6 +515,7 @@ impl App {
             || self.theme.editor.is_some()
             || self.branch.visible
             || self.recap.visible
+            || self.resume.visible
             || self.revision.visible
             || self.attachments.dialog.is_some()
             || self.skills.dialog.is_some()
@@ -529,6 +535,7 @@ impl App {
             || self.theme.editor.is_some()
             || self.branch.visible
             || self.recap.visible
+            || self.resume.visible
             || self.revision.visible
             || self.attachments.dialog.is_some()
             || self.skills.dialog.is_some()
@@ -556,6 +563,7 @@ impl App {
             && self.theme.editor.is_none()
             && !self.branch.visible
             && !self.recap.visible
+            && !self.resume.visible
             && !self.revision.visible
             && self.attachments.dialog.is_none()
             && self.skills.dialog.is_none()
@@ -638,6 +646,7 @@ impl App {
             Action::Extension(command) => self.extensions_action(command),
             Action::Branch(command) => return self.branch_action(command),
             Action::Recap(command) => return self.recap_action(command),
+            Action::Resume(command) => return self.resume_action(command),
             Action::Revision(command) => return self.revision_action(command),
             Action::Onboard(command) => return self.onboarding_action(command),
             Action::Project(command) => return self.project_action(command),
@@ -850,6 +859,9 @@ impl App {
         }
         if let Action::Recap(command) = action {
             return self.recap_enabled(command);
+        }
+        if let Action::Resume(command) = action {
+            return self.resume_enabled(command);
         }
         if let Action::Branch(command) = action {
             return self.branch_enabled(command);
@@ -1122,6 +1134,7 @@ impl App {
         self.management.oauth.invalidate_identity_geometry();
         self.branch.invalidate_geometry();
         self.recap.invalidate_geometry();
+        self.resume.invalidate_geometry();
         self.revision.invalidate_geometry();
         self.onboarding.invalidate_geometry();
         self.tabs.invalidate_geometry();
@@ -1245,6 +1258,7 @@ impl App {
                 || self.theme.editor.is_some()
                 || self.branch.visible
                 || self.recap.visible
+                || self.resume.visible
                 || self.revision.visible
                 || self.attachments.dialog.is_some()
                 || self.skills.dialog.is_some()
@@ -1276,6 +1290,8 @@ impl App {
                 Some(Action::Revision(crate::pages::revision::Command::Close))
             } else if self.recap.visible {
                 Some(Action::Recap(crate::pages::recap::Command::Close))
+            } else if self.resume.visible {
+                Some(Action::Resume(crate::pages::resume::Command::Close))
             } else if self.branch.visible {
                 Some(Action::Branch(crate::pages::branch::Command::Close))
             } else if self.onboarding.dialog.is_some() {
@@ -1319,6 +1335,9 @@ impl App {
         }
         if self.recap.visible && !matches!(event, Event::Resize(_, _)) {
             return self.recap_input(event);
+        }
+        if self.resume.visible && !matches!(event, Event::Resize(_, _)) {
+            return self.resume_input(event);
         }
         if self.branch.visible && !matches!(event, Event::Resize(_, _)) {
             return self.branch_input(event);

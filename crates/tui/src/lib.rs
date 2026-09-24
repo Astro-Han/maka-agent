@@ -72,6 +72,10 @@ enum Completed {
         pages::recap::Request,
         Result<Option<pages::recap::Receipt>, maka_client::RequestFailure>,
     ),
+    Resumed(
+        pages::resume::Request,
+        Result<pages::resume::Output, maka_client::RequestFailure>,
+    ),
     Revised(
         pages::revision::Request,
         Result<pages::revision::Output, maka_client::RequestFailure>,
@@ -310,6 +314,25 @@ where
                     jobs.spawn(async move {
                         let result = pages::recap::execute(&client, &request).await;
                         Completed::Recap(request, result)
+                    });
+                }
+                dirty = true;
+            }
+            if let Some(request) = app.resume_request() {
+                if request.needs_checkpoint() {
+                    if let Some(state) = &mut state {
+                        state.submit_resume(request);
+                    } else {
+                        app.resume_after_checkpoint(
+                            &request,
+                            &Err("TUI checkpoint unavailable".into()),
+                        );
+                    }
+                } else {
+                    let client = client.clone();
+                    jobs.spawn(async move {
+                        let result = pages::resume::execute(&client, &request).await;
+                        Completed::Resumed(request, result)
                     });
                 }
                 dirty = true;
@@ -688,6 +711,7 @@ where
                     app.skills.disconnect();
                     app.extensions.disconnect();
                     app.recap.disconnect();
+                    app.resume.disconnect();
                     app.branch.disconnect();
                     app.revision.disconnect();
                     if let Some(state) = &mut state {
@@ -706,6 +730,7 @@ where
                 }
                 Action::Connect => {
                     app.branch.disconnect();
+                    app.resume.disconnect();
                     app.revision.disconnect();
                     if let Some(state) = &mut state {
                         state.cancel_requests();
@@ -720,6 +745,7 @@ where
                     app.skills.disconnect();
                     app.extensions.disconnect();
                     app.recap.disconnect();
+                    app.resume.disconnect();
                     app.creating = false;
                     jobs = JoinSet::new();
                     history_job = None;
@@ -904,6 +930,14 @@ where
                         Completed::Recap(request,result)
                     });
                 }
+                if let Some(request) = written.resume
+                    && app.resume_after_checkpoint(&request, &written.result)
+                    && let Some(client) = client.clone() {
+                    jobs.spawn(async move {
+                        let result = pages::resume::execute(&client, &request).await;
+                        Completed::Resumed(request, result)
+                    });
+                }
                 if let Some(request) = written.extension
                     && app.extensions_after_checkpoint(&request, &written.result)
                     && let Some(client) = client.clone() {
@@ -1054,6 +1088,10 @@ where
                     }
                     Some(Ok(Completed::Recap(request,result))) => {
                         app.recap_completed(request,result);
+                        if let Some(state) = &mut state { state.changed(); }
+                    }
+                    Some(Ok(Completed::Resumed(request, result))) => {
+                        app.resume_completed(request, result);
                         if let Some(state) = &mut state { state.changed(); }
                     }
                     Some(Ok(Completed::Managed(ticket, result))) => {
@@ -1243,6 +1281,7 @@ where
                 app.skills.disconnect();
                 app.extensions.disconnect();
                 app.recap.disconnect();
+                app.resume.disconnect();
                 app.abandon_management();
                 app.branch.disconnect();
                     app.revision.disconnect();
@@ -1268,6 +1307,7 @@ where
     app.skills.disconnect();
     app.extensions.disconnect();
     app.recap.disconnect();
+    app.resume.disconnect();
     attachment_jobs.abort_all();
     jobs.abort_all();
     // Once Save was pressed, finish the bounded local write and checkpoint the
