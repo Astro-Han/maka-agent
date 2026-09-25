@@ -339,6 +339,36 @@ export const ConversationStates: Story = {
       })} />
     </StoryFrame>
   ),
+  play: async ({ canvasElement }) => {
+    const indicator = canvasElement.querySelector<HTMLElement>(
+      '[data-session-id="status-running"] .maka-running-indicator',
+    );
+    if (!indicator) throw new Error('running indicator is missing');
+    // The ring reads its period from --duration-slow-min; base.css slows the
+    // row's permanent indicator to 1.3s. The ink-ladder contract fails any
+    // getPropertyValue read of a custom property, so this scans the rule —
+    // recursively, because the app's sheets nest their rules inside @layer.
+    const walk = (rules: readonly CSSRule[]): CSSRule[] =>
+      rules.flatMap((rule) => [
+        rule,
+        ...('cssRules' in rule ? walk(Array.from((rule as CSSGroupingRule).cssRules)) : []),
+      ]);
+    const rule = walk(
+      Array.from(canvasElement.ownerDocument.styleSheets).flatMap((sheet) => {
+        try {
+          return Array.from(sheet.cssRules);
+        } catch {
+          return [];
+        }
+      }),
+    ).find(
+      (rule) =>
+        rule instanceof CSSStyleRule &&
+        rule.selectorText === '.maka-running-indicator' &&
+        rule.cssText.includes('1.3s'),
+    );
+    expect(rule).toBeDefined();
+  },
 };
 
 // Real path: switching between two ordinary Sessions in a populated rail. The
