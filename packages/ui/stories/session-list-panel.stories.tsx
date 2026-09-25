@@ -368,6 +368,18 @@ export const ConversationStates: Story = {
         rule.cssText.includes('1.3s'),
     );
     expect(rule).toBeDefined();
+
+    // The trailing column is one axis: the running ring and another row's
+    // status dot share its center, so a state swap never shifts sideways.
+    const dot = canvasElement.querySelector<HTMLElement>(
+      '[data-session-id="status-waiting"] [data-session-status]',
+    );
+    if (!dot) throw new Error('status dot is missing');
+    const centerX = (element: Element) => {
+      const box = element.getBoundingClientRect();
+      return box.x + box.width / 2;
+    };
+    expect(Math.abs(centerX(indicator) - centerX(dot))).toBeLessThanOrEqual(1);
   },
 };
 
@@ -514,6 +526,18 @@ export const LongTitlesAndNarrow: Story = {
     if (!time) throw new Error('time label is missing');
     // sidebar.css lifts the digit ink ~0.5px onto the running ring's axis.
     expect(getComputedStyle(time).transform).toContain('-0.5');
+
+    // The timestamp is centered on the trailing column's axis too — the same
+    // line the blocked row's status dot is centered on.
+    const dot = canvasElement.querySelector<HTMLElement>(
+      '[data-session-id="long-title-stale"] [data-session-status]',
+    );
+    if (!dot) throw new Error('status dot is missing');
+    const centerX = (element: Element) => {
+      const box = element.getBoundingClientRect();
+      return box.x + box.width / 2;
+    };
+    expect(Math.abs(centerX(time) - centerX(dot))).toBeLessThanOrEqual(1);
   },
 };
 
