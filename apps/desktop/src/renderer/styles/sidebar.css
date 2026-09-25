@@ -415,6 +415,10 @@
   color: var(--muted-foreground);
   font: var(--typography-caption);
   white-space: nowrap;
+  /* Blink centers the font's em box and SF's digit mass hangs ~0.5px below
+     its center, so next to the geometrically centered running ring the time
+     reads low. Nudge the ink; the slot stays put. */
+  transform: translateY(-0.5px);
 }
 
 @media (hover: hover) {

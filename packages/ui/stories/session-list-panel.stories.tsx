@@ -507,6 +507,14 @@ export const LongTitlesAndNarrow: Story = {
       })} />
     </StoryFrame>
   ),
+  play: async ({ canvasElement }) => {
+    const time = canvasElement.querySelector<HTMLElement>(
+      '[data-session-id="long-title-active"] .maka-session-row-time-label',
+    );
+    if (!time) throw new Error('time label is missing');
+    // sidebar.css lifts the digit ink ~0.5px onto the running ring's axis.
+    expect(getComputedStyle(time).transform).toContain('-0.5');
+  },
 };
 
 // Real path: time-sort with both flagged and unflagged sessions — two
