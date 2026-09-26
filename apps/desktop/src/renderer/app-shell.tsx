@@ -328,6 +328,7 @@ function AppShellContent({
     setMessageLoadPending,
     sessionUiController,
     sessionCatalogController,
+    commitSession,
     activeCatalogSession,
     activeHostSession,
     requestedCatalogSession,
@@ -1252,12 +1253,6 @@ function AppShellContent({
     [sessionCatalogController, localProjects],
   );
 
-  const activateSessionForFirstSend = useCallback((sessionId: string): Promise<void> => {
-    setNavSelection({ section: 'sessions' });
-    setActiveId(sessionId);
-    return Promise.resolve();
-  }, [setActiveId, setNavSelection]);
-
   const { applyE2eFixture } = useStableActions(createAppShellE2eFixtureActions, {
     openSettingsSection,
     refreshSessions,
@@ -1296,7 +1291,11 @@ function AppShellContent({
     isShellSurfaceOwnerActive,
     messageRetryPending: sessionUiController.messageRetryPending,
     refreshSessions,
-    activateSessionForFirstSend,
+    activateSessionForFirstSend: async (session) => {
+      commitSession(session);
+      setNavSelection({ section: 'sessions' });
+      setActiveId(session.id);
+    },
     retireSession: clearSessionRendererState,
     setMessageLoadErrorBySession: sessionUiController.setMessageLoadErrorBySession,
     addTransientMessage,
@@ -1999,6 +1998,7 @@ function AppShellContent({
   const homeSurfaceActive =
     sessionsSelected &&
     messages.length === 0 &&
+    transientMessages.length === 0 &&
     !hasLiveTurnContent &&
     !activeMessageLoadError;
   const commandOptions: AppShellCommandListOptions = {
