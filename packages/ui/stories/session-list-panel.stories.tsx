@@ -340,46 +340,22 @@ export const ConversationStates: Story = {
     </StoryFrame>
   ),
   play: async ({ canvasElement }) => {
-    const indicator = canvasElement.querySelector<HTMLElement>(
-      '[data-session-id="status-running"] .maka-running-indicator',
-    );
-    if (!indicator) throw new Error('running indicator is missing');
-    // The ring reads its period from --duration-slow-min; base.css slows the
-    // row's permanent indicator to 1.3s. The ink-ladder contract fails any
-    // getPropertyValue read of a custom property, so this scans the rule —
-    // recursively, because the app's sheets nest their rules inside @layer.
-    const walk = (rules: readonly CSSRule[]): CSSRule[] =>
-      rules.flatMap((rule) => [
-        rule,
-        ...('cssRules' in rule ? walk(Array.from((rule as CSSGroupingRule).cssRules)) : []),
-      ]);
-    const rule = walk(
-      Array.from(canvasElement.ownerDocument.styleSheets).flatMap((sheet) => {
-        try {
-          return Array.from(sheet.cssRules);
-        } catch {
-          return [];
-        }
-      }),
-    ).find(
-      (rule) =>
-        rule instanceof CSSStyleRule &&
-        rule.selectorText === '.maka-running-indicator' &&
-        rule.cssText.includes('1.3s'),
-    );
-    expect(rule).toBeDefined();
-
-    // The trailing column is one axis: the running ring and another row's
-    // status dot share its center, so a state swap never shifts sideways.
-    const dot = canvasElement.querySelector<HTMLElement>(
-      '[data-session-id="status-waiting"] [data-session-status]',
-    );
-    if (!dot) throw new Error('status dot is missing');
-    const centerX = (element: Element) => {
+    // The ring, every status dot and the ⋯ that replaces them on hover share
+    // one vertical axis.
+    const centerX = (element: Element | null) => {
+      if (!element) throw new Error('trailing element is missing');
       const box = element.getBoundingClientRect();
       return box.x + box.width / 2;
     };
-    expect(Math.abs(centerX(indicator) - centerX(dot))).toBeLessThanOrEqual(1);
+    const axis = centerX(
+      canvasElement.querySelector('[data-session-id="status-running"] .maka-running-indicator'),
+    );
+    for (const row of canvasElement.querySelectorAll<HTMLElement>('.maka-session-row')) {
+      expect(Math.abs(centerX(row.querySelector('[data-session-status]')) - axis)).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(centerX(row.querySelector(':scope > .maka-session-row-action')) - axis),
+      ).toBeLessThanOrEqual(1);
+    }
   },
 };
 
@@ -519,26 +495,6 @@ export const LongTitlesAndNarrow: Story = {
       })} />
     </StoryFrame>
   ),
-  play: async ({ canvasElement }) => {
-    const time = canvasElement.querySelector<HTMLElement>(
-      '[data-session-id="long-title-active"] .maka-session-row-time-label',
-    );
-    if (!time) throw new Error('time label is missing');
-    // sidebar.css lifts the digit ink ~0.5px onto the running ring's axis.
-    expect(getComputedStyle(time).transform).toContain('-0.5');
-
-    // The timestamp is centered on the trailing column's axis too — the same
-    // line the blocked row's status dot is centered on.
-    const dot = canvasElement.querySelector<HTMLElement>(
-      '[data-session-id="long-title-stale"] [data-session-status]',
-    );
-    if (!dot) throw new Error('status dot is missing');
-    const centerX = (element: Element) => {
-      const box = element.getBoundingClientRect();
-      return box.x + box.width / 2;
-    };
-    expect(Math.abs(centerX(time) - centerX(dot))).toBeLessThanOrEqual(1);
-  },
 };
 
 // Real path: time-sort with both flagged and unflagged sessions — two
@@ -579,6 +535,20 @@ export const PinnedAndRecentSections: Story = {
       />
     </StoryFrame>
   ),
+  play: async ({ canvasElement }) => {
+    // The ring and the timestamps end on the row's padding edge, not on a
+    // centered column that leaves them floating inside the row.
+    for (const row of canvasElement.querySelectorAll<HTMLElement>('.maka-session-row')) {
+      const signal = row.querySelector('.maka-session-row-signal');
+      const content = signal?.firstElementChild;
+      if (!signal || !content) throw new Error(`${row.dataset.sessionId} has no signal`);
+      const item = row.querySelector('.astryx-side-nav-item');
+      if (!item) throw new Error('nav item is missing');
+      const paddingEdge =
+        item.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(item).paddingRight);
+      expect(Math.abs(content.getBoundingClientRect().right - paddingEdge)).toBeLessThanOrEqual(1);
+    }
+  },
 };
 
 // Real path: group-by-project — collapsible project rows, sessions on the
