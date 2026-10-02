@@ -105,6 +105,13 @@ test('WorkHub uses its coordination model and shared attachment composer', async
   await expect.poll(() => page.evaluate(() => innerWidth)).toBe(restoredContentWidth);
   const restoredDockWidth = await page.locator('.workHubDock').evaluate((element) => Math.round(element.getBoundingClientRect().width));
   await expect.poll(() => workhub.evaluate(() => innerWidth)).toBe(restoredDockWidth);
+  // Main's titlebar controls the sibling WorkHub WebContentsView through IPC.
+  const workbar = page.locator('.maka-session-workbar[data-placement="right"]');
+  await page.getByRole('button', { name: '展开任务工作栏', exact: true }).click();
+  await expect(workbar).toBeVisible();
+  await page.getByRole('button', { name: '收起任务工作栏', exact: true }).click();
+  await expect(workbar).toBeHidden();
+  await page.evaluate(() => window.maka.settings.updateClient({ appearance: { workbarTogglePosition: 'edge' } }));
   // The edge belongs to the native conversation renderer. A Main DOM overlay
   // would be covered by this WebContentsView and never receive native clicks.
   await workhub.getByRole('button', { name: '展开任务工作栏', exact: true }).click();
