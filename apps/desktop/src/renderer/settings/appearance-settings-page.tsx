@@ -487,7 +487,7 @@ export function AppearanceSettingsPage(props: {
             <Switch
               label={copy.workbar.titlebarToggle}
               isLabelHidden
-              value={props.workbarTogglePosition === 'titlebar'}
+              value={props.workbarTogglePosition !== 'edge'}
               onChange={(enabled) => void persistAppearance({ workbarTogglePosition: enabled ? 'titlebar' : 'edge' })}
             />
           }
